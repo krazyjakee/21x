@@ -1,0 +1,48 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38333559978",
+  "overallRunConclusion": "failure",
+  "policyVersion": 2,
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "installedProofPassed": true,
+      "sourceCommit": "f15cd46120884d28139fe27a9876674e61c2fe82",
+      "report": "installed-artifact-f15cd46-linux-appimage-x64-v2-gui.json",
+      "reportSha256": "aa7f0d0420ac01eb42d6bc8a0d6ca0ebd4b3389f36c1e558508873860b982b65",
+      "packageSha256": "05d0116bef1832ecf7a63ba5914b29b19c4cc7ee53896d0d757fa7ddd7500f32",
+      "sameMainIframeIsolationProven": false,
+      "exactRuntimeVersionsCaptured": false,
+      "compactArtifactId": 11785377980,
+      "compactArtifactSha256": "3073c4928ee26b7ef700bc43b30a0f7dfb4942a7c6a9ab3c335f504f54e140fa"
+    },
+    {
+      "target": "macos-arm64",
+      "installedProofPassed": true,
+      "sourceCommit": "f15cd46120884d28139fe27a9876674e61c2fe82",
+      "report": "installed-artifact-f15cd46-macos-arm64-v2-gui.json",
+      "reportSha256": "1fc940bc0487145d87566aff82d1026604ea860a390aab81a3ba30600fd88be6",
+      "packageSha256": "6604113e73be61873f7e7e46d18c02dfe4b3ad9b1805e359dedb639431354a58",
+      "sameMainIframeIsolationProven": false,
+      "exactRuntimeVersionsCaptured": false,
+      "compactArtifactId": 11785451721,
+      "compactArtifactSha256": "04b0ceea878631dc6e564bf8a30c733366a6bd067c632a0f390c6f9ffef7f360"
+    },
+    {
+      "target": "macos-x64",
+      "installedProofPassed": true,
+      "sourceCommit": "f15cd46120884d28139fe27a9876674e61c2fe82",
+      "report": "installed-artifact-f15cd46-macos-x64-v2-gui.json",
+      "reportSha256": "231d386412fba70ba9c4206b2bfb5fd2fcf95a26f1a5247183bd9f4e6daaf322",
+      "packageSha256": "6a6d4f5c37aef0f7b8d0209d3080e058c94699a83222f8e9271179e29d4e5b54",
+      "sameMainIframeIsolationProven": false,
+      "exactRuntimeVersionsCaptured": false,
+      "compactArtifactId": 11784956761,
+      "compactArtifactSha256": "d1c5d7103a4d0b8dc3dfa5de02dcba9cfeff2ca79946755c5f3d80ebc12b71a9"
+    }
+  ],
+  "windows": "Direct frame returned unrecognized string failures; retained failed report remains authoritative.",
+  "limits": "Fixed separate-WebView synthetic diagnostic only. Runtime-version collection was added after this run. Production artifact integration and Electron retirement remain open.",
+  "productionReady": false
+}

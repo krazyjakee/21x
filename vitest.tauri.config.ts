@@ -24,6 +24,7 @@ const mainFiles = [
   'src/main/node-worker-runtime.test.ts',
   'src/main/connectors/piece-host/piece-host.test.ts',
   'src/main/connectors/oauth-lifetime.test.ts',
+  'src/main/connectors/bridge/scheduler-lifetime.test.ts',
   'src/main/oauth/local-oauth-server.test.ts',
   'src/main/database-transcript-page.test.ts', 'src/main/transcript-events.test.ts', 'src/main/transcript-page-authority.test.ts',
   'src/shared/**/*.test.ts',

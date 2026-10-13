@@ -55,7 +55,7 @@ pnpm exec tauri build --debug --bundles deb --features artifact-authorization-pr
 
 Use the existing installed-package Xvfb smoke runner with system Node hidden and its isolated synthetic profile. Compact evidence must contain `runtime.artifactAuthorizationProof.passed: true` alongside the ordinary synthetic receipt and shutdown checks. Upload logs separately from packages. The successful Linux report meets this diagnostic requirement; source checks alone provide no native security evidence.
 
-The successful Linux run demonstrates this fixed separate-Webview diagnostic on that target. Windows and both macOS targets still need the same negative/positive native proof. Production artifact content needs a separate viewer integration, narrow lifecycle/message mediation, content/path restrictions, and regression tests against all desktop/plugin/event grants. Authenticated hostile IPC from a child frame is explicitly unproven here. Same-`main` iframe isolation remains unsupported as the migration design.
+The earlier Linux run demonstrates that revision's separate-Webview diagnostic. Current cross-platform results are recorded below. Production artifact content needs a separate viewer integration, narrow lifecycle/message mediation, content/path restrictions, and regression tests against all desktop/plugin/event grants. Same-`main` iframe isolation remains unsupported as the migration design.
 
 The packaged-platform workflow now accepts `mode: artifact-authorization-proof` for each existing DMG, NSIS and AppImage target. It stages the synthetic database service, enables the exact Rust feature and uses the installed-package smoke runner. The runner checks all thirteen desktop receipts, the separate-WebView positive/negative controls, targeted event delivery, window cleanup, installed resource containment, host architecture, isolated profile and owned-child exit. `synthetic-agent` separately requires all twenty agent receipts. Evidence/package artifact names include the mode, so reports from different proofs cannot overwrite each other. These workflow changes make the outstanding platform runs executable; passing report-validator tests or compiling the host does not supply installed evidence.
 
@@ -66,3 +66,13 @@ The original relay policy passed installed packages on macOS x64/arm64 and Linux
 The version-2 continuation tests actual direct calls when APIs are present. Its failure metadata distinguishes accepted calls, unrecognized failures and deadlines without publishing native error strings or paths. Six actual-script VM regressions cover API absence, both recognized denial shapes, successful calls/subscriptions, generic transport failure and bounded deadlines. Fifteen Python evidence-policy cases and three native tests require consistent absence/direct-denial claims; older policy reports cannot count as new direct-frame evidence. The Windows installed retry remains required before acceptance. Production viewer integration, all retained native/plugin grants and same-main-iframe constraints remain separate open work.
 
 The first Windows version-2 retry at `f15cd46` failed closed: its facade was present and direct attempts completed with unrecognized failures, rather than native authorization denials. Parent/relay controls and shutdown still passed. Follow-up diagnostics record fixed Boolean internal-invoke/IPC availability and error-class observations without publishing raw exceptions. This is ongoing diagnosis; neither a generic failure nor API presence establishes a privilege escape or successful authorization exclusion.
+
+The stricter v2 policy passed installed DMGs on both macOS architectures and the
+Linux AppImage at `f15cd46`. The [retained Unix receipts](evidence/installed-artifact-v2-unix-scenarios.json)
+keep the original reports and package checksums. That matrix failed overall on
+Windows; the successful Unix jobs do not turn it into four-target acceptance.
+These reports predate exact OS/WebView version collection. The latest Windows
+GUI receipt at `942af9c` distinguishes an immediate string failure from a timeout,
+TypeError or missing transport, but does not establish its native error class.
+Exact pinned origin-parser classifications were added at `40f8061`; both remain
+failures under v2, and no arbitrary error text is recorded.
