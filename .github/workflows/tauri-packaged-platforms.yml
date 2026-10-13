@@ -126,6 +126,8 @@ jobs:
         run: python scripts/tauri-packaged-smoke.test.py
       - name: Stage pinned standalone Node and native modules once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
+      - name: Stage reviewed connector worker and pinned package bytes
+        run: pnpm tauri:prepare:connectors | tee native-evidence/connector-worker-staging.json
       - name: Run portable unit tests under staged standalone Node
         run: |
           pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
@@ -143,6 +145,8 @@ jobs:
         if: inputs.mode != 'feasibility'
         run: |
           pnpm tauri:prepare:database | tee native-evidence/database-staging.json
+          pnpm test:tauri -- --service-proofs scripts/connector-worker-service-proof.test.ts --silent --reporter=json --outputFile=native-evidence/connector-worker-service-tests.json
+          node -e 'const report = require("./native-evidence/connector-worker-service-tests.json"); if (!report.success || report.numPassedTests !== 1 || report.numPendingTests) process.exit(1)'
           pnpm test:tauri -- --service-proofs scripts/transcript-page-proof.test.ts --silent --reporter=json --outputFile=native-evidence/startup-transcript-tests.json
           node -e 'const report = require("./native-evidence/startup-transcript-tests.json"); if (!report.success || report.numPassedTests !== 6 || report.numPendingTests) process.exit(1)'
           staged_node="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/node", process.platform === "win32" ? "node.exe" : "node"))')"

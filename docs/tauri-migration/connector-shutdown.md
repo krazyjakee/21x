@@ -57,5 +57,28 @@ keeps the existing allowlist/TLS guard, and exits if its Node parent disconnects
 [Local transport evidence](evidence/connector-node-transport-local.json) includes
 the real compiled host loading pinned Trello and executing its local disable
 hook with system Node hidden. The Electron runtime still selects utilityProcess;
-packaged connector assets, resource containment and service runtime selection
-remain to integrate. This control does not exercise a provider API.
+the original transport control does not establish packaged-resource containment
+or exercise a provider API.
+
+The [four-target Node connector run](evidence/node-connector-four-target-scenarios.json)
+passed all four child/compiled-host controls on macOS x64/arm64, Windows and Linux
+at `a282c8c`. Each target passed 518 portable cases and all six startup/transcript
+controls. These reports precede the staged-resource continuation.
+
+The portable runtime core now receives its worker/native host explicitly, so it
+can load under standalone Node without Electron imports. The legacy wrapper
+supplies shell/utilityProcess. `tauri:prepare:native` separately installs the two
+existing exact connector pins; `tauri:prepare:connectors` builds the worker and
+records its bytes/package metadata. Staging rejects new dependency closures and
+requires the staged entry bytes to match the frozen repository installation.
+
+`createPackagedConnectorTransport` validates regular contained resources, package
+pins, metadata/entry hashes and the exact owning Node binary before execution.
+There is no repository or PATH fallback. The [staged proof](evidence/connector-staged-resources-local.json)
+uses real standalone SQLite and session credentials with both pinned local hooks,
+system Node hidden, and runtime close before database close. It passed 558
+standalone/private-pipe cases, nine resource controls, four staging controls and
+30 foundation cases. Platform workflows now require this separate staged proof.
+No installed GUI acceptance, real provider API or external OAuth is claimed.
+Redistribution review remains incomplete, including missing vendor notice files.
+Tauri plugin/native host/bootstrap bindings remain to integrate.

@@ -25,6 +25,7 @@ const mainFiles = [
   'src/main/sync-manager-lifetime.test.ts',
   'src/main/connectors/piece-host/piece-host.test.ts',
   'src/main/connectors/piece-host/node-transport.test.ts',
+  'src/main/connectors/piece-host/packaged-resources.test.ts',
   'src/main/connectors/oauth-lifetime.test.ts',
   'src/main/connectors/bridge/scheduler-lifetime.test.ts',
   'src/main/connectors/bridge/engine-lifetime.test.ts',
@@ -35,7 +36,8 @@ const mainFiles = [
   'scripts/artifact-frame-proof.test.ts',
   'scripts/database-proof.test.ts', 'scripts/configuration-proof.test.ts', 'scripts/agent-desktop-proof.test.ts',
   ...(process.env.TAURI_STANDALONE_SERVICE_PROOFS === '1' ? [
-    'scripts/database-service-proof.test.ts', 'scripts/configuration-service-proof.test.ts', 'scripts/transcript-page-proof.test.ts'
+    'scripts/database-service-proof.test.ts', 'scripts/configuration-service-proof.test.ts', 'scripts/transcript-page-proof.test.ts',
+    'scripts/connector-worker-service-proof.test.ts'
   ] : [])
 ]
 export default defineConfig({

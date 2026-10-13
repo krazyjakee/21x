@@ -186,7 +186,7 @@ export async function prepareRuntime({
     join(service, 'feasibility.mjs'), previous?.service)
   const manifest = {
     name: '21x-tauri-feasibility-service', version: '0.1.0', private: true, type: 'module',
-    dependencies: { ...config.nativeDependencies, ...config.sdkDependencies, ...config.serviceDependencies },
+    dependencies: { ...config.nativeDependencies, ...config.sdkDependencies, ...config.serviceDependencies, ...config.connectorDependencies },
     // npm 12 requires explicit lifecycle policy. Scope it to these pinned addons.
     allowScripts: Object.fromEntries(Object.entries(config.nativeDependencies)
       .map(([name, version]) => [`${name}@${version}`, true]))

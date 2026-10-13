@@ -67,6 +67,8 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Stage the standalone Node runtime and native addons once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
+      - name: Stage reviewed connector worker and pinned package bytes
+        run: pnpm tauri:prepare:connectors | tee native-evidence/connector-worker-staging.json
       - name: Run portable unit tests under staged standalone Node
         run: |
           pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
@@ -76,6 +78,8 @@ jobs:
         if: inputs.mode != 'feasibility'
         run: |
           pnpm tauri:prepare:database | tee native-evidence/database-staging.json
+          pnpm test:tauri -- --service-proofs scripts/connector-worker-service-proof.test.ts --silent --reporter=json --outputFile=native-evidence/connector-worker-service-tests.json
+          node -e 'const report = require("./native-evidence/connector-worker-service-tests.json"); if (!report.success || report.numPassedTests !== 1 || report.numPendingTests) process.exit(1)'
           TAURI_NODE_RUNTIME="$PWD/src-tauri/resources/node/node" TAURI_DATABASE_SERVICE_ENTRY="$PWD/src-tauri/resources/service/database-stdio.mjs" "$PWD/src-tauri/resources/node/node" scripts/transcript-page-proof.mjs | tee native-evidence/transcript-page-proof.json
           TAURI_NODE_RUNTIME="$PWD/src-tauri/resources/node/node" TAURI_DATABASE_SERVICE_ENTRY="$PWD/src-tauri/resources/service/database-stdio.mjs" "$PWD/src-tauri/resources/node/node" scripts/configuration-service-proof.mjs | tee native-evidence/configuration-service-proof.json
           if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-agent' ]; then

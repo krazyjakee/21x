@@ -11,7 +11,8 @@ async function fixture(t, nodeVersion = process.versions.node) {
   await mkdir(join(root, 'scripts'), { recursive: true })
   await mkdir(join(root, 'src/service'), { recursive: true })
   await writeFile(join(root, 'scripts/tauri-runtime.json'), JSON.stringify({ nodeVersion,
-    nativeDependencies: { 'better-sqlite3': '13.0.3', 'node-pty': '1.1.0' } }))
+    nativeDependencies: { 'better-sqlite3': '13.0.3', 'node-pty': '1.1.0' },
+    connectorDependencies: { '@activepieces/piece-trello': '0.6.0', '@activepieces/piece-todoist': '0.5.0' } }))
   await writeFile(join(root, 'src/service/feasibility.mjs'), 'process.exit(0)\n')
   return root
 }
@@ -45,6 +46,8 @@ test('repeated preparation leaves the large runtime and service untouched', asyn
   const manifest = JSON.parse(await readFile(join(resources, 'service/package.json'), 'utf8'))
   assert.equal(manifest.dependencies['better-sqlite3'], '13.0.3')
   assert.equal(manifest.dependencies['node-pty'], '1.1.0')
+  assert.equal(manifest.dependencies['@activepieces/piece-trello'], '0.6.0')
+  assert.equal(manifest.dependencies['@activepieces/piece-todoist'], '0.5.0')
   assert.deepEqual(manifest.allowScripts, { 'better-sqlite3@13.0.3': true, 'node-pty@1.1.0': true })
   assert.equal((await stat(join(resources, 'service/node_modules')).catch(() => null)), null)
   await writeFile(join(root, 'src/service/feasibility.mjs'), 'process.exit(1)\n')

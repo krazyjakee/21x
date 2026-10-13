@@ -4549,7 +4549,7 @@
       ],
       "column": 1,
       "file": "src/main/connectors/bridge/runtime.ts",
-      "line": 2,
+      "line": 1,
       "mode": "runtime",
       "syntax": "import"
     },
@@ -5435,6 +5435,7 @@
     "src/main/connectors/bridge/mapping.ts",
     "src/main/connectors/bridge/mappings.ts",
     "src/main/connectors/bridge/retry.ts",
+    "src/main/connectors/bridge/runtime-core.ts",
     "src/main/connectors/bridge/runtime.ts",
     "src/main/connectors/bridge/scheduler.ts",
     "src/main/connectors/bridge/state.ts",
@@ -5448,6 +5449,7 @@
     "src/main/connectors/piece-host/host-runtime.ts",
     "src/main/connectors/piece-host/index.ts",
     "src/main/connectors/piece-host/node-transport.ts",
+    "src/main/connectors/piece-host/packaged-resources.ts",
     "src/main/connectors/piece-host/piece-registry.ts",
     "src/main/connectors/piece-host/protocol.ts",
     "src/main/connectors/piece-host/tls-guard.ts",
@@ -14042,7 +14044,7 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 686,
+    "files": 688,
     "operations": 715,
     "runtimeElectronImports": 47,
     "typeOnlyElectronImports": 3,
