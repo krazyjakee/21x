@@ -99,6 +99,17 @@ afterEach(() => {
 })
 
 describe('CommanderWorkspace', () => {
+  it('opts the full session interface into shared reading-surface scaling', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    const { container } = render(<CommanderWorkspace />)
+    fireEvent.click(await screen.findByText('Launch'))
+    const workspace = container.querySelector('.commander-workspace')
+    expect(workspace).toHaveClass('ui-scale')
+    expect(workspace).toContainElement(screen.getByLabelText('Commander sessions'))
+    expect(workspace).toContainElement(screen.getByLabelText('Message the Commander'))
+    expect(screen.getByLabelText('Message the Commander')).toHaveClass('text-base', 'leading-relaxed', 'min-w-0')
+  })
+
   it('leaves Shift+Enter and IME Enter to the editor, and submits plain Enter once', async () => {
     api.listSessions.mockResolvedValue([session()])
     let finish: (value: unknown) => void = () => {}
@@ -181,7 +192,7 @@ describe('CommanderWorkspace', () => {
     expect(await screen.findByText('Asked web: deploy')).toBeTruthy()
     const report = screen.getByTestId('commander-report')
     expect(report.textContent).toContain('Deployed to prod')
-    expect(report.textContent).toContain('web')
+    expect(report.textContent).not.toContain('web')
 
     api.send.mockResolvedValue({ turnId: 't-1', message: message({ id: 'u2', content: 'Status?', created_at: 5 }) })
     fireEvent.change(screen.getByLabelText('Message the Commander'), { target: { value: 'Status?' } })

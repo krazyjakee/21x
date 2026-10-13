@@ -185,11 +185,12 @@ export function CommanderChatPane() {
 
   if (!sessionId) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-4">
         <EmptyState
           icon={Radio}
           title="Talk to the Commander"
           description={COMMANDER_EMPTY_DESCRIPTION}
+          className="min-w-0 py-6 [&_h3]:text-lg [&_p]:max-w-md [&_p]:text-base [&_p]:text-muted-foreground"
           action={<Button size="sm" onClick={() => void createSession()}>New session</Button>}
         />
       </div>
@@ -220,14 +221,14 @@ export function CommanderChatPane() {
   }
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col" aria-label="Commander chat">
-      <header className="flex h-12 shrink-0 items-center border-b border-border px-4">
-        <h2 className="truncate text-sm font-medium">{session?.title || UNTITLED_SESSION}</h2>
+    <section className="commander-chat flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Commander chat">
+      <header className="flex min-h-12 shrink-0 items-center py-3 border-b border-border px-4">
+        <h2 className="min-w-0 break-words text-base font-medium">{session?.title || UNTITLED_SESSION}</h2>
       </header>
 
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-5 py-4" data-testid="commander-messages">
+      <div ref={scrollRef} className="commander-messages min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4" data-testid="commander-messages">
         {visible.length === 0 && !streaming && (
-          <p className="mx-auto max-w-md pt-10 text-center text-xs leading-relaxed text-muted-foreground/70">{COMMANDER_EMPTY_DESCRIPTION}</p>
+          <p className="mx-auto max-w-md pt-10 text-center text-base leading-relaxed text-muted-foreground">{COMMANDER_EMPTY_DESCRIPTION}</p>
         )}
         {visible.map((m) => (
           <CommanderMessageItem key={m.id} message={m} toolResults={toolResults} />
@@ -235,8 +236,8 @@ export function CommanderChatPane() {
         {streaming && (
           <div className="flex flex-col gap-1.5" data-testid="commander-streaming">
             {streaming.text ? (
-              <div className="max-w-[88%] text-sm text-foreground">
-                <Markdown size="sm">{streaming.text}</Markdown>
+              <div className="commander-reply min-w-0 text-base leading-relaxed text-foreground">
+                <Markdown size="base">{streaming.text}</Markdown>
               </div>
             ) : streaming.toolCalls.length === 0 ? (
               <div className="flex gap-1 py-1" aria-label="Commander is thinking">
@@ -255,9 +256,9 @@ export function CommanderChatPane() {
           </div>
         )}
         {turnError && (
-          <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm leading-relaxed text-destructive">
             <AlertCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-            <span>{turnError}</span>
+            <span className="min-w-0 break-words">{turnError}</span>
           </div>
         )}
       </div>
@@ -276,7 +277,7 @@ export function CommanderChatPane() {
               value={draft}
               onPaste={isSubmitting ? undefined : images.handlePaste}
               placeholder="Ask the Commander…"
-              className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              className="max-h-40 min-h-8 min-w-0 flex-1 resize-none bg-transparent text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -295,7 +296,7 @@ export function CommanderChatPane() {
               </Button>
             )}
           </div>
-          <div className="flex items-center gap-2 border-t border-border/70 px-3 py-1.5">
+          <div className="flex flex-wrap items-center gap-2 border-t border-border/70 px-3 py-1.5">
             <select
               aria-label="Commander model"
               title="Model used by the Commander"
@@ -314,7 +315,7 @@ export function CommanderChatPane() {
                   [CHAT_SETTING_KEYS.reasoningEffort, nextEffort]
                 ])
               }}
-              className="max-w-[15rem] cursor-pointer bg-transparent text-xs text-muted-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-w-0 max-w-full basis-60 cursor-pointer bg-transparent text-sm text-muted-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
             >
               {configuredModels.length === 0 && <option value="">No configured Commander model</option>}
               {configuredModels.map((option) => (
@@ -332,7 +333,7 @@ export function CommanderChatPane() {
                 setReasoningEffort(next)
                 queueConfigWrite([[CHAT_SETTING_KEYS.reasoningEffort, next]])
               }}
-              className="cursor-pointer bg-transparent text-xs capitalize text-muted-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-w-0 max-w-full cursor-pointer bg-transparent text-sm capitalize text-muted-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value="">Default thinking</option>
               {(selectedModel ? thinkingOptions(selectedModel.provider) : []).map((effort) => (

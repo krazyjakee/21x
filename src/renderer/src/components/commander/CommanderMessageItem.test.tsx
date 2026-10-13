@@ -65,3 +65,36 @@ describe('formatToolResult', () => {
     expect(formatToolResult(undefined)).toBe('')
   })
 })
+
+
+describe('Commander reports', () => {
+  it('keeps a long report and its markdown readable, with optional technical detail disclosure', () => {
+    const content = [
+      '## Checkout release',
+      'The customer checkout is working. You can approve the deployment when the review is complete.',
+      '- Customers can place orders.\n- [Review the release](https://example.com/release).\n- The configuration is `production`.',
+      '```ts\nconst ready = true\n```',
+      'The review is complete. '.repeat(100),
+      '<!-- commander-technical-details -->',
+      'Correlation: internal-correlation-42'
+    ].join('\n\n')
+    const message: CommanderMessage = {
+      id: 'report', session_id: 's1', role: 'report', content, tool_calls: null,
+      tool_call_id: null, tool_name: null, is_error: false, project_id: 'internal-project-42',
+      correlation_id: null, created_at: 1
+    }
+    render(<CommanderMessageItem message={message} toolResults={new Map()} />)
+    const report = screen.getByTestId('commander-report')
+    expect(screen.getByRole('heading', { name: 'Checkout release' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Review the release' })).toBeTruthy()
+    expect(report.querySelector('ul')?.children).toHaveLength(3)
+    expect(report.textContent).not.toContain('internal-project-42')
+    expect(report.querySelector('pre')?.textContent).toContain('const ready = true')
+    expect(report.querySelector('.markdown-content')).toHaveClass('text-base')
+    expect(report.textContent).toContain('The review is complete. '.repeat(100).trim())
+    const disclosure = screen.getByText('Technical details').closest('details')
+    expect(disclosure).not.toHaveAttribute('open')
+    expect(disclosure?.textContent).toContain('internal-correlation-42')
+    expect(report.querySelector('.markdown-content')?.textContent).not.toContain('internal-correlation-42')
+  })
+})

@@ -49,10 +49,10 @@ function SessionRow({ session, selected }: { session: CommanderSession; selected
           />
         ) : (
           <>
-            <div className={cn('truncate text-sm', session.unread_count > 0 && 'font-semibold text-foreground')}>
+            <div className={cn('break-words text-base leading-relaxed', session.unread_count > 0 && 'font-semibold text-foreground')}>
               {session.title || UNTITLED_SESSION}
             </div>
-            <div className="text-[11px] text-muted-foreground/70">
+            <div className="text-xs text-muted-foreground">
               {formatRelativeDate(new Date(session.updated_at).toISOString())}
               {session.archived && ' · archived'}
             </div>
@@ -62,17 +62,17 @@ function SessionRow({ session, selected }: { session: CommanderSession; selected
       {!editing && session.unread_count > 0 && (
         <span
           aria-label={`${session.unread_count} unread`}
-          className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground group-hover:hidden"
+          className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground group-hover:hidden group-focus-within:hidden"
         >
           {session.unread_count}
         </span>
       )}
       {!editing && (
-        <div className="hidden items-center gap-0.5 group-hover:flex">
+        <div className="hidden items-center gap-0.5 group-hover:flex group-focus-within:flex">
           <button
             type="button"
             aria-label="Rename session"
-            className="grid size-6 place-items-center rounded-md hover:bg-background"
+            className="grid size-hit place-items-center rounded-md hover:bg-background"
             onClick={(e) => {
               e.stopPropagation()
               setDraft(session.title)
@@ -84,7 +84,7 @@ function SessionRow({ session, selected }: { session: CommanderSession; selected
           <button
             type="button"
             aria-label={session.archived ? 'Unarchive session' : 'Archive session'}
-            className="grid size-6 place-items-center rounded-md hover:bg-background"
+            className="grid size-hit place-items-center rounded-md hover:bg-background"
             onClick={(e) => {
               e.stopPropagation()
               void archiveSession(session.id, !session.archived)
@@ -117,9 +117,9 @@ export function CommanderSessionList() {
   }, [query, search, setSearch])
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-sidebar">
+    <aside className="commander-session-list flex min-h-0 w-64 shrink-0 flex-col border-r border-border bg-sidebar">
       <div className="flex items-center justify-between px-3 pt-3 pb-2">
-        <h2 className="text-[13px] font-medium uppercase tracking-wider text-muted-foreground">Commander</h2>
+        <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">Commander</h2>
         <Button size="sm" variant="ghost" aria-label="New session" onClick={() => void createSession()}>
           <Plus className="size-4" aria-hidden="true" />
           New
@@ -140,12 +140,12 @@ export function CommanderSessionList() {
           <SessionRow key={session.id} session={session} selected={session.id === selectedSessionId} />
         ))}
         {sessions.length === 0 && (
-          <li className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
+          <li className="px-2.5 py-6 text-center text-sm text-muted-foreground">
             {search ? 'No sessions match.' : 'No sessions yet.'}
           </li>
         )}
       </ul>
-      <label className="flex cursor-pointer items-center gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground">
+      <label className="flex cursor-pointer items-center gap-2 border-t border-border px-3 py-2 text-sm text-muted-foreground">
         <input type="checkbox" checked={showArchived} onChange={(e) => void setShowArchived(e.target.checked)} />
         Show archived
       </label>

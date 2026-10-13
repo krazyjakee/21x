@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { AlertCircle, Check, ChevronDown, ChevronRight, Inbox, Loader2 } from 'lucide-react'
 import type { CommanderMessage } from '@shared/commander'
+import { splitCommanderReport } from '@shared/commander-report'
 import { Markdown } from '@/components/ui/Markdown'
 import { ChatMessageImages } from '@/components/chat/ChatMessageImages'
 import { cachedCommanderImage, loadCommanderImage } from '@/lib/commander-images'
@@ -28,13 +29,13 @@ export function ToolChip({ name, input, result, isError }: ToolChipProps) {
   const detail = formatToolResult(result)
   const label = toolCallLabel(name, input)
   const chipClass = cn(
-    'inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs',
+    'inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-sm leading-relaxed',
     isError ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-border bg-muted text-muted-foreground'
   )
   const content = (
     <>
       <Icon className={cn('size-3 shrink-0', pending && 'animate-spin')} aria-hidden="true" />
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 break-words">{label}</span>
     </>
   )
 
@@ -64,7 +65,7 @@ export function ToolChip({ name, input, result, isError }: ToolChipProps) {
           aria-label={`Result: ${label}`}
           data-testid="commander-tool-result"
           className={cn(
-            'max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border px-2.5 py-1.5 font-mono text-[11px] leading-relaxed',
+            'max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border px-2.5 py-1.5 font-mono text-sm leading-relaxed',
             isError ? 'border-destructive/30 bg-destructive/5 text-destructive' : 'border-border bg-muted/40 text-foreground'
           )}
         >
@@ -89,7 +90,7 @@ export function CommanderMessageItem({ message, toolResults }: MessageItemProps)
           <ChatMessageImages images={message.images} load={loadCommanderImage} cached={cachedCommanderImage} />
         )}
         {message.content && (
-          <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-sm text-primary-foreground">
+          <div className="commander-user-message min-w-0 max-w-full whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-base leading-relaxed text-primary-foreground">
             {message.content}
           </div>
         )}
@@ -98,16 +99,20 @@ export function CommanderMessageItem({ message, toolResults }: MessageItemProps)
   }
 
   if (message.role === 'report') {
+    const report = splitCommanderReport(message.content)
     return (
-      <div data-testid="commander-report" className="rounded-xl border border-border border-l-[3px] border-l-primary bg-primary/5 px-3.5 py-2.5">
-        <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+      <div data-testid="commander-report" className="min-w-0 rounded-xl border border-border border-l-[3px] border-l-primary bg-primary/5 px-3.5 py-2.5">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <Inbox className="size-3.5" aria-hidden="true" />
           <span className="font-medium">Report</span>
-          <span className="rounded-md border border-primary/20 bg-primary/10 px-1.5 py-px text-[11px] font-medium text-primary">
-            {message.project_id ?? 'Project'}
-          </span>
         </div>
-        <Markdown size="sm">{message.content}</Markdown>
+        <Markdown size="base">{report.content}</Markdown>
+        {report.technicalDetails && (
+          <details className="mt-3 min-w-0">
+            <summary className="cursor-pointer text-sm leading-relaxed text-muted-foreground">Technical details</summary>
+            <Markdown size="base">{report.technicalDetails}</Markdown>
+          </details>
+        )}
       </div>
     )
   }
@@ -117,8 +122,8 @@ export function CommanderMessageItem({ message, toolResults }: MessageItemProps)
     return (
       <div className="flex flex-col gap-1.5">
         {message.content && (
-          <div className="max-w-[88%] text-sm text-foreground">
-            <Markdown size="sm">{message.content}</Markdown>
+          <div className="commander-reply min-w-0 text-base leading-relaxed text-foreground">
+            <Markdown size="base">{message.content}</Markdown>
           </div>
         )}
         {calls.length > 0 && (

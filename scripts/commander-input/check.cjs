@@ -96,6 +96,73 @@ app.whenReady().then(async () => {
     assert.equal(await js(`${field}.value`), outcome === 'resolveSend' ? 'z' : 'firstz')
     assert(await js(`document.activeElement === ${field}`))
   })
+  for (const width of [1200, 640]) for (const zoom of [1, 1.5]) {
+    await check(`readable typography and long-report layout at ${width}px / ${zoom * 100}%`, async () => {
+      win.setContentSize(width, 900)
+      wc.setZoomFactor(zoom)
+      await js('window.fixture.typography()')
+      await wait(`document.querySelector('[data-testid="commander-report"] pre')`)
+      await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      const metrics = await js(`(() => {
+        const workspace = document.querySelector('.commander-workspace');
+        const messages = document.querySelector('[data-testid="commander-messages"]');
+        const report = document.querySelector('[data-testid="commander-report"]');
+        const composer = ${field};
+        const rect = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height } };
+        const style = selector => { const element = document.querySelector(selector); if (!element) throw new Error('Missing typography measurement element: ' + selector); const s = getComputedStyle(element); return { fontSize: parseFloat(s.fontSize), lineHeight: parseFloat(s.lineHeight) } };
+        const code = report.querySelector('pre');
+        const smallText = [];
+        const walker = document.createTreeWalker(workspace, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode, parent = node.parentElement;
+          if (node.textContent.trim() && !parent.closest('svg, option') && parseFloat(getComputedStyle(parent).fontSize) < 12) smallText.push(node.textContent.trim());
+        }
+        return {
+          workspace: rect(workspace), messages: rect(messages), report: rect(report), composer: rect(composer),
+          list: rect(document.querySelector('.commander-session-list')), header: rect(document.querySelector('.commander-chat header')),
+          voice: rect(document.querySelector('.commander-voice-controls')),
+          user: style('.commander-user-message'), reply: style('.commander-reply p'), reportText: style('[data-testid="commander-report"] p'),
+          streaming: style('[data-testid="commander-streaming"] p'), input: style('textarea[aria-label="Message the Commander"]'),
+          inlineCode: style('[data-testid="commander-report"] li code'), code: style('[data-testid="commander-report"] pre code'),
+          tool: style('[data-testid="commander-tool-chip"]'), error: style('[role="alert"]'),
+          title: style('.commander-session-list li > div > div'),
+          primaryOverflow: messages.scrollWidth - messages.clientWidth,
+          codeOverflow: code.scrollWidth - code.clientWidth,
+          contentScrolls: messages.scrollHeight > messages.clientHeight,
+          smallText,
+          controls: [...document.querySelectorAll('.commander-chat select, .commander-chat button')].map(rect),
+          columns: getComputedStyle(document.querySelector('.commander-layout')).flexDirection
+        };
+      })()`)
+      assert.equal(wc.getZoomFactor(), zoom)
+      for (const key of ['user', 'reply', 'reportText', 'streaming', 'input']) {
+        assert.equal(metrics[key].fontSize, 14, key + ' uses shared 14px primary text before zoom')
+        assert(metrics[key].lineHeight >= 21, key + ' has readable line height')
+      }
+      for (const key of ['inlineCode', 'code', 'tool', 'error']) assert.equal(metrics[key].fontSize, 13, key + ' uses readable shared secondary text')
+      assert.equal(metrics.title.fontSize, 14)
+      assert.deepEqual(metrics.smallText, [], 'no essential 10px/11px text')
+      assert.equal(metrics.primaryOverflow, 0, 'report and unbroken user text do not widen the chat')
+      assert(metrics.codeOverflow > 0, 'long code scrolls within its own block')
+      assert(metrics.contentScrolls, 'long reports remain available through the message scrollport')
+      assert(metrics.messages.height >= 80, 'message scrollport remains usable')
+      assert(metrics.report.width <= metrics.messages.width, 'report is bounded by the chat width')
+      assert(metrics.report.width <= 1100 / zoom, 'reading line length is bounded')
+      assert(metrics.composer.bottom <= metrics.workspace.bottom, 'composer stays visible')
+      assert(metrics.composer.top >= metrics.messages.bottom - 1, 'composer and messages do not overlap')
+      for (const control of metrics.controls) {
+        assert(control.width > 0 && control.height > 0)
+        assert(control.left >= metrics.workspace.left && control.right <= metrics.workspace.right + 1, 'controls fit the available width')
+      }
+      if (width / zoom <= 760) {
+        assert.equal(metrics.columns, 'column')
+        assert(metrics.list.bottom <= metrics.header.top + 1, 'compact sessions sit above the chat')
+        assert(metrics.voice.top >= metrics.composer.bottom, 'compact voice controls sit below the composer')
+      }
+      await js(`document.querySelector('[data-testid="commander-messages"]').scrollTop = document.querySelector('[data-testid="commander-messages"]').scrollHeight`)
+      assert(await js(`document.querySelector('[data-testid="commander-messages"]').scrollTop > 0`))
+    })
+  }
   win.destroy()
   if (failures.length) throw new Error('Failed: ' + failures.join(', '))
   app.quit()

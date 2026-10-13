@@ -208,7 +208,7 @@ export function CommanderVoiceControls() {
 
   return (
     <aside
-      className="flex w-14 shrink-0 flex-col items-center gap-2 border-l border-border py-3"
+      className="commander-voice-controls flex w-20 shrink-0 flex-col items-center gap-2 border-l border-border py-3"
       aria-label="Commander voice mode"
       data-testid="commander-voice-controls"
       data-call-state={presentation.state}
@@ -232,7 +232,7 @@ export function CommanderVoiceControls() {
           id={setupLabelId}
           onClick={openVoiceSettings}
           title={`${setupProblem ?? ''} Click to open Settings → Voice.`.trim()}
-          className="px-1 text-center text-[10px] leading-tight text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="px-1 text-center text-xs leading-relaxed text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           data-testid="commander-voice-setup"
         >
           {setupLabel}
@@ -255,12 +255,12 @@ export function CommanderVoiceControls() {
       {sameCall && (
         <div
           role="status"
-          className="fixed bottom-24 right-20 z-40 flex max-w-sm items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground shadow-md"
+          className="fixed bottom-24 right-4 z-40 flex max-w-[min(24rem,calc(100vw-2rem))] flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground shadow-md"
           data-testid="commander-voice-status"
         >
           <Mic className={`size-3.5 shrink-0 ${presentation.state === 'listening' ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden="true" />
           <span>
-            {partial.trim() && presentation.state === 'listening'
+            {partial.trim() && (presentation.state === 'listening' || presentation.state === 'transcribing')
               ? partial.trim()
               : call.status === 'starting'
                 ? 'Starting voice conversation…'
@@ -276,10 +276,10 @@ export function CommanderVoiceControls() {
       {visibleProblem && (
         <div
           role="alert"
-          className="fixed bottom-36 right-20 z-40 max-w-sm rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          className="fixed bottom-36 right-4 z-40 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
         >
           <p>{visibleProblem}</p>
-          <div className="mt-2 flex gap-2">
+          <div className="mt-2 flex flex-wrap gap-2">
             {presentation.controls.retry && (
               <Button
                 size="sm"

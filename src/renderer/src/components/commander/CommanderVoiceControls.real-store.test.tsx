@@ -225,6 +225,13 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     expect(screen.queryByTestId('voice-transcript')).toBeNull()
     expect(screen.getAllByText('what is running')).toHaveLength(1)
 
+    // Finishing recognition keeps the words with the same visible owner.
+    act(() => useVoiceStore.setState({ state: 'transcribing', partial: 'what is running next' }))
+    expect(screen.getByTestId('commander-voice-controls')).toHaveAttribute('data-call-state', 'transcribing')
+    expect(screen.getByTestId('commander-voice-status')).toHaveTextContent('what is running next')
+    expect(screen.queryByTestId('voice-transcript')).toBeNull()
+    expect(screen.getAllByText('what is running next')).toHaveLength(1)
+
     // A microphone that takes over later gets the overlay back.
     act(() => taskMicrophoneIsListening('over here now'))
     expect(useVoiceStore.getState().captionOwner).toBeNull()

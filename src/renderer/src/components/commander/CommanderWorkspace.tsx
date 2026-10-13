@@ -29,10 +29,12 @@ export function CommanderWorkspace() {
   }, [subscribe, fetchSessions])
 
   return (
-    <div className="flex h-full min-h-0">
-      <CommanderSessionList />
-      <CommanderChatPane key={sessionId} />
-      <CommanderVoiceControls />
+    <div className="commander-workspace ui-scale h-full min-h-0 min-w-0">
+      <div className="commander-layout flex h-full min-h-0 min-w-0">
+        <CommanderSessionList />
+        <CommanderChatPane key={sessionId} />
+        <CommanderVoiceControls />
+      </div>
     </div>
   )
 }
