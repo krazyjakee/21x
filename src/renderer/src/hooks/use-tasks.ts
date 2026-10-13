@@ -4,6 +4,7 @@ import { useProjectTasks } from './use-project-tasks'
 import { useUIStore } from '@/stores/ui-store'
 import { TaskStatus } from '@/types'
 import type { Task, TaskPriority } from '@/types'
+import { matchesTaskSearch } from '@/lib/task-search'
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = {
   critical: 3,
@@ -47,7 +48,7 @@ export function useTasks() {
   }, [fetchTasks])
 
   const filteredTasks = useMemo(() => {
-    let result = [...tasks]
+    let result = tasks.filter((task) => matchesTaskSearch(task, searchQuery))
 
     // Source filter
     if (sourceFilter !== 'all') {
@@ -66,17 +67,6 @@ export function useTasks() {
     // Priority filter
     if (priorityFilter !== 'all') {
       result = result.filter((t) => t.priority === priorityFilter)
-    }
-
-    // Search
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      result = result.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.description.toLowerCase().includes(q) ||
-          (Array.isArray(t.labels) && t.labels.some((l) => l.toLowerCase().includes(q)))
-      )
     }
 
     // Date fields are parsed once per task, not once per comparison.

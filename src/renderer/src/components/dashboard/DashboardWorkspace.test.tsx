@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, act, within } from '@testing-library/react'
 import { DashboardWorkspace } from './DashboardWorkspace'
 import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
+import { useProjectStore } from '@/stores/project-store'
+import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import { agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
 import type { Task } from '@/types'
@@ -125,6 +127,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 }
 
 beforeEach(() => {
+  useProjectStore.setState({ currentProjectId: DEFAULT_PROJECT_ID })
   vi.mocked(agentApi.getStartQueue).mockResolvedValue([])
   vi.mocked(agentApi.getStartRecoveryState).mockResolvedValue(null)
   useTaskStore.setState({
@@ -165,10 +168,9 @@ describe('DashboardWorkspace', () => {
     expect(screen.getByPlaceholderText('Ask Captain or describe a task...')).toBeDefined()
   })
 
-  it('renders quick chips', () => {
+  it('renders a labelled dashboard task search', () => {
     render(<DashboardWorkspace />)
-    expect(screen.getByText('Summarize this week')).toBeDefined()
-    expect(screen.getByText('Draft outreach email')).toBeDefined()
+    expect(screen.getByRole('searchbox', { name: 'Find a task' })).toBeInTheDocument()
   })
 
   it('renders task board with status columns', () => {
@@ -395,15 +397,69 @@ describe('DashboardWorkspace', () => {
     await waitFor(() => expect(screen.queryByTestId(`task-transition-${task.id}`)).toBeNull())
   })
 
-  it('quick chip click for task opens create modal with prefill', () => {
+  it('finds titles, descriptions and labels without case sensitivity across all task states', () => {
+    useTaskStore.setState({ tasks: [
+      makeTask({ id: 'title', title: 'Invoice approval' }),
+      makeTask({ id: 'description', title: 'Completed payment', description: 'Paid the INVOICE', status: TaskStatus.Completed }),
+      makeTask({ id: 'label', title: 'Deferred payment', labels: ['Invoice'], snoozed_until: '9999-12-31T00:00:00.000Z' })
+    ] })
     render(<DashboardWorkspace />)
-    fireEvent.click(screen.getByText('Draft outreach email'))
-
-    const state = useUIStore.getState()
-    expect(state.activeModal).toBe('create')
-    expect(state.createTaskPrefill).toBeDefined()
-    expect(state.createTaskPrefill?.title).toBe('Draft outreach email')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '  INVOICE  ' } })
+    const results = screen.getByRole('region', { name: 'Task search' })
+    expect(results).toHaveTextContent('3 matching tasks')
+    expect(screen.getByRole('button', { name: 'Invoice approval Not Started' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Completed payment Completed' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Deferred payment Not Started · Snoozed' })).toBeInTheDocument()
   })
+
+  it('scopes search to the current project, excludes Captain rows and includes subtasks', () => {
+    useProjectStore.setState({ currentProjectId: 'project-a' })
+    useTaskStore.setState({ tasks: [
+      makeTask({ id: 'current', title: 'Search current', project_id: 'project-a' }),
+      makeTask({ id: 'other', title: 'Search other', project_id: 'project-b' }),
+      makeTask({ id: 'captain', title: 'Search Captain', project_id: 'project-a', role: 'captain' }),
+      makeTask({ id: 'child', title: 'Search child', project_id: 'project-a', parent_task_id: 'current' })
+    ] })
+    render(<DashboardWorkspace />)
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'search' } })
+    const results = screen.getByRole('region', { name: 'Task search' })
+    expect(results).toHaveTextContent('2 matching tasks')
+    expect(results).not.toHaveTextContent('Search other')
+    expect(results).not.toHaveTextContent('Search Captain')
+    expect(screen.getByRole('button', { name: 'Search child Not Started' })).toBeInTheDocument()
+    act(() => useProjectStore.setState({ currentProjectId: 'project-b' }))
+    expect(results).toHaveTextContent('1 matching task')
+    expect(screen.getByRole('button', { name: 'Search other Not Started' })).toBeInTheDocument()
+  })
+
+  it('opens a completed result directly using keyboard navigation', () => {
+    useUIStore.setState({ sidebarView: 'dashboard' })
+    useTaskStore.setState({ tasks: [makeTask({ id: 'done', title: 'Archived invoice', status: TaskStatus.Completed })] })
+    render(<DashboardWorkspace />)
+    const input = screen.getByRole('searchbox')
+    fireEvent.change(input, { target: { value: 'invoice' } })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const result = screen.getByRole('button', { name: 'Archived invoice Completed' })
+    expect(result).toHaveFocus()
+    fireEvent.click(result)
+    expect(useTaskStore.getState().selectedTaskId).toBe('done')
+    expect(useUIStore.getState().sidebarView).toBe('tasks')
+  })
+
+  it('explains empty results and clears the query with focus restored', () => {
+    render(<DashboardWorkspace />)
+    const input = screen.getByRole('searchbox')
+    fireEvent.change(input, { target: { value: 'missing' } })
+    expect(within(screen.getByRole('region', { name: 'Task search' })).getByRole('status')).toHaveTextContent('No matching tasks in this project')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear task search' }))
+    expect(input).toHaveValue('')
+    expect(input).toHaveFocus()
+    expect(screen.queryByText(/No matching tasks/)).toBeNull()
+    fireEvent.change(input, { target: { value: 'missing' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(input).toHaveValue('')
+  })
+
 })
 
 describe('DashboardWorkspace — readability', () => {

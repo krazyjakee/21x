@@ -13,12 +13,43 @@ import { modKey } from '@/lib/platform'
 import { CommandPalette, type CommandPaletteActions } from './CommandPalette'
 import { useGlobalShortcuts } from './hooks/use-global-shortcuts'
 import { NAV_ITEMS, navShortcutDigit } from './nav-items'
+import { useTaskStore } from '@/stores/task-store'
+import { useProjectStore } from '@/stores/project-store'
+import { DEFAULT_PROJECT_ID } from '@shared/projects'
+import { TaskStatus, type Task } from '@/types'
 
 const actions = new Proxy({}, { get: () => vi.fn() }) as CommandPaletteActions
 
 beforeEach(() => {
+  useTaskStore.setState({ tasks: [], selectedTaskId: null })
+  useProjectStore.setState({ currentProjectId: DEFAULT_PROJECT_ID })
   useSkillStore.setState({ fetchSkills: vi.fn(async () => undefined), skills: [] } as never)
   useUIStore.setState({ sidebarView: 'dashboard', activeModal: null })
+})
+
+describe('task search', () => {
+  it('shares description/label matching and opens a subtask while excluding other projects and Captains', () => {
+    const task = (id: string, overrides: Partial<Task>): Task => ({
+      id, title: id, description: '', labels: [], status: TaskStatus.Completed,
+      project_id: DEFAULT_PROJECT_ID, ...overrides
+    } as Task)
+    useTaskStore.setState({ tasks: [
+      task('description-result', { description: 'INVOICE received', parent_task_id: 'parent' }),
+      task('label-result', { labels: ['Invoice'] }),
+      task('foreign-result', { title: 'Invoice in another project', project_id: 'other' }),
+      task('captain-result', { title: 'Invoice Captain', role: 'captain' })
+    ] })
+    const onOpenChange = vi.fn()
+    render(<CommandPalette open onOpenChange={onOpenChange} actions={actions} />)
+    fireEvent.change(screen.getByPlaceholderText(/run a command/), { target: { value: '  invoice  ' } })
+    expect(screen.getByRole('button', { name: 'label-result' })).toBeInTheDocument()
+    expect(screen.queryByText('Invoice in another project')).toBeNull()
+    expect(screen.queryByText('Invoice Captain')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'description-result' }))
+    expect(useTaskStore.getState().selectedTaskId).toBe('description-result')
+    expect(useUIStore.getState().sidebarView).toBe('tasks')
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
 })
 afterEach(cleanup)
 

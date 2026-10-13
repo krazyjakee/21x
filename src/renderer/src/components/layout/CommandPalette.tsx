@@ -15,6 +15,7 @@ import { useSkillStore } from '@/stores/skill-store'
 import { cn } from '@/lib/utils'
 import { modKey as mod } from '@/lib/platform'
 import { navShortcutDigit } from './nav-items'
+import { matchesTaskSearch } from '@/lib/task-search'
 
 interface CommandItem {
   id: string
@@ -153,7 +154,7 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
 
     const taskItems: CommandItem[] = q
       ? tasks
-          .filter((t) => !t.parent_task_id && t.title.toLowerCase().includes(q))
+          .filter((t) => matchesTaskSearch(t, q))
           .slice(0, 8)
           .map((t) => ({
             id: `task-${t.id}`,

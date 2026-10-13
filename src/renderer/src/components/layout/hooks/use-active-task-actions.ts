@@ -197,6 +197,10 @@ export function useActiveTaskActions({
   }, [closeDashboardPreview, dashboardPreviewTaskId, selectTask])
 
   const focusSearch = useCallback(() => {
+    if (sidebarView === 'dashboard') {
+      document.querySelector<HTMLInputElement>('[data-keyboard-shortcut-search="dashboard"]')?.focus()
+      return
+    }
     if (sidebarView !== 'tasks' && sidebarView !== 'skills') {
       setCmdOpen(true)
       return

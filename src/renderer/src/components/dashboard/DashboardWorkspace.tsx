@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useUIStore } from '@/stores/ui-store'
 import { HeroSection } from './HeroSection'
 import { CommandInput } from './CommandInput'
-import { QuickChips } from './QuickChips'
+import { TaskSearch } from './TaskSearch'
 import { TaskBoard } from './TaskBoard'
 import type { Task, TaskStatus } from '@/types'
 import type { TaskBoardTransitionResult } from './task-board-transition'
@@ -50,11 +50,8 @@ export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspacePro
           onCreateTask={handleCreateTask}
         />
 
-        {/* 3. Quick Task Chips */}
-        <QuickChips
-          onAskCaptain={handleSendToCaptain}
-          onCreateTask={(text) => openCreateWithPrefill(text)}
-        />
+        {/* 3. Search all current-project tasks, including completed and snoozed work. */}
+        <TaskSearch />
       </div>
 
       {/* Full-width sections below — constrained + centered to align with kanban */}

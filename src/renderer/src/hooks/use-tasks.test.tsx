@@ -83,6 +83,16 @@ describe('useTasks', () => {
   })
 
   describe('filtering', () => {
+    it('trims the shared search query and excludes coordinator rows', () => {
+      useTaskStore.setState({ tasks: [
+        makeTask({ id: 'description', description: 'INVOICE received' }),
+        makeTask({ id: 'label', labels: ['Invoice'] }),
+        makeTask({ id: 'captain', title: 'Invoice Captain', role: 'captain' })
+      ] })
+      useUIStore.setState({ searchQuery: '  invoice  ' })
+      const { result } = renderHook(() => useTasks())
+      expect(result.current.tasks.map((task) => task.id)).toEqual(['description', 'label'])
+    })
     it('filters by status', () => {
       useTaskStore.setState({
         tasks: [
