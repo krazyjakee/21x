@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { makeTask, makeAgent } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
-import { getTaskApiToken, handleRoute, setTaskApiAgentController, setTaskApiNotifier, startTaskApiServer, stopTaskApiServer } from './task-api-server'
+import { getTaskApiToken, handleRoute, setTaskApiAgentController, setTaskApiNotifier, startTaskApiServer, closeTaskApiServer } from './task-api-server-core'
 import { TaskStatus } from '../shared/constants'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
@@ -17,11 +17,12 @@ beforeEach(() => {
   ;({ db, rawDb } = createTestDb())
 })
 
-afterEach(() => {
+afterEach(async () => {
   setTaskApiAgentController(null)
   setTaskApiNotifier(() => undefined)
   setTaskAutomationTrigger(null)
-  stopTaskApiServer()
+  await closeTaskApiServer()
+  rawDb.close()
 })
 
 describe('explicit artifact workpiece routes', () => {

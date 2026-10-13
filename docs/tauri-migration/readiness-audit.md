@@ -57,8 +57,8 @@ recorded revisions. Artifact policy v3 passed the installed Windows NSIS at
 opaque child parser rejections remain distinct. The raw report, installer
 checksum and exact OS/WebView/Node observations are retained in
 [artifact authorization](artifact-authorization.md). Earlier failed v1/v2
-Windows reports remain unchanged. Same-revision current v3 results across all
-four targets are pending; no retirement gate was closed.
+Windows reports remain unchanged. The [same-revision v3 matrix](evidence/installed-artifact-v3-four-target-scenarios.json)
+passed all four targets at `5bea453`; no retirement gate was closed.
 
 [Connector shutdown](connector-shutdown.md) records portable runtime/plugin/form
 services, staged exact-piece resources, Node IPC transport, raw credential/KV/
@@ -70,7 +70,9 @@ pipe cases with zero skips in 64 files. The full local application recheck befor
 that continuation passed 5,239 with 20 optional skips in 372 files; the subsequent [form-service recheck](evidence/connector-portable-form-service-local.json)
 passed 5,254 application cases with 20 optional skips and 718 default standalone
 cases with zero skips. Its 13 focused staged cases passed separately. Hosted Verify passed through
-`5bea453` ([run](https://github.com/krazyjakee/21x/actions/runs/38352155256)).
+`d892d8a` ([run](https://github.com/krazyjakee/21x/actions/runs/38355457621)).
+The corrected provider/installer service matrix passed all four targets at that
+revision; source-scoped process/API-owner continuations record later changes.
 The generated source audit includes the current connector and artifact sources
 while retaining 38 scoped synthetic commands, 221 missing packaged commands and
 false production/retirement readiness flags.

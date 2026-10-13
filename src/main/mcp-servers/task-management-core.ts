@@ -304,11 +304,14 @@ async function skillScopeFor(scope: TaskMcpScope, invoke: TaskApiInvoke): Promis
 }
 
 /** The tools a session may see. This is the whole answer to "which tools to serve". */
-export function listToolsForScope(scope: TaskMcpScope) {
+export interface TaskToolAvailability { includeLegacyBrowserTools?: boolean }
+
+export function listToolsForScope(scope: TaskMcpScope, availability: TaskToolAvailability = {}) {
   const taskOnly = scope.taskId && scope.artifactTaskId ? taskAgentTools : []
+  const browser = availability.includeLegacyBrowserTools === false ? [] : browserTools
   return isScopedSession(scope)
-    ? [...subtaskTools, ...taskOnly, ...browserTools, ...sharedTools]
-    : [...captainTools, ...taskOnly, ...browserTools, ...sharedTools]
+    ? [...subtaskTools, ...taskOnly, ...browser, ...sharedTools]
+    : [...captainTools, ...taskOnly, ...browser, ...sharedTools]
 }
 
 /**
@@ -319,7 +322,8 @@ export async function callToolForScope(
   name: string,
   args: Record<string, unknown> | undefined,
   scope: TaskMcpScope,
-  invoke: TaskApiInvoke
+  invoke: TaskApiInvoke,
+  availability: TaskToolAvailability = {}
 ): Promise<ToolCallResult> {
   try {
     const bindScope = isScopedSession(scope) || isProjectScopedSession(scope)
@@ -332,7 +336,7 @@ export async function callToolForScope(
     // `update_task` instead of `update_own_task`, used to reach that
     // pass-through and act on any task at all. The tool list is the boundary, so
     // it must be enforced here and not only advertised.
-    if (!listToolsForScope(scope).some((tool) => tool.name === name)) {
+    if (!listToolsForScope(scope, availability).some((tool) => tool.name === name)) {
       return {
         content: [{ type: 'text', text: JSON.stringify({ error: `Unknown tool: ${name}` }) }],
         isError: true

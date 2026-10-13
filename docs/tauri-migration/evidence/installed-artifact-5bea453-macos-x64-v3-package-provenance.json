@@ -1,0 +1,8 @@
+{
+  "packageKind": "dmg",
+  "proofMode": "artifact-authorization-proof",
+  "packageSha256": "82a87891df37744f476be839991a3df3316ff42a9f7f7f47d03f2a87a950fda8",
+  "artifact": "21x Tauri Feasibility_0.1.0_x64.dmg",
+  "packagedExecutable": "/Users/runner/work/_temp/21x-packaged-q84vavkv/21x Tauri Feasibility.app/Contents/MacOS/twentyonex-tauri-feasibility",
+  "smokeCommandSucceeded": true
+}

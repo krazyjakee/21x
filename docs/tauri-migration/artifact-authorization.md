@@ -47,8 +47,8 @@ Each navigation waits for document readiness at its exact fixed route and a
 matching phase marker. The original 15-second overall deadline, bounded evaluation
 waits and bounded canary request remain. Failure closes the owned window through
 a scope guard. No mutation is replayed. Local v3 controls compile and pass. Installed Windows v3 passed at `144fab3`;
-its receipt is recorded below. Current same-revision four-target acceptance
-remains pending, and old v1/v2 receipts keep their original scope.
+its receipt is recorded below. The same-revision four-target run at `5bea453` also passed; old v1/v2
+receipts keep their original scope.
 
 ## Packaged initial URL correction
 
@@ -127,5 +127,19 @@ opaque child separately recorded all three exact invalid-Origin rejections. The
 main positive controls, same-application-origin excluded-window denials, parent
 access restrictions, targeted service event and artifact cleanup also passed.
 This establishes this installed synthetic diagnostic's scope. Production viewer
-integration and the remaining grants/content/lifecycle review stay open. A new
-all-target run at `5bea453` is separate from this Windows receipt.
+integration and the remaining grants/content/lifecycle review stay open. The all-target run at `5bea453` is separately recorded below.
+
+## Same-revision installed four-target result
+
+The [complete v3 matrix](https://github.com/krazyjakee/21x/actions/runs/38352234885)
+passed NSIS, both DMGs and AppImage at `5bea453`. The
+[retained scenarios](evidence/installed-artifact-v3-four-target-scenarios.json)
+include unchanged GUI/provenance receipts, run/artifact digests, package checksums
+and exact OS/WebView/Node observations for each target. Windows supplied actual
+valid-origin child ACL denials. Both macOS targets and Linux recorded child API
+absence, which remains distinct from authenticated frame-native ACL evaluation.
+All four separately passed main positive controls, actual native ACL denial by
+the excluded same-application-origin WebView, targeted service event, diagnostic
+cleanup and owned shutdown. No owned processes survived. Production viewer
+integration, full native/plugin-grant review and same-main-iframe constraints
+remain open.

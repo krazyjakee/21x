@@ -1,0 +1,104 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "d892d8a3af15a37f1f359151f240a6e826160d15",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38355526768",
+  "conclusion": "success",
+  "scope": "Same-revision four-target default standalone suite, including mocked five-backend protocols and real loopback installer networking; staged actual connector hooks and startup controls also passed. This predates the installer process owner. No GUI or real provider/installer/proxy/elevation claim. Earlier 85e09e3 matrix remains failed.",
+  "targets": [
+    {
+      "target": "windows-x64",
+      "artifactId": 11792378391,
+      "artifactDigest": "8af0bad7f5dd5667bc50a554cb308e4ade86f5272e5ae902e881964831711973",
+      "portablePassed": 1046,
+      "portableSkipped": 0,
+      "portableFiles": 72,
+      "portableReportSha256": "454ccdc4a20e32bdf71082a9bf6a2fdf97dfc5b879a2799cb9501d8630de4700",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "provider-installer-d892d8a-windows-x64-connector-worker-service-tests.json",
+          "sha256": "fcf770c850f76633364ebf2e74cb79914376a6b16be16cfcdcb6f44114a57100"
+        },
+        "staged-native-preflight.json": {
+          "report": "provider-installer-d892d8a-windows-x64-staged-native-preflight.json",
+          "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+        },
+        "startup-transcript-tests.json": {
+          "report": "provider-installer-d892d8a-windows-x64-startup-transcript-tests.json",
+          "sha256": "8d2ffade5a3a039158fc2a44b6db95aa35fa3616d0c8f733be350d3164de0371"
+        }
+      }
+    },
+    {
+      "target": "macos-x64",
+      "artifactId": 11792513466,
+      "artifactDigest": "dd0490aa4985ae003f0f2183bd99e6e5ccb3aca1b3d58c294ebf9a00a9831371",
+      "portablePassed": 1046,
+      "portableSkipped": 0,
+      "portableFiles": 72,
+      "portableReportSha256": "e23af465ce99ec687358823c7db9b5ccf3ac1accc9ae5c2f07a2393faed69c65",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "provider-installer-d892d8a-macos-x64-connector-worker-service-tests.json",
+          "sha256": "245bd0dbee0247fdaf103402d05e42cced05a0086f7289095d4194944bfaeec9"
+        },
+        "staged-native-preflight.json": {
+          "report": "provider-installer-d892d8a-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "startup-transcript-tests.json": {
+          "report": "provider-installer-d892d8a-macos-x64-startup-transcript-tests.json",
+          "sha256": "4660cdf89494cc31e38a8dd3d3384001469e8efbcd420b9aa6987d2d5ed554b8"
+        }
+      }
+    },
+    {
+      "target": "macos-arm64",
+      "artifactId": 11792313516,
+      "artifactDigest": "942a08c95005e27dae23e921b53ddfeeba2459445ca0d92f7b61e482c61ffe69",
+      "portablePassed": 1046,
+      "portableSkipped": 0,
+      "portableFiles": 72,
+      "portableReportSha256": "591cccc950a9d1e1a3e739d52a1c2bc516cb25991a7adb7f4718c0c444725026",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "provider-installer-d892d8a-macos-arm64-connector-worker-service-tests.json",
+          "sha256": "0623b00f78a71bcff4293e10245f0907c1de3fc413cef04b62cfb4881e9de73f"
+        },
+        "staged-native-preflight.json": {
+          "report": "provider-installer-d892d8a-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "startup-transcript-tests.json": {
+          "report": "provider-installer-d892d8a-macos-arm64-startup-transcript-tests.json",
+          "sha256": "bd8bcebc8742e67b1b39a5614b63fbf9648e4922537a081ece1f90211b99a6f3"
+        }
+      }
+    },
+    {
+      "target": "linux-appimage-x64",
+      "artifactId": 11792669153,
+      "artifactDigest": "296976b4893bb8e91187018604e90b4dc9c566cd4c27aa5edb46fae8f583a43b",
+      "portablePassed": 1046,
+      "portableSkipped": 0,
+      "portableFiles": 72,
+      "portableReportSha256": "5fda124bc786db77852022f237b2b145cdbfce254d5bcfc3935424598a194c40",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "provider-installer-d892d8a-linux-appimage-x64-connector-worker-service-tests.json",
+          "sha256": "12315eb6dcc42c88e423088a42344dfe24abb1b812194b69c20c245fccc45421"
+        },
+        "staged-native-preflight.json": {
+          "report": "provider-installer-d892d8a-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "startup-transcript-tests.json": {
+          "report": "provider-installer-d892d8a-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "45026e689b58c8ada9131500a2b8a97a661da161fb24fa8fc45c582b555eb172"
+        }
+      }
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

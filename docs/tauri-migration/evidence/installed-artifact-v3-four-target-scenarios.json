@@ -1,0 +1,170 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "5bea453960277c97d58dcee1678e61f0bf8c1abe",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38352234885",
+  "conclusion": "success",
+  "scope": "Same-revision installed isolated DMG/NSIS/AppImage policy-v3 diagnostic across all targets. Windows supplies actual authenticated child native ACL denials; Unix records frame API absence. All four separately prove native exclusion of the same-app-origin WebView, main positive controls, targeted service event, cleanup and owned shutdown. No same-main-iframe or production viewer/native-grant parity claim.",
+  "targets": [
+    {
+      "target": "windows-x64",
+      "artifactId": 11791797620,
+      "artifactDigest": "edeb10cc8b11d205c39ee3773e780c46855aa4758b70bf52b31f6b73498a3302",
+      "packageSha256": "9ebd838912973217f7762780173d57116f24d4315a00a2b0b3a94eac2d1ad111",
+      "runtimeVersions": {
+        "schemaVersion": 1,
+        "os": {
+          "system": "Windows",
+          "release": "10",
+          "version": "10.0.20348"
+        },
+        "node": {
+          "nodeVersion": "v22.23.2",
+          "nodeAbi": "127",
+          "platform": "win32",
+          "arch": "x64"
+        },
+        "webview": {
+          "version": "131.0.2903.86",
+          "source": "tauri::webview_version",
+          "defaultRuntime": true
+        }
+      },
+      "authenticatedChildNativeOutcome": "native-acl-denials",
+      "sameApplicationOriginExcludedWebviewNativeDenials": true,
+      "retained": {
+        "packaged-gui-smoke.json": {
+          "report": "installed-artifact-5bea453-windows-x64-v3-packaged-gui-smoke.json",
+          "sha256": "5788c983bfdb9614338129ffff502e359a0ba65d93e35264fe7a971dcb413b78"
+        },
+        "package-provenance.json": {
+          "report": "installed-artifact-5bea453-windows-x64-v3-package-provenance.json",
+          "sha256": "67060441e69d55102786535c7a37121ba8a6981d9d55c92d4800ad65b8f1a9a0"
+        }
+      }
+    },
+    {
+      "target": "macos-x64",
+      "artifactId": 11793065152,
+      "artifactDigest": "96fb1189683162171221273c9bd4a61f82e4e0ad68d449f21d07224936d4e6ff",
+      "packageSha256": "82a87891df37744f476be839991a3df3316ff42a9f7f7f47d03f2a87a950fda8",
+      "runtimeVersions": {
+        "schemaVersion": 1,
+        "os": {
+          "system": "Darwin",
+          "release": "24.6.0",
+          "version": "Darwin Kernel Version 24.6.0: Tue Jul 21 20:50:07 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_X86_64",
+          "macOS": "15.7.9"
+        },
+        "node": {
+          "nodeVersion": "v22.23.2",
+          "nodeAbi": "127",
+          "platform": "darwin",
+          "arch": "x64"
+        },
+        "webview": {
+          "version": "20621.3.11.11.3",
+          "source": "tauri::webview_version",
+          "defaultRuntime": true
+        }
+      },
+      "authenticatedChildNativeOutcome": "frame-api-absence",
+      "sameApplicationOriginExcludedWebviewNativeDenials": true,
+      "retained": {
+        "packaged-gui-smoke.json": {
+          "report": "installed-artifact-5bea453-macos-x64-v3-packaged-gui-smoke.json",
+          "sha256": "b70d1a8428e019dacb1c3ad68b27368c2d3e619e7468b4f7d478f83582f23c7d"
+        },
+        "package-provenance.json": {
+          "report": "installed-artifact-5bea453-macos-x64-v3-package-provenance.json",
+          "sha256": "3d0c42f556b43b2e3210060ba0766c325cf18ff396118a1504f8185ed7409255"
+        }
+      }
+    },
+    {
+      "target": "macos-arm64",
+      "artifactId": 11793066461,
+      "artifactDigest": "1120eae3e99ef9c38798ec211f7e6003803b6d39979964230699ba9b40bf43a7",
+      "packageSha256": "e9be3ed5516034b08e35e86a81c83a2c34d0d18b4fc8c2193864d0a71f70a1b2",
+      "runtimeVersions": {
+        "schemaVersion": 1,
+        "os": {
+          "system": "Darwin",
+          "release": "23.6.0",
+          "version": "Darwin Kernel Version 23.6.0: Tue Jul 21 21:56:54 PDT 2026; root:xnu-10063.141.1.713.39~1/RELEASE_ARM64_VMAPPLE",
+          "macOS": "14.8.9"
+        },
+        "node": {
+          "nodeVersion": "v22.23.2",
+          "nodeAbi": "127",
+          "platform": "darwin",
+          "arch": "arm64"
+        },
+        "webview": {
+          "version": "19618.3.11.11.5",
+          "source": "tauri::webview_version",
+          "defaultRuntime": true
+        }
+      },
+      "authenticatedChildNativeOutcome": "frame-api-absence",
+      "sameApplicationOriginExcludedWebviewNativeDenials": true,
+      "retained": {
+        "packaged-gui-smoke.json": {
+          "report": "installed-artifact-5bea453-macos-arm64-v3-packaged-gui-smoke.json",
+          "sha256": "2d6875dbf11e759324f1a0bbc237c249e12a3e8086cfd6e5c532e7a3e369acee"
+        },
+        "package-provenance.json": {
+          "report": "installed-artifact-5bea453-macos-arm64-v3-package-provenance.json",
+          "sha256": "001a49b3b26094bacaf7c7405843ae067f9358e2ac5a16d50236cd64b3446482"
+        }
+      }
+    },
+    {
+      "target": "linux-appimage-x64",
+      "artifactId": 11792378526,
+      "artifactDigest": "8d5697626fefda4e833bb155ab8ca008ca9a25fb06e14ce5b5c7b2d3c6462fc4",
+      "packageSha256": "0b136d81db44be86040fd96e82ba96602c8b6a77a7e3c297f1849c7bd3e0a20d",
+      "runtimeVersions": {
+        "schemaVersion": 1,
+        "os": {
+          "system": "Linux",
+          "release": "6.17.0-1022-azure",
+          "version": "#22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026",
+          "distribution": {
+            "VERSION_ID": "24.04",
+            "ID": "ubuntu"
+          },
+          "libc": [
+            "glibc",
+            "2.39"
+          ]
+        },
+        "node": {
+          "nodeVersion": "v22.23.2",
+          "nodeAbi": "127",
+          "platform": "linux",
+          "arch": "x64"
+        },
+        "webview": {
+          "version": "2.52.6",
+          "source": "tauri::webview_version",
+          "defaultRuntime": true
+        }
+      },
+      "authenticatedChildNativeOutcome": "frame-api-absence",
+      "sameApplicationOriginExcludedWebviewNativeDenials": true,
+      "retained": {
+        "packaged-gui-smoke.json": {
+          "report": "installed-artifact-5bea453-linux-appimage-x64-v3-packaged-gui-smoke.json",
+          "sha256": "b29bf3a0c75b3d5b8004b50ec8c4ba148da404aacc8233d2f4877b780418fd1b"
+        },
+        "package-provenance.json": {
+          "report": "installed-artifact-5bea453-linux-appimage-x64-v3-package-provenance.json",
+          "sha256": "20a3b88e6a3c98def2049198a1a00f679f2122850313c4f88530058f878171c2"
+        }
+      }
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

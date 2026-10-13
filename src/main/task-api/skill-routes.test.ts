@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager, SkillRecord } from '../database'
-import { handleRoute } from '../task-api-server'
+import { handleRoute } from '../task-api-server-core'
 import { SKILL_SCOPE_PARAM, validateSkillAssignment } from './skill-routes'
 
 /**
@@ -30,6 +30,8 @@ beforeEach(() => {
   skillA = db.createSkill({ name: 'alpha-release', description: 'Alpha release', content: '# A', project_id: projectA })!
   skillB = db.createSkill({ name: 'beta-release', description: 'Beta release', content: '# B', project_id: projectB })!
 })
+
+afterEach(() => db.db.close())
 
 describe('visibility per scope', () => {
   it('a project scope lists global skills plus its own, with the scope spelled out', async () => {

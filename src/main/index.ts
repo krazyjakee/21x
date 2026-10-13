@@ -39,7 +39,7 @@ import { ClaudePluginManager } from './claude-plugin-manager'
 import { parseProcessTable, selectKillableMcpPids, WINDOWS_PROCESS_TABLE_SCRIPT } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
 import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspace-paths'
-import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer } from './task-api-server'
+import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer, closeTaskApiServer } from './task-api-server'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { CaptainWaker } from './captain-waker'
 import { startScheduledCoordination, stopScheduledCoordination } from './scheduled-coordination'
@@ -178,6 +178,7 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 }
 
 async function shutdownAppServices(): Promise<void> {
+  stopTaskApiServer()
   syncManager?.stop()
   connectorBridgePlugin?.stopPolling()
   if (db) disposeConnectorRuntime(db)
@@ -193,14 +194,13 @@ async function shutdownAppServices(): Promise<void> {
   await agentManager?.stopServer()
 
   oauthManager?.destroy()
-  const connectorDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined
+  const serviceDrains = await Promise.allSettled([
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer()
   ])
-  const incompleteConnectorDrain = connectorDrains.find(result => result.status === 'rejected')
-  if (incompleteConnectorDrain?.status === 'rejected') throw incompleteConnectorDrain.reason
+  const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
+  if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason
   stopSecretBroker()
   stopMobileApiServer()
-  stopTaskApiServer()
 
   sweepLeakedMcpProcesses()
   // A short grace here: quitting must stay quick, and anything that ignores

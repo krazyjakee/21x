@@ -53,6 +53,8 @@ const report = {
     'src/main/connectors/bridge/service.ts', 'src/main/ipc/connectors.ts',
     'scripts/tauri-runtime.json', 'scripts/tauri-stage-connectors.mjs',
     'src/main/sync-manager.ts', 'src/main/index.ts',
+    'src/main/task-api-server.ts', 'src/main/task-api-server-core.ts', 'src/main/task-api/listener.ts',
+    'src/main/task-mcp-endpoint.ts', 'src/main/mcp-servers/task-management-core.ts',
     'src/main/oauth/connector-oauth-flow.ts', 'src/main/oauth/local-oauth-server.ts',
     'src-tauri/src/main.rs', 'src-tauri/src/artifact_proof.rs', 'src-tauri/src/artifact-denial-matcher.js',
     'src-tauri/src/artifact-proof.js', 'src-tauri/src/artifact-frame-proof.js',

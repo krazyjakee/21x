@@ -69,3 +69,11 @@ passed both macOS targets but exposed four Windows fixture assumptions;
 platform paths/absolute roots and the Windows Pi shell launcher. The corrected
 Windows retry is separate pending evidence, rather than a reclassification of
 the failed job.
+
+The [corrected provider/installer matrix](evidence/provider-installer-four-target-scenarios.json)
+passed the same `d892d8a` revision on all four targets: 1,046 default portable
+cases with zero skips in 72 files per target, staged actual connector local hooks
+and six startup/transcript controls. This predates the later process/API-owner
+changes. The earlier `85e09e3` matrix remains failed overall. No installed GUI,
+real model provider, privileged installer or system-proxy acceptance is claimed
+by these service-only receipts.
