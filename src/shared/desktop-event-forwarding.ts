@@ -321,7 +321,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "task-api-relay",
     "source": {
       "file": "src/main/index.ts",
-      "line": 427,
+      "line": 429,
       "column": 7,
       "target": "guardedIpcSend",
       "method": "send",
@@ -360,7 +360,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "mobile-to-desktop-relay",
     "source": {
       "file": "src/main/index.ts",
-      "line": 448,
+      "line": 450,
       "column": 7,
       "target": "guardedIpcSend",
       "method": "send",

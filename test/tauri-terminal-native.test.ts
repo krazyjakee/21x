@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createStandaloneTerminalService } from '../src/main/terminal-service'
@@ -12,7 +12,8 @@ describe('actual staged standalone terminal owner', () => {
   it('spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit', async () => {
     expect(process.versions.electron).toBeUndefined()
     expect(stagedRequire('node-pty/package.json').version).toBe('1.1.0')
-    const root = mkdtempSync(join(tmpdir(), '21x-terminal-native-'))
+    // macOS aliases /var to /private/var; cwd reports the physical path.
+    const root = realpathSync(mkdtempSync(join(tmpdir(), '21x-terminal-native-')))
     const fixtureScript = `
       process.stdout.write('FIXTURE_READY\\n');
       let pending = '';
@@ -44,10 +45,12 @@ describe('actual staged standalone terminal owner', () => {
       expect(attached?.pid).toBe(pid)
       expect(attached?.lines.join('\n')).toContain('FIXTURE_READY')
       owner.kill('native-fixture', pid + 1)
-      expect(owner.write('native-fixture', 'size\ncwd\n')).toEqual({ alive: true })
+      expect(owner.write('native-fixture', 'size\rcwd\r')).toEqual({ alive: true })
       await vi.waitFor(() => {
-        expect(second).toContain('FIXTURE_SIZE=120x40')
-        expect(second).toContain('FIXTURE_CWD=' + root)
+        // ConPTY emits screen control sequences around otherwise ordinary output.
+        const plain = second.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+        expect(plain).toContain('FIXTURE_SIZE=120x40')
+        expect(plain).toContain('FIXTURE_CWD=' + root)
       }, { timeout: 5000 })
       expect(owner.getBuffer('native-fixture').lines.join('\n')).toContain('FIXTURE_SIZE=120x40')
       await owner.close(3000)

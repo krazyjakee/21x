@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import type { CommanderEvent, CommanderMessage } from '../../shared/commander'
 import type { ChatProvider, ChatProviderEvent, ChatProviderRequest } from '../chat/providers/types'
 import type { DatabaseManager } from '../database'

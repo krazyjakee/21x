@@ -35,6 +35,41 @@ const MAX_TITLE_INPUT = 500
 const MAX_SEARCH_INPUT = 200
 
 let service: CommanderService | null = null
+let closing = false
+interface CommanderOwner {
+  commander: CommanderService
+  delivery: CaptainDeliveryService
+  recovery: Promise<void>
+  stopHost(): void
+}
+const owners = new Set<CommanderOwner>()
+
+export function shutdownCommanderServices(): void {
+  closing = true
+  service = null
+  for (const owner of owners) {
+    owner.commander.shutdown()
+    owner.delivery.shutdown()
+    owner.stopHost()
+  }
+}
+
+export async function closeCommanderServices(timeoutMs = 2000): Promise<void> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+    throw new RangeError('Commander host shutdown deadline must be an integer from 1 to 3000 ms')
+  }
+  shutdownCommanderServices()
+  const drain = Promise.all([...owners].map(async owner => {
+    await Promise.all([owner.commander.close(timeoutMs), owner.delivery.close(timeoutMs), owner.recovery])
+    owners.delete(owner)
+  }))
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('COMMANDER_HOST_SHUTDOWN_INCOMPLETE')), timeoutMs)
+  })
+  try { await Promise.race([drain, expired]) }
+  finally { if (timer) clearTimeout(timer) }
+}
 
 /** The running service, for main-process integrations (#62 report routing). */
 export function getCommanderService(): CommanderService | null {
@@ -55,8 +90,11 @@ function sendUiCommand(command: UiCommand): { ok: true } | { ok: false; detail: 
 }
 
 export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOptions = {}): CommanderService {
+  if (closing) throw new Error('COMMANDER_SERVICE_CLOSED')
   const subscribers = new Set<WebContents>()
+  const destroyListeners = new Map<WebContents, () => void>()
   const emit = (event: CommanderEvent): void => {
+    if (closing) return
     for (const wc of subscribers) {
       if (wc.isDestroyed()) {
         subscribers.delete(wc)
@@ -73,7 +111,7 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     db: deps.db,
     agents: deps.agentManager,
     onTerminalFailure: (request, reason, timedOut) => {
-      if (!commanderRef || !request.sourceSessionId || !request.projectId) return
+      if (closing || !commanderRef || !request.sourceSessionId || !request.projectId) return
       const project = deps.db.getProject(request.projectId)
       const key = `captain-request:${request.id}:${timedOut ? 'timeout' : 'failure'}`
       const content = timedOut
@@ -128,26 +166,37 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
 
   // #62: `report_to_commander` (Task API route) and the Captain's merges and
   // issue writes reach the sessions through this bridge.
-  installCommanderReportBridge({
+  const removeReportBridge = installCommanderReportBridge({
     service: commander,
     store,
     deliveries: delivery.store,
     getProject: (projectId) => deps.db.getProject(projectId)
   })
   void delivery.reconcile().catch((error) => console.error('[Commander] Durable Captain delivery recovery failed:', error))
-  void recoverIssueWriteOutcomes(deps.db).catch((error) => console.error('[IssueWrites] Recovery failed:', error))
+  const recovery = Promise.resolve().then(() => closing ? undefined : recoverIssueWriteOutcomes(deps.db))
+    .catch((error) => console.error('[IssueWrites] Recovery failed:', error))
+  owners.add({ commander, delivery, recovery, stopHost: () => {
+    removeReportBridge()
+    for (const [sender, listener] of destroyListeners) sender.removeListener?.('destroyed', listener)
+    destroyListeners.clear()
+    subscribers.clear()
+  } })
 
   /** Every Commander call is from the main window; the caller then receives events. */
   const trusted = (event: IpcMainInvokeEvent, channel: string): void => {
     assertTrustedSender(event, channel)
+    if (closing) throw new Error('COMMANDER_SERVICE_CLOSED')
     const sender = event.sender
     if (sender && !subscribers.has(sender)) {
       subscribers.add(sender)
-      sender.once?.('destroyed', () => {
+      const onDestroyed = (): void => {
         subscribers.delete(sender)
+        destroyListeners.delete(sender)
         // A closed window shows no session: reports only queue from now on.
         commander.setActiveSession(null)
-      })
+      }
+      destroyListeners.set(sender, onDestroyed)
+      sender.once?.('destroyed', onDestroyed)
     }
   }
 

@@ -28,6 +28,7 @@ import { closeConnectorRuntime, disposeConnectorRuntime } from './connectors/bri
 import { registerIpcHandlers } from './ipc-handlers'
 import { shutdownTerminalServices, closeTerminalServices } from './ipc/terminal'
 import { shutdownChatServices, closeChatServices } from './ipc/chat'
+import { shutdownCommanderServices, closeCommanderServices } from './ipc/commander'
 import { panelBrowserBroker } from './panel-browser-broker'
 import { hardenWebviewPreferences } from './webview-hardening'
 import { VoiceSessionManager } from './voice/voice-session-manager'
@@ -187,6 +188,7 @@ async function shutdownAppServices(): Promise<void> {
   overdueNotifier.shutdown()
   shutdownTerminalServices()
   shutdownChatServices()
+  shutdownCommanderServices()
   stopTaskApiServer()
   void stopMobileApiServer()
   syncManager?.stop()
@@ -205,7 +207,7 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason
