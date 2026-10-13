@@ -68,7 +68,10 @@ jobs:
       - name: Stage the standalone Node runtime and native addons once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
       - name: Run portable unit tests under staged standalone Node
-        run: pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
+        run: |
+          pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
+          test -s native-evidence/standalone-tests.json
+          node -e 'const report = require("./native-evidence/standalone-tests.json"); if (!report.success || report.numFailedTests) process.exit(1)'
       - name: Stage the synthetic database service and check its actual native boundary
         if: inputs.mode != 'feasibility'
         run: |

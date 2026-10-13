@@ -12,7 +12,9 @@ try {
   const sqlite = realpathSync(join(root, 'src-tauri/resources/service/node_modules/better-sqlite3'))
   const metadata = JSON.parse(readFileSync(join(sqlite, 'package.json'), 'utf8'))
   if (!lstatSync(node).isFile() || metadata.name !== 'better-sqlite3' || metadata.version !== pins.nativeDependencies['better-sqlite3']) throw new Error()
-  const args = process.argv.slice(2)
+  // pnpm preserves the script separator; Vitest treats it as end-of-options
+  // and would silently ignore reporter/filter flags that follow it.
+  const args = process.argv.slice(2).filter(arg => arg !== '--')
   const serviceProofs = args.includes('--service-proofs')
   if (args.some(arg => /^--(?:config|root|workspace|project)(?:=|$)/.test(arg) || ['-c', '-r'].includes(arg))) {
     failureMessage = 'The portable runner does not accept configuration, root, workspace or project overrides.'

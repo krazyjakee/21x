@@ -1,0 +1,51 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "23109a4de0c1b2a140361cfd5f677a4a24c508bd",
+  "scope": "Follow-up working-tree tooling fixes; installed macOS runtime source remains 23109a4. Windows installed retry is outstanding.",
+  "sourceSha256": {
+    ".gitattributes": "7b870c3605720919821f34ba696be37573f670e90554fa937c15e27726805d5f",
+    "scripts/tauri-test.mjs": "d40e3229c64d07d1905d530437f827512cfb385065fcb3060b3db62a52d3d49f",
+    "test/tauri-runtime.test.ts": "e0a703b0bd226d4b8bfb971befbb4846eb732c79ba9db19ac40c86ffd7fe9d2c",
+    ".github/workflows/tauri-native-linux.yml": "32fce5aebfd49dcdf17ad40b9a382adfb331adb04162720441664e9b32ee425e",
+    ".github/workflows/tauri-packaged-platforms.yml": "ad1bcba39ee62bd99e5bb958822812301f5c21c26a653286e737cc2a9d3277e9"
+  },
+  "hostedFailure": {
+    "run": "https://github.com/krazyjakee/21x/actions/runs/38323026423",
+    "job": 115055263779,
+    "stage": "Run portable unit tests under staged standalone Node",
+    "passed": 443,
+    "failedFiles": [
+      "scripts/tauri-inventory.test.ts",
+      "scripts/tauri-contracts.test.ts"
+    ],
+    "cause": "CRLF shebangs fail Vitest module loading; reproduced on Linux by converting exactly these two modules to CRLF and restoring their original bytes afterward."
+  },
+  "fixes": [
+    "Git retains LF for mjs modules even with core.autocrlf=true.",
+    "Runner removes pnpm script separator so Vitest receives filters and reporter options.",
+    "Platform steps require nonempty JSON with successful test status."
+  ],
+  "focusedTests": {
+    "passed": 21,
+    "files": 3,
+    "reportSha256": "80db00ce33edfa699e3a222d48cfde222db05fcbe7fb51e5792319abf934ff77"
+  },
+  "standaloneServiceSuite": {
+    "command": "pnpm test:tauri -- --service-proofs --silent --reporter=json --outputFile=/tmp/21x-pnpm-full-standalone-fixed.json",
+    "node": "v22.23.2",
+    "passed": 465,
+    "failed": 0,
+    "skipped": 0,
+    "files": 44,
+    "reportSha256": "eb93fef92004f0ab01e21fbdcad1f8f6d7266f186861b378ed782da79fd5fe7c"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "changedSourceLint": "passed",
+    "workflowShellSyntax": "passed (three files, 40 steps)",
+    "diffWhitespace": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

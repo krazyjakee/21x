@@ -104,7 +104,10 @@ jobs:
       - name: Stage pinned standalone Node and native modules once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
       - name: Run portable unit tests under staged standalone Node
-        run: pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
+        run: |
+          pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
+          test -s native-evidence/standalone-tests.json
+          node -e 'const report = require("./native-evidence/standalone-tests.json"); if (!report.success || report.numFailedTests) process.exit(1)'
       - name: Preserve Node and dependency redistribution notices
         run: node scripts/tauri-resource-notices.mjs | tee native-evidence/third-party-notices.json
       - name: Check actual staged native probes before compiling the GUI
