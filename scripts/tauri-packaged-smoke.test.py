@@ -43,13 +43,16 @@ class ReportValidationTests(unittest.TestCase):
         if mode == "artifact-authorization-proof":
             runtime["artifactAuthorizationProof"] = {
                 "passed": True, "boundary": "separate-webview", "sameMainIframeIsolationProven": False,
-                "frameNativeAttemptMethod": "unprivileged-parent-relay", "defaultMainCspUnchanged": True,
+                "policyVersion": 2, "frameNativeAttemptMethod": "parent-relay-and-conditional-direct-frame", "defaultMainCspUnchanged": True,
                 "artifactWindowClosed": True, "excludedDocumentReady": True, "mainReceivedTargetedServiceEvent": True,
                 "mainPositiveControls": dict.fromkeys(("transportAvailable", "desktopAccepted", "statusAccepted", "listenAccepted"), True),
                 "sameLocalOriginExcludedWebview": dict.fromkeys(("transportAvailable", "desktopDenied", "statusDenied", "listenDenied"), True),
                 "sandboxedArtifactFrame": dict.fromkeys(("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
                                                         "frameBridgeAbsent", "relayDesktopDenied", "relayStatusDenied", "relayListenDenied"), True),
             }
+            runtime["artifactAuthorizationProof"]["sandboxedArtifactFrame"].update(
+                directAttempted=False, directDesktopDenied=False, directStatusDenied=False, directListenDenied=False,
+                directDeadlineReached=False, directUnrecognizedFailure=False, directAccepted=False)
         return {"stage": "complete", "passed": True, "gui": gui, "runtime": runtime,
                 "shutdown": {"engineUnavailable": True, "ownedChildExited": True}}
 
@@ -93,10 +96,53 @@ class ReportValidationTests(unittest.TestCase):
         authority = original["runtime"]["artifactAuthorizationProof"]
         for section in ("mainPositiveControls", "sameLocalOriginExcludedWebview", "sandboxedArtifactFrame"):
             for key in authority[section]:
+                if key.startswith("direct"):
+                    continue
                 report = copy.deepcopy(original)
                 report["runtime"]["artifactAuthorizationProof"][section][key] = False
                 with self.subTest(section=section, key=key), self.assertRaises(AssertionError):
                     self.verify(report, mode)
+
+    def test_injected_frame_requires_each_actual_direct_denial(self):
+        mode = "artifact-authorization-proof"
+        report = self.report(mode)
+        frame = report["runtime"]["artifactAuthorizationProof"]["sandboxedArtifactFrame"]
+        frame.update(frameBridgeAbsent=False, directAttempted=True,
+                     directDesktopDenied=True, directStatusDenied=True, directListenDenied=True)
+        self.verify(report, mode)
+        for key in ("directAttempted", "directDesktopDenied", "directStatusDenied", "directListenDenied"):
+            for value in (None, False, 1, "true"):
+                invalid = copy.deepcopy(report)
+                invalid["runtime"]["artifactAuthorizationProof"]["sandboxedArtifactFrame"][key] = value
+                with self.subTest(key=key, value=value), self.assertRaises(AssertionError):
+                    self.verify(invalid, mode)
+
+    def test_absent_frame_cannot_claim_direct_calls_were_denied(self):
+        mode = "artifact-authorization-proof"
+        for key in ("directAttempted", "directDesktopDenied", "directStatusDenied", "directListenDenied"):
+            report = self.report(mode)
+            report["runtime"]["artifactAuthorizationProof"]["sandboxedArtifactFrame"][key] = True
+            with self.subTest(key=key), self.assertRaises(AssertionError):
+                self.verify(report, mode)
+
+    def test_rejects_older_artifact_policy_as_new_direct_frame_evidence(self):
+        mode = "artifact-authorization-proof"
+        for value in (None, 1, "2"):
+            report = self.report(mode)
+            report["runtime"]["artifactAuthorizationProof"]["policyVersion"] = value
+            with self.subTest(value=value), self.assertRaises(AssertionError):
+                self.verify(report, mode)
+
+    def test_injected_frame_rejects_timeouts_unrecognized_errors_and_accepted_calls(self):
+        mode = "artifact-authorization-proof"
+        for key in ("directDeadlineReached", "directUnrecognizedFailure", "directAccepted"):
+            report = self.report(mode)
+            frame = report["runtime"]["artifactAuthorizationProof"]["sandboxedArtifactFrame"]
+            frame.update(frameBridgeAbsent=False, directAttempted=True,
+                         directDesktopDenied=True, directStatusDenied=True, directListenDenied=True)
+            frame[key] = True
+            with self.subTest(key=key), self.assertRaises(AssertionError):
+                self.verify(report, mode)
 
     def test_does_not_allow_broader_frame_isolation_claim(self):
         mode = "artifact-authorization-proof"

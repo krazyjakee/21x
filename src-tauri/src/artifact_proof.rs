@@ -97,6 +97,30 @@ fn wait(
 fn all(value: &Value, keys: &[&str]) -> bool {
     keys.iter().all(|key| value[*key] == true)
 }
+fn frame_ipc_denied(value: &Value) -> bool {
+    if [
+        "directDeadlineReached",
+        "directUnrecognizedFailure",
+        "directAccepted",
+    ]
+    .iter()
+    .any(|key| value[*key] != false)
+    {
+        return false;
+    }
+    let denials = [
+        "directDesktopDenied",
+        "directStatusDenied",
+        "directListenDenied",
+    ];
+    if value["frameBridgeAbsent"] == true {
+        value["directAttempted"] == false && denials.iter().all(|key| value[*key] == false)
+    } else {
+        value["frameBridgeAbsent"] == false
+            && value["directAttempted"] == true
+            && all(value, &denials)
+    }
+}
 fn initial_app_url(url: &tauri::Url) -> bool {
     // Tauri intentionally omits index.html. Its non-HTTP packaged root is
     // tauri://localhost with an EMPTY path, unlike HTTP's slash root.
@@ -170,7 +194,7 @@ impl Drop for MainListener {
 
 pub(crate) fn run(main: &WebviewWindow) -> Value {
     let mut report = json!({"passed":false,"boundary":"separate-webview","sameMainIframeIsolationProven":false,
-        "frameNativeAttemptMethod":"unprivileged-parent-relay","defaultMainCspUnchanged":true});
+        "policyVersion":2,"frameNativeAttemptMethod":"parent-relay-and-conditional-direct-frame","defaultMainCspUnchanged":true});
     let deadline = Instant::now() + Duration::from_secs(15);
     let engine = main.state::<Engine>().inner().clone();
     let status = engine.status();
@@ -306,12 +330,11 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
                 "frameLoaded",
                 "parentAccessDenied",
                 "parentGlobalDenied",
-                "frameBridgeAbsent",
                 "relayDesktopDenied",
                 "relayStatusDenied",
                 "relayListenDenied",
             ],
-        )
+        ) && frame_ipc_denied(value)
     });
     // Exercise the real service event path after the excluded-context listener
     // attempts. Existing renderer codecs must receive a valid domain event.
@@ -353,6 +376,33 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn injected_frame_requires_all_direct_native_denials() {
+        let absent = json!({"frameBridgeAbsent":true,"directAttempted":false,
+            "directDesktopDenied":false,"directStatusDenied":false,"directListenDenied":false,
+            "directDeadlineReached":false,"directUnrecognizedFailure":false,"directAccepted":false});
+        assert!(frame_ipc_denied(&absent));
+        let injected = json!({"frameBridgeAbsent":false,"directAttempted":true,
+            "directDesktopDenied":true,"directStatusDenied":true,"directListenDenied":true,
+            "directDeadlineReached":false,"directUnrecognizedFailure":false,"directAccepted":false});
+        assert!(frame_ipc_denied(&injected));
+        for key in [
+            "directAttempted",
+            "directDesktopDenied",
+            "directStatusDenied",
+            "directListenDenied",
+        ] {
+            let mut invalid = injected.clone();
+            invalid[key] = json!(false);
+            assert!(!frame_ipc_denied(&invalid));
+            invalid[key] = Value::Null;
+            assert!(!frame_ipc_denied(&invalid));
+            let mut invented = absent.clone();
+            invented[key] = json!(true);
+            assert!(!frame_ipc_denied(&invented));
+        }
+    }
 
     #[test]
     fn packaged_root_uses_tauris_actual_empty_path() {

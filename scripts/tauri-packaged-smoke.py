@@ -55,16 +55,25 @@ def verify_report(report, *, mode, arch, installed, root):
         authority = runtime["artifactAuthorizationProof"]
         assert authority["passed"] is True and authority["boundary"] == "separate-webview"
         assert authority["sameMainIframeIsolationProven"] is False
-        assert authority["frameNativeAttemptMethod"] == "unprivileged-parent-relay"
+        assert authority["policyVersion"] == 2
+        assert authority["frameNativeAttemptMethod"] == "parent-relay-and-conditional-direct-frame"
         for key in ("artifactWindowClosed", "excludedDocumentReady", "mainReceivedTargetedServiceEvent", "defaultMainCspUnchanged"):
             assert authority[key] is True
         for section, keys in (
             ("mainPositiveControls", ("transportAvailable", "desktopAccepted", "statusAccepted", "listenAccepted")),
             ("sameLocalOriginExcludedWebview", ("transportAvailable", "desktopDenied", "statusDenied", "listenDenied")),
             ("sandboxedArtifactFrame", ("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
-                                       "frameBridgeAbsent", "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
+                                       "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
         ):
             assert all(authority[section][key] is True for key in keys)
+        frame = authority["sandboxedArtifactFrame"]
+        assert all(frame[key] is False for key in ("directDeadlineReached", "directUnrecognizedFailure", "directAccepted"))
+        if frame["frameBridgeAbsent"] is True:
+            assert frame["directAttempted"] is False
+            assert all(frame[key] is False for key in ("directDesktopDenied", "directStatusDenied", "directListenDenied"))
+        else:
+            assert frame["frameBridgeAbsent"] is False
+            assert all(frame[key] is True for key in ("directAttempted", "directDesktopDenied", "directStatusDenied", "directListenDenied"))
     else:
         assert "artifactAuthorizationProof" not in runtime
     owned_node = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")

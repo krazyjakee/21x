@@ -1,0 +1,92 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": false,
+  "runtime": {
+    "artifactAuthorizationProof": {
+      "artifactWindowClosed": true,
+      "artifactWindowCreated": true,
+      "boundary": "separate-webview",
+      "defaultMainCspUnchanged": true,
+      "excludedDocumentReady": true,
+      "excludedPageFinished": true,
+      "excludedSameAppOrigin": true,
+      "excludedScriptSubmitted": true,
+      "frameNativeAttemptMethod": "unprivileged-parent-relay",
+      "mainPositiveControls": {
+        "complete": true,
+        "desktopAccepted": true,
+        "eventReceived": false,
+        "listenAccepted": true,
+        "phase": "main",
+        "statusAccepted": true,
+        "transportAvailable": true
+      },
+      "mainReceivedTargetedServiceEvent": true,
+      "navigation": {
+        "allowed": 2,
+        "denied": 0,
+        "lastClass": "fixed-artifact",
+        "observed": 2
+      },
+      "passed": false,
+      "sameLocalOriginExcludedWebview": {
+        "attempt": "listen",
+        "complete": true,
+        "desktopDenied": true,
+        "listenDenied": true,
+        "phase": "excluded",
+        "statusDenied": true,
+        "transportAvailable": true
+      },
+      "sameMainIframeIsolationProven": false,
+      "sandboxedArtifactFrame": {
+        "attempt": "listen",
+        "complete": true,
+        "frameBridgeAbsent": false,
+        "frameLoaded": true,
+        "parentAccessDenied": true,
+        "parentGlobalDenied": true,
+        "phase": "frame",
+        "relayDesktopDenied": true,
+        "relayListenDenied": true,
+        "relayStatusDenied": true,
+        "transportAvailable": true
+      }
+    },
+    "developmentFrontend": false,
+    "hostArch": "x86_64",
+    "initialized": true,
+    "profileRoot": "\\\\?\\D:\\a\\_temp\\21x-packaged-nkfanxgm\\21x-database-service-3048-1791854168777116800-0",
+    "resourceRoot": "\\\\?\\D:\\a\\_temp\\21x-packaged-nkfanxgm\\installed\\resources",
+    "syntheticAgent": false,
+    "syntheticDesktop": true,
+    "syntheticDesktopProof": {
+      "missingResultPreserved": true,
+      "projectCreated": true,
+      "rehydrated": true,
+      "rendererReloaded": true,
+      "retiredOperationDenied": true,
+      "settingPersisted": true,
+      "staleEpochDenied": true,
+      "taskCreated": true,
+      "taskEventObserved": true,
+      "taskUpdated": true,
+      "transcriptDeltaRead": true,
+      "transcriptSnapshotRead": true,
+      "updateEventObserved": true
+    },
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "windows-job-kill-on-close"
+  },
+  "stage": "complete"
+}

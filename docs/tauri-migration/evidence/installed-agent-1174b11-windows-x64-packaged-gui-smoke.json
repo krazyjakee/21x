@@ -1,0 +1,57 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "developmentFrontend": false,
+    "hostArch": "x86_64",
+    "initialized": true,
+    "profileRoot": "\\\\?\\D:\\a\\_temp\\21x-packaged-pf2rmgd2\\21x-database-service-2696-1791853418195326400-0",
+    "resourceRoot": "\\\\?\\D:\\a\\_temp\\21x-packaged-pf2rmgd2\\installed\\resources",
+    "syntheticAgent": true,
+    "syntheticDesktop": true,
+    "syntheticDesktopProof": {
+      "agentCompleted": true,
+      "agentStarted": true,
+      "agentStatusEventObserved": true,
+      "agentTranscriptRehydrated": true,
+      "approvalAccepted": true,
+      "approvalRequested": true,
+      "missingResultPreserved": true,
+      "projectCreated": true,
+      "rehydrated": true,
+      "rendererReloaded": true,
+      "retiredOperationDenied": true,
+      "settingPersisted": true,
+      "staleApprovalDenied": true,
+      "staleEpochDenied": true,
+      "taskCreated": true,
+      "taskEventObserved": true,
+      "taskUpdated": true,
+      "transcriptDeltaRead": true,
+      "transcriptSnapshotRead": true,
+      "updateEventObserved": true
+    },
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "windows-job-kill-on-close"
+  },
+  "stage": "complete",
+  "verification": {
+    "packageKind": "nsis",
+    "proofMode": "synthetic-agent",
+    "packageSha256": "e9d0d14cbfbdd7c5ed222a3b10e14f651d4cda18435a08b7eb2be01846000329",
+    "artifact": "21x Tauri Feasibility_0.1.0_x64-setup.exe",
+    "packagedExecutable": "D:\\a\\_temp\\21x-packaged-pf2rmgd2\\installed\\twentyonex-tauri-feasibility.exe",
+    "packagedResources": true,
+    "ownedRunningProcessesAfterExit": []
+  }
+}

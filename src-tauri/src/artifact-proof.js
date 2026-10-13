@@ -54,7 +54,9 @@
         event.source.postMessage({ kind: 'artifact-result', command: event.data.command, denied: authorized }, '*');
       } else if (event.data.kind === 'artifact-complete') {
         const names = ['parentAccessDenied', 'parentGlobalDenied', 'frameBridgeAbsent',
-          'relayDesktopDenied', 'relayStatusDenied', 'relayListenDenied'];
+          'relayDesktopDenied', 'relayStatusDenied', 'relayListenDenied',
+          'directAttempted', 'directDesktopDenied', 'directStatusDenied', 'directListenDenied',
+          'directDeadlineReached', 'directUnrecognizedFailure', 'directAccepted'];
         if (Object.keys(event.data).length !== names.length + 1 || !names.every(key => typeof event.data[key] === 'boolean')) return;
         for (const key of names) result[key] = event.data[key];
         result.frameLoaded = true;
@@ -65,7 +67,7 @@
     };
     window.addEventListener('message', receive);
     const start = setInterval(() => {
-      frame?.contentWindow?.postMessage({ kind: 'artifact-start' }, '*');
+      frame?.contentWindow?.postMessage({ kind: 'artifact-start', engineEpoch: configuration.engineEpoch }, '*');
     }, 50);
     setTimeout(() => { clearInterval(start); window.removeEventListener('message', receive); }, 8000);
   }

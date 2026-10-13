@@ -25,6 +25,7 @@ const mainFiles = [
   'src/main/database-transcript-page.test.ts', 'src/main/transcript-events.test.ts', 'src/main/transcript-page-authority.test.ts',
   'src/shared/**/*.test.ts',
   'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts',
+  'scripts/artifact-frame-proof.test.ts',
   'scripts/database-proof.test.ts', 'scripts/configuration-proof.test.ts', 'scripts/agent-desktop-proof.test.ts',
   ...(process.env.TAURI_STANDALONE_SERVICE_PROOFS === '1' ? [
     'scripts/database-service-proof.test.ts', 'scripts/configuration-service-proof.test.ts', 'scripts/transcript-page-proof.test.ts'
