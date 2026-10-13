@@ -21,3 +21,8 @@ export function createPortableTestDb(): DatabaseManager {
   manager.db = db
   return manager
 }
+
+export function createPortableDbFixture(): { db: DatabaseManager; rawDb: InstanceType<typeof Database> } {
+  const db = createPortableTestDb()
+  return { db, rawDb: db.db }
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { applySchema } from '../database/schema'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import {
   CONNECTOR_KV_MAX_INSTANCE_BYTES,
   CONNECTOR_KV_MAX_KEY_CHARS,

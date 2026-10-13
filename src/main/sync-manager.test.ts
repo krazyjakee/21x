@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { SyncManager } from './sync-manager'
 import { PluginActionId, TaskStatus } from '../shared/constants'
 import type { DatabaseManager, TaskRecord } from './database'

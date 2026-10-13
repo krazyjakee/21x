@@ -104,3 +104,9 @@ stopped in a fixture-path assertion before that phase. The fixture now uses
 physical temporary paths and explicitly tests system ancestor aliases such as
 macOS `/var` to `/private/var`. Package/link/escape checks remain required. This
 matrix is retained as failed overall; the corrected retry is separate evidence.
+
+The standalone graph also includes the existing source-manager, connector-store,
+credential/redaction, SSRF and TLS tests. [Source/security evidence](evidence/source-security-portable-local.json)
+records 87 focused cases under each launcher and 709 standalone/private-pipe cases
+overall. Credential tests mock the configured storage provider, restore it after
+each case, and close their SQLite fixture; they do not attest OS keychain security.
