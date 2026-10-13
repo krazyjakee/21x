@@ -79,3 +79,5 @@ real model provider, privileged installer or system-proxy acceptance is claimed
 by these service-only receipts.
 
 The later [task API matrix](evidence/task-api-service-four-target-scenarios.json) passed 1,137 default portable cases with zero skips in 76 files on all four targets at `08d495f`. Local portable coverage subsequently adds the retained HTTP MCP, mobile server/lifetime, task automation and Captain wakeup suites. [Captain wake ownership](captain-wake-owner.md) documents the current full local results and the distinction between fixtures and production native/provider acceptance.
+
+The [mobile/Captain service matrix](evidence/captain-mobile-four-target-scenarios.json) at `8bc28c1` passed all four targets with 1,272 default portable cases and zero skips in 83 files per target. It includes HTTP MCP, mobile, task automation and Captain ownership, and predates recurrence/coordination. Current [scheduled coordination](scheduled-coordination-owner.md) local validation passes 1,328 complete opt-in cases in 91 files. Each report retains its original revision and scope.

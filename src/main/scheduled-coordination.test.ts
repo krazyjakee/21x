@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from './database'
 import type { ChatProvider, ChatProviderEvent } from './chat/providers/types'
 import { CommanderStore } from './commander/commander-store'
@@ -10,7 +10,7 @@ import {
   latestOccurrence,
   reviewStateKey,
   type ScheduledCoordinationOptions
-} from './scheduled-coordination'
+} from './scheduled-coordination-core'
 import {
   COMMANDER_BRIEFING_SETTING,
   DEFAULT_COMMANDER_BRIEFING,
@@ -51,8 +51,10 @@ function fakeProvider(text: string): ChatProvider {
   } as unknown as ChatProvider
 }
 
+const owners: ScheduledCoordination[] = []
+
 function scheduler(extra: Partial<ScheduledCoordinationOptions> = {}): ScheduledCoordination {
-  return new ScheduledCoordination({
+  const owner = new ScheduledCoordination({
     db,
     agents: agents as never,
     timezone: 'UTC',
@@ -60,6 +62,8 @@ function scheduler(extra: Partial<ScheduledCoordinationOptions> = {}): Scheduled
     notify: vi.fn(),
     ...extra
   })
+  owners.push(owner)
+  return owner
 }
 
 function project(name: string, settings: Record<string, unknown> = {}): string {
@@ -74,6 +78,11 @@ beforeEach(() => {
     findSessionByTaskId: vi.fn(() => undefined),
     sendMessage: vi.fn(async () => ({}))
   }
+})
+
+afterEach(async () => {
+  for (const owner of owners.splice(0)) await owner.close()
+  db.db.close()
 })
 
 describe('settings', () => {

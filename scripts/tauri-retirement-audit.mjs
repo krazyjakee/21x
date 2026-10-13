@@ -59,6 +59,7 @@ const report = {
     'src/main/task-automation-scheduler.ts',
     'src/main/captain-waker.ts',
     'src/main/recurrence-scheduler.ts', 'src/main/recurrence-scheduler-core.ts',
+    'src/main/scheduled-coordination.ts', 'src/main/scheduled-coordination-core.ts',
     'src/main/oauth/connector-oauth-flow.ts', 'src/main/oauth/local-oauth-server.ts',
     'src-tauri/src/main.rs', 'src-tauri/src/artifact_proof.rs', 'src-tauri/src/artifact-denial-matcher.js',
     'src-tauri/src/artifact-proof.js', 'src-tauri/src/artifact-frame-proof.js',

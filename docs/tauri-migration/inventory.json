@@ -5169,9 +5169,9 @@
     },
     {
       "bindings": [],
-      "column": 3,
+      "column": 10,
       "file": "src/main/scheduled-coordination.ts",
-      "line": 239,
+      "line": 16,
       "mode": "runtime",
       "syntax": "dynamic-import"
     },
@@ -5577,6 +5577,7 @@
     "src/main/recurrence-scheduler-core.ts",
     "src/main/recurrence-scheduler.ts",
     "src/main/repo-providers.ts",
+    "src/main/scheduled-coordination-core.ts",
     "src/main/scheduled-coordination.ts",
     "src/main/secret-broker.ts",
     "src/main/session-feedback.ts",
@@ -14051,7 +14052,7 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 695,
+    "files": 696,
     "operations": 715,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 4,

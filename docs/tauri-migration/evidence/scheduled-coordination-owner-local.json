@@ -1,0 +1,79 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Actual portable SQLite and Commander persistence with fixture agent/model/native host operations; raw review, ignored summary abort, notification and speech ownership; queued admission and application stopped-source failure/retry. No real model, installed notification/audio or production bootstrap claim.",
+  "sourceFilesSha256": {
+    "src/main/scheduled-coordination-core.ts": "cbc41a65d0c7f968a3b90eeb11147e55be1483055fc2a8a46ddfa78c02b9b45f",
+    "src/main/scheduled-coordination.ts": "ccdc91d28d38db87441fb3020ef7e12e83b6a3c7c57e182018478bb1619cd3e0",
+    "src/main/scheduled-coordination.test.ts": "678415d1201a50edee9581ef2e3d253a7d8ddb17ee083638cc171569f00d238d",
+    "src/main/scheduled-coordination-lifetime.test.ts": "f734ab5e6b1d1819ae0fd06ed8bccc84badeadacc1ecc9c8275c9d569b06fdc8",
+    "src/main/scheduled-coordination-host.test.ts": "30b49c8a0df54c35f278baf4fab4a753720072f985ce74d4d871dd9ce0175c72",
+    "src/main/index.ts": "7f3c73dd4afc272270036e5a159415f718668ffc4081fdfe23e469c97091b004",
+    "vitest.tauri.config.ts": "c2aba73d1509efabc98dba27986eb532baaca5b2ea9ca1911c7b845afbeb11c0"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-coordination-service.json",
+      "sha256": "2dc991f140cafee5634541edc4afadb3f4d16208516acd5a5a2ee87da503e350",
+      "passed": 17,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true
+    },
+    {
+      "report": "/tmp/21x-coordination-legacy.json",
+      "sha256": "70f41bcf74dc7e803d8266580c8365a2fea9a987a3560d9551a49404d5a13e70",
+      "passed": 17,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true
+    },
+    {
+      "report": "/tmp/21x-coordination-host.json",
+      "sha256": "a4e8bea4a58d21cb00cb6ec91643edecc634d104d162f5e437e7851b834a1e7e",
+      "passed": 1,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true
+    },
+    {
+      "report": "/tmp/21x-coordination-full-service.json",
+      "sha256": "8f74357bde8253aa0a1e25e3d26835088f75a8f115490032089cc55afd0e6152",
+      "passed": 1328,
+      "skipped": 0,
+      "files": 91,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "12a8f37e7ec3c3286b67b7b0c0eb3e389853a3eb7a062cfbb61a31bf822059a2",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-coordination-full-legacy.json",
+      "sha256": "3977894fb59cb6ad549c191bf633e6bd1150dbc36d59afe873dddfbde61fcd65",
+      "passed": 5314,
+      "skipped": 20,
+      "files": 385,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "83537c35c68a85eaec4b0c1e9ab734b45a85fa6b7f733c0af90ec4b85b4cea82",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-coordination-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-coordination-full-legacy.json"
+  },
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "5f966e7d2827da7c358a3f4a1e1b4a966568f9013b9557380154a287e4f9ba4d"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

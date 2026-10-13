@@ -1,0 +1,104 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "8bc28c1d26a5eb097c4700aa70bedfe5f7ef841b",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38373807222",
+  "conclusion": "success",
+  "scope": "Four-target default standalone suite including HTTP MCP, mobile lifetime, task automation and Captain wakeup ownership. Actual loopback/database/child controls use fixture agent/provider operations. Predates portable recurrence and scheduled coordination. No installed GUI/native device/real model or production bootstrap claim.",
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "artifactId": 11800483888,
+      "artifactDigest": "sha256:6e98b2a1400bc13ea5db868c0d9e7bbd55c3a6be7b6b04d129bafb9b29fec8a7",
+      "portablePassed": 1272,
+      "portableSkipped": 0,
+      "portableFiles": 83,
+      "portableReportSha256": "11742e432f92f2e91e2577b38a56147c5b7076f3de13354d56650bab92462dd8",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "captain-mobile-8bc28c1-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "captain-mobile-8bc28c1-linux-appimage-x64-connector-worker-service-tests.json",
+          "sha256": "60c9ede8b34af785014e1c11269c1bc040dc0a8925ea8755372c6c0635fe8f3b"
+        },
+        "startup-transcript-tests.json": {
+          "report": "captain-mobile-8bc28c1-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "1af456c89c34a7a40563a1dd67b3e2712aa6a7f309356cf9b38c8708de695576"
+        }
+      }
+    },
+    {
+      "target": "macos-arm64",
+      "artifactId": 11799854986,
+      "artifactDigest": "sha256:4be0b61aa5974137dfe2f8398b2e18038bf04dd0b4871ec5a16c2740a85b7b7e",
+      "portablePassed": 1272,
+      "portableSkipped": 0,
+      "portableFiles": 83,
+      "portableReportSha256": "c26d6daeedc1787a8f7eec1b245095a67ecbb13de0b40102b996611abab747e9",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "captain-mobile-8bc28c1-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "captain-mobile-8bc28c1-macos-arm64-connector-worker-service-tests.json",
+          "sha256": "d1fb76019830fd68dc47f0991b9fc8337b34bc08e64d3173ef3f2f3ac0efc080"
+        },
+        "startup-transcript-tests.json": {
+          "report": "captain-mobile-8bc28c1-macos-arm64-startup-transcript-tests.json",
+          "sha256": "0962e3175eac5574929db1027a75f04fcf00c387bdacc02f7902adbcd19cac04"
+        }
+      }
+    },
+    {
+      "target": "macos-x64",
+      "artifactId": 11799869032,
+      "artifactDigest": "sha256:044f2826258676983d555e86a70a74dcaf5e5ff29b0bcbee33dbae6492f1e958",
+      "portablePassed": 1272,
+      "portableSkipped": 0,
+      "portableFiles": 83,
+      "portableReportSha256": "0a3f780414b71c139e4f08241e44ad4809d5096fe0713cf1b4e7dc3100d46aaa",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "captain-mobile-8bc28c1-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "captain-mobile-8bc28c1-macos-x64-connector-worker-service-tests.json",
+          "sha256": "8910ccdfe4607e5f243ee00cf17bcc75f62cb641557315311c36c6d52c4268e4"
+        },
+        "startup-transcript-tests.json": {
+          "report": "captain-mobile-8bc28c1-macos-x64-startup-transcript-tests.json",
+          "sha256": "733bcbbf49d15f098eb712cd245831dd63caf9bb8a6dcbf01c64050e078b4e44"
+        }
+      }
+    },
+    {
+      "target": "windows-x64",
+      "artifactId": 11800259401,
+      "artifactDigest": "sha256:c5b4c72af5d5889f2dc1efc88dd1a7af52f610a64b6836fdb41023a1888b02f1",
+      "portablePassed": 1272,
+      "portableSkipped": 0,
+      "portableFiles": 83,
+      "portableReportSha256": "77eb342aee1df3abbac07ddfb4e45c981f6c31ac18bc94da59ae4f8b2f6c6daa",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "captain-mobile-8bc28c1-windows-x64-staged-native-preflight.json",
+          "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "captain-mobile-8bc28c1-windows-x64-connector-worker-service-tests.json",
+          "sha256": "0ace896d933327655d2eed6d9e88c241b7c18f20767eaebe29aa632a4391322b"
+        },
+        "startup-transcript-tests.json": {
+          "report": "captain-mobile-8bc28c1-windows-x64-startup-transcript-tests.json",
+          "sha256": "0322fc9be41d48c8597ee90e19b3457dca0013687bced84f8cb4ecbff478d9ef"
+        }
+      }
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}
