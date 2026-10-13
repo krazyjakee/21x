@@ -80,5 +80,6 @@ export async function closeConnectorRuntime(source: DbSource, timeoutMs = 2000):
   const results = await Promise.allSettled([runtime.credentials.close(timeoutMs), runtime.client.close(timeoutMs)])
   const incomplete = results.find(result => result.status === 'rejected')
   if (incomplete?.status === 'rejected') throw incomplete.reason
+  runtime.credentialStore.close()
   runtimes.delete(source)
 }

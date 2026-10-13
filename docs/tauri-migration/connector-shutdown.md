@@ -144,3 +144,12 @@ with 20 optional skips in 374 files. The default standalone run omits the opt-in
 service-proof files; earlier 715-case evidence included those files. These counts
 therefore describe different explicit commands. Typecheck, changed-source lint
 and source/contract freshness also passed.
+
+After both runtime owners drain successfully, the credential store closes, drops
+its session references and refuses later reads/writes from retained runtime
+references. It does not query or modify SQLite. A failed drain keeps those
+references until a successful retry; persistent ciphertext is untouched.
+[Credential-close evidence](evidence/connector-credential-close-local.json)
+records the failed-close/retry and no-database-access controls under both
+launchers, including the staged actual child. This is reference cleanup, not
+a claim that JavaScript strings or externally retained copies are zeroized.

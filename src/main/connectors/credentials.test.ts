@@ -6,6 +6,7 @@ import { ConnectorStore } from './connector-store'
 import {
   CONNECTOR_CREDENTIALS_REMEDIATION,
   ConnectorCredentialStore,
+  ConnectorCredentialStoreClosedError,
   ConnectorCredentialsUnavailableError,
   redactCredentials,
   type ConnectorCredentials
@@ -196,6 +197,30 @@ describe('ConnectorCredentialStore', () => {
     useFakeKeychain(true)
     creds.set(instanceId, SECRET)
     expect(creds.redact(instanceId, `401 for key ${SECRET.secret}`)).toBe('401 for key [REDACTED]')
+  })
+
+  it('forgets session credentials and refuses all access after close without reading or changing SQLite', () => {
+    useFakeKeychain(true)
+    creds.set(instanceId, SECRET)
+    const sessionId = store.createInstance({ pieceName: 'p', pieceVersion: '1' }).id
+    creds.set(sessionId, BASIC, 'session')
+    const before = rawDb.prepare('SELECT * FROM connector_instances ORDER BY id').all()
+    const read = vi.spyOn(store, 'getAuthBlob')
+    const write = vi.spyOn(store, 'setAuthBlob')
+    creds.close()
+    creds.close()
+    for (const call of [
+      () => creds.get(sessionId), () => creds.get(instanceId), () => creds.getStorage(sessionId),
+      () => creds.set(sessionId, BASIC, 'session'), () => creds.clear(instanceId),
+      () => creds.isPersistentStorageAvailable(), () => creds.redact(instanceId, 'fixture')
+    ]) expect(call).toThrow(ConnectorCredentialStoreClosedError)
+    expect(read).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
+    expect(rawDb.prepare('SELECT * FROM connector_instances ORDER BY id').all()).toEqual(before)
+    expect(new ConnectorCredentialStore(store).get(instanceId)).toEqual(SECRET)
+    expect(new ConnectorCredentialStore(store).get(sessionId)).toBeNull()
+    read.mockRestore()
+    write.mockRestore()
   })
 })
 
