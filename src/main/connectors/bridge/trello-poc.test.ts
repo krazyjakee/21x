@@ -356,7 +356,7 @@ describe('Trello is only an allowlist entry and a declarative mapping', () => {
         const path = join(dir, name)
         if (statSync(path).isDirectory()) walk(path)
         else if (name.endsWith('.ts') && !name.endsWith('.test.ts') && /trello/i.test(readFileSync(path, 'utf8'))) {
-          hits.push(relative(root, path))
+          hits.push(relative(root, path).split('\\').join('/'))
         }
       }
     }

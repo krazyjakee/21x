@@ -473,7 +473,7 @@ describe('Todoist is only an allowlist entry, a declarative mapping and a regist
         const path = join(dir, name)
         if (statSync(path).isDirectory()) walk(path)
         else if (name.endsWith('.ts') && !name.endsWith('.test.ts') && /todoist/i.test(readFileSync(path, 'utf8'))) {
-          hits.push(relative(root, path))
+          hits.push(relative(root, path).split('\\').join('/'))
         }
       }
     }
