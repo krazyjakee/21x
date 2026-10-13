@@ -283,8 +283,7 @@
           "heartbeat-desktop",
           "task-api-relay",
           "mobile-to-desktop-relay",
-          "voice-desktop-relay",
-          "workspace-cleanup-desktop"
+          "voice-desktop-relay"
         ],
         "review": "Finite reviewed producer closure; transport has no independent permission or domain owner.",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
@@ -464,33 +463,10 @@
           "method": "send",
           "target": "guardedIpcSend"
         }
-      },
-      {
-        "allowedNames": [
-          "workspace:cleanup-complete",
-          "workspace:cleanup-progress"
-        ],
-        "channelOwners": {
-          "workspace:cleanup-complete": "service",
-          "workspace:cleanup-progress": "service"
-        },
-        "destination": "trusted-desktop-main",
-        "id": "workspace-cleanup-desktop",
-        "producerOwner": "workspace-cleanup-scheduler",
-        "review": "Only cleanup progress/completion names.",
-        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
-        "source": {
-          "channelExpression": "channel",
-          "column": 7,
-          "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 427,
-          "method": "send",
-          "target": "guardedIpcSend"
-        }
       }
     ],
     "reviewVersion": 1,
-    "reviewedReferences": 10,
+    "reviewedReferences": 9,
     "stalePolicies": [],
     "status": "manual-source-review; not runtime validation or namespace authority",
     "unreviewedReferences": 0
@@ -18126,12 +18102,12 @@
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
-          "column": 9,
+          "column": 46,
           "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 153,
+          "line": 22,
           "method": "send",
           "resolution": "literal",
-          "target": "reviewed-event-wrapper"
+          "target": "guardedIpcSend"
         }
       ],
       "result": {
@@ -18171,68 +18147,12 @@
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
-          "column": 5,
+          "column": 46,
           "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 92,
+          "line": 21,
           "method": "send",
           "resolution": "literal",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 7,
-          "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 101,
-          "method": "send",
-          "resolution": "literal",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 7,
-          "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 230,
-          "method": "send",
-          "resolution": "literal",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 9,
-          "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 242,
-          "method": "send",
-          "resolution": "literal",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 9,
-          "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 277,
-          "method": "send",
-          "resolution": "literal",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 7,
-          "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 387,
-          "method": "send",
-          "resolution": "literal",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 13,
-          "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 401,
-          "method": "send",
-          "resolution": "literal",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 7,
-          "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 412,
-          "method": "send",
-          "resolution": "literal",
-          "target": "reviewed-event-wrapper"
+          "target": "guardedIpcSend"
         },
         {
           "column": 5,
@@ -19063,31 +18983,6 @@
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
       "line": 27,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "unresolved",
-      "target": "guardedIpcSend"
-    },
-    {
-      "channel": null,
-      "channelExpression": "channel",
-      "column": 7,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "forwardingReview": {
-        "allowedNames": [
-          "workspace:cleanup-complete",
-          "workspace:cleanup-progress"
-        ],
-        "channelOwners": {
-          "workspace:cleanup-complete": "service",
-          "workspace:cleanup-progress": "service"
-        },
-        "destination": "trusted-desktop-main",
-        "policyId": "workspace-cleanup-desktop",
-        "producerOwner": "workspace-cleanup-scheduler",
-        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
-      },
-      "line": 427,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",

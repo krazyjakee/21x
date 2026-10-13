@@ -30,7 +30,7 @@
     "scripts/tauri-runtime.json": "23fe6fb61778a75e30729951e3817640ea48380f6285c9255f8ec34ac7fa5e82",
     "scripts/tauri-stage-connectors.mjs": "1e324c2c50d266fd46d52fc27bbbd9d97465ecccd2fe2c0232a7ceb0abfe0af3",
     "src/main/sync-manager.ts": "8aaf53451fe9b21f58259bc0ff7042ba2b38af8990b13177c440e09beabaf5d8",
-    "src/main/index.ts": "17f0e169f159b836a1f78a0e6725a9098d67221fae3eab4ff1f6d75777dc80ae",
+    "src/main/index.ts": "c8a55a7fb8ec144c3076b45072981b7b89d946a670fabc24a620e1e101a8d27e",
     "src/main/task-api-server.ts": "5a59a9394d2255c3fbbf96c4914a714da79cd71a6208a2ac54230eb17020bf49",
     "src/main/task-api-server-core.ts": "a13b5812689e76519b08cad1ab120ab65ba083889211c3c4815f7d5bb9e34797",
     "src/main/task-api/listener.ts": "e46d9bd4f7e2f024b12134ad6ee5bccb9b6be7234f9da8fbfd5c9b1175c70d8b",
@@ -43,6 +43,8 @@
     "src/main/recurrence-scheduler-core.ts": "356bc9b6066d30a2c2fc09c2d28e7452ff424224f9662996dc9663bbe03089be",
     "src/main/scheduled-coordination.ts": "ccdc91d28d38db87441fb3020ef7e12e83b6a3c7c57e182018478bb1619cd3e0",
     "src/main/scheduled-coordination-core.ts": "cbc41a65d0c7f968a3b90eeb11147e55be1483055fc2a8a46ddfa78c02b9b45f",
+    "src/main/workspace-cleanup-scheduler.ts": "e872cc956843ac80a49c290a6f009b70e80af4e8229f65dd6aa0533038c43b10",
+    "src/main/workspace-cleanup-scheduler-core.ts": "9be24c5c33067d3ccc02c05f20a5e6ecdaba793e55a1f2f112ccca2c75839c76",
     "src/main/heartbeat-scheduler.ts": "4adf118908f6a97fa2fec22c3c8fc99e9c3dae656b506b4176f2e2c1fce04742",
     "src/main/heartbeat-scheduler-core.ts": "6123b1f2bf8ba1c0d32f8f8a3c03472e6e9abcd5e1723b61b9b9ed37a35e15e9",
     "src/main/oauth/connector-oauth-flow.ts": "4dec30ec8e0235378297594a9ab9e9237db1ffa6280a4a83571ece874a6d75d3",
@@ -53,7 +55,7 @@
     "src-tauri/src/artifact-proof.js": "55d5c34ba0e4ba84e157eaf836e9dee6ee11163935f4b9a7ba9235aa1741ea98",
     "src-tauri/src/artifact-frame-proof.js": "e2442297f0cdba6cc867f810d1ac53e4682cc9db735016dde5878033df8ae5f9",
     "scripts/tauri-packaged-smoke.py": "db58961d3f2426432991acda7acc9ac46622402d2d6972d09ef44d4e01ad064e",
-    "scripts/tauri-retirement-audit.mjs": "4a7b0f166e3fa36593f31095b287b3a60341b3d36756f73106ac36fc44df58f2",
+    "scripts/tauri-retirement-audit.mjs": "edbc914882c3534c956c83986e74ceb38cf5a27c71e45bddf7dcb90ebe006444",
     "src/shared/database-desktop-codecs.ts": "1301a41eaa42001a31430f136e14081fd79b636596426eee8c5af02037b3c928",
     "src/shared/configuration-desktop-codecs.ts": "9500cb85047e874bf74c4d0992c21fc9e12bb0fcfe18f2fd9e2d869fa09404c4",
     "src/shared/agent-desktop-codecs.ts": "61361c40c942d1115c3f5b0d8ee6497211ac736bca5eb71a552ec5df96dbc347",
@@ -61,9 +63,9 @@
     "src-tauri/engine/src/configuration_desktop.rs": "e51edc68156533ef5308d0770a74c338f3c2500c2172d295b03fcb3e7ecabc88",
     "src-tauri/engine/src/agent_desktop.rs": "99e0b3a94925617884d993c8d6d861324ab230951e2bbeb24c2b40a8789318fa",
     "src/renderer/src/lib/ipc-client.ts": "6f91f28183a7c05709613cd5071c5b3eeb0d415c3e81acb889e1db3b79241a78",
-    "docs/tauri-migration/operations.json": "8c14b8ef99e9803dcf85f0ca15d7bac66c6ee335be9ff55c5c38fdd8ec103e4e"
+    "docs/tauri-migration/operations.json": "2dcae1dc2ef26c9e45e7733dc83ca0755c25d76f6dd8d2b624520253d138a61d"
   },
-  "sourceInventorySha256": "9685a46eee7d902145f45d2230cfafb190654a0540c01ede5fbf4284cacf86ee",
+  "sourceInventorySha256": "7371fd01dc8c34282af56f9c39abb7a42871dfd3c92fad12bd4e354963cfbed7",
   "productionReady": false,
   "electronRetirementReady": false,
   "methodology": "Source inventory and explicit scoped codec lists, reviewed against current synthetic service/native bootstrap. Counts are declarations, not production authority, complete semantics, installed evidence or a gate pass. The 18 content-only configuration bindings share the packaged synthetic database and exact native policy; Agent CRUD and lifecycle settings remain unbound.",
@@ -563,7 +565,7 @@
       "build:linux": "electron-vite build && vite build --config vite.mobile.config.ts && electron-builder --linux",
       "release": "bash scripts/release.sh"
     },
-    "runtimeElectronImportCount": 46,
+    "runtimeElectronImportCount": 45,
     "runtimeElectronImportFiles": [
       "src/main/agent-installer/installer-utils.js",
       "src/main/agent-manager/electron-host.ts",
@@ -606,7 +608,6 @@
       "src/main/secret-broker.ts",
       "src/main/tunnel-manager.ts",
       "src/main/voice/voice-session-manager.ts",
-      "src/main/workspace-cleanup-scheduler.ts",
       "src/main/workspace-paths.ts",
       "src/main/worktree-manager.ts",
       "src/preload/index.ts"

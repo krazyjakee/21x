@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { WorkspaceCleanupScheduler } from './workspace-cleanup-scheduler'
+import { WorkspaceCleanupSchedulerCore as WorkspaceCleanupScheduler } from './workspace-cleanup-scheduler-core'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import type { DatabaseManager, TaskRecord } from './database'
 import type { WorktreeManager } from './worktree-manager'
 import { TaskStatus } from '../shared/constants'
@@ -91,15 +93,15 @@ describe('WorkspaceCleanupScheduler', () => {
     vi.useFakeTimers()
     db = mockDbManager()
     worktree = mockWorktreeManager()
-    scheduler = new WorkspaceCleanupScheduler(db, worktree)
+    scheduler = new WorkspaceCleanupScheduler(db, worktree, { workspacesRoot: join(tmpdir(), '21x-cleanup-fixture'), listWorkspaceDirs: () => [] }, { terminateProcesses: vi.fn().mockResolvedValue([]), findLiveProcesses: vi.fn().mockResolvedValue(new Set()), pruneNodeModules: vi.fn().mockReturnValue({ pruned: [], errors: [] }) })
 
     // Reset fs mocks
     mockedExistsSync.mockReturnValue(false)
     mockedRmSync.mockReturnValue(undefined)
   })
 
-  afterEach(() => {
-    scheduler.stop()
+  afterEach(async () => {
+    await scheduler.close()
     vi.useRealTimers()
     vi.restoreAllMocks()
   })

@@ -291,8 +291,7 @@ export const DESKTOP_EVENT_FORWARDING = {
       "heartbeat-desktop",
       "task-api-relay",
       "mobile-to-desktop-relay",
-      "voice-desktop-relay",
-      "workspace-cleanup-desktop"
+      "voice-desktop-relay"
     ]
   },
   "guarded-split": {
@@ -462,29 +461,6 @@ export const DESKTOP_EVENT_FORWARDING = {
       "voice:state",
       "voice:status"
     ]
-  },
-  "workspace-cleanup-desktop": {
-    "id": "workspace-cleanup-desktop",
-    "source": {
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 427,
-      "column": 7,
-      "target": "guardedIpcSend",
-      "method": "send",
-      "channelExpression": "channel"
-    },
-    "producerOwner": "workspace-cleanup-scheduler",
-    "allowedNames": [
-      "workspace:cleanup-complete",
-      "workspace:cleanup-progress"
-    ],
-    "channelOwners": {
-      "workspace:cleanup-complete": "service",
-      "workspace:cleanup-progress": "service"
-    },
-    "destination": "trusted-desktop-main",
-    "review": "Only cleanup progress/completion names.",
-    "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
   }
 } as const
 export type DesktopForwardingPolicyId = keyof typeof DESKTOP_EVENT_FORWARDING

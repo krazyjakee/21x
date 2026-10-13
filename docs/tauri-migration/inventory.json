@@ -5260,13 +5260,13 @@
         {
           "imported": "BrowserWindow",
           "local": "BrowserWindow",
-          "typeOnly": false
+          "typeOnly": true
         }
       ],
       "column": 1,
       "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 2,
-      "mode": "runtime",
+      "line": 1,
+      "mode": "type-only",
       "syntax": "import"
     },
     {
@@ -5626,6 +5626,7 @@
     "src/main/voice/voice-worker.js",
     "src/main/webview-hardening.ts",
     "src/main/windows-runtime-paths.ts",
+    "src/main/workspace-cleanup-scheduler-core.ts",
     "src/main/workspace-cleanup-scheduler.ts",
     "src/main/workspace-node-modules-gc.ts",
     "src/main/workspace-paths.ts",
@@ -10323,111 +10324,23 @@
     {
       "channel": "workspace:cleanup-progress",
       "channelExpression": null,
-      "column": 5,
+      "column": 46,
       "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 92,
+      "line": 21,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "workspace:cleanup-progress",
-      "channelExpression": null,
-      "column": 7,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 101,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
+      "target": "guardedIpcSend"
     },
     {
       "channel": "workspace:cleanup-complete",
       "channelExpression": null,
-      "column": 9,
+      "column": 46,
       "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 153,
+      "line": 22,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "workspace:cleanup-progress",
-      "channelExpression": null,
-      "column": 7,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 230,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "workspace:cleanup-progress",
-      "channelExpression": null,
-      "column": 9,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 242,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "workspace:cleanup-progress",
-      "channelExpression": null,
-      "column": 9,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 277,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "workspace:cleanup-progress",
-      "channelExpression": null,
-      "column": 7,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 387,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "workspace:cleanup-progress",
-      "channelExpression": null,
-      "column": 13,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 401,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "workspace:cleanup-progress",
-      "channelExpression": null,
-      "column": 7,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 412,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": null,
-      "channelExpression": "channel",
-      "column": 7,
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 427,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "unresolved",
       "target": "guardedIpcSend"
     },
     {
@@ -14031,11 +13944,11 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 697,
-    "operations": 713,
-    "runtimeElectronImports": 46,
-    "typeOnlyElectronImports": 4,
-    "unresolvedOperations": 10,
+    "files": 698,
+    "operations": 705,
+    "runtimeElectronImports": 45,
+    "typeOnlyElectronImports": 5,
+    "unresolvedOperations": 9,
     "webviews": 1
   },
   "webviews": [
