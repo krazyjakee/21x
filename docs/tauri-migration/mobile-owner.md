@@ -33,8 +33,13 @@ public tunnel lifecycle, complete process trees and installed device/recovery
 acceptance remain open.
 
 Final local rechecks passed 1,223 complete standalone/private-pipe cases with
-zero skips in 83 files and 5,288 full application cases with 20 optional skips
-in 379 files. Existing mobile and the first six lifetime controls passed 53
-focused cases under each launcher; the additional direct-source regression
-passed in both final full runs. Forced typecheck, changed-source lint, source/
-contract freshness and desktop/mobile build passed within recorded scopes.
+zero skips in 83 files. The initial full application run reported 5,288 passed /
+20 optional skips in 379 files but exited 1; it remains unaccepted. A separate
+raw default-plus-JSON reporter run passed the same assertions with exit 0 and no
+reported unhandled errors. Its report/log hashes and command are retained.
+The cause of the initial nonzero exit was not reproduced.
+
+Existing mobile and the first six lifetime controls passed 53 focused cases
+under each launcher; the additional direct-source regression passed in the
+final full runs. Forced typecheck, changed-source lint, source/contract freshness
+and desktop/mobile build passed within recorded scopes.
