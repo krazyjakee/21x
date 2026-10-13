@@ -52,22 +52,32 @@ The eight full-suite skips include opt-in/environment-dependent cases. The two o
 
 The 2026-10-13 continuation is committed in draft [PR #224](https://github.com/krazyjakee/21x/pull/224).
 Installed synthetic-agent scenarios passed on all four targets across their
-recorded revisions. Artifact policy v2 passed both macOS targets and Linux;
-Windows remains failed because its opaque frame reaches the native Origin
-parser before ACL evaluation. The exact failed receipt is retained in
-[artifact authorization](artifact-authorization.md); no retirement gate was closed.
+recorded revisions. Artifact policy v3 passed the installed Windows NSIS at
+`144fab3`, including real native ACL denials from its valid-origin child. The
+opaque child parser rejections remain distinct. The raw report, installer
+checksum and exact OS/WebView/Node observations are retained in
+[artifact authorization](artifact-authorization.md). Earlier failed v1/v2
+Windows reports remain unchanged. Same-revision current v3 results across all
+four targets are pending; no retirement gate was closed.
 
-[Connector shutdown](connector-shutdown.md) now records Node IPC transport,
-raw credential/KV/worker/OAuth/polling ownership, and HTTP close acknowledgement.
-The standalone/private-pipe suite passed 526 cases in 51 files before the stricter
-matcher and HTTP close additions. The latest full local application run passed
-5,194 with 16 optional skips before polling/transport additions. New focused
-controls record their own scopes; hosted Verify passed through `2ecb3e22`.
-The generated source audit includes the new worker, OAuth and artifact sources
+[Connector shutdown](connector-shutdown.md) records portable runtime/plugin/form
+services, staged exact-piece resources, Node IPC transport, raw credential/KV/
+worker/OAuth/polling ownership, HTTP close acknowledgement and integrated source
+drain before SQLite close. Staged real-child local-hook proofs passed all four
+targets across `7fb35a0`/`144fab3`; fake-provider API/OAuth regressions run under
+standalone Node. The latest redaction continuation passed 715 standalone/private-
+pipe cases with zero skips in 64 files. The full local application recheck before
+that continuation passed 5,239 with 20 optional skips in 372 files; the subsequent [form-service recheck](evidence/connector-portable-form-service-local.json)
+passed 5,254 application cases with 20 optional skips and 718 default standalone
+cases with zero skips. Its 13 focused staged cases passed separately. Hosted Verify passed through
+`5bea453` ([run](https://github.com/krazyjakee/21x/actions/runs/38352155256)).
+The generated source audit includes the current connector and artifact sources
 while retaining 38 scoped synthetic commands, 221 missing packaged commands and
 false production/retirement readiness flags.
 
-The subsequent [issue continuation report](evidence/issue-continuation-local.json) records the latest full recheck: **5,148 passed / 4 skipped**, all 363 test files passed with opt-in standalone proofs enabled. The initial run exposed a stale standalone database fixture expectation for the old credential wrapper; the corrected authenticated-format/tamper proof and final rerun passed. Latest native validation passed 20 unit + 6 staged cases. Typecheck, desktop/mobile/isolated frontend builds, lint (165 existing warnings), source freshness, 26 subprocess cases and 11 installed-evidence policy cases passed. No installed or hosted run for this uncommitted continuation is claimed.
+Earlier [issue continuation evidence](evidence/issue-continuation-local.json)
+retains its original 5,148-pass scope and fixture corrections. Subsequent reports
+supersede its counts without changing its source provenance.
 
 All twenty new issues are open, with role owners, gate/task IDs, dependencies and concrete acceptance/evidence criteria. [#193](https://github.com/krazyjakee/21x/issues/193) is the overall tracker. Existing [#202](https://github.com/krazyjakee/21x/issues/202) remains the contracts umbrella; foundation issues #200/#201/#203 remain closed within their original scope.
 

@@ -1,0 +1,61 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Portable connector form service, shared legacy adapter and staged actual-worker local hooks. Session storage uses real SQLite; keychain/OAuth endpoint fixtures are injected. No native command binding or production/bootstrap acceptance.",
+  "sourceFilesSha256": {
+    "src/main/connectors/bridge/service.ts": "dbea8424ae3c596ccd6bc3ccb3d7bb68fd810c47b46301aaea523d79e1dc8cee",
+    "src/main/ipc/connectors.ts": "70c8307b53bd4aaff8ad30b1e9c982145ae30c142e563978c9aa4ff1e9ebb8b2",
+    "src/main/connectors/bridge/runtime-lifetime.test.ts": "191bc5b321ed7cf24ba4bb837e22cd04101d9fd132580979d74dc81837f7a1ee",
+    "scripts/connector-worker-service-proof.test.ts": "998f1d852e5434bf33fcb58e60c5e618e25a36840321cff5f1b04b7081727262",
+    "vitest.tauri.config.ts": "12465cfe8f6aca3cf31640a3f25f414908c66898eb4f82ab5d084a5de4cdb10f"
+  },
+  "reports": [
+    {
+      "commandReport": "/tmp/21x-connector-service-full-standalone.json",
+      "sha256": "9e217681936af217abbbe807b7fbab3d4e5fa082a1f0e199e2006a813dc3a291",
+      "passed": 718,
+      "skipped": 0,
+      "files": 62,
+      "success": true,
+      "command": "pnpm test:tauri -- --reporter=json --outputFile=/tmp/21x-connector-service-full-standalone.json"
+    },
+    {
+      "commandReport": "/tmp/21x-connector-service-full-legacy.json",
+      "sha256": "8bd5640c19854306e9df3b43007511ca13d440d30063b51cb53bb03641283940",
+      "passed": 5254,
+      "skipped": 20,
+      "files": 374,
+      "success": true,
+      "command": "pnpm test -- --run --reporter=json --outputFile=/tmp/21x-connector-service-full-legacy.json"
+    },
+    {
+      "commandReport": "/tmp/21x-connector-service-standalone.json",
+      "sha256": "72bddb65f718bd729004e4df22e22e38dd0d0cd8d2c90c7f542268b1ec55c765",
+      "passed": 9,
+      "skipped": 0,
+      "files": 1,
+      "success": true,
+      "command": "pnpm test:tauri -- src/main/connectors/bridge/service.test.ts --reporter=json --outputFile=/tmp/21x-connector-service-standalone.json"
+    },
+    {
+      "commandReport": "/tmp/21x-connector-service-legacy.json",
+      "sha256": "993c97ce0d0de726cd3513deee55590ed87cf1a34e28432c62c77163c19d2f32",
+      "passed": 12,
+      "skipped": 0,
+      "files": 2,
+      "success": true,
+      "command": "pnpm test -- src/main/connectors/bridge/service.test.ts src/main/connectors/bridge/runtime-lifetime.test.ts --reporter=json --outputFile=/tmp/21x-connector-service-legacy.json"
+    },
+    {
+      "commandReport": "/tmp/21x-connector-service-staged.json",
+      "sha256": "7bbfbc43303fc97430d96b9a303bac6d828dfe84a6a0dbe3d634f286041d22be",
+      "passed": 13,
+      "skipped": 0,
+      "files": 3,
+      "success": true,
+      "command": "pnpm test:tauri -- --service-proofs src/main/connectors/bridge/service.test.ts src/main/connectors/bridge/runtime-lifetime.test.ts scripts/connector-worker-service-proof.test.ts --reporter=json --outputFile=/tmp/21x-connector-service-staged.json"
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

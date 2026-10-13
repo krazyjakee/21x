@@ -1,0 +1,39 @@
+
+> 21x@0.0.161 tauri:prepare:connectors D:\a\21x\21x
+> node scripts/tauri-stage-connectors.mjs
+
+{
+  "staged": true,
+  "worker": "service/piece-host.cjs",
+  "workerSha256": "3b81e6581955b46ce3c1761bda9d9b51e7620a19811fa188bdff46f1b053eb33",
+  "bytes": 24496,
+  "packages": {
+    "@activepieces/piece-trello": {
+      "version": "0.6.0",
+      "entry": "node_modules/@activepieces/piece-trello/src/index.js",
+      "entrySha256": "df34aa8726a1f2f95d8a403dd8a3d3dce8a0eeb2c30251105135eb1fd02ee5c4",
+      "metadataSha256": "e16b142e4adb7bcd1546c7912588cac82a81dfa1a8689db28ef22b52aeb473d5",
+      "reviewedLicenseException": {
+        "package": "@activepieces/piece-trello",
+        "version": "0.6.0",
+        "concludedLicense": "MIT",
+        "note": "package.json has no license field and the tarball has no LICENSE file. Source lives in packages/pieces/community/trello of github.com/activepieces/activepieces, outside the commercially licensed packages/ee and packages/server/api/src/app/ee; the root LICENSE grants MIT for it. The bundle inlines MIT third-party code (axios, mime-types, dayjs, ipaddr.js). No ee DTOs appear in the bundle.",
+        "reviewedOn": "2026-09-18"
+      }
+    },
+    "@activepieces/piece-todoist": {
+      "version": "0.5.0",
+      "entry": "node_modules/@activepieces/piece-todoist/src/index.js",
+      "entrySha256": "d2e5c5c93d0d3c172075f1aa44158c5d18b5082863bedb1442f4cfc6e87af4e0",
+      "metadataSha256": "fd86c1923e9802c0243beb865600d5ed346620a2052c88bd3f2426be63527133",
+      "reviewedLicenseException": {
+        "package": "@activepieces/piece-todoist",
+        "version": "0.5.0",
+        "concludedLicense": "MIT",
+        "note": "package.json has no license field and the tarball has no LICENSE file. Source lives in packages/pieces/community/todoist of github.com/activepieces/activepieces, outside the commercially licensed packages/ee and packages/server/api/src/app/ee; the root LICENSE grants MIT for it. The bundle inlines MIT third-party code (mime-types, dayjs, ipaddr.js, form-data). No ee paths appear in the bundle.",
+        "reviewedOn": "2026-09-18"
+      }
+    }
+  },
+  "redistributionReviewComplete": false
+}

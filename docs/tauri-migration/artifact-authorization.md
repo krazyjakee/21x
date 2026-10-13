@@ -46,8 +46,9 @@ Boolean metadata without a reporting command in the artifact.
 Each navigation waits for document readiness at its exact fixed route and a
 matching phase marker. The original 15-second overall deadline, bounded evaluation
 waits and bounded canary request remain. Failure closes the owned window through
-a scope guard. No mutation is replayed. Local v3 controls compile and pass; installed
-v3 acceptance remains pending and old v1/v2 receipts keep their original scope.
+a scope guard. No mutation is replayed. Local v3 controls compile and pass. Installed Windows v3 passed at `144fab3`;
+its receipt is recorded below. Current same-revision four-target acceptance
+remains pending, and old v1/v2 receipts keep their original scope.
 
 ## Packaged initial URL correction
 
@@ -109,3 +110,22 @@ fail the control. Both diagnostic documents use the same compiled matcher.
 frame controls, twenty-one package policy/provenance controls and three native
 tests. New package runs retain checksums even before the GUI starts and can retain
 contained runtime/process observations on failure without changing acceptance.
+
+## Installed Windows policy-v3 result
+
+The [Windows NSIS run at `144fab3`](https://github.com/krazyjakee/21x/actions/runs/38351070116)
+passed policy v3. The [retained scenario](evidence/installed-artifact-v3-windows-scenario.json)
+includes the unchanged GUI report, package provenance, artifact digest and installer
+SHA-256. Windows `10.0.20348`, default WebView2 `131.0.2903.86`, and bundled Node
+`22.23.2` / ABI `127` were observed. System Node was hidden; no owned process
+survived shutdown.
+
+The valid-origin child had injected native APIs and a non-opaque origin. All
+three direct calls received actual command-specific native ACL denials; no call
+was accepted, timed out, failed generically or stopped at the origin parser. The
+opaque child separately recorded all three exact invalid-Origin rejections. The
+main positive controls, same-application-origin excluded-window denials, parent
+access restrictions, targeted service event and artifact cleanup also passed.
+This establishes this installed synthetic diagnostic's scope. Production viewer
+integration and the remaining grants/content/lifecycle review stay open. A new
+all-target run at `5bea453` is separate from this Windows receipt.

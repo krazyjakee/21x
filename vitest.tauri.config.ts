@@ -32,6 +32,8 @@ const mainFiles = [
   'src/main/connectors/ssrf.test.ts', 'src/main/connectors/piece-host/tls-guard.test.ts',
   'src/main/connectors/bridge/scheduler-lifetime.test.ts',
   'src/main/connectors/bridge/engine-lifetime.test.ts',
+  'src/main/connectors/bridge/service.test.ts',
+  'src/main/connectors/bridge/runtime-lifetime.test.ts',
   'src/main/connectors/bridge/bridge.test.ts', 'src/main/connectors/bridge/trello-poc.test.ts',
   'src/main/connectors/bridge/todoist-oauth.test.ts',
   'src/main/oauth/local-oauth-server.test.ts',

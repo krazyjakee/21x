@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../../../test/helpers/db-test-helper'
-import { closeConnectorRuntime, ConnectorRuntimeClosedError, disposeConnectorRuntime, getConnectorRuntime } from './runtime'
+import { createPortableDbFixture as createTestDb } from '../../../../test/helpers/portable-db-test-helper'
+import { closeConnectorRuntime, ConnectorRuntimeClosedError, disposeConnectorRuntime, getConnectorRuntime as resolveRuntime } from './runtime-core'
 import { PieceHostShutdownIncompleteError } from '../piece-host/client'
 import { PieceCancelledError } from '../piece-host/errors'
+
+const host = {
+  createTransport: () => { throw new Error('Lifetime controls must not start a worker') },
+  openExternal: () => { throw new Error('Lifetime controls must not open a browser') }
+}
+const getConnectorRuntime = (source: Parameters<typeof resolveRuntime>[0]) => resolveRuntime(source, host)
 
 describe('connector runtime ownership', () => {
   const sources: ReturnType<typeof createTestDb>[] = []

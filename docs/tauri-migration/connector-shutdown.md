@@ -119,3 +119,28 @@ scrubbed before truncation. Invalid-grant classification remains available.
 records six added reflection controls, 49 focused passes under each launcher and
 715 standalone/private-pipe passes. Endpoints and credentials in these controls
 are fixtures.
+
+The [corrected staged receipts](evidence/connector-staged-four-target-scenarios.json)
+now cover all four targets: macOS x64/arm64 and Linux passed their staged worker
+proof at `7fb35a0`; Windows passed at `144fab3` after source-audit paths were
+normalized. The portable counts were 613 on each Unix target and 700 on Windows.
+All staged local-hook and six startup/transcript controls passed. These are
+service-only runs at explicit different revisions; they do not replace installed
+GUI, external OAuth, provider API or production bootstrap acceptance.
+
+`ConnectorBridgeService` now owns all seven connector form operations without
+Electron imports. The legacy IPC module delegates to it. Each database method
+resolves the runtime anew, preserving shutdown admission; credentials remain
+write-only, with explicit session storage and persistent-storage remediation.
+The staged real-child proof uses this service for instance creation and Trello
+credential setup/clear. Portable form and runtime-owner regressions run under
+both launchers. Native command bindings remain open; extracting the service
+does not add capabilities or increase the packaged command count.
+
+[Form-service evidence](evidence/connector-portable-form-service-local.json)
+records 718 default standalone cases with zero skips in 62 files, 13 focused
+standalone/staged cases, 12 focused legacy cases and 5,254 full application passes
+with 20 optional skips in 374 files. The default standalone run omits the opt-in
+service-proof files; earlier 715-case evidence included those files. These counts
+therefore describe different explicit commands. Typecheck, changed-source lint
+and source/contract freshness also passed.
