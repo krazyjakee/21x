@@ -3,9 +3,11 @@
 <body><div id="root"></div>
 <script>
 // No real sessions, microphone, provider calls or application services.
-window.fixture = { sends: [], voiceSends: [], resolveSend: null, rejectSend: null }
+window.fixture = { sends: [], voiceSends: [], captures: [], releases: 0, finalReceiver: null, resolveSend: null, rejectSend: null }
+Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { enumerateDevices: async () => [{ kind: 'audioinput', deviceId: 'fixture-mic', label: 'Fixture microphone' }], addEventListener: () => {}, removeEventListener: () => {} } })
 const noop = async () => {}
 window.electronAPI = new Proxy({
+  voice: { onFinal: callback => { window.fixture.finalReceiver = callback; return () => { window.fixture.finalReceiver = null } } },
   settings: { getAll: async () => ({}), set: noop },
   commander: {
     listSessions: async () => [], listMessages: async () => ({ messages: [], activeTurnId: null }),

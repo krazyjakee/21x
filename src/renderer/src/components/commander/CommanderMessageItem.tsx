@@ -1,6 +1,8 @@
 import { useId, useState } from 'react'
 import { AlertCircle, Check, ChevronDown, ChevronRight, Inbox, Loader2 } from 'lucide-react'
 import type { CommanderMessage } from '@shared/commander'
+import { isCommanderAdminTool } from '@shared/commander-tools'
+import { ActionCard } from './ActionCard'
 import { splitCommanderReport } from '@shared/commander-report'
 import { Markdown } from '@/components/ui/Markdown'
 import { ChatMessageImages } from '@/components/chat/ChatMessageImages'
@@ -80,9 +82,12 @@ interface MessageItemProps {
   message: CommanderMessage
   /** Tool results by call id, so an assistant message can show its calls' outcomes. */
   toolResults: Map<string, CommanderMessage>
+  requestedBy?: CommanderMessage
+  reports?: CommanderMessage[]
+  unseenReportIds?: string[]
 }
 
-export function CommanderMessageItem({ message, toolResults }: MessageItemProps) {
+export function CommanderMessageItem({ message, toolResults, reports = [], unseenReportIds = [], requestedBy }: MessageItemProps) {
   if (message.role === 'user') {
     return (
       <div className="flex flex-col items-end gap-1.5">
@@ -101,10 +106,11 @@ export function CommanderMessageItem({ message, toolResults }: MessageItemProps)
   if (message.role === 'report') {
     const report = splitCommanderReport(message.content)
     return (
-      <div data-testid="commander-report" className="min-w-0 rounded-xl border border-border border-l-[3px] border-l-primary bg-primary/5 px-3.5 py-2.5">
+      <div data-testid="commander-report" data-report-id={message.id} className="min-w-0 rounded-xl border border-border border-l-[3px] border-l-primary bg-primary/5 px-3.5 py-2.5">
         <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <Inbox className="size-3.5" aria-hidden="true" />
           <span className="font-medium">Report</span>
+          {unseenReportIds.includes(message.id) && <span className="rounded bg-primary/10 px-2 text-xs font-medium text-foreground">New update</span>}
         </div>
         <Markdown size="base">{report.content}</Markdown>
         {report.technicalDetails && (
@@ -130,12 +136,16 @@ export function CommanderMessageItem({ message, toolResults }: MessageItemProps)
           <div className="flex flex-wrap gap-1.5">
             {calls.map((call) => {
               const result = toolResults.get(call.id)
+              if (result && isCommanderAdminTool(call.name)) return <ActionCard key={call.id} call={call} result={result} requestedBy={requestedBy} />
               return (
                 <ToolChip key={call.id} name={call.name} input={call.input} result={result?.content} isError={result?.is_error} />
               )
             })}
           </div>
         )}
+        {reports.length > 0 && <section className="mt-2 space-y-3 border-l-2 border-border pl-3" aria-label="Reports for this request" data-testid="commander-report-thread">
+          {reports.map(report => <CommanderMessageItem key={report.id} message={report} toolResults={toolResults} unseenReportIds={unseenReportIds} />)}
+        </section>}
       </div>
     )
   }

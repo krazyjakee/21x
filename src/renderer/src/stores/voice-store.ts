@@ -102,12 +102,12 @@ interface VoiceStoreState {
   setEnabled: (enabled: boolean) => Promise<void>
   setContextProvider: (provider: (() => VoiceUiContext) | null) => void
   setCaptionOwner: (owner: string | null) => void
-  startTurn: (mode: VoiceTurnMode, options?: { signal?: AbortSignal }) => Promise<string | null>
+  startTurn: (mode: VoiceTurnMode, options?: { signal?: AbortSignal; deviceId?: string }) => Promise<string | null>
   /** Records one turn and shows the words in settings, changing nothing else. */
   startTest: () => Promise<void>
   clearTest: () => void
   setConversation: (on: boolean) => Promise<void>
-  endTurn: () => Promise<void>
+  endTurn: (options?: { retainForFinal?: boolean }) => Promise<void>
   toggleTurn: (mode: VoiceTurnMode) => Promise<void>
   cancel: () => Promise<void>
   confirm: (choice?: { taskId?: string; agentName?: string }) => Promise<void>
@@ -471,7 +471,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         set({ result: { kind: 'error', message, at: Date.now() } })
         cancelStartedTurn()
       },
-    }, undefined, signal)
+    }, options?.deviceId, signal)
     signal?.removeEventListener('abort', cancelStartedTurn)
     if (signal?.aborted) {
       cancelStartedTurn()
@@ -499,7 +499,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     await settingsApi.set(VOICE_SETTING_KEYS.conversation, on ? 'true' : 'false')
   },
 
-  endTurn: async () => {
+  endTurn: async (options) => {
     const { turnId } = get()
     if (!turnId) return
     voiceCapture.stop()
@@ -507,7 +507,8 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     // The turn is closed here and now. Waiting for an answer from main would
     // leave the control stuck on "Stop" whenever main has already dropped the
     // turn — for example after the worker ended it at a pause.
-    set({ turnId: null, turnEpoch: null, level: 0, partial: '' })
+    if (options?.retainForFinal) set({ state: 'transcribing', level: 0 })
+    else set({ turnId: null, turnEpoch: null, level: 0, partial: '' })
     await voiceApi.endTurn(turnId)
   },
 

@@ -8,7 +8,7 @@ import { useCommanderStore } from '@/stores/commander-store'
 
 export const UNTITLED_SESSION = 'New session'
 
-function SessionRow({ session, selected }: { session: CommanderSession; selected: boolean }) {
+function SessionRow({ session, selected, onSelected }: { session: CommanderSession; selected: boolean; onSelected?: () => void }) {
   const selectSession = useCommanderStore((s) => s.selectSession)
   const renameSession = useCommanderStore((s) => s.renameSession)
   const archiveSession = useCommanderStore((s) => s.archiveSession)
@@ -27,7 +27,9 @@ function SessionRow({ session, selected }: { session: CommanderSession; selected
         'group relative flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 transition-colors',
         selected ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
       )}
-      onClick={() => !editing && void selectSession(session.id)}
+      onClick={() => { if (!editing) { void selectSession(session.id); onSelected?.() } }}
+      tabIndex={0}
+      onKeyDown={event => { if (!editing && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); void selectSession(session.id); onSelected?.() } }}
     >
       <div className="min-w-0 flex-1">
         {editing ? (
@@ -50,7 +52,7 @@ function SessionRow({ session, selected }: { session: CommanderSession; selected
         ) : (
           <>
             <div className={cn('break-words text-base leading-relaxed', session.unread_count > 0 && 'font-semibold text-foreground')}>
-              {session.title || UNTITLED_SESSION}
+              {session.is_report_inbox ? 'Project reports' : session.title || UNTITLED_SESSION}
             </div>
             <div className="text-xs text-muted-foreground">
               {formatRelativeDate(new Date(session.updated_at).toISOString())}
@@ -99,7 +101,7 @@ function SessionRow({ session, selected }: { session: CommanderSession; selected
 }
 
 /** Session list: new, search, rename, archive, unread badges. */
-export function CommanderSessionList() {
+export function CommanderSessionList({ onSelected }: { onSelected?: () => void } = {}) {
   const sessions = useCommanderStore((s) => s.sessions)
   const selectedSessionId = useCommanderStore((s) => s.selectedSessionId)
   const search = useCommanderStore((s) => s.search)
@@ -120,7 +122,7 @@ export function CommanderSessionList() {
     <aside className="commander-session-list flex min-h-0 w-64 shrink-0 flex-col border-r border-border bg-sidebar">
       <div className="flex items-center justify-between px-3 pt-3 pb-2">
         <h2 className="text-sm font-medium uppercase tracking-wider text-muted-foreground">Commander</h2>
-        <Button size="sm" variant="ghost" aria-label="New session" onClick={() => void createSession()}>
+        <Button size="sm" variant="ghost" aria-label="New session" onClick={() => { void createSession(); onSelected?.() }}>
           <Plus className="size-4" aria-hidden="true" />
           New
         </Button>
@@ -137,7 +139,7 @@ export function CommanderSessionList() {
       </div>
       <ul className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-2" aria-label="Commander sessions">
         {sessions.map((session) => (
-          <SessionRow key={session.id} session={session} selected={session.id === selectedSessionId} />
+          <SessionRow key={session.id} session={session} selected={session.id === selectedSessionId} onSelected={onSelected} />
         ))}
         {sessions.length === 0 && (
           <li className="px-2.5 py-6 text-center text-sm text-muted-foreground">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AlertCircle, Radio, Send, Square } from 'lucide-react'
 import type { CommanderMessage } from '@shared/commander'
 import {
@@ -18,6 +18,8 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import type { Agent } from '@/types'
 import { CommanderMessageItem, ToolChip } from './CommanderMessageItem'
+import { CommanderActions } from './CommanderActions'
+import { commanderReportThreads } from '@/lib/commander-report-threads'
 import { UNTITLED_SESSION } from './CommanderSessionList'
 
 const EMPTY: CommanderMessage[] = []
@@ -60,9 +62,10 @@ export const COMMANDER_EMPTY_DESCRIPTION =
   'The Commander is a fast chat that coordinates your projects. It hands work to each project’s Captain and relays their reports back here — it never does the work itself.'
 
 /** The open session: history, the streaming turn, and the composer. */
-export function CommanderChatPane() {
+export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'chat' | 'actions'; embedded?: boolean } = {}) {
   const sessionId = useCommanderStore((s) => s.selectedSessionId)
   const session = useCommanderStore((s) => s.sessions.find((x) => x.id === s.selectedSessionId))
+  const unseenReports = useCommanderStore(s => sessionId ? s.unseenReports[sessionId] : undefined) ?? []
   const messages = useCommanderStore((s) => (s.selectedSessionId ? s.messages[s.selectedSessionId] : undefined)) ?? EMPTY
   const streaming = useCommanderStore((s) => (s.selectedSessionId ? s.streaming[s.selectedSessionId] : undefined))
   const turnError = useCommanderStore((s) => (s.selectedSessionId ? s.turnErrors[s.selectedSessionId] : undefined))
@@ -176,12 +179,21 @@ export function CommanderChatPane() {
     return map
   }, [messages])
 
-  const visible = useMemo(() => messages.filter((m) => m.role !== 'tool' && m.role !== 'summary'), [messages])
+  const reportThreads = useMemo(() => commanderReportThreads(messages), [messages])
+  const threadedIds = useMemo(() => new Set([...reportThreads.values()].flat().map(message => message.id)), [reportThreads])
+  const visible = useMemo(() => messages.filter((m) => m.role !== 'tool' && m.role !== 'summary' && !threadedIds.has(m.id)), [messages, threadedIds])
+  const requests = useMemo(() => {
+    const map = new Map<string, CommanderMessage>()
+    let latest: CommanderMessage | undefined
+    for (const message of messages) { if (message.role === 'user') latest = message; if (message.role === 'assistant' && latest) map.set(message.id, latest) }
+    return map
+  }, [messages])
+  const conversationCount = visible.filter(message => message.role !== 'report').length
 
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [visible.length, streaming?.text, streaming?.toolCalls.length])
+  }, [conversationCount, streaming?.text, streaming?.toolCalls.length])
 
   if (!sessionId) {
     return (
@@ -222,16 +234,21 @@ export function CommanderChatPane() {
 
   return (
     <section className="commander-chat flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Commander chat">
-      <header className="flex min-h-12 shrink-0 items-center py-3 border-b border-border px-4">
+      {!embedded && <header className="flex min-h-12 shrink-0 items-center py-3 border-b border-border px-4">
         <h2 className="min-w-0 break-words text-base font-medium">{session?.title || UNTITLED_SESSION}</h2>
-      </header>
-
-      <div ref={scrollRef} className="commander-messages min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4" data-testid="commander-messages">
+      </header>}
+      {unseenReports.length > 0 && <Button size="sm" variant="secondary" className="m-2 self-start" onClick={() => {
+        const target = [...document.querySelectorAll<HTMLElement>('[data-report-id]')].find(element => element.dataset.reportId === unseenReports[0])
+        target?.scrollIntoView({ block: 'nearest' })
+        if (sessionId) void useCommanderStore.getState().readReports(sessionId)
+      }}>{unseenReports.length} new {unseenReports.length === 1 ? 'report' : 'reports'} · Read updates</Button>}
+      {tab === 'actions' && <CommanderActions />}
+      <CommanderTranscript scrollRef={scrollRef} hidden={tab !== 'chat'}>
         {visible.length === 0 && !streaming && (
           <p className="mx-auto max-w-md pt-10 text-center text-base leading-relaxed text-muted-foreground">{COMMANDER_EMPTY_DESCRIPTION}</p>
         )}
         {visible.map((m) => (
-          <CommanderMessageItem key={m.id} message={m} toolResults={toolResults} />
+          <CommanderMessageItem key={m.id} message={m} toolResults={toolResults} reports={reportThreads.get(m.id)} requestedBy={requests.get(m.id)} unseenReportIds={unseenReports} />
         ))}
         {streaming && (
           <div className="flex flex-col gap-1.5" data-testid="commander-streaming">
@@ -261,9 +278,9 @@ export function CommanderChatPane() {
             <span className="min-w-0 break-words">{turnError}</span>
           </div>
         )}
-      </div>
+      </CommanderTranscript>
 
-      <div className="shrink-0 border-t border-border p-3">
+      <CommanderComposer>
         <div className="rounded-xl border border-input bg-card shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
           <AttachmentTray controller={images} composerRef={inputRef} className="px-3 pt-2" />
           <div className="flex items-end gap-2 px-3 py-2">
@@ -342,7 +359,16 @@ export function CommanderChatPane() {
             </select>
           </div>
         </div>
-      </div>
+      </CommanderComposer>
     </section>
   )
+}
+
+
+export function CommanderTranscript({ children, scrollRef, hidden }: { children: ReactNode; scrollRef: RefObject<HTMLDivElement | null>; hidden?: boolean }) {
+  return <div ref={scrollRef} hidden={hidden} className="commander-messages min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4" data-testid="commander-messages">{children}</div>
+}
+
+export function CommanderComposer({ children }: { children: ReactNode }) {
+  return <div className="shrink-0 border-t border-border p-3" data-testid="commander-composer">{children}</div>
 }

@@ -81,6 +81,18 @@ describe('voice store — words heard while reading', () => {
 })
 
 describe('voice store — turns', () => {
+  it('keeps the exact recognition lease through PTT release until its final tail arrives', async () => {
+    reset()
+    await useVoiceStore.getState().startTurn('conversation', { deviceId: 'fixture-input' })
+    const epoch = useVoiceStore.getState().turnEpoch
+    expect(voiceCapture.start).toHaveBeenLastCalledWith(expect.any(Object), 'fixture-input', undefined)
+    await useVoiceStore.getState().endTurn({ retainForFinal: true })
+    expect(voiceCapture.stop).toHaveBeenCalled()
+    expect(useVoiceStore.getState()).toMatchObject({ state: 'transcribing', turnId: 'turn-1', turnEpoch: epoch })
+    onFinal({ turnId: 'turn-1', turnEpoch: epoch, text: 'The final tail' })
+    expect(useVoiceStore.getState()).toMatchObject({ turnId: null, final: 'The final tail' })
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     reset()

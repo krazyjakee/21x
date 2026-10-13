@@ -19,6 +19,7 @@ interface FakeSource {
 
 const sources: FakeSource[] = []
 let currentTime = 0
+let analyserSample = 128
 
 class FakeAudioContext {
   state = 'running'
@@ -32,7 +33,7 @@ class FakeAudioContext {
       frequencyBinCount: 128,
       connect: () => {},
       disconnect: () => {},
-      getByteTimeDomainData: (data: Uint8Array) => data.fill(128),
+      getByteTimeDomainData: (data: Uint8Array) => data.fill(analyserSample),
     }
   }
   createBuffer(_channels: number, length: number, sampleRate: number) {
@@ -76,6 +77,7 @@ function pcm(seconds: number, sampleRate = 24000): Uint8Array {
 
 beforeEach(() => {
   sources.length = 0
+  analyserSample = 128
   currentTime = 0
   vi.stubGlobal('AudioContext', FakeAudioContext)
   vi.stubGlobal('window', { ...globalThis.window, setTimeout, clearTimeout })
@@ -86,6 +88,21 @@ afterEach(() => {
 })
 
 describe('VoicePlayback', () => {
+  it('reads actual analyser RMS only while queued audio belongs to the current passage', () => {
+    const playback = new VoicePlayback()
+    analyserSample = 160
+    playback.start('system-reply')
+    expect(playback.outputLevel).toBe(0)
+    playback.play('system-reply', pcm(1), 24000)
+    expect(playback.outputLevel).toBeCloseTo(.5)
+    analyserSample = 128
+    expect(playback.outputLevel).toBe(0)
+    analyserSample = 192
+    expect(playback.outputLevel).toBe(1)
+    playback.stop()
+    expect(playback.outputLevel).toBe(0)
+  })
+
   it('plays each sentence where the last one ends', () => {
     const playback = new VoicePlayback()
     playback.start('s1')

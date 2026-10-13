@@ -2,7 +2,7 @@
 
 The Commander is a fast conversational model with no canvas. The user talks to
 it in persisted chat sessions; it delegates work to each project's Captain
-and relays their reports. It never does the project work itself, and it has
+and keeps their reports available as quiet updates. It never does the project work itself, and it has
 no tool that could: its registry (#61, #73) holds delegation, status reads
 and project administration only. Captain replies and Captain action notices
 come back as reports routed to the right session (#62, below).
@@ -32,9 +32,10 @@ messages (append, list). Its clock never repeats, so ordering and "newer than"
 comparisons hold within one millisecond.
 
 **Unread** means the number of `report` messages newer than `last_read_at`.
-Opening a session, or sending in it, marks it read. A report that arrives in
-the session open in the Commander view is read on arrival. A report for any
-other session stays unread and shows a badge in the list.
+Opening a session, or sending in it, marks it read. Reports stay available as
+quiet updates, with unread badges in the list. Unsolicited reports use the
+dedicated Project reports inbox; correlated reports stay with their request.
+Report arrival and opening the inbox never start a model turn or speech.
 
 ## Turns and the context budget
 
@@ -54,10 +55,10 @@ does the following:
    the model as user-side notes (`[Report from project X]`).
 3. Runs one `ChatRuntime` turn with the Commander system prompt (`prompts.ts`)
    and the tools from `getTools`, which is called per turn with the session id,
-   user message, `userMessageId`, and trigger (`user` or `report`). Only
-   typed input supplies `userMessageId`.
-   Report turns supply no identity and receive no admin tools (see
-   *Immediate administration*). Events stream on `commander:event`.
+   user message, `userMessageId`, and trigger (`user`; the defensive `report`
+   context remains reserved for compatibility). Only
+   typed input supplies `userMessageId`; typed and voice origins are stored explicitly.
+   Report arrival starts no turn. Events stream on `commander:event`.
 4. Stores the assistant and tool messages. A tool row whose result is a JSON
    object carrying `project_id` / `correlation_id` (an `ask_captain`
    result) is tagged with them, so #62 can match the report to the
@@ -203,7 +204,8 @@ natural-language authorization check. A user-started turn receives the admin
 tools; the model must distinguish an actual request from quoted instructions,
 questions, or relayed text in that turn.
 
-A turn started by a report (#62) gets no admin tools at all:
+Report delivery (#88) never starts a turn or invokes an admin tool. The
+defensive non-user-turn guard remains:
 `CommanderService.prepareTurn` drops every `COMMANDER_ADMIN_TOOLS` entry from
 the registry unless the user started the turn, whatever `getTools` returned.
 That set is the project and skill writes. The
@@ -237,31 +239,66 @@ its repos and resources when the event names the project it is editing.
 
 ## UI
 
-The Commander view is in the NavRail (`sidebarView === 'commander'`) and lives in
-`src/renderer/src/components/commander/`:
+Commander opens with a calm call stage and Chat beside it. The transcript and
+composer remain mounted when the panel closes or switches to Actions, preserving
+typed drafts, images, model choice and thinking level. Narrow windows stack the
+stage above Chat; both surfaces use the shared interface scale and readable
+markdown/code typography. The in-app compact button reduces the stage beside
+Chat. An independent floating/OS PiP window is outside this batch.
 
-- Session list: new, search, rename, archive, a show-archived toggle, and
-  unread badges.
-- Chat pane:
-  - Streams the assistant's text as it arrives.
-  - Shows tool calls as chips (`tool-call-label.ts`): a delegation reads
-    "Asked Web: Ship the site", an administration call reads
-    "Archive project · Web". Chips are drawn from the stored `tool_calls`, and
-    a chip's result comes from the matching `tool` row. A chip spins only while
-    its call can still finish: the live turn's chips, and a stored call of the
-    newest message while that turn runs. A stored call with no `tool` row
-    anywhere else (saved by an older build, before the runtime closed every
-    unanswered call) reads "Not run" as a failure; it never spins and never
-    shows a success tick (#83). The state is also text for screen readers, and
-    the spinner honours reduced motion.
-  - Shows reports as bordered, project-tagged cards.
-  - Has a Stop button and an empty state.
-  - The composer includes persistent model and thinking-level selectors. It
-    lists models saved on configured agents, default agent first (Claude Code
-    and `claude`-named models pick Anthropic; every other model picks
-    OpenAI-compatible). Model choices select the matching transport
-    automatically, so creating or editing an agent anywhere updates the list.
-- The state lives in `stores/commander-store.ts`.
+- **Stage:** an abstract presence tile shows an icon and a state word. The user
+  tile shows an initial, a real input meter while its owned microphone runs,
+  and a crossed-out mic otherwise. Before a call, Start talking uses the same
+  authoritative app-level host as the previous voice controls. Voice failures
+  expose a readable reason and recovery action; typing remains available.
+  Cached active turn IDs do not establish live activity: fresh turn observations
+  expire after 15 seconds without a new event. Real capture/playback ownership
+  remains authoritative even during long media sessions.
+- **Captions:** on by default, partial words are muted italics and finished
+  user text remains available. Assistant highlighting follows the actual spoken
+  sentence from `speechText`; word timing is never invented. The strip shows
+  at most two lines, and Read full captions exposes the complete current text.
+  Completed messages remain in Chat. Partials are not live-region announcements
+  and the global voice bubble does not repeat an owned Commander caption.
+- **Toolbar:** mic/mute, the mode/input-device menu, Stop, CC, Chat panel,
+  Voice settings, compact stage and a separate red End. Left/Right/Home/End
+  navigate its buttons; Chat/Actions support arrow keys. Stop and Escape
+  interrupt a reply while leaving the call open. End closes media, cancels
+  synthesis/the active reply and retains the conversation.
+- **Microphone modes:** open mic preserves the existing default. Its pauses
+  send completed sentences and local `BargeInGate` supports speech interruption.
+  Push to talk opens one capture while Space is held outside text fields or
+  the Talk button is held. Release, focus moving into a control, window blur
+  or hiding the document finishes it once. Repeated key events cannot open
+  duplicate capture. Finished segments are buffered until the recogniser's
+  final tail arrives, then one complete request is sent. Mode/device changes
+  and mute cancel unfinished capture instead of sending it accidentally. The
+  input-device selector passes the chosen device to the shared capture owner.
+- **Output ring:** the visible speaking tile reads the real shared Web Audio
+  analyser directly each frame, without frame-rate store writes. It pauses
+  offscreen or in a hidden document and detaches when speech stops or the tile
+  unmounts. Reduced motion uses fixed opacity steps; thinking stays static.
+- **Sessions:** Sessions opens a focus-contained drawer with search, rename,
+  archive, unread badges and a show-archived toggle. Closing or selecting a
+  session restores focus to Sessions. The durable Project reports inbox stays
+  discoverable by its identity and unread count even if renamed. Opening it
+  reads reports and never starts a paid model turn. Correlated reports appear
+  under the original delegation with a New update marker. Quiet arrival does
+  not move keyboard focus or force-scroll Chat; Read updates is explicit.
+- **Actions:** actual executed admin results render cards in Chat and newest
+  first in Actions, with target, old → new values, time, severity and expandable
+  audit details. Read/delegation tools remain compact expandable chips. Voice
+  attribution shows only a stored voice user's actual heard sentence. Legacy
+  records retain their evidence without inventing changes or successful
+  execution. Exact reversible actions use direct Undo IPC, with conflict errors
+  shown inline; unsupported operations say Can't be undone here. A fresh
+  validated action has an eight-second stage toast; destructive changes use its
+  single assertive announcement region. Undo notes disable a historical card's
+  Undo after reload. The server owns the exact reversal and idempotency.
+
+The view lives in `components/commander/`; `commander-store.ts` owns durable
+session projections and `commander-call-store.ts` owns call/microphone leases.
+The view never opens a second microphone or independent playback queue.
 
 ## Reports (#62)
 
@@ -286,25 +323,27 @@ right place. The pieces:
   goes to the session whose `ask_captain` tool row carries that id
   (`CommanderStore.findDelegation`, indexed on `correlation_id`), unless that
   session is archived. Otherwise — no id, an unknown id, or an archived
-  origin — it goes to the most recently active session, which is where the
-  user is working. With no session at all, one titled "Project reports" is
-  created for it. The stored `report` message keeps the project tag and the
+  origin — it goes to the dedicated quiet "Project reports" inbox, never the
+  latest conversation. Its identity is stored under
+  `commander_report_inbox_session_id`; rename and restart preserve it, and a
+  new unsolicited report restores an archived inbox without losing its history.
+  The stored `report` message keeps the project tag and the
   correlation id whichever rule applied. The tool result says which rule
-  (`routed_by`: `correlation` | `latest` | `inbox`).
+  (`routed_by`: `correlation` | `inbox`). Pending unsolicited deliveries from
+  older builds also recover into the quiet inbox. Correlated deliveries already
+  durably attached to a request keep that destination on retry.
 - **Delivery** (`CommanderService.deliverReport`). The report is stored and
-  emitted (unread until read, as before). The renderer tells main which
-  session the Commander view shows (`commander:setActiveSession`, sent by the
-  store's `selectSession` and cleared when the view unmounts or the window
-  closes). If the report's session is that one and idle, a turn starts at
-  once with a relay note appended to the system prompt, so the Commander
-  answers it with a plain-language explanation (#173, below); the stored history ends
-  with the report, which the context builder already renders as a user-side
-  note. If that session is mid-turn, the relay runs when the turn ends. Any
-  other session only gets the unread report and its badge; opening it later
-  shows the report as a card without a relay turn. With no provider (no API
-  key) the report is still stored.
+  emitted immediately as a quiet update, including during a running turn.
+  It starts no model call, reply, follow-up delegation or speech, and is not
+  moved to the end after the current reply. The view associates a valid
+  correlated report with the exchange that requested it; unsolicited reports
+  remain in the inbox. Opening a report reveals its existing content without
+  a paid turn. Decisions and escalations retain their explanation and required
+  user action in the card, with unread/inbox affordances; they do not create a
+  new approval flow. An explicit user question can ask the Commander to explain
+  or act on the report. With no provider, reports are still stored and visible.
 - **Communication contract** (#173, `REPORT_SUMMARY_RULES` in `prompts.ts`).
-  Every normal reply, report relay, status/history explanation and spoken
+  Every normal reply, user-requested report explanation, status/history explanation and spoken
   response names and describes the change, explains its known benefit or
   project impact, states its current outcome, gives the next meaningful step
   and owner, and says whether the user must act. Enough context must survive
@@ -323,12 +362,10 @@ right place. The pieces:
   recently updated tasks stay visible. The change has been added to the main
   codebase. The Captain is arranging scrollbar accessibility work next. No
   action is needed from you." Each claim must come from the source context.
-- **Loop protection.** A turn started by a report may call `ask_captain`
-  only while the session's budget lasts: 3 calls
-  (`MAX_REPORT_ASKS_WITHOUT_USER_TURN`) across report-triggered turns since
-  the user last spoke. `guardReportAsks` wraps the tool for such turns and
-  returns a `loop_guard` error result beyond that; a user message resets the
-  count. User-triggered turns are not limited.
+- **Loop protection.** Quiet delivery cannot trigger another delegation.
+  The earlier non-user-turn guard (`guardReportAsks`, a maximum of 3 calls)
+  remains defensive compatibility code. Only an explicit user message starts
+  the normal Commander turn.
 - **Captain actions.** `installCommanderReportBridge` also installs the
   `captain-github-tools.ts` handler: a merge, a settled issue write, or a
   merge blocked on a person outside 21x becomes an unprompted, project-tagged
@@ -343,11 +380,11 @@ right place. The pieces:
 ## Voice mode (#64)
 
 The Commander has a hands-free call owned by `CommanderCallHost`, mounted once
-from `AppLayout`. `CommanderVoiceControls` is only the narrow strip beside the
-chat; unmounting that view does not own or end media. The wake word stays out
-of scope.
+from `AppLayout`. `CommanderStage` renders the presence, captions and toolbar;
+unmounting that view does not own or end media. The earlier standalone voice
+controls retain their compatibility contract. The wake word stays out of scope.
 
-- **Turning it on** tells main which session to speak for
+- **Turning it on in open-mic mode** tells main which session to speak for
   (`voice:commander:setActive`) and immediately opens one `conversation` speech
   turn. It first refreshes and prepares the persisted reply voice, so a saved
   ElevenLabs configuration is reused even when the renderer still has its
@@ -363,10 +400,10 @@ of scope.
   the call while it is live (the global voice overlay defers); Escape and Stop
   interrupt the current reply, briefly show "Stopped", and leave the call open.
 - **Half-heard words appear once** (#83). While its own conversation turn
-  runs, the strip's status pill shows them and sets the voice store's
+  runs, the stage caption strip shows them and the app-level host sets the voice store's
   `captionOwner`, so the global `VoiceOverlay` leaves its listening bubble out.
   Confirmations and results still appear in the overlay. Ownership follows the
-  turn the strip actually opened, never the fact that it is starting: a
+  turn the call host actually opened, never the fact that it is starting: a
   microphone opened anywhere else keeps the overlay and its words. If another
   microphone is already listening, clicking the voice button is refused at once
   ("Another microphone is already listening…") before voice mode or the reply
@@ -417,21 +454,17 @@ of scope.
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool
   call is released whole; the tail is flushed when the turn ends.
-- **Captain reports** are never read aloud as written (#107), and only
-  while voice mode is on for that session. A relayed report starts a
-  Commander turn, and that turn's plain-language summary is spoken
-  like any reply. Reports arriving during a reply wait for it to finish
-  before their summary turn starts. A report with no summary turn (no
-  provider or a stored briefing) reads the structured human explanation when
-  one is present, including change, impact, outcome, next owner and user action.
-  Audit evidence and URLs/hashes/PR numbers are omitted. An older unstructured
-  report is announced in one line, "Report from <project>; details in the chat."
+- **Captain reports** arrive silently (#88), even in the active call and even
+  when a report needs a decision. They neither interrupt the current reply nor
+  queue an announcement after it. Their meaning and required action remain
+  visible in the quiet inbox or request thread. The user can explicitly ask
+  for a plain-language explanation; that requested reply is spoken normally
+  under the reporting contract (#173), with audit evidence omitted.
 - **Barge-in**: speaking while a reply is playing, or pressing the Stop button,
   stops playback in the renderer at once, then main interrupts the passage (which
   cancels the synthesis request or closes the ElevenLabs connection and drops
   late audio) and cancels the Commander turn (`voice:commander:bargeIn`). It
-  also discards pending report speech cues and silences the interrupted turns,
-  so queued cues or late events cannot restart their speech. The written part
+  silences the interrupted turns, so late events cannot restart their speech. The written part
   of the reply is kept, as with any cancel.
 
 Speaking in voice mode uses the `conversation` speech source: opening voice

@@ -15,6 +15,7 @@ const server = await createServer({
   configFile: false, root: directory,
   resolve: { alias: { '@': resolve(root, 'src/renderer/src'), '@shared': resolve(root, 'src/shared') } },
   plugins: [react(), tailwindcss()],
+  optimizeDeps: { include: ['@radix-ui/react-dialog', 'zustand/react/shallow'] },
   server: { host: '127.0.0.1', port: 0, hmr: false, fs: { allow: [root] } }
 })
 try {

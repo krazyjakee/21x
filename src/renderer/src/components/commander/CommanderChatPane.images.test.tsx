@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
   onTranscriptChanged: vi.fn()
 }))
 vi.mock('@/lib/ipc-client', () => mocks)
-vi.mock('./CommanderVoiceControls', () => ({ CommanderVoiceControls: () => null }))
+vi.mock('./CommanderStage', () => ({ CommanderStage: () => null }))
 
 const api = mocks.commanderApi
 
@@ -48,6 +48,7 @@ function message(over: Partial<CommanderMessage> = {}): CommanderMessage {
 
 async function mountCommander(): Promise<HTMLTextAreaElement> {
   render(<CommanderWorkspace />)
+  fireEvent.click(screen.getByRole('button', { name: 'Open Commander sessions' }))
   fireEvent.click(await screen.findByText('Launch'))
   const field = await screen.findByLabelText('Message the Commander') as HTMLTextAreaElement
   // Wait for the model selection, so Send is live once there is content.
@@ -67,7 +68,7 @@ beforeEach(() => {
   clearCommanderImageCache()
   useAgentStore.setState({ agents: [], isLoading: false, error: null, sessions: new Map() })
   useCommanderStore.setState({
-    sessions: [], selectedSessionId: null, search: '', showArchived: false, messages: {}, streaming: {}, turnErrors: {}, isLoading: false, error: null
+    sessions: [], reportInbox: null, unseenReports: {}, recentAction: null, undoingActions: [], undoneActions: [], selectedSessionId: null, search: '', showArchived: false, messages: {}, streaming: {}, turnErrors: {}, isLoading: false, error: null
   })
   api.listSessions.mockResolvedValue([session()])
   api.listMessages.mockResolvedValue({ messages: [], activeTurnId: null })

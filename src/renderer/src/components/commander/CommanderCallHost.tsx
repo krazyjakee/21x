@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { CallMedia } from '@shared/commander-call'
 import type { CommanderEvent } from '@shared/commander'
 import { isCommanderAdminTool } from '@shared/commander-tools'
-import { commanderApi, commanderVoiceApi } from '@/lib/ipc-client'
+import { commanderApi, commanderVoiceApi, voiceApi } from '@/lib/ipc-client'
 import { activityNow } from '@/lib/activity/activity-clock'
 import {
   ensureCommanderActivitySubscription,
@@ -61,6 +61,8 @@ async function reconcileActiveSession(): Promise<void> {
 // Composer and caption ownership use the AbortSignal as an opaque call lease.
 // Session and provider turn ids may both be reused; object identity may not.
 let activeMicrophoneLease: AbortSignal | null = null
+let activeMicrophoneTurnId: string | null = null
+let activeMicrophoneTurnEpoch: string | null = null
 
 function ownedMicrophone() {
   const call = useCommanderCallStore.getState()
@@ -170,7 +172,7 @@ export function CommanderCallHost() {
         }
         return setActiveSession(nextSessionId, signal)
       },
-      openMicrophone: async (signal) => {
+      openMicrophone: async (signal, options) => {
         const ensureCurrent = (): void => {
           if (signal.aborted) throw new Error('The voice conversation was cancelled.')
         }
@@ -216,12 +218,14 @@ export function CommanderCallHost() {
         setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
         current.setCaptionOwner(COMMANDER_VOICE_COMPOSER_KEY)
         try {
-          const started = await current.startTurn('conversation', { signal })
+          const started = await current.startTurn('conversation', options?.deviceId ? { signal, deviceId: options.deviceId } : { signal })
           ensureCurrent()
           const opened = started ?? useVoiceStore.getState().turnId
           if (!opened) {
             throw new Error(captureAdvice(useVoiceStore.getState().result?.message || 'The microphone could not be started.'))
           }
+          activeMicrophoneTurnId = opened
+          activeMicrophoneTurnEpoch = useVoiceStore.getState().turnEpoch ?? null
           return opened
         } catch (err) {
           if (activeMicrophoneLease === signal) {
@@ -234,9 +238,19 @@ export function CommanderCallHost() {
           throw err
         }
       },
+      isReplyActive: () => {
+        const sessionId = useCommanderCallStore.getState().sessionId
+        const turn = sessionId ? useCommanderActivityStore.getState().sessions[sessionId] : undefined
+        return !!ownedPlayback()?.snapshot.hasQueuedAudio || !!turn && ['thinking', 'working', 'tool'].includes(turn.phase) && activityNow() - turn.observedAt < 15_000
+      },
+      finishMicrophone: async (ownedTurnId, signal) => {
+        if (activeMicrophoneLease !== signal || useVoiceStore.getState().turnId !== ownedTurnId) return
+        await useVoiceStore.getState().endTurn({ retainForFinal: true })
+      },
       closeMicrophone: (ownedTurnId, signal) => {
         if (!signal || activeMicrophoneLease !== signal) return
         activeMicrophoneLease = null
+        activeMicrophoneTurnId = null; activeMicrophoneTurnEpoch = null
         const voiceState = useVoiceStore.getState()
         if (ownedTurnId && voiceState.turnId === ownedTurnId) void voiceState.cancel()
         if (getActiveComposer() === COMMANDER_VOICE_COMPOSER_KEY) clearActiveComposer()
@@ -246,6 +260,19 @@ export function CommanderCallHost() {
       bargeIn: (activeSessionId) => commanderVoiceApi.bargeIn(activeSessionId),
       send: (activeSessionId, text) => commanderVoiceApi.send(activeSessionId, text)
     })
+  }, [])
+
+  // PTT uses the same conversation recogniser. Pause-delimited segments are
+  // buffered by the call store; release flushes the final tail exactly once.
+  useEffect(() => {
+    try {
+      return voiceApi?.onFinal(({ turnId, turnEpoch, text }) => {
+        const call = useCommanderCallStore.getState()
+        if (call.status !== 'live' || call.micMode !== 'push-to-talk' || !activeMicrophoneLease || activeMicrophoneLease.aborted) return
+        if (turnId !== activeMicrophoneTurnId || (turnEpoch ?? null) !== activeMicrophoneTurnEpoch || call.turnId !== turnId) return
+        call.microphoneFinished(text)
+      })
+    } catch { return undefined }
   }, [])
 
   // Action/report events are observations, not new call states. Keep this
@@ -335,7 +362,7 @@ export function CommanderCallHost() {
   useEffect(() => {
     if (status !== 'live') return undefined
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
       event.preventDefault()
       event.stopImmediatePropagation()
       interrupt('stop')

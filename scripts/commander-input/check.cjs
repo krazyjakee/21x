@@ -8,10 +8,13 @@ app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith(url) && !details.url.startsWith('devtools:') }))
   const win = new BrowserWindow({ width: 1200, height: 800, show: true, webPreferences: { backgroundThrottling: false, contextIsolation: true, nodeIntegration: false, sandbox: true } })
   const wc = win.webContents
+  wc.on('console-message', event => {
+    if (event.level >= 2) console.error('Renderer:', event.message)
+  })
   const js = source => wc.executeJavaScript(source)
   const field = 'document.querySelector(\'textarea[aria-label="Message the Commander"]\')'
   const wait = async source => {
-    for (let i = 0; i < 100; i++) { if (await js(source)) return; await pause(30) }
+    for (let i = 0; i < 500; i++) { if (await js(source)) return; await pause(30) }
     throw new Error('Timed out: ' + source)
   }
   const key = async (keyCode, modifiers = []) => {
@@ -32,6 +35,7 @@ app.whenReady().then(async () => {
   const state = () => js(`(() => { const f = ${field}, r = f.getBoundingClientRect(); return { active: { tag: document.activeElement?.tagName, label: document.activeElement?.getAttribute("aria-label"), hidden: document.activeElement?.getAttribute("aria-hidden"), readOnly: document.activeElement?.readOnly }, disabled: f.disabled, readOnly: f.readOnly, hidden: !!f.closest('[aria-hidden="true"], [hidden], [inert]'), pointerEvents: getComputedStyle(f).pointerEvents, hit: document.elementFromPoint(r.x+r.width/2,r.y+r.height/2) === f, value: f.value } })()`)
   const failures = []
   const check = async (name, test) => {
+    win.setContentSize(1200, 900); wc.setZoomFactor(1)
     await win.loadURL(url)
     win.focus()
     await wait(`${field} && !document.querySelector('[aria-label="Commander model"]').disabled && document.querySelector('[aria-label="Turn voice mode on"]')`)
@@ -119,13 +123,13 @@ app.whenReady().then(async () => {
         }
         return {
           workspace: rect(workspace), messages: rect(messages), report: rect(report), composer: rect(composer),
-          list: rect(document.querySelector('.commander-session-list')), header: rect(document.querySelector('.commander-chat header')),
-          voice: rect(document.querySelector('.commander-voice-controls')),
+          stage: rect(document.querySelector('.commander-stage')), panel: rect(document.querySelector('.commander-side-panel')), header: rect(document.querySelector('.commander-workspace-header')),
+          voice: rect(document.querySelector('.commander-toolbar')),
           user: style('.commander-user-message'), reply: style('.commander-reply p'), reportText: style('[data-testid="commander-report"] p'),
           streaming: style('[data-testid="commander-streaming"] p'), input: style('textarea[aria-label="Message the Commander"]'),
           inlineCode: style('[data-testid="commander-report"] li code'), code: style('[data-testid="commander-report"] pre code'),
           tool: style('[data-testid="commander-tool-chip"]'), error: style('[role="alert"]'),
-          title: style('.commander-session-list li > div > div'),
+          title: style('.commander-workspace-header h1'),
           primaryOverflow: messages.scrollWidth - messages.clientWidth,
           codeOverflow: code.scrollWidth - code.clientWidth,
           contentScrolls: messages.scrollHeight > messages.clientHeight,
@@ -156,13 +160,71 @@ app.whenReady().then(async () => {
       }
       if (width / zoom <= 760) {
         assert.equal(metrics.columns, 'column')
-        assert(metrics.list.bottom <= metrics.header.top + 1, 'compact sessions sit above the chat')
-        assert(metrics.voice.top >= metrics.composer.bottom, 'compact voice controls sit below the composer')
+        assert(metrics.stage.bottom <= metrics.panel.top + 1, 'compact stage sits above the Chat panel')
+        assert(metrics.voice.bottom <= metrics.stage.bottom + 1, 'call controls remain inside the stage')
       }
       await js(`document.querySelector('[data-testid="commander-messages"]').scrollTop = document.querySelector('[data-testid="commander-messages"]').scrollHeight`)
       assert(await js(`document.querySelector('[data-testid="commander-messages"]').scrollTop > 0`))
     })
   }
+  await check('stage panels preserve draft and sessions drawer traps and restores keyboard focus', async () => {
+    await click('textarea[aria-label="Message the Commander"]'); await type('retained draft')
+    await click('[aria-label="Hide Chat panel"]')
+    assert(await js(`${field}.closest('[hidden]') !== null`))
+    await click('[aria-label="Show Chat panel"]')
+    assert.equal(await js(`${field}.value`), 'retained draft')
+    await click('[role="tab"][id="commander-actions-tab"]')
+    assert.equal(await js(`${field}.value`), 'retained draft')
+    await click('[role="tab"][id="commander-chat-tab"]')
+    await click('[aria-label="Open Commander sessions"]')
+    await wait(`document.querySelector('[role="dialog"]')`)
+    for (let i = 0; i < 10; i++) { await key('Tab'); assert(await js(`!!document.activeElement.closest('[role="dialog"]')`)) }
+    await key('Escape')
+    await wait(`!document.querySelector('[role="dialog"]')`)
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Open Commander sessions')
+    assert.equal(await js(`${field}.value`), 'retained draft')
+  })
+  await check('PTT Space preserves text entry and completes once on release or focus change', async () => {
+    await click('[aria-label="Turn voice mode on"]')
+    await wait('window.fixture.callState().status === "live"')
+    await click('[aria-label="Microphone mode and input device"]')
+    await js(`(() => { const select = document.querySelector('[aria-label="Microphone mode"]'); select.value = 'push-to-talk'; select.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await wait('window.fixture.callState().mode === "push-to-talk"')
+    await click('textarea[aria-label="Message the Commander"]'); await type('typed space')
+    assert.equal(await js(`${field}.value`), 'typed space')
+    assert.equal(await js('window.fixture.captures.length'), 1)
+    await js('document.activeElement.blur()')
+    wc.sendInputEvent({ type: 'keyDown', keyCode: 'Space' }); await pause(40)
+    await wait('window.fixture.callState().pttHeld')
+    await js('window.fixture.segment("First sentence.")')
+    assert.equal(await js('window.fixture.voiceSends.length'), 0)
+    wc.sendInputEvent({ type: 'keyUp', keyCode: 'Space' })
+    await wait('window.fixture.voiceSends.length === 1')
+    assert.equal(await js('window.fixture.releases'), 1)
+    assert.equal(await js('window.fixture.voiceSends[0].text'), 'First sentence. Final words')
+    await js('document.activeElement.blur()')
+    wc.sendInputEvent({ type: 'keyDown', keyCode: 'Space' }); await pause(40)
+    await wait('window.fixture.callState().pttHeld')
+    await js(`${field}.focus()`)
+    await wait('window.fixture.releases === 2')
+    wc.sendInputEvent({ type: 'keyUp', keyCode: 'Space' })
+    await wait('window.fixture.voiceSends.length === 2')
+    assert.equal(await js('window.fixture.releases'), 2)
+    assert.equal(await js(`${field}.value`), 'typed space')
+    await click('[aria-label="Turn voice mode off"]')
+    assert.equal(await js('window.fixture.callState().status'), 'off')
+  })
+  await check('actual shared playback analyser drives speaking ring and Stop removes it', async () => {
+    await click('[aria-label="Turn voice mode on"]')
+    await wait('window.fixture.callState().status === "live"')
+    await js('window.fixture.speech()')
+    await wait(`document.querySelector('[data-testid="commander-output-ring"]') && parseFloat(document.querySelector('[data-testid="commander-output-ring"]').style.getPropertyValue('--commander-level')) > .05`)
+    assert(await js(`document.querySelector('[data-testid="commander-presence-state"]').textContent.includes('Speaking')`))
+    assert(await js(`document.querySelector('.commander-caption-strip mark').textContent === 'The checkout review is complete.'`))
+    await click('[aria-label="Stop the reply"]')
+    await wait(`!document.querySelector('[data-testid="commander-output-ring"]')`)
+    assert.equal(await js('window.fixture.callState().status'), 'live')
+  })
   win.destroy()
   if (failures.length) throw new Error('Failed: ' + failures.join(', '))
   app.quit()

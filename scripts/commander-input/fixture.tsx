@@ -1,5 +1,8 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { useCommanderCallStore } from '../../src/renderer/src/stores/commander-call-store'
+import { useVoiceAttributionStore } from '../../src/renderer/src/lib/activity/voice-activity-adapter'
+import { voicePlayback } from '../../src/renderer/src/lib/voice-playback'
 import { CommanderCallHost } from '../../src/renderer/src/components/commander/CommanderCallHost'
 import { CommanderWorkspace } from '../../src/renderer/src/components/commander/CommanderWorkspace'
 import { useGlobalShortcuts } from '../../src/renderer/src/components/layout/hooks/use-global-shortcuts'
@@ -20,11 +23,30 @@ useVoiceStore.setState({
   available: true, enabled: true, runtime: { installed: true }, engine: { state: 'ready' }, permission: 'granted',
   tts: { enabled: true, status: { state: 'ready' } },
   initializeTts: async () => {},
-  startTurn: async () => { useVoiceStore.setState({ turnId: 'voice-turn', state: 'listening' }) },
+  startTurn: async (mode, options) => { window.fixture.captures.push({ mode, deviceId: options?.deviceId ?? '' }); useVoiceStore.setState({ turnId: 'voice-turn', turnEpoch: 'fixture-epoch', state: 'listening' }); return 'voice-turn' },
+  endTurn: async () => {
+    window.fixture.releases++
+    useVoiceStore.setState({ state: 'transcribing' })
+    window.setTimeout(() => {
+      useVoiceStore.setState({ turnId: null, turnEpoch: null, state: 'idle', final: 'Final words', partial: '' })
+      window.fixture.finalReceiver?.({ turnId: 'voice-turn', turnEpoch: 'fixture-epoch', text: 'Final words' })
+    }, 50)
+  },
   cancel: async () => { useVoiceStore.setState({ turnId: null, state: 'idle' }) },
-  stopPlaybackNow: () => {}
+  stopPlaybackNow: () => { voicePlayback.stop(); useVoiceStore.setState({ speaking: false, speechText: '' }) }
 })
 Object.assign(window.fixture, {
+  partial: text => useVoiceStore.setState({ partial: text, level: .4 }),
+  speech: () => {
+    const id = 'fixture-speech', generation = 1
+    useVoiceAttributionStore.setState({ passage: { speechId: id, speechGeneration: generation, taskId: 'commander:session-1' }, version: 1 })
+    voicePlayback.start(id, {}, generation)
+    const pcm = new Uint8Array(24000 * 2 * 3), view = new DataView(pcm.buffer)
+    for (let i = 0; i < pcm.length / 2; i++) view.setInt16(i * 2, Math.round(Math.sin(i / 24000 * 440 * Math.PI * 2) * 9000), true)
+    useVoiceStore.setState({ speechText: 'The checkout review is complete.', speaking: true })
+    voicePlayback.play(id, pcm, 24000, generation)
+  },
+  callState: () => ({ status: useCommanderCallStore.getState().status, mode: useCommanderCallStore.getState().micMode, pttHeld: useCommanderCallStore.getState().pttHeld }),
   typography: () => {
     const message = (id: string, role: CommanderMessage['role'], content: string): CommanderMessage => ({
       id, session_id: 'session-1', role, content, tool_calls: null, tool_call_id: null,

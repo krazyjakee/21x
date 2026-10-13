@@ -61,10 +61,17 @@ function message(over: Partial<CommanderMessage> = {}): CommanderMessage {
 
 let emit: (event: CommanderEvent) => void = () => {}
 
+function renderWorkspace() {
+  const result = render(<CommanderWorkspace />)
+  fireEvent.click(screen.getByRole('button', { name: 'Open Commander sessions' }))
+  return result
+}
+
+
 beforeEach(() => {
   useAgentStore.setState({ agents: [], isLoading: false, error: null, sessions: new Map() })
   useCommanderStore.setState({
-    sessions: [],
+    sessions: [], reportInbox: null, unseenReports: {}, recentAction: null, undoneActions: [], undoingActions: [],
     selectedSessionId: null,
     search: '',
     showArchived: false,
@@ -99,13 +106,62 @@ afterEach(() => {
 })
 
 describe('CommanderWorkspace', () => {
+  it('starts with the stage beside Chat and preserves the typed draft across panel and tab toggles', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    renderWorkspace(); fireEvent.click(await screen.findByText('Launch'))
+    expect(screen.getByLabelText('Commander stage')).toBeTruthy()
+    expect(screen.getByRole('toolbar', { name: 'Commander call controls' })).toBeTruthy()
+    const field = screen.getByLabelText('Message the Commander')
+    fireEvent.change(field, { target: { value: 'Keep my draft' } })
+    fireEvent.click(screen.getByRole('tab', { name: 'Actions' }))
+    expect(field).toHaveValue('Keep my draft')
+    expect(screen.getByTestId('commander-messages')).toHaveAttribute('hidden')
+    fireEvent.click(screen.getByRole('tab', { name: 'Chat' }))
+    fireEvent.click(screen.getByLabelText('Hide Chat panel'))
+    expect(field.closest('[hidden]')).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('Show Chat panel'))
+    expect(screen.getByLabelText('Message the Commander')).toBe(field)
+    expect(field).toHaveValue('Keep my draft')
+  })
+
+  it('keeps the quiet inbox discoverable after rename and does not start a turn when opening it', async () => {
+    const inbox = session({ id: 'inbox', title: 'Renamed by the user', unread_count: 3, is_report_inbox: true })
+    api.listSessions.mockResolvedValue([session(), inbox])
+    api.markRead.mockImplementation(async id => id === 'inbox' ? { ...inbox, unread_count: 0 } : session())
+    renderWorkspace(); fireEvent.click(await within(screen.getByRole('list', { name: 'Commander sessions' })).findByText('Launch'))
+    fireEvent.click(screen.getByRole('button', { name: 'Project reports, 3 unread' }))
+    await waitFor(() => expect(useCommanderStore.getState().selectedSessionId).toBe('inbox'))
+    expect(api.send).not.toHaveBeenCalled()
+    expect(api.listMessages).toHaveBeenCalledWith('inbox')
+  })
+
+  it('threads a quiet correlated report below its request without moving focus or scrolling', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    api.listMessages.mockResolvedValue({ messages: [
+      message({ id: 'ask', role: 'assistant', content: 'I asked Web to review checkout.', tool_calls: [{ id: 'ask-1', name: 'ask_captain', input: { project: 'Web', message: 'Review checkout' } }] }),
+      message({ id: 'tool', role: 'tool', tool_call_id: 'ask-1', tool_name: 'ask_captain', correlation_id: 'request-1', content: 'Queued', created_at: 2 }),
+      message({ id: 'later-user', content: 'Another question', created_at: 3 })
+    ], activeTurnId: null })
+    renderWorkspace(); fireEvent.click(await screen.findByText('Launch'))
+    await screen.findByText('Another question')
+    const field = screen.getByLabelText('Message the Commander'); field.focus()
+    const messages = screen.getByTestId('commander-messages'); messages.scrollTop = 17
+    act(() => emit({ type: 'messages_appended', sessionId: 's1', messages: [message({ id: 'quiet', role: 'report', correlation_id: 'request-1', content: 'Checkout review complete; approval is needed.', created_at: 4 })] }))
+    expect(screen.getByTestId('commander-report-thread')).toHaveTextContent('Checkout review complete; approval is needed.')
+    expect(screen.getByText('New update')).toBeTruthy()
+    expect(field).toHaveFocus()
+    expect(messages.scrollTop).toBe(17)
+    expect(api.send).not.toHaveBeenCalled()
+  })
+
   it('opts the full session interface into shared reading-surface scaling', async () => {
     api.listSessions.mockResolvedValue([session()])
-    const { container } = render(<CommanderWorkspace />)
+    const { container } = renderWorkspace()
     fireEvent.click(await screen.findByText('Launch'))
     const workspace = container.querySelector('.commander-workspace')
     expect(workspace).toHaveClass('ui-scale')
-    expect(workspace).toContainElement(screen.getByLabelText('Commander sessions'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(workspace).toContainElement(screen.getByLabelText('Commander stage'))
     expect(workspace).toContainElement(screen.getByLabelText('Message the Commander'))
     expect(screen.getByLabelText('Message the Commander')).toHaveClass('text-base', 'leading-relaxed', 'min-w-0')
   })
@@ -114,7 +170,7 @@ describe('CommanderWorkspace', () => {
     api.listSessions.mockResolvedValue([session()])
     let finish: (value: unknown) => void = () => {}
     api.send.mockReturnValue(new Promise((resolve) => { finish = resolve }))
-    render(<CommanderWorkspace />)
+    renderWorkspace()
     fireEvent.click(await screen.findByText('Launch'))
     await waitFor(() => expect(screen.getByLabelText('Commander model')).not.toBeDisabled())
     const input = screen.getByRole('textbox', { name: 'Message the Commander' })
@@ -131,6 +187,7 @@ describe('CommanderWorkspace', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(api.send).toHaveBeenCalledTimes(1)
     // Completing an asynchronous send must not steal focus back from another control.
+    fireEvent.click(screen.getByRole('button', { name: 'Open Commander sessions' }))
     const search = screen.getByRole('textbox', { name: 'Search sessions' })
     search.focus()
     await act(async () => { finish({ turnId: 'keyboard-turn', message: message({ content: 'Hello' }) }) })
@@ -141,7 +198,7 @@ describe('CommanderWorkspace', () => {
 
   it('shows the empty state when there is no session', async () => {
     api.listSessions.mockResolvedValue([])
-    render(<CommanderWorkspace />)
+    renderWorkspace()
     expect(await screen.findByText('Talk to the Commander')).toBeTruthy()
     expect(screen.getByText('No sessions yet.')).toBeTruthy()
   })
@@ -151,10 +208,10 @@ describe('CommanderWorkspace', () => {
       session({ id: 'a', title: 'Alpha', updated_at: 2, unread_count: 2 }),
       session({ id: 'b', title: '', updated_at: 1 })
     ])
-    render(<CommanderWorkspace />)
+    renderWorkspace()
     expect(await screen.findByText('Alpha')).toBeTruthy()
     // An untitled session reads "New session" until it is named.
-    expect(within(screen.getByLabelText('Commander sessions')).getByText('New session')).toBeTruthy()
+    expect(within(screen.getByRole('list', { name: 'Commander sessions' })).getByText('New session')).toBeTruthy()
     expect(screen.getByLabelText('2 unread')).toBeTruthy()
 
     api.markRead.mockResolvedValue(session({ id: 'a', title: 'Alpha', updated_at: 2, unread_count: 0 }))
@@ -165,7 +222,7 @@ describe('CommanderWorkspace', () => {
 
   it('counts a report for a session that is not open as unread', async () => {
     api.listSessions.mockResolvedValue([session({ id: 'a', title: 'Alpha' }), session({ id: 'b', title: 'Beta' })])
-    render(<CommanderWorkspace />)
+    renderWorkspace()
     await screen.findByText('Beta')
     act(() => {
       emit({ type: 'messages_appended', sessionId: 'b', messages: [message({ session_id: 'b', role: 'report', content: 'done' })] })
@@ -186,7 +243,7 @@ describe('CommanderWorkspace', () => {
       ],
       activeTurnId: null
     })
-    render(<CommanderWorkspace />)
+    renderWorkspace()
     fireEvent.click(await screen.findByText('Launch'))
 
     expect(await screen.findByText('Asked web: deploy')).toBeTruthy()
@@ -224,7 +281,7 @@ describe('CommanderWorkspace', () => {
       messages: [message({ id: 'u1', content: 'Hi there', created_at: 1 })],
       activeTurnId: null
     })
-    render(<CommanderWorkspace />)
+    renderWorkspace()
     fireEvent.click(await screen.findByText('Launch'))
     expect(await screen.findByText('Hi there')).toBeTruthy()
 
@@ -242,7 +299,8 @@ describe('CommanderWorkspace', () => {
       ],
       activeTurnId: null
     })
-    fireEvent.click(within(screen.getByLabelText('Commander sessions')).getByText('Launch'))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Commander sessions' }))
+    fireEvent.click(within(screen.getByRole('list', { name: 'Commander sessions' })).getByText('Launch'))
     await waitFor(async () => expect(api.listMessages).toHaveBeenCalledTimes(2))
     expect(screen.getAllByText('Hi there')).toHaveLength(1)
     expect(screen.getAllByText('Hello!')).toHaveLength(1)
@@ -263,7 +321,7 @@ describe('CommanderWorkspace', () => {
         is_default: false, created_at: '', updated_at: ''
       }
     ])
-    render(<CommanderWorkspace />)
+    renderWorkspace()
     fireEvent.click(await screen.findByText('Launch'))
 
     await waitFor(() => expect(screen.getByLabelText('Commander model')).not.toBeDisabled())
@@ -286,7 +344,7 @@ describe('CommanderWorkspace', () => {
   it('does not offer or send with an unconfigured model', async () => {
     api.listSessions.mockResolvedValue([session()])
     mocks.agentApi.getAll.mockResolvedValue([])
-    render(<CommanderWorkspace />)
+    renderWorkspace()
     fireEvent.click(await screen.findByText('Launch'))
 
     expect(await screen.findByText('No configured Commander model')).toBeTruthy()

@@ -1,3 +1,5 @@
+import { activityNow } from '@/lib/activity/activity-clock'
+import { parseCommanderAction } from '@shared/commander-action'
 import { create } from 'zustand'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
 import { commanderApi } from '@/lib/ipc-client'
@@ -27,8 +29,22 @@ export interface StreamingTurn {
   toolCalls: StreamingToolCall[]
 }
 
+export interface CommanderActionNotice {
+  call: NonNullable<CommanderMessage['tool_calls']>[number]
+  result: CommanderMessage
+  requestedBy?: CommanderMessage
+  observedAt: number
+}
+
 interface CommanderState {
+  recentAction: CommanderActionNotice | null
   sessions: CommanderSession[]
+  undoingActions: string[]
+  undoneActions: string[]
+  undoAction: (sessionId: string, actionId: string) => Promise<void>
+  reportInbox: CommanderSession | null
+  unseenReports: Record<string, string[]>
+  readReports: (sessionId: string) => Promise<void>
   selectedSessionId: string | null
   search: string
   showArchived: boolean
@@ -80,7 +96,24 @@ function mergeMessages(existing: CommanderMessage[], incoming: CommanderMessage[
 }
 
 export const useCommanderStore = create<CommanderState>((set, get) => ({
+  recentAction: null,
   sessions: [],
+  undoingActions: [], undoneActions: [],
+  undoAction: async (sessionId, actionId) => {
+    if (get().undoingActions.includes(actionId) || get().undoneActions.includes(actionId)) return
+    set(state => ({ undoingActions: [...state.undoingActions, actionId] }))
+    try {
+      const result = await commanderApi.undoAction(sessionId, actionId)
+      get().handleEvent({ type: 'messages_appended', sessionId, messages: [result.message] })
+      set(state => ({ undoneActions: [...state.undoneActions, actionId] }))
+    } finally { set(state => ({ undoingActions: state.undoingActions.filter(id => id !== actionId) })) }
+  },
+  reportInbox: null, unseenReports: {},
+  readReports: async (id) => {
+    const session = await commanderApi.markRead(id)
+    if (session) get().handleEvent({ type: 'session_updated', session })
+    set(state => ({ unseenReports: { ...state.unseenReports, [id]: [] } }))
+  },
   selectedSessionId: null,
   search: '',
   showArchived: false,
@@ -105,7 +138,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
     try {
       const { search, showArchived } = get()
       const sessions = await commanderApi.listSessions({ search: search || undefined, includeArchived: showArchived })
-      set({ sessions: sortSessions(sessions), isLoading: false })
+      set({ sessions: sortSessions(sessions), reportInbox: sessions.find(session => session.is_report_inbox) ?? get().reportInbox, isLoading: false })
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err), isLoading: false })
     }
@@ -123,7 +156,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
 
   selectSession: async (id) => {
     set({ selectedSessionId: id })
-    // Main relays a report at once only for the open session (#62).
+    // Opening a thread marks its reports read; quiet delivery never buys a model turn.
     void Promise.resolve(commanderApi.setActiveSession(id)).catch(() => {})
     if (!id) return
     try {
@@ -133,6 +166,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
         // already in `existing`, so the stored fetch dedupes against local state
         // instead of the combined array (which contains each id twice).
         messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], messages) },
+        undoneActions: [...new Set([...state.undoneActions, ...messages.filter(message => message.tool_name === 'undo_action' && message.tool_call_id).map(message => message.tool_call_id!)])],
         // Main is the truth about running turns: events may have been missed
         // while the view was closed, so a turn that ended meanwhile is cleared.
         streaming: !activeTurnId
@@ -142,8 +176,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
             : { ...state.streaming, [id]: { turnId: activeTurnId, text: '', toolCalls: [] } }
       }))
       // Opening a session reads its reports.
-      const session = await commanderApi.markRead(id)
-      if (session) get().handleEvent({ type: 'session_updated', session })
+      await get().readReports(id)
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) })
     }
@@ -245,7 +278,15 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
               toolCalls: turn.toolCalls.map((c) => (c.id === inner.id ? { ...c, result: inner.content, isError: inner.isError } : c))
             }
           }
-          return { streaming: { ...state.streaming, [sessionId]: next } }
+          const call = inner.type === 'tool_call_result' ? turn.toolCalls.find(call => call.id === inner.id) : undefined
+          const action = call && inner.type === 'tool_call_result' ? parseCommanderAction(call.name, inner.content, inner.isError) : null
+          const recentAction = action && call && inner.type === 'tool_call_result' ? {
+            call, result: { id: `live:${turnId}:${call.id}`, session_id: sessionId, role: 'tool' as const,
+              content: inner.content, is_error: inner.isError, tool_calls: null, tool_call_id: call.id,
+              tool_name: call.name, project_id: null, correlation_id: null, created_at: Date.now() },
+            requestedBy: [...(state.messages[sessionId] ?? [])].reverse().find(message => message.role === 'user'), observedAt: activityNow()
+          } : state.recentAction
+          return { streaming: { ...state.streaming, [sessionId]: next }, recentAction }
         })
         return
       }
@@ -253,20 +294,17 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
         const { sessionId, messages } = event
         const state = get()
         const loaded = state.messages[sessionId]
-        const stored = messages.some((m) => m.role === 'assistant' || m.role === 'tool')
+        const stored = messages.some((m) => m.tool_name !== 'undo_action' && (m.role === 'assistant' || m.role === 'tool'))
         set({
+          undoneActions: [...new Set([...state.undoneActions, ...messages.filter(message => message.tool_name === 'undo_action' && message.tool_call_id).map(message => message.tool_call_id!)])],
+          unseenReports: { ...state.unseenReports, [sessionId]: [...new Set([...(state.unseenReports[sessionId] ?? []), ...messages.filter(message => message.role === 'report').map(message => message.id)])] },
           messages: loaded ? { ...state.messages, [sessionId]: mergeMessages(loaded, messages) } : state.messages,
           // Stored assistant output replaces the streamed text of the same turn.
           streaming: stored && state.streaming[sessionId]
             ? { ...state.streaming, [sessionId]: { ...state.streaming[sessionId]!, text: '', toolCalls: [] } }
             : state.streaming
         })
-        // A report arriving in the open session is read on arrival.
-        if (sessionId === state.selectedSessionId && messages.some((m) => m.role === 'report')) {
-          void commanderApi.markRead(sessionId).then((session) => {
-            if (session) get().handleEvent({ type: 'session_updated', session })
-          }).catch(() => {})
-        }
+        // Quiet reports keep their unread marker until the user explicitly reads them.
         return
       }
       case 'session_updated': {
@@ -276,7 +314,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
           // With a search active, only sessions already in the results are updated.
           const outsideSearch = !!state.search && others.length === state.sessions.length
           const hidden = (session.archived && !state.showArchived) || outsideSearch
-          return { sessions: hidden ? others : sortSessions([session, ...others]) }
+          return { sessions: hidden ? others : sortSessions([session, ...others]), reportInbox: session.is_report_inbox ? session : state.reportInbox }
         })
         return
       }
