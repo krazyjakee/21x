@@ -1,5 +1,10 @@
 import SQLite from 'better-sqlite3'
+import { createRequire } from 'node:module'
+import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-service-core'
+import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
+import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { ProductionAdapters } from './production-adapters'
+import { ProductionProviderOwner } from './production-provider-owner'
 import { randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
@@ -96,6 +101,7 @@ export interface ProductionOwnerExternalBoundaries {
   createAdapter?: AgentManagerHost['createAdapter']
   createProvider?: typeof createChatProviderFromSettings
   connectorTransport?: ConnectorRuntimeHost['createTransport']
+  terminalProcessHost?: TerminalProcessHost
 }
 
 export interface ProductionServices {
@@ -119,6 +125,7 @@ export interface ProductionServices {
   coordination: ScheduledCoordination
   cleanup: WorkspaceCleanupSchedulerCore
   reminders: OverdueNotifier
+  terminals: TerminalServiceCore
 }
 
 // Task API, secret storage, report bridge and task lifecycle hooks are process
@@ -154,6 +161,7 @@ export class ProductionOwner {
   private readonly stopOwners: Array<() => void> = []
   private readonly drains = new Map<string, () => Promise<void>>()
   private nativeDrained = false
+  private readonly providers = new ProductionProviderOwner()
 
   constructor(private readonly bootstrap: ProductionOwnerBootstrap, private readonly boundaries: ProductionOwnerExternalBoundaries = {}) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(bootstrap.profileId)) throw new ProductionOwnerError('PROFILE_ID_INVALID')
@@ -223,6 +231,43 @@ export class ProductionOwner {
         ...runtime.managedTaskMcp, args: [...runtime.managedTaskMcp.args], tools: runtime.managedTaskMcp.tools.map(tool => ({ ...tool })), environment: { ...runtime.managedTaskMcp.environment }
       } }
     }
+  }
+
+  getSettingsBindingLease(): { secretStorage: AuthenticatedSecretStorage; assertSettingsOwners(owners: {
+    database: DatabaseManager; manager: AgentManager; recurrence: RecurrenceSchedulerCore; heartbeat: HeartbeatSchedulerCore;
+    automation: TaskAutomationScheduler; coordination: ScheduledCoordination; cleanup: WorkspaceCleanupSchedulerCore; secretStorage: unknown
+  }): void } {
+    this.getDatabaseBindingLease()
+    const storage = this.storage!
+    const services = this.services!
+    return { secretStorage: storage, assertSettingsOwners: owners => {
+      this.getDatabaseBindingLease()
+      if (this.storage !== storage || this.services !== services || owners.secretStorage !== storage || owners.database !== services.db ||
+        owners.manager !== services.agents || owners.recurrence !== services.recurrence || owners.heartbeat !== services.heartbeat ||
+        owners.automation !== services.automation || owners.coordination !== services.coordination || owners.cleanup !== services.cleanup)
+        throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    } }
+  }
+
+  runCredentialMutation<T>(input: ProductionCredentialMutation, mutation: () => T | Promise<T>): Promise<T> {
+    return this.run(async services => {
+      // Both reservations are synchronous. No new turn can enter while another
+      // owner's accepted provider/tool work is being awaited.
+      const leases: Array<{ drain(): Promise<void>; release(): void }> = []
+      try {
+        if (input.kind === 'provider-key') {
+          leases.push(this.providers.beginMutation())
+          leases.push(services.chat.beginProviderConfigurationMutation())
+          leases.push(services.commander.beginProviderConfigurationMutation())
+          leases.push(services.coordination.beginProviderConfigurationMutation())
+        }
+        return await services.agents.runProductionCredentialMutation(input, async () => {
+          await Promise.all(leases.map(lease => lease.drain()))
+          this.getDatabaseBindingLease()
+          return mutation()
+        })
+      } finally { for (const lease of leases.reverse()) lease.release() }
+    })
   }
 
   /** Register a real request backend's fence/drain synchronously while ready.
@@ -301,7 +346,9 @@ export class ProductionOwner {
     await apiStartup
     this.assertStarting()
     const native = this.bootstrap.native
-    const provider = this.boundaries.createProvider ?? createChatProviderFromSettings
+    const providerFactory = this.boundaries.createProvider ?? createChatProviderFromSettings
+    const provider: typeof createChatProviderFromSettings = (...args) => this.providers.wrap(providerFactory(...args))
+    this.register('providers', () => this.providers.shutdown(), () => this.providers.drain())
     const broker = this.broker
     const adapters = new ProductionAdapters()
     this.register('adapters', () => adapters.shutdown(), () => adapters.close())
@@ -363,6 +410,14 @@ export class ProductionOwner {
     configureCaptainGithubTools({ db, mergeDb: db, issueDb: db, notifyUser: (title, body) => this.notify(title, body), notifyRenderer: (channel, data) => this.emit(channel, data) })
     const chat = new ChatRuntime()
     this.register('chat', () => chat.shutdown(), () => chat.close())
+    const terminals = new TerminalServiceCore(this.boundaries.terminalProcessHost ?? {
+      resolveShell,
+      // The resource-verified staged engine resolves its own physical pinned
+      // native module only when a terminal is accepted, never from caller paths.
+      create: options => createNodePty(options, createRequire(import.meta.url)('node-pty') as typeof import('node-pty')),
+      getCwd: terminalProcessCwd
+    })
+    this.register('terminals', () => terminals.shutdown(), () => terminals.close())
     const createChatProvider = () => provider(db)
     const commanderStore = new CommanderStore(db)
     let commander: CommanderService | null = null
@@ -401,7 +456,7 @@ export class ProductionOwner {
     }
     const reminders = new OverdueNotifier(() => this.emit('overdue:check', undefined))
     this.register('reminders', () => reminders.shutdown(), async () => { reminders.shutdown() })
-    this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders }
+    this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals }
     this.checkpoint('recovery')
     await agents.reconcileStartup()
     this.assertStarting()

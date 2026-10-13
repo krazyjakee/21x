@@ -1,10 +1,10 @@
-import { desktopApi } from '@/lib/desktop-api'
+import { getDesktopHost } from '@/lib/desktop-api'
+import { createTerminalViewSession, type TerminalViewSession } from '@/lib/terminal-session'
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useCanvasStore } from '@/stores/canvas-store'
-import { subscribe } from '@/lib/shared-ipc-listeners'
 import '@xterm/xterm/css/xterm.css'
 
 // Verbose terminal lifecycle logs are off by default (they fire on every
@@ -50,7 +50,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
   const cleanupRef = useRef<(() => void)[]>([])
   const initCalledRef = useRef(false)
   const isReadyRef = useRef(false)
-  const activePidRef = useRef<number | null>(null)
+  const sessionRef = useRef<TerminalViewSession | null>(null)
   const isMountedRef = useRef(true)
 
   // Store cwd in a ref — only used at init time, never triggers re-init
@@ -130,93 +130,51 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
     })
 
     // Bail if component was unmounted during the wait
-    if (!xtermRef.current) return
+    if (!isMountedRef.current || xtermRef.current !== term) return
 
     try {
-      const { pid } = await desktopApi.terminal.create(
-        terminalId,
-        term.cols,
-        term.rows,
-        cwdRef.current // read from ref, not prop — stable reference
-      )
-
-      // StrictMode / fast remount can unmount this instance before create() resolves.
-      // In that case, kill only the PTY we just created and let the live instance continue.
-      if (!isMountedRef.current || xtermRef.current !== term) {
-        await desktopApi.terminal.kill(terminalId, pid).catch(() => {})
-        return
-      }
-
-      activePidRef.current = pid
-
-      tlog(`[Terminal:${terminalId}] PTY created, setting up listeners`)
-
-      const inputDispose = term.onData((data) => {
-        desktopApi.terminal.write(terminalId, data)
-      })
-
-      const removeDataListener = subscribe<{ id: string; data: string }>(
-        'terminal:data',
-        (cb) => desktopApi.terminal.onData?.(cb),
-        ({ id, data }) => {
-          if (id === terminalId) {
-            term.write(data)
-          }
-        }
-      )
-
       let processExited = false
-
-      const removeExitListener = subscribe<{ id: string }>(
-        'terminal:exit',
-        (cb) => desktopApi.terminal.onExit?.(cb),
-        ({ id }) => {
-          if (id === terminalId) {
-            processExited = true
-            term.write('\r\n\x1b[90m[Process exited — press Enter to restart]\x1b[0m\r\n')
+      const mounted = () => isMountedRef.current && xtermRef.current === term
+      const session = createTerminalViewSession({
+        host: getDesktopHost(), id: terminalId, cols: term.cols, rows: term.rows, cwd: cwdRef.current,
+        onData: data => { if (mounted()) term.write(data) },
+        onExit: () => { if (mounted()) { processExited = true; term.write('\r\n\x1b[90m[Process exited — press Enter to restart]\x1b[0m\r\n') } },
+        onRecentText: lines => { if (mounted()) term.write(`\r\n[Recent terminal text. Live output may overlap.]\r\n${lines.join('\r\n')}\r\n`) },
+        onError: message => { if (mounted()) setError(message) },
+        onReady: (ready, initial) => {
+          if (!mounted()) return
+          isReadyRef.current = ready; setIsReady(ready)
+          if (!ready) return
+          setError(null)
+          if (!initial) return
+          term.focus()
+          const focusCheck = setTimeout(() => {
+            if (mounted()) tlog(`[Terminal:${terminalId}] after focus, activeElement:`, document.activeElement?.tagName, document.activeElement?.className)
+          }, 100)
+          cleanupRef.current.push(() => clearTimeout(focusCheck))
+        },
+        onCwd: currentCwd => {
+          if (currentCwd !== lastWrittenCwdRef.current) {
+            lastWrittenCwdRef.current = currentCwd
+            useCanvasStore.getState().updatePanel(terminalId, { url: currentCwd })
           }
         }
-      )
-
-      // Respawn the shell when the user presses Enter after exit
+      })
+      sessionRef.current = session
+      const inputDispose = term.onData(data => session.write(data))
       const respawnDispose = term.onKey(({ domEvent }) => {
         if (processExited && domEvent.key === 'Enter') {
           processExited = false
           term.clear()
-          desktopApi.terminal.create(
-            terminalId,
-            term.cols,
-            term.rows,
-            cwdRef.current
-          ).then(({ pid }) => {
-            activePidRef.current = pid
-            term.focus()
-          }).catch(() => {
-            processExited = true
-            term.write('\r\n\x1b[90m[Failed to restart shell]\x1b[0m\r\n')
+          session.restart().then(() => {
+            if (!mounted()) return
+            if (isReadyRef.current) term.focus()
+            else { processExited = true; term.write('\r\n\x1b[90m[Failed to restart shell]\x1b[0m\r\n') }
           })
         }
       })
-
-      cleanupRef.current = [
-        () => inputDispose.dispose(),
-        () => respawnDispose.dispose(),
-        removeDataListener,
-        removeExitListener,
-      ]
-
-      // Focus the terminal so it can receive keyboard input
-      tlog(`[Terminal:${terminalId}] calling term.focus(), textarea exists:`, !!term.textarea)
-      term.focus()
-      // Verify focus actually took
-      const focusCheck = setTimeout(() => {
-        if (!isMountedRef.current || xtermRef.current !== term) return
-        tlog(`[Terminal:${terminalId}] after focus, activeElement:`, document.activeElement?.tagName, document.activeElement?.className)
-      }, 100)
-      cleanupRef.current.push(() => clearTimeout(focusCheck))
-
-      isReadyRef.current = true
-      setIsReady(true)
+      cleanupRef.current = [() => inputDispose.dispose(), () => respawnDispose.dispose(), () => session.dispose()]
+      await session.start()
     } catch (err) {
       console.error('Failed to create terminal:', err)
       setError(err instanceof Error ? err.message : 'Failed to create terminal')
@@ -255,11 +213,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
         try {
           fitAddonRef.current.fit()
           if (xtermRef.current && isReadyRef.current) {
-            desktopApi.terminal.resize(
-              terminalId,
-              xtermRef.current.cols,
-              xtermRef.current.rows
-            ).catch(() => {})
+            sessionRef.current?.resize(xtermRef.current.cols, xtermRef.current.rows)
           }
         } catch {
           // ignore fit errors during transitions
@@ -279,21 +233,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
         clearTimeout(resizeDebounceRef.current)
         resizeDebounceRef.current = null
       }
-      const expectedPid = activePidRef.current ?? undefined
       isMountedRef.current = false
-
-      if (expectedPid !== undefined) {
-        // Capture cwd before killing the terminal — persists across restarts.
-        // Skip ID-only cleanup when this instance never acquired a PTY pid.
-        desktopApi.terminal.getCwd(terminalId, expectedPid).then(({ cwd: currentCwd }) => {
-          if (currentCwd && currentCwd !== lastWrittenCwdRef.current) {
-            lastWrittenCwdRef.current = currentCwd
-            useCanvasStore.getState().updatePanel(terminalId, { url: currentCwd })
-          }
-        }).catch(() => {}).finally(() => {
-          desktopApi.terminal.kill(terminalId, expectedPid).catch(() => {})
-        })
-      }
 
       // Cleanup listeners
       for (const fn of cleanupRef.current) fn()
@@ -305,7 +245,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
       fitAddonRef.current = null
       initCalledRef.current = false
       isReadyRef.current = false
-      activePidRef.current = null
+      sessionRef.current = null
     }
   }, [initTerminal, terminalId])
 
@@ -314,18 +254,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
   // trigger re-initialization of the terminal.
   useEffect(() => {
     if (!isReady) return
-    const interval = setInterval(async () => {
-      try {
-        const expectedPid = activePidRef.current ?? undefined
-        const { cwd: currentCwd } = await desktopApi.terminal.getCwd(terminalId, expectedPid)
-        // Skip the store write (and the re-render/persist it triggers) when the
-        // directory hasn't changed since the last write.
-        if (currentCwd && currentCwd !== lastWrittenCwdRef.current) {
-          lastWrittenCwdRef.current = currentCwd
-          useCanvasStore.getState().updatePanel(terminalId, { url: currentCwd })
-        }
-      } catch { /* ignore */ }
-    }, 30_000) // every 30 seconds (less aggressive)
+    const interval = setInterval(() => { void sessionRef.current?.captureCwd() }, 30_000)
     return () => clearInterval(interval)
   }, [isReady, terminalId])
 
@@ -419,18 +348,12 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
     }, 50)
   }, [terminalId])
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-full text-red-400/60 text-xs">
-        <div className="text-center space-y-1">
-          <div>Terminal Error</div>
-          <div className="text-[10px] text-muted-foreground/40">{error}</div>
-        </div>
-      </div>
-    )
-  }
-
   return (
+    <div className="relative h-full w-full">
+    {error && <div role="status" className="absolute top-0 left-0 right-0 z-10 border-b bg-background px-3 py-2 text-sm text-destructive">
+      {error}
+      {getDesktopHost().kind === 'tauri' && <button type="button" className="ml-2 underline" onClick={() => { void sessionRef.current?.restart() }}>Restore terminal</button>}
+    </div>}
     <div
       ref={containerRef}
       className="h-full w-full xterm-container"
@@ -443,5 +366,6 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
         minHeight: 50,
       }}
     />
+    </div>
   )
 }

@@ -6,8 +6,9 @@ const terminalWrite = vi.fn()
 const terminalResize = vi.fn()
 const terminalKill = vi.fn()
 const terminalGetCwd = vi.fn()
-const terminalOnData = vi.fn(() => vi.fn())
-const terminalOnExit = vi.fn(() => vi.fn())
+const terminalOnData = vi.fn((_callback: (event: { id: string; data: string }) => void) => vi.fn())
+const terminalOnExit = vi.fn((_callback: (event: { id: string }) => void) => vi.fn())
+const renderedData = vi.fn()
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
@@ -26,7 +27,7 @@ vi.mock('@xterm/xterm', () => ({
     }
     focus() {}
     clear() {}
-    write() {}
+    write(data: string) { renderedData(data) }
     dispose() {}
     onData() {
       return { dispose: vi.fn() }
@@ -131,6 +132,20 @@ describe('TerminalPanelContent', () => {
     expect(vi.getTimerCount()).toBe(0)
     await vi.advanceTimersByTimeAsync(100)
     expect(terminalKill).toHaveBeenCalledWith('panel-focus', 444)
+  })
+
+  it('subscribes before create so initial terminal output is rendered', async () => {
+    terminalCreate.mockImplementationOnce(async () => {
+      expect(terminalOnData).toHaveBeenCalledOnce()
+      expect(terminalOnExit).toHaveBeenCalledOnce()
+      const listener = terminalOnData.mock.calls[0]?.[0] as ((event: { id: string; data: string }) => void) | undefined
+      if (!listener) throw new Error('Missing pre-create terminal listener')
+      listener({ id: 'panel-early', data: 'Initial shell prompt' })
+      return { pid: 444 }
+    })
+    terminalGetCwd.mockResolvedValue({ cwd: null })
+    render(<TerminalPanelContent terminalId="panel-early" />)
+    await waitFor(() => expect(renderedData).toHaveBeenCalledWith('Initial shell prompt'))
   })
 
   it('kills only the PTY instance that owned the cleanup', async () => {

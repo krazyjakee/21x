@@ -201,6 +201,8 @@ export class CommanderService {
   private readonly work = new Set<Promise<unknown>>()
   private readonly shutdownSignal = new AbortController()
   private closing = false
+  private providerMutation = false
+  private providerSignal = new AbortController()
   private readonly folding = new Set<string>()
   private readonly naming = new Set<string>()
   /** Sessions whose last fold failed; cleared by the next successful one (read with foldFailure). */
@@ -263,6 +265,28 @@ export class CommanderService {
     })
     try { await Promise.race([Promise.all([Promise.allSettled([...this.work]), this.runtime.close(timeoutMs)]), expired]) }
     finally { if (timer) clearTimeout(timer) }
+  }
+
+  beginProviderConfigurationMutation(): { drain(): Promise<void>; release(): void } {
+    if (this.closing || this.providerMutation) throw new Error('COMMANDER_PROVIDER_CONFIGURATION_UNAVAILABLE')
+    const runtimeLease = this.runtime.beginProviderConfigurationMutation()
+    this.providerMutation = true
+    this.providerSignal.abort()
+    for (const controller of this.handoffControllers.values()) controller.abort()
+    let released = false
+    return {
+      drain: async () => {
+        while (this.work.size) await Promise.allSettled([...this.work])
+        await runtimeLease.drain()
+      },
+      release: () => {
+        if (released) return
+        released = true
+        this.providerSignal = new AbortController()
+        this.providerMutation = false
+        runtimeLease.release()
+      }
+    }
   }
 
   private retain<T>(work: Promise<T>): Promise<T> {
@@ -425,6 +449,7 @@ export class CommanderService {
    */
   sendUserMessage(sessionId: string, text: string, origin: 'typed' | 'voice' = 'typed', images?: unknown): SendResult {
     this.assertOpen()
+    if (this.providerMutation) throw new Error('COMMANDER_PROVIDER_CONFIGURATION_CHANGING')
     const content = typeof text === 'string' ? text.trim() : ''
     const attached = validateChatImageInputs(images)
     if (!content && attached.length === 0) throw new Error('Message is empty')
@@ -594,6 +619,7 @@ export class CommanderService {
   }
 
   private async afterTurn(sessionId: string, provider: ChatProvider): Promise<void> {
+    if (this.providerMutation) return
     if (this.closing) return
     const session = this.store.getSession(sessionId)
     if (!session) return
@@ -628,7 +654,7 @@ export class CommanderService {
     if (decision.action !== 'rollover') return false
     const controller = new AbortController()
     this.handoffControllers.set(sessionId, controller)
-    const signal = AbortSignal.any([controller.signal, this.shutdownSignal.signal])
+    const signal = AbortSignal.any([controller.signal, this.shutdownSignal.signal, this.providerSignal.signal])
     const guard = (): void => {
       if (this.closing || !this.commanderManaged() || readRolloverPolicy(database).mode !== 'on'
         || !rolloverStageEnabled(database, 'commander')) controller.abort()
@@ -705,7 +731,7 @@ export class CommanderService {
    */
   async generateTitle(sessionId: string, provider?: ChatProvider): Promise<string | null> {
     this.assertOpen()
-    return this.retain(Promise.resolve().then(() => this.closing ? null : this.generateTitleNow(sessionId, provider)))
+    return this.retain(Promise.resolve().then(() => this.closing || this.providerMutation ? null : this.generateTitleNow(sessionId, provider)))
   }
 
   private async generateTitleNow(sessionId: string, provider?: ChatProvider): Promise<string | null> {
@@ -728,7 +754,7 @@ export class CommanderService {
               messages: [{ role: 'user', content: `User: ${firstUser.content.slice(0, 2000) || '[shared an image]'}\n\nCommander: ${firstReply.content.slice(0, 2000)}` }],
               maxTokens: 32
             },
-            AbortSignal.any([this.shutdownSignal.signal, AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)])
+            AbortSignal.any([this.shutdownSignal.signal, this.providerSignal.signal, AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)])
           )
           title = cleanGeneratedTitle(raw)
         } catch (err) {
@@ -768,7 +794,7 @@ export class CommanderService {
    */
   async foldHistory(sessionId: string, provider?: ChatProvider): Promise<CommanderMessage | null> {
     this.assertOpen()
-    return this.retain(Promise.resolve().then(() => this.closing ? null : this.foldHistoryNow(sessionId, provider)))
+    return this.retain(Promise.resolve().then(() => this.closing || this.providerMutation ? null : this.foldHistoryNow(sessionId, provider)))
   }
 
   private async foldHistoryNow(sessionId: string, provider?: ChatProvider): Promise<CommanderMessage | null> {
@@ -804,7 +830,7 @@ export class CommanderService {
           this.recordFoldFailure(sessionId, 'summary input exceeds bounded managed requests; stored history retained')
           return null
         }
-        const signal = AbortSignal.any([this.shutdownSignal.signal, AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)])
+        const signal = AbortSignal.any([this.shutdownSignal.signal, this.providerSignal.signal, AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)])
         // A large single turn is folded in bounded requests. Intermediate
         // summaries remain local: any failed/empty chunk leaves the durable
         // summary and its cursor untouched, ready for a complete retry.

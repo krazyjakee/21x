@@ -51,7 +51,9 @@ function fixture() {
   const authority: ProductionDesktopBindingOptions['authority'] = { isTrustedDesktop: check, canAccessTask: check, canAccessSource: check,
     canAccessProject: check, canAccessAgent: check, canAccessSession: check, canAccessGlobalCommander: check,
     canManageGlobalConfiguration: check, canQueryBackend: check, canCreateProject: check, canEditSettings: check,
-    canAccessGlobalSkills: check, canChangeSkillScope: check, canReorderProjects: check }
+    canAccessGlobalSkills: check, canChangeSkillScope: check, canReorderProjects: check, canReadSetting: check, canWriteSetting: check, canAccessSecret: check,
+    canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessTerminal: check,
+    resolveTerminalDirectory: () => ({ cwd: launch.paths.workspaceRoot, root: launch.paths.workspaceRoot }) }
   const schemas: Record<string, OperationSchema> = Object.fromEntries(Object.entries(PRODUCTION_COMMAND_CODECS).map(([operation, codec]) => [operation, {
     validatePayload: (value: unknown) => { try { return codec.validateArguments(codec.decodeArguments(value as JsonValue)) } catch { return false } }, validateResult: codec.validateWireResult
   }]))

@@ -1,6 +1,10 @@
 import { TaskLifecycleBackend } from './task-lifecycle-backend'
 import { ProductionAgentBackend } from './production-agent-backend'
 import { CommanderBackend } from './commander-backend'
+import { TerminalBackend, type TerminalDirectoryAuthority } from './terminal-backend'
+import { ProductionSettingsBackend, type ProductionSettingsBackendOptions } from './production-settings-backend'
+import { PRODUCTION_SETTINGS_CODECS } from '../shared/production-settings-codecs'
+import { TERMINAL_COMMAND_CODECS, TERMINAL_EVENT_CODECS } from '../shared/terminal-desktop-codecs'
 import { encodeDurableTranscriptEvent } from './transcript-events'
 import { DatabaseBackend } from './database-backend'
 import { ConfigurationBackend } from './configuration-backend'
@@ -28,7 +32,9 @@ type Authority = Pick<AgentConfigurationBackendOptions, 'isTrustedDesktop' | 'ca
   canAccessGlobalSkills(caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   canChangeSkillScope(caller: DesktopCallerContext): boolean
   canReorderProjects(caller: DesktopCallerContext): boolean
-}
+  canAccessTerminal(id: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
+  resolveTerminalDirectory(id: string, caller: DesktopCallerContext): TerminalDirectoryAuthority | null
+} & Pick<ProductionSettingsBackendOptions, 'canReadSetting' | 'canWriteSetting' | 'canAccessSecret' | 'canCreateSecret' | 'canUseSecretEnvironment' | 'canReadEnvironment'>
 export interface ProductionDesktopBindingOptions {
   authority: Authority
   emit(operation: string, payload: JsonValue, recipient?: DesktopCallerContext): void
@@ -38,9 +44,10 @@ export interface ProductionDesktopBindingOptions {
 /** Source codecs are separate from native grants; each domain has actual scope. */
 export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
-  ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS }
+  ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
-  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS }
+  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS }
 
 /** Validate actual wire payload, including explicit binary envelopes. */
 export function validateProductionEventWire(operation: string, payload: unknown): boolean {
@@ -64,6 +71,8 @@ export class ProductionDesktopBindings {
   private readonly tasks: TaskLifecycleBackend
   private readonly lifecycle: ProductionAgentBackend
   private readonly commander: CommanderBackend
+  private readonly settings: ProductionSettingsBackend
+  private readonly terminals: TerminalBackend
   private readonly epoch: string
   private constructor(private readonly owner: ProductionOwner, private readonly services: Awaited<ReturnType<ProductionOwner['start']>>, private readonly options: ProductionDesktopBindingOptions) {
     const lease = owner.getDatabaseBindingLease()
@@ -102,10 +111,22 @@ export class ProductionDesktopBindings {
     this.commander = new CommanderBackend({ database: services.db, store: services.commanderStore, commander: services.commander,
       chat: services.chat, agents: services.agents, createChatProvider: services.createChatProvider,
       engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority, emit: options.emit, onFatalEvent: options.fatal })
+    this.settings = new ProductionSettingsBackend({ database: services.db, manager: services.agents,
+      recurrence: services.recurrence, heartbeat: services.heartbeat, automation: services.automation,
+      coordination: services.coordination, cleanup: services.cleanup, ...owner.getSettingsBindingLease(),
+      runCredentialMutation: (input, mutation) => owner.runCredentialMutation(input, mutation),
+      engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
+      environment: { OPENAI_API_KEY: process.env.OPENAI_API_KEY, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, CURSOR_API_KEY: process.env.CURSOR_API_KEY },
+      emit: options.emit, onFatalEvent: options.fatal })
+    this.terminals = new TerminalBackend({ terminals: services.terminals, engineEpoch: this.epoch, assertAvailable: available,
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTerminal: dynamicAuthority.canAccessTerminal,
+      // Unlike boolean policy checks this callback returns a trusted directory.
+      resolveDirectory: (id, caller) => authority.resolveTerminalDirectory(id, caller),
+      emit: options.emit, onFatalEvent: options.fatal })
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown()
-      void Promise.all([this.agents.close(), this.tasks.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close()]).then(() => undefined))
+      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown()
+      void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close()]).catch(() => { /* Registered drain retains raw work. */ })
+    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close()]).then(() => undefined))
   }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
@@ -147,6 +168,8 @@ export class ProductionDesktopBindings {
       const decoded = codec.decodePayload(payload)
       return this.commander.canReadEvent(operation, decoded, caller) ? payload : undefined
     }
+    if (operation === 'terminal:data' || operation === 'terminal:exit')
+      return this.terminals.canReadEvent(operation, TERMINAL_EVENT_CODECS[operation].decodePayload(payload), caller) ? payload : undefined
     if (!isRecord(payload)) return undefined
     if (operation === 'agent:startQueueChanged') {
       const queue = (payload.queue as JsonValue[]).filter(row => isRecord(row) && taskAllowed(row.taskId) && typeof row.agentId === 'string' &&
@@ -170,7 +193,8 @@ export class ProductionDesktopBindings {
   /** Caller context is selected by trusted native ingress, never payload fields. */
   operationSchemas(caller: DesktopCallerContext): Record<string, OperationSchema> {
     const schemas = { ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
-      ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller) }
+      ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
+      ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller) }
     return Object.fromEntries(Object.entries(schemas).map(([operation, schema]) => [operation, {
       ...schema, handle: (payload: JsonValue, signal: AbortSignal) => this.invoke(operation, payload, caller, signal)
     }]))
@@ -185,6 +209,8 @@ export class ProductionDesktopBindings {
       signal.addEventListener('abort', abort, { once: true }); ownerSignal.addEventListener('abort', abort, { once: true })
       if (signal.aborted || ownerSignal.aborted) abort()
       try {
+        if (Object.hasOwn(PRODUCTION_SETTINGS_CODECS, operation)) return await this.settings.registry.invoke(operation, payload, caller, combined.signal)
+        if (Object.hasOwn(TERMINAL_COMMAND_CODECS, operation)) return await this.terminals.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(TASK_LIFECYCLE_CODECS, operation)) return await this.tasks.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(PRODUCTION_AGENT_CODECS, operation)) return await this.lifecycle.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(COMMANDER_COMMAND_CODECS, operation)) return await this.commander.registry.invoke(operation, payload, caller, combined.signal)

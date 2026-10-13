@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "21x Production Preview",
+  "identifier": "com.krazyjakee.21x.tauri-production-preview",
+  "build": {
+    "beforeDevCommand": "pnpm tauri:prepare:production && pnpm tauri:production:frontend:dev",
+    "beforeBuildCommand": "pnpm tauri:prepare:production && pnpm tauri:production:frontend:build",
+    "frontendDist": "../out/tauri-production-renderer",
+    "devUrl": "http://localhost:1421"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost; frame-src 'none'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1421; frame-src 'none'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'"
+    }
+  }
+}

@@ -102,11 +102,12 @@ const mainFiles = [
   'src/main/oauth/providers/connector-oauth-provider.test.ts',
   'src/main/database-transcript-page.test.ts', 'src/main/transcript-events.test.ts', 'src/main/transcript-page-authority.test.ts',
   'src/shared/**/*.test.ts',
-  'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts', 'scripts/tauri-stage-production.test.ts',
+  'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts', 'scripts/tauri-stage-production.test.ts', 'scripts/production-contracts-proof.test.ts',
   'scripts/artifact-frame-proof.test.ts',
   'scripts/activity-process-proof.test.ts',
   'scripts/database-proof.test.ts', 'scripts/configuration-proof.test.ts', 'scripts/agent-desktop-proof.test.ts',
   ...(process.env.TAURI_PRODUCTION_SERVICE_PROOFS === '1' ? ['scripts/production-service-proof.test.ts'] : []),
+  ...(process.env.TAURI_TERMINAL_PROOFS === '1' ? ['scripts/production-terminal-proof.test.ts'] : []),
   ...(process.env.TAURI_STANDALONE_SERVICE_PROOFS === '1' ? [
     'scripts/database-service-proof.test.ts', 'scripts/configuration-service-proof.test.ts', 'scripts/transcript-page-proof.test.ts',
     'scripts/connector-worker-service-proof.test.ts'
@@ -121,7 +122,7 @@ export default defineConfig({
         setupFiles: [join(root, 'test/setup-tauri.ts')] } },
       { resolve: resolveOptions, esbuild: { jsx: 'automatic' }, test: { name: 'portable-renderer', environment: 'happy-dom',
         include: ['src/renderer/src/lib/desktop-client.test.ts', 'src/renderer/src/lib/transcript-pagination.test.ts', 'src/renderer/src/lib/tauri-task-slice.test.ts',
-          'src/renderer/src/lib/desktop-api.test.ts', 'src/renderer/src/lib/native-desktop-host.test.ts', 'src/renderer/src/lib/shared-ipc-listeners.test.ts',
+          'src/renderer/src/lib/terminal-session.test.ts', 'src/renderer/src/lib/tauri-desktop-transport.test.ts', 'src/renderer/src/lib/desktop-api.test.ts', 'src/renderer/src/lib/native-desktop-host.test.ts', 'src/renderer/src/lib/shared-ipc-listeners.test.ts',
           'src/renderer/src/components/layout/DesktopHostStatus.test.tsx', 'src/renderer/src/stores/commander-desktop-recovery.test.ts'], setupFiles: [join(root, 'test/setup-renderer.ts')] } }
     ]
   }

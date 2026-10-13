@@ -1,0 +1,122 @@
+/** Pure codec corpus: no service/SDK imports, profiles, mutations or credentials. */
+import { writeFile } from 'node:fs/promises'
+import { DATABASE_COMMAND_CODECS } from '../src/shared/database-desktop-codecs'
+import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_CONTENT_OPERATIONS } from '../src/shared/configuration-desktop-codecs'
+import { AGENT_CONFIGURATION_CODECS } from '../src/shared/agent-configuration-codecs'
+import { TASK_LIFECYCLE_CODECS } from '../src/shared/task-lifecycle-codecs'
+import { PRODUCTION_AGENT_CODECS } from '../src/shared/production-agent-codecs'
+import { COMMANDER_COMMAND_CODECS } from '../src/shared/commander-desktop-codecs'
+import { PRODUCTION_SETTINGS_CODECS, PRODUCTION_SETTINGS_KEYS, PRODUCTION_ENV_KEYS } from '../src/shared/production-settings-codecs'
+import { TERMINAL_COMMAND_CODECS } from '../src/shared/terminal-desktop-codecs'
+import type { JsonValue } from '../src/shared/service-protocol'
+
+// Preserve the production binding's override order; older diagnostic task,
+// settings and agent CRUD schemas must not supply these proof payloads.
+export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
+  ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
+  ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS }
+const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
+const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
+let deepOutput: JsonValue = 'fixture leaf'
+for (let depth = 0; depth < 40; depth++) deepOutput = { child: deepOutput }
+const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }, (_, server) => ({ serverId: `server_${server}`, enabledTools: Array.from({ length: 120 }, (_, tool) => `tool_${tool}_` + 'x'.repeat(240)) })) }
+
+/** One explicit valid API argument tuple for every finite production command. */
+export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
+  'db:getTasks': [project], 'db:getTask': [task], 'db:createTask': [{ title: 'Fixture task', project_id: project }],
+  'db:updateTask': [task, { title: 'Updated fixture', status: 'ready_for_review' }], 'db:deleteTask': [task],
+  'db:getSubtasks': [task], 'db:reorderSubtasks': [task, ['subtask_one', 'subtask_two']], 'project:moveTask': [task, project],
+  'tasks:getCoordinatorTaskId': [project], 'plugin:executeAction': ['fixture_action', task, 'source_fixture', 'Fixture input'],
+  'project:getAll': [{ includeArchived: true }], 'project:get': [project], 'project:getDefault': [], 'project:create': [{ name: 'Fixture project', description: 'Codec proof' }],
+  'settings:get': ['theme'], 'settings:set': ['theme', 'dark'], 'settings:getAll': [],
+  'agentSession:getTranscriptSnapshot': [task, 0], 'agentSession:getTranscriptDelta': [task, 0],
+  'agentSession:getTranscriptPage': [task, { version: 1, mode: 'snapshot', after: 0 }],
+  'skills:getAll': [], 'skills:create': [{ name: 'Fixture skill', description: 'Description', content: 'Instructions' }],
+  'skills:update': ['skill_fixture', { content: 'Updated instructions', expected_version: 1 }], 'skills:delete': ['skill_fixture'], 'skills:setProject': ['skill_fixture', project],
+  'project:update': [project, { name: 'Updated project', git_provider: 'github', git_org: 'fixture-org' }],
+  'project:archive': [project, false], 'project:reorder': [[project]],
+  'projectRepo:list': [project], 'projectRepo:add': [project, { name: 'fixture/repo', provider: 'github', org: 'fixture', default_branch: 'main' }],
+  'projectRepo:update': ['repo_fixture', { default_branch: null }], 'projectRepo:remove': ['repo_fixture'], 'projectRepo:reorder': [project, ['repo_fixture']],
+  'projectResource:list': [project], 'projectResource:add': [project, { label: 'Fixture notes', url: null, notes: 'Context' }],
+  'projectResource:update': ['resource_fixture', { label: 'Updated notes' }], 'projectResource:remove': ['resource_fixture'], 'projectResource:reorder': [project, ['resource_fixture']],
+  'agent:getAll': [], 'agent:create': [{ name: 'Fixture agent', server_url: 'http://localhost:4096', config: { coding_agent: 'pi', model: 'fixture', max_parallel_sessions: 2 } }],
+  'agent:update': [agent, { config: { coding_agent: 'codex', permission_mode: 'ask', sandbox_mode: 'workspace-write' } }], 'agent:delete': [agent],
+  'agentConfig:getProviders': ['http://localhost:4096', 'opencode'], 'agentConfig:listModels': ['pi'],
+  'agentSession:start': [agent, task, undefined, true], 'agentSession:startTask': [task], 'agentSession:resume': [agent, task, session],
+  'agentSession:send': [session, 'Fixture continuation', task, agent, [], 'delivery_fixture_one'],
+  'agentSession:sendByTaskId': [task, 'Fixture continuation', [], 'delivery_fixture_two'],
+  'agentSession:abort': [session], 'agentSession:stop': [session], 'agentSession:stopByTaskId': [task], 'agentSession:switchAgent': [task, 'agent_other'],
+  'agentSession:approve': [session, false, 'Fixture answer', 'question', 'native/request:fixture'],
+  'agent:getStartQueue': [], 'agent:getStartRecoveryState': [task], 'agentSession:getRawTranscript': [task],
+  'captainRuntime:get': [project], 'captainRuntime:switch': [project, agent], 'captainRuntime:retry': [project], 'captainRuntime:rollback': [project],
+  'commander:listSessions': [{ search: 'Fixture', includeArchived: true }], 'commander:createSession': [{ title: 'Fixture Commander' }],
+  'commander:renameSession': [session, 'Renamed fixture'], 'commander:archiveSession': [session, false], 'commander:listMessages': [session],
+  'commander:markRead': [session], 'commander:setActiveSession': [null], 'commander:send': [session, 'Describe fixture', [image]],
+  'commander:getImage': ['image_fixture'], 'commander:cancel': [session], 'commander:undoAction': [session, 'action:fixture'], 'commander:getActivity': [session],
+  'chat:start': [{ messages: [{ role: 'user', content: 'Describe fixture', images: [image] }], system: 'Fixture context', maxToolCalls: 0 }], 'chat:cancel': ['turn_fixture'],
+  'secrets:getAll': [], 'secrets:create': [{ name: 'Fixture metadata', description: 'Not a live credential', env_var_name: 'FIXTURE_PROOF_VALUE', value: 'synthetic-fixture-value' }],
+  'secrets:update': ['secret_fixture', { description: 'Updated fixture metadata' }], 'secrets:delete': ['secret_fixture'], 'env:get': ['OPENAI_API_KEY'],
+  'terminal:create': ['terminal:fixture', 80, 24, '/trusted-fixture/workspace'], 'terminal:write': ['terminal:fixture', '\u001b[31m\u0000'],
+  'terminal:resize': ['terminal:fixture', 120, 32], 'terminal:kill': ['terminal:fixture', 42], 'terminal:getCwd': ['terminal:fixture', 42], 'terminal:getBuffer': ['terminal:fixture', 500]
+}
+
+type Variant = { operation: string; case: string; args: unknown[] }
+export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  { operation: 'agentSession:getTranscriptPage', case: 'snapshot-watermark-limit', args: [task, { version: 1, mode: 'snapshot', after: 10, watermark: 100, limit: 64 }] },
+  { operation: 'agentSession:getTranscriptPage', case: 'delta-watermark-limit', args: [task, { version: 1, mode: 'delta', after: 10, watermark: 100, limit: 1 }] },
+  { operation: 'agentSession:getTranscriptPage', case: 'delta-empty-watermark', args: [task, { version: 1, mode: 'delta', after: 0, watermark: 0 }] },
+  { operation: 'project:update', case: 'nullable-git-fields', args: [project, { git_provider: null, git_org: null }] },
+  { operation: 'project:update', case: 'forgejo-git-fields', args: [project, { git_provider: 'forgejo', git_org: 'fixture' }] },
+  { operation: 'skills:create', case: 'all-optional-fields', args: [{ name: 'Fixture skill', description: '', content: 'Instructions', confidence: 0.5, uses: 3, last_used: null, tags: ['fixture'], preferred_model: null, project_id: null }] },
+  { operation: 'skills:update', case: 'all-optional-fields', args: ['skill_fixture', { name: 'Fixture skill', description: '', content: 'Instructions', confidence: 0.75, uses: 4, last_used: '2026-10-13', tags: [], preferred_model: 'fixture/model', expected_version: 2 }] },
+  { operation: 'skills:setProject', case: 'global-null-scope', args: ['skill_fixture', null] },
+  { operation: 'db:getTasks', case: 'no-project-filter', args: [] },
+  { operation: 'tasks:getCoordinatorTaskId', case: 'no-project-filter', args: [] },
+  { operation: 'project:getAll', case: 'no-filter', args: [] },
+  { operation: 'project:archive', case: 'omitted-default', args: [project] },
+  { operation: 'commander:listSessions', case: 'no-filter', args: [] },
+  { operation: 'commander:createSession', case: 'default-title', args: [] },
+  { operation: 'commander:setActiveSession', case: 'active-session', args: [session] },
+  { operation: 'commander:send', case: 'text-without-images', args: [session, 'Fixture'] },
+  { operation: 'commander:send', case: 'image-only', args: [session, '', [image]] },
+  { operation: 'agentSession:start', case: 'omitted-optionals', args: [agent, task] },
+  { operation: 'agentSession:send', case: 'task-addressed-empty-native-id', args: ['', 'Fixture', task, agent] },
+  { operation: 'agentSession:approve', case: 'permission-without-answer', args: [session, true, undefined, 'permission', 'native_permission_fixture'] },
+  { operation: 'agentSession:sendByTaskId', case: 'persisted-attachment', args: [task, 'Fixture', [{ id: 'attachment_fixture', filename: 'fixture.txt', size: 4, mime_type: 'text/plain' }]] },
+  { operation: 'agentConfig:getProviders', case: 'default-provider', args: [] },
+  { operation: 'agentConfig:getProviders', case: 'backend-only', args: [undefined, 'claude-code'] },
+  { operation: 'terminal:create', case: 'owner-default-cwd', args: ['terminal:fixture', 1, 4096] },
+  { operation: 'terminal:kill', case: 'no-expected-pid', args: ['terminal:fixture'] },
+  { operation: 'terminal:getCwd', case: 'no-expected-pid', args: ['terminal:fixture'] },
+  { operation: 'terminal:getBuffer', case: 'default-lines', args: ['terminal:fixture'] },
+  { operation: 'db:updateTask', case: 'wide-output-json', args: [task, { output_fields: [{ id: 'output_fixture', name: 'Wide JSON', type: 'json', value: Object.fromEntries(Array.from({ length: 300 }, (_, index) => [`field_${index}`, index])) }] }] },
+  { operation: 'db:updateTask', case: 'large-output-json-array', args: [task, { output_fields: [{ id: 'output_fixture', name: 'Array JSON', type: 'json', value: Array.from({ length: 5000 }, (_, index) => index) }] }] },
+  { operation: 'db:updateTask', case: 'depth-40-output-json', args: [task, { output_fields: [{ id: 'output_fixture', name: 'Deep JSON', type: 'json', value: deepOutput }] }] },
+  { operation: 'agent:update', case: 'frame-bounded-large-config', args: [agent, { config: largeConfig }] },
+  { operation: 'chat:start', case: 'tool-history', args: [{ messages: [{ role: 'user', content: 'Fixture request' }, { role: 'assistant', content: '', toolCalls: [{ id: 'call_fixture', name: 'fixture_tool', input: { projectId: project } }] }, { role: 'tool', toolCallId: 'call_fixture', name: 'fixture_tool', content: 'Fixture result', isError: false }], maxToolCalls: 32 }] },
+  ...PRODUCTION_SETTINGS_KEYS.map(key => ({ operation: 'settings:get', case: `setting-${key}`, args: [key] })),
+  ...PRODUCTION_ENV_KEYS.map(key => ({ operation: 'env:get', case: `marker-${key}`, args: [key] })),
+  { operation: 'settings:get', case: 'project-canvas', args: [`canvas_state:${project}`] },
+  { operation: 'settings:set', case: 'project-canvas-value', args: [`canvas_state:${project}`, JSON.stringify({ nodes: [], viewport: { zoom: 1 } })] }
+]
+export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
+export function createProductionRequestCorpus(): ProductionRequestCorpus {
+  const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
+  if (operations.length !== 86 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
+  const requests = inputs.map(row => {
+    const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]
+    if (!codec || !codec.validateArguments(row.args)) throw new Error(`Invalid explicit fixture: ${row.operation}/${row.case}`)
+    const payload = codec.encodeArguments(row.args as never)
+    if (!codec.validateArguments(codec.decodeArguments(payload))) throw new Error(`Encoded fixture failed actual codec: ${row.operation}/${row.case}`)
+    return { operation: row.operation, case: row.case, payload }
+  })
+  return { version: 1, operations, requests }
+}
+/** Coordinator/test harness selects the artifact destination, never desktop RPC. */
+export async function writeProductionRequestCorpus(path: string): Promise<ProductionRequestCorpus> {
+  const corpus = createProductionRequestCorpus()
+  await writeFile(path, JSON.stringify(corpus, null, 2) + '\n', { mode: 0o600 })
+  return corpus
+}

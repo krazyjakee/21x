@@ -6,28 +6,51 @@ import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { AgentManager } from './agent-manager-core'
 import type { AgentManagerHost } from './agent-manager/host'
 import { SessionStatusType } from './adapters/coding-agent-adapter'
+import { SecretBroker } from './secret-broker-core'
+import { writeSecretShellWrapper } from './secret-shell'
 
 vi.mock('./agent-manager/workspace-docs', async original => ({ ...await original<typeof import('./agent-manager/workspace-docs')>(), writeSkillFiles: vi.fn(async () => undefined) }))
-const resources: Array<{ db: ReturnType<typeof createPortableTestDb>; manager: AgentManager; directory: string }> = []
+const resources: Array<{ db: ReturnType<typeof createPortableTestDb>; manager: AgentManager; directory: string; broker?: SecretBroker }> = []
 beforeEach(() => vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }))
 afterEach(async () => {
-  for (const { db, manager, directory } of resources.splice(0)) { await manager.stopAllSessions(); db.close(); rmSync(directory, { recursive: true, force: true }) }
+  for (const { db, manager, directory, broker } of resources.splice(0)) { await manager.stopAllSessions(); await broker?.close(); db.close(); rmSync(directory, { recursive: true, force: true }) }
   vi.useRealTimers(); vi.restoreAllMocks()
 })
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
-function fixture() {
+function fixture(withSecrets = false) {
   const db = createPortableTestDb()
   const agent = db.createAgent({ name: 'Configuration owner', config: { coding_agent: 'codex', model: 'old-model', max_parallel_sessions: 1 } })!
   const project = db.createProject({ name: 'Configuration fixture', default_agent_id: agent.id })!
   const tasks = ['First', 'Second'].map(title => { const task = db.createTask({ title, project_id: project.id })!; db.updateTask(task.id, { agent_id: agent.id }); return db.getTask(task.id)! })
   const adapter = Object.assign(new FakeAdapter({ status: SessionStatusType.BUSY, sessionIds: ['configuration-one', 'configuration-two', 'configuration-three'] }), { notifyConfigChanged: vi.fn(async () => {}) })
-  const host: AgentManagerHost = { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, secrets: { kind: 'unsupported' },
+  const directory = dirname(dirname(db.getWorkspaceDir(tasks[0].id))), broker = withSecrets ? new SecretBroker(db) : undefined
+  const host: AgentManagerHost = { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' },
+    secrets: broker ? { kind: 'broker', getPort: () => broker.port, register: (token, id, ids) => broker.register(token, id, ids),
+      unregister: token => broker.unregister(token), writeShellWrapper: () => writeSecretShellWrapper(directory) } : { kind: 'unsupported' },
     configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' }, createAdapter: () => adapter, isCodexAppServerAdapter: () => true }
-  const manager = new AgentManager(db, host), directory = dirname(dirname(db.getWorkspaceDir(tasks[0].id)))
-  resources.push({ db, manager, directory }); return { db, manager, adapter, agent, project, tasks }
+  const manager = new AgentManager(db, host)
+  resources.push({ db, manager, directory, broker }); return { db, manager, adapter, agent, project, tasks }
 }
 
 describe('actual AgentManager configuration ownership', () => {
+  it('fences group changes and the old Captain owner while an actual secret Stop remains unacknowledged', async () => {
+    const h = fixture(true)
+    const secret = h.db.createSecret({ name: 'Controlled secret', description: '', env_var_name: 'CONTROLLED_TOKEN', value: 'controlled' })!
+    await h.manager.startTask(h.tasks[0].id)
+    h.db.updateAgent(h.agent.id, { config: { ...h.agent.config, secret_ids: [secret.id] } })
+    const entered = deferred(), stopped = deferred(), groupMutation = vi.fn(async () => undefined), credentialMutation = vi.fn(() => undefined)
+    h.adapter.destroySession.mockImplementationOnce(async () => { entered.resolve(); await stopped.promise })
+    const changing = h.manager.runProductionCredentialMutation({ kind: 'secret', secretId: secret.id }, credentialMutation)
+    const candidate = h.db.createAgent({ name: 'Unaffected Captain candidate', config: { coding_agent: 'pi' } })!
+    try {
+      await entered.promise
+      await expect(h.manager.runTaskGroupMutation([h.tasks[0].id], groupMutation)).rejects.toThrow('configuration is being updated')
+      await expect(h.manager.switchCaptainAgent(h.project.id, candidate.id)).rejects.toThrow('configuration is being updated')
+      expect(groupMutation).not.toHaveBeenCalled(); expect(credentialMutation).not.toHaveBeenCalled()
+      expect(h.adapter.createSession).toHaveBeenCalledOnce()
+    } finally { stopped.resolve(); await changing }
+    expect(credentialMutation).toHaveBeenCalledOnce()
+  })
   it('raises a cap and starts queued work without destroying a live session or refreshing provider config', async () => {
     const h = fixture()
     h.db.updateProject(h.project.id, { settings: { concurrency: { captain_control: false } } })

@@ -16,14 +16,18 @@ tokio = { version = "=1.53.2", features = ["io-util", "macros", "process", "rt",
 
 [build-dependencies]
 tauri-build = { version = "=2.7.2", features = [] }
+sha2 = "=0.10.9"
+serde_json.workspace = true
 
 [dependencies]
 tauri = { version = "=2.12.3", features = [] }
 serde_json.workspace = true
 twentyonex-engine = { path = "engine" }
+sha2 = { version = "=0.10.9", optional = true }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
 synthetic-desktop = ["twentyonex-engine/synthetic-desktop"]
 artifact-authorization-proof = ["synthetic-desktop"]
 synthetic-agent = ["synthetic-desktop", "twentyonex-engine/synthetic-agent"]
+production-service = ["twentyonex-engine/production-service", "dep:sha2"]

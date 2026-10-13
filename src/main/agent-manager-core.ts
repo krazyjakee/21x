@@ -9,6 +9,7 @@ import { join } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import type { AgentRecord, DatabaseManager, TaskRecord } from './database/manager'
 import type { UpdateAgentData } from './database/types'
+import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TaskStatus } from '../shared/constants'
 import { isCoordinatorTask } from '../shared/task-roles'
 import { resolveCaptainAgentId } from './captain-waker'
@@ -352,6 +353,8 @@ export class AgentManager extends EventEmitter {
   private readonly agentConfigurationMutations = new Set<string>()
   private readonly backendConfigurationMutations = new Set<string>()
   private readonly failedBackendConfigurations = new Set<string>()
+  private productionCredentialMutation = false
+  private productionAdmissionMutation = false
   private sessionStops: Map<string, Promise<void>> = new Map()
   private startupReconciliation: Promise<void> | null = null
   private startQueueDrainScheduled = false
@@ -1180,6 +1183,7 @@ export class AgentManager extends EventEmitter {
       throw new Error('Select valid task-group members.')
     const ids = [...new Set(taskIds)]
     if (ids.some(id => this.taskGroupMutations.has(id) || this.taskLifecycleMutations.has(id))) throw new Error('This task group is already being updated.')
+    for (const id of ids) this.assertAgentConfigurationAvailable(this.taskGroupExecution(id)?.agent_id ?? this.db.getTask(id)?.agent_id ?? this.findSessionByTaskId(id)?.session.agentId)
     for (const id of ids) this.taskGroupMutations.add(id)
     return this.ownShutdownWork((async () => {
       try {
@@ -1217,6 +1221,7 @@ export class AgentManager extends EventEmitter {
    * before committing. Shared backend adapters cannot disrupt another agent. */
   async runAgentConfigurationMutation<T>(agentId: string, kind: 'update' | 'delete', mutation: () => T | Promise<T>, changes?: UpdateAgentData): Promise<T> {
     if (this.shuttingDown) throw new Error('The app is shutting down.')
+    if (this.productionCredentialMutation) throw new Error('Wait for the credential change to finish before changing agents.')
     if (typeof agentId !== 'string' || !agentId || !['update', 'delete'].includes(kind) || typeof mutation !== 'function') throw new Error('Invalid agent configuration mutation.')
     if (this.agentConfigurationMutations.has(agentId)) throw new Error('This agent configuration is already being updated.')
     if ([...this.taskLifecycleMutations, ...this.taskGroupMutations].some(id => this.db.getTask(id)?.agent_id === agentId || this.findSessionByTaskId(id)?.session.agentId === agentId))
@@ -1273,6 +1278,68 @@ export class AgentManager extends EventEmitter {
         for (const type of backends) this.backendConfigurationMutations.delete(type)
         this.drainStartQueue()
         this.scheduleProviderRecovery()
+      }
+    })())
+  }
+
+  /** Scope derivation is shared by authorization and the actual mutation. A
+   * cached global backend refresh may affect every agent using that backend. */
+  getProductionCredentialAffectedAgents(input: ProductionCredentialMutation): string[] {
+    if (input.kind !== 'secret') return []
+    const agents = this.db.getAgents()
+    const referenced = agents.filter(agent => agent.config.secret_ids?.includes(input.secretId))
+    const shared = new Set(referenced.map(getAgentProvider).filter(type => !!this.adapters.get(type)?.notifyConfigChanged))
+    return agents.filter(agent => referenced.some(row => row.id === agent.id) || shared.has(getAgentProvider(agent))).map(agent => agent.id).sort()
+  }
+
+  runProductionCredentialMutation<T>(input: ProductionCredentialMutation, mutation: () => T | Promise<T>): Promise<T> {
+    if (this.shuttingDown || this.productionCredentialMutation || this.agentConfigurationMutations.size || this.backendConfigurationMutations.size)
+      return Promise.reject(new Error('The credential lifecycle is unavailable. Retry after current changes finish.'))
+    if (!input || !['provider-key', 'secret', 'default-agent'].includes(input.kind) || typeof mutation !== 'function' ||
+      input.kind === 'secret' && (typeof input.secretId !== 'string' || !input.secretId) ||
+      input.kind === 'provider-key' && !['openai_api_key', 'anthropic_api_key'].includes(input.key))
+      return Promise.reject(new Error('Invalid credential mutation.'))
+    const ids = new Set(this.getProductionCredentialAffectedAgents(input))
+    const backends = new Set([...ids].map(id => getAgentProvider(this.db.getAgent(id)!)).filter(type => !!this.adapters.get(type)?.notifyConfigChanged))
+    const taskIds = new Set<string>([
+      ...[...this.sessions.values()].filter(session => ids.has(session.agentId)).map(session => session.taskId),
+      ...[...this.admittedStarts.entries()].filter(([, id]) => ids.has(id)).map(([id]) => id),
+      ...this.startQueue.active().filter(row => ids.has(row.agentId)).map(row => row.taskId),
+      ...[...this.sessionStarts.keys()].filter(taskId => ids.has(this.admittedStarts.get(taskId) ?? this.db.getTask(taskId)?.agent_id
+        ?? this.db.getSetting(coordinatorSessionAgentKey(taskId)) ?? ''))
+    ])
+    if ([...taskIds].some(id => this.taskGroupMutations.has(id) || this.taskLifecycleMutations.has(id)) ||
+      [...this.captainSwitches.entries()].some(([projectId, flight]) => {
+        const project = this.db.getProject(projectId)
+        return ids.has(flight.agentId) || !!project && ids.has(resolveCaptainAgentId(this.db, project) ?? '')
+      }))
+      return Promise.reject(new Error('Wait for task or Captain changes to finish before changing credentials.'))
+    this.productionCredentialMutation = true
+    this.productionAdmissionMutation = input.kind === 'default-agent'
+    for (const id of ids) this.agentConfigurationMutations.add(id)
+    for (const backend of backends) this.backendConfigurationMutations.add(backend)
+    return this.ownShutdownWork((async () => {
+      try {
+        for (const id of taskIds) this.cancelQueuedStart(id)
+        for (const id of taskIds) await this.stopByTaskId(id)
+        await Promise.all([...taskIds].map(id => serializeTaskSend(this, id, async () => undefined)))
+        if (this.shuttingDown) throw new Error('The app is shutting down.')
+        const current = this.getProductionCredentialAffectedAgents(input)
+        if (current.length !== ids.size || current.some(id => !ids.has(id))) throw new Error('Credential references changed. Retry with current scope.')
+        const result = await mutation()
+        for (const backend of backends) {
+          try {
+            await this.ownShutdownWork(this.adapters.get(backend)!.notifyConfigChanged!())
+            this.failedBackendConfigurations.delete(backend)
+          } catch (error) { this.failedBackendConfigurations.add(backend); throw error }
+        }
+        return result
+      } finally {
+        this.productionCredentialMutation = false
+        this.productionAdmissionMutation = false
+        for (const id of ids) this.agentConfigurationMutations.delete(id)
+        for (const backend of backends) this.backendConfigurationMutations.delete(backend)
+        this.drainStartQueue(); this.scheduleProviderRecovery()
       }
     })())
   }
@@ -2926,6 +2993,7 @@ export class AgentManager extends EventEmitter {
    * heartbeat and triage sessions bypass the limits (see admission.ts).
    */
   async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
+    if (this.productionAdmissionMutation) throw new Error('The default agent is being updated. Retry after it finishes.')
     const execution = this.taskGroupExecution(taskId)
     if (execution) { taskId = execution.id; agentId = execution.agent_id! }
     this.assertAgentConfigurationAvailable(agentId)
@@ -3257,6 +3325,7 @@ export class AgentManager extends EventEmitter {
     if (!candidate) throw new Error(`Agent not found: ${candidateAgentId}`)
 
     const currentAgentId = resolveCaptainAgentId(this.db, project)
+    this.assertAgentConfigurationAvailable(currentAgentId ?? undefined)
     if (currentAgentId === candidateAgentId && !retry) {
       const existing = this.captainRuntimes.get(coordinator.id)
       if (existing) return existing
@@ -5067,7 +5136,7 @@ export class AgentManager extends EventEmitter {
    * dropped.
    */
   drainStartQueue(): void {
-    if (this.shuttingDown || this.startupReconciliation) return
+    if (this.shuttingDown || this.startupReconciliation || this.productionAdmissionMutation) return
     let changed = false
     let nextRetryAt: number | null = null
     // #150: a priority changed while waiting reorders the queue now.

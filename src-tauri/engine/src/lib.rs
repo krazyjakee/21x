@@ -23,6 +23,8 @@ mod configuration_desktop;
 #[cfg(feature = "synthetic-desktop")]
 mod desktop;
 mod process_tree;
+#[cfg(feature = "production-service")]
+pub mod production;
 #[cfg(feature = "synthetic-desktop")]
 pub type DesktopEventSink = Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>;
 

@@ -2,6 +2,8 @@ import { TASK_LIFECYCLE_CODECS, TASK_LIFECYCLE_EVENT_CODECS } from '@shared/task
 import { PRODUCTION_AGENT_CODECS } from '@shared/production-agent-codecs'
 import { PRODUCTION_AGENT_EVENT_CODECS } from '@shared/production-agent-events'
 import { COMMANDER_COMMAND_CODECS, COMMANDER_EVENT_CODECS } from '@shared/commander-desktop-codecs'
+import { PRODUCTION_SETTINGS_CODECS } from '@shared/production-settings-codecs'
+import { TERMINAL_COMMAND_CODECS, TERMINAL_EVENT_CODECS } from '@shared/terminal-desktop-codecs'
 import type { DesktopApi } from '@shared/desktop-api'
 import { DATABASE_COMMAND_CODECS, DATABASE_EVENT_CODECS } from '@shared/database-desktop-codecs'
 import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_EVENT_CODECS } from '@shared/configuration-desktop-codecs'
@@ -10,11 +12,11 @@ import { AGENT_CONFIGURATION_CODECS, AGENT_CONFIGURATION_EVENT_CODECS } from '@s
 import type { DesktopCommandMap, DesktopEventMap } from '@shared/desktop-operations'
 import { isRecord, ServiceProtocolError } from '@shared/service-protocol'
 import { DesktopClient, type DesktopClientState } from './desktop-client'
-import { createTauriDesktopTransport, getTauriEngineEpoch, type TauriDesktopApi } from './tauri-desktop-transport'
+import { createTauriDesktopTransport, getTauriEngineEpoch, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS }
-const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS,
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS }
+const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
 /** Explicit binding is separate from codec validation and native/service authorization. */
@@ -40,18 +42,21 @@ export const NATIVE_COMMAND_BINDINGS = {
   'commander:archiveSession': 'commander.archiveSession', 'commander:listMessages': 'commander.listMessages', 'commander:markRead': 'commander.markRead',
   'commander:setActiveSession': 'commander.setActiveSession', 'commander:send': 'commander.send', 'commander:getImage': 'commander.getImage',
   'commander:cancel': 'commander.cancel', 'commander:undoAction': 'commander.undoAction', 'commander:getActivity': 'commander.getActivity',
-  'chat:start': 'chat.start', 'chat:cancel': 'chat.cancel'
+  'chat:start': 'chat.start', 'chat:cancel': 'chat.cancel',
+  'secrets:getAll': 'secrets.getAll', 'secrets:create': 'secrets.create', 'secrets:update': 'secrets.update', 'secrets:delete': 'secrets.delete', 'env:get': 'env.get',
+  'terminal:create': 'terminal.create', 'terminal:write': 'terminal.write', 'terminal:resize': 'terminal.resize',
+  'terminal:kill': 'terminal.kill', 'terminal:getCwd': 'terminal.getCwd', 'terminal:getBuffer': 'terminal.getBuffer'
 } as const satisfies Record<keyof typeof commands, ApiPath<DesktopApi>>
 export const NATIVE_EVENT_BINDINGS = {
   'task:created': 'onTaskCreated', 'task:updated': 'onTaskUpdated', 'task:deleted': 'onTaskDeleted', 'project:changed': 'projects.onChanged', 'transcript:changed': 'onTranscriptChanged',
   'skills:changed': 'skills.onChanged', 'agent:status': 'onAgentStatus', 'agent:startQueueChanged': 'onAgentStartQueueChanged',
   'project:statusChanged': 'projects.onStatusChanged', 'concurrency:changed': 'concurrency.onChanged', 'tasks:refresh': 'onTasksRefresh',
-  'commander:event': 'commander.onEvent', 'chat:event': 'chat.onEvent'
+  'commander:event': 'commander.onEvent', 'chat:event': 'chat.onEvent', 'terminal:data': 'terminal.onData', 'terminal:exit': 'terminal.onExit'
   // Recovery-state codec exists, but there is no production API binding yet.
 } as const satisfies Partial<Record<keyof typeof events, ApiPath<DesktopApi>>>
 const reads = new Set<keyof typeof commands>(['db:getTasks', 'db:getTask', 'project:getAll', 'project:get', 'project:getDefault', 'settings:get', 'settings:getAll', 'agent:getAll', 'skills:getAll', 'projectRepo:list', 'projectResource:list', 'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage', 'agentConfig:getProviders', 'agentConfig:listModels', 'db:getSubtasks', 'tasks:getCoordinatorTaskId', 'agent:getStartQueue',
   'agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'captainRuntime:get', 'commander:listSessions',
-  'commander:listMessages', 'commander:getImage', 'commander:getActivity'])
+  'commander:listMessages', 'commander:getImage', 'commander:getActivity', 'secrets:getAll', 'env:get', 'terminal:getCwd', 'terminal:getBuffer'])
 
 export interface NativeDesktopHost extends DesktopHost {
   reconnect: () => Promise<void>
@@ -61,6 +66,7 @@ export interface NativeDesktopHost extends DesktopHost {
   readonly hydrationPending: boolean
   readonly unavailableCapability: string | null
   readonly recoveryFailed: boolean
+  readonly bootstrapFailure?: string | null
 }
 export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopHost {
   const observers = new Set<() => void>(), refreshes = new Set<() => void>()
@@ -69,6 +75,7 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
   let generation = 0
   let hydrationGeneration = 0, recoveryFailed = false
   let unavailableCapability: string | null = null
+  let bootstrapFailure: string | null = null
   const sessionTasks = new Map<string, string>(), observedRevisions = new Map<string, number>(), hydratedRevisions = new Map<string, number>()
   const notify = () => { for (const listener of [...observers]) { try { listener() } catch { /* Consumer failures cannot change connection ownership. */ } } }
   const client = new DesktopClient({ transport: createTauriDesktopTransport(native), commands, events, onState: next => {
@@ -151,6 +158,7 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
     get connection() { return state }, get hydrationPending() { return hydrationPending },
     get unavailableCapability() { return unavailableCapability },
     get recoveryFailed() { return recoveryFailed },
+    get bootstrapFailure() { return bootstrapFailure },
     supports: path => commandPaths.has(path) || eventPaths.has(path) || path === 'onTasksRefresh',
     subscribeConnection: listener => { observers.add(listener); return () => { observers.delete(listener) } },
     setRehydrator: callback => { rehydrate = callback },
@@ -158,7 +166,12 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
     async reconnect() {
       if (disposed) throw new ServiceProtocolError('DISCONNECTED')
       unavailableCapability = null
-      await client.connect(await getTauriEngineEpoch(native))
+      bootstrapFailure = null
+      hydrationPending = true; recoveryFailed = false; notify()
+      let epoch: string
+      try { epoch = await getTauriEngineEpoch(native) }
+      catch (error) { bootstrapFailure = error instanceof NativeBootstrapUnavailableError ? error.explanation : null; client.disconnect('DISCONNECTED'); notify(); throw error }
+      await client.connect(epoch)
       // Reads during hydration are allowed; mutation/approval is fenced until
       // all retained durable owners have settled against this trusted epoch.
       if (rehydrate) await hydrate()

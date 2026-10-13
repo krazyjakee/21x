@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import type { TauriDesktopApi } from './tauri-desktop-transport'
-import { createNativeDesktopHost, type NativeDesktopHost } from './native-desktop-host'
+import { createNativeDesktopHost, NATIVE_COMMAND_BINDINGS, type NativeDesktopHost } from './native-desktop-host'
+import { PRODUCTION_API_KEY_SET_MARKER } from '@shared/production-settings-codecs'
 import { desktopApi, installDesktopHost } from './desktop-api'
 import type { ServiceEvent } from '@shared/service-protocol'
 const hosts: NativeDesktopHost[] = [], releases: Array<() => void> = []
@@ -93,4 +94,72 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
   expect(await desktopApi.commander.listSessions()).toEqual([])
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
+})
+
+it('binds the 86 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+  const f = fixture(); releases.push(installDesktopHost(f.host))
+  const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
+  f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
+  f.results.set('settings:getAll', { theme: 'dark', openai_api_key: PRODUCTION_API_KEY_SET_MARKER })
+  f.results.set('env:get', PRODUCTION_API_KEY_SET_MARKER)
+  f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
+  f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(86)
+  expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
+  await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
+  expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
+  expect(await desktopApi.secrets.getAll()).toEqual([secret])
+  const input = { name: secret.name, description: secret.description, env_var_name: secret.env_var_name, value: 'new credential supplied by user' }
+  expect(await desktopApi.secrets.create(input)).toEqual(secret)
+  expect(await desktopApi.secrets.update(secret.id, { description: 'Updated metadata' })).toEqual(secret)
+  expect(await desktopApi.secrets.delete(secret.id)).toBe(true)
+  expect(await desktopApi.terminal.create('panel-1', 80, 24)).toEqual({ pid: 4242 })
+  expect(await desktopApi.terminal.getCwd('panel-1', 4242)).toEqual({ cwd: '/selected/workspace' })
+  expect(await desktopApi.terminal.getBuffer('panel-1', 200)).toEqual({ lines: ['recent output'] })
+  await desktopApi.terminal.write('panel-1', '\x03'); await desktopApi.terminal.resize('panel-1', 100, 40); await desktopApi.terminal.kill('panel-1', 4242)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'terminal:kill', payload: { id: 'panel-1', expectedPid: 4242 }, engineEpoch: 'engine-1' })
+  const before = f.invoke.mock.calls.length
+  await expect(desktopApi.env.get('HOME')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(desktopApi.settings.set('unknown_owner_key', 'yes')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+})
+
+it('preserves terminal subscriptions through reconnect and drops retired-epoch output', async () => {
+  const f = fixture(), data = vi.fn(), exit = vi.fn()
+  const offData = f.host.api.terminal.onData(data), offExit = f.host.api.terminal.onExit(exit)
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  f.emit('terminal:data', { id: 'panel-1', data: '\x1b[31mfirst\x1b[0m' })
+  expect(data).toHaveBeenCalledExactlyOnceWith({ id: 'panel-1', data: '\x1b[31mfirst\x1b[0m' })
+  f.changeEpoch(); await f.host.reconnect()
+  f.history[0]?.({ payload: { protocolVersion: 1, kind: 'event', operation: 'terminal:data', payload: { id: 'panel-1', data: 'retired' }, engineEpoch: 'engine-1', sequence: 2 } })
+  expect(data).toHaveBeenCalledOnce()
+  f.emit('terminal:exit', { id: 'panel-1' }); expect(exit).toHaveBeenCalledExactlyOnceWith({ id: 'panel-1' })
+  offData(); offExit()
+})
+
+it('keeps native terminal mutation fenced during recovery and refuses secret value exposure', async () => {
+  const f = fixture(); await f.host.reconnect()
+  await expect(f.host.api.terminal.create('panel-1', 80, 24)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.secrets.create({ name: 'Secret', description: '', env_var_name: 'TOKEN', value: 'private' })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  f.results.set('secrets:getAll', [{ id: 'secret-1', name: 'Secret', description: '', env_var_name: 'TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13', value: 'private stored value' }])
+  await expect(f.host.api.secrets.getAll()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('shows a fixed bootstrap failure, disconnects an earlier client and keeps mutations fenced without retry', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const original = f.invoke.getMockImplementation()
+  if (!original) throw new Error('Missing native transport fixture')
+  f.invoke.mockImplementation((command, args) => command === 'engine_status' ? Promise.resolve({ available: false, production: true, protocolVersion: 1,
+    startupFailure: { code: 'PRODUCTION_CONTAINMENT_UNAVAILABLE', phase: 'production-delegation-missing', path: '/private/profile', credential: 'private value' }
+  }) : original(command, args))
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.reconnect()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.host.bootstrapFailure).toBe('Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.')
+  expect(f.host.connection.status).toBe('disconnected'); expect(f.host.hydrationPending).toBe(true)
+  await expect(f.host.api.settings.set('theme', 'light')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke.mock.calls.length).toBe(before + 1)
+  expect(f.unlisten).toHaveBeenCalledOnce()
+  expect(f.host.bootstrapFailure).not.toContain('/private/profile')
 })

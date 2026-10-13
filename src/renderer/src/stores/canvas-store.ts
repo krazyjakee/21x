@@ -6,6 +6,7 @@ import { migrateLegacySettingToDefaultProject, projectScopedKey } from '@/lib/pr
 import { getCurrentProjectId, useProjectStore } from '@/stores/project-store'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import { embeddedBrowserEnabled, isRetiredBrowserPanel } from '@/lib/desktop-features'
+import { closeNativeTerminalPanel } from '@/lib/terminal-session'
 
 /**
  * The canvas is kept once per project under `canvas_state:<projectId>`. The
@@ -518,6 +519,7 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
   },
 
   removePanel: (id) => {
+    if (get().panels.some(panel => panel.id === id && panel.type === 'terminal')) void closeNativeTerminalPanel(id).catch(() => {})
     releaseBrokerPanel(id)
     get().removeEdgesForPanel(id)
     set((s) => ({ panels: s.panels.filter((p) => p.id !== id) }))

@@ -3,11 +3,14 @@
 #[cfg(all(feature = "synthetic-agent", not(debug_assertions)))]
 compile_error!("synthetic-agent is restricted to debug fixture builds");
 
+#[cfg(not(feature = "production-service"))]
 use serde_json::{json, Value};
+#[cfg(not(feature = "production-service"))]
 use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
     Arc, Mutex,
 };
+#[cfg(not(feature = "production-service"))]
 use std::{
     io::Write,
     path::PathBuf,
@@ -15,7 +18,9 @@ use std::{
 };
 #[cfg(feature = "synthetic-desktop")]
 use tauri::{Emitter, EventTarget};
+#[cfg(not(feature = "production-service"))]
 use tauri::{Manager, State, WebviewWindow};
+#[cfg(not(feature = "production-service"))]
 use twentyonex_engine::{Engine, EngineError};
 
 #[cfg(all(feature = "artifact-authorization-proof", debug_assertions))]
@@ -23,6 +28,7 @@ mod artifact_proof;
 
 // Developer/CI diagnostics only: release builds never read this opt-in variable.
 // No command lets the renderer enable it, choose output paths, or bypass policy.
+#[cfg(not(feature = "production-service"))]
 struct NativeSmoke {
     report: Option<PathBuf>,
     started: AtomicBool,
@@ -34,6 +40,7 @@ struct NativeSmoke {
     evidence: Mutex<Value>,
 }
 
+#[cfg(not(feature = "production-service"))]
 impl NativeSmoke {
     fn new() -> Self {
         #[cfg(debug_assertions)]
@@ -117,6 +124,7 @@ impl NativeSmoke {
     }
 }
 
+#[cfg(not(feature = "production-service"))]
 fn begin_smoke(window: &WebviewWindow, smoke: Arc<NativeSmoke>) {
     #[cfg(feature = "synthetic-desktop")]
     if window.state::<Engine>().status()["syntheticDesktop"] == true {
@@ -285,6 +293,7 @@ fn begin_synthetic_smoke(window: &WebviewWindow, smoke: Arc<NativeSmoke>) {
     });
 }
 
+#[cfg(not(feature = "production-service"))]
 fn trusted_origin(url: &tauri::Url) -> bool {
     let packaged = url.port().is_none()
         && (url.host_str() == Some("localhost") && url.scheme() == "tauri"
@@ -297,6 +306,7 @@ fn trusted_origin(url: &tauri::Url) -> bool {
     (packaged || development) && url.username().is_empty() && url.password().is_none()
 }
 
+#[cfg(not(feature = "production-service"))]
 fn authorize(window: &WebviewWindow) -> Result<(), EngineError> {
     if window.label() != "main"
         || !trusted_origin(&window.url().map_err(|_| EngineError::new("UNAUTHORIZED"))?)
@@ -306,6 +316,7 @@ fn authorize(window: &WebviewWindow) -> Result<(), EngineError> {
     Ok(())
 }
 
+#[cfg(not(feature = "production-service"))]
 #[tauri::command]
 async fn engine_invoke(
     window: WebviewWindow,
@@ -323,6 +334,7 @@ async fn engine_invoke(
     engine.request(&operation, payload).await
 }
 
+#[cfg(not(feature = "production-service"))]
 #[tauri::command]
 fn engine_status(
     window: WebviewWindow,
@@ -361,6 +373,7 @@ fn engine_status(
     Ok(engine.status())
 }
 
+#[cfg(not(feature = "production-service"))]
 #[tauri::command]
 async fn desktop_invoke(
     window: WebviewWindow,
@@ -424,6 +437,7 @@ impl Drop for SyntheticProfile {
     }
 }
 
+#[cfg(not(feature = "production-service"))]
 fn main() {
     let smoke = Arc::new(NativeSmoke::new());
     // Package launchers may need PATH while starting. Once this explicit debug
@@ -581,4 +595,13 @@ fn main() {
             }
         }
     });
+}
+
+#[cfg(all(feature = "production-service", feature = "synthetic-desktop"))]
+compile_error!("production-service and synthetic-desktop are separate native entry points");
+#[cfg(feature = "production-service")]
+mod production_host;
+#[cfg(feature = "production-service")]
+fn main() {
+    production_host::run();
 }

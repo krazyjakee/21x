@@ -22,3 +22,14 @@ it('makes failed native recovery visible and leaves the user a keyboard-accessib
   expect(screen.getByRole('button', { name: 'Reconnect' })).not.toBeDisabled()
   expect(screen.queryByText('private native detail')).toBeNull()
 })
+
+it('shows known provisioning failure guidance without presenting reconnect as a bootstrap retry', () => {
+  const reconnect = vi.fn()
+  const host: NativeDesktopHost = { kind: 'tauri', api: {} as DesktopApi, connection: { status: 'disconnected', engineEpoch: null }, hydrationPending: true, recoveryFailed: false,
+    bootstrapFailure: 'Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.', unavailableCapability: null,
+    supports: () => false, subscribeConnection: () => () => {}, reconnect, rehydrate: async () => {}, setRehydrator: () => {}, dispose: () => {} }
+  releases.push(installDesktopHost(host)); render(<DesktopHostStatus />)
+  expect(screen.getByLabelText('Desktop connection')).toHaveTextContent('Provision the native environment and relaunch')
+  expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
+  expect(reconnect).not.toHaveBeenCalled()
+})

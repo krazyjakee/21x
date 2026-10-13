@@ -4213,6 +4213,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "url",
  "windows-sys 0.61.2",
@@ -4223,6 +4224,7 @@ name = "twentyonex-tauri-feasibility"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "twentyonex-engine",

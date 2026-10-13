@@ -24,6 +24,7 @@ export interface TerminalEventHost {
 }
 interface Entry {
   id: string
+  generation: number
   handle?: TerminalHandle
   events: TerminalEventHost
   buffer: string[]
@@ -42,6 +43,7 @@ export class TerminalServiceCore {
   private owned = new Set<Entry>()
   private probes = new Set<Promise<unknown>>()
   private closing = false
+  private nextGeneration = 0
 
   constructor(private readonly host: TerminalProcessHost) {}
 
@@ -52,11 +54,12 @@ export class TerminalServiceCore {
     if (input.cwd !== undefined && (typeof input.cwd !== 'string' || input.cwd.includes('\0'))) throw new Error('Invalid terminal cwd')
     // Retired processes still consume a slot until actual native close.
     if (this.owned.size >= 64) throw new Error('TERMINAL_CAPACITY_EXCEEDED')
+    if (this.nextGeneration === Number.MAX_SAFE_INTEGER) throw new Error('TERMINAL_IDENTITY_EXHAUSTED')
     const existing = this.current.get(input.id)
     if (existing) this.retire(existing)
     let finish!: () => void
     const entry: Entry = {
-      id: input.id, events, buffer: [], exited: false, killRequested: false,
+      id: input.id, generation: ++this.nextGeneration, events, buffer: [], exited: false, killRequested: false,
       closed: new Promise<void>(resolve => { finish = resolve }), finish: () => finish()
     }
     this.current.set(input.id, entry)
@@ -99,6 +102,29 @@ export class TerminalServiceCore {
     return { pid: entry.handle.pid, lines: [...entry.buffer] }
   }
 
+  /** Current native identity; generation distinguishes same-PID replacements. */
+  identity(id: string): { pid: number; generation: number } | null {
+    this.assertOpen()
+    const entry = this.current.get(id)
+    return entry?.handle && this.isCurrent(entry) ? { pid: entry.handle.pid, generation: entry.generation } : null
+  }
+
+  /** A retiring process still owns its ID until the actual onExit receipt. */
+  ownedIdentity(id: string): { pid: number; generation: number } | null {
+    this.assertOpen()
+    const entry = this.current.get(id) ?? [...this.owned].filter(row => row.id === id && !row.exited).sort((a, b) => b.generation - a.generation)[0]
+    return entry?.handle && !entry.exited ? { pid: entry.handle.pid, generation: entry.generation } : null
+  }
+
+  /** Reconnect event delivery without copying the potentially large buffer. */
+  attachIdentity(id: string, events: TerminalEventHost): { pid: number; generation: number } | null {
+    this.assertOpen()
+    const entry = this.current.get(id)
+    if (!entry?.handle || !this.isCurrent(entry)) return null
+    entry.events = events
+    return { pid: entry.handle.pid, generation: entry.generation }
+  }
+
   write(id: string, data: string): { alive: boolean } {
     this.assertOpen()
     if (typeof data !== 'string' || data.length > MAX_CHARS) throw new Error('Invalid terminal input')
@@ -113,6 +139,14 @@ export class TerminalServiceCore {
     try { this.current.get(id)?.handle?.resize?.(cols, rows) } catch { /* terminal already exited */ }
   }
 
+  /** Production acknowledgement must reflect the actual captured native call. */
+  resizeAcknowledged(id: string, cols: number, rows: number, expected: { pid: number; generation: number }): { alive: boolean } {
+    this.assertOpen(); this.validateSize(cols, rows)
+    const entry = this.current.get(id)
+    if (!entry?.handle?.resize || !this.isCurrent(entry) || entry.handle.pid !== expected.pid || entry.generation !== expected.generation) return { alive: false }
+    try { entry.handle.resize(cols, rows); return { alive: this.isCurrent(entry) } } catch { return { alive: false } }
+  }
+
   getBuffer(id: string, lines = 200): { lines: string[] } {
     this.assertOpen()
     if (!Number.isSafeInteger(lines) || lines < 1) throw new Error('Invalid terminal line count')
@@ -124,6 +158,19 @@ export class TerminalServiceCore {
     const entry = this.current.get(id)
     if (!entry || (expectedPid !== undefined && entry.handle?.pid !== expectedPid)) return
     this.retire(entry)
+  }
+
+  /** Retain this exact native process through close, including a prior failed
+   * kill or a timeout at the caller. Never redirect a delayed kill to a new PID. */
+  async killAcknowledged(id: string, expectedPid?: number, expectedGeneration?: number): Promise<{ killed: boolean }> {
+    this.assertOpen()
+    const candidates = [...this.owned].filter(entry => entry.id === id && !entry.exited && entry.handle &&
+      (expectedPid === undefined || entry.handle.pid === expectedPid) && (expectedGeneration === undefined || entry.generation === expectedGeneration))
+    const entry = expectedGeneration === undefined ? this.current.get(id) ?? candidates.sort((a, b) => b.generation - a.generation)[0] : candidates[0]
+    if (!entry?.handle || (expectedPid !== undefined && entry.handle.pid !== expectedPid) || (expectedGeneration !== undefined && entry.generation !== expectedGeneration)) return { killed: false }
+    this.retire(entry)
+    await entry.closed
+    return { killed: true }
   }
 
   async getCwd(id: string, expectedPid?: number): Promise<{ cwd: string | null }> {

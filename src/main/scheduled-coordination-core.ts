@@ -252,6 +252,8 @@ export class ScheduledCoordination {
   private readonly store: CommanderStore
   private timer: NodeJS.Timeout | null = null
   private closing = false
+  private providerMutation = false
+  private providerSignal = new AbortController()
   private activeTick: Promise<void> | null = null
   private readonly work = new Set<Promise<unknown>>()
   private readonly shutdownSignal = new AbortController()
@@ -287,7 +289,7 @@ export class ScheduledCoordination {
 
   /** One pass over every schedule. The interval calls this; tests may too. */
   tick(): Promise<void> {
-    if (this.closing) return Promise.resolve()
+    if (this.closing || this.providerMutation) return Promise.resolve()
     if (this.activeTick) return this.activeTick
     const pass = this.own(() => this.executeTick())
     this.activeTick = pass
@@ -296,10 +298,10 @@ export class ScheduledCoordination {
   }
 
   private async executeTick(): Promise<void> {
-    if (this.closing) return
+    if (this.closing || this.providerMutation) return
     try {
       await this.runReviews()
-      if (!this.closing) await this.runBriefing()
+      if (!this.closing && !this.providerMutation) await this.runBriefing()
     } catch (err) {
       console.error('[ScheduledCoordination] tick failed:', err)
     }
@@ -330,6 +332,16 @@ export class ScheduledCoordination {
     })
     try { await Promise.race([Promise.allSettled([...this.work]), expired]) }
     finally { if (timer) clearTimeout(timer) }
+  }
+
+  beginProviderConfigurationMutation(): { drain(): Promise<void>; release(): void } {
+    if (this.closing || this.providerMutation) throw new Error('COORDINATION_PROVIDER_CONFIGURATION_UNAVAILABLE')
+    this.providerMutation = true; this.providerSignal.abort()
+    let released = false
+    return { drain: async () => { while (this.work.size) await Promise.allSettled([...this.work]) }, release: () => {
+      if (released) return
+      released = true; this.providerMutation = false; this.providerSignal = new AbortController()
+    } }
   }
 
   /**
@@ -472,11 +484,12 @@ export class ScheduledCoordination {
   /** Builds and stores one briefing session now (the schedule calls this; tests may too). */
   runBriefingNow(options: { speak?: boolean } = {}): Promise<BriefingResult | null> {
     if (this.closing) return Promise.reject(new Error('SCHEDULED_COORDINATION_CLOSED'))
+    if (this.providerMutation) return Promise.reject(new Error('COORDINATION_PROVIDER_CONFIGURATION_CHANGING'))
     return this.own(() => this.executeBriefing(options))
   }
 
   private async executeBriefing(options: { speak?: boolean }): Promise<BriefingResult | null> {
-    if (this.closing) return null
+    if (this.closing || this.providerMutation) return null
     const entries = this.collectBriefing()
     const day = localDayKey(new Date(this.now()))
     const briefing = buildBriefingText(entries, day)
@@ -517,7 +530,7 @@ export class ScheduledCoordination {
   }
 
   private async modelSummary(briefing: string): Promise<string | null> {
-    if (!this.options.createProvider) return null
+    if (!this.options.createProvider || this.providerMutation) return null
     let provider: ChatProvider
     try {
       provider = this.options.createProvider()
@@ -529,7 +542,7 @@ export class ScheduledCoordination {
       const text = await completeText(
         provider,
         { system: BRIEFING_SUMMARY_PROMPT, messages: [{ role: 'user', content: briefing }], maxTokens: 400 },
-        AbortSignal.any([this.shutdownSignal.signal, AbortSignal.timeout(this.summaryTimeoutMs)])
+        AbortSignal.any([this.shutdownSignal.signal, this.providerSignal.signal, AbortSignal.timeout(this.summaryTimeoutMs)])
       )
       return text.trim() || null
     } catch (err) {

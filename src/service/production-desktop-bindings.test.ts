@@ -10,6 +10,8 @@ import type { DesktopCallerContext } from './transport/desktop-registry'
 import { DATABASE_COMMAND_CODECS } from '../shared/database-desktop-codecs'
 import { CONFIGURATION_COMMAND_CODECS } from '../shared/configuration-desktop-codecs'
 import { CodingAgentType } from '../renderer/src/types'
+import type { ChatProvider } from '../main/chat/providers/types'
+import { PRODUCTION_SETTINGS_CODECS } from '../shared/production-settings-codecs'
 import { COMMANDER_COMMAND_CODECS } from '../shared/commander-desktop-codecs'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
@@ -25,7 +27,7 @@ afterEach(async () => {
   for (const { owner, root } of owned.splice(0)) { await owner.close(); rmSync(root, { recursive: true, force: true }) }
   vi.restoreAllMocks()
 })
-async function fixture() {
+async function fixture(providerOverride?: ChatProvider) {
   const { ProductionOwner } = ownerModule
   const { ProductionDesktopBindings } = bindingModule
   const root = mkdtempSync(join(tmpdir(), '21x-production-bindings-')), resourceRoot = join(root, 'resources')
@@ -42,7 +44,7 @@ async function fixture() {
     native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: 'disabled' },
       prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }) }
   }
-  const owner = new ProductionOwner(bootstrap, { createAdapter: () => adapter, createProvider: () => ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end', stopReason: 'end_turn' } } }) })
+  const owner = new ProductionOwner(bootstrap, { createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end', stopReason: 'end_turn' } } }) })
   owned.push({ owner, root }); const services = await owner.start(), epoch = owner.snapshot().epoch
   const caller: DesktopCallerContext = { principal: 'trusted-desktop-main', engineEpoch: epoch, webviewId: 'main', origin: 'tauri://localhost' }
   const events: Array<{ operation: string; payload: unknown }> = []
@@ -52,16 +54,50 @@ async function fixture() {
     canAccessTask: (_id, value) => trusted(value), canAccessSource: (_id, value) => trusted(value),
     canAccessSession: (_id, value) => trusted(value), canAccessGlobalCommander: trusted,
     canAccessAgent: (_id, value) => trusted(value), canManageGlobalConfiguration: trusted, canQueryBackend: (_type, _url, value) => trusted(value),
-    canCreateProject: trusted, canEditSettings: trusted, canAccessGlobalSkills: trusted, canChangeSkillScope: trusted, canReorderProjects: trusted },
+    canCreateProject: trusted, canEditSettings: trusted, canAccessGlobalSkills: trusted, canChangeSkillScope: trusted, canReorderProjects: trusted,
+    canReadSetting: (_key, value) => trusted(value), canWriteSetting: (_key, value) => trusted(value),
+    canAccessSecret: (_id, value) => trusted(value), canCreateSecret: trusted,
+    canUseSecretEnvironment: (_name, value) => trusted(value), canReadEnvironment: (_key, value) => trusted(value),
+    canAccessTerminal: (_id, value) => trusted(value), resolveTerminalDirectory: (_id, value) => trusted(value)
+      ? { cwd: bootstrap.paths.workspaceRoot, root: bootstrap.paths.workspaceRoot } : null },
     emit: (operation, payload) => events.push({ operation, payload }), fatal: () => {} }
   const backend = await ProductionDesktopBindings.attach(owner, options), signal = new AbortController().signal
   return { owner, services, backend, options, caller, signal, events }
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('fences actual conversation and briefing owners before changing a global key and joins ignored cancellation', async () => {
+    let finish!: () => void, entered!: () => void, calls = 0
+    const gate = new Promise<void>(resolve => { finish = resolve })
+    const entry = new Promise<void>(resolve => { entered = resolve })
+    const signals: AbortSignal[] = []
+    const provider: ChatProvider = { id: 'controlled', model: 'controlled', async *stream(_request, signal) {
+      signals.push(signal); if (++calls === 3) entered()
+      await gate
+      yield { type: 'message_end', stopReason: 'end_turn' }
+    } }
+    const f = await fixture(provider); finishers.push(finish)
+    const chat = f.services.chat.startTurn({ provider, messages: [{ role: 'user', content: 'Chat' }] }, () => {})
+    const session = f.services.commanderStore.createSession()
+    const commander = f.services.commander.sendUserMessage(session.id, 'Commander')
+    const briefing = f.services.coordination.runBriefingNow()
+    await entry
+    const write = f.backend.invoke('settings:set', PRODUCTION_SETTINGS_CODECS['settings:set'].encodeArguments(['openai_api_key', 'controlled-new-key']), f.caller, f.signal)
+    await vi.waitFor(() => expect(signals.every(signal => signal.aborted)).toBe(true))
+    expect(f.services.db.getSetting('openai_api_key')).toBeUndefined()
+    expect(() => f.services.chat.startTurn({ provider, messages: [] }, () => {})).toThrow('CONFIGURATION_CHANGING')
+    expect(() => f.services.commander.sendUserMessage(session.id, 'New request')).toThrow('CONFIGURATION_CHANGING')
+    await expect(f.services.coordination.runBriefingNow()).rejects.toThrow('CONFIGURATION_CHANGING')
+    finish(); await Promise.all([chat.done, commander.done, briefing, write])
+    expect(f.services.db.getSetting('openai_api_key')).toBe('controlled-new-key')
+    expect(f.services.db.db.prepare('SELECT value FROM settings WHERE key=?').get('openai_api_key')).not.toEqual({ value: 'controlled-new-key' })
+    const read = await f.backend.invoke('settings:get', PRODUCTION_SETTINGS_CODECS['settings:get'].encodeArguments(['openai_api_key']), f.caller, f.signal)
+    expect(read).toEqual({ defined: true, value: '__21x_api_key_set__' })
+    await f.services.chat.startTurn({ provider, messages: [] }, () => {}).done
+  })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(75)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(86)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

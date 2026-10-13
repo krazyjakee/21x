@@ -96,6 +96,7 @@ export class ChatRuntime {
   private readonly turns = new Map<string, AbortController>()
   private readonly work = new Set<Promise<ChatTurnResult>>()
   private closing = false
+  private providerMutation = false
 
   /** Turn ids currently running. */
   get activeTurnIds(): string[] {
@@ -104,6 +105,7 @@ export class ChatRuntime {
 
   startTurn(options: ChatTurnOptions, listener: ChatEventListener): ChatTurnHandle {
     if (this.closing) throw new Error('CHAT_RUNTIME_CLOSED')
+    if (this.providerMutation) throw new Error('CHAT_PROVIDER_CONFIGURATION_CHANGING')
     const turnId = createId()
     const controller = new AbortController()
     const forward = (): void => controller.abort()
@@ -136,6 +138,19 @@ export class ChatRuntime {
 
   cancelAll(): void {
     for (const controller of this.turns.values()) controller.abort()
+  }
+
+  /** Reserve synchronously before another provider owner is awaited. Accepted
+   * tools and streams remain owned until their raw work settles. */
+  beginProviderConfigurationMutation(): { drain(): Promise<void>; release(): void } {
+    if (this.closing || this.providerMutation) throw new Error('CHAT_PROVIDER_CONFIGURATION_UNAVAILABLE')
+    this.providerMutation = true
+    this.cancelAll()
+    let released = false
+    return {
+      drain: async () => { while (this.work.size) await Promise.allSettled([...this.work]) },
+      release: () => { if (!released) { released = true; this.providerMutation = false } }
+    }
   }
 
   shutdown(): void {

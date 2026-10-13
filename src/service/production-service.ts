@@ -212,7 +212,12 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
     canAccessSession: (_id, caller) => trusted(caller),
     canAccessGlobalCommander: trusted, canManageGlobalConfiguration: trusted, canCreateProject: trusted,
     canEditSettings: trusted, canAccessGlobalSkills: trusted, canChangeSkillScope: trusted, canReorderProjects: trusted,
-    canQueryBackend: (_type, _url, caller) => trusted(caller)
+    canQueryBackend: (_type, _url, caller) => trusted(caller),
+    canReadSetting: (_key, caller) => trusted(caller), canWriteSetting: (_key, caller) => trusted(caller),
+    canAccessSecret: (_id, caller) => trusted(caller), canCreateSecret: trusted,
+    canUseSecretEnvironment: (_name, caller) => trusted(caller), canReadEnvironment: (_key, caller) => trusted(caller),
+    canAccessTerminal: (_id, caller) => trusted(caller), resolveTerminalDirectory: (_id, caller) => trusted(caller)
+      ? { cwd: descriptor.paths.workspaceRoot, root: descriptor.paths.workspaceRoot } : null
   }
   const host = sealProductionServiceHost({ descriptor, authority, caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' },
     unbridgedOwnerEvent: () => { process.stderr.write('PRODUCTION_NATIVE_EVENT_UNSUPPORTED\n') },
