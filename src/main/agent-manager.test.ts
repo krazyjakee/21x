@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { AgentManager, AgentShutdownIncompleteError, AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS, withStartupDeadline } from './agent-manager'
 import { AGENT_SERVER_START_TIMEOUT_MS, AGENT_SESSION_START_TIMEOUT_MS } from './agent-manager-core'
+import { classifyProviderFailure } from './agent-manager/provider-failure'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { shouldEnableTillDone } from './agent-manager/session-config'
 import { isDelegationTool } from './agent-manager/watchdogs'
@@ -238,52 +239,56 @@ describe('AgentManager skill file paths', () => {
   })
 
   describe('automatic credit fallback', () => {
-    it('hands off to the first available fallback and carries the remaining chain', async () => {
-      const mockDb = createMockDb({ coding_agent: 'claude-code' }) as any
-      mockDb.getAgent.mockImplementation((id: string) => ({
-        id,
-        name: id === 'agent-1' ? 'Claude Opus' : id === 'agent-2' ? 'Astra' : 'GPT 6',
-        config: { coding_agent: 'claude-code' }
-      }))
-      const mgr = new AgentManager(mockDb)
-      const switchSpy = vi.spyOn(mgr as any, 'switchAgentWithContext').mockResolvedValue('fallback-session')
-      const session = {
-        id: 'session-1',
-        agentId: 'agent-1',
-        taskId: 'task-1',
-        fallbackAgentIds: ['agent-2', 'agent-3'],
-        attemptedAgentIds: new Set(['agent-1']),
-      }
-
-      await expect((mgr as any).tryAutomaticFallback(
-        'session-1',
-        session,
-        'Credit balance is too low'
-      )).resolves.toBe(true)
-
-      expect(switchSpy).toHaveBeenCalledWith('task-1', 'agent-2', {
-        remainingAgentIds: ['agent-3'],
-        attemptedAgentIds: new Set(['agent-1', 'agent-2'])
-      })
-    })
-
-    it('skips fallback agents already attempted in this task run', async () => {
+    async function recover(fallbackAgentIds: string[], attemptedAgentIds: string[], agentId: string, message: string) {
       const mockDb = createMockDb({ coding_agent: 'claude-code' }) as any
       mockDb.getAgent.mockImplementation((id: string) => ({ id, name: id, config: { coding_agent: 'claude-code' } }))
       const mgr = new AgentManager(mockDb)
-      const switchSpy = vi.spyOn(mgr as any, 'switchAgentWithContext').mockResolvedValue('fallback-session')
-      const session = {
-        id: 'session-2',
-        agentId: 'agent-2',
-        taskId: 'task-1',
-        fallbackAgentIds: ['agent-1', 'agent-3'],
-        attemptedAgentIds: new Set(['agent-1', 'agent-2']),
-      }
+      const internal = mgr as any
+      const adapter = new FakeAdapter({ status: SessionStatusType.IDLE })
+      vi.spyOn(internal, 'getAdapter').mockReturnValue(adapter)
+      vi.spyOn(internal, 'buildSessionConfig').mockResolvedValue({ workspaceDir: '/tmp', agentId, taskId: 'task-1' })
+      vi.spyOn(internal, 'startAdapterPolling').mockImplementation(() => undefined)
+      vi.spyOn(internal, 'scheduleProviderRecovery').mockImplementation(() => undefined)
+      vi.spyOn(internal, 'stopSession').mockImplementation(async (...args: unknown[]) => {
+        internal.sessions.delete(args[0])
+      })
+      const session = { id: 'session-1', agentId, taskId: 'task-1', status: 'working', adapter,
+        fallbackAgentIds, attemptedAgentIds: new Set(attemptedAgentIds), seenMessageIds: new Set(), seenPartIds: new Set(), partContentLengths: new Map() }
+      internal.sessions.set('session-1', session)
+      const initial = internal.providerRecoveries.begin({ taskId: 'task-1', sessionId: 'session-1', agentId,
+        prompt: 'Continue remaining task work', remainingAgentIds: fallbackAgentIds, attemptedAgentIds })
+      internal.providerRecoveries.change(initial, { state: 'accepted' })
+      const startSpy = vi.spyOn(internal, 'startAdapterSession').mockImplementation(async (...args: unknown[]) => {
+        const replacement = { ...session, id: 'fallback-session', agentId: args[1] as string }
+        internal.sessions.set('fallback-session', replacement)
+        return 'fallback-session'
+      })
+      const accepted = internal.providerRecoveries.get('task-1')
+      const scheduled = await internal.tryProviderRecovery('session-1', session,
+        { ...classifyProviderFailure(message, 'turn_failed'), intentId: accepted.intentId })
+      await internal.dispatchProviderRecovery(internal.providerRecoveries.get('task-1'))
+      return { mgr, scheduled, startSpy, adapter, record: internal.providerRecoveries.get('task-1') }
+    }
 
-      await (mgr as any).tryAutomaticFallback('session-2', session, 'Quota exceeded')
+    it('hands off to the first available fallback and carries the remaining chain', async () => {
+      const result = await recover(['agent-2', 'agent-3'], ['agent-1'], 'agent-1', 'Credit balance is too low')
+      expect(result.scheduled).toBe(true)
+      expect(result.startSpy).toHaveBeenCalledOnce()
+      expect(result.startSpy.mock.calls[0][1]).toBe('agent-2')
+      expect(result.record).toMatchObject({ state: 'accepted', agentId: 'agent-2',
+        remainingAgentIds: ['agent-3'], attemptedAgentIds: ['agent-1', 'agent-2'] })
+      expect(result.mgr.findSessionByTaskId('task-1')?.session.fallbackAgentIds).toEqual(['agent-3'])
+      expect(result.adapter.sendPrompt.mock.calls[0][1][0].text).toContain('Do not repeat completed tool calls')
+      await result.mgr.stopAllSessions()
+    })
 
-      expect(switchSpy).toHaveBeenCalledOnce()
-      expect(switchSpy.mock.calls[0][1]).toBe('agent-3')
+    it('skips fallback agents already attempted in this task run', async () => {
+      const result = await recover(['agent-1', 'agent-3'], ['agent-1', 'agent-2'], 'agent-2', 'Quota exceeded')
+      expect(result.startSpy).toHaveBeenCalledOnce()
+      expect(result.startSpy.mock.calls[0][1]).toBe('agent-3')
+      expect(result.record.attemptedAgentIds).toEqual(['agent-1', 'agent-2', 'agent-3'])
+      expect(result.adapter.sendPrompt).toHaveBeenCalledOnce()
+      await result.mgr.stopAllSessions()
     })
   })
 

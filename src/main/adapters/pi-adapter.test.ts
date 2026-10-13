@@ -229,6 +229,7 @@ describe('PiAdapter', () => {
     expect(process.stdin.write).toHaveBeenCalledWith(
       `${JSON.stringify({
         type: 'prompt',
+        id: session.promptRequestId,
         message: 'Stop and do this instead',
         streamingBehavior: 'steer',
       })}\n`,
@@ -246,7 +247,7 @@ describe('PiAdapter', () => {
     await adapter.sendPrompt(session.id, [{ type: MessagePartType.TEXT, text: 'Start work' }], session.config)
 
     expect(process.stdin.write).toHaveBeenCalledWith(
-      `${JSON.stringify({ type: 'prompt', message: 'Start work' })}\n`,
+      `${JSON.stringify({ type: 'prompt', id: session.promptRequestId, message: 'Start work' })}\n`,
       expect.any(Function),
     )
   })
@@ -459,19 +460,20 @@ describe('PiAdapter', () => {
         role: 'assistant',
         content: [],
         stopReason: 'error',
-        errorMessage: 'Provider unavailable',
+        errorMessage: 'Service unavailable',
       },
     })
     monotonicSpy.mockReturnValue(1_101)
 
     await expect(adapter.getStatus(session.id, session.config)).resolves.toEqual({
       type: 'error',
-      message: 'Provider unavailable',
+      message: 'Service unavailable',
+      providerFailure: expect.objectContaining({ kind: 'transient', delivery: 'turn_failed' }),
     })
     expect((await adapter.pollMessages(session.id)).at(-1)).toMatchObject({
       id: 'pi-error-1',
       type: 'error',
-      text: 'Provider unavailable',
+      text: 'Service unavailable',
     })
     monotonicSpy.mockRestore()
   })

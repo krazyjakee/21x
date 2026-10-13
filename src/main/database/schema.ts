@@ -10,6 +10,7 @@ import { createConcurrencyTables, migrateConcurrencyControl } from './concurrenc
 import { dropAuthorizationTables, dropMergeGrantTables, removeProjectPermissionSettings } from './authorization-schema'
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
+import { createProviderRecoveryTable } from './provider-recovery-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -70,7 +71,7 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  *          merge_grant* tables are dropped and projects.settings loses its
  *          `escalation` and `merge_grants` blocks (authorization-schema.ts).
  */
-const SCHEMA_VERSION = 32
+const SCHEMA_VERSION = 33
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -569,6 +570,7 @@ export function createTables(db: Database.Database): void {
 
   // Delegated GitHub issue writes: the audit ledger and idempotency claims.
   createIssueWriteTables(db)
+  createProviderRecoveryTable(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.

@@ -1,3 +1,4 @@
+import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 /**
  * Unified ACP (Agent Client Protocol) adapter for all ACP-compatible coding agents.
  * Supports: codex-acp and cursor-agent.
@@ -78,6 +79,8 @@ interface AcpSession extends AcpTurnState, JsonRpcPeer {
   promptRequestId: number | null
   /** Last error (e.g. quota exceeded) for status reporting */
   lastError: string | null
+  providerFailure?: ProviderFailure
+  recoveryIntentId?: string
   /** True when Codex auth uses an API key (vs. ChatGPT subscription / CLI login) */
   codexUseApiKey: boolean
   /** Auth identity used, surfaced in provider errors for diagnostics */
@@ -347,7 +350,7 @@ export class AcpAdapter implements CodingAgentAdapter {
   async sendPrompt(
     sessionId: string,
     parts: MessagePart[],
-    _config: SessionConfig
+    config: SessionConfig
   ): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session) {
@@ -388,6 +391,8 @@ export class AcpAdapter implements CodingAgentAdapter {
 
     session.status = SessionStatusType.BUSY
     session.lastError = null
+    session.providerFailure = undefined
+    session.recoveryIntentId = config.providerIntentId
     session.currentTurnId++
     session.activeTurnId = session.currentTurnId
     session.lastChunkTime = null
@@ -427,7 +432,8 @@ export class AcpAdapter implements CodingAgentAdapter {
 
     return {
       type: session.status,
-      message: session.status === 'error' ? (session.lastError || 'Process error') : undefined
+      message: session.status === 'error' ? (session.lastError || 'Process error') : undefined,
+      providerFailure: session.providerFailure
     }
   }
 
@@ -644,6 +650,16 @@ export class AcpAdapter implements CodingAgentAdapter {
         return
       }
 
+      // A terminal prompt response owns the failed turn. Other RPC failures
+      // (including approval delivery) do not authorize replay.
+      if (response.error && session.promptRequestId === message.id) {
+        session.status = SessionStatusType.ERROR
+        session.lastError = response.error.message
+        session.providerFailure = { ...classifyProviderFailure(response.error, 'turn_failed'), intentId: session.recoveryIntentId }
+        session.activeTurnId = null
+        this.onDataAvailable?.(session.sessionId)
+        return
+      }
       // No pending request: e.g. an error for a permission response.
       if (response.error) {
         const errorInfo = this.extractCodexErrorInfo(response.error)
@@ -771,6 +787,8 @@ export class AcpAdapter implements CodingAgentAdapter {
 
     session.status = SessionStatusType.ERROR
     session.lastError = userMessage
+    // Unsolicited/config RPC errors do not prove a prompt turn failed.
+    session.providerFailure = undefined
     session.activeTurnId = null
 
     // LIVE buffer only. Quota/rate-limit errors are transient; permanentMessages

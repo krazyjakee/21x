@@ -32,7 +32,7 @@ import { ARTIFACT_WORKSPACE_INSTRUCTIONS, HEARTBEAT_MONITORING_INSTRUCTIONS, bui
 import { setupTaskWorktrees } from './agent-manager/worktree-setup'
 import { listProjectRepos, taskProjectId } from './agent-manager/project-repos'
 import { assistantTextKey, dedupStateFromHistory, hasMatchingErrorMessage, pruneDedup } from './agent-manager/output-dedup'
-import { findCreditExhaustionMessage, normalizeFallbackAgentIds } from './agent-manager/credit-exhaustion'
+import { normalizeFallbackAgentIds } from './agent-manager/credit-exhaustion'
 import { STUCK_SESSION_TIMEOUT_MS, findStuckTool, hasGarbledOutput, isDelegationTool, isWaitingForUserInput, type RunningTool } from './agent-manager/watchdogs'
 import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, checkAdmission, isExemptFromAdmission, isGlobalAdmissionReason, parseGlobalSessionLimit, type AdmissionDecision, type AdmissionLimits, type AdmissionReason, type CountedSession } from './agent-manager/admission'
 import { buildProjectLimitState, describeQueueReason, isAllProjectsPaused, projectAdmissionLimits, recordProjectSessionStart, setAllProjectsPaused, type ProjectLimitState } from './project-limits'
@@ -45,6 +45,8 @@ import { CaptainRuntimeStore } from './sessions/runtime-store'
 import { DeliveryStore, type DeliveryRecord } from './sessions/delivery-store'
 import { DurableStartQueueStore, type DurableQueuedStartInfo } from './sessions/start-queue-store'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
+import { classifyProviderFailure, PROVIDER_CONTINUATION, PROVIDER_MAX_RETRIES, type ProviderFailure } from './agent-manager/provider-failure'
+import { ProviderRecoveryStore, type ProviderRecovery } from './sessions/provider-recovery-store'
 
 // Default OpenCode server URL (matches database default)
 
@@ -209,6 +211,9 @@ export class AgentManager extends EventEmitter {
   private oauthManager: import('./oauth/oauth-manager').OAuthManager | null = null
   private externalListeners: Array<(channel: string, data: unknown) => void> = []
   private readonly captainRuntimes: CaptainRuntimeStore
+  private readonly providerRecoveries: ProviderRecoveryStore
+  private providerRecoveryTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly providerRecoveryFlights = new Set<string>()
   private readonly deliveries: DeliveryStore
   private readonly deliveryFlights = new Map<string, Promise<{ newSessionId?: string }>>()
   /** Durable sends to one task reserve and activate authorization in outbox order. */
@@ -335,6 +340,7 @@ export class AgentManager extends EventEmitter {
     this.db = db
     this.captainRuntimes = new CaptainRuntimeStore(db)
     this.deliveries = new DeliveryStore(db)
+    this.providerRecoveries = new ProviderRecoveryStore(db)
     this.startQueue = new DurableStartQueueStore(db)
     this.startIdleSessionReaper()
     this.resourceMonitor.start(30_000, () => {
@@ -459,11 +465,19 @@ export class AgentManager extends EventEmitter {
       await reconciliation
     } finally {
       this.startupReconciliation = null
+      this.scheduleProviderRecovery()
       this.scheduleStartQueueDrain()
     }
   }
 
   private async reconcileStartupNow(): Promise<void> {
+    // A crash while a wire send was in flight cannot prove rejection. A saved
+    // backoff is different: its failed turn/rejection was already confirmed.
+    for (const row of this.providerRecoveries.list(['sending', 'dispatching'])) {
+      if (row.state === 'sending' || row.state === 'dispatching') {
+        this.failProviderRecovery(row, 'The app restarted during provider delivery; acceptance is unknown. Inspect tool outcomes before continuing.')
+      }
+    }
     const inventory = {
       projects: this.db.getProjects().length,
       tasks: this.db.getTasks().length,
@@ -545,6 +559,7 @@ export class AgentManager extends EventEmitter {
 
     for (const state of this.captainRuntimes.list()) {
       if (state.phase !== 'healthy' && state.phase !== 'recovering') continue
+      if (this.providerRecoveryOwnsTask(state.ownerId)) continue
       this.captainRuntimes.transition(state.ownerId, state.generation, 'recovering', {
         deadlineAt: Date.now() + CAPTAIN_START_TIMEOUT_MS,
         probeOk: null
@@ -571,7 +586,7 @@ export class AgentManager extends EventEmitter {
     for (const stale of staleTasks) {
       const task = this.db.getTask(stale.id)
       if (!task) continue
-      if (this.sessionStarts.has(stale.id)) continue
+      if (this.sessionStarts.has(stale.id) || this.providerRecoveryOwnsTask(stale.id)) continue
       const liveOwner = this.findSessionByTaskId(stale.id)
       if (liveOwner && liveOwner.session.status !== 'error') {
         this.updateTaskFromLocalAgent(stale.id, { session_id: liveOwner.sessionId })
@@ -1194,6 +1209,8 @@ export class AgentManager extends EventEmitter {
       AGENT_SERVER_START_TIMEOUT_MS,
       'Agent session readiness probe'
     )
+    if (status.type === SessionStatusType.ERROR && this.providerRecoveries.get(taskId)?.state === 'retrying'
+      && this.providerRecoveries.get(taskId)?.sessionId === sessionId) return SessionStatusType.IDLE
     if (status.type === SessionStatusType.ERROR) {
       this.transitionCaptainRuntime(taskId, 'unhealthy', {
         lastProbeAt: Date.now(),
@@ -1429,14 +1446,14 @@ export class AgentManager extends EventEmitter {
       const startingSession = this.sessions.get(adapterSessionId)!
       const pendingLossId = startingSession.pendingLossId
       try {
-        const send = () => adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+        const send = () => this.sendTrackedPrompt(startingSession, adapterSessionId, promptText, sessionConfig)
         await serializeTaskSend(this, taskId, send)
         this.acknowledgeSessionRecap(startingSession, pendingLossId)
       } catch (sendError) {
         console.error(`[AgentManager] sendPrompt FAILED:`, sendError)
         const message = sendError instanceof Error ? sendError.message : String(sendError)
         const session = this.sessions.get(adapterSessionId)
-        if (session && findCreditExhaustionMessage([message]) && await this.tryAutomaticFallback(adapterSessionId, session, message)) {
+        if (session && await this.tryProviderRecovery(adapterSessionId, session, classifyProviderFailure(sendError))) {
           return this.findSessionByTaskId(taskId)?.sessionId || adapterSessionId
         }
         if (task && this.startQueue.fail(taskId, 'unsafe_side_effect_unknown', 'prompt_delivery_unconfirmed', message)) {
@@ -1717,6 +1734,8 @@ export class AgentManager extends EventEmitter {
         return
       }
 
+      if (this.providerRecoveries.get(activeSession.taskId)?.state === 'retrying') return
+
       // Cleared immediately before the poll, so anything the adapter buffers
       // from here on is known to be undelivered even if this poll returns it
       // (at worst that costs one extra cycle; it can never lose a message).
@@ -1768,7 +1787,7 @@ export class AgentManager extends EventEmitter {
       const session = this.sessions.get(sessionId)
 
       if (status.type === SessionStatusType.ERROR) {
-        await this.handleErrorStatus(sessionId, session, config, status, batchMessages)
+        await this.handleErrorStatus(sessionId, session, config, status, batchMessages, newParts.find((part) => part.type === MessagePartType.ERROR && part.providerFailure)?.providerFailure)
       } else if (status.type === SessionStatusType.WAITING_APPROVAL && session) {
         this.handleWaitingApprovalStatus(sessionId, session, config)
       } else if (status.type === SessionStatusType.BUSY && session) {
@@ -1783,6 +1802,9 @@ export class AgentManager extends EventEmitter {
       this.publishActivityHeartbeat(sessionId)
     } catch (error: unknown) {
       console.error('[AgentManager] Adapter polling error:', error)
+      const sessionId = this.resolvePollingSessionId(entry)
+      const session = this.sessions.get(sessionId)
+      if (session) this.handlePollingError(sessionId, session, error)
     }
   }
 
@@ -1825,6 +1847,8 @@ export class AgentManager extends EventEmitter {
     console.log(`[AgentManager] Session ID updated: ${sessionId} -> ${realSessionId}`)
     console.log(`[SessionTracker] REKEYED old=${sessionId} new=${realSessionId} task=${entry.config.taskId} reason=adapter_provided_real_id`)
     this.updateTaskFromLocalAgent(entry.config.taskId, { session_id: realSessionId })
+    const intent = this.providerRecoveries.get(entry.config.taskId)
+    if (intent?.sessionId === sessionId) this.providerRecoveries.change(intent, { sessionId: realSessionId })
 
     const session = this.sessions.get(sessionId)
     if (!session) return sessionId
@@ -1977,7 +2001,8 @@ export class AgentManager extends EventEmitter {
     session: AgentSession | undefined,
     config: SessionConfig,
     status: AdapterSessionStatus,
-    batchMessages: OutputMessage[]
+    batchMessages: OutputMessage[],
+    partFailure?: ProviderFailure
   ): Promise<void> {
     if (status.message?.includes('INCOMPATIBLE_SESSION_ID')) {
       console.warn('[AgentManager] Incompatible session detected during polling:', sessionId)
@@ -2010,15 +2035,8 @@ export class AgentManager extends EventEmitter {
       this.emitSystemError(sessionId, config.taskId, `error-${Date.now()}`, status.message || 'An unexpected error occurred. Check logs for details.')
     }
 
-    const exhaustionMessage = findCreditExhaustionMessage([
-      status.message,
-      ...batchMessages
-        .filter((message) => message.partType === MessagePartType.ERROR || message.role === 'system')
-        .map((message) => message.content)
-    ])
-    if (session && exhaustionMessage && await this.tryAutomaticFallback(sessionId, session, exhaustionMessage)) {
-      return
-    }
+    if (session && await this.tryProviderRecovery(sessionId, session,
+      status.providerFailure ?? partFailure ?? classifyProviderFailure(status.message ?? 'Unknown provider failure'))) return
 
     if (session) {
       session.status = 'error'
@@ -2026,80 +2044,6 @@ export class AgentManager extends EventEmitter {
       this.emitStatus(sessionId, config, 'error')
     }
     this.stopAdapterPolling(sessionId)
-  }
-
-  /**
-   * Moves an exhausted task to the next configured agent. The shared worktree
-   * and durable transcript remain in place; switchAgentWithContext seeds the
-   * new backend with the conversation recap and carries the rest of the chain.
-   */
-  private async tryAutomaticFallback(
-    sessionId: string,
-    session: AgentSession,
-    exhaustionMessage: string
-  ): Promise<boolean> {
-    if (session.fallbackInProgress || session.fallbackAgentIds.length === 0) return false
-    session.fallbackInProgress = true
-
-    while (session.fallbackAgentIds.length > 0) {
-      const fallbackAgentId = session.fallbackAgentIds.shift()!
-      if (session.attemptedAgentIds.has(fallbackAgentId)) continue
-      session.attemptedAgentIds.add(fallbackAgentId)
-
-      const fallbackAgent = this.db.getAgent(fallbackAgentId)
-      if (!fallbackAgent) {
-        console.warn(`[AgentManager] Skipping deleted fallback agent ${fallbackAgentId} for task ${session.taskId}`)
-        continue
-      }
-
-      const currentAgent = this.db.getAgent(session.agentId)
-      const fromName = currentAgent?.name || 'the current agent'
-      const detail = exhaustionMessage.replace(/\s+/g, ' ').trim().slice(0, 300)
-      this.emitSystemNotice(
-        sessionId,
-        session.taskId,
-        `automatic-fallback-${Date.now()}`,
-        `${fromName} cannot continue because its credits or usage quota are exhausted. Automatically handing off to ${fallbackAgent.name}.${detail ? `\n\nProvider message: ${detail}` : ''}`
-      )
-
-      try {
-        await this.switchAgentWithContext(session.taskId, fallbackAgentId, {
-          remainingAgentIds: [...session.fallbackAgentIds],
-          attemptedAgentIds: session.attemptedAgentIds
-        })
-        console.log(`[AgentManager] Automatic fallback succeeded for task ${session.taskId}: ${session.agentId} -> ${fallbackAgentId}`)
-        return true
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.error(`[AgentManager] Automatic fallback to ${fallbackAgent.name} failed:`, error)
-        this.emitSystemError(
-          '',
-          session.taskId,
-          `automatic-fallback-error-${Date.now()}`,
-          `Could not start fallback agent ${fallbackAgent.name}: ${message}`
-        )
-
-        // A failure after createSession may leave a partially-created runtime.
-        // Release it before trying the next candidate in the ordered chain.
-        const partial = this.findSessionByTaskId(session.taskId)
-        if (partial && partial.session.agentId === fallbackAgentId) {
-          await this.stopSession(partial.sessionId, false)
-          this.updateTaskFromLocalAgent(session.taskId, { session_id: null })
-        }
-      }
-    }
-
-    session.fallbackInProgress = false
-    if (!this.findSessionByTaskId(session.taskId)) {
-      this.updateTaskFromLocalAgent(session.taskId, { session_id: null })
-    }
-    this.emitSystemError(
-      '',
-      session.taskId,
-      `automatic-fallback-exhausted-${Date.now()}`,
-      'Every configured fallback agent was unavailable. The task has been stopped so you can review the agent configuration and retry.'
-    )
-    return false
   }
 
   private handleWaitingApprovalStatus(sessionId: string, session: AgentSession, config: SessionConfig): void {
@@ -2288,6 +2232,8 @@ export class AgentManager extends EventEmitter {
       for (const key of pollingEntry.assistantTextKeys ?? []) session.assistantTextKeys.add(key)
       pruneDedup(session.seenMessageIds, session.seenPartIds, session.partContentLengths)
     }
+    const intent = this.providerRecoveries.get(session.taskId)
+    if (intent?.state === 'accepted' && intent.sessionId === sessionId) this.providerRecoveries.change(intent, { state: 'completed', nextRetryAt: null })
     session.pollingStarted = false
     // Unregister FIRST so other sessions aren't starved while transitionToIdle
     // runs (it can be slow due to extractOutputValues); it is not awaited.
@@ -3837,6 +3783,7 @@ export class AgentManager extends EventEmitter {
     sessionId = resolved.sessionId
     this.assertSessionGeneration(sessionId, session)
 
+    this.providerRecoveries.cancel(session.taskId)
     console.log(`[AgentManager] Aborting session ${sessionId}`)
     this.stopAdapterPolling(sessionId)
 
@@ -3910,6 +3857,7 @@ export class AgentManager extends EventEmitter {
       return
     }
 
+    if (resetTaskStatus) this.providerRecoveries.cancel(session.taskId)
     const restorePollingOnRefusal = session.pollingStarted || this.pollingEntries.has(sessionId)
 
     // Fence this exact runtime synchronously. Adapter teardown can be slow and
@@ -4045,6 +3993,7 @@ export class AgentManager extends EventEmitter {
 
   /** Withdraws a queued start; true when one was waiting. */
   cancelQueuedStart(taskId: string): boolean {
+    this.providerRecoveries.cancel(taskId)
     const task = this.db.getTask(taskId)
     const inFlightAgentId = this.admittedStarts.get(taskId) ?? this.findSessionByTaskId(taskId)?.session.agentId
     const ownerAgentId = task?.agent_id ?? inFlightAgentId
@@ -4076,6 +4025,11 @@ export class AgentManager extends EventEmitter {
       const task = this.db.getTask(taskId)
       if (stopping.session.isTriageSession || isExemptFromAdmission(taskId, task)) continue
       counted.set(taskId, { taskId, agentId: stopping.session.agentId, projectId: taskProjectId(task) })
+    }
+    for (const { taskId, agentId } of this.providerRecoveries.owners()) {
+      const task = this.db.getTask(taskId)
+      if (!task || isExemptFromAdmission(taskId, task)) continue
+      if (!counted.has(taskId)) counted.set(taskId, { taskId, agentId, projectId: taskProjectId(task) })
     }
     for (const [taskId, agentId] of this.admittedStarts) {
       if (!counted.has(taskId)) counted.set(taskId, { taskId, agentId, projectId: taskProjectId(this.db.getTask(taskId)) })
@@ -4657,6 +4611,8 @@ export class AgentManager extends EventEmitter {
         this.deliveries.terminal(claimed.id, 'timed_out', `${detail}; backend acceptance is unknown. Inspect the conversation before retrying.`)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-timeout-${claimed.id}`,
           `${detail}. Backend acceptance is unknown; inspect the conversation before retrying.`)
+      } else if (claimed.taskId && this.providerRecoveries.get(claimed.taskId)?.state === 'failed') {
+        this.deliveries.terminal(claimed.id, 'failed', `${detail}; provider recovery requires review before any new delivery.`)
       } else if (claimed.attemptCount >= 5) {
         this.deliveries.terminal(claimed.id, 'failed', detail)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-failed-${claimed.id}`,
@@ -4751,8 +4707,7 @@ export class AgentManager extends EventEmitter {
     try {
       await this.doSendAdapterMessage(session, sessionId, message, attachments, transcriptPartId)
     } catch (error) {
-      await this.handleSessionError(sessionId, session, error)
-      throw error
+      if (!await this.handleSessionError(sessionId, session, error)) throw error
     }
     return recovered ? { newSessionId: sessionId } : {}
   }
@@ -4772,13 +4727,11 @@ export class AgentManager extends EventEmitter {
    * and the user can retry with "continue". The session stays recoverable:
    * the next send clears the error state (see doSendAdapterMessage).
    */
-  private async handleSessionError(sessionId: string, session: AgentSession, err: unknown): Promise<void> {
-    if (!this.ownsSessionGeneration(sessionId, session)) return
+  private async handleSessionError(sessionId: string, session: AgentSession, err: unknown): Promise<boolean> {
+    if (!this.ownsSessionGeneration(sessionId, session)) return false
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[AgentManager] Session ${sessionId} error:`, message)
-    if (findCreditExhaustionMessage([message]) && await this.tryAutomaticFallback(sessionId, session, message)) {
-      return
-    }
+    if (await this.tryProviderRecovery(sessionId, session, classifyProviderFailure(err))) return true
     session.status = 'error'
     this.emitSystemError(
       sessionId,
@@ -4787,6 +4740,260 @@ export class AgentManager extends EventEmitter {
       `Could not send the message: ${message}\n\nThe session is still here — fix the issue and retry with "continue".`
     )
     this.emitStatus(sessionId, session, 'error')
+    this.stopAdapterPolling(sessionId)
+    return false
+  }
+
+  /** Persists intent before crossing the wire. Acceptance cannot reset a retry
+   * budget: the same intent owns the whole interrupted turn until idle. */
+  private async sendTrackedPrompt(session: AgentSession, sessionId: string, prompt: string, config: SessionConfig, recovery?: ProviderRecovery): Promise<void> {
+    this.assertSessionGeneration(sessionId, session)
+    if (recovery) {
+      const current = this.providerRecoveries.get(recovery.taskId)
+      if (!current || current.intentId !== recovery.intentId || current.generation !== recovery.generation || current.state !== 'dispatching')
+        throw new Error('Provider continuation was superseded or cancelled before delivery.')
+    }
+    const adapter = session.adapter!
+    const task = this.db.getTask(session.taskId)
+    const row = task ? recovery ?? this.providerRecoveries.begin({ taskId: session.taskId, sessionId,
+      agentId: session.agentId, workspaceDir: session.workspaceDir, prompt,
+      remainingAgentIds: session.fallbackAgentIds ?? [], attemptedAgentIds: [...session.attemptedAgentIds ?? [session.agentId]] }) : null
+    try {
+      await adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: prompt }], { ...config, providerIntentId: row?.intentId })
+    } catch (error) {
+      if (!row) throw error
+      const failure = classifyProviderFailure(error)
+      throw Object.assign(new Error(failure.message), { providerFailure: { ...failure, intentId: row.intentId } })
+    }
+    if (row && this.ownsSessionGeneration(sessionId, session)) {
+      const current = this.providerRecoveries.get(row.taskId)
+      if (current?.intentId === row.intentId && ['sending', 'dispatching'].includes(current.state))
+        this.providerRecoveries.change(current, { state: 'accepted', sessionId, agentId: session.agentId, nextRetryAt: null, delivery: 'unknown' })
+    }
+  }
+
+  private providerRecoveryOwnsTask(taskId: string): boolean {
+    const row = this.providerRecoveries.get(taskId)
+    return !!row && ['retrying', 'dispatching', 'failed', 'cancelled'].includes(row.state)
+  }
+
+  /** Polling is read-only. Reconnect/re-read on a transient transport failure;
+   * never infer a failed turn or send a new prompt from a disconnected read. */
+  private handlePollingError(sessionId: string, session: AgentSession, error: unknown): void {
+    if (!this.ownsSessionGeneration(sessionId, session)) return
+    const row = this.providerRecoveries.get(session.taskId)
+    if (!row || row.sessionId !== sessionId || ['retrying', 'failed', 'cancelled', 'completed'].includes(row.state)) return
+    const failure = classifyProviderFailure(error)
+    if (failure.kind !== 'transient') { this.failProviderRecovery(row, failure.message); return }
+    const scheduled = this.providerRecoveries.schedule(row, failure, 'poll')
+    if (!scheduled) return
+    this.stopAdapterPolling(sessionId)
+    session.pollingStarted = false
+    this.emitSystemNotice(sessionId, session.taskId, `provider-poll-${scheduled.intentId}-${scheduled.generation}`,
+      `Retrying… provider status read failed. Reconnecting at ${new Date(scheduled.nextRetryAt!).toISOString()}; the existing turn keeps ownership.`)
+    this.scheduleProviderRecovery()
+  }
+
+  private async tryProviderRecovery(sessionId: string, session: AgentSession, failure: ProviderFailure): Promise<boolean> {
+    if (!this.ownsSessionGeneration(sessionId, session)) return false
+    const row = this.providerRecoveries.get(session.taskId)
+    if (failure.intentId && row?.intentId !== failure.intentId) return false
+    if (row?.state === 'retrying') return true // Error/poll/send can observe the same failure.
+    if (!row || row.sessionId !== sessionId || ['completed', 'cancelled', 'failed'].includes(row.state)) return false
+    if (failure.delivery === 'rejected' && (!['sending', 'dispatching'].includes(row.state) || failure.intentId !== row.intentId)) return false
+    const task = this.db.getTask(session.taskId)
+    const exclusion = this.retryExclusion(task)
+      ?? (session.status === 'waiting_approval' ? 'awaiting_approval' : null)
+    if (exclusion || failure.delivery === 'unknown' || failure.kind === 'terminal') {
+      this.failProviderRecovery(row, exclusion ?? `${failure.message}; backend delivery or tool outcomes require review.`,
+        failure.delivery === 'unknown' && row.state === 'sending' ? 'prompt_delivery_unconfirmed' : 'review_required')
+      return false
+    }
+    const scheduled = this.providerRecoveries.schedule(row, failure)
+    if (!scheduled) return false
+    session.status = 'working' // Retain its admission slot and queue ownership.
+    session.pollingStarted = false
+    this.stopAdapterPolling(sessionId)
+    this.emitStatus(sessionId, session, 'working')
+    this.emitSystemNotice(sessionId, session.taskId, `provider-retry-${scheduled.intentId}-${scheduled.generation}`,
+      `Retrying… ${failure.message}\nNext attempt ${scheduled.attempt}/${PROVIDER_MAX_RETRIES} at ${new Date(scheduled.nextRetryAt!).toISOString()}${failure.kind === 'exhausted' || scheduled.attempt > PROVIDER_MAX_RETRIES ? '; trying the next configured fallback.' : '.'}`)
+    if (task) this.recordRecoveryAudit(task, failure.message, 'provider_retry', `attempt_${scheduled.attempt}_at_${scheduled.nextRetryAt}`)
+    this.scheduleProviderRecovery()
+    return true
+  }
+
+  private failProviderRecovery(row: ProviderRecovery, detail: string, result = 'review_required'): void {
+    const failed = this.providerRecoveries.change(row, { state: 'failed', cause: detail, nextRetryAt: null })
+    if (!failed) return
+    const task = this.db.getTask(row.taskId)
+    if (task && !this.startQueue.get(row.taskId)) this.startQueue.enqueue({
+      taskId: row.taskId, agentId: row.agentId, projectId: taskProjectId(task),
+      priority: task.priority, reason: 'recovery', queuedAt: new Date().toISOString()
+    })
+    this.startQueue.fail(row.taskId, result === 'prompt_delivery_unconfirmed' ? 'unsafe_side_effect_unknown' : 'provider_recovery_terminal', result, detail)
+    const live = this.findSessionByTaskId(row.taskId)
+    if (live) {
+      live.session.status = 'error'
+      live.session.pollingStarted = false
+      this.stopAdapterPolling(live.sessionId)
+      this.emitStatus(live.sessionId, live.session, 'error')
+    }
+    this.emitSystemError(live?.sessionId ?? row.sessionId, row.taskId, `provider-terminal-${row.intentId}`, detail)
+    if (task && !live && !isCoordinatorTask(task) && task.status !== TaskStatus.Completed)
+      this.updateTaskFromLocalAgent(task.id, { status: TaskStatus.NotStarted }, 'system')
+    if (task) this.recordRecoveryAudit(task, detail, 'terminal_failure', result, detail)
+  }
+
+  private scheduleProviderRecovery(): void {
+    if (this.shuttingDown || this.startupReconciliation) return
+    if (this.providerRecoveryTimer) clearTimeout(this.providerRecoveryTimer)
+    const pending = this.providerRecoveries.list(['retrying']).filter((row) => !this.providerRecoveryFlights.has(row.taskId))
+    if (!pending.length) { this.providerRecoveryTimer = null; return }
+    const deadline = Math.min(...pending.map((row) => row.nextRetryAt ?? Date.now()))
+    this.providerRecoveryTimer = setTimeout(() => {
+      this.providerRecoveryTimer = null
+      for (const row of this.providerRecoveries.list(['retrying'])) {
+        if (row.state !== 'retrying' || (row.nextRetryAt ?? 0) > Date.now() || this.providerRecoveryFlights.has(row.taskId)) continue
+        this.providerRecoveryFlights.add(row.taskId)
+        void this.ownShutdownWork(this.dispatchProviderRecovery(row)).finally(() => {
+          this.providerRecoveryFlights.delete(row.taskId)
+          this.scheduleProviderRecovery()
+        }).catch((error) => console.error('[AgentManager] Provider recovery failed:', error))
+      }
+    }, Math.max(0, deadline - Date.now()))
+  }
+
+  private async dispatchProviderRecovery(original: ProviderRecovery): Promise<void> {
+    if (this.shuttingDown) return
+    let row = this.providerRecoveries.get(original.taskId)
+    if (!row || row.generation !== original.generation || row.state !== 'retrying') return
+    const task = this.db.getTask(row.taskId)
+    const exclusion = this.retryExclusion(task)
+    if (exclusion) { this.failProviderRecovery(row, exclusion); return }
+    let live = this.findSessionByTaskId(row.taskId)
+    if (live?.session.status === 'waiting_approval') { this.failProviderRecovery(row, 'awaiting_approval'); return }
+    if (row.mode === 'poll') {
+      if (row.attempt > PROVIDER_MAX_RETRIES) { this.failProviderRecovery(row, 'Provider status reads failed repeatedly; delivery remains unknown. Inspect the live conversation before continuing.'); return }
+      try {
+        if (!live) {
+          const adapter = this.getAdapter(row.agentId)
+          if (!adapter) throw new Error('Provider adapter unavailable')
+          const sessionId = await this.resumeAdapterSession(adapter, row.agentId, row.taskId, row.sessionId)
+          if (!sessionId) throw new Error('INCOMPATIBLE_SESSION_ID: Interrupted conversation is unavailable')
+          live = this.findSessionByTaskId(row.taskId)
+        }
+        if (!live) throw new Error('Recovery session ownership changed')
+        const accepted = this.providerRecoveries.change(row, { state: 'accepted', nextRetryAt: null })
+        if (!accepted || this.shuttingDown) return
+        this.startAdapterPolling(live.sessionId, live.session.adapter!, this.sessionConfigFor(live.session), live.session)
+        const entry = this.pollingEntries.get(live.sessionId)
+        if (entry) await this.pollSingleSession(entry)
+      } catch (error) {
+        if (live) this.handlePollingError(live.sessionId, live.session, error)
+        else this.failProviderRecovery(row, String(error))
+      }
+      return
+    }
+    const fallback = row.attempt > PROVIDER_MAX_RETRIES || row.failureKind === 'exhausted'
+      || (row.selectedFallback !== null && !row.sessionId)
+    try {
+      if (fallback && (row.attempt > PROVIDER_MAX_RETRIES || row.failureKind === 'exhausted')) {
+        const next = row.remainingAgentIds.find((id) => !row!.attemptedAgentIds.includes(id) && this.db.getAgent(id))
+        if (!next) { this.failProviderRecovery(row, 'Provider retries and all configured fallbacks are exhausted. Review provider availability or agent configuration, then continue.'); return }
+        row = this.providerRecoveries.change(row, { selectedFallback: next, agentId: next, sessionId: '', attempt: 0, failureKind: null,
+          remainingAgentIds: row.remainingAgentIds.filter((id) => id !== next), attemptedAgentIds: [...row.attemptedAgentIds, next] })!
+        this.emitSystemNotice(live?.sessionId ?? row.sessionId, row.taskId, `provider-fallback-${row.intentId}-${row.generation}`,
+          `Retrying… handing off to ${this.db.getAgent(next)!.name}. Completed tool results are preserved.`)
+        // Stop only the outgoing backend, preserving the active intent/start row.
+        if (live) await this.stopSession(live.sessionId, false, true)
+        const selected = this.providerRecoveries.get(row.taskId)
+        if (this.shuttingDown || selected?.generation !== row.generation || selected.state !== 'retrying') return
+        live = undefined
+        this.updateTaskFromLocalAgent(row.taskId, { agent_id: next, session_id: null })
+        if (isCoordinatorTask(task) && task?.project_id) this.db.updateProject(task.project_id, { captain_agent_id: next })
+      }
+      if (!live) {
+        // Never substitute a fresh conversation for a same-agent continuation.
+        // A failed resume is an explicit safety boundary; a fallback receives
+        // a recap and a remaining-intent continuation, never the original turn.
+        const adapter = this.getAdapter(row.agentId)
+        if (!adapter) throw new Error('Agent adapter unavailable')
+        let sessionId: string
+        if (!fallback) {
+          sessionId = await this.resumeAdapterSession(adapter, row.agentId, row.taskId, row.sessionId)
+          if (!sessionId) throw new Error('INCOMPATIBLE_SESSION_ID: Interrupted conversation is unavailable')
+        } else {
+          const counted = this.countedSessions().filter((owner) => owner.taskId !== row!.taskId)
+          const fallbackAgent = this.db.getAgent(row.agentId)
+          if (!fallbackAgent) throw new Error('Fallback agent is no longer configured')
+          const decision = checkAdmission({ agentId: row.agentId, taskId: row.taskId, task, agent: fallbackAgent }, counted,
+            this.admissionLimits(task, row.agentId, counted))
+          if (!decision.admitted) {
+            const waiting = this.providerRecoveries.change(row, { nextRetryAt: Date.now() + 2000 })
+            if (waiting) this.emitSystemNotice('', row.taskId, `provider-admission-${row.intentId}-${waiting.generation}`,
+              `Retrying… fallback is waiting for admission (${decision.reason}); next check at ${new Date(waiting.nextRetryAt!).toISOString()}.`)
+            return
+          }
+          sessionId = await this.boundedSessionStart(
+            this.startAdapterSession(adapter, row.agentId, row.taskId, row.workspaceDir ?? await this.setupWorktreeIfNeeded(row.taskId), true,
+              undefined, undefined, false, () => {
+                const current = this.providerRecoveries.get(row!.taskId)
+                return !this.shuttingDown && current?.intentId === row!.intentId
+                  && current.generation === row!.generation && current.state === 'retrying'
+              }),
+            'Provider fallback', row.taskId, AGENT_START_TIMEOUT_MS)
+        }
+        live = this.findSessionByTaskId(row.taskId)
+        if (!live || live.sessionId !== sessionId) throw new Error('Recovery session ownership changed')
+      }
+      const current = this.providerRecoveries.get(row.taskId)
+      if (this.shuttingDown || !current || current.generation !== row.generation || current.state !== 'retrying') return
+      if (live.session.status === 'waiting_approval') { this.failProviderRecovery(row, 'awaiting_approval'); return }
+      // Re-check after reconnect/start, which can reveal unresolved tools.
+      const latestExclusion = this.retryExclusion(this.db.getTask(row.taskId))
+      if (latestExclusion) { this.failProviderRecovery(row, latestExclusion); return }
+      if (live.session.status === 'working' && !fallback && live.sessionId !== original.sessionId) {
+        this.failProviderRecovery(row, 'The backend still owns active work; inspect its outcomes before continuing.')
+        return
+      }
+      const backendStatus = await live.session.adapter!.getStatus(live.sessionId, this.sessionConfigFor(live.session))
+      if (!fallback && [SessionStatusType.BUSY, SessionStatusType.RETRY, SessionStatusType.WAITING_APPROVAL].includes(backendStatus.type)) {
+        this.failProviderRecovery(row, 'The backend still owns work or awaits approval; inspect outcomes before continuing.')
+        return
+      }
+      const dispatching = this.providerRecoveries.change(row, { state: 'dispatching', sessionId: live.sessionId })
+      if (!dispatching) return
+      row = dispatching
+      const session = live.session
+      session.fallbackAgentIds = row.remainingAgentIds
+      session.attemptedAgentIds = new Set(row.attemptedAgentIds)
+      const recap = fallback ? buildAgentSwitchRecap(this.db.getTranscriptParts(row.taskId)) : ''
+      const prompt = row.delivery === 'rejected' && !fallback ? row.prompt
+        : `${recap ? `Conversation recap:\n${recap}\n\n` : ''}${PROVIDER_CONTINUATION}\n\nRemaining intent:\n${row.prompt}`
+      const config = await this.buildSessionConfig(row.agentId, row.taskId, session.workspaceDir)
+      this.assertSessionGeneration(live.sessionId, session)
+      const pendingLossId = session.pendingLossId
+      await serializeTaskSend(this, row.taskId, () => this.sendTrackedPrompt(session, live!.sessionId, prompt, config, row!))
+      if (!this.ownsSessionGeneration(live.sessionId, session)) return
+      this.acknowledgeSessionRecap(session, pendingLossId)
+      session.status = 'working'
+      session.pollingStarted = true
+      this.startAdapterPolling(live.sessionId, session.adapter!, config, session)
+      this.emitSystemNotice(live.sessionId, row.taskId, `provider-recovered-${row.intentId}-${row.generation}`, 'Provider recovered. Continuing the interrupted work.')
+    } catch (error) {
+      const current = this.providerRecoveries.get(row.taskId)
+      if (!current || current.intentId !== row.intentId || ['cancelled', 'failed'].includes(current.state)) return
+      const failure = classifyProviderFailure(error)
+      // Before send, unavailable fallback creation can safely advance the chain.
+      // Once dispatching, only explicit rejection permits another send.
+      if (current.state === 'retrying' && fallback) {
+        this.providerRecoveries.change(current, { attempt: PROVIDER_MAX_RETRIES + 1, nextRetryAt: Date.now(), cause: failure.message })
+      } else if (live && current.state === 'retrying' && failure.kind === 'transient') {
+        this.providerRecoveries.schedule(current, { ...failure, delivery: current.delivery })
+      } else if (live && current.state === 'dispatching' && failure.delivery !== 'unknown' && failure.kind !== 'terminal') {
+        await this.tryProviderRecovery(live.sessionId, live.session, failure)
+      } else this.failProviderRecovery(current, failure.message)
+    }
   }
 
   private async doSendAdapterMessage(
@@ -4851,10 +5058,9 @@ export class AgentManager extends EventEmitter {
     const recap = session.pendingRecap
     const pendingLossId = session.pendingLossId
     if (recap) promptText = `${recap}\n\n${promptText}`
-    const adapter = session.adapter
     const send = (): Promise<void> => {
       this.assertSessionGeneration(sessionId, session)
-      return adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+      return this.sendTrackedPrompt(session, sessionId, promptText, sessionConfig)
     }
     await serializeTaskSend(this, session.taskId, send)
     // Stop may destroy the session while adapter acceptance is in flight.
@@ -5066,6 +5272,8 @@ export class AgentManager extends EventEmitter {
     // Shutdown preserves the durable queue. The next process reconciles any
     // outstanding claim; stops below must not drain it in this process.
     this.shuttingDown = true
+    if (this.providerRecoveryTimer) clearTimeout(this.providerRecoveryTimer)
+    this.providerRecoveryTimer = null
     if (this.startQueueRetryTimer) {
       clearTimeout(this.startQueueRetryTimer)
       this.startQueueRetryTimer = null

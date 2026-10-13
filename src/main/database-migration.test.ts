@@ -144,7 +144,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     expect(after.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'merge_grant%'").all()).toEqual([])
     const settings = after.prepare("SELECT settings FROM projects WHERE id = 'default'").get() as { settings: string }
     expect(JSON.parse(settings.settings)).toEqual({ limits: { paused: true } })
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('33')
     after.close()
   })
 
@@ -190,7 +190,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     const columns = (after.pragma('table_info(pr_review_attestations)') as { name: string }[]).map((column) => column.name)
     expect(tables).toContain('pr_review_handoffs')
     expect(columns).toContain('handoff_id')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('33')
     after.close()
   })
 
@@ -210,7 +210,7 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const after = openRaw()
     expect(taskColumns(after)).toContain('mcp_scope_nonce')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('33')
     after.close()
   })
 
@@ -252,7 +252,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('33')
     after.close()
   })
 
@@ -263,7 +263,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     { name: 'integrated v21', version: '21', drop: ['agent_start_queue', 'agent_start_queue_fairness'] },
     { name: 'authorization-chain v23', version: '23', drop: ['issue_writes'] },
     { name: 'live main v24', version: '24', drop: [] }
-  ])('produces schema-equivalent v32 from $name', ({ version, drop }) => {
+  ])('produces schema-equivalent v33 from $name', ({ version, drop }) => {
     const fresh = new DatabaseManager()
     fresh.initialize()
     fresh.close?.()
@@ -299,7 +299,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('33')
     after.close()
   })
 

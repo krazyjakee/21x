@@ -4,6 +4,7 @@
  */
 
 import type { ReasoningEffort } from '../../shared/reasoning-effort'
+import type { ProviderFailure } from '../agent-manager/provider-failure'
 
 export enum SessionStatusType {
   IDLE = 'idle',
@@ -62,6 +63,8 @@ export interface BackendModel {
 export interface SessionConfig {
   agentId: string
   taskId: string
+  /** Internal durable turn identity; never a provider model option. */
+  providerIntentId?: string
   workspaceDir: string
   serverUrl?: string
   model?: string
@@ -100,6 +103,8 @@ export interface SessionConfig {
 export interface SessionStatus {
   type: SessionStatusType
   message?: string
+  /** Explicit backend evidence; a transport error defaults to unknown. */
+  providerFailure?: ProviderFailure
 }
 
 export interface SessionMessage {
@@ -113,6 +118,7 @@ export interface MessagePart {
   type: MessagePartType
   text?: string
   content?: string
+  providerFailure?: ProviderFailure
   role?: 'user' | 'assistant' | 'system' // Message role
   tool?: {
     name: string

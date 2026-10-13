@@ -1,3 +1,4 @@
+import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 import { Agent as UndiciAgent } from 'undici'
 import { homedir } from 'os'
 import { buildMergedOpencodeConfig } from '../utils/opencode-config'
@@ -88,7 +89,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   private v2Client: V2OpencodeClient | null = null
   private promptAborts: Map<string, AbortController> = new Map()
   /** Provider errors captured from prompt results (surfaced via getStatus) */
-  private promptErrors: Map<string, string> = new Map()
+  private promptErrors: Map<string, ProviderFailure> = new Map()
   /** Absolute paths to generated OpenCode plugin files registered for this session/workspace */
   private pluginFilePaths: string[] = []
   /** Absolute paths to generated support files used by runtime plugins */
@@ -100,10 +101,6 @@ export class OpencodeAdapter implements CodingAgentAdapter {
    *  via explicit `notifyConfigChanged()` calls (e.g. after settings edit or key rotation).
    *  This avoids PATCH /global/config storms that abort all running sessions. */
   private configPushed = false
-  /** Maximum number of automatic retries for transient prompt errors (e.g. "Aborted") */
-  private static readonly PROMPT_MAX_RETRIES = 3
-  /** Base delay (ms) for exponential backoff between prompt retries */
-  private static readonly PROMPT_RETRY_BASE_DELAY_MS = 2_000
   /** Pending permission requests per session (captured from SSE events).
    *  Each session may have multiple pending permissions (parallel tool calls). */
   private pendingPermissions: Map<string, Array<{ permissionId: string; permission: string; patterns: string[] }>> = new Map()
@@ -756,26 +753,15 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     const promptAbort = new AbortController()
     this.promptAborts.set(sessionId, promptAbort)
 
-    // Fire-and-forget prompt with retry — the HTTP call stays open until the full
+    // Fire-and-forget prompt — the HTTP call stays open until the full
     // agent loop completes (including tool call execution).  getStatus() checks
     // promptAborts to reliably report BUSY while this call is in flight.
-    // Retries handle transient "Aborted" errors caused by config pushes or
-    // provider concurrency limits.
+    // The shared durable manager owns safe continuation/retry policy.
     console.log(`[OpencodeAdapter] Sending prompt for session ${sessionId} (model: ${config.model || 'default'})`)
     this.executePromptWithRetry(ocClient, sessionId, parts, modelParam, config, promptAbort)
       .finally(() => {
         this.promptAborts.delete(sessionId)
       })
-  }
-
-  /**
-   * Returns true if the error message indicates a transient condition that
-   * may succeed on retry (e.g. OpenCode server aborted the session processor
-   * due to a config push, or the provider returned a temporary overload).
-   */
-  private isRetryablePromptError(msg: string): boolean {
-    const lower = msg.toLowerCase()
-    return lower === 'aborted' || lower.includes('aborted') || lower.includes('overloaded') || lower.includes('service unavailable')
   }
 
   /**
@@ -805,9 +791,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   }
 
   /**
-   * Executes a prompt with automatic retry for transient errors.
-   * Keeps the AbortController in promptAborts alive during retries so
-   * getStatus() continues to report BUSY.
+   * Executes one prompt. Provider failures return delivery evidence to the
+   * shared manager; unknown HTTP failures are never blindly replayed.
    */
   private async executePromptWithRetry(
     ocClient: OpencodeClient,
@@ -817,90 +802,30 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     config: SessionConfig,
     promptAbort: AbortController
   ): Promise<void> {
-    const maxRetries = OpencodeAdapter.PROMPT_MAX_RETRIES
-    const baseDelay = OpencodeAdapter.PROMPT_RETRY_BASE_DELAY_MS
-
-    let attempt = 0
-    /** Waits with exponential backoff and returns true when a transient error may be retried. */
-    const retryAfterBackoff = async (errorMsg: string, kind: string): Promise<boolean> => {
-      if (!this.isRetryablePromptError(errorMsg) || attempt >= maxRetries) return false
-      const delay = baseDelay * Math.pow(2, attempt)
-      console.warn(`[OpencodeAdapter] Retryable ${kind} error "${errorMsg}" for ${sessionId}, retrying (${attempt + 1}/${maxRetries}) after ${delay}ms`)
-      await new Promise(resolve => setTimeout(resolve, delay))
-      return true
-    }
-
-    for (; attempt <= maxRetries; attempt++) {
-      if (promptAbort.signal.aborted) return
-
-      const promptStartTime = Date.now()
-      if (attempt > 0) {
-        console.log(`[OpencodeAdapter] Retry attempt ${attempt}/${maxRetries} for session ${sessionId}`)
+    if (promptAbort.signal.aborted) return
+    this.promptErrors.delete(sessionId)
+    try {
+      const result = await ocClient.session.prompt({
+        path: { id: sessionId },
+        body: OpencodeAdapter.buildPromptBody(parts, modelParam, config) as import('@opencode-ai/sdk').SessionPromptData['body'],
+        ...(config.workspaceDir && { query: { directory: config.workspaceDir } }),
+        signal: promptAbort.signal
+      })
+      const response = result as { error?: unknown; data?: { info?: { error?: { name?: string; data?: { message?: string } } } } }
+      const failure = response.data?.info?.error
+      if (failure) {
+        // The session loop returned a completed assistant attempt with an API
+        // failure. Continue its persisted context; never resend completed tools.
+        this.promptErrors.set(sessionId, { ...classifyProviderFailure(failure.data?.message || failure.name || 'Unknown provider error', 'turn_failed'), intentId: config.providerIntentId })
+      } else if (response.error) {
+        // HTTP transport errors do not establish acceptance or tool outcomes.
+        this.promptErrors.set(sessionId, classifyProviderFailure(response.error))
       }
-
-      try {
-        const result: unknown = await ocClient.session.prompt({
-          path: { id: sessionId },
-          body: OpencodeAdapter.buildPromptBody(parts, modelParam, config) as import('@opencode-ai/sdk').SessionPromptData['body'],
-          ...(config.workspaceDir && { query: { directory: config.workspaceDir } }),
-          signal: promptAbort.signal
-        })
-
-        const elapsed = Date.now() - promptStartTime
-        console.log(`[OpencodeAdapter] Prompt completed for session ${sessionId} after ${elapsed}ms`)
-
-        // Log tool call details from the response for debugging
-        const res = result as { data?: { parts?: Array<Record<string, unknown>> } } | undefined
-        if (res?.data?.parts) {
-          const toolParts = res.data.parts.filter((p: Record<string, unknown>) => p.type === 'tool')
-          if (toolParts.length > 0) {
-            console.log(`[OpencodeAdapter] Response contains ${toolParts.length} tool part(s):`,
-              toolParts.map((p: Record<string, unknown>) => ({
-                tool: p.tool,
-                status: (p.state as Record<string, unknown> | undefined)?.status
-              }))
-            )
-          }
-        }
-
-        // Check for provider errors in the prompt response (e.g. quota exceeded,
-        // payment required, rate limit).  OpenCode wraps these in result.data.info.error
-        // but does NOT create a message with the error text, so pollMessages never
-        // picks them up and the user sees "idle" with no response.
-        const r = result as { data?: { info?: { error?: { name?: string; data?: { message?: string } } } } } | undefined
-        const promptError = r?.data?.info?.error
-        if (promptError) {
-          const errorMsg = promptError.data?.message || promptError.name || 'Unknown provider error'
-
-          // Retry transient errors (e.g. "Aborted" from config push tearing down the bus)
-          if (await retryAfterBackoff(errorMsg, 'provider')) continue
-
-          console.error(`[OpencodeAdapter] Provider error for ${sessionId}: ${errorMsg}`)
-          this.promptErrors.set(sessionId, errorMsg)
-          if (this.onDataAvailable) {
-            this.onDataAvailable(sessionId)
-          }
-        }
-
-        // Success or non-retryable error — stop retrying
-        return
-      } catch (err: unknown) {
-        // User-initiated abort — exit silently
-        if (err instanceof Error && err.name === 'AbortError') return
-
-        const errorMsg = err instanceof Error ? err.message : String(err)
-
-        if (await retryAfterBackoff(errorMsg, 'HTTP')) continue
-
-        console.error('[OpencodeAdapter] prompt error:', err)
-        // Surface HTTP-level errors (network failures, 4xx/5xx, connection refused)
-        // via promptErrors so getStatus() returns ERROR instead of silent IDLE.
-        this.promptErrors.set(sessionId, errorMsg)
-        if (this.onDataAvailable) {
-          this.onDataAvailable(sessionId)
-        }
-        return
-      }
+    } catch (error) {
+      if (promptAbort.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return
+      this.promptErrors.set(sessionId, classifyProviderFailure(error))
+    } finally {
+      this.onDataAvailable?.(sessionId)
     }
   }
 
@@ -1008,7 +933,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     const promptError = this.promptErrors.get(sessionId)
     if (promptError) {
       this.promptErrors.delete(sessionId)
-      return { type: SessionStatusType.ERROR, message: promptError }
+      return { type: SessionStatusType.ERROR, message: promptError.message, providerFailure: promptError }
     }
     return { type: SessionStatusType.IDLE }
   }

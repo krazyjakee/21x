@@ -1,3 +1,4 @@
+import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 /**
  * Pi coding-agent adapter.
  *
@@ -59,6 +60,9 @@ interface PiSession {
   config: SessionConfig
   status: 'idle' | 'busy' | 'error'
   lastError: string | null
+  providerFailure?: ProviderFailure
+  recoveryIntentId?: string
+  promptRequestId?: string
   pending: Map<string, PendingRequest>
   parts: MessagePart[]
   allMessages: SessionMessage[]
@@ -420,6 +424,8 @@ export class PiAdapter implements CodingAgentAdapter {
       if (response.command === 'prompt' && !response.success) {
         session.status = 'error'
         session.lastError = response.error || 'Pi rejected the prompt'
+        session.providerFailure = response.id === session.promptRequestId
+          ? { ...classifyProviderFailure(session.lastError, 'turn_failed'), intentId: session.recoveryIntentId } : undefined
       } else if (
         response.command === 'prompt'
         && response.success
@@ -444,6 +450,7 @@ export class PiAdapter implements CodingAgentAdapter {
       case 'agent_start':
         session.status = 'busy'
         session.lastError = null
+        session.providerFailure = undefined
         session.pendingTurnError = null
         session.pendingTurnErrorMonotonicTime = null
         session.turn++
@@ -694,18 +701,22 @@ export class PiAdapter implements CodingAgentAdapter {
     })
   }
 
-  async sendPrompt(sessionId: string, parts: MessagePart[], _config: SessionConfig): Promise<void> {
+  async sendPrompt(sessionId: string, parts: MessagePart[], config: SessionConfig): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session) throw new Error(`Session not found: ${sessionId}`)
     const message = parts.filter((part) => part.type === MessagePartType.TEXT && part.text).map((part) => part.text).join('\n')
     if (!message) throw new Error('No text content in prompt parts')
     const wasBusy = session.status === 'busy'
+    if (!wasBusy) session.recoveryIntentId = config.providerIntentId
+    session.promptRequestId = randomUUID()
     session.status = 'busy'
     session.lastError = null
+    session.providerFailure = undefined
     session.sawAgentActivity = false
     session.promptMayBeCommandOnly = message.trimStart().startsWith('/')
     this.sendRecord(session, {
       type: 'prompt',
+      id: session.promptRequestId,
       message,
       // A message sent from the task composer while Pi is already running is
       // user steering, not deferred work. Pi delivers `steer` after the current
@@ -740,7 +751,7 @@ export class PiAdapter implements CodingAgentAdapter {
         // Keep polling; process exit/error handling remains authoritative.
       }
     }
-    if (session.lastError) return { type: SessionStatusType.ERROR, message: session.lastError }
+    if (session.lastError) return { type: SessionStatusType.ERROR, message: session.lastError, providerFailure: session.providerFailure }
     if (session.pendingUiRequests.size > 0) {
       return { type: SessionStatusType.WAITING_APPROVAL, message: 'Pi is waiting for input' }
     }
@@ -753,6 +764,7 @@ export class PiAdapter implements CodingAgentAdapter {
     session.pendingTurnError = null
     session.pendingTurnErrorMonotonicTime = null
     session.lastError = error
+    session.providerFailure = { ...classifyProviderFailure(error, 'turn_failed'), intentId: session.recoveryIntentId }
     session.status = 'error'
     session.parts.push({
       id: `pi-error-${session.turn}`,

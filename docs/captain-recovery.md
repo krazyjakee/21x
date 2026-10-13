@@ -81,3 +81,38 @@ exclusion that recovery made after a failure.
 A failed initial prompt transport can have accepted the prompt before reporting
 an error. Such an attempt stops with `prompt_delivery_unconfirmed`, preserving
 an auditable user decision instead of automatically replaying unknown effects.
+
+## Active provider recovery (#172, schema v33)
+
+`agent_provider_recovery` gives an active turn a durable intent ID, generation,
+original intent, session/workspace binding, attempt count, retry deadline, cause,
+delivery evidence, and ordered fallback cursor. Captain and ordinary task turns
+use the same policy. Model capacity (`serverOverloaded`), throttling, temporary
+5xx/unavailability and recoverable stream errors are transient; exhausted
+credits/quota select the next configured agent immediately. Authentication,
+configuration, incompatible sessions and authority boundaries require action.
+
+The manager writes recovery state before showing `Retrying…` with its next
+deadline. It keeps the task's admission slot while backing off. There are five
+same-agent retries with exponential delay and stable per-intent/per-attempt
+0–25% jitter; each delay is bounded by sixty seconds. Remaining configured
+fallback agents are selected in order without cycles. Fallbacks receive a
+conversation recap and the remaining intent. Existing tools and task starts
+are never replayed by the manager.
+
+Error classification alone does not authorize another send. Only an explicit
+rejection permits resending the original prompt. An authoritative failed-turn
+response permits a new continuation in the persisted conversation, after
+checking approval, running tools and unsafe labels. Generic transport failures
+have unknown delivery and stop for review. Backend retries (such as Codex's
+`willRetry`) retain ownership until the backend finishes its attempt.
+
+A failed status/history read uses a separate read-only recovery mode: it
+reconnects and reads the existing turn with bounded backoff, without sending
+any prompt or switching agents. A busy or approval state still owns its work.
+
+Startup restores saved backoff deadlines and fallback choices. A crash during
+wire dispatch becomes an actionable unknown-delivery failure, never a replay.
+Manual Stop/cancel fences the recovery generation and cancels its continuation.
+Shutdown preserves backoff for the next process. Retry exhaustion stays
+terminal until a person explicitly continues.

@@ -6,6 +6,7 @@
  * 20x's CodingAgentAdapter contract.
  */
 
+import { classifyProviderFailure, providerFailureError, type ProviderFailure } from '../agent-manager/provider-failure'
 import { CLIENT_NAME } from '../app-identity'
 import { spawn, type ChildProcess } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
@@ -105,6 +106,10 @@ interface AppServerSession extends CodexItemState, JsonRpcPeer {
   pendingThreadIdle: boolean
   pendingApproval: PendingApproval | null
   lastError: string | null
+  providerFailure?: ProviderFailure
+  recoveryIntentId?: string
+  pendingRecoveryIntentId?: string
+  lastTurnId?: string
   config: SessionConfig
   codexUseApiKey: boolean
   codexAuthSummary: string
@@ -285,6 +290,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
     const messages = await this.getAllMessages(sessionId, config)
     session.messageBuffer = []
+    session.pendingRecoveryIntentId = config.providerIntentId
     return messages
   }
 
@@ -321,6 +327,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
     session.status = SessionStatusType.BUSY
     session.lastError = null
+    session.providerFailure = undefined
 
     const result = await this.sendRpcRequest(session, 'turn/start', {
       ...this.buildThreadParams(config),
@@ -331,7 +338,10 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     })
 
     if (isObject(result)) {
-      session.activeTurnId = asString(result.turnId) || asString(result.turn_id) || session.activeTurnId
+      session.activeTurnId = asString(result.turnId) || asString(result.turn_id) || (isObject(result.turn) ? asString(result.turn.id) : undefined) || session.activeTurnId
+      session.lastTurnId = session.activeTurnId ?? undefined
+      session.recoveryIntentId = session.pendingRecoveryIntentId ?? session.recoveryIntentId
+      session.pendingRecoveryIntentId = undefined
     }
   }
 
@@ -342,7 +352,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     }
     return {
       type: session.status,
-      message: session.status === SessionStatusType.ERROR ? (session.lastError || 'Process error') : undefined
+      message: session.status === SessionStatusType.ERROR ? (session.lastError || 'Process error') : undefined,
+      providerFailure: session.providerFailure
     }
   }
 
@@ -817,7 +828,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       session.pendingRequests.delete(message.id)
       const response = message as JsonRpcResponse
       if (response.error) {
-        pending.reject(new Error(response.error.message))
+        pending.reject(providerFailureError(response.error, 'rejected'))
       } else {
         pending.resolve(response.result)
       }
@@ -854,11 +865,16 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
     if (notification.method === 'turn/started') {
       session.status = SessionStatusType.BUSY
-      session.activeTurnId = asString(params.turnId) || session.activeTurnId
+      session.activeTurnId = asString(params.turnId) || (isObject(params.turn) ? asString(params.turn.id) : undefined) || session.activeTurnId
+      session.lastTurnId = session.activeTurnId ?? undefined
+      session.recoveryIntentId = session.pendingRecoveryIntentId ?? session.recoveryIntentId
+      session.pendingRecoveryIntentId = undefined
       session.pendingThreadIdle = false
     }
 
     if (notification.method === 'turn/completed') {
+      const completedId = isObject(params.turn) ? asString(params.turn.id) : asString(params.turnId)
+      if (completedId && session.lastTurnId && completedId !== session.lastTurnId) return
       session.activeTurnId = null
       // A failed turn reports `turn.status === 'failed'` with a `TurnError`.
       // Codex normally sends a non-retryable `error` notification first, but
@@ -867,6 +883,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       if (failure) {
         session.status = SessionStatusType.ERROR
         session.lastError = failure.message
+        session.providerFailure = { ...classifyProviderFailure(failure.message, 'turn_failed'), intentId: session.recoveryIntentId }
       }
       if (session.threadId) {
         session.pendingCompletionRefreshes += 1
@@ -893,6 +910,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     }
 
     if (notification.method === 'error') {
+      const errorTurnId = asString(params.turnId) || asString(params.turn_id)
+      if (errorTurnId && session.lastTurnId && errorTurnId !== session.lastTurnId) return
       const failure = summarizeAppServerError(params)
       if (failure.willRetry) {
         // Recoverable (stream disconnect, transient 5xx, ...): Codex retries
@@ -901,8 +920,11 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
         // usually went on to complete.
         console.warn(`[CodexAppServerAdapter] Codex is retrying after a recoverable error: ${failure.message}`)
       } else {
-        session.status = SessionStatusType.ERROR
+        // Capacity and throttling notifications may precede turn/completed.
+        // Wait for that authoritative boundary before issuing a continuation.
         session.lastError = failure.message
+        const policy = classifyProviderFailure(failure.message)
+        if (policy.kind === 'terminal') session.status = SessionStatusType.ERROR
       }
     }
 

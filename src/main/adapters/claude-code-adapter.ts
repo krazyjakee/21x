@@ -1,3 +1,4 @@
+import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 /**
  * Claude Code Adapter
  *
@@ -99,6 +100,8 @@ interface ClaudeSession {
   messageCursor: number
   streamTask: Promise<void> | null
   lastError: string | null
+  providerFailure?: ProviderFailure
+  recoveryIntentId?: string
   config: SessionConfig
   /** True when the next query must `resume` the persisted session */
   isResumed?: boolean
@@ -484,6 +487,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     // Note: Don't add user message to buffer - agent-manager already shows it
     // to avoid duplicate messages in UI
 
+    if (session.status !== 'busy') session.recoveryIntentId = config.providerIntentId
     const isFirstPrompt = !session.queryIterator
 
     // A live query owns a persistent prompt stream. Add the next turn to that
@@ -492,6 +496,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     if (!isFirstPrompt && session.enqueuePrompt) {
       session.sawResult = false
       session.status = 'busy'
+      session.providerFailure = undefined
       session.lastError = null
       session.enqueuePrompt(promptText)
       return
@@ -635,6 +640,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
 
     session.queryIterator = query
     session.status = 'busy'
+    session.providerFailure = undefined
     session.lastError = null // Clear any previous error (e.g., rate limit) for recovery
     if (!isFirstPrompt) {
       session.messageBuffer = [] // Clear buffer for new messages (but keep history for first prompt)
@@ -655,8 +661,10 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       return { type: SessionStatusType.ERROR, message: 'Session not found' }
     }
 
+    if (session.lastError && session.queryIterator && !session.providerFailure) return { type: SessionStatusType.BUSY }
     if (session.lastError) {
-      return { type: SessionStatusType.ERROR, message: session.lastError }
+      return { type: SessionStatusType.ERROR, message: session.lastError,
+        providerFailure: session.pendingApprovals.length || session.backgroundTasks.size ? undefined : session.providerFailure }
     }
 
     if (session.pendingApprovals.length > 0) {
@@ -1091,6 +1099,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           console.warn('[ClaudeCodeAdapter] Full error result message:', JSON.stringify(raw, null, 2))
           session.status = 'error'
           session.lastError = errorText
+          session.providerFailure = { ...classifyProviderFailure(errorText, 'turn_failed'), intentId: session.recoveryIntentId }
         }
 
         if (msg.type === 'assistant' && (msg as Record<string, unknown>).isApiErrorMessage === true) {
@@ -1106,8 +1115,10 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
             })
             .filter(Boolean)
             .join('\n')
-          session.status = 'error'
+          session.status = 'busy'
           session.lastError = text || 'Claude Code API error'
+          // An API-error assistant item is not the terminal turn result.
+          session.providerFailure = undefined
         }
 
         session.messageBuffer.push(message)

@@ -14,6 +14,7 @@ import { SessionStatusType, type MessagePart, type SessionConfig } from './adapt
 import { LOST_SESSION_NOTICE } from './agent-handoff'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import { CaptainRuntimeStore } from './sessions/runtime-store'
+import { providerFailureError } from './agent-manager/provider-failure'
 import { DeliveryStore } from './sessions/delivery-store'
 
 // Mock heavy dependencies to avoid loading electron/native modules. The
@@ -333,11 +334,19 @@ describe('per-project Captain conversations', () => {
     const after = new FakeAdapter()
     const second = newManager(after)
     expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('replacement')
-    after.sendPrompt.mockRejectedValueOnce(new Error('temporarily unavailable'))
-    await expect(second.sendMessage('replacement', 'Continue.', alphaCaptain)).rejects.toThrow('temporarily unavailable')
-    await second.sendMessage('replacement', 'Try again.', alphaCaptain)
+    after.sendPrompt.mockRejectedValueOnce(providerFailureError('temporarily unavailable', 'rejected'))
+    await second.sendMessage('replacement', 'Continue.', alphaCaptain)
+    const owner = second.findSessionByTaskId(alphaCaptain)!.session
+    expect(owner.pendingRecap).toContain('Release plan drafted: three tasks created.')
+    const recovery = (second as any).providerRecoveries.get(alphaCaptain)
+    expect(recovery.state).toBe('retrying')
+    after.setStatus(SessionStatusType.IDLE)
+    await (second as any).dispatchProviderRecovery(recovery)
     expect(promptTexts(after)).toHaveLength(2)
     for (const prompt of promptTexts(after)) expect(prompt).toContain('Release plan drafted: three tasks created.')
+    expect(owner.pendingRecap).toBeUndefined()
+    await second.sendMessage('replacement', 'Try again.', alphaCaptain)
+    expect(promptTexts(after)[2]).toBe('Try again.')
     expect(lostNotices(alphaCaptain)).toHaveLength(1)
     await second.stopAllSessions()
 
@@ -659,11 +668,11 @@ describe('per-project Captain conversations', () => {
     expect(db.getTask(task.id)?.status).toBe('not_started')
   })
 
-  it('replays an earlier failed delivery after its successor', async () => {
+  it('retries an earlier message that failed before provider delivery after its successor', async () => {
     const before = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
     const firstManager = newManager(before)
     await firstManager.startSession(agentId, alphaCaptain, undefined, true)
-    before.sendPrompt.mockRejectedValueOnce(new Error('temporary unavailable'))
+    vi.spyOn(firstManager as any, 'buildSessionConfig').mockRejectedValueOnce(providerFailureError('temporary unavailable', 'rejected'))
     const result = await Promise.allSettled([
       firstManager.sendMessage('live', 'first', alphaCaptain, agentId, undefined, 'retry-first'),
       firstManager.sendMessage('live', 'second', alphaCaptain, agentId, undefined, 'retry-second')

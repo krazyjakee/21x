@@ -1312,7 +1312,8 @@ describe('CodexAppServerAdapter app-server error notifications', () => {
     }
     adapter.handleRpcMessage(session, notification)
 
-    expect(session.status).toBe(SessionStatusType.ERROR)
+    // The error is visible immediately; continuation waits for failed-turn settlement.
+    expect(session.status).toBe(SessionStatusType.BUSY)
     expect(session.lastError).toBe(
       'Selected model is at capacity. Please try a different model. (serverOverloaded)'
     )

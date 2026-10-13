@@ -3,6 +3,7 @@
  * parts, plus the identity helpers that keep part ids stable across reconciles.
  */
 
+import { classifyProviderFailure } from '../agent-manager/provider-failure'
 import { basename } from 'path'
 import type { MessagePart } from './coding-agent-adapter'
 import { MessagePartType, MessageRole } from './coding-agent-adapter'
@@ -22,6 +23,7 @@ export interface RunningTool {
 
 /** Per-session state the conversion reads and updates. */
 export interface CodexItemState {
+  recoveryIntentId?: string
   streamedTextByItemId: Map<string, string>
   assistantTextKeysByTurn: Map<string, Set<string>>
   runningTools: Map<string, RunningTool>
@@ -353,6 +355,7 @@ export function convertEventToMessageParts(
       id: partId,
       type: MessagePartType.ERROR,
       text: failure.message,
+      providerFailure: { ...classifyProviderFailure(failure.message, 'turn_failed'), intentId: session?.recoveryIntentId },
       role: MessageRole.ASSISTANT
     }]
   }
