@@ -1,0 +1,8 @@
+{
+  "packageKind": "nsis",
+  "proofMode": "synthetic-agent",
+  "packageSha256": "556e962f1c309a29e031e7cafb569564a79119714ff9700f6141046dc9ad23be",
+  "artifact": "21x Tauri Feasibility_0.1.0_x64-setup.exe",
+  "packagedExecutable": "D:\\a\\_temp\\21x-packaged-b_vjbm5u\\installed\\twentyonex-tauri-feasibility.exe",
+  "smokeCommandSucceeded": true
+}

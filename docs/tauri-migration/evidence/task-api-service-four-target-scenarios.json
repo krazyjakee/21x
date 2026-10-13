@@ -1,0 +1,120 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "08d495f0479d4e91826e3d22b1c1441112320c5d",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38364232789",
+  "conclusion": "success",
+  "scope": "Default standalone regression suite across four OS/architecture targets, including actual loopback task API/MCP and retained raw request lifecycle. This revision predates portable HTTP MCP test registration, mobile and task automation lifetime changes. No installed GUI or production bootstrap claim.",
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "artifactId": 11796950789,
+      "artifactDigest": "sha256:b9b667da9f8f4a18d242bd969c1561ea67f7dc006d6d14a0282de8737c7ca445",
+      "retained": {
+        "agent-desktop-proof.json": {
+          "report": "task-api-service-08d495f-linux-appimage-x64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "agent-service-proof.json": {
+          "report": "task-api-service-08d495f-linux-appimage-x64-agent-service-proof.json",
+          "sha256": "d309297c736fadc4bfd6cd02cfabb8932225f1b1fec694fa8ab148cc87b155e2"
+        },
+        "staged-native-preflight.json": {
+          "report": "task-api-service-08d495f-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "startup-transcript-tests.json": {
+          "report": "task-api-service-08d495f-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "ddb27b53694584fdd9eb4f8105c5254b4fa8b3f22916e34bba0d5cd5b677b808"
+        }
+      },
+      "portablePassed": 1137,
+      "portableSkipped": 0,
+      "portableFiles": 76,
+      "portableReportSha256": "8a97eafff762c1fb52003be429bbb2edbfc8f2ecd32317093d9201b0944976e9"
+    },
+    {
+      "target": "macos-arm64",
+      "artifactId": 11795889840,
+      "artifactDigest": "sha256:4e6bf2bf48dcdb960d464d1438e40952a4749e28a5599a98e4f401eadf52e6ee",
+      "retained": {
+        "agent-desktop-proof.json": {
+          "report": "task-api-service-08d495f-macos-arm64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "agent-service-proof.json": {
+          "report": "task-api-service-08d495f-macos-arm64-agent-service-proof.json",
+          "sha256": "d309297c736fadc4bfd6cd02cfabb8932225f1b1fec694fa8ab148cc87b155e2"
+        },
+        "staged-native-preflight.json": {
+          "report": "task-api-service-08d495f-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "startup-transcript-tests.json": {
+          "report": "task-api-service-08d495f-macos-arm64-startup-transcript-tests.json",
+          "sha256": "aeb181cd113984da2e3b15d64b877d667045fbdee0f2d418a4626eef3e62ffe7"
+        }
+      },
+      "portablePassed": 1137,
+      "portableSkipped": 0,
+      "portableFiles": 76,
+      "portableReportSha256": "944c73b7932a6c24cc8868d05e0064803cd9cafa927450808d13a1ecb66215df"
+    },
+    {
+      "target": "macos-x64",
+      "artifactId": 11796198341,
+      "artifactDigest": "sha256:978589b270d29557f902041745485350b2f1d7dee43f8ac1b0342c0bcf76fdeb",
+      "retained": {
+        "agent-desktop-proof.json": {
+          "report": "task-api-service-08d495f-macos-x64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "agent-service-proof.json": {
+          "report": "task-api-service-08d495f-macos-x64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "staged-native-preflight.json": {
+          "report": "task-api-service-08d495f-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "startup-transcript-tests.json": {
+          "report": "task-api-service-08d495f-macos-x64-startup-transcript-tests.json",
+          "sha256": "6bebdc7ed3c705b7f597d7d3b7b3bcf9632bec95e4d8afa0aa3a5682512e4383"
+        }
+      },
+      "portablePassed": 1137,
+      "portableSkipped": 0,
+      "portableFiles": 76,
+      "portableReportSha256": "a07c2e97c14b265c0afcbaa4fb67fd82ba2ecc21fb036b9c4c302a2c4887e5e5"
+    },
+    {
+      "target": "windows-x64",
+      "artifactId": 11796229044,
+      "artifactDigest": "sha256:4a0b2bd5193dd318ec4f09026f4565853f0a8cab9f0a60ec749a3956306d9504",
+      "retained": {
+        "agent-desktop-proof.json": {
+          "report": "task-api-service-08d495f-windows-x64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "agent-service-proof.json": {
+          "report": "task-api-service-08d495f-windows-x64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "staged-native-preflight.json": {
+          "report": "task-api-service-08d495f-windows-x64-staged-native-preflight.json",
+          "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+        },
+        "startup-transcript-tests.json": {
+          "report": "task-api-service-08d495f-windows-x64-startup-transcript-tests.json",
+          "sha256": "fde5a9777ffcaf6b2fa7003c63d124d577813540fcd4811f6216e6ace539fe94"
+        }
+      },
+      "portablePassed": 1137,
+      "portableSkipped": 0,
+      "portableFiles": 76,
+      "portableReportSha256": "b18fecc67c62c3587b406ab2c99171a079909f765f9f536dbff0824d7f6d109c"
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

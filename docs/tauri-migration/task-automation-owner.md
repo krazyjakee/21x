@@ -1,0 +1,9 @@
+# Task automation shutdown ownership
+
+`TaskAutomationScheduler.shutdown()` closes final admission synchronously while `stop()` remains a reusable timer pause. `close()` joins the actual reconciliation pass before SQLite closes. Overlapping callers share the pass; a bounded close timeout retains it for retry. A pass queued before shutdown performs no database access, and an active pass finishes its accepted start/completion without advancing to another candidate or phase. The application trigger handles late closed-admission replies.
+
+Five lifecycle controls use real portable SQLite with fixture agent operations, including an accepted completion that writes only after the first close deadline. All 29 existing scheduling regressions run under standalone Node too. This does not establish installed production scheduler parity. Captain wakeups, heartbeat monitoring and workspace cleanup still require their own ownership and native-host integration under [#212](https://github.com/krazyjakee/21x/issues/212) and [#208](https://github.com/krazyjakee/21x/issues/208).
+
+Full application validation exposed an unowned terminal-panel focus timer after renderer teardown. The timer is now cleared on unmount and checks the originating terminal before using the document. A regression proves no timer survives unmount. The initial unhandled-error report and a separate profile-rehearsal timeout remain unaccepted evidence; the final result is recorded in [local evidence](evidence/task-automation-owner-local.json).
+
+Final validation passed 1,257 standalone cases with zero skips in 85 files and 5,294 application assertions with 20 optional skips in 380 files. The full application run used four workers, exited zero and reported no unhandled errors. The import rehearsal also passed independently with its original deadline. Forced typecheck, changed-source lint and generated-contract freshness passed.

@@ -188,7 +188,7 @@ async function shutdownAppServices(): Promise<void> {
   stopScheduledCoordination()
   heartbeatScheduler?.stop()
   captainWaker?.stop()
-  taskAutomationScheduler?.stop()
+  taskAutomationScheduler?.shutdown()
   workspaceCleanupScheduler?.stop()
 
   await agentManager?.stopAllSessions()
@@ -196,7 +196,7 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason
@@ -427,7 +427,9 @@ function createWindow(): void {
   // An MCP caller has no window, so the main-process loop is what honours the
   // auto-start / auto-complete flags it sets.
   setTaskAutomationTrigger(() => {
-    void taskAutomationScheduler?.runNow()
+    void taskAutomationScheduler?.runNow().catch(error => {
+      if (!(error instanceof Error && error.message === 'TASK_AUTOMATION_CLOSED')) console.error('[TaskAutomation] Trigger failed:', error)
+    })
   })
 
   // Wire up transcript provider for subtask MCP agents to access sibling transcripts

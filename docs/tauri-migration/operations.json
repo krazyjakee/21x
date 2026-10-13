@@ -410,7 +410,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 441,
+          "line": 443,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -8737,7 +8737,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 457,
+          "line": 459,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9501,7 +9501,7 @@
         {
           "column": 15,
           "file": "src/main/index.ts",
-          "line": 609,
+          "line": 611,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9509,7 +9509,7 @@
         {
           "column": 11,
           "file": "src/main/index.ts",
-          "line": 615,
+          "line": 617,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -12989,7 +12989,7 @@
         {
           "column": 50,
           "file": "src/main/index.ts",
-          "line": 753,
+          "line": 755,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13670,7 +13670,7 @@
         {
           "column": 23,
           "file": "src/main/index.ts",
-          "line": 800,
+          "line": 802,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -19069,7 +19069,7 @@
         "producerOwner": "authenticated-mobile-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 441,
+      "line": 443,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",

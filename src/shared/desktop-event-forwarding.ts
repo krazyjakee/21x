@@ -388,7 +388,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "mobile-to-desktop-relay",
     "source": {
       "file": "src/main/index.ts",
-      "line": 441,
+      "line": 443,
       "column": 7,
       "target": "guardedIpcSend",
       "method": "send",

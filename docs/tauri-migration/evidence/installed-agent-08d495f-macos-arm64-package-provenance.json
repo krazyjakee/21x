@@ -1,0 +1,8 @@
+{
+  "packageKind": "dmg",
+  "proofMode": "synthetic-agent",
+  "packageSha256": "cefef3eb579f0b6c76ba524f675251452589356bbf8110ed8b31caa2a7b0fa52",
+  "artifact": "21x Tauri Feasibility_0.1.0_aarch64.dmg",
+  "packagedExecutable": "/Users/runner/work/_temp/21x-packaged-c4pt_0g6/21x Tauri Feasibility.app/Contents/MacOS/twentyonex-tauri-feasibility",
+  "smokeCommandSucceeded": true
+}

@@ -225,7 +225,7 @@
       "expression": "window.electronAPI.terminal.resize",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 255,
+      "line": 257,
       "path": [
         "terminal",
         "resize"
@@ -237,7 +237,7 @@
       "expression": "window.electronAPI.terminal.getCwd",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 285,
+      "line": 287,
       "path": [
         "terminal",
         "getCwd"
@@ -249,7 +249,7 @@
       "expression": "window.electronAPI.terminal.kill",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 291,
+      "line": 293,
       "path": [
         "terminal",
         "kill"
@@ -261,7 +261,7 @@
       "expression": "window.electronAPI.terminal.getCwd",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 317,
+      "line": 319,
       "path": [
         "terminal",
         "getCwd"
@@ -6736,7 +6736,7 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/index.ts",
-      "line": 441,
+      "line": 443,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -6747,7 +6747,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/index.ts",
-      "line": 457,
+      "line": 459,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6758,7 +6758,7 @@
       "channelExpression": null,
       "column": 15,
       "file": "src/main/index.ts",
-      "line": 609,
+      "line": 611,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6769,7 +6769,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/index.ts",
-      "line": 615,
+      "line": 617,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6780,7 +6780,7 @@
       "channelExpression": null,
       "column": 50,
       "file": "src/main/index.ts",
-      "line": 753,
+      "line": 755,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6791,7 +6791,7 @@
       "channelExpression": null,
       "column": 23,
       "file": "src/main/index.ts",
-      "line": 800,
+      "line": 802,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",

@@ -51,3 +51,5 @@ cleanup. [MCP evidence](evidence/task-mcp-portable-local.json) records all 23
 passes under each launcher, including signed scope, project/task isolation, tool
 visibility and delegated fixture controllers. GitHub interactions are fixtures
 and temporary local repositories; no real remote write or model call is made.
+
+The [four-target service run](https://github.com/krazyjakee/21x/actions/runs/38364232789) passed 1,137 default portable cases with zero skips in 76 files on Windows x64, Linux x64 and both Macs at `08d495f`. [Retained evidence](evidence/task-api-service-four-target-scenarios.json) preserves the report hashes and staged native/private-service controls. This revision predates the later HTTP MCP test registration, mobile and task automation lifecycle changes.

@@ -51,7 +51,8 @@ export class TaskAutomationScheduler {
   private readonly MAX_COMPLETE_ATTEMPTS = 3
 
   /** Guards against two ticks overlapping when a tick runs longer than the interval. */
-  private running = false
+  private closing = false
+  private activeTick: Promise<void> | null = null
 
   constructor(dbManager: DatabaseManager, agentManager: AgentManager) {
     this.dbManager = dbManager
@@ -59,6 +60,7 @@ export class TaskAutomationScheduler {
   }
 
   start(): void {
+    if (this.closing) throw new Error('TASK_AUTOMATION_CLOSED')
     this.stop() // clear any previous timer to prevent interval leaks
     console.log('[TaskAutomation] Starting scheduler...')
 
@@ -78,6 +80,12 @@ export class TaskAutomationScheduler {
     }
   }
 
+  /** Stop final admission synchronously while preserving reusable stop() semantics. */
+  shutdown(): void {
+    this.closing = true
+    this.stop()
+  }
+
   /**
    * Run one reconciliation pass immediately.
    *
@@ -87,19 +95,42 @@ export class TaskAutomationScheduler {
    * dropped while a pass is already running.
    */
   async runNow(): Promise<void> {
+    if (this.closing) throw new Error('TASK_AUTOMATION_CLOSED')
     await this.tick()
   }
 
-  private async tick(): Promise<void> {
-    if (this.running) return
-    this.running = true
+  /** Final shutdown joins the current raw pass; timeout does not discard it. */
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Task automation shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.shutdown()
+    if (!this.activeTick) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('TASK_AUTOMATION_SHUTDOWN_INCOMPLETE')), timeoutMs)
+    })
+    try { await Promise.race([this.activeTick, expired]) }
+    finally { if (timer) clearTimeout(timer) }
+  }
+
+  private tick(): Promise<void> {
+    if (this.closing) return Promise.resolve()
+    if (this.activeTick) return this.activeTick
+    const work = Promise.resolve().then(() => this.executeTick())
+    this.activeTick = work
+    void work.finally(() => { if (this.activeTick === work) this.activeTick = null }).catch(() => {})
+    return work
+  }
+
+  private async executeTick(): Promise<void> {
+    if (this.closing) return
     try {
       await this.autoStartPendingTasks()
+      if (this.closing) return
       await this.autoCompleteReviewedTasks()
     } catch (err) {
       console.error('[TaskAutomation] Error during reconciliation pass:', err)
-    } finally {
-      this.running = false
     }
   }
 
@@ -126,6 +157,7 @@ export class TaskAutomationScheduler {
     // frees. A queued task stays not_started, so later sweeps ask again and
     // just get its queue position back.
     for (const task of tasks) {
+      if (this.closing) return
       if (this.inFlight.has(task.id)) continue
       if (this.agentManager.hasActiveSessionForTask(task.id)) continue
 
@@ -257,6 +289,7 @@ export class TaskAutomationScheduler {
     console.log(`[TaskAutomation] Found ${candidates.length} task(s) to auto-complete`)
 
     for (const row of candidates) {
+      if (this.closing) return
       if (this.inFlight.has(row.id)) continue
       if (this.agentManager.hasActiveSessionForTask(row.id)) {
         console.log(`[TaskAutomation] Skipping auto-complete of ${row.id} — agent session still active`)

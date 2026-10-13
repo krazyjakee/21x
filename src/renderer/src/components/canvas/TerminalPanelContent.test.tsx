@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
 
 const terminalCreate = vi.fn()
 const terminalWrite = vi.fn()
@@ -112,8 +112,25 @@ describe('TerminalPanelContent', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('cancels the delayed focus check when its terminal unmounts', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    terminalCreate.mockResolvedValue({ pid: 444 })
+    terminalGetCwd.mockResolvedValue({ cwd: null })
+    const panel = render(<TerminalPanelContent terminalId="panel-focus" cwd="/tmp" />)
+    await act(async () => {})
+    expect(terminalCreate).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+
+    panel.unmount()
+    await act(async () => {})
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(terminalKill).toHaveBeenCalledWith('panel-focus', 444)
   })
 
   it('kills only the PTY instance that owned the cleanup', async () => {
