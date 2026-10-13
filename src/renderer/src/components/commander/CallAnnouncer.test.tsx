@@ -55,6 +55,70 @@ describe('one honest Commander announcer', () => {
     act(() => vi.advanceTimersByTime(1000))
     expect(screen.getByTestId('commander-polite-announcer').firstChild).toBe(announced)
   })
+  it('keeps semantic paragraph announcements for repeated thinking on distinct turns', () => {
+    render(<CallAnnouncer />)
+    thinking('first-thinking'); act(() => vi.advanceTimersByTime(1000))
+    const polite = screen.getByTestId('commander-polite-announcer')
+    const first = polite.firstElementChild
+    expect(first?.tagName).toBe('P')
+    expect(first).toHaveTextContent('Commander is thinking.')
+    thinking('second-thinking'); act(() => vi.advanceTimersByTime(999))
+    expect(polite.firstElementChild).toBe(first)
+    act(() => vi.advanceTimersByTime(1))
+    expect(polite.firstElementChild).not.toBe(first)
+    expect(polite.firstElementChild?.tagName).toBe('P')
+    expect(polite).toHaveTextContent('Commander is thinking.')
+    const second = polite.firstElementChild
+    thinking('second-thinking'); act(() => vi.advanceTimersByTime(1000))
+    expect(polite.firstElementChild).toBe(second)
+  })
+  it('does not replay a retained turn error after Retry, navigation, session return or End, but announces a new failing turn', async () => {
+    useCommanderCallStore.setState({ status: 'live', sessionId: 's1' })
+    render(<CallAnnouncer />)
+    const error = 'The connection was lost. Retry the reply or type instead.'
+    const fail = (turnId: string) => {
+      emit({ type: 'turn_started', sessionId: 's1', turnId })
+      emit({ type: 'turn_event', sessionId: 's1', turnId, event: { type: 'error', message: error } })
+      act(() => {
+        useCommanderStore.setState({ turnErrors: { s1: error } })
+        useCommanderActivityStore.setState({ sessions: { s1: { sessionId: 's1', turnId, phase: 'error', error, openTools: [], hasText: false, observedAt: activityNow() } } })
+      })
+    }
+    fail('failed-first')
+    const urgent = screen.getByTestId('commander-assertive-announcer')
+    const first = urgent.firstElementChild
+    expect(first?.textContent).toBe(`Commander error: ${error}`)
+    await act(async () => { await useCommanderCallStore.getState().retry('failed-first') })
+    expect(urgent.firstElementChild).toBe(first)
+    act(() => useUIStore.setState({ sidebarView: 'tasks' }))
+    act(() => useUIStore.setState({ sidebarView: 'commander' }))
+    expect(urgent.firstElementChild).toBe(first)
+    act(() => useCommanderStore.setState({ selectedSessionId: 'inbox' }))
+    act(() => useCommanderStore.setState({ selectedSessionId: 's1' }))
+    expect(urgent.firstElementChild).toBe(first)
+    act(() => useCommanderCallStore.getState().end())
+    expect(urgent.firstElementChild).toBe(first)
+    fail('failed-second')
+    expect(urgent.firstElementChild).not.toBe(first)
+    expect(urgent.textContent).toBe(`Commander error: ${error}`)
+    const second = urgent.firstElementChild
+    emit({ type: 'turn_event', sessionId: 's1', turnId: 'failed-second', event: { type: 'error', message: error } })
+    emit({ type: 'turn_event', sessionId: 's1', turnId: 'failed-second', event: { type: 'done', stopReason: 'cancelled' } })
+    expect(urgent.firstElementChild).toBe(second)
+  })
+  it('allows a new microphone failure with the same wording after the old call ended', () => {
+    render(<CallAnnouncer />)
+    act(() => useCommanderCallStore.setState({ error: 'Microphone disconnected.', retrySessionId: 's1' }))
+    const urgent = screen.getByTestId('commander-assertive-announcer')
+    const first = urgent.firstElementChild
+    act(() => useUIStore.setState({ sidebarView: 'tasks' }))
+    act(() => useUIStore.setState({ sidebarView: 'commander' }))
+    expect(urgent.firstElementChild).toBe(first)
+    act(() => useCommanderCallStore.getState().end())
+    act(() => useCommanderCallStore.setState({ error: 'Microphone disconnected.', retrySessionId: 's1' }))
+    expect(urgent.firstElementChild).not.toBe(first)
+    expect(urgent.textContent).toBe('Commander error: Microphone disconnected.')
+  })
   it('announces ordinary call-off typed Chat after successful completion even with global TTS ready', () => {
     render(<CallAnnouncer />)
     const written = message('written', 'assistant', 'This is the final typed reply.')
@@ -63,7 +127,8 @@ describe('one honest Commander announcer', () => {
     const polite = screen.getByTestId('commander-polite-announcer')
     expect(polite).not.toHaveTextContent(written.content)
     emit({ type: 'turn_event', sessionId: 's1', turnId: 'typed-turn', event: { type: 'done', stopReason: 'end_turn' } })
-    expect(polite).toHaveTextContent(written.content)
+    expect(polite.textContent).toBe(`Commander replied: ${written.content}`)
+    expect(polite.firstElementChild?.tagName).toBe('P')
     const original = polite.firstChild
     emit({ type: 'messages_appended', sessionId: 's1', turnId: 'typed-turn', messages: [written] })
     emit({ type: 'turn_event', sessionId: 's1', turnId: 'typed-turn', event: { type: 'done', stopReason: 'end_turn' } })

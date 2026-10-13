@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url'
 
 const directory = dirname(fileURLToPath(import.meta.url))
 const root = resolve(directory, '../..')
-const profile = await mkdtemp(resolve(tmpdir(), 'commander-input-profile-'))
+const assistive = process.argv.includes('--assistive')
+const profile = await mkdtemp(resolve(tmpdir(), assistive ? 'commander-assistive-profile-' : 'commander-input-profile-'))
 const server = await createServer({
   configFile: false, root: directory,
   resolve: { alias: { '@': resolve(root, 'src/renderer/src'), '@shared': resolve(root, 'src/shared') } },
@@ -23,7 +24,7 @@ try {
   const env = { ...process.env, GSETTINGS_BACKEND: 'memory', COMMANDER_INPUT_URL: server.resolvedUrls.local[0], COMMANDER_INPUT_PROFILE: profile }
   delete env.ELECTRON_RUN_AS_NODE
   process.exitCode = await new Promise((resolveExit, reject) => {
-    const child = spawn(electron, [resolve(directory, 'check.cjs')], { env, stdio: 'inherit', timeout: 60_000 })
+    const child = spawn(electron, [resolve(directory, assistive ? 'check-assistive.cjs' : 'check.cjs')], { env, stdio: 'inherit', timeout: assistive ? 300_000 : 60_000 })
     child.on('error', reject)
     child.on('exit', code => resolveExit(code ?? 1))
   })

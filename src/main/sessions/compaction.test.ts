@@ -8,6 +8,23 @@ const databases: ReturnType<typeof createPortableTestDb>[] = []
 afterEach(() => { for (const db of databases.splice(0)) db.close() })
 
 describe('backend-session compaction evidence', () => {
+  it('exposes current model input without renewing replayed timestamps or carrying occupancy across native sessions', () => {
+    let now = 10
+    const tracker = new AdapterCompactionTracker('codex', () => now)
+    expect(tracker.contextSnapshot('session')).toBeNull()
+    tracker.observeContext('session', 'call-1', 1000, 'turn')
+    now = 20
+    tracker.observeContext('session', 'call-1', 1000, 'turn')
+    expect(tracker.contextSnapshot('session')).toMatchObject({ tokens: 1000, provenance: 'reported', observedAt: 10 })
+    const received = tracker.contextSnapshot('session')!
+    received.tokens = 50000
+    expect(tracker.contextSnapshot('session')?.tokens).toBe(1000)
+    tracker.observeExplicit('session', 'boundary', 'contextCompaction', { afterTokens: 300 })
+    expect(tracker.contextSnapshot('session')).toMatchObject({ tokens: 300, observedAt: 20 })
+    tracker.bindSession('replacement')
+    expect(tracker.contextSnapshot('session')).toBeNull()
+    expect(tracker.contextSnapshot('replacement')).toBeNull()
+  })
   it('requires a strictly greater than 40% drop, ignoring unknown counters and duplicate samples', () => {
     const tracker = new AdapterCompactionTracker('cursor', () => 10)
     tracker.observeContext('session', 'a', 1000)

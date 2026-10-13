@@ -9,6 +9,7 @@ import { ChatMessageImages } from '@/components/chat/ChatMessageImages'
 import { cachedCommanderImage, loadCommanderImage } from '@/lib/commander-images'
 import { cn } from '@/lib/utils'
 import { formatToolResult, toolCallLabel } from './tool-call-label'
+import { ContextDivider, readContextDivider } from '@/components/context/ContextDivider'
 
 export interface ToolChipProps {
   name: string
@@ -88,6 +89,13 @@ interface MessageItemProps {
 }
 
 export function CommanderMessageItem({ message, toolResults, reports = [], unseenReportIds = [], requestedBy }: MessageItemProps) {
+  if (message.role === 'assistant' && (message.tool_name === 'session_rollover' || message.tool_name === 'session_recovery')) {
+    return <ContextDivider {...readContextDivider(message.content, message.tool_name === 'session_rollover' ? 'rollover' : 'recovery')} />
+  }
+  if (message.role === 'summary') {
+    const rollover = message.id.startsWith('rollover-summary:')
+    return <ContextDivider kind={rollover ? 'rollover' : 'compaction'} title={rollover ? 'Generation handoff summary' : 'Context compacted'} summary={message.content} />
+  }
   if (message.role === 'user') {
     return (
       <div className="flex flex-col items-end gap-1.5">
@@ -150,6 +158,6 @@ export function CommanderMessageItem({ message, toolResults, reports = [], unsee
     )
   }
 
-  // Tool results render inside their assistant's chips; summaries are model context only.
+  // Tool results render inside their assistant's chips.
   return null
 }

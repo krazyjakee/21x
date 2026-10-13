@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { CommanderStage } from './CommanderStage'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderCallUiStore, useCommanderPipVisible } from '@/stores/commander-call-ui-store'
+import { SessionContextMeter } from '@/components/context/SessionContextMeter'
 
 /** Stage first, with a mounted Chat/Actions panel and a focus-contained sessions drawer. */
 export function CommanderWorkspace() {
@@ -55,6 +56,7 @@ export function CommanderWorkspace() {
         {!!session?.unread_count && !session.is_report_inbox && <Button size="sm" variant="secondary" onClick={() => { setTab('chat'); setPanelOpen(true) }}>{session.unread_count} new {session.unread_count === 1 ? 'report' : 'reports'}</Button>}
         {inbox && <Button size="sm" variant={sessionId === inbox.id ? 'secondary' : 'outline'} aria-label={`Project reports, ${inbox.unread_count} unread`} onClick={() => { setTab('chat'); setPanelOpen(true); void useCommanderStore.getState().selectSession(inbox.id) }}><Inbox className="size-icon-sm" aria-hidden="true" />Project reports{inbox.unread_count > 0 && <span className="font-semibold">{inbox.unread_count}</span>}</Button>}
         {call.status !== 'off' && <span className="text-xs font-medium text-muted-foreground">{call.status === 'starting' ? 'Joining…' : 'Live'}</span>}
+        {!panelOpen && sessionId && <SessionContextMeter compact scope={{ kind: 'commander', ownerId: sessionId }} />}
       </header>
       <div className="commander-layout commander-stage-layout">
         {pip ? <section className="commander-stage commander-stage-pip-placeholder" aria-label="Commander stage"><p className="text-base">{call.error ? 'Call needs attention in the floating view.' : 'Call continues in the floating view.'}</p><Button onClick={() => useCommanderCallUiStore.getState().expand()}>Expand Commander call</Button></section> : <CommanderStage panelOpen={panelOpen} onPanelToggle={() => setPanelOpen(!panelOpen)} compact={false} onCompactToggle={() => useCommanderCallUiStore.getState().showPip()} />}
@@ -68,6 +70,7 @@ export function CommanderWorkspace() {
               <Button size="sm" id="commander-chat-tab" role="tab" tabIndex={tab === 'chat' ? 0 : -1} aria-selected={tab === 'chat'} aria-controls="commander-panel" variant={tab === 'chat' ? 'secondary' : 'ghost'} onClick={() => setTab('chat')}>Chat</Button>
               <Button size="sm" id="commander-actions-tab" role="tab" tabIndex={tab === 'actions' ? 0 : -1} aria-selected={tab === 'actions'} aria-controls="commander-panel" variant={tab === 'actions' ? 'secondary' : 'ghost'} onClick={() => setTab('actions')}>Actions</Button>
             </div>
+            {sessionId && <SessionContextMeter compact scope={{ kind: 'commander', ownerId: sessionId }} />}
             <Button size="icon" variant="ghost" aria-label="Close Chat panel" onClick={() => { setPanelOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[aria-label="Show Chat panel"]')?.focus()) }}><X className="size-icon" aria-hidden="true" /></Button>
           </div>
           <div id="commander-panel" role="tabpanel" aria-labelledby={tab === 'chat' ? 'commander-chat-tab' : 'commander-actions-tab'} className="flex min-h-0 flex-1 flex-col">

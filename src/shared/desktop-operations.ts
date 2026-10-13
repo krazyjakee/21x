@@ -180,6 +180,8 @@ export interface DesktopCommandMap {
   "secrets:delete": { apiArguments: Parameters<NonNullable<DesktopApi["secrets"]["delete"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["secrets"]["delete"]>>> }
   "secrets:getAll": { apiArguments: Parameters<NonNullable<DesktopApi["secrets"]["getAll"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["secrets"]["getAll"]>>> }
   "secrets:update": { apiArguments: Parameters<NonNullable<DesktopApi["secrets"]["update"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["secrets"]["update"]>>> }
+  "sessionContext:getSnapshot": { apiArguments: Parameters<NonNullable<DesktopApi["sessionContext"]["getSnapshot"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["sessionContext"]["getSnapshot"]>>> }
+  "sessionContext:setPolicy": { apiArguments: Parameters<NonNullable<DesktopApi["sessionContext"]["setPolicy"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["sessionContext"]["setPolicy"]>>> }
   "settings:get": { apiArguments: Parameters<NonNullable<DesktopApi["settings"]["get"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["settings"]["get"]>>> }
   "settings:getAll": { apiArguments: Parameters<NonNullable<DesktopApi["settings"]["getAll"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["settings"]["getAll"]>>> }
   "settings:set": { apiArguments: Parameters<NonNullable<DesktopApi["settings"]["set"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["settings"]["set"]>>> }
@@ -523,6 +525,8 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "command/secrets:delete": {"name":"secrets:delete","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/secrets:getAll": {"name":"secrets:getAll","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/secrets:update": {"name":"secrets:update","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/sessionContext:getSnapshot": {"name":"sessionContext:getSnapshot","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/sessionContext:setPolicy": {"name":"sessionContext:setPolicy","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/settings:get": {"name":"settings:get","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/settings:getAll": {"name":"settings:getAll","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/settings:set": {"name":"settings:set","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},

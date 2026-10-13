@@ -290,6 +290,36 @@ export class CommanderStore {
     return { message: this.getMessage(id)!, inserted: true }
   }
 
+  /** Bind a durable summary and its visible divider in the same conversation. */
+  bindHandoff(input: { sessionId: string; handoffId: string; generationKey: string; summary: string; source: 'model' | 'fallback'; lastFoldedId: string | null }): { messages: CommanderMessage[]; inserted: boolean } {
+    const ids = [`rollover-summary:${input.handoffId}`, `rollover-divider:${input.handoffId}`]
+    const divider = JSON.stringify({ kind: 'rollover', title: 'Conversation continued in a new generation', summary: input.summary, source: input.source, generationKey: input.generationKey })
+    let inserted = false
+    this.db.transaction(() => {
+      if (!this.hasSession(input.sessionId)) throw new Error('Commander session not found')
+      const previous = this.getMessage(ids[0])
+      if (previous && (previous.session_id !== input.sessionId || previous.content !== input.summary || previous.correlation_id !== input.lastFoldedId))
+        throw new Error('Handoff summary belongs to different source content')
+      const existingDivider = this.getMessage(ids[1])
+      const handoff = this.db.prepare('SELECT next_generation_key FROM session_handoffs WHERE id = ?').get(input.handoffId) as { next_generation_key: string } | undefined
+      if (handoff && handoff.next_generation_key !== input.generationKey) throw new Error('Handoff generation identity changed')
+      if (previous && (!existingDivider || existingDivider.session_id !== input.sessionId || existingDivider.role !== 'assistant'
+        || existingDivider.tool_name !== 'session_rollover' || existingDivider.content !== divider))
+        throw new Error('Handoff divider belongs to different source content')
+      if (!previous) {
+        const write = this.db.prepare(`INSERT INTO commander_messages
+          (id, session_id, role, content, tool_name, correlation_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        write.run(ids[0], input.sessionId, 'summary', input.summary, null, input.lastFoldedId, this.now())
+        write.run(ids[1], input.sessionId, 'assistant', divider, 'session_rollover', null, this.now())
+        inserted = true
+        this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(this.now(), input.sessionId)
+        this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+          .run(`sessions.commander_generation:${input.sessionId}`, input.generationKey)
+      }
+    })()
+    return { messages: ids.map(id => this.getMessage(id)!), inserted }
+  }
+
   /** Idempotent external report delivery and outbox acknowledgement. */
   appendMessageOnce(
     sessionId: string,

@@ -31,9 +31,11 @@ import { projectEvents, type ProjectEvent } from './project-events'
 import { isCoordinatorScope, setToolCallObserver, type TaskMcpScope } from './mcp-servers/task-management-core'
 import { readCaptainWakeupSettings, wakeupKindEnabled, type ProjectEventKind } from '../shared/captain-wakeups'
 import { buildSystemMessage, computeDeliveryId, SystemMessageOrigin } from '../shared/system-authority'
+import { captainWakeIdentity, type CaptainWakeDisposition } from './sessions/roles/captain'
 
 export type CaptainWakerStore = Pick<DatabaseManager, 'getProject' | 'getCoordinatorTask' | 'getAgents'>
 export type CaptainWakerAgents = Pick<AgentManager, 'findSessionByTaskId' | 'sendMessage'>
+  & Partial<Pick<AgentManager, 'deliverCaptainWake' | 'recordDroppedCaptainWake'>>
 
 export interface CaptainWakerOptions {
   /** How long a project's first event waits for company before the wake-up. */
@@ -301,6 +303,7 @@ export class CaptainWaker {
     if (!project || !coordinator) {
       console.warn(`[CaptainWaker] Project ${projectId} has no Captain row; dropping ${batch.events.length} event(s)`)
       this.pending.delete(projectId)
+      if (coordinator) await this.recordDrop(coordinator.id, batch, 'missing_project')
       return
     }
 
@@ -311,6 +314,7 @@ export class CaptainWaker {
       if (this.now() - batch.since > this.maxDeferMs) {
         console.warn(`[CaptainWaker] Captain of ${projectId} stayed ${live.session.status} for over ${Math.round(this.maxDeferMs / 60_000)} min; dropping ${batch.events.length} stale event(s)`)
         this.pending.delete(projectId)
+        await this.recordDrop(coordinator.id, batch, 'stale')
         return
       }
       this.arm(projectId, batch)
@@ -323,12 +327,14 @@ export class CaptainWaker {
         this.capLogged.add(projectId)
         console.warn(`[CaptainWaker] Wake-up cap reached for project ${projectId} (${this.hourlyCap}/hour); dropping ${batch.events.length} event(s) until the hour rolls over`)
       }
+      await this.recordDrop(coordinator.id, batch, 'hourly_cap')
       return
     }
 
     const agentId = resolveCaptainAgentId(this.db, project)
     if (!agentId) {
       console.warn(`[CaptainWaker] No agent to run the Captain of ${projectId}; dropping ${batch.events.length} event(s)`)
+      await this.recordDrop(coordinator.id, batch, 'missing_agent')
       return
     }
     // A live session on an agent the Captain was switched away from is not
@@ -343,7 +349,10 @@ export class CaptainWaker {
     // synchronous host callback cannot hide it by starting shutdown reentrantly.
     const delivery = Promise.resolve().then(() => {
       if (this.closing) return
-      return this.agents.sendMessage(liveSessionId, message, coordinator.id, agentId)
+      return this.agents.deliverCaptainWake
+        ? this.agents.deliverCaptainWake(liveSessionId, message, coordinator.id, agentId,
+          captainWakeIdentity(coordinator.id, batch.events), batch.events.length)
+        : this.agents.sendMessage(liveSessionId, message, coordinator.id, agentId)
     })
     this.deliveries.add(delivery)
     try {
@@ -355,6 +364,19 @@ export class CaptainWaker {
       this.deliveries.delete(delivery)
       this.flushing.delete(projectId)
     }
+  }
+
+  private async recordDrop(ownerId: string, batch: PendingBatch, disposition: CaptainWakeDisposition): Promise<void> {
+    if (!this.agents.recordDroppedCaptainWake || this.closing) return
+    const observation = Promise.resolve().then(() => {
+      if (!this.closing) return this.agents.recordDroppedCaptainWake!(ownerId,
+        captainWakeIdentity(ownerId, batch.events), disposition, batch.events.length)
+      return undefined
+    })
+    this.deliveries.add(observation)
+    try { await observation }
+    catch (error) { console.error('[CaptainWaker] Could not record dropped wake disposition:', error) }
+    finally { this.deliveries.delete(observation) }
   }
 
   private underCap(projectId: string): boolean {

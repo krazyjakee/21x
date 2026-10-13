@@ -1,4 +1,4 @@
-# Session accounting and managed Commander
+# Session accounting and managed conversations
 
 Schema v34 adds Commander turn/call usage independently of the managed-session
 rollout. Every user, title and summary model turn records a durable usage row,
@@ -88,3 +88,63 @@ inbox according to existing routing). Delivery never starts a model turn or
 speech. `roles/commander.ts` owns the defensive report tool policy: report-owned
 administration is refused and the report-ask budget is shared; explicit user
 tools retain their direct action behavior.
+
+## Captains on AdapterEngine
+
+`sessions.captain_managed` defaults off; `1` or `true` enables the Captain path.
+It retains the backend's native context. Starts, resumes, prompt acceptance and
+wake dispositions enter the shared event inbox with stable owner/generation
+identities. Wake receipt and its existing delivery intent commit together.
+The inbox records evidence; the delivery outbox remains the only owner of sends
+and retries, so startup projection does not replay prompts or tools.
+
+A managed Captain whose backend session is explicitly missing starts a visible
+recap-pending replacement. Its next accepted human message or eligible wake
+carries the retained recap; the interrupted prompt is not replayed. Transport,
+configuration and approval failures preserve their existing binding. Stale
+output batches and excluded, capped or expired wake batches retain disposition
+records. Temporary-to-native ID changes preserve the original logical generation.
+
+## Planned context continuation
+
+`sessions.rollover` is `off` by default. `observe` records reached limits without
+allocating a generation. `on` continues between safe turns after activation of
+managed Captains; Commander additionally requires its own managed flag. The
+adopted defaults in `sessions.rollover_thresholds` are 70% of a known context
+window, two compactions, 150 delivered wake-ups, 300 conversation turns or seven
+days. Summed billing usage is never interpreted as context occupancy. Unknown
+model windows do not produce a percentage trigger.
+
+The durable handoff progresses through pending, summary, memory, creating,
+created and completed. Summaries use the frozen session model and are bounded
+to 1,500 estimated tokens. A failed or oversized summary uses a deterministic
+fallback with explicit archive references and the newest instruction retained;
+if that instruction cannot fit, continuation pauses visibly with its source
+intact. Cancellation leaves resumable evidence. It never changes summary models
+silently or repeats accepted external creation. A `creation_unconfirmed` row
+needs its exact accepted backend identity reconciled before binding can resume.
+
+Captain memory replaces only its own marked block in `MEMORY.md` and appends
+one stable handoff entry to `.21x/session-journal.jsonl`. Other text and owners'
+blocks are preserved. A changed or non-regular destination and a symlink journal
+parent pause the write; source and handoff progress remain available. An accepted
+Captain replacement takes precedence over a missing old backend on restart,
+so an interrupted binding resumes against its saved identity. Commander retains
+one global memory record, binds a
+summary and divider atomically in its existing conversation, and keeps newer
+unfolded messages available. Replayed binding cannot rewind a later generation.
+
+## Context presentation
+
+Commander and Captain transcript surfaces show a context control. Reported
+model input is distinguished from `≈` estimated input; unknown usage and model
+windows remain unknown. The latest single request is shown, rather than summed
+turn costs. Generation counters, reached limits, pending or unconfirmed
+continuation warnings and expandable retained summaries are available in the
+dialog. Caption/call lifetime, typing and direct action Undo remain unchanged.
+
+The dialog exposes continuation mode and all five thresholds, and a Stop
+control while continuation is pending. Settings writes are validated in main
+and do not activate either managed engine flag. Snapshot reads are scoped,
+trusted desktop operations with no model calls or lifecycle effects. The
+renderer coalesces visible reads and fences failed, released or foreign results.

@@ -287,3 +287,14 @@ bounded display results and the committed Undo note. The action and its snapshot
 commit together. Supported reversals compare the affected current fields before
 writing; later conflicting edits, removals and scope moves are never guessed.
 These changes add no confirmation or model turn.
+
+### Version 36 — resumable session handoffs
+
+`session-handoff-migration.ts` adds `session_handoffs`, uniquely keyed by the
+logical owner and source generation. The row freezes source turns and the
+session's model, and records summary, memory, allocation, binding and completion
+steps. A captured backend ID survives interruption; an allocation whose result
+was not recorded stays visibly unconfirmed and is never issued again on retry.
+Existing conversation, task and ledger rows remain intact. Commander memory
+uses one global `sessions.commander_memory` settings record; the active
+generation pointer is scoped to each existing Commander conversation.

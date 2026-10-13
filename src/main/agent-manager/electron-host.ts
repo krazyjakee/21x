@@ -51,6 +51,10 @@ export function electronAgentManagerHost(): AgentManagerHost {
       }
     },
     createAdapter,
-    isCodexAppServerAdapter
+    isCodexAppServerAdapter,
+    captainSummaryProvider: async source => {
+      const { createChatProviderFromSettings } = await import('../chat/provider-factory')
+      return createChatProviderFromSettings(source)
+    }
   }
 }

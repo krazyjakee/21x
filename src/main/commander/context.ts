@@ -135,6 +135,7 @@ export function splitTurns(messages: CommanderMessage[]): CommanderMessage[][] {
   const turns: CommanderMessage[][] = []
   for (const message of messages) {
     if (message.role === 'summary') continue
+    if (message.role === 'assistant' && ['session_rollover', 'session_recovery'].includes(message.tool_name ?? '')) continue
     if (turns.length === 0 || startsTurn(message)) turns.push([message])
     else turns[turns.length - 1].push(message)
   }
@@ -170,6 +171,7 @@ export function toChatMessages(messages: CommanderMessage[], loadImages?: Comman
   const withImages = loadImages ? messagesWithImagesInBudget(messages) : new Set<string>()
   for (const message of messages) {
     if (message.role === 'summary') continue
+    if (message.role === 'assistant' && ['session_rollover', 'session_recovery'].includes(message.tool_name ?? '')) continue
     if (message.role === 'user' || message.role === 'report') {
       let text = message.role === 'report' ? reportText(message) : message.content
       let images: ChatImageInput[] = []

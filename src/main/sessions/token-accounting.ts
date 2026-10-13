@@ -42,7 +42,9 @@ export class TokenAccounting {
     this.db.prepare(`INSERT OR IGNORE INTO session_turn_usage
       (turn_id, owner_id, kind, provider, model, context_window, process_run_id, state,
        input_tokens, estimated_input_tokens, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)`)
-      .run(turnId, ownerId, kind, provider.id, provider.model, modelContextWindow(provider.model), this.processRunId, estimate, estimate, this.now())
+      .run(turnId, ownerId, kind, provider.id, provider.model,
+        provider.contextWindow && Number.isSafeInteger(provider.contextWindow) && provider.contextWindow > 0 ? provider.contextWindow : modelContextWindow(provider.model),
+        this.processRunId, estimate, estimate, this.now())
     this.ownedTurns.add(turnId)
   }
 

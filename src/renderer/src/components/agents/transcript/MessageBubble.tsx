@@ -12,6 +12,7 @@ import { QuestionMessage } from './QuestionMessage'
 import { TaskProgressMessage } from './TaskProgressMessage'
 import { TodoWriteMessage } from './TodoMessages'
 import { CompactionDivider } from './CompactionDivider'
+import { ContextDivider, readContextDivider } from '@/components/context/ContextDivider'
 
 function formatStepMeta(meta: StepMeta): string {
   const parts: string[] = []
@@ -34,6 +35,7 @@ interface MessageBubbleProps {
 
 export const MessageBubble = memo(function MessageBubble({ message, onAnswer, canAnswerQuestion = false, searchQuery }: MessageBubbleProps) {
   if (message.partType === 'compaction') return <CompactionDivider message={message} />
+  if (message.partType === 'generation') return <ContextDivider {...readContextDivider(message.content, 'rollover')} />
   if (message.partType === 'question' && message.tool?.questions) {
     return <QuestionMessage message={message} onAnswer={onAnswer} canAnswer={canAnswerQuestion} searchQuery={searchQuery} />
   }

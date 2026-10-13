@@ -1,6 +1,8 @@
 import type { DatabaseManager } from '../database/manager'
 import type { CodingAgentAdapter, McpServerConfig } from '../adapters/coding-agent-adapter'
 import type { McpServerOptions } from './session-config-core'
+import type { ChatSettingsSource } from '../chat/provider-factory'
+import type { ChatProvider } from '../chat/providers/types'
 
 /** The GUI attachment is optional; durable events never depend on one. */
 export interface AgentWindow {
@@ -49,4 +51,7 @@ export interface AgentManagerHost extends SessionConfigHost {
   }
   createAdapter(backendType: string, db: DatabaseManager): CodingAgentAdapter | null
   isCodexAppServerAdapter(adapter: CodingAgentAdapter): boolean
+  /** Native summary transports belong to the host; the portable lifecycle
+   * can retain a deterministic continuity summary when none is available. */
+  captainSummaryProvider?(source: ChatSettingsSource): ChatProvider | Promise<ChatProvider>
 }

@@ -1,0 +1,287 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "issues": [
+    101,
+    103,
+    104,
+    91,
+    95
+  ],
+  "resolvedIssues": [
+    101,
+    103,
+    104
+  ],
+  "source": {
+    "baseCommit": "a201df3a05ff62f5bb28e2c62c5d40d31d51ac5c",
+    "targetBranch": "master",
+    "schemaVersion": 36,
+    "changedSourceHashes": {
+      "docs/commander.md": "7c374326a694e91b735ee85a1b19b99317ae97500faa0910673b15bf1fc5fefb",
+      "docs/database-migrations.md": "3fac7507887c27d2e800d2a43c00ad07fe8f3452107c961e4315c7da22140f3f",
+      "docs/managed-sessions.md": "0a404bb14f32caa5722e77a93f0545fd06532ce16aa3eda004981123ec39cb13",
+      "docs/tauri-migration/event-forwarding-review.json": "22bdd378b0767ebe218d5ddfca242d3b60f2a670c01e2501520cfbf89f3142cf",
+      "docs/tauri-migration/inventory.json": "9a5912de373dea2a8e941e68701595f128e4283e16bd977eeeab1248394af32b",
+      "docs/tauri-migration/operations.json": "f89b40998c6802ba169fc0a2321da96dc882fa57c2be3b2bd77ecd7c13a1eb1f",
+      "scripts/commander-input/check-assistive.cjs": "dd472a663eabe853074dd7620c95df50302b93493fb2a3d7676ac962da96ca61",
+      "scripts/commander-input/check.cjs": "45661984a6826bd5cccf3f0e0844bb3c8deaf727c5de87cbb10933b1c4f1e060",
+      "scripts/commander-input/fixture.tsx": "4f1c75bfb5684a521f310efa39d77c7de31cdd6da542235747effba34f47ea96",
+      "scripts/commander-input/index.html": "fd07393534508625af5d9f6a4a6f76b85507bac296ac919be71d6f168687737b",
+      "scripts/commander-input/run.mjs": "9ab8f008fc56e72a5bdf81cce14e33eb3fd252f85f0591e4d5948b6e739fe395",
+      "scripts/database-proof.test.ts": "b64bb6b6726eea49f051915f14f541797c8651b5fd03490343f84a0a68a8ce7e",
+      "scripts/database-proof/fixture.ts": "a2664fea69f8686e29eb9d22e66257f2774b87439863289e4e50bdb3064c6168",
+      "scripts/tauri-contracts.mjs": "70109569210b197d1ba2b6344a0e853fde8f93431e12b296cfa5161ff9e3765d",
+      "src/main/adapters/acp-adapter.ts": "0308f071dc15f54ad907c2399538b7e17faf68321e9c02e8f58d463b294f8989",
+      "src/main/adapters/claude-code-adapter.ts": "7153ab750a71124202a4848de2711a824ba56f3d2ab1979b6fb6f9fc0d4ea877",
+      "src/main/adapters/codex-app-server-adapter.ts": "67ef6d0a7579e28a9837e5d849fed64e4c9c3ebb81453347e485f2d68556362e",
+      "src/main/adapters/coding-agent-adapter.ts": "0ae496d18bd9f91abd8da58551000dc574d503fab70d766974c20684c300a392",
+      "src/main/adapters/opencode-adapter.ts": "c9c27c0f2c1be1a14abdf3c2b842e0a87428cbe53889e06dd5cca179e85f039a",
+      "src/main/adapters/pi-adapter.ts": "a05ab5223e7b3f015c4a17d97060ef91263d575eca4530493f42e8df717d8d02",
+      "src/main/agent-manager-captain-managed.test.ts": "238aa8928c0c47a3a6f24cea4cb3b6112734525607bc0d19472f750dfbd8c33f",
+      "src/main/agent-manager-captain-rollover.test.ts": "5f460b0328098a969cb5b8f36b6844d4782d22580fa4cf83a7f29d24bfdd555b",
+      "src/main/agent-manager-core.ts": "c7ac6b1390e0e8838cc1081a804a96fa9b6a0825cc175b8973df918450bc8598",
+      "src/main/agent-manager/electron-host.ts": "b191fafa6d1583eb752c6796a662d45d5032ebddc114e6944c8426406d5ff65f",
+      "src/main/agent-manager/host.ts": "0f0be16f4ad5e1b472633507b61a9b537938cc6020c501427a06098fe8ea074b",
+      "src/main/captain-waker-managed.test.ts": "51bedd58ca0391958d32aeb6a3093d77854b17ba1b262ef25cebcbf5e7dc2d89",
+      "src/main/captain-waker.ts": "0c40c0b4a0bacb1779d4fb7beea251c600258ce257d34a97fe95ad664b1f0ff5",
+      "src/main/commander/commander-rollover.test.ts": "19f413af0ad8fcdd9ee598b7f3e5a095f20866cf15f4f032ecf16aad74346a04",
+      "src/main/commander/commander-service.ts": "e2b00c97e69fabb2136b94d70e7c71afe24fb0b2dea6e51b9f7e25e7ffe85f54",
+      "src/main/commander/commander-store.ts": "258d24fb3a25bb2e15928471f1a848a1726bc8ce1f60c20aa0aa03090b4074e5",
+      "src/main/commander/context.ts": "46259df8e9b74ece48a3445a71e92b3af6a989562eae1cc365734e421a95f640",
+      "src/main/database-migration.test.ts": "ed008de56c77b6db2ccd1599b4bc1119dc92d6fcc7513e4b79bba4ceb0e3cfe2",
+      "src/main/database-projects.test.ts": "aae41d3820be350765e5e0dfe0dd177bea5ce2ba0b0bf5d5f0d2a4000bd6437d",
+      "src/main/database-task-activity.test.ts": "ad6e990088dad075e7d947343cf7cfecbdd666f05d2afafdb45ea9b92f66e1fa",
+      "src/main/database/captain-migration.test.ts": "f8575500982462dfbeba8088464ebfe90124569ebdd50f351abbe9cac95c6b1a",
+      "src/main/database/commander-actions-migration.test.ts": "5550758415caa6fb31bd9712b50ec957da237e7cec6334ebeefc4d268e9b3ed4",
+      "src/main/database/schema.ts": "d7357e1f2f6408d36eb4075fa86e567e40a8fb0402d63b38a89e0ce68e47254c",
+      "src/main/database/session-handoff-migration.test.ts": "c84eb81c1e887983785ea6b2d1517bf24af6ace89ec8eb00db24c2e6b3910ab9",
+      "src/main/database/session-handoff-migration.ts": "5928ae070505fe854fcd891e022d90a8ef25fe7a9c2e65d04cdb1d7e9833d135",
+      "src/main/ipc-handlers.ts": "7fbd1e003acd71b04118f09400eb17cf3877dd0e78bb84b706e5ceec8c184435",
+      "src/main/ipc/session-context.test.ts": "f67a8398d42b98386a9afbe99cf205df35d8a8a024d6277ae0fd41788a52189c",
+      "src/main/ipc/session-context.ts": "1b02c0a701a2346c14b2b6d0b87071b6ae97b6eeffa24b8d3e3d5189a70bdb6e",
+      "src/main/sessions/adapter-engine.test.ts": "06f4d8204bc0e69f71da09014eed1f0bd6b0760571567080ed215a31ea9972bb",
+      "src/main/sessions/adapter-engine.ts": "74840d0d3151800e92b2dd7a0294c602f556f16a1239627e94a17bdfcfb82457",
+      "src/main/sessions/captain-rollover.test.ts": "38a5489895241727a96e5ee5ef281f29557031ba5eb9ba6e468d3384783575ee",
+      "src/main/sessions/captain-rollover.ts": "06bfb3b4928d1a1518688671fc8a19bd8d0b1048c0f42a628ed3b782c5afa78a",
+      "src/main/sessions/compaction-policy.test.ts": "820084311840f865229c834c352285a7ebbf3dcdd0dc1c7a0f24dc57cf36fafd",
+      "src/main/sessions/compaction-policy.ts": "6caabd2118700fe1e26a4dba5fb1da649062f49b05f361192ff5b2c292db073d",
+      "src/main/sessions/compaction.test.ts": "df33a07682a17498f1afbae074d07393eb10b7c02d3cc029052a6afa3d09ecac",
+      "src/main/sessions/compaction.ts": "c72f6c1a07250e946310849ee944afb6f891f85c9f3ff6fb592b6627ba2d4404",
+      "src/main/sessions/context-service.test.ts": "b47a477ab7846c798ea2c60786d8f9595ddd1335d8500923fff85ad400828148",
+      "src/main/sessions/context-service.ts": "c269545de0e741ab77e1c05f82314fa07999e658522655ef42742539d6165137",
+      "src/main/sessions/delivery-store.ts": "3441ea7cf0949abfcf73f31ee2f0009717672bc52924f56749f55cb09f76d50e",
+      "src/main/sessions/handoff.test.ts": "64a1d97f8b6fbb2ab14e42272d3e3172161fa066e0d18e9d84c49a298cbde55f",
+      "src/main/sessions/handoff.ts": "33cdfef49dbea9459bd1bb882c7dacbf40dc20d110260e1b81ec89e8a37b332a",
+      "src/main/sessions/ledger.ts": "21e8d9cac79076d3bb1704ad5d8256d9bb1a4760b2c9e8d76655965c21ad5241",
+      "src/main/sessions/memory.test.ts": "2921785ed6da65fdc0ceb63b49e69285ed835bd0936abd68f8b10e5d0c5e8c4b",
+      "src/main/sessions/memory.ts": "936fe2a4c94321b53bd3975227168a15fcb21e012295dbbb72c3065271706863",
+      "src/main/sessions/roles/captain.ts": "9aa39636c08b38444006a87ee811c631a85b24bc690c188426980287037a79ff",
+      "src/main/sessions/token-accounting.ts": "e86bef67d7b72c3a67376cc305c4213d386af6dce5a564d743b99c00b4d5973b",
+      "src/main/task-send-lock.test.ts": "e3a529c2c70ebfd50bdaf7388be79cde4b7e245dfd23fd35cf465314ab65c0b2",
+      "src/main/task-send-lock.ts": "0ffd2579f93b21880df7e8a1b0d3805d8c8f60c7a0a73bf6e79c8ab6ea403a30",
+      "src/preload/index.ts": "4208b630ad9017b9b63f605309be170433277b635b0a5025a69814d91a5c520a",
+      "src/renderer/src/components/agents/AgentTranscriptPanel.context.test.tsx": "5226b4c6200a22d729b8b8b4ba41053fea1ae2c3adf6312d6e66b7496896bcb3",
+      "src/renderer/src/components/agents/AgentTranscriptPanel.tsx": "a6fcd4fc5e512fb18e81a0fa17553df0447e3c42cc6c6fb151c16170dc7bb62c",
+      "src/renderer/src/components/agents/transcript/CompactionDivider.test.tsx": "e184a12c3ec405a98211a80a8da8f9843605761ac1f4d6892fb44fa809b2cbfb",
+      "src/renderer/src/components/agents/transcript/CompactionDivider.tsx": "73efe719b0d54bff5c6dce0523d6eeb634677af62ebf2f5d5627655f50c15017",
+      "src/renderer/src/components/agents/transcript/MessageBubble.tsx": "c1959f944196a77695d66e50001fe36841c3622440b68d41a6e38655d1a2f59f",
+      "src/renderer/src/components/commander/CallAnnouncer.test.tsx": "ff1c585e55708e94127406a208d7cfc9d76a4c71fb48a4fdb71169efb761ed6c",
+      "src/renderer/src/components/commander/CallAnnouncer.tsx": "b9cb20975cae8fd7ca44e02f82bb8a17cb7cec2d4b501f70a4a83242c0daf775",
+      "src/renderer/src/components/commander/CommanderChatPane.tsx": "bc776189537579bb437bfd893afb1b9ef4cfe4fd9768884e2f1dd069ccabf22b",
+      "src/renderer/src/components/commander/CommanderMessageItem.tsx": "3893a721df9be4b90f629cdc556e8bf251d5986a2bb098c258d593a1df5d1e7f",
+      "src/renderer/src/components/commander/CommanderWorkspace.test.tsx": "89df81a202eb3c6d8cd60ce57c5977d1fa602d228dd5da461baa8bc9b3969840",
+      "src/renderer/src/components/commander/CommanderWorkspace.tsx": "33f31321b4199364e06c82566c176df49e495475431f9ac4a6a81226a64cba85",
+      "src/renderer/src/components/context/ContextDivider.test.tsx": "98b63802ba47eced3e522468ba76e6b177ba4919efdabf51515d99d6f8597468",
+      "src/renderer/src/components/context/ContextDivider.tsx": "8599c43457e9d17c6a75016fc19b2f582141ccff6a4552871d456ba78de03387",
+      "src/renderer/src/components/context/RolloverPolicySettings.tsx": "90017b6c8cc1009f9f3b7d1d701107c420cc8e01edd94e9739df03f59affeba3",
+      "src/renderer/src/components/context/SessionContextMeter.test.tsx": "05aa4b2aadfeae5e0adc5a477e934b76a82f39492cf34a408940ce958f069410",
+      "src/renderer/src/components/context/SessionContextMeter.tsx": "5d3731aa1283f872570c4e420dd93fab570df232a3003cb3d08b0bcd6f784c39",
+      "src/renderer/src/hooks/use-session-context.test.tsx": "657cb875f28ff8e8dec32fc3ae477d9f694f74bd52aa85ba4582c257b1ded7f9",
+      "src/renderer/src/hooks/use-session-context.ts": "17aec298490b5815e09176331ac365a321cc357c9523cb56cf0b0ab753fca358",
+      "src/renderer/src/lib/ipc-client.ts": "826405285001cd1232a6230ba2d1b2ecb70ea8d221caa163e121b942ce95db2d",
+      "src/renderer/src/types/electron.d.ts": "1135fde94b78d9d86eccdb89a8618227a8fe803153fba6a39c1760938e70ef3d",
+      "src/shared/desktop-api.ts": "3c9eeaddf7bad28106c55e0affc657abeed9e0bd13ff1d8d92ff09401d56cf0c",
+      "src/shared/desktop-event-forwarding.ts": "96720216d5f81a335764e4bfa1c20e733973e46bc70ebb180a267859e630bcf7",
+      "src/shared/desktop-operations.ts": "8a1d84c31a25f1426576c1595895ac6e3a79f7a15e551032a82a70186f7abd98",
+      "src/shared/session-context.ts": "4eb55e30c65f2582002edfb671172cf23f2ef35ee898c3f5463130cb9ba4b85c",
+      "vitest.tauri.config.ts": "10692f07fc98ff8a81786d87a8dde3d278e9cd7961760530522c475bbb2000bf"
+    }
+  },
+  "scope": "Local application and standalone tests for staged Captain managed lifecycle, planned continuation, durable memory and context UI. Adapter/provider protocols use controlled fixtures; no live cloud, physical microphone, other OS or production Tauri cutover claim.",
+  "decisions": {
+    "hostedVoice": "User explicitly deferred hosted features #92; finish the local experience.",
+    "layout": "Stage first, Chat beside it",
+    "undo": "Exact reversals",
+    "reports": "Quiet inbox; correlated reports stay with request",
+    "pip": "Retain the call across navigation; global shortcut targets active Commander call"
+  },
+  "tests": {
+    "application": {
+      "command": "rtk pnpm test:run --reporter=json --outputFile=.git/issue-closing/batch4-app-final.json",
+      "passed": 5757,
+      "failed": 0,
+      "skipped": 20,
+      "reportSha256": "5cbff4f41339e51145028d035ffd61c6a7762604cb35e2ddb9464c3ef1f5552c"
+    },
+    "rendererFollowup": {
+      "command": "rtk pnpm test:run --project renderer --reporter=json --outputFile=.git/issue-closing/batch4-renderer-final.json",
+      "passed": 1505,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "efcc49fd3b9de3688810ef187f9844c748c81543a033b2ed3ed6fb23c6509d7d",
+      "reason": "Final speaker prefixes changed only CallAnnouncer, its tests and the assistive harness. Revalidated the complete renderer project after the passing integrated application run; main, shared, scripts, mobile and standalone inputs remain unchanged."
+    },
+    "standalone": {
+      "command": "rtk pnpm test:tauri --service-proofs --reporter=json --outputFile=.git/issue-closing/batch4-tauri-final.json",
+      "passed": 2023,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "fa5a4dfca9eb68b3c3546812e5106f0f4a440084299f57682ce238133d897ad4"
+    }
+  },
+  "verification": {
+    "forcedTypecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": "rtk pnpm lint",
+      "exitCode": 0,
+      "logSha256": "9e82aeb1d63ebe144cbbfad5a99774612d72479a110c12337892816d99ce2890",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "announcerFollowupLint": {
+      "command": "rtk pnpm exec eslint src/renderer/src/components/commander/CallAnnouncer.tsx src/renderer/src/components/commander/CallAnnouncer.test.tsx",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "build": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "logSha256": "4418fbc001b3d4ec8b2810a28f5e901cfdedf299248c20f6a7e91a20259b7739"
+    },
+    "tauriFrontend": {
+      "command": "rtk pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "logSha256": "85dfe271ffe8118c28b07708b18b3ed7e2d511b0d12b9e48a2abc96390c00803",
+      "reuse": "The diagnostic Tauri frontend graph is unchanged; production Commander is not imported by that graph."
+    },
+    "standaloneDatabaseStage": {
+      "command": "rtk pnpm tauri:prepare:database",
+      "exitCode": 0,
+      "logSha256": "c6acaeadd453b8720f839b8c1ba8767905bb656f5d58d101c5d545935fdc718b"
+    },
+    "inventoryFreshness": {
+      "command": "rtk node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1ab7c3dfaf883de784cd708ba58df31cb465fd2ec0d1b3eec45476ad073335e2"
+    },
+    "contractFreshness": {
+      "command": "rtk node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "diffWhitespace": {
+      "command": "rtk git diff --check",
+      "exitCode": 0,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "nativeCommander": {
+      "command": "DISPLAY=:199 rtk pnpm test:commander-input",
+      "exitCode": 0,
+      "logSha256": "a602cd53167f67182caf2b37096dff3a8687c7307b285aef62da5a79a5b82b0f",
+      "checks": 16
+    }
+  },
+  "assistiveTechnology": {
+    "command": "DISPLAY=:199 rtk dbus-run-session -- rtk python3 .git/issue-closing/orca-batch4.py",
+    "exitCode": 0,
+    "completed": true,
+    "scriptedCases": 18,
+    "pageLoads": 1,
+    "reader": "Linux Orca on a private D-Bus session, private preferences and dummy Speech Dispatcher; isolated Xephyr",
+    "scope": "Native Electron keyboard input, controlled capture/IPC, generated PCM through the production Web Audio driver. Actual Orca utterance logs reviewed; this is not a human/manual or cross-platform certification.",
+    "announcedCounts": {
+      "Microphone access is blocked. Allow it in the system privacy settings, then try again.": 1,
+      "Commander is thinking.": 2,
+      "Commander error: The connection was lost. Retry the reply or type instead.": 2,
+      "New project report in Project reports.": 1,
+      "Archive project: Web.": 1,
+      "Commander replied: Your typed checkout review is complete.": 1,
+      "Commander error: The typed review could not finish. Try again.": 1
+    },
+    "reviewedUtterances": [
+      {
+        "localTime": "18:24:47.165915",
+        "text": "Microphone access is blocked. Allow it in the system privacy settings, then try again."
+      },
+      {
+        "localTime": "18:24:59.784034",
+        "text": "Commander is thinking."
+      },
+      {
+        "localTime": "18:25:04.961586",
+        "text": "Commander is thinking."
+      },
+      {
+        "localTime": "18:25:12.762665",
+        "text": "Commander error: The connection was lost. Retry the reply or type instead."
+      },
+      {
+        "localTime": "18:25:24.423385",
+        "text": "New project report in Project reports."
+      },
+      {
+        "localTime": "18:25:26.844525",
+        "text": "Archive project: Web."
+      },
+      {
+        "localTime": "18:25:39.616417",
+        "text": "Commander replied: Your typed checkout review is complete."
+      },
+      {
+        "localTime": "18:25:42.187698",
+        "text": "Commander error: The typed review could not finish. Try again."
+      },
+      {
+        "localTime": "18:25:44.455636",
+        "text": "Commander error: The connection was lost. Retry the reply or type instead."
+      }
+    ],
+    "noPartialOrSpokenReplySentinels": true,
+    "logSha256": {
+      "batch4-orca-run.log": "582bced90370822d818b3f6e322a1d10ef1ba933e08f898f578b7eea1569c0ab",
+      "batch4-orca-native.log": "2dab64f3ee94884a52cc5910bf6cab6e1262d00c2a493c45b330e5b00570dbb6",
+      "batch4-orca-debug.log": "5510af8a67e90fc5c4b418bded42fc79846caa8b2871124f9b0c8d60a5de12ae"
+    }
+  },
+  "acceptance": {
+    "101": [
+      "Managed native starts/resumes and idempotent inbox wakes",
+      "Recap-pending lost-session replacements without interrupted prompt replay",
+      "Dropped/stale/excluded dispositions, manual-stop barrier and rollout flag"
+    ],
+    "103": [
+      "All five threshold policies and off/observe/on staging",
+      "Own-model summaries or bounded explicit deterministic fallback with lossless archive",
+      "Crash-resumable memory/journal/native binding, accepted creation retained, no duplicate create",
+      "Exact saved target wins over missing old backend on restart; secret ownership and foreign target checks",
+      "One global Commander memory record, same conversation and atomic generation divider"
+    ],
+    "104": [
+      "Scoped reported/estimated/unknown occupancy, not summed billing",
+      "Commander/Captain context, summaries, recovery warnings and dividers",
+      "Validated five defaults and policy controls; independent engine flags",
+      "Shared coalesced reads with late/foreign/failure fencing; native settings preserve draft"
+    ]
+  },
+  "remainingAcceptance": [
+    "#91 requires the documented independent manual reader pass; Linux Orca scripted evidence covers the observed states but does not certify NVDA/VoiceOver.",
+    "#95 still requires cross-surface native/assistive hidden-window, long-silent-tool and disconnected/dead-backend audit.",
+    "An external adapter create whose accepted ID was not durably confirmed remains explicitly unconfirmed and requires exact native-identity reconciliation; it is never repeated blindly.",
+    "#92 hosted features are deferred by explicit user decision."
+  ]
+}

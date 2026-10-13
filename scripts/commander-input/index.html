@@ -3,17 +3,77 @@
 <body><div id="root"></div>
 <script>
 // No real sessions, microphone, provider calls or application services.
-window.fixture = { sends: [], voiceSends: [], captures: [], releases: 0, undos: [], events: new Set(), finalReceiver: null, resolveSend: null, rejectSend: null }
+window.fixture = { sends: [], voiceSends: [], captures: [], releases: 0, undos: [], events: new Set(), finalReceiver: null, resolveSend: null, rejectSend: null, contextReads: 0, policyWrites: [], policy: {mode: 'off',contextRatio: .7,compactions: 2,wakeups: 150,turns: 300,maxAgeDays: 7} }
+window.fixture.assistive = new URLSearchParams(location.search).has('assistive')
+window.fixture.sessions = window.fixture.assistive ? [
+  {id: 'session-1',title: 'Checkout review',created_at: 1,updated_at: 1,archived: false,last_read_at: 0,unread_count: 0},
+  {id: 'report-inbox',title: 'Project reports',is_report_inbox: true,created_at: 1,updated_at: 1,archived: false,last_read_at: 0,unread_count: 0}
+] : []
+window.fixture.histories = {}
+window.fixture.activeTurns = {}
+window.fixture.activitySources = {}
+window.fixture.activitySequence = 0
+window.fixture.cancelled = []
+window.fixture.bargeIns = []
+// Deliver the same event stream consumed by the actual store, activity adapter
+// and CallAnnouncer. History remains available when navigating away and back.
+window.fixture.emit = event => {
+  const f = window.fixture
+  if (event.type === 'turn_started' || event.type === 'turn_event') {
+    const previous = f.activitySources[event.sessionId]?.snapshot
+    const snapshot = event.type === 'turn_started'
+      ? {turnId: event.turnId,phase: 'thinking',openTools: [],hasText: false}
+      : {...previous,turnId: event.turnId}
+    if (event.type === 'turn_started') f.activeTurns[event.sessionId] = event.turnId
+    else {
+      const inner = event.event
+      if (inner.type === 'text_delta') { snapshot.hasText = true; snapshot.phase = snapshot.openTools.length ? 'tool' : 'working' }
+      if (inner.type === 'tool_call_start') { snapshot.phase = 'tool'; snapshot.openTools = [...snapshot.openTools,{id: inner.id,name: inner.name}] }
+      if (inner.type === 'tool_call_result') { snapshot.openTools = snapshot.openTools.filter(tool => tool.id !== inner.id); snapshot.phase = snapshot.openTools.length ? 'tool' : snapshot.hasText ? 'working' : 'thinking' }
+      if (inner.type === 'error') { snapshot.phase = 'error'; snapshot.openTools = []; snapshot.reason = inner.message; snapshot.outcome = 'failed' }
+      if (inner.type === 'done') { snapshot.phase = 'idle'; snapshot.openTools = []; snapshot.outcome = inner.stopReason === 'cancelled' ? 'stopped' : 'finished'; delete f.activeTurns[event.sessionId] }
+    }
+    event = {...event,activity: {...snapshot,epoch: 'native-assistive',sequence: ++f.activitySequence,ageMs: 0}}
+    f.activitySources[event.sessionId] = {snapshot: event.activity,at: Date.now()}
+  }
+  if (event.type === 'messages_appended') {
+    const history = f.histories[event.sessionId] ?? []
+    f.histories[event.sessionId] = [...history,...event.messages.filter(message => !history.some(old => old.id === message.id))]
+  }
+  if (event.type === 'session_updated') f.sessions = [...f.sessions.filter(session => session.id !== event.session.id),event.session]
+  for (const listener of [...f.events]) listener(event)
+}
 Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { enumerateDevices: async () => [{ kind: 'audioinput', deviceId: 'fixture-mic', label: 'Fixture microphone' }], addEventListener: () => {}, removeEventListener: () => {} } })
 const noop = async () => {}
 window.electronAPI = new Proxy({
+  sessionContext: {
+    getSnapshot: async scope => { window.fixture.contextReads++; return {
+      scope, generation: { id: 'generation-1', key: 'commander:session-1:initial', engine: 'chat', state: 'open', createdAt: 1, backendId: null },
+      usage: { tokens: 7000, source: 'estimated', contextWindow: 10000, model: 'fixture-model', observedAt: 1 },
+      counters: { compactions: 1, wakeups: 0, turns: 2, ageMs: 1000 }, policy: window.fixture.policy, reasons: [], warnings: [],
+      summaries: [{id: 'fixture-summary',kind: 'rollover',content: 'Completed work remains recorded; continue with the checkout review.',source: 'model',createdAt: 1}]
+    } },
+    setPolicy: async policy => { window.fixture.policyWrites.push(policy); window.fixture.policy = policy; return policy }
+  },
   voice: { onFinal: callback => { window.fixture.finalReceiver = callback; return () => { window.fixture.finalReceiver = null } } },
   settings: { getAll: async () => ({}), set: noop },
   commander: {
-    listSessions: async () => [], listMessages: async () => ({ messages: [], activeTurnId: null }),
-    markRead: async () => null, setActiveSession: noop, onEvent: listener => { window.fixture.events.add(listener); return () => window.fixture.events.delete(listener) },
+    listSessions: async () => window.fixture.sessions,
+    listMessages: async id => ({ messages: window.fixture.histories[id] ?? [], activeTurnId: window.fixture.activeTurns[id] ?? null }),
+    getActivity: async id => {
+      if (!window.fixture.assistive) return null
+      const source = window.fixture.activitySources[id]
+      return source ? {...source.snapshot,ageMs: Date.now() - source.at} : {epoch: 'native-assistive',sequence: ++window.fixture.activitySequence,turnId: null,phase: 'idle',ageMs: 0,openTools: [],hasText: false}
+    },
+    markRead: async id => {
+      const session = window.fixture.sessions.find(item => item.id === id)
+      if (!session) return null
+      const read = {...session,last_read_at: Date.now(),unread_count: 0}
+      window.fixture.sessions = window.fixture.sessions.map(item => item.id === id ? read : item)
+      return read
+    }, setActiveSession: noop, onEvent: listener => { window.fixture.events.add(listener); return () => window.fixture.events.delete(listener) },
     undoAction: async (sessionId, actionId) => { window.fixture.undos.push({ sessionId, actionId }); return { alreadyUndone: false, message: { id: 'undo-note', session_id: sessionId, role: 'assistant', tool_name: 'undo_action', tool_call_id: actionId, tool_calls: null, content: 'Restored Web.', is_error: false, project_id: null, correlation_id: null, created_at: 2 } } },
-    cancel: noop,
+    cancel: async id => { window.fixture.cancelled.push(id) },
     send: (sessionId, text) => new Promise((resolve, reject) => {
       window.fixture.sends.push({ sessionId, text })
       window.fixture.resolveSend = () => resolve({ turnId: 'typed-turn', message: {
@@ -22,7 +82,7 @@ window.electronAPI = new Proxy({
       window.fixture.rejectSend = () => reject(new Error('Test send failed'))
     })
   },
-  commanderVoice: { setActive: noop, bargeIn: noop, send: async (sessionId, text) => { window.fixture.voiceSends.push({ sessionId, text }) } }
+  commanderVoice: { setActive: noop, bargeIn: async id => { window.fixture.bargeIns.push(id) }, send: async (sessionId, text) => { window.fixture.voiceSends.push({ sessionId, text }) } }
 }, { get: (target, key) => key in target ? target[key] : key.startsWith('on') ? () => () => {} : undefined })
 </script>
 <script type="module" src="/fixture.tsx"></script></body></html>

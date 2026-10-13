@@ -678,6 +678,12 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     return session ? this.compactionTracker(session).snapshot(session.sessionId || sessionId).map((observation) => ({ ...observation, backendSessionId: sessionId })) : []
   }
 
+  async getContextUsage(sessionId: string, _config: SessionConfig) {
+    const session = this.sessions.get(sessionId)
+    const context = session ? this.compactionTracker(session).contextSnapshot(session.sessionId || sessionId) : null
+    return context ? { ...context, backendSessionId: sessionId } : null
+  }
+
   async getStatus(sessionId: string, _config: SessionConfig): Promise<SessionStatus> {
     const session = this.sessions.get(sessionId)
     if (!session) {

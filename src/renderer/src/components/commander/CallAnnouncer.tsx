@@ -37,8 +37,9 @@ export function CallAnnouncer() {
   const [polite, setPolite] = useState({ key: '', text: '' })
   const [assertive, setAssertive] = useState({ key: '', text: '' })
   const seen = useRef(new Set<string>())
-  const lastError = useRef<string | null>(null)
-  const errorSequence = useRef(0)
+  const turnFailures = useRef(new Map<string, { turnId: string; message: string }>())
+  const lastCallError = useRef<string | null>(null)
+  const callErrorSequence = useRef(0)
   const replyTurns = useRef(new Map<string, ReplyTurn>())
   const sessionTurns = useRef(new Map<string, string>())
   const current = useRef({ sessionId: call.sessionId ?? selected, speechOutput, visible: view === 'commander' || call.status !== 'off' })
@@ -59,11 +60,23 @@ export function CallAnnouncer() {
   }, [thinking, observation?.turnId, announce])
   useEffect(() => {
     if (active && presentation.state === 'unavailable' && presentation.detail) announce(`unavailable:${presentation.detail}`, presentation.detail)
-    const error = call.error ?? (presentation.state === 'error' ? presentation.detail : null) ?? (view === 'commander' ? turnError : null)
-    const key = error ? `${call.sessionId ?? selected}:${error}` : null
-    if (active && error && key !== lastError.current) announce(`error:${++errorSequence.current}`, error, true)
-    lastError.current = key
-  }, [active, presentation.state, presentation.detail, call.error, call.sessionId, view, selected, turnError, announce])
+    const callError = call.error ? `${call.sessionId ?? call.retrySessionId ?? selected}:${call.error}` : null
+    if (callError && callError !== lastCallError.current) callErrorSequence.current++
+    lastCallError.current = callError
+    if (active && call.error) {
+      announce(`call-error:${callErrorSequence.current}`, `Commander error: ${call.error}`, true)
+      return
+    }
+    const error = (presentation.state === 'error' ? presentation.detail : null) ?? (view === 'commander' ? turnError : null)
+    const sessionId = presentation.state === 'error' ? call.sessionId ?? selected : selected
+    if (!active || !error || !sessionId) return
+    const observed = observation?.phase === 'error' && observation.error === error && observation.sessionId === sessionId ? observation.turnId : null
+    const recorded = turnFailures.current.get(sessionId)
+    const turnId = observed ?? (recorded?.message === error ? recorded.turnId : null)
+    // The stored error may reappear after Retry, End, PiP or session selection.
+    // Keep its turn identity instead of creating a new occurrence on visibility.
+    announce(turnId ? `turn-error:${sessionId}:${turnId}` : `stored-error:${sessionId}:${error}`, `Commander error: ${error}`, true)
+  }, [active, presentation.state, presentation.detail, call.error, call.sessionId, call.retrySessionId, view, selected, turnError, observation, announce])
   useEffect(() => {
     if (!action || action.result.session_id !== current.current.sessionId || activityNow() - action.observedAt >= 8_000) return
     const parsed = parseCommanderAction(action.call.name, action.result.content, action.result.is_error)
@@ -107,12 +120,20 @@ export function CallAnnouncer() {
           const inner = event.event
           if (inner.type === 'text_delta' && !turn.failed) turn.text = (turn.text + inner.text).slice(-MAX_REPLY_CHARACTERS)
           if (inner.type === 'tool_call_start') turn.reply = null
-          if (inner.type === 'error') { turn.failed = true; turn.reply = null; turn.text = '' }
+          if (inner.type === 'error') {
+            turn.failed = true; turn.reply = null; turn.text = ''
+            if (sessionTurns.current.get(event.sessionId) === key) {
+              turnFailures.current.set(event.sessionId, { turnId: event.turnId, message: inner.message })
+              if (turnFailures.current.size > 100) turnFailures.current.delete(turnFailures.current.keys().next().value!)
+              const now = current.current
+              if (now.visible && now.sessionId === event.sessionId) announce(`turn-error:${key}`, `Commander error: ${inner.message}`, true)
+            }
+          }
           if (inner.type === 'done') {
             turn.settled = true
             const now = current.current
             if (inner.stopReason === 'end_turn' && !turn.failed && !turn.spoken && turn.reply && now.visible && now.sessionId === event.sessionId) {
-              announce(`reply:${key}`, turn.reply.text)
+              announce(`reply:${key}`, `Commander replied: ${turn.reply.text}`)
             }
             turn.reply = null
             turn.text = ''
@@ -141,5 +162,8 @@ export function CallAnnouncer() {
       })
     } catch { return undefined }
   }, [announce])
-  return <div className="ui-scale sr-only" data-testid="commander-call-announcer"><div role="status" aria-live="polite" aria-atomic="true" className="text-sm" data-testid="commander-polite-announcer"><span key={polite.key}>{polite.text}</span></div><div role="alert" aria-live="assertive" aria-atomic="true" className="text-sm" data-testid="commander-assertive-announcer"><span key={assertive.key}>{assertive.text}</span></div></div>
+  // Paragraphs remain semantic accessible children. Flattened inline spans can
+  // lose their addition event, leaving readers only a duplicate text insertion
+  // when the same words already appeared in the silent transcript or last cue.
+  return <div className="ui-scale sr-only" data-testid="commander-call-announcer"><div role="status" aria-live="polite" aria-atomic="true" className="text-sm" data-testid="commander-polite-announcer"><p key={polite.key}>{polite.text}</p></div><div role="alert" aria-live="assertive" aria-atomic="true" className="text-sm" data-testid="commander-assertive-announcer"><p key={assertive.key}>{assertive.text}</p></div></div>
 }

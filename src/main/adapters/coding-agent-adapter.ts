@@ -32,6 +32,7 @@ export enum MessagePartType {
   RETRY = 'retry',
   /** A within-session context boundary; never a durable generation handoff. */
   COMPACTION = 'compaction',
+  GENERATION = 'generation',
   TASK_PROGRESS = 'task_progress'
 }
 
@@ -121,6 +122,16 @@ export interface AdapterTokenUsage {
   outputTokens: number
   cachedInputTokens?: number
   provenance: 'reported'
+  turnId?: string
+}
+
+/** Latest actual model-input occupancy; separate from aggregate billing. */
+export interface AdapterContextUsage {
+  backendSessionId: string
+  eventKey: string
+  tokens: number
+  provenance: 'reported'
+  observedAt: number
   turnId?: string
 }
 
@@ -221,6 +232,7 @@ export interface CodingAgentAdapter {
   /** Read-only token counters for the current/latest turn. Absent usage is
    * unknown, never an invented reported zero. Does not change context/runtime. */
   getUsage?(sessionId: string, config: SessionConfig): Promise<AdapterTokenUsage | null>
+  getContextUsage?(sessionId: string, config: SessionConfig): Promise<AdapterContextUsage | null>
   /** Read-only scoped evidence. Root projection deduplicates per generation. */
   getCompactionObservations?(sessionId: string, config: SessionConfig): Promise<AdapterCompactionObservation[]>
 

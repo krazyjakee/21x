@@ -11,8 +11,13 @@ import type {
 import type { CaptainMemory } from '../shared/captain-memory'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
 import type { TranscriptPage, TranscriptPageRequest } from '../shared/transcript-page'
+import type { RolloverPolicy, SessionContextScope, SessionContextSnapshot } from '../shared/session-context'
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  sessionContext: {
+    getSnapshot: (scope: SessionContextScope): Promise<SessionContextSnapshot> => ipcRenderer.invoke('sessionContext:getSnapshot', scope),
+    setPolicy: (policy: RolloverPolicy): Promise<RolloverPolicy> => ipcRenderer.invoke('sessionContext:setPolicy', policy)
+  },
   db: {
     getTasks: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('db:getTasks', projectId),
     getTask: (id: string): Promise<unknown> => ipcRenderer.invoke('db:getTask', id),

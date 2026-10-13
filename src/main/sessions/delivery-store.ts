@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 
-export type DeliveryKind = 'agent_message' | 'captain_request' | 'captain_report'
+export type DeliveryKind = 'agent_message' | 'captain_request' | 'captain_report' | 'captain_handoff_seed'
 export type DeliveryState = 'pending' | 'claimed' | 'accepted' | 'acknowledged' | 'failed' | 'timed_out' | 'cancelled'
 
 export interface DeliveryRecord {

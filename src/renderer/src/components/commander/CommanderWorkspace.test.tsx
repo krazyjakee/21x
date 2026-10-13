@@ -60,7 +60,10 @@ function message(over: Partial<CommanderMessage> = {}): CommanderMessage {
   }
 }
 
-let emit: (event: CommanderEvent) => void = () => {}
+const eventListeners = new Set<(event: CommanderEvent) => void>()
+const emit = (event: CommanderEvent) => {
+  for (const listener of [...eventListeners]) listener(event)
+}
 
 function renderWorkspace() {
   const result = render(<CommanderWorkspace />)
@@ -70,6 +73,7 @@ function renderWorkspace() {
 
 
 beforeEach(() => {
+  eventListeners.clear()
   useCommanderCallUiStore.setState({ captions: true, captionSize: 'medium', panelOpen: true, pipRequested: false, notice: null })
   useAgentStore.setState({ agents: [], isLoading: false, error: null, sessions: new Map() })
   useCommanderStore.setState({
@@ -85,8 +89,10 @@ beforeEach(() => {
     error: null
   })
   api.onEvent.mockImplementation((cb: (event: CommanderEvent) => void) => {
-    emit = cb
-    return () => {}
+    // Transcript and context subscribe independently to the same IPC channel.
+    // A later subscriber must not replace the existing event recipients.
+    eventListeners.add(cb)
+    return () => eventListeners.delete(cb)
   })
   api.listMessages.mockResolvedValue({ messages: [], activeTurnId: null })
   api.markRead.mockImplementation(async (id: string) => session({ id, unread_count: 0 }))
@@ -109,6 +115,29 @@ afterEach(() => {
 })
 
 describe('CommanderWorkspace', () => {
+  it('shows legacy compaction and orphan handoff summaries in Chat while deduplicating atomic rollover metadata', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    api.listMessages.mockResolvedValue({ messages: [
+      message({ id: 'summary-old', role: 'summary', content: 'Earlier checkout decisions were retained.' }),
+      message({ id: 'rollover-summary:handoff-1', role: 'summary', content: 'One atomic handoff summary.' }),
+      message({ id: 'rollover-divider:handoff-1', role: 'assistant', tool_name: 'session_rollover', content: JSON.stringify({ kind: 'rollover', title: 'Continued in the same conversation', summary: 'One atomic handoff summary.', source: 'fallback' }) }),
+      message({ id: 'rollover-summary:legacy-handoff', role: 'summary', content: 'An older retained handoff.' })
+    ], activeTurnId: null })
+    renderWorkspace(); fireEvent.click(await screen.findByText('Launch'))
+    expect(await screen.findByRole('separator', { name: 'Conversation context compacted' })).toBeTruthy()
+    expect(screen.getAllByRole('separator', { name: 'Conversation generation changed' })).toHaveLength(2)
+    expect(screen.getAllByText('One atomic handoff summary.')).toHaveLength(1)
+    const summary = screen.getByText('Read compaction summary')
+    expect(summary.closest('details')).not.toHaveAttribute('open')
+    fireEvent.click(summary); expect(summary.closest('details')).toHaveAttribute('open')
+    expect(screen.getByText('Earlier checkout decisions were retained.')).toBeTruthy()
+    expect(api.createSession).not.toHaveBeenCalled(); expect(api.send).not.toHaveBeenCalled()
+    expect(useCommanderStore.getState().selectedSessionId).toBe('s1')
+    const field = screen.getByLabelText('Message the Commander'); field.focus()
+    const transcript = screen.getByTestId('commander-messages'); transcript.scrollTop = 17
+    act(() => emit({ type: 'messages_appended', sessionId: 's1', messages: [message({ id: 'summary-next', role: 'summary', content: 'A later compaction.', created_at: 2 })] }))
+    expect(field).toHaveFocus(); expect(transcript.scrollTop).toBe(17)
+  })
   it('restores the session draft when returning after the workspace unmounts', async () => {
     api.listSessions.mockResolvedValue([session()])
     const first = renderWorkspace()

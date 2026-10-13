@@ -142,6 +142,12 @@ export class AcpAdapter implements CodingAgentAdapter {
       .map((observation) => ({ ...observation, backendSessionId: sessionId })) : []
   }
 
+  async getContextUsage(sessionId: string, _config: SessionConfig) {
+    const session = this.sessions.get(sessionId)
+    const context = session ? this.compactionTracker(session).contextSnapshot(session.acpSessionId || sessionId) : null
+    return context ? { ...context, backendSessionId: sessionId } : null
+  }
+
   /** Returns true when Codex uses API-key auth; see applyCodexAuthEnv. */
   private configureCodexAuthEnv(env: Record<string, string | undefined>, config: SessionConfig): boolean {
     if (this.agentType !== 'codex') return false

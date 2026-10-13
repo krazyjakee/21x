@@ -143,6 +143,12 @@ export class PiAdapter implements CodingAgentAdapter {
     return session ? this.compactionTracker(session).snapshot(session.id) : []
   }
 
+  async getContextUsage(sessionId: string, _config: SessionConfig) {
+    const session = this.sessions.get(sessionId)
+    const context = session ? this.compactionTracker(session).contextSnapshot(session.id) : null
+    return context ? { ...context, backendSessionId: sessionId } : null
+  }
+
   async initialize(): Promise<void> {
     await this.findPiExecutable()
   }

@@ -22,7 +22,15 @@ export class SessionLedger {
         observation.eventType, JSON.stringify(observation.payload), this.now()).changes === 1
     if (!inserted) return
     const payload = observation.payload && typeof observation.payload === 'object' ? observation.payload as Record<string, unknown> : {}
-    if (observation.eventType === 'turn_started' && observation.turnKey) {
+    if (observation.eventType === 'session_started' || observation.eventType === 'session_resumed') {
+      this.db.prepare(`UPDATE session_generations SET process_run_id = ?, backend_id = COALESCE(?, backend_id),
+        state = CASE WHEN EXISTS (SELECT 1 FROM session_turns WHERE generation_id = ? AND state = 'running') THEN 'running' ELSE 'open' END,
+        updated_at = ? WHERE id = ?`)
+        .run(processRunId, observation.backendId ?? null, generation.id, this.now(), generation.id)
+    } else if (observation.eventType === 'session_rekeyed' && typeof payload.backendId === 'string' && payload.backendId) {
+      this.db.prepare('UPDATE session_generations SET backend_id = ?, updated_at = ? WHERE id = ?')
+        .run(payload.backendId, this.now(), generation.id)
+    } else if (observation.eventType === 'turn_started' && observation.turnKey) {
       this.db.prepare(`INSERT OR IGNORE INTO session_turns
         (id, generation_id, owner_id, turn_key, kind, state, input, started_at) VALUES (?, ?, ?, ?, ?, 'running', ?, ?)`)
         .run(randomUUID(), generation.id, observation.ownerId, observation.turnKey, String(payload.kind ?? 'user'),

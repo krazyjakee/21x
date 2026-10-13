@@ -186,14 +186,18 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
 
   const reportThreads = useMemo(() => commanderReportThreads(messages), [messages])
   const threadedIds = useMemo(() => new Set([...reportThreads.values()].flat().map(message => message.id)), [reportThreads])
-  const visible = useMemo(() => messages.filter((m) => m.role !== 'tool' && m.role !== 'summary' && !threadedIds.has(m.id)), [messages, threadedIds])
+  const visible = useMemo(() => {
+    const rollovers = new Set(messages.filter(message => message.role === 'assistant' && message.tool_name === 'session_rollover' && message.id.startsWith('rollover-divider:')).map(message => `${message.session_id}:${message.id.slice('rollover-divider:'.length)}`))
+    return messages.filter(message => message.role !== 'tool' && !threadedIds.has(message.id)
+      && !(message.role === 'summary' && message.id.startsWith('rollover-summary:') && rollovers.has(`${message.session_id}:${message.id.slice('rollover-summary:'.length)}`)))
+  }, [messages, threadedIds])
   const requests = useMemo(() => {
     const map = new Map<string, CommanderMessage>()
     let latest: CommanderMessage | undefined
     for (const message of messages) { if (message.role === 'user') latest = message; if (message.role === 'assistant' && latest) map.set(message.id, latest) }
     return map
   }, [messages])
-  const conversationCount = visible.filter(message => message.role !== 'report').length
+  const conversationCount = visible.filter(message => message.role !== 'report' && message.role !== 'summary' && !['session_rollover', 'session_recovery'].includes(message.tool_name ?? '')).length
 
   useEffect(() => {
     const el = scrollRef.current

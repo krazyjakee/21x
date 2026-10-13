@@ -378,6 +378,12 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     return session ? this.compactionTracker(session).snapshot(session.threadId || session.sessionId).map((observation) => ({ ...observation, backendSessionId: sessionId })) : []
   }
 
+  async getContextUsage(sessionId: string, _config: SessionConfig) {
+    const session = this.sessions.get(sessionId)
+    const context = session ? this.compactionTracker(session).contextSnapshot(session.threadId || session.sessionId) : null
+    return context ? { ...context, backendSessionId: sessionId } : null
+  }
+
   async pollMessages(
     sessionId: string,
     seenMessageIds: Set<string>,

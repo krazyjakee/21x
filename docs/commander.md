@@ -316,6 +316,9 @@ view is part of this window, not an always-on-top OS window.
   regions. It announces unavailable reasons once, thinking after one second
   (cancelled if the state changes), errors/destructive executed actions
   assertively, and other executed actions/completed text-only replies politely.
+  Completed replies identify Commander as the speaker; errors keep their failed
+  turn identity across Retry, session navigation and PiP, so retained errors
+  do not become new announcements.
   Partial words and replies already delivered by speech stay silent. Report
   arrival has one short polite location cue, without report contents or voice
   synthesis. The transcript is a named log with automatic announcements off;
@@ -359,6 +362,31 @@ actual screen-reader pass remains a manual release gate: check NVDA/VoiceOver
 working, speaking, interrupted and error states, full view/PiP, the sessions
 modal, action details/Undo, and typed fallback. Automation does not establish
 announcement timing or reading order on those assistive technologies.
+
+## Context and conversation continuation
+
+The Context control shows the latest model input size. `≈` marks an estimate;
+unknown input size or model capacity stays unknown. The dialog contains reached
+limits, generation details, warnings and expandable summaries. Condensed
+conversation and generation changes also appear as dividers in Chat. They do
+not create another conversation, move typing focus or end the call.
+
+Conversation continuation defaults off. Observe shows reached limits without
+changing context; On continues when a safe boundary and the managed rollout
+allow it. Default limits are 70% of a known model window, two compactions,
+150 Captain wake-ups, 300 conversation turns or seven days. All five limits
+and the mode can be edited in the dialog. A pending continuation exposes Stop;
+a rejected settings write or uncertain backend creation remains visible.
+
+Commander uses its own session model for summaries, with a bounded deterministic
+fallback when that model cannot summarize. Full source turns remain stored.
+Later reports remain available after the summary cursor, and historical action
+results are never replayed by a generation change. Global Commander memory is
+one database record shared across its existing conversations. Native Captain
+continuation retains its own workspace memory and backend session identity.
+
+These controls do not activate the underlying managed engines. Their staged
+rollout and crash recovery are documented in [Managed sessions](managed-sessions.md).
 
 ## Reports (#62)
 

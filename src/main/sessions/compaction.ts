@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { MessagePartType, type MessagePart } from '../adapters/coding-agent-adapter'
+import { MessagePartType, type MessagePart, type AdapterContextUsage } from '../adapters/coding-agent-adapter'
 
 export interface AdapterCompactionObservation {
   backendSessionId: string
@@ -26,6 +26,7 @@ export class AdapterCompactionTracker {
   private readonly observations = new Map<string, AdapterCompactionObservation>()
   private pendingExplicit: string | null = null
   private lastDrop: string | null = null
+  private context: AdapterContextUsage | null = null
   constructor(private readonly backend: string, private readonly now: () => number = Date.now) {}
 
   bindSession(sessionId: string): void {
@@ -35,6 +36,7 @@ export class AdapterCompactionTracker {
     this.observations.clear()
     this.pendingExplicit = null
     this.lastDrop = null
+    this.context = null
   }
 
   observeExplicit(sessionId: string, eventKey: string, signal: string, details: { turnId?: string; beforeTokens?: number; afterTokens?: number } = {}): void {
@@ -51,6 +53,8 @@ export class AdapterCompactionTracker {
       return
     }
     const key = `explicit:${eventKey}`
+    if (positiveTokens(details.afterTokens)) this.context = { backendSessionId: sessionId, eventKey: key,
+      tokens: details.afterTokens, provenance: 'reported', observedAt: this.now(), turnId: details.turnId }
     this.add(key, { backendSessionId: sessionId, backend: this.backend, eventKey: key, source: 'explicit', signal, observedAt: this.now(),
       ...(details.turnId ? { turnId: details.turnId } : {}),
       ...(positiveTokens(details.beforeTokens) ? { beforeTokens: details.beforeTokens } : this.previous ? { beforeTokens: this.previous.tokens } : {}),
@@ -64,6 +68,7 @@ export class AdapterCompactionTracker {
     this.bindSession(sessionId)
     const previous = this.previous
     if (previous?.key === eventKey) return
+    this.context = { backendSessionId: sessionId, eventKey, tokens, provenance: 'reported', observedAt: this.now(), turnId }
     this.previous = { key: eventKey, tokens, turnId }
     const explicit = this.pendingExplicit ? this.observations.get(this.pendingExplicit) : undefined
     this.pendingExplicit = null
@@ -85,6 +90,10 @@ export class AdapterCompactionTracker {
   snapshot(sessionId: string): AdapterCompactionObservation[] {
     if (sessionId !== this.sessionId) return []
     return [...this.observations.values()].map((observation) => ({ ...observation }))
+  }
+
+  contextSnapshot(sessionId: string): AdapterContextUsage | null {
+    return sessionId === this.sessionId && this.context ? { ...this.context } : null
   }
 
   private add(key: string, observation: AdapterCompactionObservation): void {

@@ -672,6 +672,10 @@ interface ElectronAPI {
     onEvent: (callback: (event: ChatIpcEvent) => void) => () => void
   }
   /** Commander chat sessions (docs/commander.md). */
+  sessionContext: {
+    getSnapshot: (scope: import('@shared/session-context').SessionContextScope) => Promise<import('@shared/session-context').SessionContextSnapshot>
+    setPolicy: (policy: import('@shared/session-context').RolloverPolicy) => Promise<import('@shared/session-context').RolloverPolicy>
+  }
   commander: {
     listSessions: (payload?: CommanderListSessionsRequest) => Promise<CommanderSession[]>
     createSession: (payload?: { title?: string }) => Promise<CommanderSession>

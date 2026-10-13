@@ -43,17 +43,21 @@ useVoiceStore.setState({
   cancel: async () => { capturing = false; useVoiceStore.setState({ turnId: null, state: 'idle' }) },
   stopPlaybackNow: () => { voicePlayback.stop(); useVoiceStore.setState({ speaking: false, speechText: '' }) }
 })
+if (window.fixture.assistive) useVoiceStore.setState({ permission: 'denied' })
+let assistiveSpeechGeneration = 0
 Object.assign(window.fixture, {
+  permission: permission => useVoiceStore.setState({ permission }),
   partial: text => useVoiceStore.setState({ partial: text, level: .4 }),
   navigate: view => useUIStore.getState().setSidebarView(view),
   action: () => useCommanderStore.setState({ recentAction: { call: { id: 'archive-1', name: 'archive_project', input: { project: 'Web' } }, result: {
     id: 'executed-action', session_id: 'session-1', role: 'tool', content: JSON.stringify({ status: 'ok', target: { kind: 'project', id: 'web', name: 'Web' }, changes: [{ field: 'archived', before: false, after: true }], undoId: 'exact-undo' }), tool_calls: null, tool_call_id: 'archive-1', tool_name: 'archive_project', is_error: false, project_id: null, correlation_id: null, created_at: 1
   }, observedAt: activityNow() } }),
-  speech: () => {
-    const id = 'fixture-speech', generation = 1
-    useVoiceAttributionStore.setState({ passage: { speechId: id, speechGeneration: generation, taskId: 'commander:session-1' }, version: 1 })
+  speech: (seconds = 3) => {
+    const generation = window.fixture.assistive ? ++assistiveSpeechGeneration : 1
+    const id = `fixture-speech-${generation}`
+    useVoiceAttributionStore.setState({ passage: { speechId: id, speechGeneration: generation, taskId: 'commander:session-1' }, version: generation })
     voicePlayback.start(id, {}, generation)
-    const pcm = new Uint8Array(24000 * 2 * 3), view = new DataView(pcm.buffer)
+    const pcm = new Uint8Array(24000 * 2 * Math.min(15, Math.max(1, seconds))), view = new DataView(pcm.buffer)
     for (let i = 0; i < pcm.length / 2; i++) view.setInt16(i * 2, Math.round(Math.sin(i / 24000 * 440 * Math.PI * 2) * 9000), true)
     // A reply follows a completed utterance; retained partial words would
     // correctly trigger the production call's speech barge-in watcher.

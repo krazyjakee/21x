@@ -16,6 +16,8 @@ import { TranscriptComposer, type ComposerAttachment, type SaveImagesHandler, ty
 import { TranscriptHeader, TranscriptSearchBar } from './transcript/TranscriptHeader'
 import { useTranscriptAutoScroll } from './transcript/useTranscriptAutoScroll'
 import { useTranscriptSearch } from './transcript/useTranscriptSearch'
+import { useCoordinatorStore } from '@/stores/coordinator-store'
+import { SessionContextMeter } from '@/components/context/SessionContextMeter'
 
 const EMPTY_ARTIFACTS: Artifact[] = []
 
@@ -64,6 +66,7 @@ export function AgentTranscriptPanel({
   const scrollRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [debugCopyToast, setDebugCopyToast] = useState(false)
+  const isCaptain = useCoordinatorStore(state => !!taskId && Object.values(state.captainTaskIds).includes(taskId))
   const taskArtifacts = useArtifactStore((state) => taskId ? (state.artifactsByTask[taskId] || EMPTY_ARTIFACTS) : EMPTY_ARTIFACTS)
   const selectArtifactTab = useArtifactStore((state) => state.selectTab)
   const handleOpenArtifact = useCallback((artifact: Artifact) => {
@@ -172,6 +175,7 @@ export function AgentTranscriptPanel({
         onStop={onStop}
         onContextMenu={handleHeaderContextMenu}
       />
+      {isCaptain && taskId && <div className="ui-scale flex shrink-0 items-center justify-end border-b border-border px-2 py-1"><SessionContextMeter scope={{ kind: 'captain', ownerId: taskId }} /></div>}
 
       {search.isOpen && <TranscriptSearchBar search={search} />}
 

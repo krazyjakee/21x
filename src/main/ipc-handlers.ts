@@ -19,6 +19,7 @@ import { registerCommanderHandlers } from './ipc/commander'
 import { registerChatImageHandlers } from './ipc/chat-images'
 import { registerConnectorHandlers } from './ipc/connectors'
 import { registerOverviewHandlers } from './ipc/overview'
+import { registerSessionContextHandlers } from './ipc/session-context'
 
 export function registerIpcHandlers(deps: IpcDeps): void {
   registerTaskHandlers(deps)
@@ -41,4 +42,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerChatImageHandlers(deps)
   registerConnectorHandlers(deps)
   registerOverviewHandlers(deps)
+  registerSessionContextHandlers(deps)
 }

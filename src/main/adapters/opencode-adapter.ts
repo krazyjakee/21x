@@ -873,6 +873,10 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     return this.clients.has(sessionId) ? this.compactionTracker(sessionId).snapshot(sessionId) : []
   }
 
+  async getContextUsage(sessionId: string, _config: SessionConfig) {
+    return this.clients.has(sessionId) ? this.compactionTracker(sessionId).contextSnapshot(sessionId) : null
+  }
+
   private async fetchMessages(ocClient: OpencodeClient, sessionId: string, workspaceDir?: string): Promise<OpencodeMessage[]> {
     const result = await ocClient.session.messages({
       path: { id: sessionId },

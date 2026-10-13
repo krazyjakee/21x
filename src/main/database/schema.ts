@@ -13,6 +13,7 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
 import { createProviderRecoveryTable } from './provider-recovery-migration'
 import { createManagedSessionTables } from './managed-session-migration'
 import { createCommanderActionTables, migrateCommanderActions } from './commander-actions-migration'
+import { createSessionHandoffTable } from './session-handoff-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -75,8 +76,9 @@ import { createCommanderActionTables, migrateCommanderActions } from './commande
  * 32 → 33: durable provider turn recovery.
  * 33 → 34: observational managed-session ledger and Commander usage (#97/#99).
  * 34 → 35: Commander input mode and executed action snapshots / exact Undo (#86).
+ * 35 → 36: durable planned session handoff steps (#103).
  */
-const SCHEMA_VERSION = 35
+const SCHEMA_VERSION = 36
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -579,6 +581,7 @@ export function createTables(db: Database.Database): void {
   createProviderRecoveryTable(db)
   createManagedSessionTables(db)
   createCommanderActionTables(db)
+  createSessionHandoffTable(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -1118,6 +1121,9 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v35: legacy messages remain unattributed; one executed-action ledger.
   migrateCommanderActions(db)
+
+  // Migration v36: resumable rollover intents preserve source turns.
+  createSessionHandoffTable(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

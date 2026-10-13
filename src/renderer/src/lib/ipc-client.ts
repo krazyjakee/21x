@@ -26,6 +26,7 @@ import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
 import type { ChatImageInput } from '@shared/chat-images'
 import type { CaptainRuntimeState } from '@shared/captain-runtime'
+import type { RolloverPolicy, SessionContextScope, SessionContextSnapshot } from '@shared/session-context'
 import type {
   ConnectorBridgeCredentialInput,
   ConnectorBridgeCredentialStatus,
@@ -871,6 +872,11 @@ export const chatApi = {
 // ── Commander sessions ─────────────────────────────────────
 // Persisted Commander chat sessions (docs/commander.md). Main stores every
 // message and runs the turns; the renderer lists, sends and draws events.
+
+export const sessionContextApi = {
+  getSnapshot: (scope: SessionContextScope): Promise<SessionContextSnapshot> => window.electronAPI.sessionContext.getSnapshot(scope),
+  setPolicy: (policy: RolloverPolicy): Promise<RolloverPolicy> => window.electronAPI.sessionContext.setPolicy(policy)
+}
 
 export const commanderApi = {
   listSessions: (payload?: CommanderListSessionsRequest): Promise<CommanderSession[]> => window.electronAPI.commander.listSessions(payload),

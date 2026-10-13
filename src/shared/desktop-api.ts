@@ -865,6 +865,10 @@ export interface DesktopApi {
         onEvent: (callback: (event: ChatIpcEvent) => void) => () => void;
     };
     /** Commander chat sessions (docs/commander.md). */
+    sessionContext: {
+        getSnapshot: (scope: import("./session-context").SessionContextScope) => Promise<import("./session-context").SessionContextSnapshot>;
+        setPolicy: (policy: import("./session-context").RolloverPolicy) => Promise<import("./session-context").RolloverPolicy>;
+    };
     commander: {
         listSessions: (payload?: CommanderListSessionsRequest) => Promise<CommanderSession[]>;
         createSession: (payload?: {
