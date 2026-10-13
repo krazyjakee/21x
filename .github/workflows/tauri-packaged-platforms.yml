@@ -175,6 +175,9 @@ jobs:
             *) exit 2 ;;
           esac
           pnpm tauri:build --verbose --debug --bundles ${{ matrix.bundle }} "${feature_args[@]}" -- --locked 2>&1 | tee native-evidence/native-build.log
+      - name: Check compiled artifact policy before installed execution
+        if: inputs.mode == 'artifact-authorization-proof' && !inputs.service_only
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features artifact-authorization-proof --bin twentyonex-tauri-feasibility -- --test-threads=1 2>&1 | tee native-evidence/artifact-policy-native-tests.log
       - name: Exercise packaged GUI, resources, native probes and quit
         if: ${{ !inputs.service_only }}
         timeout-minutes: 8
