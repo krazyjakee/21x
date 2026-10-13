@@ -50,7 +50,7 @@ describe('Commander activity adapter', () => {
     const done = run([{ type: 'turn_started', sessionId: 's', turnId: 't1' }, ev('t1', { type: 'done', stopReason: 'end_turn' })])
     expect(result(done, 150)).toMatchObject({ state: 'finished', label: 'Reply finished' })
     const cancelled = run([{ type: 'turn_started', sessionId: 's', turnId: 't1' }, ev('t1', { type: 'done', stopReason: 'cancelled' })])
-    expect(result(cancelled, 150)).toMatchObject({ state: 'idle', detail: 'Stopped' })
+    expect(result(cancelled, 150)).toMatchObject({ state: 'idle', label: 'Stopped', accent: false })
     const failed = run([{ type: 'turn_started', sessionId: 's', turnId: 't1' }, ev('t1', { type: 'error', message: 'rate limited' })])
     expect(result(failed, 150)).toMatchObject({ state: 'failed', detail: 'rate limited' })
   })

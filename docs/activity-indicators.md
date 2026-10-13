@@ -2,6 +2,10 @@
 
 Implementation for GitHub [#95](https://github.com/krazyjakee/21x/issues/95) covers the shared vocabulary, freshness rules, indicator primitives, voice adapter, task/Captain surfaces and Commander stage/PiP integration. Verification is tracked separately from implementation; source and component checks do not substitute for native keyboard and assistive-technology checks.
 
+Captain completion requires an explicit observed terminal result. Working followed
+by idle alone is idle; cancellation and interruption show Stopped without a
+completion accent. Heartbeats and first sightings never announce a completion.
+
 The indicators answer one question, "is the Commander, a Captain or a task session doing something right now?", and they never claim activity without evidence. **Unknown is not idle, and idle is not running.**
 
 ## Vocabulary
@@ -19,7 +23,7 @@ The indicators answer one question, "is the Commander, a Captain or a task sessi
 | `listening` | An open microphone owned by this entity | "Listening" |
 | `finished` | Task: `ready_for_review`/`completed`. Commander/Captain: a turn that ended successfully | "Ready for review" / "Completed" / "Reply finished" (brief) |
 | `failed` | An explicit error in the current run | "Failed" (+ reason) |
-| `idle` | A fresh authoritative idle status | "Idle" (+ "Stopped" after a cancellation) |
+| `idle` | A fresh authoritative idle status | "Idle", or "Stopped" after cancellation/interruption |
 | `unknown` | No evidence, expired evidence, a known disconnect, or ownership that cannot be proven | "Status unavailable", with "Last seen running" / "Last result: Failed" when something was known |
 
 A task's lifecycle status (`agent_working`, `triaging`, …) is durable, and it survives the death of the process. It is only ever a static detail or a historical result. **It never produces a running claim.**
@@ -111,7 +115,7 @@ One entity is never indicated twice in the same chrome. A canvas task panel alre
 
 ### Quiet states
 
-Compact surfaces call `isQuietActivity(result)` and render nothing for a verified idle, or for unknown with no active history. Rendering nothing makes no claim. A claim that was active and has been lost still shows "Status unavailable · Last seen …".
+Compact surfaces call `isQuietActivity(result)` and render nothing for a plain verified idle, or for unknown with no active history. A fresh Stopped result retains its word. Rendering nothing makes no claim. A claim that was active and has been lost still shows "Status unavailable · Last seen …".
 
 ## Accessibility
 
@@ -148,6 +152,19 @@ Commander surfaces consume the shared source observations and voice adapter thro
 Agent status epoch/sequence/heartbeat/disconnection fields and Commander activity snapshots have typed desktop transport and runtime validation. Verified local speaking/listening use their media lifetime even when a provider turn observation is stale. Reports remain quiet inbox updates and do not manufacture active model or speech states.
 
 ## Tests
+
+`pnpm test:activity-input` runs production board, canvas, shell, Captain and
+Commander/PiP components in a native window with controlled stamped inputs.
+It checks real elapsed freshness deadlines, hidden/show recovery, epoch and
+queue races, keyboard focus, reduced motion and composited theme contrast.
+`ACTIVITY_SCREEN_READER=1` exposes the same fixture to a separately started
+reader; DOM receipts alone do not certify screen-reader announcements.
+
+`scripts/activity-process-proof.test.ts`, in the staged standalone suite,
+uses actual AgentManager ownership, locked portable SQLite and owned Node
+children. It checks more than fifteen seconds of silent RPC polling,
+window-only heartbeats, immediate known process loss and scoped cleanup.
+Its backend is a fixed local fixture and does not establish SDK parity.
 
 - `src/shared/activity.test.ts`: vocabulary and runtime validation of the metadata.
 - `src/main/agent-manager/activity-observations.test.ts` and `src/main/agent-manager-activity.test.ts`: stamping, heartbeat rate limit, heartbeats only after a successful poll and only for active sessions, never through `sendToRenderer`.

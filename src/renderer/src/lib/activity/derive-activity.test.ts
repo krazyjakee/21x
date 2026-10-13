@@ -192,7 +192,8 @@ describe('deriveActivity: completion and failure', () => {
       { entity: 'commander', live: { phase: 'idle', observedAt: fresh }, outcome: { kind: 'stopped', observedAt: fresh } },
       NOW
     )
-    expect(r).toMatchObject({ state: 'idle', detail: 'Stopped' })
+    expect(r).toMatchObject({ state: 'idle', label: 'Stopped', accent: false })
+    expect(isQuietActivity(r)).toBe(false)
   })
 })
 

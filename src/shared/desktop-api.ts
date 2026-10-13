@@ -82,6 +82,7 @@ export interface AgentStatusEvent {
     seq?: number;
     heartbeat?: boolean;
     disconnected?: boolean;
+    activityOutcome?: import("./activity").AgentActivityOutcome;
 }
 /** A durable transcript projection part (the single source of truth for rendering). */
 export type { TranscriptPartRecord };

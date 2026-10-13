@@ -36,7 +36,7 @@ export class TokenAccounting {
     return sample && sample[`${side}_chars`] > 0 ? sample[`${side}_tokens`] * CHARS_PER_TOKEN / sample[`${side}_chars`] : 1
   }
 
-  beginTurn(turnId: string, ownerId: string, kind: UsageKind, provider: ChatProvider, inputCharacters: number): void {
+  beginTurn(turnId: string, ownerId: string, kind: UsageKind, provider: Pick<ChatProvider, 'id' | 'model' | 'contextWindow'>, inputCharacters: number): void {
     if (this.closed) return
     const estimate = estimateTokens(inputCharacters, this.factor(provider.model, 'input'))
     this.db.prepare(`INSERT OR IGNORE INTO session_turn_usage
@@ -46,6 +46,30 @@ export class TokenAccounting {
         provider.contextWindow && Number.isSafeInteger(provider.contextWindow) && provider.contextWindow > 0 ? provider.contextWindow : modelContextWindow(provider.model),
         this.processRunId, estimate, estimate, this.now())
     this.ownedTurns.add(turnId)
+  }
+
+  /** Native adapters report an aggregate for a dispatch, rather than exposing
+   * individual model calls. Keep that aggregate in one replaceable call row;
+   * safe recovery attempts get separate rows instead of losing prior costs. */
+  beginAdapterTurn(turnId: string, ownerId: string, provider: Pick<ChatProvider, 'id' | 'model' | 'contextWindow'>,
+    inputCharacters: number, attempt: number): void {
+    if (this.closed) return
+    const prior = this.get(turnId)
+    if (prior && prior.owner_id !== ownerId) throw new Error('Adapter usage belongs to another owner')
+    this.beginTurn(turnId, ownerId, 'user', provider, inputCharacters)
+    if (prior) this.db.prepare("UPDATE session_turn_usage SET state='running', finished_at=NULL, process_run_id=? WHERE turn_id=?")
+      .run(this.processRunId, turnId)
+    this.beginCall(turnId, attempt + 1, inputCharacters, provider.model)
+  }
+
+  observeAdapterUsage(turnId: string, attempt: number, outputCharacters: number, reported: ReportedUsageFigures | null): void {
+    if (this.closed) return
+    this.finishCall(turnId, attempt + 1, outputCharacters, 'running', reported)
+  }
+
+  finishAdapterAttempt(turnId: string, attempt: number, outputCharacters: number, state: string): void {
+    if (this.closed) return
+    this.finishCall(turnId, attempt + 1, outputCharacters, state, null)
   }
 
   private beginCall(turnId: string, index: number, characters: number, model: string): void {

@@ -1,0 +1,239 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "issues": [
+    105,
+    96,
+    95
+  ],
+  "resolvedIssues": [
+    105,
+    96
+  ],
+  "source": {
+    "baseCommit": "2fdb67bd0e7a8c91ef521aad3ceca7ba87e52c8a",
+    "targetBranch": "master",
+    "schemaVersion": 36,
+    "changedSourceHashes": {
+      "docs/activity-indicators.md": "f6b0e8a6786d1b620b7725f15c57c19a40bea7da32acdfdb49e75aad994214c8",
+      "docs/managed-sessions.md": "d501789e4851a09287b10c2f8535050d8cf59664f2ae2f53f5573c022927bcc0",
+      "docs/tauri-migration/event-forwarding-review.json": "be54cf9a1758cc214b67eac652cdc6d4508a80b5de54a029e14529d7164441f1",
+      "docs/tauri-migration/inventory.json": "0761a3317c6ffae4f21a2b41b614c7aa9c72c249eca39a776e4cc5f85661d2d0",
+      "docs/tauri-migration/operations.json": "3dec602cddbafd4ca2d033310f5fc40d07175407517bee16f17f6ba4e0390b62",
+      "package.json": "2a453a36a9b58b43202afd96aa390d4b06f41c31294e2e1d69f84f63e9e1ca4e",
+      "scripts/activity-input/check.cjs": "e59d0fa0aaf01a4882dea2f3738f0239edb45cf954565aebef6e6f82dc306c5a",
+      "scripts/activity-input/fixture.css": "2b31208a6f9371a66bedd447d30a67c448c14ae3b6dfd3fcf74ce8fd7bcbcb3a",
+      "scripts/activity-input/fixture.tsx": "4f99a1ceb222d4c0472ba6432413fa9ee71d498c90d0aa15c55acca1a27d10dd",
+      "scripts/activity-input/index.html": "61526572af7962fd3ec36e8dedc18265be1e108a72d3e22135f19f5bbd846e04",
+      "scripts/activity-input/run.mjs": "50a57931e2e9b5b4cd85e92c4dba9ebf06adbde8e98721be140410073c334c2c",
+      "scripts/activity-process-proof.mjs": "9d6a1cf96b90b67d3ef9f84d8f0b2b69eafa77bc04f32f3bef68aeeb0a878fc3",
+      "scripts/activity-process-proof.test.ts": "e81d1e61dc7216e832aca16b456541b5b272b1bd2457f8092eb62ebe6dd910bc",
+      "scripts/activity-process-proof/fixture.ts": "5f81323fb749b72b3c347a82f1dbb906e43303c8b896224578a59116878ee2cd",
+      "scripts/activity-process-proof/worker.mjs": "ce11d85f65bd35f7bad2677252b71604d4682d8ed57a02abf86396dce0ebc146",
+      "scripts/agent-lifecycle-proof.mjs": "4f7e0774d6d0b8f1d0a9dbdcfaf8ded548efcff7ca11eede25efdf31b37bc6d9",
+      "src/main/agent-handoff-token-budget.test.ts": "059e759459b4c242834b81c3343eaed528b02077c9e69ae91100dad52e97f269",
+      "src/main/agent-handoff.ts": "47eeb8ba2cd2374a253e155eb64fb381eeb4097eac8ca36f6c574fb264b3b47c",
+      "src/main/agent-manager-activity-outcomes.test.ts": "e3f14fc959285961836d4eb6182df0b0bc6e262a8897218babfd553d3cbad8c0",
+      "src/main/agent-manager-coordinator.test.ts": "1ece067f2e0a707a25a8dc486d500260b66c097837316e62baa6df2c52660d4a",
+      "src/main/agent-manager-core.ts": "9c0d61f0097d3c419b3f78a89c10b568597c36b659d8335b31e996ae6550d1d2",
+      "src/main/agent-manager-task-managed.test.ts": "d62551dfe173bc7c1afe519424eb6a05d13bd181deddc5497629883955232c79",
+      "src/main/agent-manager.test.ts": "87b2932ea4eb2085b84d1af9c682a2995860d90aef4b30c5d3113c275b0c97b2",
+      "src/main/sessions/adapter-engine-accounting.test.ts": "66902e32d13316477127bf33e53a519723671b0fc12519a6b9cae48462a9f463",
+      "src/main/sessions/adapter-engine.ts": "05edba93412d260cc8ba9e4656e7ab72868fe2d8e455bce53c9d9445bd2250e6",
+      "src/main/sessions/roles/task.ts": "9695c46ac0755ed958dbbfc60f0fa5476089bd17445461999c4a77471689188a",
+      "src/main/sessions/token-accounting.ts": "218ad1da9a8568cad86f17803cb925836e3dbfb619a44aa432a4b82550b36aa9",
+      "src/renderer/src/components/activity/ActivityAnnouncer.test.tsx": "191985d047df34aeb91832999632a2e24aeefd59992a39c30ee7f01ae8c68d8f",
+      "src/renderer/src/components/activity/ActivityAnnouncer.tsx": "8c7f83cd147cd116ea25ca4e89f2f658eb6f4067439edda3d3a30e33d50ed34b",
+      "src/renderer/src/lib/activity/commander-activity-adapter.test.ts": "65020e358402cda144d29d4b21b6af360c87a27c23c0c9f1a855faef480c6918",
+      "src/renderer/src/lib/activity/derive-activity.test.ts": "003a73d7b753289c756c44f54ae7e9d93f8fe3f97cecd86e0569afec64e3ba92",
+      "src/renderer/src/lib/activity/derive-activity.ts": "d5f93b9f5d27126120e5657076b0f38d5bb5efb91ee77a344b2d883210bb6bc9",
+      "src/renderer/src/lib/activity/session-activity-adapter.test.ts": "1f2e864523b7dfe2ef5750b035f3607c901a5bd3555267e55cfa1ff696383fcd",
+      "src/renderer/src/lib/activity/session-activity-adapter.ts": "105984e9f5d623b8039b8c8a7fc7499d6aa3bd000e9c08722957e0fa6763c036",
+      "src/renderer/src/types/electron.d.ts": "6bec1ea7819fa80bfc0e51ca5e76ef19ed71c443b507c5ceef99869ce9715049",
+      "src/shared/activity.test.ts": "7a980611bf9c14631aa91804d80e049245c1f8ef4d9882b3f63b14ffdf9a1420",
+      "src/shared/activity.ts": "8a62480745ad34e973e45f0502f6e47a1ad44a25f2501a24439fe8d736f2e860",
+      "src/shared/agent-desktop-codecs.test.ts": "48efeb959a1b2e5a31325b1415df1ec3c3ba98494bcaee7fcb61f61e548b77d3",
+      "src/shared/agent-desktop-codecs.ts": "07c09e7c0f2d93d7808bcf8e6fc08cfa078cbd2aa63033779d39bb645e6ffccf",
+      "src/shared/desktop-api.ts": "d0d295a73e37dcd69fed483fd4cd9cd1da0c05dbd7b235aebd3795de69758b00",
+      "src/shared/desktop-event-forwarding.ts": "9d8e2416a7dc8dd690184eab322f22b0f3b0466e1a0d5059515449519be4eb57",
+      "vitest.tauri.config.ts": "d17ed9c1e4f9c451f9dea98d2776a68ceb8213df61f593ce71e0297c742dca4f"
+    }
+  },
+  "scope": "Local optional managed task sessions and cross-surface activity checks. Controlled adapters/native IPC and a real owned Node fixture worker; no SDK, cloud, physical microphone, other-OS or production Tauri parity claim.",
+  "decisions": {
+    "hostedVoice": "User explicitly deferred #92 hosted features; finish the local experience."
+  },
+  "tests": {
+    "application": {
+      "command": "rtk pnpm test:run --reporter=json --outputFile=.git/issue-closing/batch5-app-corrected.json",
+      "passed": 5785,
+      "failed": 0,
+      "skipped": 21,
+      "reportSha256": "bccb9aee4734ab6c39bd2ff99dbe5d5e62bebbc672f257d87f63b85e535e0f9d"
+    },
+    "rendererFollowup": {
+      "command": "rtk pnpm test:run --project renderer --reporter=json --outputFile=.git/issue-closing/batch5-renderer-final.json",
+      "passed": 1512,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "1c641e4544aec67b562ccd55421def03f9b89d1c6656514a9e71749afe12377d",
+      "reason": "Final ActivityAnnouncer semantic-child and repeated-failure wording changed only renderer inputs; the complete renderer suite was rerun. Main/shared/standalone remain on the passing integrated revision."
+    },
+    "standalone": {
+      "command": "rtk pnpm test:tauri --service-proofs --reporter=json --outputFile=.git/issue-closing/batch5-tauri-corrected.json",
+      "passed": 2046,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "952933d6660e96a7f3fa4c25ca62a3cf935cdad3cd9ff21c636d0dd734f9a7a7"
+    }
+  },
+  "verification": {
+    "forcedTypecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": "rtk pnpm lint",
+      "exitCode": 0,
+      "logSha256": "9e82aeb1d63ebe144cbbfad5a99774612d72479a110c12337892816d99ce2890",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "announcerFollowupLint": {
+      "command": "rtk pnpm exec eslint src/renderer/src/components/activity/ActivityAnnouncer.tsx src/renderer/src/components/activity/ActivityAnnouncer.test.tsx",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "build": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "logSha256": "a07221cdbd1c72ad7bd410cd31ec91c24523ea2ff82ae2b6980f84baa540e8c4"
+    },
+    "tauriFrontend": {
+      "command": "rtk pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "logSha256": "13b4523fe65d7d9e0e53f142ff21dd0b2ca97f3f2251c0eb3db6b40072139e1a"
+    },
+    "nativeCommander": {
+      "command": "DISPLAY=:199 rtk node scripts/commander-input/run.mjs",
+      "exitCode": 0,
+      "logSha256": "8a5df1ded82c31b565b021835222fd85bec75642750ae267e75a3098eeada44d",
+      "checks": 16
+    },
+    "standaloneDatabaseStage": {
+      "command": "rtk pnpm tauri:prepare:database",
+      "exitCode": 0
+    },
+    "inventoryFreshness": {
+      "command": "rtk node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0
+    },
+    "contractFreshness": {
+      "command": "rtk node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0
+    },
+    "diffWhitespace": {
+      "command": "rtk git diff --check",
+      "exitCode": 0
+    }
+  },
+  "nativeActivity": {
+    "command": "DISPLAY=:199 rtk dbus-run-session -- rtk python3 .git/issue-closing/orca-batch5.py",
+    "exitCode": 0,
+    "scriptedCases": 14,
+    "pageLoads": 1,
+    "passedCases": [
+      "hydration is static and agent health cannot bless a cached dead session",
+      "many cards and canvas mirrors have one motion owner per entity",
+      "successful five-second observations keep an eighteen-second silent tool fresh",
+      "no new observation and a missed done expire at the fifteen-second deadline",
+      "explicit disconnect immediately removes motion and shows unknown",
+      "real hidden/show/focus rechecks elapsed age before motion resumes",
+      "agent epochs, replaced sessions and replayed stamps cannot renew ownership",
+      "late source response and retired Commander epoch are fenced",
+      "new queue push wins over an older in-flight queue read",
+      "cancelled and interrupted Captain/task turns stay Stopped, explicit success alone finishes",
+      "observed review accent settles while Ready for review persists",
+      "both themes honor reduced motion and actual badge contrast",
+      "native NavRail tooltip focus and Commander/PiP share source ownership",
+      "assistive reader receives completed reply and separate repeated actionable failures"
+    ],
+    "logSha256": "10f247b0a352a8f3d9d67b41716b21a53547d3a39eb59938a0ab2186fd23aab4",
+    "receiptsSha256": "d445da82a6560237c928c2cfbe2bffe3a33fa00aaa184b701fbf07d70296a213"
+  },
+  "assistiveTechnology": {
+    "reader": "Linux Orca, private D-Bus/preferences/dummy Speech Dispatcher in isolated Xephyr",
+    "scope": "Actual utterance log reviewed after native keyboard input and controlled source events. Scripted actual-reader evidence, not independent human/manual or cross-platform certification.",
+    "reviewedUtterances": [
+      {
+        "localTime": "19:17:23.188904",
+        "text": "3 task connections lost. task-one connection restored"
+      },
+      {
+        "localTime": "19:17:24.205768",
+        "text": "Captain stopped. task-one stopped. task-one connection lost. 2 task connections restored"
+      },
+      {
+        "localTime": "19:17:28.765435",
+        "text": "task-two ready for review"
+      },
+      {
+        "localTime": "19:17:29.948495",
+        "text": "task-two needs approval"
+      },
+      {
+        "localTime": "19:17:30.987464",
+        "text": "Captain failed"
+      },
+      {
+        "localTime": "19:17:34.594654",
+        "text": "Captain reply finished"
+      },
+      {
+        "localTime": "19:17:36.243254",
+        "text": "Captain failed"
+      },
+      {
+        "localTime": "19:17:37.820067",
+        "text": "Captain failed again"
+      },
+      {
+        "localTime": "19:17:39.213487",
+        "text": "task-two needs approval"
+      }
+    ],
+    "logSha256": "d8d7c2803757cac68c0338b1a9e6b9d613dd421011b7f321f46c225f4ed2f0be",
+    "repeatedFailureFix": "Distinct consecutive actionable failures/approval requests use an again cue; duplicate observations remain silent."
+  },
+  "ownedProcessProof": {
+    "test": "scripts/activity-process-proof.test.ts",
+    "result": "Passed in staged standalone suite",
+    "assertedEvidence": [
+      "Actual AgentManager and canonical locked SQLite profile; fixed owned Node JSONL worker",
+      "More than 15 seconds silent polling with at least three window-only heartbeats spaced at least five seconds",
+      "Known child exit disconnect within four seconds; static bridge health cannot bless dead owner",
+      "External/mobile heartbeat count zero; explicit Captain completion versus cancelled abort",
+      "Stop/shutdown clean owned children; unregistered fixture child survives manager teardown; fixture cleanup exits all created children"
+    ],
+    "noSdkParityClaim": true
+  },
+  "acceptance": {
+    "105": [
+      "Default-off real-task AdapterEngine lifecycle, accounting and compaction with provenance",
+      "Reported billing requires owned-intent or fresh native-turn correlation; context remains separate",
+      "Loss/switch recaps select complete records within token budgets, preserve protected newest instruction and full stored transcript",
+      "Shared recovery/outbox authority, no new automatic provider turns or prompt replay"
+    ],
+    "96": [
+      "B1-B8 foundations landed in preceding verified master commits",
+      "Commander ChatEngine and Captain AdapterEngine share durable ledger, inbox, accounting, continuity and handoff",
+      "Staged defaults, threshold/memory ownership, own-model summary fallback, context UI and immutable saved source retained"
+    ]
+  },
+  "remainingAcceptance": [
+    "#95 independent human/manual screen-reader audit remains open; this batch provides 14 native/Linux Orca cases and actual owned-process proof.",
+    "#91 retains its documented remaining manual/platform accessibility audit.",
+    "#92 hosted features remain deferred by user choice; #93/#94 optional choices remain unselected."
+  ]
+}

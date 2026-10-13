@@ -73,7 +73,7 @@ function makeAdapter() {
     createSession: vi.fn(async () => 'fresh-session'),
     resumeSession: vi.fn(async () => [{ id: 'msg-1', role: 'assistant', parts: [{ id: 'part-1', type: 'text', text: 'Earlier' }] }]),
     destroySession: vi.fn(async () => undefined),
-    getSessionStatus: vi.fn(async () => ({ type: 'idle' })),
+    getStatus: vi.fn(async () => ({ type: 'idle' })),
     getMessages: vi.fn(async () => [])
   }
 }

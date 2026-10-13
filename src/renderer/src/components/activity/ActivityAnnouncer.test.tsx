@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ActivityAnnouncer } from './ActivityAnnouncer'
+import { ActivityAnnouncer, announcementForTransition } from './ActivityAnnouncer'
 import { __resetSessionActivity, recordAgentStatus } from '@/lib/activity/session-activity-adapter'
 import { __resetActivityClock, __setActivityTimeSource, revalidateActivityNow } from '@/lib/activity/activity-clock'
 import { useTaskStore } from '@/stores/task-store'
@@ -32,6 +32,32 @@ afterEach(() => {
 })
 
 describe('ActivityAnnouncer connection freshness', () => {
+  it('replaces its semantic child for distinct identical failures, while repeated observations stay silent', async () => {
+    render(<ActivityAnnouncer />)
+    const emit = (status: string, seq: number) => act(() => {
+      recordAgentStatus({ sessionId: 's', agentId: 'a', taskId: 't', status, epoch: 'E', seq }, now)
+    })
+    emit('working', 1)
+    now = 100; emit('error', 2)
+    const first = screen.getByRole('status').firstElementChild
+    expect(first?.tagName).toBe('P')
+    expect(first).toHaveTextContent('Build failed')
+    emit('error', 3)
+    expect(screen.getByRole('status').firstElementChild).toBe(first)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    now = 1100; emit('working', 4)
+    now = 1200; emit('error', 5)
+    expect(screen.getByRole('status').firstElementChild).not.toBe(first)
+    expect(screen.getByRole('status').textContent).toBe('Build failed again')
+  })
+  it('announces Captain success only from its result and distinguishes Stop from idle', () => {
+    const transition = { taskId: 'captain', from: 'working' as const, to: 'idle' as const, at: 100 }
+    const info = { title: 'Captain', isCaptain: true }
+    expect(announcementForTransition(transition, info)).toBeNull()
+    expect(announcementForTransition({ ...transition, outcome: 'completed' }, info)?.message).toBe('Captain reply finished')
+    expect(announcementForTransition({ ...transition, outcome: 'cancelled' }, info)?.message).toBe('Captain stopped')
+    expect(announcementForTransition({ ...transition, outcome: 'interrupted' }, info)?.message).toBe('Captain stopped')
+  })
   it('announces loss and restoration, but not the first live observation', async () => {
     render(<ActivityAnnouncer />)
     act(() => {

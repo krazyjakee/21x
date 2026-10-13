@@ -1559,6 +1559,7 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
 
     const sendSpy = vi.spyOn(mgr as any, 'sendToRenderer')
 
+    ;(mgr as any).sessions.set('session-1', sessionWithAdapter)
     await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
 
     const replayCall = sendSpy.mock.calls.find(
@@ -1596,6 +1597,7 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
     vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
     const sendSpy = vi.spyOn(mgr as any, 'sendToRenderer')
 
+    ;(mgr as any).sessions.set('session-1', sessionWithAdapter)
     await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
 
     const batch = sendSpy.mock.calls.find(([channel]) => channel === 'agent:output-batch')?.[1] as
@@ -1640,6 +1642,7 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
 
     const sendSpy = vi.spyOn(mgr as any, 'sendToRenderer')
 
+    ;(mgr as any).sessions.set('session-1', sessionWithAdapter)
     await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
 
     const replayCalls = sendSpy.mock.calls.filter(
@@ -1681,6 +1684,7 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
     vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
     vi.spyOn(mgr as any, 'ensurePollingCoordinator').mockImplementation(() => undefined)
 
+    ;(mgr as any).sessions.set('session-1', sessionWithAdapter)
     await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
 
     expect(adapter.getAllMessages).toHaveBeenCalledOnce()
@@ -1720,6 +1724,7 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
     vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
     vi.spyOn(mgr as any, 'sendToRenderer')
 
+    ;(mgr as any).sessions.set('session-1', sessionWithAdapter)
     await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
 
     // partContentLengths should store the ACTUAL text, not its length

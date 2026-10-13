@@ -33,6 +33,13 @@ describe('retained synthetic agent desktop codecs', () => {
     const status = { sessionId: 'session-1', agentId: 'agent-1', taskId: 'task-1', status: 'waiting_approval' }
     expect(events['agent:status'].validatePayload(status)).toBe(true)
     expect(events['agent:status'].validatePayload({ ...status, epoch: 'owner:1', seq: 1, heartbeat: true })).toBe(true)
+    for (const activityOutcome of ['completed', 'cancelled', 'interrupted']) {
+      expect(events['agent:status'].validatePayload({ ...status, status: 'idle', epoch: 'owner:1', seq: 2, activityOutcome })).toBe(true)
+    }
+    expect(events['agent:status'].validatePayload({ ...status, status: 'error', epoch: 'owner:1', seq: 2, activityOutcome: 'failed' })).toBe(true)
+    for (const extra of [{ activityOutcome: 'completed' }, { epoch: 'owner:1', seq: 2, activityOutcome: 'completed' }, { status: 'idle', epoch: 'owner:1', seq: 2, activityOutcome: 'failed' }, { status: 'idle', epoch: 'owner:1', seq: 2, activityOutcome: 'completed', heartbeat: true }]) {
+      expect(events['agent:status'].validatePayload({ ...status, ...extra })).toBe(false)
+    }
     for (const extra of [{ epoch: 'owner:1' }, { seq: 1 }, { epoch: 'owner:1', seq: 0 }, { heartbeat: true }, { epoch: 'owner:1', seq: 1, heartbeat: false }, { secret: 'private' }]) {
       expect(events['agent:status'].validatePayload({ ...status, ...extra })).toBe(false)
     }

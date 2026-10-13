@@ -53,6 +53,8 @@ const mainFiles = [
   'src/main/sessions/compaction.test.ts', 'src/main/adapters/adapter-compaction.test.ts',
   'src/main/agent-manager-compaction.test.ts',
   'src/main/sessions/adapter-engine.test.ts', 'src/main/agent-manager-captain-managed.test.ts',
+  'src/main/sessions/adapter-engine-accounting.test.ts', 'src/main/agent-manager-task-managed.test.ts',
+  'src/main/agent-handoff-token-budget.test.ts', 'src/main/agent-manager-activity-outcomes.test.ts',
   'src/main/captain-waker-managed.test.ts', 'src/main/database/session-handoff-migration.test.ts',
   'src/main/sessions/handoff.test.ts', 'src/main/sessions/memory.test.ts', 'src/main/sessions/compaction-policy.test.ts',
   'src/main/sessions/context-service.test.ts', 'src/main/ipc/session-context.test.ts',
@@ -94,6 +96,7 @@ const mainFiles = [
   'src/shared/**/*.test.ts',
   'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts',
   'scripts/artifact-frame-proof.test.ts',
+  'scripts/activity-process-proof.test.ts',
   'scripts/database-proof.test.ts', 'scripts/configuration-proof.test.ts', 'scripts/agent-desktop-proof.test.ts',
   ...(process.env.TAURI_STANDALONE_SERVICE_PROOFS === '1' ? [
     'scripts/database-service-proof.test.ts', 'scripts/configuration-service-proof.test.ts', 'scripts/transcript-page-proof.test.ts',

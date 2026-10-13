@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { readAgentStatusActivityMeta, ACTIVITY_REVALIDATE_MS, type ActivityQueueReason } from '@shared/activity'
+import { readAgentStatusActivityMeta, ACTIVITY_REVALIDATE_MS, type ActivityQueueReason, type AgentActivityOutcome } from '@shared/activity'
 import { activityNow, revalidateActivityNow } from './activity-clock'
 import type { ActivityEvidence, LiveObservation, LivePhase, OutcomeObservation, QueueObservation } from './derive-activity'
 
@@ -24,7 +24,7 @@ export interface SessionObservation {
   observedAt: number
   disconnected?: boolean
   /** The latest observed transition (never set by the first observation). */
-  lastTransition?: { from: LivePhase; to: LivePhase; at: number }
+  lastTransition?: { from: LivePhase; to: LivePhase; at: number; outcome?: AgentActivityOutcome }
 }
 
 export interface QueueEntryObservation {
@@ -56,6 +56,7 @@ export interface SessionTransition {
   from: LivePhase
   to: LivePhase
   at: number
+  outcome?: AgentActivityOutcome
 }
 
 type TransitionListener = (transition: SessionTransition) => void
@@ -89,6 +90,10 @@ export function recordAgentStatus(event: unknown, now: number = activityNow()): 
   // ordering metadata may still update the legacy agent store, but cannot
   // prove freshness here.
   if (!meta || retiredEpochs.has(meta.epoch)) return false
+  const taskId = e.taskId
+  const status = e.status as LivePhase
+  if (meta.activityOutcome && (meta.activityOutcome === 'failed' ? status !== 'error' : status !== 'idle')) return false
+  if (!e.sessionId && status !== 'error') return false
   const state = useSessionActivityStore.getState()
 
   const epoch = meta.epoch
@@ -104,9 +109,6 @@ export function recordAgentStatus(event: unknown, now: number = activityNow()): 
     return false
   }
 
-  const taskId = e.taskId
-  const status = e.status as LivePhase
-  if (!e.sessionId && status !== 'error') return false
   // Startup failures are task-scoped and intentionally have no backend
   // session id. Give that authoritative error a stable observation identity
   // without making the legacy agent store invent a live session.
@@ -125,8 +127,9 @@ export function recordAgentStatus(event: unknown, now: number = activityNow()): 
     retiredSessions.set(taskId, retired)
     previous = undefined
   }
-  const transition: SessionTransition | null = previous && previous.status !== status
-    ? { taskId, from: previous.status, to: status, at: now }
+  if (meta.heartbeat && previous && previous.status !== status) return false
+  const transition: SessionTransition | null = !meta.heartbeat && !meta.disconnected && previous && previous.status !== status
+    ? { taskId, from: previous.status, to: status, at: now, ...(meta.activityOutcome ? { outcome: meta.activityOutcome } : {}) }
     : null
   const next: SessionObservation = {
     taskId,
@@ -136,7 +139,7 @@ export function recordAgentStatus(event: unknown, now: number = activityNow()): 
     observedAt: now,
     ...(meta.disconnected ? { disconnected: true } : {}),
     ...(transition
-      ? { lastTransition: { from: transition.from, to: transition.to, at: transition.at } }
+      ? { lastTransition: { from: transition.from, to: transition.to, at: transition.at, ...(transition.outcome ? { outcome: transition.outcome } : {}) } }
       : previous?.lastTransition
         ? { lastTransition: previous.lastTransition }
         : {})
@@ -211,6 +214,9 @@ export function taskEvidence(
   if (input.lifecycleFinishedAt != null) outcome = { kind: 'finished', observedAt: input.lifecycleFinishedAt }
   if (session?.lastTransition && session.lastTransition.to === 'error' && session.status === 'error') {
     outcome = { kind: 'failed', observedAt: session.lastTransition.at }
+  } else if (session?.status === 'idle' && session.lastTransition?.to === 'idle'
+    && ['cancelled', 'interrupted'].includes(session.lastTransition.outcome ?? '')) {
+    outcome = { kind: 'stopped', observedAt: session.lastTransition.at }
   }
   return {
     entity: 'task',
@@ -223,14 +229,15 @@ export function taskEvidence(
 }
 
 /**
- * Evidence for a Captain. A turn ending (working → idle) is "Reply finished",
- * never "Ready for review": the Captain row has no ordinary completion.
+ * Captain success requires an explicit observed result. Idle can also mean
+ * cancellation, reconnect or a warm session without any completed turn.
  */
 export function captainEvidence(session: SessionObservation | undefined): ActivityEvidence {
   let outcome: OutcomeObservation | null = null
   const t = session?.lastTransition
-  if (t && t.from === 'working' && t.to === 'idle' && session?.status === 'idle') {
-    outcome = { kind: 'finished', observedAt: t.at }
+  if (t && t.to === 'idle' && session?.status === 'idle') {
+    if (t.outcome === 'completed') outcome = { kind: 'finished', observedAt: t.at }
+    else if (t.outcome === 'cancelled' || t.outcome === 'interrupted') outcome = { kind: 'stopped', observedAt: t.at }
   } else if (t && t.to === 'error' && session?.status === 'error') {
     outcome = { kind: 'failed', observedAt: t.at }
   }

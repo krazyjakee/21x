@@ -105,6 +105,25 @@ configuration and approval failures preserve their existing binding. Stale
 output batches and excluded, capped or expired wake batches retain disposition
 records. Temporary-to-native ID changes preserve the original logical generation.
 
+## Optional task sessions
+
+`sessions.task_managed` defaults off; `1` or `true` enables ordinary task
+sessions independently of the Captain flag. Captain, triage and heartbeat
+sessions are excluded. Tasks reuse AdapterEngine start, resume, send, terminal,
+rekey and compaction observations, with the existing delivery outbox retaining
+authority over retries. This flag does not enable planned task rollover.
+
+Each dispatch records estimated input and cumulative output. Reported billing
+replaces those estimates only when it identifies the owned intent or a fresh
+native turn; uncorrelated reports remain estimated. Actual context occupancy is
+recorded separately and is never inferred from summed billing usage.
+
+Lost-session and agent-switch recaps select complete saved records within a
+token budget, preserve the newest human instruction, and identify omitted
+history. The complete transcript remains stored. An oversized protected
+instruction pauses continuation instead of being clipped. A lost-session seed
+joins the next accepted instruction without creating another provider turn.
+
 ## Planned context continuation
 
 `sessions.rollover` is `off` by default. `observe` records reached limits without

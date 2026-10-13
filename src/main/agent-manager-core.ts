@@ -3,7 +3,7 @@ import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import type { AgentManagerHost, AgentWindow } from './agent-manager/host'
 import { transcriptDisplayPart } from './transcript-display'
 import { finishSessionFeedback, updateTaskFromUser } from './session-feedback'
-import { buildAgentSwitchRecap, buildLostSessionRecap, INITIAL_PROMPT_PART_PREFIX, LOST_SESSION_NOTICE } from './agent-handoff'
+import { buildAgentSwitchRecap, buildLostSessionRecap, buildTokenBudgetedRecap, INITIAL_PROMPT_PART_PREFIX, LOST_SESSION_NOTICE, taskContextBudget } from './agent-handoff'
 import { EventEmitter } from 'events'
 import { join } from 'path'
 import { existsSync, readFileSync } from 'fs'
@@ -38,6 +38,7 @@ import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, checkAdmission, isExemptFromAdmi
 import { buildProjectLimitState, describeQueueReason, isAllProjectsPaused, projectAdmissionLimits, recordProjectSessionStart, setAllProjectsPaused, type ProjectLimitState } from './project-limits'
 import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
 import { ActivityObservations, isKnownActivityDisconnect, shouldPublishHeartbeat } from './agent-manager/activity-observations'
+import type { AgentActivityOutcome } from '../shared/activity'
 import { BranchDiffCache, ResourceMonitor, agentCap, autoLowerForPressure, findFileOverlap, projectAgentLevel, readProjectConcurrency, setConcurrencyLevel, setUserConcurrency, type LevelChangeResult, type OverlapCandidate } from './concurrency-control'
 import { effectiveLevel, recommendLevel, type ProjectConcurrencyState, type ResourcePressure } from '../shared/concurrency'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events-core'
@@ -50,6 +51,8 @@ import { ProviderRecoveryStore, type ProviderRecovery } from './sessions/provide
 import { CompactionNormalizer } from './sessions/compaction'
 import { ManagedSessionObserver } from './sessions/managed-session'
 import { AdapterEngine } from './sessions/adapter-engine'
+import { isManagedTask } from './sessions/roles/task'
+import { estimateTokens } from './sessions/token-estimator'
 import { isManagedCaptain, isLostCaptainSession, type CaptainWakeDisposition } from './sessions/roles/captain'
 import type { SessionObservation } from './sessions/event-inbox'
 import { modelContextWindow } from './sessions/model-windows'
@@ -159,6 +162,7 @@ interface AgentSession {
   pendingRecap?: string
   pendingLossId?: string
   managedCaptain?: boolean
+  managedTask?: boolean
   managedIntentId?: string
   configuredModel?: string
   configuredAgent?: AgentRecord
@@ -225,6 +229,7 @@ export class AgentManager extends EventEmitter {
   private externalListeners: Array<(channel: string, data: unknown) => void> = []
   private readonly captainRuntimes: CaptainRuntimeStore
   private readonly captainEngine: AdapterEngine | null
+  private readonly taskEngine: AdapterEngine | null
   private readonly captainRollover: CaptainRollover | null
   private readonly providerRecoveries: ProviderRecoveryStore
   private providerRecoveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -356,6 +361,7 @@ export class AgentManager extends EventEmitter {
     }
     this.db = db
     this.compactionObserver = db.db && typeof db.db.prepare === 'function' ? new ManagedSessionObserver(db.db) : null
+    this.taskEngine = db.db && typeof db.db.prepare === 'function' ? new AdapterEngine(db.db, undefined, 'task') : null
     this.captainEngine = db.db && typeof db.db.prepare === 'function' ? new AdapterEngine(db.db) : null
     this.captainRollover = db.db && typeof db.db.prepare === 'function' ? new CaptainRollover(db, host.captainSummaryProvider?.bind(host)) : null
     this.captainRuntimes = new CaptainRuntimeStore(db)
@@ -377,8 +383,31 @@ export class AgentManager extends EventEmitter {
     return !this.shuttingDown && isManagedCaptain(this.db.getTask(taskId), this.captainEngine?.enabled ?? false)
   }
 
+  private managesTask(taskId: string): boolean {
+    return !this.shuttingDown && isManagedTask(taskId, this.db.getTask(taskId), this.taskEngine?.enabled ?? false)
+  }
+
+  private managedEngine(session: AgentSession | undefined): AdapterEngine | null {
+    return session?.managedCaptain ? this.captainEngine : session?.managedTask ? this.taskEngine : null
+  }
+
+  private taskRecap(taskId: string, model: string | undefined, lost: boolean, reservedTokens = 0): string {
+    const parts = this.db.getTranscriptParts(taskId)
+    if (!this.managesTask(taskId)) return lost ? buildLostSessionRecap(parts) : buildAgentSwitchRecap(parts)
+    const result = buildTokenBudgetedRecap(parts, { model: model ?? '', kind: lost ? 'lost' : 'switch', reservedTokens })
+    const backendId = this.db.getTask(taskId)?.session_id ?? undefined
+    const identity = createHash('sha256').update(JSON.stringify([backendId, model, lost, result])).digest('hex')
+    this.retainCaptainObservation(this.taskEngine!.observe(taskId, backendId,
+      'recap_prepared', `task:${taskId}:recap:${identity}`, { ...result, text: undefined, source: 'estimated', losslessSource: 'transcript_parts' }))
+    return result.text
+  }
+
+  private taskHandoffReservedTokens(taskId: string): number {
+    return estimateTokens((buildTaskWorkPrompt(this.db, taskId, this.db.getTask(taskId)) + HEARTBEAT_MONITORING_INSTRUCTIONS).length + 1024)
+  }
+
   private retainCaptainObservation(observation: Promise<void>): void {
-    this.ownShutdownWork(observation.catch((error) => console.error('[AgentManager] Captain managed observation failed:', error)))
+    this.ownShutdownWork(observation.catch((error) => console.error('[AgentManager] Adapter managed observation failed:', error)))
   }
 
   /** The waker's stable identity is also the durable delivery identity. The
@@ -539,6 +568,7 @@ export class AgentManager extends EventEmitter {
   private async reconcileStartupNow(): Promise<void> {
     if (!this.shuttingDown) await this.compactionObserver?.reconcileStartup(true)
     if (!this.shuttingDown) await this.captainEngine?.reconcileStartup()
+    if (!this.shuttingDown) await this.taskEngine?.reconcileStartup()
     if (this.shuttingDown) return
     // A crash while a wire send was in flight cannot prove rejection. A saved
     // backoff is different: its failed turn/rejection was already confirmed.
@@ -1134,20 +1164,22 @@ export class AgentManager extends EventEmitter {
     }
   }
 
-  private emitStatus(sessionId: string, owner: { agentId: string; taskId: string }, status: AgentSession['status']): void {
+  private emitStatus(sessionId: string, owner: { agentId: string; taskId: string }, status: AgentSession['status'], activityOutcome: AgentActivityOutcome | undefined = status === 'error' ? 'failed' : undefined): void {
     const task = this.db.getTask(owner.taskId)
     if (sessionId && isCoordinatorTask(task) && task?.session_id && task.session_id !== sessionId) return
     const managed = this.sessions.get(sessionId)
-    if (managed?.managedCaptain && managed.managedIntentId && (status === 'idle' || status === 'error')) {
+    if (this.managedEngine(managed) && managed?.managedIntentId && (status === 'idle' || status === 'error')) {
       const intentId = managed.managedIntentId
       managed.managedIntentId = undefined
-      this.retainCaptainObservation(this.captainEngine!.finishTurn(owner.taskId, sessionId, intentId, status === 'idle' ? 'end_turn' : 'error'))
+      this.retainCaptainObservation(this.managedEngine(managed)!.finishTurn(owner.taskId, sessionId, intentId,
+        activityOutcome === 'cancelled' || activityOutcome === 'interrupted' ? activityOutcome : status === 'idle' ? 'end_turn' : 'error'))
     }
     this.sendToRenderer('agent:status', {
       sessionId,
       agentId: owner.agentId,
       taskId: owner.taskId,
       status,
+      ...(activityOutcome ? { activityOutcome } : {}),
       ...this.activityObservations.stamp()
     })
     // Every idle transition and every stop ends here: a slot may have freed.
@@ -1187,11 +1219,12 @@ export class AgentManager extends EventEmitter {
     console.warn(`[AgentManager] Session ${previousSessionId} of task ${taskId} was lost (${why}); the next session starts with a recap`)
     const lossId = `session-loss-pending-${randomUUID()}`
     this.emitSystemNotice(previousSessionId, taskId, lossId, why)
-    if (this.managesCaptain(taskId)) {
-      this.retainCaptainObservation(this.captainEngine!.observe(taskId, previousSessionId, 'session_lost', `${lossId}:lost`, { reason: why, lossId }))
+    const engine = this.managesCaptain(taskId) ? this.captainEngine : this.managesTask(taskId) ? this.taskEngine : null
+    if (engine) {
+      this.retainCaptainObservation(engine.observe(taskId, previousSessionId, 'session_lost', `${lossId}:lost`, { reason: why, lossId }))
       const intent = this.providerRecoveries.get(taskId)
-      if (intent?.sessionId === previousSessionId) this.retainCaptainObservation(this.captainEngine!.finishTurn(taskId, previousSessionId, intent.intentId, 'interrupted'))
-      this.retainCaptainObservation(this.captainEngine!.observe(taskId, previousSessionId, 'owner_closed', `${lossId}:closed`, { reason: 'backend_session_lost' }))
+      if (intent?.sessionId === previousSessionId) this.retainCaptainObservation(engine.finishTurn(taskId, previousSessionId, intent.intentId, 'interrupted'))
+      this.retainCaptainObservation(engine.observe(taskId, previousSessionId, 'owner_closed', `${lossId}:closed`, { reason: 'backend_session_lost' }))
     }
   }
 
@@ -1205,7 +1238,7 @@ export class AgentManager extends EventEmitter {
   private announceLostSessionReplacement(taskId: string, newSessionId: string): string {
     const lost = this.pendingSessionLoss(taskId)
     if (!lost) return ''
-    const recap = buildLostSessionRecap(this.db.getTranscriptParts(taskId))
+    const recap = this.taskRecap(taskId, this.sessions.get(newSessionId)?.configuredModel, true)
     const session = this.sessions.get(newSessionId)
     if (session) {
       session.pendingRecap = recap
@@ -1215,8 +1248,9 @@ export class AgentManager extends EventEmitter {
       newSessionId, taskId, `session-lost-replacement-${lost.id}`,
       `${LOST_SESSION_NOTICE}${recap ? ', with a recap of the latest conversation pending delivery.' : '.'}\n\nReason: ${lost.reason}`
     )
-    if (this.managesCaptain(taskId)) this.retainCaptainObservation(this.captainEngine!.observe(taskId, newSessionId,
-      'replacement_seeded', `captain:${taskId}:${lost.id}:${newSessionId}:seeded`, { lossId: lost.id, recapPending: true, recapCharacters: recap.length }))
+    const engine = this.managedEngine(session)
+    if (engine) this.retainCaptainObservation(engine.observe(taskId, newSessionId,
+      'replacement_seeded', `${engine.role}:${taskId}:${lost.id}:${newSessionId}:seeded`, { lossId: lost.id, recapPending: true, recapCharacters: recap.length }))
     return recap
   }
 
@@ -1380,6 +1414,8 @@ export class AgentManager extends EventEmitter {
 
     const task = this.db.getTask(taskId)
     const managedCaptain = isManagedCaptain(task, this.captainEngine?.enabled ?? false)
+    const managedTask = isManagedTask(taskId, task, this.taskEngine?.enabled ?? false)
+    const engine = managedCaptain ? this.captainEngine : managedTask ? this.taskEngine : null
     const runtimeGeneration = this.captainRuntimes.get(taskId)?.generation
     const isTriageSession = isTriageSessionTask(taskId, task)
     await yieldEventLoop()
@@ -1411,9 +1447,11 @@ export class AgentManager extends EventEmitter {
     console.log(`[AgentManager] startAdapterSession: agent=${agent.name}, coding_agent=${agent.config?.coding_agent || 'opencode'}, model=${agent.config?.model}, adapter=${adapter.constructor.name}`)
     await this.initializeAndProbeAdapter(adapter, taskId, runtimeGeneration)
 
+    if (managedTask && (handoffFromAgentName || this.pendingSessionLoss(taskId))) this.taskRecap(taskId, sessionConfig.model, !handoffFromAgentName,
+      skipInitialPrompt ? 0 : this.taskHandoffReservedTokens(taskId))
     if (!mayStart()) throw new Error('Start ownership was withdrawn before session creation.')
-    const creating = this.ownShutdownWork(managedCaptain
-      ? this.captainEngine!.createSession(taskId, adapter, sessionConfig) : adapter.createSession(sessionConfig))
+    const creating = this.ownShutdownWork(engine
+      ? engine.createSession(taskId, adapter, sessionConfig) : adapter.createSession(sessionConfig))
     const adapterSessionId = await withStartupDeadline(
       creating,
       AGENT_SESSION_START_TIMEOUT_MS,
@@ -1475,6 +1513,7 @@ export class AgentManager extends EventEmitter {
       fallbackAgentIds,
       attemptedAgentIds,
       managedCaptain,
+      managedTask,
       configuredModel: sessionConfig.model,
       configuredAgent: isCoordinatorTask(task) ? structuredClone(agent) : undefined
     })
@@ -1537,13 +1576,16 @@ export class AgentManager extends EventEmitter {
       // new agent isn't starting from a blank slate. Comes last so it reads
       // first, right before the actual work instructions.
       if (handoffFromAgentName) {
-        const recap = buildAgentSwitchRecap(this.db.getTranscriptParts(taskId))
+        const recap = this.taskRecap(taskId, sessionConfig.model, false, estimateTokens(promptText.length + 256))
         if (recap) {
           promptText = `## Picking up from ${handoffFromAgentName}\n\nThis task was previously being worked on by a different agent. Here is the conversation so far:\n\n${recap}\n\n---\n\n${promptText}`
         }
       } else if (seedRecap) {
         promptText = `${seedRecap}\n\n${promptText}`
       }
+
+      if (managedTask && (handoffFromAgentName || seedRecap) && estimateTokens(promptText.length) > taskContextBudget(sessionConfig.model ?? ''))
+        throw new Error('TASK_RECAP_INSTRUCTION_TOO_LARGE: task instructions and continuity do not fit intact; the transcript remains saved.')
 
       // Show the full prompt so the user can see the complete context sent to
       // the agent (repos, skills, secrets, heartbeat, etc.)
@@ -1859,6 +1901,7 @@ export class AgentManager extends EventEmitter {
       // (at worst that costs one extra cycle; it can never lose a message).
       entry.dataArrivedSincePoll = false
 
+      const polledIntentId = activeSession.managedIntentId
       const newParts = await adapter.pollMessages(
         sessionId,
         entry.seenMessageIds,
@@ -1870,8 +1913,8 @@ export class AgentManager extends EventEmitter {
       // An old lease cannot publish output or renew its successor's activity.
       sessionId = this.resolvePollingSessionId(entry)
       if (this.sessions.get(sessionId) !== activeSession || this.stoppingSessions.has(activeSession)) {
-        if (activeSession.managedCaptain) await this.captainEngine?.observe(activeSession.taskId, activeSession.id,
-          'stale_batch_dropped', `captain:${activeSession.taskId}:stale:${randomUUID()}`,
+        if (this.managedEngine(activeSession)) await this.managedEngine(activeSession)!.observe(activeSession.taskId, activeSession.id,
+          'stale_batch_dropped', `${this.managedEngine(activeSession)!.role}:${activeSession.taskId}:stale:${randomUUID()}`,
           { disposition: 'superseded_or_stopped', count: newParts.length, partIds: newParts.map((part) => part.id ?? null) })
         return
       }
@@ -1900,8 +1943,8 @@ export class AgentManager extends EventEmitter {
       // One batched IPC call instead of one per part, so the renderer does a
       // single state update + re-render.
       if (this.sessions.get(sessionId) !== activeSession || this.stoppingSessions.has(activeSession)) {
-        if (activeSession.managedCaptain) await this.captainEngine?.observe(activeSession.taskId, activeSession.id,
-          'stale_batch_dropped', `captain:${activeSession.taskId}:stale:${randomUUID()}`,
+        if (this.managedEngine(activeSession)) await this.managedEngine(activeSession)!.observe(activeSession.taskId, activeSession.id,
+          'stale_batch_dropped', `${this.managedEngine(activeSession)!.role}:${activeSession.taskId}:stale:${randomUUID()}`,
           { disposition: 'superseded_during_processing', count: newParts.length, partIds: newParts.map((part) => part.id ?? null) })
         return
       }
@@ -1914,11 +1957,12 @@ export class AgentManager extends EventEmitter {
           taskId: config.taskId,
           messages: batchMessages
         })
-        if (activeSession.managedCaptain) {
+        if (this.managedEngine(activeSession)) {
+          if (polledIntentId && activeSession.managedIntentId === polledIntentId) this.managedEngine(activeSession)!.recordOutput(activeSession.taskId, sessionId, polledIntentId, batchMessages)
           const identity = createHash('sha256').update(JSON.stringify(batchMessages)).digest('hex')
-          await this.captainEngine!.observe(activeSession.taskId, sessionId, 'output_batch',
-            `captain:${activeSession.taskId}:${sessionId}:output:${identity}`,
-            { parts: batchMessages.map((message) => ({ id: message.id, role: message.role, partType: message.partType })) }, activeSession.managedIntentId)
+          await this.managedEngine(activeSession)!.observe(activeSession.taskId, sessionId, 'output_batch',
+            `${this.managedEngine(activeSession)!.role}:${activeSession.taskId}:${sessionId}:output:${identity}`,
+            { parts: batchMessages.map((message) => ({ id: message.id, role: message.role, partType: message.partType })) }, polledIntentId)
           if (!this.ownsSessionGeneration(sessionId, activeSession) || this.shuttingDown) return
         }
       }
@@ -1927,7 +1971,10 @@ export class AgentManager extends EventEmitter {
       const session = this.sessions.get(sessionId)
       if (session !== activeSession || this.stoppingSessions.has(activeSession)) return
       await this.pollCompactions(sessionId, activeSession, adapter, config)
-      await this.pollCaptainContextUsage(sessionId, activeSession, adapter, config)
+      const contextUsage = await this.pollCaptainContextUsage(sessionId, activeSession, adapter, config)
+      const managedIntentId = activeSession.managedIntentId === polledIntentId ? polledIntentId : undefined
+      if (managedIntentId) await this.managedEngine(activeSession)?.pollUsage(activeSession.taskId, sessionId, managedIntentId, adapter, config, contextUsage,
+        () => this.ownsSessionGeneration(sessionId, activeSession) && !this.shuttingDown && activeSession.managedIntentId === managedIntentId)
       if (this.shuttingDown || this.sessions.get(sessionId) !== activeSession || this.stoppingSessions.has(activeSession)) return
 
       if (status.type === SessionStatusType.ERROR) {
@@ -1962,7 +2009,7 @@ export class AgentManager extends EventEmitter {
     try {
       const observations = await adapter.getCompactionObservations(sessionId, config)
       if (this.shuttingDown || this.sessions.get(sessionId) !== session || this.stoppingSessions.has(session)) return
-      const generationKey = session.managedCaptain ? this.captainEngine!.generationKey(sessionId, session.taskId) : `adapter:${sessionId}`
+      const generationKey = this.managedEngine(session) ? this.managedEngine(session)!.generationKey(sessionId, session.taskId) : `adapter:${sessionId}`
       for (const observation of observations) {
         const effect = this.compactions.observe(observation, { ownerId: session.taskId, generationKey,
           backendSessionId: sessionId, backend: this.db.getAgent(session.agentId)?.config.coding_agent })
@@ -2000,16 +2047,18 @@ export class AgentManager extends EventEmitter {
     }
   }
 
-  private async pollCaptainContextUsage(sessionId: string, session: AgentSession, adapter: CodingAgentAdapter, config: SessionConfig): Promise<void> {
-    if (!session.managedCaptain || !adapter.getContextUsage || this.shuttingDown) return
+  private async pollCaptainContextUsage(sessionId: string, session: AgentSession, adapter: CodingAgentAdapter, config: SessionConfig): Promise<import('./adapters/coding-agent-adapter').AdapterContextUsage | null> {
+    const engine = this.managedEngine(session)
+    if (!engine || !adapter.getContextUsage || this.shuttingDown) return null
     try {
       const usage = await adapter.getContextUsage(sessionId, config)
-      if (!usage || usage.backendSessionId !== sessionId || !this.ownsSessionGeneration(sessionId, session) || this.shuttingDown) return
-      await this.captainEngine!.observe(session.taskId, sessionId, 'context_usage',
-        `captain:${session.taskId}:${sessionId}:context:${usage.eventKey}`,
+      if (!usage || usage.backendSessionId !== sessionId || !this.ownsSessionGeneration(sessionId, session) || this.shuttingDown) return null
+      await engine.observe(session.taskId, sessionId, 'context_usage',
+        `${engine.role}:${session.taskId}:${sessionId}:context:${usage.eventKey}`,
         { tokens: usage.tokens, source: usage.provenance, model: config.model ?? null,
           contextWindow: modelContextWindow(config.model ?? ''), observedAt: usage.observedAt, turnId: usage.turnId ?? null })
-    } catch (error) { console.error('[AgentManager] Captain context usage observation failed:', error) }
+      return usage
+    } catch (error) { console.error('[AgentManager] Adapter context usage observation failed:', error); return null }
   }
 
   /**
@@ -2063,7 +2112,7 @@ export class AgentManager extends EventEmitter {
 
     const session = this.sessions.get(sessionId)
     if (!session) return sessionId
-    if (session.managedCaptain) this.retainCaptainObservation(this.captainEngine!.rekeySession(session.taskId, sessionId, realSessionId))
+    if (this.managedEngine(session)) this.retainCaptainObservation(this.managedEngine(session)!.rekeySession(session.taskId, sessionId, realSessionId))
     this.sessions.delete(sessionId)
     this.sessions.set(realSessionId, session)
 
@@ -2216,7 +2265,7 @@ export class AgentManager extends EventEmitter {
     batchMessages: OutputMessage[],
     partFailure?: ProviderFailure
   ): Promise<void> {
-    if (status.message?.includes('INCOMPATIBLE_SESSION_ID') || (session?.managedCaptain && isLostCaptainSession(status.message))) {
+    if (status.message?.includes('INCOMPATIBLE_SESSION_ID') || (this.managedEngine(session) && isLostCaptainSession(status.message))) {
       console.warn('[AgentManager] Incompatible session detected during polling:', sessionId)
       if (this.db.getTask(config.taskId)?.session_id !== sessionId) {
         this.stopAdapterPolling(sessionId)
@@ -2496,6 +2545,8 @@ export class AgentManager extends EventEmitter {
     const agent = this.db.getAgent(agentId)!
     const originalTask = this.db.getTask(taskId)
     const managedCaptain = isManagedCaptain(originalTask, this.captainEngine?.enabled ?? false)
+    const managedTask = isManagedTask(taskId, originalTask, this.taskEngine?.enabled ?? false)
+    const engine = managedCaptain ? this.captainEngine : managedTask ? this.taskEngine : null
     const originalBinding = originalTask?.session_id
     const runtimeGeneration = this.captainRuntimes.get(taskId)?.generation
 
@@ -2541,8 +2592,8 @@ export class AgentManager extends EventEmitter {
     try {
       console.log('[AgentManager] Calling adapter.resumeSession...')
       messages = await withStartupDeadline(
-        this.ownShutdownWork(managedCaptain
-          ? this.captainEngine!.resumeSession(taskId, adapterSessionId, adapter, sessionConfig)
+        this.ownShutdownWork(engine
+          ? engine.resumeSession(taskId, adapterSessionId, adapter, sessionConfig)
           : adapter.resumeSession(adapterSessionId, sessionConfig)),
         AGENT_SESSION_START_TIMEOUT_MS,
         'Agent session resume',
@@ -2645,6 +2696,7 @@ export class AgentManager extends EventEmitter {
         .filter((id) => id !== agentId),
       attemptedAgentIds: new Set([agentId]),
       managedCaptain,
+      managedTask,
       configuredModel: sessionConfig.model,
       configuredAgent: isCoordinatorTask(task) ? structuredClone(agent) : undefined
     })
@@ -3216,6 +3268,8 @@ export class AgentManager extends EventEmitter {
     // leaves the outgoing session and the task assignment intact.
     const adapter = this.getAdapter(newAgentId)
     if (!adapter) throw new Error(`No adapter available for agent ${newAgentId}`)
+
+    if (this.managesTask(taskId)) this.taskRecap(taskId, newAgent.config.model, false, this.taskHandoffReservedTokens(taskId))
 
     // Stop the outgoing agent's live session, if any — its process belongs to
     // a different backend and can't continue once we hand off.
@@ -3855,6 +3909,7 @@ export class AgentManager extends EventEmitter {
    * values are extracted BEFORE notifying so the renderer's re-fetch sees them.
    */
   private async transitionToIdle(sessionId: string, session: AgentSession): Promise<void> {
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
     if (session.status === 'idle') {
       console.log(`[AgentManager] transitionToIdle: session ${sessionId} already idle, skipping`)
       return
@@ -3891,10 +3946,16 @@ export class AgentManager extends EventEmitter {
     // the UI doesn't miss the last response.
     const replayedPartCount = await this.replayMissedTranscriptPartsBeforeIdle(sessionId, session)
     await yieldEventLoop()
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
 
     if (session.adapter) {
       try {
         const statusAfterReplay = await session.adapter.getStatus(sessionId, this.sessionConfigFor(session))
+        if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
+        if (statusAfterReplay.type === SessionStatusType.ERROR) {
+          await this.handleErrorStatus(sessionId, session, this.sessionConfigFor(session), statusAfterReplay, [])
+          return
+        }
         if (statusAfterReplay.type !== SessionStatusType.IDLE) {
           console.log(
             `[AgentManager] Idle transition for ${sessionId} deferred after replay: replayed=${replayedPartCount}, adapterStatus=${statusAfterReplay.type}`
@@ -3904,6 +3965,10 @@ export class AgentManager extends EventEmitter {
         }
       } catch (err) {
         console.error(`[AgentManager] Failed to re-check adapter status before idle for ${sessionId}:`, err)
+        if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
+        if (isKnownActivityDisconnect(err)) this.publishActivityDisconnect(sessionId, session)
+        this.resumeAdapterPollingAfterPrematureIdle(sessionId, session)
+        return
       }
     }
 
@@ -3918,10 +3983,11 @@ export class AgentManager extends EventEmitter {
     // lifecycle: neither goes to review, grows a heartbeat or wakes a parent.
     const task = this.db.getTask(session.taskId)
     await yieldEventLoop()
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
 
     if (!task || isCoordinatorTask(task)) {
       console.log(`[AgentManager] No lifecycle for ${session.taskId}, sending idle status only`)
-      this.emitStatus(sessionId, session, 'idle')
+      this.emitStatus(sessionId, session, 'idle', 'completed')
       if (task && isCoordinatorTask(task)) await this.maybeRolloverCaptain(sessionId, session)
       return
     }
@@ -3961,10 +4027,12 @@ export class AgentManager extends EventEmitter {
       console.error(`[AgentManager] extractOutputValues error:`, err)
     }
     await yieldEventLoop()
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
 
     // The frontend may have completed the task during the feedback flow meanwhile.
     const taskAfterExtract = this.db.getTask(session.taskId)
     await yieldEventLoop()
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
 
     if (taskAfterExtract?.status === TaskStatus.AgentLearning || taskAfterExtract?.status === TaskStatus.Completed) {
       console.log(`[AgentManager] Task already in final state (${taskAfterExtract.status}), skipping status update`)
@@ -3976,9 +4044,11 @@ export class AgentManager extends EventEmitter {
     console.log(`[AgentManager] Updating task ${session.taskId} status to ReadyForReview`)
     this.updateTaskFromLocalAgent(session.taskId, { status: TaskStatus.ReadyForReview })
     await yieldEventLoop()
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
 
     this.autoEnableHeartbeat(session.taskId)
     await yieldEventLoop()
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return
 
     const updatedTask = this.db.getTask(session.taskId)
     this.sendToRenderer('task:updated', {
@@ -4209,14 +4279,14 @@ export class AgentManager extends EventEmitter {
     }
 
     this.assertSessionGeneration(sessionId, session)
-    if (session.managedCaptain && session.managedIntentId) {
+    if (this.managedEngine(session) && session.managedIntentId) {
       const intentId = session.managedIntentId
       session.managedIntentId = undefined
-      await this.captainEngine!.finishTurn(session.taskId, sessionId, intentId, 'cancelled')
+      await this.managedEngine(session)!.finishTurn(session.taskId, sessionId, intentId, 'cancelled')
       this.assertSessionGeneration(sessionId, session)
     }
     session.status = 'idle'
-    this.emitStatus(sessionId, session, 'idle')
+    this.emitStatus(sessionId, session, 'idle', 'cancelled')
   }
 
   /**
@@ -4325,10 +4395,10 @@ export class AgentManager extends EventEmitter {
       // intact so a caller can retry without manufacturing a stopped state.
       if (resetTaskStatus) this.cancelQueuedStart(session.taskId)
     }
-    if (session.managedCaptain && session.managedIntentId && !this.shuttingDown) {
+    if (this.managedEngine(session) && session.managedIntentId && !this.shuttingDown) {
       const intentId = session.managedIntentId
       session.managedIntentId = undefined
-      await this.captainEngine!.finishTurn(session.taskId, sessionId, intentId, resetTaskStatus ? 'cancelled' : 'interrupted')
+      await this.managedEngine(session)!.finishTurn(session.taskId, sessionId, intentId, resetTaskStatus ? 'cancelled' : 'interrupted')
     }
 
     if (session.secretSessionToken) {
@@ -4360,7 +4430,7 @@ export class AgentManager extends EventEmitter {
       }
     }
 
-    if (!replacement) this.emitStatus(sessionId, session, 'idle')
+    if (!replacement) this.emitStatus(sessionId, session, 'idle', resetTaskStatus ? 'cancelled' : 'interrupted')
   }
 
   /**
@@ -5188,9 +5258,9 @@ export class AgentManager extends EventEmitter {
       remainingAgentIds: session.fallbackAgentIds ?? [], attemptedAgentIds: [...session.attemptedAgentIds ?? [session.agentId]] }) : null
     try {
       const trackedConfig = { ...config, providerIntentId: row?.intentId }
-      if (session.managedCaptain && row) {
+      if (this.managedEngine(session) && row) {
         session.managedIntentId = row.intentId
-        await this.captainEngine!.sendPrompt(session.taskId, sessionId, row.intentId, row.attempt, prompt, adapter, trackedConfig,
+        await this.managedEngine(session)!.sendPrompt(session.taskId, sessionId, row.intentId, row.attempt, prompt, adapter, trackedConfig,
           () => this.assertSessionGeneration(sessionId, session))
       } else await adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: prompt }], trackedConfig)
     } catch (error) {
@@ -5400,7 +5470,8 @@ export class AgentManager extends EventEmitter {
       const session = live.session
       session.fallbackAgentIds = row.remainingAgentIds
       session.attemptedAgentIds = new Set(row.attemptedAgentIds)
-      const recap = fallback ? buildAgentSwitchRecap(this.db.getTranscriptParts(row.taskId)) : ''
+      const recap = fallback ? this.taskRecap(row.taskId, this.db.getAgent(row.agentId)?.config.model, false,
+        estimateTokens(row.prompt.length + PROVIDER_CONTINUATION.length + 128)) : ''
       const prompt = row.delivery === 'rejected' && !fallback ? row.prompt
         : `${recap ? `Conversation recap:\n${recap}\n\n` : ''}${PROVIDER_CONTINUATION}\n\nRemaining intent:\n${row.prompt}`
       const config = await this.buildSessionConfig(row.agentId, row.taskId, session.workspaceDir)
@@ -5491,7 +5562,11 @@ export class AgentManager extends EventEmitter {
     // backend sees it: the transcript keeps the user's own words.
     const recap = session.pendingRecap
     const pendingLossId = session.pendingLossId
-    if (recap) promptText = `${recap}\n\n${promptText}`
+    if (recap) {
+      if (session.managedTask && estimateTokens((recap + '\n\n' + promptText).length) > taskContextBudget(sessionConfig.model ?? ''))
+        throw new Error('TASK_RECAP_INSTRUCTION_TOO_LARGE: the continuity seed and new instruction do not fit intact; both remain saved.')
+      promptText = `${recap}\n\n${promptText}`
+    }
     const send = (): Promise<void> => {
       this.assertSessionGeneration(sessionId, session)
       return this.sendTrackedPrompt(session, sessionId, promptText, sessionConfig)
@@ -5708,6 +5783,7 @@ export class AgentManager extends EventEmitter {
     this.shuttingDown = true
     this.captainRollover?.shutdown()
     this.captainEngine?.shutdown()
+    this.taskEngine?.shutdown()
     this.compactionObserver?.shutdown()
     if (this.providerRecoveryTimer) clearTimeout(this.providerRecoveryTimer)
     this.providerRecoveryTimer = null

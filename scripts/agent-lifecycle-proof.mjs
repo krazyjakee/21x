@@ -12,7 +12,8 @@ const dependencies = new Set(['better-sqlite3', '@paralleldrive/cuid2'])
 export async function stageAgentLifecycleProof(directory, { sqliteModule, fixture = 'lifecycle' }) {
   const entries = {
     lifecycle: 'scripts/agent-lifecycle-proof/fixture.ts',
-    desktop: 'scripts/agent-desktop-proof/fixture.ts'
+    desktop: 'scripts/agent-desktop-proof/fixture.ts',
+    activity: 'scripts/activity-process-proof/fixture.ts'
   }
   if (!Object.hasOwn(entries, fixture)) throw new Error('Unknown fixed proof fixture')
   const entry = entries[fixture]

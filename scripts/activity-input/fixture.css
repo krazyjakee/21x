@@ -1,0 +1,11 @@
+@import '../../src/renderer/src/styles/globals.css';
+@source '../../src/renderer/src';
+@source './fixture.tsx';
+
+.audit-shell { display: flex; height: 100vh; flex-direction: column; overflow: hidden; }
+.audit-shell-body { display: flex; flex: 1; min-height: 0; }
+.audit-content { flex: 1; min-width: 0; overflow-y: auto; padding: 16px; }
+.audit-expanded { display: flex; align-items: center; gap: 16px; margin: 8px 0; }
+.audit-board { height: 270px; overflow: auto; margin-bottom: 12px; }
+.audit-canvas { position: relative; height: 410px; min-width: 1250px; }
+.audit-commander { flex: 1; min-height: 0; min-width: 0; }

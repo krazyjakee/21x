@@ -5,11 +5,15 @@
  * tested without starting the application.
  */
 
+import { estimateTokens } from './sessions/token-estimator'
+import { modelContextWindow } from './sessions/model-windows'
+
 export interface TranscriptLike {
   partId?: string
   role: string
   content: string
   partType?: string
+  tool?: unknown
 }
 
 // ~200k tokens is the smallest context window among the agent backends this
@@ -104,4 +108,58 @@ export function buildLostSessionRecap(parts: TranscriptLike[], maxChars = LOST_S
   }
   if (!chunks.length) return ''
   return `${header}${omitted ? marker : ''}${chunks.join('\n\n')}${footer}`
+}
+
+export function taskContextBudget(model: string): number {
+  const window = modelContextWindow(model)
+  return Math.min(16_000, window === null ? 16_000 : Math.floor(window * 0.6))
+}
+
+/** The durable transcript remains the lossless source. Only complete records
+ * enter the bounded recap, with explicit omissions and the latest human
+ * instruction protected. Oversized protected input requires a user decision;
+ * it is never clipped or silently dispatched without continuity. */
+export function buildTokenBudgetedRecap(parts: TranscriptLike[], options: {
+  model: string; kind: 'lost' | 'switch'; maxTokens?: number; reservedTokens?: number
+}): { text: string; tokens: number; budget: number; sourcePartIds: string[]; omittedPartIds: string[] } {
+  const reserved = options.reservedTokens ?? 0
+  const available = taskContextBudget(options.model) - reserved
+  const budget = Math.min(options.maxTokens ?? (options.kind === 'lost' ? 1500 : 16_000), available)
+  if (!Number.isSafeInteger(budget) || budget <= 0 || !Number.isSafeInteger(reserved) || reserved < 0)
+    throw new Error('TASK_RECAP_INSTRUCTION_TOO_LARGE: retain the transcript and shorten the new instruction before continuing.')
+  const header = `## ${options.kind === 'lost' ? 'Continuing after a lost session' : 'Previous agent context'}\n\nHistorical context only; do not repeat completed actions. Inspect retained tool outcomes before continuing.\n\n`
+  const marker = '(Some historical exchanges or tool outcomes are omitted from this recap. The complete source remains in this task’s saved transcript.)\n\n'
+  const records = parts.flatMap((part, index) => {
+    if (part.partId?.startsWith(INITIAL_PROMPT_PART_PREFIX) || (part.role !== 'user' && part.role !== 'assistant')) return []
+    const text = (!part.partType || part.partType === 'text') ? part.content?.trim()
+      : part.tool ? `Tool outcome: ${JSON.stringify(part.tool)}` : ''
+    return text ? [{ id: part.partId ?? `record:${index}`, role: part.role, text: `${part.role === 'user' ? 'User' : 'Previous agent'}: ${text}` }] : []
+  })
+  if (!records.length) return { text: '', tokens: 0, budget, sourcePartIds: [], omittedPartIds: [] }
+  const protectedIndex = records.findLastIndex((record) => record.role === 'user')
+  const selected = new Set<number>()
+  let selectedCharacters = 0
+  const render = (): string => `${header}${selected.size < records.length ? marker : ''}${records.filter((_, index) => selected.has(index)).map((record) => record.text).join('\n\n')}\n\n---`
+  const fits = (characters: number, count: number): boolean => estimateTokens(header.length
+    + (count < records.length ? marker.length : 0) + characters + Math.max(0, count - 1) * 2 + 5) <= budget
+  const allCharacters = records.reduce((sum, record) => sum + record.text.length, 0)
+  if (fits(allCharacters, records.length)) {
+    for (let index = 0; index < records.length; index++) selected.add(index)
+  } else {
+    if (protectedIndex !== -1) {
+      selected.add(protectedIndex)
+      selectedCharacters = records[protectedIndex].text.length
+      if (!fits(selectedCharacters, selected.size))
+        throw new Error('TASK_RECAP_INSTRUCTION_TOO_LARGE: the newest instruction cannot fit intact; the complete source is retained.')
+    }
+    for (let index = records.length - 1; index >= 0; index--) {
+      if (selected.has(index)) continue
+      const characters = selectedCharacters + records[index].text.length
+      if (fits(characters, selected.size + 1)) { selected.add(index); selectedCharacters = characters }
+    }
+  }
+  const text = render()
+  if (estimateTokens(text.length) > budget) throw new Error('TASK_RECAP_BUDGET_TOO_SMALL: retain the transcript before continuing.')
+  return { text, tokens: estimateTokens(text.length), budget, sourcePartIds: records.map((record) => record.id),
+    omittedPartIds: records.filter((_, index) => !selected.has(index)).map((record) => record.id) }
 }

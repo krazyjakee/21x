@@ -92,11 +92,19 @@ export function describeActivityQueueReason(reason: string | undefined): string 
  * successful adapter poll: it refreshes freshness and nothing else. Consumers
  * that react to transitions must ignore heartbeats.
  */
+export type AgentActivityOutcome = 'completed' | 'cancelled' | 'interrupted' | 'failed'
+
+export function isAgentActivityOutcome(value: unknown): value is AgentActivityOutcome {
+  return typeof value === 'string' && ['completed', 'cancelled', 'interrupted', 'failed'].includes(value)
+}
+
 export interface AgentStatusActivityMeta {
   epoch: string
   seq: number
   heartbeat?: boolean
   disconnected?: boolean
+  /** An observed terminal result. An idle phase alone has no outcome. */
+  activityOutcome?: AgentActivityOutcome
 }
 
 /** Commander source age is measured in main. Reading an active runtime does
@@ -133,8 +141,10 @@ export function readAgentStatusActivityMeta(event: unknown): AgentStatusActivity
   const e = event as Record<string, unknown>
   if (typeof e.epoch !== 'string' || !e.epoch) return null
   if (typeof e.seq !== 'number' || !Number.isSafeInteger(e.seq) || e.seq <= 0) return null
+  if (e.activityOutcome !== undefined && (!isAgentActivityOutcome(e.activityOutcome) || e.heartbeat === true || e.disconnected === true)) return null
   return { epoch: e.epoch, seq: e.seq, ...(e.heartbeat === true ? { heartbeat: true } : {}),
-    ...(e.disconnected === true ? { disconnected: true } : {}) }
+    ...(e.disconnected === true ? { disconnected: true } : {}),
+    ...(e.activityOutcome !== undefined ? { activityOutcome: e.activityOutcome as AgentActivityOutcome } : {}) }
 }
 
 /** True for a freshness-only heartbeat push, which carries no transition. */

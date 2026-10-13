@@ -114,11 +114,38 @@ describe('recordAgentStatus', () => {
 describe('evidence builders', () => {
   it('a Captain turn end is a finished outcome; a failure is failed', () => {
     recordAgentStatus(status('cap', 'working', 1), 0)
-    recordAgentStatus(status('cap', 'idle', 2), 100)
+    recordAgentStatus(status('cap', 'idle', 2, { activityOutcome: 'completed' }), 100)
     const done = deriveActivity(captainEvidence(useSessionActivityStore.getState().sessions.cap), 200)
     expect(done).toMatchObject({ state: 'finished', label: 'Reply finished' })
     recordAgentStatus(status('cap', 'error', 3), 300)
     expect(deriveActivity(captainEvidence(useSessionActivityStore.getState().sessions.cap), 400).state).toBe('failed')
+  })
+
+  it.each([undefined, 'cancelled', 'interrupted'] as const)('does not infer Captain success from idle with outcome %s', activityOutcome => {
+    recordAgentStatus(status('cap', 'working', 1), 0)
+    recordAgentStatus(status('cap', 'idle', 2, activityOutcome ? { activityOutcome } : {}), 100)
+    const result = deriveActivity(captainEvidence(useSessionActivityStore.getState().sessions.cap), 200)
+    expect(result).toMatchObject({ state: 'idle', label: activityOutcome ? 'Stopped' : 'Idle', accent: false })
+  })
+
+  it('does not replay a completed first sighting or let heartbeats fabricate a completion', () => {
+    recordAgentStatus(status('cap', 'idle', 1, { activityOutcome: 'completed' }), 0)
+    expect(deriveActivity(captainEvidence(useSessionActivityStore.getState().sessions.cap), 100)).toMatchObject({ state: 'idle', accent: false })
+    recordAgentStatus(status('cap', 'working', 2), 200)
+    expect(recordAgentStatus(status('cap', 'idle', 3, { heartbeat: true, activityOutcome: 'completed' }), 300)).toBe(false)
+    expect(recordAgentStatus(status('cap', 'idle', 3, { heartbeat: true }), 300)).toBe(false)
+    expect(deriveActivity(captainEvidence(useSessionActivityStore.getState().sessions.cap), 400).state).toBe('running')
+    recordAgentStatus(status('cap', 'idle', 4, { activityOutcome: 'completed' }), 500)
+    expect(deriveActivity(captainEvidence(useSessionActivityStore.getState().sessions.cap), 600).accent).toBe(true)
+    recordAgentStatus(status('cap', 'working', 5), 700)
+    expect(captainEvidence(useSessionActivityStore.getState().sessions.cap).outcome).toBeNull()
+  })
+
+  it('rejects inconsistent terminal evidence before retiring the current epoch', () => {
+    recordAgentStatus(status('cap', 'working', 1), 0)
+    expect(recordAgentStatus(status('cap', 'working', 2, { epoch: 'foreign', activityOutcome: 'completed' }), 100)).toBe(false)
+    expect(recordAgentStatus(status('cap', 'working', 2, { heartbeat: true }), 200)).toBe(true)
+    expect(useSessionActivityStore.getState().epoch).toBe('E1')
   })
 
   it('queue evidence is undefined before the first read and null for "not queued"', () => {

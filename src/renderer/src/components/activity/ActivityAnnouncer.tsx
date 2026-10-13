@@ -21,7 +21,10 @@ export function announcementForTransition(
   if (t.to === 'error') {
     return { key: `${entity}:failed:${t.at}`, entity, kind: 'actionable', message: `${who} failed` }
   }
-  if (info.isCaptain && t.from === 'working' && t.to === 'idle') {
+  if (t.to === 'idle' && (t.outcome === 'cancelled' || t.outcome === 'interrupted')) {
+    return { key: `${entity}:stopped:${t.at}`, entity, kind: 'routine', message: `${who} stopped` }
+  }
+  if (info.isCaptain && t.to === 'idle' && t.outcome === 'completed') {
     return { key: `${entity}:finished:${t.at}`, entity, kind: 'routine', message: 'Captain reply finished' }
   }
   return null
@@ -47,7 +50,7 @@ export function announcementForCompletion(c: LifecycleCompletion): Parameters<Ac
  * first sightings, hydration, tokens or tool steps.
  */
 export function ActivityAnnouncer() {
-  const [message, setMessage] = useState('')
+  const [announcement, setAnnouncement] = useState({ sequence: 0, message: '' })
   const queueRef = useRef<ActivityAnnouncementQueue | null>(null)
   const connectionRef = useRef(new Map<string, { lost: boolean; announcedLost: boolean }>())
   const sessions = useSessionActivityStore((s) => s.sessions)
@@ -59,10 +62,13 @@ export function ActivityAnnouncer() {
   useEffect(() => {
     ensureLifecycleWatcher()
     const queue = new ActivityAnnouncementQueue((text) => {
-      // Clearing first makes a repeated identical message announce again.
-      setMessage('')
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setMessage(text))
-      else setMessage(text)
+      // A semantic child replacement gives readers a distinct addition even
+      // when separate failures have identical wording. Clearing for one frame
+      // can be coalesced away by the accessibility bridge.
+      setAnnouncement(previous => ({ sequence: previous.sequence + 1,
+        // Some readers also deduplicate identical text across child replacements.
+        // The queue already proved this is a distinct actionable transition.
+        message: previous.message === text && (text.endsWith(' failed') || text.endsWith('needs approval')) ? `${text} again` : text }))
     })
     queueRef.current = queue
     const inCurrentProject = (taskId: string): { title: string; isCaptain: boolean } | null => {
@@ -142,7 +148,7 @@ export function ActivityAnnouncer() {
 
   return (
     <div role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-testid="activity-announcer">
-      {message}
+      <p key={announcement.sequence}>{announcement.message}</p>
     </div>
   )
 }

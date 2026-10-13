@@ -32,6 +32,10 @@ describe('shared activity contract', () => {
     expect(readAgentStatusActivityMeta({ epoch: 'E', seq: 1.5 })).toBeNull()
     expect(readAgentStatusActivityMeta({ taskId: 't', status: 'idle' })).toBeNull()
     expect(readAgentStatusActivityMeta(null)).toBeNull()
+    expect(readAgentStatusActivityMeta({ epoch: 'E', seq: 3, activityOutcome: 'cancelled' })).toEqual({ epoch: 'E', seq: 3, activityOutcome: 'cancelled' })
+    for (const extra of [{ activityOutcome: 'success' }, { activityOutcome: 'completed', heartbeat: true }, { activityOutcome: 'cancelled', disconnected: true }]) {
+      expect(readAgentStatusActivityMeta({ epoch: 'E', seq: 3, ...extra })).toBeNull()
+    }
   })
 
   it('recognises heartbeats', () => {

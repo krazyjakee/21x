@@ -245,7 +245,7 @@ export function deriveActivity(evidence: ActivityEvidence, now: number): Activit
   // 8. Verified idle.
   if (liveState === 'idle') {
     const stopped = outcomeCurrent?.kind === 'stopped'
-    return result('idle', stopped ? { detail: 'Stopped' } : {}, liveExpiry)
+    return result('idle', stopped ? { label: 'Stopped', detail: outcomeCurrent?.reason } : {}, liveExpiry)
   }
 
   // 9. Nothing current and trustworthy: unknown, with the last known state as history.
@@ -340,7 +340,7 @@ export function activityPresentation(result: ActivityResult, options: Presentati
  * the expanded surfaces still show "Status unavailable".
  */
 export function isQuietActivity(result: ActivityResult): boolean {
-  if (result.state === 'idle') return true
+  if (result.state === 'idle') return result.label !== 'Stopped'
   if (result.state !== 'unknown') return false
   return !result.lastKnown || result.lastKnown === 'idle'
 }

@@ -1,0 +1,92 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><title>Native cross-surface activity audit</title></head>
+<body><div id="root"></div>
+<script>
+// Controlled local IPC/source observations only. No backend, SDK, microphone,
+// application database or main-process polling is exercised by this fixture.
+window.fixture = { channels: new Map(), receipts: [], reads: [], sequence: 0, epoch: 'fixture-agent-a', heartbeats: {}, queue: [], queueMode: 'live', pendingQueues: [], sourceMode: 'silent', pendingSources: [], sourceSequence: 0, sourceEpoch: 'fixture-commander-a', sourceAt: performance.now(), source: null }
+const f = window.fixture
+f.receipt = (kind, data) => {
+  const row = { timestamp: new Date().toISOString(), monotonicMs: performance.now(), kind, ...data }
+  f.receipts.push(row); console.log('ACTIVITY_SOURCE ' + JSON.stringify(row))
+}
+const subscribe = name => listener => {
+  if (!f.channels.has(name)) f.channels.set(name, new Set())
+  f.channels.get(name).add(listener)
+  return () => f.channels.get(name).delete(listener)
+}
+f.emit = (channel, event) => {
+  for (const listener of [...(f.channels.get(channel) ?? [])]) listener(event)
+  f.receipt('push', { channel, event })
+}
+f.status = (taskId, status, fields = {}) => {
+  const event = { taskId, sessionId: 'session-' + taskId, agentId: 'fixture-agent', status, epoch: f.epoch, seq: ++f.sequence, ...fields }
+  f.emit('onAgentStatus', event)
+  return event
+}
+f.commander = (event, fields = {}) => {
+  let snapshot = event.type === 'turn_started'
+    ? { turnId: event.turnId, phase: 'thinking', openTools: [], hasText: false }
+    : { ...(f.source ?? { turnId: event.turnId, phase: 'working', openTools: [], hasText: false }) }
+  if (event.type === 'turn_event') {
+    const inner = event.event
+    if (inner.type === 'text_delta') { snapshot.hasText = true; snapshot.phase = snapshot.openTools.length ? 'tool' : 'working' }
+    if (inner.type === 'tool_call_start') { snapshot.phase = 'tool'; snapshot.openTools = [...snapshot.openTools, { id: inner.id, name: inner.name }] }
+    if (inner.type === 'done') { snapshot.phase = 'idle'; snapshot.openTools = []; snapshot.outcome = inner.stopReason === 'cancelled' ? 'stopped' : 'finished' }
+    if (inner.type === 'error') { snapshot.phase = 'error'; snapshot.reason = inner.message; snapshot.outcome = 'failed' }
+  }
+  snapshot = { ...snapshot, epoch: f.sourceEpoch, sequence: ++f.sourceSequence, ageMs: 0, ...fields }
+  f.source = snapshot; f.sourceAt = performance.now()
+  f.emit('commander', { ...event, activity: snapshot })
+  return snapshot
+}
+f.queuePush = queue => { f.queue = queue; f.emit('onAgentStartQueueChanged', { queue }) }
+f.resolveQueue = queue => { const pending = f.pendingQueues.splice(0); for (const resolve of pending) resolve(queue); f.receipt('queue-resolved', { queue, count: pending.length }) }
+f.resolveSource = snapshot => { const pending = f.pendingSources.splice(0); for (const resolve of pending) resolve(snapshot); f.receipt('source-resolved', { snapshot, count: pending.length }) }
+// This timer is an explicit controlled successful-source input, not a fake
+// clock, activity derivation, health probe or simulated provider process.
+setInterval(() => {
+  if (document.hidden) return
+  for (const [taskId, status] of Object.entries(f.heartbeats)) f.status(taskId, status, { heartbeat: true })
+}, 5_000)
+const noop = async () => undefined
+const listMethods = new Set(['getAll', 'getSubtasks', 'getImages', 'getRepos', 'scan', 'getModels'])
+const methods = new Proxy({}, { get: (_, key) => key.startsWith('on') ? subscribe(key) : async () => listMethods.has(key) ? [] : null })
+window.electronAPI = new Proxy({
+  app: { getVersion: async () => 'controlled-fixture', setTitleBarOverlay: noop },
+  settings: { getAll: async () => ({}), set: noop, get: async () => null },
+  agents: new Proxy({
+    getAll: async () => [], getStartRecoveryState: async () => null,
+    getStartQueue: async () => {
+      f.reads.push({ kind: 'queue', at: performance.now() }); f.receipt('queue-read', { mode: f.queueMode })
+      if (f.queueMode === 'deferred') return new Promise(resolve => f.pendingQueues.push(resolve))
+      if (f.queueMode === 'failed') throw new Error('Controlled queue unavailable')
+      return f.queue
+    },
+    checkHealth: async () => { f.receipt('global-health', { available: true }); return { available: true } }
+  }, { get: (target, key) => key in target ? target[key] : methods[key] }),
+  agentSession: new Proxy({ getTranscriptSnapshot: async () => [], getTranscriptDelta: async () => ({ parts: [], maxRev: 0 }) }, { get: (target, key) => key in target ? target[key] : methods[key] }),
+  artifacts: { scan: async () => [], read: async () => null },
+  attachments: { getImages: async () => [] },
+  updater: { getVersion: async () => 'fixture', check: async () => ({ status: 'not-available' }), onStatus: subscribe('updater-status'), onMenuCheckForUpdates: subscribe('updater-menu') },
+  sessionContext: { getSnapshot: async scope => ({ scope, generation: null, usage: { tokens: null, source: 'unknown', contextWindow: null, model: null, observedAt: null }, counters: { compactions: 0, wakeups: 0, turns: 0, ageMs: 0 }, policy: { mode: 'off', contextRatio: .7, compactions: 2, wakeups: 150, turns: 300, maxAgeDays: 7 }, reasons: [], warnings: [], summaries: [] }) },
+  voice: new Proxy({ onFinal: subscribe('voice-final') }, { get: (target, key) => key in target ? target[key] : methods[key] }),
+  commanderVoice: { setActive: noop, bargeIn: noop, send: noop },
+  commander: {
+    listSessions: async () => [{ id: 'commander-session', title: 'Activity audit conversation', created_at: 1, updated_at: 1, archived: false, last_read_at: 1, unread_count: 0 }],
+    listMessages: async () => ({ messages: [], activeTurnId: f.source?.phase !== 'idle' ? f.source?.turnId ?? null : null }),
+    markRead: async () => null, setActiveSession: noop, onEvent: subscribe('commander'), cancel: noop,
+    getActivity: async sessionId => {
+      f.reads.push({ kind: 'commander', at: performance.now() }); f.receipt('commander-read', { sessionId, mode: f.sourceMode })
+      if (f.sourceMode === 'deferred') return new Promise(resolve => f.pendingSources.push(resolve))
+      if (f.sourceMode === 'failed') throw new Error('Controlled source unavailable')
+      if (!f.source) return { epoch: f.sourceEpoch, sequence: ++f.sourceSequence, turnId: null, phase: 'idle', ageMs: 0, openTools: [], hasText: false }
+      if (f.sourceMode === 'live') { f.source = { ...f.source, sequence: ++f.sourceSequence, ageMs: 0 }; f.sourceAt = performance.now() }
+      return { ...f.source, ageMs: performance.now() - f.sourceAt }
+    }
+  }
+}, { get: (target, key) => key in target ? target[key] : key.startsWith('on') ? subscribe(key) : methods })
+document.addEventListener('visibilitychange', () => f.receipt('visibility', { visibility: document.visibilityState }))
+window.addEventListener('focus', () => f.receipt('focus', { visibility: document.visibilityState }))
+</script>
+<script type="module" src="/fixture.tsx"></script></body></html>
