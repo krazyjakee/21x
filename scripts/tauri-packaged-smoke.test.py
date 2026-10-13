@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("packaged_smoke", Path(__file__).with_name("tauri-packaged-smoke.py"))
@@ -180,6 +181,36 @@ class ReportValidationTests(unittest.TestCase):
         report["runtime"]["hostArch"] = "aarch64"
         with self.assertRaises(AssertionError):
             self.verify(report, "synthetic-agent")
+
+    def test_runtime_versions_use_the_verified_binary_without_inherited_preloads_or_secrets(self):
+        binary = self.resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
+        metadata = {"nodeVersion": "v22.23.2", "nodeAbi": "127", "platform": sys.platform, "arch": "x64"}
+        runtime = {"webviewVersion": "123.4.5", "webviewDefaultRuntime": True}
+        with patch.dict("os.environ", {"NODE_OPTIONS": "--require fixture", "PATH": "/system-node",
+                                        "ELECTRON_RUN_AS_NODE": "1", "SECRET_KEY": "not-copied"}), \
+                patch.object(smoke.subprocess, "check_output", return_value=smoke.json.dumps(metadata)) as query:
+            result = smoke.runtime_versions(binary, runtime, "x64")
+        self.assertEqual(result["node"], metadata)
+        self.assertEqual(result["webview"]["version"], "123.4.5")
+        self.assertEqual(query.call_args.args[0][:2], [str(binary), "-p"])
+        for name in ("NODE_OPTIONS", "PATH", "ELECTRON_RUN_AS_NODE", "SECRET_KEY"):
+            self.assertNotIn(name, query.call_args.kwargs["env"])
+
+    def test_runtime_versions_reject_missing_webview_version_and_selected_runtime_override(self):
+        metadata = {"nodeVersion": "v22.23.2", "nodeAbi": "127", "platform": sys.platform, "arch": "x64"}
+        for version, default in ((None, True), ("", True), (1, True), ("x" * 129, True), ("123", False)):
+            with self.subTest(version=version, default=default), \
+                    patch.object(smoke.subprocess, "check_output", return_value=smoke.json.dumps(metadata)), \
+                    self.assertRaises(AssertionError):
+                smoke.runtime_versions(self.resources / "node/node", {"webviewVersion": version, "webviewDefaultRuntime": default}, "x64")
+
+    def test_runtime_versions_reject_wrong_node_arch_platform_and_malformed_versions(self):
+        base = {"nodeVersion": "v22.23.2", "nodeAbi": "127", "platform": sys.platform, "arch": "x64"}
+        for key, value in (("arch", "arm64"), ("platform", "wrong"), ("nodeVersion", "vUnknown"), ("nodeAbi", "unknown")):
+            metadata = {**base, key: value}
+            with self.subTest(key=key), patch.object(smoke.subprocess, "check_output", return_value=smoke.json.dumps(metadata)), \
+                    self.assertRaises(AssertionError):
+                smoke.runtime_versions(self.resources / "node/node", {"webviewVersion": "123", "webviewDefaultRuntime": True}, "x64")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@ import argparse
 import hashlib
 import json
 import os
+import platform
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -19,6 +21,30 @@ AGENT_RECEIPTS = (
     "agentStarted", "approvalRequested", "staleApprovalDenied", "approvalAccepted",
     "agentCompleted", "agentStatusEventObserved", "agentTranscriptRehydrated",
 )
+
+
+def verify_artifact_authority(authority):
+    assert authority["passed"] is True and authority["boundary"] == "separate-webview"
+    assert authority["sameMainIframeIsolationProven"] is False
+    assert authority["policyVersion"] == 2
+    assert authority["frameNativeAttemptMethod"] == "parent-relay-and-conditional-direct-frame"
+    for key in ("artifactWindowClosed", "excludedDocumentReady", "mainReceivedTargetedServiceEvent", "defaultMainCspUnchanged"):
+        assert authority[key] is True
+    for section, keys in (
+        ("mainPositiveControls", ("transportAvailable", "desktopAccepted", "statusAccepted", "listenAccepted")),
+        ("sameLocalOriginExcludedWebview", ("transportAvailable", "desktopDenied", "statusDenied", "listenDenied")),
+        ("sandboxedArtifactFrame", ("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
+                                   "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
+    ):
+        assert all(authority[section][key] is True for key in keys)
+    frame = authority["sandboxedArtifactFrame"]
+    assert all(frame[key] is False for key in ("directDeadlineReached", "directUnrecognizedFailure", "directAccepted"))
+    if frame["frameBridgeAbsent"] is True:
+        assert frame["directAttempted"] is False
+        assert all(frame[key] is False for key in ("directDesktopDenied", "directStatusDenied", "directListenDenied"))
+    else:
+        assert frame["frameBridgeAbsent"] is False
+        assert all(frame[key] is True for key in ("directAttempted", "directDesktopDenied", "directStatusDenied", "directListenDenied"))
 
 
 def verify_report(report, *, mode, arch, installed, root):
@@ -52,28 +78,7 @@ def verify_report(report, *, mode, arch, installed, root):
         assert (resources / "service/database-stdio.mjs").is_file()
         assert (resources / "service/database-engine.mjs").is_file()
     if mode == "artifact-authorization-proof":
-        authority = runtime["artifactAuthorizationProof"]
-        assert authority["passed"] is True and authority["boundary"] == "separate-webview"
-        assert authority["sameMainIframeIsolationProven"] is False
-        assert authority["policyVersion"] == 2
-        assert authority["frameNativeAttemptMethod"] == "parent-relay-and-conditional-direct-frame"
-        for key in ("artifactWindowClosed", "excludedDocumentReady", "mainReceivedTargetedServiceEvent", "defaultMainCspUnchanged"):
-            assert authority[key] is True
-        for section, keys in (
-            ("mainPositiveControls", ("transportAvailable", "desktopAccepted", "statusAccepted", "listenAccepted")),
-            ("sameLocalOriginExcludedWebview", ("transportAvailable", "desktopDenied", "statusDenied", "listenDenied")),
-            ("sandboxedArtifactFrame", ("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
-                                       "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
-        ):
-            assert all(authority[section][key] is True for key in keys)
-        frame = authority["sandboxedArtifactFrame"]
-        assert all(frame[key] is False for key in ("directDeadlineReached", "directUnrecognizedFailure", "directAccepted"))
-        if frame["frameBridgeAbsent"] is True:
-            assert frame["directAttempted"] is False
-            assert all(frame[key] is False for key in ("directDesktopDenied", "directStatusDenied", "directListenDenied"))
-        else:
-            assert frame["frameBridgeAbsent"] is False
-            assert all(frame[key] is True for key in ("directAttempted", "directDesktopDenied", "directStatusDenied", "directListenDenied"))
+        verify_artifact_authority(runtime["artifactAuthorizationProof"])
     else:
         assert "artifactAuthorizationProof" not in runtime
     owned_node = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
@@ -197,12 +202,41 @@ def running_owned_node(owned_node):
     raise RuntimeError("No owned process observation for this platform")
 
 
+def runtime_versions(owned_node, runtime, arch):
+    """Query only the verified packaged binary and native-selected WebView."""
+    env = {key: value for key, value in os.environ.items()
+           if key.upper() in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR")}
+    code = "JSON.stringify({nodeVersion:process.version,nodeAbi:process.versions.modules,platform:process.platform,arch:process.arch})"
+    node = json.loads(subprocess.check_output([str(owned_node), "-p", code],
+                                             env=env, text=True, timeout=15))
+    assert node["arch"] == arch and node["platform"] == sys.platform
+    assert isinstance(node["nodeVersion"], str) and re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", node["nodeVersion"])
+    assert isinstance(node["nodeAbi"], str) and node["nodeAbi"].isdecimal()
+    webview = runtime.get("webviewVersion")
+    assert isinstance(webview, str) and 0 < len(webview) <= 128
+    assert runtime.get("webviewDefaultRuntime") is True
+    os_version = {"system": platform.system(), "release": platform.release(), "version": platform.version()}
+    if sys.platform == "darwin":
+        os_version["macOS"] = platform.mac_ver()[0]
+    if sys.platform.startswith("linux"):
+        distribution = {}
+        for line in Path("/etc/os-release").read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key in ("ID", "VERSION_ID"):
+                distribution[key] = value.strip('"')
+        os_version["distribution"] = distribution
+        os_version["libc"] = list(platform.libc_ver())
+    return {"schemaVersion": 1, "os": os_version, "node": node,
+            "webview": {"version": webview, "source": "tauri::webview_version", "defaultRuntime": True}}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kind", choices=["dmg", "nsis", "appimage"], required=True)
     parser.add_argument("--arch", choices=["x64", "arm64"], required=True)
     parser.add_argument("--mode", choices=PROOF_MODES, default="feasibility")
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--require-runtime-versions", action="store_true")
     args = parser.parse_args()
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
@@ -221,6 +255,8 @@ def main():
         report["verification"] = {"packageKind": args.kind, "proofMode": args.mode, "packageSha256": checksum,
                                   "artifact": artifact.name, "packagedExecutable": str(executable),
                                   "packagedResources": True, "ownedRunningProcessesAfterExit": survivors}
+        if args.require_runtime_versions:
+            report["verification"]["runtimeVersions"] = runtime_versions(owned_node, report["runtime"], args.arch)
         report_path.write_text(json.dumps(report, indent=2) + "\n")
         assert not survivors, "Owned packaged Node survived native shutdown"
         print(json.dumps(report, indent=2))

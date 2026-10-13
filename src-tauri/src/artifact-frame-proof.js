@@ -5,7 +5,10 @@
     frameBridgeAbsent: typeof window.__TAURI__?.core?.invoke !== 'function',
     relayDesktopDenied: false, relayStatusDenied: false, relayListenDenied: false,
     directAttempted: false, directDesktopDenied: false, directStatusDenied: false, directListenDenied: false,
-    directDeadlineReached: false, directUnrecognizedFailure: false, directAccepted: false };
+    directDeadlineReached: false, directUnrecognizedFailure: false, directAccepted: false,
+    internalInvokeAvailable: typeof window.__TAURI_INTERNALS__?.invoke === 'function',
+    internalIpcAvailable: typeof window.__TAURI_INTERNALS__?.ipc === 'function',
+    directTypeError: false, directStringError: false, directSecurityError: false };
   const pending = new Set(['desktop', 'status', 'listen']);
   let directComplete = report.frameBridgeAbsent;
   const finish = () => {
@@ -32,7 +35,12 @@
       } catch (error) {
         report[key] = error?.code === 'UNAUTHORIZED' || typeof error === 'string' && /not allowed|not authorized|denied/i.test(error);
         if (error?.code === 'PROOF_DEADLINE') report.directDeadlineReached = true;
-        else if (!report[key]) report.directUnrecognizedFailure = true;
+        else if (!report[key]) {
+          report.directUnrecognizedFailure = true;
+          if (error?.name === 'TypeError') report.directTypeError = true;
+          if (error?.name === 'SecurityError') report.directSecurityError = true;
+          if (typeof error === 'string') report.directStringError = true;
+        }
       } finally { clearTimeout(timeout); }
     }
     directComplete = true;

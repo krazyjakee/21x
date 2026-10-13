@@ -186,7 +186,7 @@ jobs:
       - name: Exercise packaged GUI, resources, native probes and quit
         if: ${{ !inputs.service_only }}
         timeout-minutes: 8
-        run: python scripts/tauri-packaged-smoke.py --kind ${{ matrix.bundle }} --arch ${{ matrix.arch }} --mode "$TAURI_NATIVE_PROOF_MODE" --evidence native-evidence
+        run: python scripts/tauri-packaged-smoke.py --kind ${{ matrix.bundle }} --arch ${{ matrix.arch }} --mode "$TAURI_NATIVE_PROOF_MODE" --evidence native-evidence --require-runtime-versions
       - name: Upload compact evidence
         if: always()
         uses: actions/upload-artifact@v4

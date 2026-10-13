@@ -56,7 +56,8 @@
         const names = ['parentAccessDenied', 'parentGlobalDenied', 'frameBridgeAbsent',
           'relayDesktopDenied', 'relayStatusDenied', 'relayListenDenied',
           'directAttempted', 'directDesktopDenied', 'directStatusDenied', 'directListenDenied',
-          'directDeadlineReached', 'directUnrecognizedFailure', 'directAccepted'];
+          'directDeadlineReached', 'directUnrecognizedFailure', 'directAccepted',
+          'internalInvokeAvailable', 'internalIpcAvailable', 'directTypeError', 'directStringError', 'directSecurityError'];
         if (Object.keys(event.data).length !== names.length + 1 || !names.every(key => typeof event.data[key] === 'boolean')) return;
         for (const key of names) result[key] = event.data[key];
         result.frameLoaded = true;

@@ -131,7 +131,13 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import importlib.util
+          import sys
           from pathlib import Path
+          sys.dont_write_bytecode = True
+          spec = importlib.util.spec_from_file_location('packaged_smoke', 'scripts/tauri-packaged-smoke.py')
+          packaged_smoke = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(packaged_smoke)
           report_path = Path('native-evidence/installed-gui-smoke.json')
           report = json.loads(report_path.read_text())
           assert report['stage'] == 'complete' and report['passed'] is True
@@ -154,7 +160,7 @@ jobs:
               assert authority['passed'] is True
               assert authority['boundary'] == 'separate-webview'
               assert authority['sameMainIframeIsolationProven'] is False
-              assert authority['frameNativeAttemptMethod'] == 'unprivileged-parent-relay'
+              packaged_smoke.verify_artifact_authority(authority)
           assert runtime['resourceRoot'].startswith('/usr/lib/')
           owned_node = (Path(runtime['resourceRoot']) / 'node/node').resolve()
           assert owned_node.is_file()
@@ -173,6 +179,7 @@ jobs:
                   if profile_marker in environment or executable == owned_node:
                       orphaned.append(process.name)
           report['verification'] = {'installedResources': True, 'ownedRunningProcessesAfterExit': orphaned}
+          report['verification']['runtimeVersions'] = packaged_smoke.runtime_versions(owned_node, runtime, 'x64')
           report_path.write_text(json.dumps(report, indent=2) + '\n')
           assert not orphaned, 'Owned staged Node process remained alive after native quit'
           print(json.dumps(report, indent=2))
