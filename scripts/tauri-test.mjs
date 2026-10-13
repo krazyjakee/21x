@@ -16,17 +16,20 @@ try {
   // and would silently ignore reporter/filter flags that follow it.
   const args = process.argv.slice(2).filter(arg => arg !== '--')
   const serviceProofs = args.includes('--service-proofs')
+  const productionProofs = args.includes('--production-proofs')
   if (args.some(arg => /^--(?:config|root|workspace|project)(?:=|$)/.test(arg) || ['-c', '-r'].includes(arg))) {
     failureMessage = 'The portable runner does not accept configuration, root, workspace or project overrides.'
     throw new Error()
   }
   const env = { ...process.env, TAURI_NODE_RUNTIME: node, TAURI_SQLITE_MODULE: sqlite,
-    TAURI_STANDALONE_SERVICE_PROOFS: serviceProofs ? '1' : '0' }
+    TAURI_STANDALONE_SERVICE_PROOFS: serviceProofs ? '1' : '0', TAURI_PRODUCTION_SERVICE_PROOFS: productionProofs ? '1' : '0' }
   delete env.ELECTRON_RUN_AS_NODE
   delete env.TAURI_DATABASE_SERVICE_ENTRY
+  delete env.TAURI_PRODUCTION_SERVICE_ENTRY
+  if (productionProofs) env.TAURI_PRODUCTION_SERVICE_ENTRY = realpathSync(join(root, 'src-tauri/resources/service/production-stdio.mjs'))
   if (serviceProofs) env.TAURI_DATABASE_SERVICE_ENTRY = realpathSync(join(root, 'src-tauri/resources/service/database-stdio.mjs'))
   const child = spawn(node, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', 'vitest.tauri.config.ts',
-    ...args.filter(arg => arg !== '--service-proofs')], { cwd: root, env, stdio: 'inherit', windowsHide: true })
+    ...args.filter(arg => arg !== '--service-proofs' && arg !== '--production-proofs')], { cwd: root, env, stdio: 'inherit', windowsHide: true })
   const stop = signal => child.kill(signal)
   const interrupt = () => stop('SIGINT')
   const terminate = () => stop('SIGTERM')

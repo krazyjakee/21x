@@ -54,6 +54,22 @@ export function writeJsonRpc(
   return writeToChildStdin(peer.process, `${JSON.stringify(payload)}\n`, label, onError)
 }
 
+/** Exact human replies retain their raw pipe write until acknowledged or closed.
+ * A deadline belongs to the caller; it cannot manufacture successful delivery. */
+export function writeJsonRpcAcknowledged(peer: Pick<JsonRpcPeer, 'process'>, payload: unknown, label: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const stdin = peer.process.stdin
+    const lost = (): void => finish(new Error(`${label}: response pipe closed before acknowledgement`))
+    const finish = (error?: Error): void => {
+      stdin?.removeListener('close', lost)
+      if (error) reject(error); else resolve()
+    }
+    stdin?.once('close', lost)
+    if (!writeToChildStdin(peer.process, `${JSON.stringify(payload)}\n`, label, finish, () => finish()))
+      finish(new Error(`${label}: response pipe is unavailable`))
+  })
+}
+
 /** Sends a request and resolves with its result (or rejects on error / 30s timeout). */
 export function sendJsonRpcRequest(peer: JsonRpcPeer, method: string, params: unknown, label: string): Promise<unknown> {
   const id = peer.nextRequestId++

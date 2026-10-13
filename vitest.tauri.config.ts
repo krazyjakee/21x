@@ -22,6 +22,8 @@ const resolveOptions = { alias: [
 ] }
 const mainFiles = [
   'src/service/**/*.test.ts', 'src/main/agent-manager-configuration.test.ts',
+  'src/main/agent-manager-scoped-approval.test.ts', 'src/main/adapters/shared/json-rpc-acknowledgement.test.ts',
+  'src/main/platform/native-application-key-store.test.ts',
   'src/main/oauth/oauth-manager-host.test.ts', 'src/main/worktree-manager-host.test.ts', 'src/main/platform/secret-storage.test.ts',
   'test/tauri-runtime.test.ts', 'test/tauri-terminal-native.test.ts',
   'src/main/node-worker-runtime.test.ts',
@@ -100,10 +102,11 @@ const mainFiles = [
   'src/main/oauth/providers/connector-oauth-provider.test.ts',
   'src/main/database-transcript-page.test.ts', 'src/main/transcript-events.test.ts', 'src/main/transcript-page-authority.test.ts',
   'src/shared/**/*.test.ts',
-  'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts',
+  'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts', 'scripts/tauri-stage-production.test.ts',
   'scripts/artifact-frame-proof.test.ts',
   'scripts/activity-process-proof.test.ts',
   'scripts/database-proof.test.ts', 'scripts/configuration-proof.test.ts', 'scripts/agent-desktop-proof.test.ts',
+  ...(process.env.TAURI_PRODUCTION_SERVICE_PROOFS === '1' ? ['scripts/production-service-proof.test.ts'] : []),
   ...(process.env.TAURI_STANDALONE_SERVICE_PROOFS === '1' ? [
     'scripts/database-service-proof.test.ts', 'scripts/configuration-service-proof.test.ts', 'scripts/transcript-page-proof.test.ts',
     'scripts/connector-worker-service-proof.test.ts'
@@ -119,7 +122,7 @@ export default defineConfig({
       { resolve: resolveOptions, esbuild: { jsx: 'automatic' }, test: { name: 'portable-renderer', environment: 'happy-dom',
         include: ['src/renderer/src/lib/desktop-client.test.ts', 'src/renderer/src/lib/transcript-pagination.test.ts', 'src/renderer/src/lib/tauri-task-slice.test.ts',
           'src/renderer/src/lib/desktop-api.test.ts', 'src/renderer/src/lib/native-desktop-host.test.ts', 'src/renderer/src/lib/shared-ipc-listeners.test.ts',
-          'src/renderer/src/components/layout/DesktopHostStatus.test.tsx'], setupFiles: [join(root, 'test/setup-renderer.ts')] } }
+          'src/renderer/src/components/layout/DesktopHostStatus.test.tsx', 'src/renderer/src/stores/commander-desktop-recovery.test.ts'], setupFiles: [join(root, 'test/setup-renderer.ts')] } }
     ]
   }
 })

@@ -28,13 +28,13 @@ function fakeProcess() {
   const process = new EventEmitter() as EventEmitter & Record<string, any>
   process.pid = 12345
   process.exitCode = null
-  process.stdin = {
+  process.stdin = Object.assign(new EventEmitter(), {
     writable: true,
     write: vi.fn((_value: string, callback?: (error?: Error | null) => void) => {
       callback?.(null)
       return true
     }),
-  }
+  })
   process.stdout = new EventEmitter()
   process.stderr = new EventEmitter()
   process.kill = vi.fn(() => true)

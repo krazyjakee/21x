@@ -6,6 +6,7 @@ import type { DatabaseManager, TaskRecord, UpdateTaskData } from './database'
 import type { AgentManager } from './agent-manager'
 import type { RecurrenceScheduler } from './recurrence-scheduler'
 import type { HeartbeatScheduler } from './heartbeat-scheduler'
+import type { TaskAutomationScheduler } from './task-automation-scheduler'
 import { TaskStatus } from '../shared/constants'
 import { emitTaskEvent } from './project-events'
 
@@ -73,6 +74,7 @@ export async function startPreparedTask(
   return result
 }
 
+let automationOwner: TaskAutomationScheduler | null = null
 let automationTrigger: (() => void) | null = null
 let recurrenceScheduler: Pick<RecurrenceScheduler, 'initializeRecurringTask'> | null = null
 let heartbeatScheduler: Pick<HeartbeatScheduler, 'disableHeartbeat'> | null = null
@@ -85,8 +87,9 @@ let heartbeatScheduler: Pick<HeartbeatScheduler, 'disableHeartbeat'> | null = nu
  * Poking the main-process scheduler keeps those flags immediate rather than
  * leaving them until its next 60s tick.
  */
-export function setTaskAutomationTrigger(fn: (() => void) | null): void {
+export function setTaskAutomationTrigger(fn: (() => void) | null, owner?: TaskAutomationScheduler): void {
   automationTrigger = fn
+  automationOwner = fn ? owner ?? null : null
 }
 
 export function setTaskSchedulers(schedulers: {
@@ -95,6 +98,16 @@ export function setTaskSchedulers(schedulers: {
 }): void {
   if (schedulers.recurrence !== undefined) recurrenceScheduler = schedulers.recurrence
   if (schedulers.heartbeat !== undefined) heartbeatScheduler = schedulers.heartbeat
+}
+
+/** Portable mutation bindings must use the exact application-owned effects. */
+export function assertTaskLifecycleOwners(
+  recurrence: Pick<RecurrenceScheduler, 'initializeRecurringTask'>,
+  heartbeat: Pick<HeartbeatScheduler, 'disableHeartbeat'>,
+  automation: TaskAutomationScheduler
+): void {
+  if (!automationTrigger || recurrenceScheduler !== recurrence || heartbeatScheduler !== heartbeat || automationOwner !== automation)
+    throw new Error('The task lifecycle owners are unavailable.')
 }
 
 export function triggerTaskAutomation(): void {

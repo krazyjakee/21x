@@ -41,6 +41,7 @@ import { execFileAsync } from '../find-executable'
 import {
   sendJsonRpcRequest,
   writeJsonRpc,
+  writeJsonRpcAcknowledged,
   type JsonRpcError,
   type JsonRpcMessage,
   type JsonRpcNotification,
@@ -489,7 +490,7 @@ export class AcpAdapter implements CodingAgentAdapter {
 
     // session/cancel is a notification. The agent answers the original
     // session/prompt with stopReason: cancelled, which settles the status.
-    writeJsonRpc(session, {
+    await writeJsonRpcAcknowledged(session, {
       jsonrpc: '2.0',
       method: 'session/cancel',
       params: { sessionId: session.acpSessionId }
@@ -604,18 +605,25 @@ export class AcpAdapter implements CodingAgentAdapter {
     return session?.pendingApproval || null
   }
 
+  async getPendingRequests(sessionId: string): Promise<Array<{ requestId: string; responseType: 'permission' | 'question' }>> {
+    const pending = this.sessions.get(sessionId)?.pendingApproval
+    return pending ? [{ requestId: String(pending.requestId), responseType: 'permission' }] : []
+  }
+
   async respondToApproval(
     sessionId: string,
     approved: boolean,
-    optionId?: string
-  ): Promise<void> {
+    optionId?: string,
+    requestId?: string
+  ): Promise<boolean> {
     const session = this.sessions.get(sessionId)
     if (!session || !session.pendingApproval) {
       console.warn(`[${this.label}] No pending approval for session ${sessionId}`)
-      return
+      return false
     }
 
     const approval = session.pendingApproval
+    if (requestId !== undefined && String(approval.requestId) !== requestId) return false
     let selectedOptionId = approval.options.some((option) => option.optionId === optionId)
       ? optionId
       : undefined
@@ -628,16 +636,12 @@ export class AcpAdapter implements CodingAgentAdapter {
     console.log(`[${this.label}] Responding to approval with: ${selectedOptionId}`)
 
     // The ACP TypeScript SDK nests the outcome: { outcome: { outcome, optionId } }
-    this.sendRpcResponse(session, approval.requestId, {
-      result: {
-        outcome: {
-          outcome: 'selected',
-          optionId: selectedOptionId
-        }
-      }
-    })
+    const payload = { result: { outcome: { outcome: 'selected', optionId: selectedOptionId } } }
+    if (requestId !== undefined) await writeJsonRpcAcknowledged(session, { jsonrpc: '2.0', id: approval.requestId, ...payload }, this.label)
+    else this.sendRpcResponse(session, approval.requestId, payload)
 
     session.pendingApproval = null
+    return true
   }
 
   private convertAcpEventToMessageParts(

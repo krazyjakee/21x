@@ -246,6 +246,8 @@ export class AgentManager extends EventEmitter {
    * this index lets every in-process ownership consumer join that teardown. */
   private readonly taskStops = new Map<string, PendingTaskStop>()
   private readonly taskGroupMutations = new Set<string>()
+  private readonly taskLifecycleMutations = new Set<string>()
+  private readonly scopedApprovalFlights = new Set<string>()
   private deliveryRecoveryTimer: ReturnType<typeof setInterval> | null = null
   private readonly captainSwitches = new Map<string, { agentId: string; promise: Promise<CaptainRuntimeState> }>()
   private readonly deliveryOwner = `agent-manager:${process.pid}:${randomUUID()}`
@@ -1177,7 +1179,7 @@ export class AgentManager extends EventEmitter {
     if (!Array.isArray(taskIds) || !taskIds.length || taskIds.length > 32 || taskIds.some(id => typeof id !== 'string' || !id))
       throw new Error('Select valid task-group members.')
     const ids = [...new Set(taskIds)]
-    if (ids.some(id => this.taskGroupMutations.has(id))) throw new Error('This task group is already being updated.')
+    if (ids.some(id => this.taskGroupMutations.has(id) || this.taskLifecycleMutations.has(id))) throw new Error('This task group is already being updated.')
     for (const id of ids) this.taskGroupMutations.add(id)
     return this.ownShutdownWork((async () => {
       try {
@@ -1188,6 +1190,28 @@ export class AgentManager extends EventEmitter {
     })())
   }
 
+  /** Ordinary task writes join accepted sends before lifecycle side effects.
+   * The domain owner validates scope/references before entering this lease. */
+  async runTaskLifecycleMutation<T>(taskIds: string[], mutation: () => Promise<T>): Promise<T> {
+    if (this.shuttingDown) throw new Error('The app is shutting down.')
+    if (!Array.isArray(taskIds) || !taskIds.length || taskIds.length > 128 || taskIds.some(id => typeof id !== 'string' || !id) || typeof mutation !== 'function')
+      throw new Error('Select valid tasks.')
+    const ids = [...new Set(taskIds)]
+    if (ids.some(id => this.taskGroupMutations.has(id) || this.taskLifecycleMutations.has(id))) throw new Error('The task is already being updated.')
+    for (const id of ids) this.assertAgentConfigurationAvailable(this.db.getTask(id)?.agent_id ?? this.findSessionByTaskId(id)?.session.agentId)
+    for (const id of ids) this.taskLifecycleMutations.add(id)
+    return this.ownShutdownWork((async () => {
+      try {
+        await Promise.all(ids.map(id => serializeTaskSend(this, id, async () => undefined)))
+        if (this.shuttingDown) throw new Error('The app is shutting down.')
+        return await mutation()
+      } finally {
+        for (const id of ids) this.taskLifecycleMutations.delete(id)
+        this.drainStartQueue(); this.scheduleProviderRecovery()
+      }
+    })())
+  }
+
   /** Configuration changes join the actual lifecycle owner. Cap/name changes
    * leave live sessions intact; runtime edits and deletion acknowledge Stop
    * before committing. Shared backend adapters cannot disrupt another agent. */
@@ -1195,6 +1219,8 @@ export class AgentManager extends EventEmitter {
     if (this.shuttingDown) throw new Error('The app is shutting down.')
     if (typeof agentId !== 'string' || !agentId || !['update', 'delete'].includes(kind) || typeof mutation !== 'function') throw new Error('Invalid agent configuration mutation.')
     if (this.agentConfigurationMutations.has(agentId)) throw new Error('This agent configuration is already being updated.')
+    if ([...this.taskLifecycleMutations, ...this.taskGroupMutations].some(id => this.db.getTask(id)?.agent_id === agentId || this.findSessionByTaskId(id)?.session.agentId === agentId))
+      throw new Error('Wait for task changes to finish before changing this agent.')
     if ([...this.captainSwitches.values()].some(flight => flight.agentId === agentId)) throw new Error('Wait for the Captain switch to finish before changing this agent.')
     const before = this.db.getAgent(agentId)
     if (!before) return this.ownShutdownWork(Promise.resolve().then(mutation))
@@ -1223,7 +1249,7 @@ export class AgentManager extends EventEmitter {
           ...[...this.sessionStarts.keys()].filter(taskId => (this.admittedStarts.get(taskId) ?? this.db.getTask(taskId)?.agent_id
             ?? this.db.getSetting(coordinatorSessionAgentKey(taskId))) === agentId)
         ])
-        if ([...taskIds].some(taskId => this.taskGroupMutations.has(taskId))) throw new Error('Wait for task-group review or membership changes to finish before changing this agent.')
+        if ([...taskIds].some(taskId => this.taskGroupMutations.has(taskId) || this.taskLifecycleMutations.has(taskId))) throw new Error('Wait for task-group review or membership changes to finish before changing this agent.')
         if (disruptive) {
           for (const taskId of taskIds) this.cancelQueuedStart(taskId)
           for (const taskId of taskIds) await this.stopByTaskId(taskId)
@@ -1287,6 +1313,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private assertNoTaskGroupMutation(taskId: string): void {
+    if (this.taskLifecycleMutations.has(taskId)) throw new Error('The task is being updated. Retry after its lifecycle change finishes.')
     if (this.taskGroupMutations.has(taskId)) throw new Error('The task group is being updated. Retry after its review or membership change finishes.')
     this.assertAgentConfigurationAvailable(this.db.getTask(taskId)?.agent_id ?? this.findSessionByTaskId(taskId)?.session.agentId)
   }
@@ -2344,7 +2371,7 @@ export class AgentManager extends EventEmitter {
           tool: {
             name: 'permission',
             status: 'running',
-            requestId: approval.requestId,
+            requestId: String(approval.requestId ?? approval.toolCallId),
             questions: [{
               header: 'Permission Required',
               question: approval.question,
@@ -3105,7 +3132,7 @@ export class AgentManager extends EventEmitter {
     const claim = this.startQueue.get(taskId)
     const runtime = this.captainRuntimes.get(taskId)
     const mayStart = (): boolean => {
-      if (this.shuttingDown) return false
+      if (this.shuttingDown || this.taskLifecycleMutations.has(taskId) || this.taskGroupMutations.has(taskId)) return false
       if (this.agentConfigurationMutations.has(agentId) || this.backendConfigurationMutations.has(getAgentProvider(agent))) return false
       if (runtime) {
         const latest = this.captainRuntimes.get(taskId)
@@ -3926,10 +3953,11 @@ export class AgentManager extends EventEmitter {
   }
 
   /** Raw transcript for the renderer's hidden "Copy Debug Info" feature. */
-  async getRawTranscriptForDebug(taskId: string): Promise<DebugTranscriptMessage[]> {
+  async getRawTranscriptForDebug(taskId: string, options: { requireAvailable?: boolean } = {}): Promise<DebugTranscriptMessage[]> {
     try {
       return debugTranscript(await this.getLiveMessages(taskId) ?? [])
     } catch (err) {
+      if (options.requireAvailable) throw err
       console.error(`[AgentManager] Failed to get raw transcript for task ${taskId}:`, err)
       return []
     }
@@ -4411,12 +4439,13 @@ export class AgentManager extends EventEmitter {
     }
   }
 
-  async abortSession(sessionId: string): Promise<void> {
-    return this.ownShutdownWork(this.abortSessionNow(sessionId))
+  async abortSession(sessionId: string, options: { requireAcknowledgement?: boolean } = {}): Promise<void> {
+    return this.ownShutdownWork(this.abortSessionNow(sessionId, options))
   }
 
-  private async abortSessionNow(sessionId: string): Promise<void> {
+  private async abortSessionNow(sessionId: string, options: { requireAcknowledgement?: boolean } = {}): Promise<void> {
     if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
+    if (options.requireAcknowledgement && !this.sessions.has(sessionId)) throw new Error('The native session is no longer owned.')
     const resolved = this.resolveSession(sessionId, 'abortSession')
     if (!resolved) return
     const { session } = resolved
@@ -4434,9 +4463,23 @@ export class AgentManager extends EventEmitter {
         const sessionConfig = await this.buildSessionConfig(session.agentId, session.taskId, session.workspaceDir)
         this.assertSessionGeneration(sessionId, session)
         await adapter.abortPrompt(sessionId, sessionConfig)
+        if (options.requireAcknowledgement) {
+          const status = await adapter.getStatus(sessionId, sessionConfig)
+          this.assertSessionGeneration(sessionId, session)
+          if (status.type !== SessionStatusType.IDLE) throw new Error('The backend has not confirmed that cancellation settled. Read status or use Stop.')
+        }
       } catch (error) {
+        if (options.requireAcknowledgement) {
+          if (this.ownsSessionGeneration(sessionId, session)) {
+            session.pollingStarted = true
+            this.startAdapterPolling(sessionId, adapter, this.sessionConfigFor(session), session)
+          }
+          throw error
+        }
         console.error(`[AgentManager] Error aborting adapter session:`, error)
       }
+    } else if (options.requireAcknowledgement) {
+      throw new Error('The native adapter is unavailable.')
     }
 
     this.assertSessionGeneration(sessionId, session)
@@ -5033,7 +5076,7 @@ export class AgentManager extends EventEmitter {
       return task ? { projectId: taskProjectId(task), priority: task.priority } : undefined
     })
     for (const entry of this.startQueue.snapshot()) {
-      if (this.agentConfigurationBlocked(entry.agentId)) continue
+      if (this.agentConfigurationBlocked(entry.agentId) || this.taskLifecycleMutations.has(entry.taskId)) continue
       const agent = this.db.getAgent(entry.agentId)
       const task = this.db.getTask(entry.taskId)
       const exclusion = this.retryExclusion(task)
@@ -5534,13 +5577,13 @@ export class AgentManager extends EventEmitter {
   private scheduleProviderRecovery(): void {
     if (this.shuttingDown || this.startupReconciliation) return
     if (this.providerRecoveryTimer) clearTimeout(this.providerRecoveryTimer)
-    const pending = this.providerRecoveries.list(['retrying']).filter((row) => !this.providerRecoveryFlights.has(row.taskId) && !this.agentConfigurationBlocked(row.agentId))
+    const pending = this.providerRecoveries.list(['retrying']).filter((row) => !this.providerRecoveryFlights.has(row.taskId) && !this.agentConfigurationBlocked(row.agentId) && !this.taskLifecycleMutations.has(row.taskId))
     if (!pending.length) { this.providerRecoveryTimer = null; return }
     const deadline = Math.min(...pending.map((row) => row.nextRetryAt ?? Date.now()))
     this.providerRecoveryTimer = setTimeout(() => {
       this.providerRecoveryTimer = null
       for (const row of this.providerRecoveries.list(['retrying'])) {
-        if (row.state !== 'retrying' || (row.nextRetryAt ?? 0) > Date.now() || this.providerRecoveryFlights.has(row.taskId) || this.agentConfigurationBlocked(row.agentId)) continue
+        if (row.state !== 'retrying' || (row.nextRetryAt ?? 0) > Date.now() || this.providerRecoveryFlights.has(row.taskId) || this.agentConfigurationBlocked(row.agentId) || this.taskLifecycleMutations.has(row.taskId)) continue
         this.providerRecoveryFlights.add(row.taskId)
         void this.ownShutdownWork(this.dispatchProviderRecovery(row)).finally(() => {
           this.providerRecoveryFlights.delete(row.taskId)
@@ -5771,6 +5814,42 @@ export class AgentManager extends EventEmitter {
     }
   }
 
+  /** Only the current native owner and live adapter callback grant approval. */
+  async getSessionRequestScope(sessionId: string, requestId?: string, responseType?: 'permission' | 'question'): Promise<{
+    sessionId: string; taskId: string; agentId: string; requestId: string; responseType: 'permission' | 'question'
+  } | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session || !this.ownsSessionGeneration(sessionId, session) || this.shuttingDown || !session.adapter?.getPendingRequests) return null
+    const requests = await this.ownShutdownWork(session.adapter.getPendingRequests(sessionId, this.sessionConfigFor(session)))
+    this.assertSessionGeneration(sessionId, session)
+    if (!Array.isArray(requests) || requests.length > 256 || requests.some(request => !request || typeof request.requestId !== 'string' || !request.requestId || request.requestId.length > 512 || !['permission', 'question'].includes(request.responseType)))
+      throw new Error('The backend returned invalid pending requests.')
+    const request = requests.find(row => (requestId === undefined || row.requestId === requestId) && (responseType === undefined || row.responseType === responseType))
+    return request ? { sessionId, taskId: session.taskId, agentId: session.agentId, ...request } : null
+  }
+
+  async respondToScopedPermission(input: {
+    sessionId: string; taskId: string; agentId: string; requestId: string; responseType: 'permission' | 'question'; approved: boolean; message?: string
+  }): Promise<{ handled: boolean }> {
+    if (!input || !input.requestId || !['permission', 'question'].includes(input.responseType) || typeof input.approved !== 'boolean') throw new Error('Select a current pending request.')
+    const key = JSON.stringify([input.sessionId, input.requestId])
+    if (this.scopedApprovalFlights.has(key)) throw new Error('This request already has a response in progress.')
+    this.scopedApprovalFlights.add(key)
+    return this.ownShutdownWork((async () => {
+      try {
+        const scope = await this.getSessionRequestScope(input.sessionId, input.requestId, input.responseType)
+        if (!scope || scope.taskId !== input.taskId || scope.agentId !== input.agentId) return { handled: false }
+        this.assertAgentConfigurationAvailable(scope.agentId)
+        this.assertNoTaskGroupMutation(scope.taskId)
+        if (input.responseType === 'question' && !input.approved) {
+          await this.abortSession(input.sessionId, { requireAcknowledgement: true })
+          return { handled: true }
+        }
+        return { handled: await this.respondToPermissionNow(input.sessionId, input.approved, input.message, undefined, input.responseType, input.requestId, true) }
+      } finally { this.scopedApprovalFlights.delete(key) }
+    })())
+  }
+
   async respondToPermission(
     sessionId: string,
     approved: boolean,
@@ -5780,7 +5859,7 @@ export class AgentManager extends EventEmitter {
     requestId?: string
   ): Promise<void> {
     this.assertAgentConfigurationAvailable(this.resolveSession(sessionId)?.session.agentId)
-    return this.ownShutdownWork(this.respondToPermissionNow(sessionId, approved, message, optionId, responseType, requestId))
+    return this.ownShutdownWork(this.respondToPermissionNow(sessionId, approved, message, optionId, responseType, requestId).then(() => undefined))
   }
 
   private async respondToPermissionNow(
@@ -5789,8 +5868,9 @@ export class AgentManager extends EventEmitter {
     message?: string,
     optionId?: string,
     responseType?: 'permission' | 'question',
-    requestId?: string
-  ): Promise<void> {
+    requestId?: string,
+    requireAcknowledgement = false
+  ): Promise<boolean> {
     if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     const resolved = this.resolveSession(sessionId, 'respondToPermission')
     if (!resolved) throw new Error(`Session not found: ${sessionId}`)
@@ -5812,7 +5892,7 @@ export class AgentManager extends EventEmitter {
         console.log(`[AgentManager] Question rejected for session ${sessionId}`)
         session.status = 'idle'
         this.emitStatus(sessionId, session, 'idle')
-        return
+        return false
       }
 
       // The renderer sends "Header1: Answer1\nHeader2: Answer2" or a single answer.
@@ -5863,8 +5943,10 @@ export class AgentManager extends EventEmitter {
             },
           })
         }
-        return
+        return false
       }
+
+      if (requireAcknowledgement && handled !== true) throw new Error('The backend did not acknowledge this response.')
 
       // Update session and task state after the adapter accepts the response.
       session.status = 'working'
@@ -5894,7 +5976,7 @@ export class AgentManager extends EventEmitter {
         session.pollingStarted = true
         this.startAdapterPolling(sessionId, session.adapter, adapterConfig)
       }
-      return
+      return true
     }
 
     // --- ACP/OpenCode permission responses: use permission-style options ---
@@ -5940,7 +6022,7 @@ export class AgentManager extends EventEmitter {
             update: true
           }
         })
-        return
+        return false
       }
 
       // If no pending permission was found (stale prompt after watchdog abort
@@ -5950,10 +6032,11 @@ export class AgentManager extends EventEmitter {
         console.log(`[AgentManager] No pending permission found for ${sessionId}, sending continuation message to recover session`)
         this.sendInBackground(session, sessionId, 'continue')
       }
-      return
+      return handled === true
     }
 
     console.warn(`[AgentManager] No adapter handler for permission response in session ${sessionId}`)
+    return false
   }
 
   async stopAllSessions(): Promise<void> {

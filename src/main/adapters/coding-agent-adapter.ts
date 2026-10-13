@@ -271,6 +271,9 @@ export interface CodingAgentAdapter {
    */
   destroySession(sessionId: string, config: SessionConfig): Promise<void>
 
+  /** Actual live backend callbacks, never persisted transcript cards. */
+  getPendingRequests?(sessionId: string, config: SessionConfig): Promise<Array<{ requestId: string; responseType: 'permission' | 'question' }>>
+
   /**
    * Respond to a pending question (AskUserQuestion tool call).
    * Agent-manager passes structured answers; each adapter delivers them

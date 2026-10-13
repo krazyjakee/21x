@@ -38,6 +38,7 @@ export class NativeApplicationKeyStore implements ProtectedApplicationKeyStore {
       const chunks: Buffer[] = []
       let bytes = 0
       let settled = false
+      let failure: string | undefined
       const finish = (error?: string, response?: { backend: string; key?: string }) => {
         if (settled) return
         settled = true
@@ -45,19 +46,33 @@ export class NativeApplicationKeyStore implements ProtectedApplicationKeyStore {
         child.stdin.destroy()
         child.stdout.destroy()
         for (const chunk of chunks) chunk.fill(0)
-        if (error) { child.kill(); reject(new NativeApplicationKeyStoreError(error)) }
+        if (error) reject(new NativeApplicationKeyStoreError(error))
         else resolve(response!)
       }
-      const timer = setTimeout(() => finish('KEYSTORE_NO_ACCESS'), this.timeoutMs)
-      child.on('error', () => finish('KEYSTORE_NO_ACCESS'))
-      child.stdin.on('error', () => finish('KEYSTORE_NO_ACCESS'))
+      // A deadline rejects acceptance, but never releases raw ownership before
+      // Node observes the helper's pipes/process closing. ProductionOwner must
+      // retain its bootstrap/profile lease if a helper refuses termination.
+      const failAfterClose = (code: string): void => {
+        if (settled || failure) return
+        failure = code
+        clearTimeout(timer)
+        for (const chunk of chunks) chunk.fill(0)
+        child.stdin.destroy()
+        child.kill()
+      }
+      const timer = setTimeout(() => failAfterClose('KEYSTORE_NO_ACCESS'), this.timeoutMs)
+      child.on('error', () => failAfterClose('KEYSTORE_NO_ACCESS'))
+      child.stdin.on('error', () => failAfterClose('KEYSTORE_NO_ACCESS'))
+      child.stdout.on('error', () => failAfterClose('KEYSTORE_NO_ACCESS'))
       child.stdout.on('data', (chunk: Buffer) => {
+        if (failure) { chunk.fill(0); return }
         bytes += chunk.length
-        if (bytes > 4096) { chunk.fill(0); finish('KEYSTORE_PROTOCOL_ERROR'); return }
+        if (bytes > 4096) { chunk.fill(0); failAfterClose('KEYSTORE_PROTOCOL_ERROR'); return }
         chunks.push(chunk)
       })
       child.on('close', (code) => {
         if (settled) return
+        if (failure) { finish(failure); return }
         const raw = Buffer.concat(chunks)
         try {
           const response = JSON.parse(raw.toString('utf8')) as Record<string, unknown>

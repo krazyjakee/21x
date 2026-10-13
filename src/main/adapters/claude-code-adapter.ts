@@ -132,6 +132,7 @@ interface ClaudeSession {
   releasePrompt: (() => void) | null
   /** Tool-permission requests awaiting the user, oldest first ('ask' mode only). */
   pendingApprovals: PendingClaudeApproval[]
+  pendingQuestions: Set<string>
 }
 
 type HookMap = Partial<Record<string, HookCallbackMatcher[]>>
@@ -166,6 +167,7 @@ function newClaudeSession(sessionId: string, config: SessionConfig, isResumed: b
     enqueuePrompt: null,
     releasePrompt: null,
     pendingApprovals: [],
+    pendingQuestions: new Set(),
   }
 }
 
@@ -333,6 +335,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       // rendered as a question and the answer arrives as the next prompt (see
       // respondToQuestion). End the turn so the agent waits for it.
       if (toolName === 'AskUserQuestion') {
+        if (!signal.aborted && toolUseID) (session.pendingQuestions ??= new Set()).add(toolUseID)
         return Promise.resolve({
           behavior: 'deny',
           message: 'The question has been shown to the user. Their answer will arrive as the next message.',
@@ -488,6 +491,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     if (!promptText) {
       throw new Error('No text content in prompt parts')
     }
+
+    session.pendingQuestions?.clear()
 
     // Note: Don't add user message to buffer - agent-manager already shows it
     // to avoid duplicate messages in UI
@@ -696,7 +701,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
         providerFailure: session.pendingApprovals.length || session.backgroundTasks.size ? undefined : session.providerFailure }
     }
 
-    if (session.pendingApprovals.length > 0) {
+    if (session.pendingApprovals.length > 0 || session.pendingQuestions?.size) {
       return { type: SessionStatusType.WAITING_APPROVAL }
     }
 
@@ -791,6 +796,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.releasePrompt = null
     session.enqueuePrompt = null
     session.backgroundTasks.clear()
+    session.pendingQuestions?.clear()
     this.rejectPendingApprovals(session, 'The session was stopped.')
     session.abortController?.abort()
 
@@ -818,6 +824,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.releasePrompt = null
     session.enqueuePrompt = null
     session.backgroundTasks.clear()
+    session.pendingQuestions?.clear()
     this.rejectPendingApprovals(session, 'The session was stopped.')
     session.abortController?.abort()
 
@@ -898,6 +905,13 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
    * The oldest tool-permission request waiting for the user, in the shape
    * agent-manager renders as a permission card. Only 'ask' mode creates these.
    */
+  async getPendingRequests(sessionId: string): Promise<Array<{ requestId: string; responseType: 'permission' | 'question' }>> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return []
+    return [...session.pendingApprovals.map(approval => ({ requestId: approval.requestId, responseType: 'permission' as const })),
+      ...[...(session.pendingQuestions ?? [])].map(requestId => ({ requestId, responseType: 'question' as const }))]
+  }
+
   getPendingApproval(sessionId: string): {
     requestId: string
     toolCallId: string
@@ -955,23 +969,30 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
   async respondToQuestion(
     sessionId: string,
     answers: Record<string, string>,
-    config: SessionConfig
-  ): Promise<void> {
+    config: SessionConfig,
+    requestId?: string
+  ): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    if (!session || requestId !== undefined && !session.pendingQuestions?.has(requestId)) return false
     // Claude Code runs with bypassPermissions, so AskUserQuestion ends the
     // session turn (it appears in permission_denials in the result message).
     // Send the user's answer as a follow-up prompt to continue the conversation.
     const answerText = Object.values(answers).filter(Boolean).join('\n')
     if (!answerText) {
       console.warn(`[ClaudeCodeAdapter] respondToQuestion called with empty answers for session ${sessionId}`)
-      return
+      return false
     }
 
     console.log(`[ClaudeCodeAdapter] Sending question answer as follow-up prompt for session ${sessionId}`)
+    // Consume the exact live question before dispatch; an uncertain accepted
+    // follow-up must not authorize another reply from the same stale card.
+    if (requestId !== undefined) session.pendingQuestions.delete(requestId)
     await this.sendPrompt(
       sessionId,
       [{ type: MessagePartType.TEXT, text: answerText }],
       config
     )
+    return true
   }
 
   /**
@@ -1170,6 +1191,20 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           session.providerFailure = undefined
         }
 
+        if (!msg.parent_tool_use_id && msg.type === 'assistant' && msg.message && typeof msg.message === 'object') {
+          const content = (msg.message as Record<string, unknown>).content
+          if (Array.isArray(content)) for (const block of content) {
+            if (block && typeof block === 'object' && block.type === 'tool_use' && block.name === 'AskUserQuestion' && typeof block.id === 'string')
+              (session.pendingQuestions ??= new Set()).add(block.id)
+          }
+        }
+        if (!msg.parent_tool_use_id && msg.type === 'user' && msg.message && typeof msg.message === 'object') {
+          const content = (msg.message as Record<string, unknown>).content
+          if (Array.isArray(content)) for (const block of content) {
+            if (block && typeof block === 'object' && block.type === 'tool_result' && typeof block.tool_use_id === 'string' && block.is_error !== true)
+              session.pendingQuestions?.delete(block.tool_use_id)
+          }
+        }
         session.messageBuffer.push(message)
 
         // Cap buffer size to prevent unbounded memory growth.

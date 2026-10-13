@@ -3,7 +3,9 @@ import { parseCommanderAction } from '@shared/commander-action'
 import { create } from 'zustand'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
 import { commanderApi } from '@/lib/ipc-client'
-import { seedCommanderImages } from '@/lib/commander-images'
+import { seedCommanderImages, clearCommanderImageCache } from '@/lib/commander-images'
+import { getDesktopHost } from '@/lib/desktop-api'
+import { ServiceProtocolError } from '@shared/service-protocol'
 import type { ChatImageInput } from '@shared/chat-images'
 
 /**
@@ -96,6 +98,49 @@ function mergeMessages(existing: CommanderMessage[], incoming: CommanderMessage[
   const added = incoming.filter((m) => !seen.has(m.id))
   if (added.length === 0) return existing
   return [...existing, ...added].sort((a, b) => a.created_at - b.created_at)
+}
+
+let desktopRecoveryGeneration = 0
+let desktopRecoverySessionUpdates: Map<string, CommanderSession> | undefined
+/** Reconnect reads durable state without marking reports read or sending a turn. */
+export async function rehydrateCommanderDesktopState(): Promise<void> {
+  const generation = ++desktopRecoveryGeneration
+  const epoch = getDesktopHost().connection.engineEpoch
+  clearCommanderImageCache()
+  const { selectedSessionId, search, showArchived } = useCommanderStore.getState()
+  finishedTurns.clear()
+  const updates = new Map<string, CommanderSession>()
+  desktopRecoverySessionUpdates = updates
+  useCommanderStore.setState({ messages: selectedSessionId ? { [selectedSessionId]: [] } : {}, streaming: {}, turnErrors: {}, recentAction: null, undoingActions: [], undoneActions: [], unseenReports: {} })
+  try {
+    const [sessions, history, inboxSessions] = await Promise.all([
+      commanderApi.listSessions({ search: search || undefined, includeArchived: showArchived }),
+      selectedSessionId ? commanderApi.listMessages(selectedSessionId) : Promise.resolve(null),
+      search ? commanderApi.listSessions({ includeArchived: true }) : Promise.resolve(null)
+    ])
+    const current = useCommanderStore.getState()
+    if (generation !== desktopRecoveryGeneration || epoch !== getDesktopHost().connection.engineEpoch || selectedSessionId !== current.selectedSessionId || search !== current.search || showArchived !== current.showArchived) throw new ServiceProtocolError('STALE_EPOCH')
+    useCommanderStore.setState(state => {
+      const live = selectedSessionId ? state.streaming[selectedSessionId] : undefined
+      const turn = live && !finishedTurns.has(live.turnId) ? live
+        : history?.activeTurnId && !finishedTurns.has(history.activeTurnId) ? { turnId: history.activeTurnId, text: '', toolCalls: [] } : undefined
+      const observed = new Map(sessions.map(session => [session.id, session]))
+      for (const [id, session] of updates) {
+        if ((!session.archived || showArchived) && (!search || session.title.toLowerCase().includes(search.toLowerCase()))) observed.set(id, session)
+        else observed.delete(id)
+      }
+      const inbox = [...updates.values()].find(session => session.is_report_inbox) ?? (inboxSessions ?? sessions).find(session => session.is_report_inbox) ?? null
+      return {
+        sessions: sortSessions([...observed.values()]), reportInbox: inbox,
+        messages: selectedSessionId && history ? { [selectedSessionId]: mergeMessages(history.messages, state.messages[selectedSessionId] ?? []) } : {},
+        streaming: selectedSessionId && turn ? { [selectedSessionId]: turn } : {},
+        undoneActions: [...new Set([...state.undoneActions, ...(history?.messages.filter(message => message.tool_name === 'undo_action' && message.tool_call_id).map(message => message.tool_call_id!) ?? [])])],
+        error: null, isLoading: false
+      }
+    })
+  } finally {
+    if (generation === desktopRecoveryGeneration) desktopRecoverySessionUpdates = undefined
+  }
 }
 
 export const useCommanderStore = create<CommanderState>((set, get) => ({
@@ -317,6 +362,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
       }
       case 'session_updated': {
         const { session } = event
+        desktopRecoverySessionUpdates?.set(session.id, session)
         set((state) => {
           const others = state.sessions.filter((s) => s.id !== session.id)
           // With a search active, only sessions already in the results are updated.

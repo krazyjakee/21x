@@ -21,7 +21,7 @@ function fixture() {
   const emit = (operation: ServiceEvent['operation'], payload: ServiceEvent['payload']) => { const event = { protocolVersion: 1, kind: 'event', operation, payload, engineEpoch: epoch, sequence: ++sequence }; for (const receive of [...receivers]) receive({ payload: event }) }
   return { host, invoke, listen, unlisten, results, history, emit, changeEpoch: () => { epoch = 'engine-2'; sequence = 0 } }
 }
-it('uses exact codecs and trusted host metadata; missing binary/files/Commander bindings never reach native or Electron', async () => {
+it('uses exact codecs and trusted host metadata; missing binary/file bindings never reach native or Electron', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
   expect(await desktopApi.settings.get('theme')).toBe('dark')
@@ -29,11 +29,10 @@ it('uses exact codecs and trusted host metadata; missing binary/files/Commander 
   await expect(desktopApi.settings.get('api_key')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   const before = f.invoke.mock.calls.length
   await expect(desktopApi.voice.pushAudio('turn', new Uint8Array([1, 2]))).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE', capability: 'voice.pushAudio' })
-  await expect(desktopApi.commander.send('session', 'hello')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
   await expect(desktopApi.shell.openPath('/private')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
   expect(() => desktopApi.webUtils.getPathForFile(new File([], 'private'))).toThrow('unavailable')
-  expect(desktopApi.commander.onEvent).toBeUndefined(); expect(Reflect.get(desktopApi, 'browser')).toBeUndefined()
-  expect(f.host.supports('commander.send')).toBe(false); expect(f.invoke.mock.calls.length).toBe(before)
+  expect(typeof desktopApi.commander.onEvent).toBe('function'); expect(Reflect.get(desktopApi, 'browser')).toBeUndefined()
+  expect(f.host.supports('commander.send')).toBe(true); expect(f.invoke.mock.calls.length).toBe(before)
 })
 it('fences writes until durable recovery finishes and never replays a mutation interrupted by reconnect', async () => {
   const f = fixture(), hydration = deferred<void>()
@@ -86,4 +85,12 @@ it('blocks approval until matching-session durable reads cover the observed tran
   await f.host.api.agentSession.getTranscriptDelta('task-1', 0)
   await expect(f.host.api.agentSession.approve('session-1', true, undefined, 'permission', 'request-1')).resolves.toEqual({ success: true })
   await expect(f.host.api.agentSession.approve('different-session', true, undefined, 'permission', 'request-1')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+})
+
+it('binds Commander reads to exact native codecs without entering Electron', async () => {
+  const f = fixture(); releases.push(installDesktopHost(f.host))
+  f.results.set('commander:listSessions', [])
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(await desktopApi.commander.listSessions()).toEqual([])
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })

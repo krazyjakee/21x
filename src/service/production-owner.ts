@@ -39,6 +39,7 @@ import { CaptainWaker } from '../main/captain-waker'
 import { ScheduledCoordination, type BriefingSpeech } from '../main/scheduled-coordination-core'
 import { OverdueNotifier } from '../main/overdue-notifier'
 import { ClaudePluginManager } from '../main/claude-plugin-manager'
+import { ChatRuntime } from '../main/chat/chat-runtime'
 import { CommanderStore } from '../main/commander/commander-store'
 import { CommanderService } from '../main/commander/commander-service'
 import { CaptainDeliveryService } from '../main/commander/captain-delivery'
@@ -105,6 +106,8 @@ export interface ProductionServices {
   sync: SyncManager
   registry: PluginRegistry
   groups: TaskGroupService
+  chat: ChatRuntime
+  createChatProvider: () => ReturnType<typeof createChatProviderFromSettings>
   commander: CommanderService
   commanderStore: CommanderStore
   captainDelivery: CaptainDeliveryService
@@ -291,7 +294,7 @@ export class ProductionOwner {
     this.assertStarting()
     const shellWrapper = writeSecretShellWrapper(profileRoot)
     this.checkpoint('task-api')
-    const apiStartup = startTaskApiServer(db)
+    const apiStartup = startTaskApiServer(db, { notifyUser: (title, body) => this.notify(title, body) })
     this.apiOwned = true
     this.stopOwners.push(() => stopTaskApiServer())
     this.drains.set('task-api', () => closeTaskApiServer())
@@ -358,6 +361,9 @@ export class ProductionOwner {
     setTaskApiAgentController(agents)
     setTaskApiTaskGroupService(groups)
     configureCaptainGithubTools({ db, mergeDb: db, issueDb: db, notifyUser: (title, body) => this.notify(title, body), notifyRenderer: (channel, data) => this.emit(channel, data) })
+    const chat = new ChatRuntime()
+    this.register('chat', () => chat.shutdown(), () => chat.close())
+    const createChatProvider = () => provider(db)
     const commanderStore = new CommanderStore(db)
     let commander: CommanderService | null = null
     const captainDelivery = new CaptainDeliveryService({ db, agents, onTerminalFailure: (record, reason, timedOut) => {
@@ -383,7 +389,7 @@ export class ProductionOwner {
     const automation = new TaskAutomationScheduler(db, agents)
     recurrence.setOnInstancesCreated(() => { void automation.runNow() })
     setTaskSchedulers({ recurrence, heartbeat })
-    setTaskAutomationTrigger(() => { void automation.runNow() })
+    setTaskAutomationTrigger(() => { void automation.runNow() }, automation)
     const wakeups = new CaptainWaker(db, agents)
     const coordination = new ScheduledCoordination({ db, agents, getCommander: () => commanderService, createProvider: () => provider(db), notify: (title, body) => this.notify(title, body),
       getSpeech: () => native.speech?.get() ?? null, canPlayAudio: () => native.speech?.canPlayAudio() ?? false })
@@ -395,7 +401,7 @@ export class ProductionOwner {
     }
     const reminders = new OverdueNotifier(() => this.emit('overdue:check', undefined))
     this.register('reminders', () => reminders.shutdown(), async () => { reminders.shutdown() })
-    this.services = { db, agents, oauth, worktrees, sync, registry, groups, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders }
+    this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders }
     this.checkpoint('recovery')
     await agents.reconcileStartup()
     this.assertStarting()

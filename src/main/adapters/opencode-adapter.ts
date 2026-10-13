@@ -719,9 +719,9 @@ export class OpencodeAdapter implements CodingAgentAdapter {
             try {
               await v2.permission.reply({
                 requestID: perm.id,
-                reply: 'always'
+                reply: 'reject'
               })
-              console.log(`[OpencodeAdapter] Auto-approved stale permission ${perm.id} on resume`)
+              console.log(`[OpencodeAdapter] Rejected stale permission ${perm.id} after abort on resume`)
             } catch {
               // Permission may have already expired
             }
@@ -1034,21 +1034,21 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     const ocClient = this.clients.get(sessionId)
     if (ocClient) {
       try {
-        await ocClient.session.abort({
+        const result = await ocClient.session.abort({
           path: { id: sessionId },
           ...(_config.workspaceDir && { query: { directory: _config.workspaceDir } }),
         })
-        console.log(`[OpencodeAdapter] Server-side abort sent for session ${sessionId}`)
-      } catch (err) {
-        // Non-fatal: the local abort is sufficient for the HTTP request.
-        // Server-side abort can fail if session is already idle or not found.
-        console.warn(`[OpencodeAdapter] Server-side abort failed for ${sessionId}:`, err instanceof Error ? err.message : err)
+        if (result.error) throw new Error('OpenCode rejected the abort')
+        console.log(`[OpencodeAdapter] Server-side abort acknowledged for session ${sessionId}`)
+      } catch {
+        console.warn(`[OpencodeAdapter] Server-side abort was not acknowledged for ${sessionId}`)
+        throw new Error('OpenCode abort was not confirmed')
       }
-    }
+    } else throw new Error('OpenCode abort owner is unavailable')
   }
 
   async destroySession(sessionId: string, _config: SessionConfig): Promise<void> {
-    await this.abortPrompt(sessionId, _config)
+    if (this.clients.has(sessionId)) await this.abortPrompt(sessionId, _config)
     // Release the stdio MCP children of this session before dropping the client.
     // They are children of the long-lived `opencode serve` process, so nothing
     // else would ever stop them.
@@ -1109,11 +1109,27 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     return this.v2Client
   }
 
+  async getPendingRequests(sessionId: string, config: SessionConfig): Promise<Array<{ requestId: string; responseType: 'permission' | 'question' }>> {
+    const v2 = this.getV2Client(config.serverUrl)
+    if (!v2) throw new Error('OpenCode V2 SDK not loaded')
+    const [permissions, questions] = await Promise.all([
+      v2.permission.list({ ...(config.workspaceDir && { directory: config.workspaceDir }) }),
+      v2.question.list({ ...(config.workspaceDir && { directory: config.workspaceDir }) })
+    ])
+    if (permissions.error || questions.error) throw new Error('OpenCode pending requests are unavailable')
+    const permissionRows = permissions.data ?? []
+    const questionRows = questions.data ?? []
+    return [...permissionRows.filter(row => row.sessionID === sessionId).map(row => ({ requestId: row.id, responseType: 'permission' as const })),
+      ...questionRows.filter(row => row.sessionID === sessionId || (row as unknown as { sessionId?: string }).sessionId === sessionId)
+        .map(row => ({ requestId: row.id, responseType: 'question' as const }))]
+  }
+
   async respondToQuestion(
     sessionId: string,
     answers: Record<string, string>,
-    config: SessionConfig
-  ): Promise<void> {
+    config: SessionConfig,
+    requestId?: string
+  ): Promise<boolean> {
     const v2 = this.getV2Client(config.serverUrl)
     if (!v2) throw new Error('OpenCode V2 SDK not loaded')
 
@@ -1139,10 +1155,10 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       )
 
       // Find the question for this session
-      const question = questions.find(q => q.sessionID === sessionId || (q as unknown as { sessionId?: string }).sessionId === sessionId)
+      const question = questions.find(q => (q.sessionID === sessionId || (q as unknown as { sessionId?: string }).sessionId === sessionId) && (requestId === undefined || q.id === requestId))
       if (!question?.id) {
         console.warn(`[OpencodeAdapter] No pending question found for session ${sessionId}`)
-        return
+        return false
       }
 
       console.log(`[OpencodeAdapter] Matched question:`, JSON.stringify(question, null, 2).slice(0, 1000))
@@ -1173,8 +1189,10 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       }
 
       console.log(`[OpencodeAdapter] Question ${question.id} replied successfully`)
+      return true
     } catch (err) {
       console.error('[OpencodeAdapter] Question API failed:', err)
+      throw new Error('OpenCode question response was not confirmed')
     }
   }
 
@@ -1188,6 +1206,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
    * duck-types for this method on any adapter during polling.
    */
   getPendingApproval(sessionId: string): {
+    requestId: string
     toolCallId: string
     question: string
     options: Array<{ optionId: string; name: string; kind: string }>
@@ -1201,6 +1220,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       : 'requested path'
 
     return {
+      requestId: pending.permissionId,
       toolCallId: pending.permissionId,
       question: `Allow ${pending.permission} access to: ${pathList}`,
       options: [
@@ -1218,7 +1238,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   async respondToApproval(
     sessionId: string,
     approved: boolean,
-    optionId?: string
+    optionId?: string,
+    requestId?: string
   ): Promise<boolean> {
     const queue = this.pendingPermissions.get(sessionId)
     if (!queue || queue.length === 0) {
@@ -1226,10 +1247,12 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       // This handles the case where pendingPermissions was lost (e.g., app restart
       // or watchdog abort) but the permission is still pending in OpenCode.
       console.warn(`[OpencodeAdapter] No pending permission in memory for session ${sessionId}, trying V2 API fallback`)
-      return await this.respondToPermissionViaV2(sessionId, approved, optionId)
+      return await this.respondToPermissionViaV2(sessionId, approved, optionId, requestId)
     }
 
-    const pending = queue.shift()!
+    const index = requestId === undefined ? 0 : queue.findIndex(row => row.permissionId === requestId)
+    if (index < 0) return this.respondToPermissionViaV2(sessionId, approved, optionId, requestId)
+    const [pending] = queue.splice(index, 1)
     if (queue.length === 0) {
       this.pendingPermissions.delete(sessionId)
     }
@@ -1247,10 +1270,11 @@ export class OpencodeAdapter implements CodingAgentAdapter {
         body: JSON.stringify({ response })
       })
       if (!res.ok) {
-        console.warn(`[OpencodeAdapter] Permission response HTTP ${res.status}: ${await res.text().catch(() => '')}`)
+        throw new Error('OpenCode permission response was rejected')
       }
     } catch (err) {
       console.error(`[OpencodeAdapter] Failed to respond to permission ${pending.permissionId}:`, err)
+      throw new Error('OpenCode permission response was not confirmed')
     }
 
     // Trigger immediate poll so agent-manager sees next pending permission (if any)
@@ -1272,7 +1296,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   private async respondToPermissionViaV2(
     sessionId: string,
     approved: boolean,
-    optionId?: string
+    optionId?: string,
+    requestId?: string
   ): Promise<boolean> {
     try {
       const v2 = this.getV2Client()
@@ -1296,17 +1321,20 @@ export class OpencodeAdapter implements CodingAgentAdapter {
         return false
       }
 
-      const first = sessionPending[0]
+      const first = requestId === undefined ? sessionPending[0] : sessionPending.find(row => row.id === requestId)
+      if (!first) return false
 
       const reply = permissionReply(approved, optionId)
 
       const directory = this.sessionWorkspaceDirs.get(sessionId)
       console.log(`[OpencodeAdapter] Responding to permission ${first.id} via V2 API: ${reply} (permission=${first.permission}, patterns=${first.patterns.join(', ')})`)
-      await v2.permission.reply({
+      const result = await v2.permission.reply({
         requestID: first.id,
         reply,
         ...(directory && { directory })
       })
+
+      if (result.error) throw new Error('OpenCode permission response was rejected')
 
       // Trigger immediate poll so agent-manager sees the unblocked session
       if (this.onDataAvailable) {

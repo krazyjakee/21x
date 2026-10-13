@@ -88,7 +88,8 @@ export function writeToChildStdin(
   child: ChildProcess | null | undefined,
   data: string | Uint8Array,
   label: string,
-  onError?: (err: Error) => void
+  onError?: (err: Error) => void,
+  onWritten?: () => void
 ): boolean {
   const stdin = child?.stdin as Writable | null | undefined
   if (!stdin || stdin.destroyed || stdin.writable === false) return false
@@ -97,7 +98,7 @@ export function writeToChildStdin(
 
   try {
     stdin.write(data, (err) => {
-      if (!err) return
+      if (!err) { onWritten?.(); return }
       onError?.(err)
       if (isBenignStreamError(err)) return
       try {

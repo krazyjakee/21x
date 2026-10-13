@@ -44,6 +44,7 @@ import { execFileAsync, findExecutable } from '../find-executable'
 import {
   sendJsonRpcRequest,
   writeJsonRpc,
+  writeJsonRpcAcknowledged,
   type JsonRpcMessage,
   type JsonRpcNotification,
   type JsonRpcPeer,
@@ -92,6 +93,7 @@ interface PendingApproval {
     name: string
     kind: string
   }>
+  questions?: Array<{ id: string; header: string; question: string; options?: Array<{ label: string; description?: string }> }>
   responseKind: 'execCommand' | 'commandExecution' | 'fileChange' | 'permissions' | 'elicitation' | 'userInput' | 'generic'
 }
 
@@ -108,6 +110,7 @@ interface AppServerSession extends CodexItemState, JsonRpcPeer {
   sawThreadStatusNotification: boolean
   pendingThreadIdle: boolean
   pendingApproval: PendingApproval | null
+  pendingApprovals?: Map<string, PendingApproval>
   lastError: string | null
   providerFailure?: ProviderFailure
   recoveryIntentId?: string
@@ -494,6 +497,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       pending.reject(new Error(`Codex app-server stopped: ${reason}`))
     }
     session.pendingRequests.clear()
+    session.pendingApprovals?.clear(); session.pendingApproval = null
     session.messageBuffer.length = 0
     session.permanentMessages.length = 0
     session.streamedTextByItemId.clear()
@@ -588,26 +592,62 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   }
 
   getPendingApproval(sessionId: string): PendingApproval | null {
-    return this.sessions.get(sessionId)?.pendingApproval || null
+    const pending = this.sessions.get(sessionId)?.pendingApproval
+    return pending?.responseKind === 'userInput' ? null : pending ?? null
   }
 
-  async respondToApproval(sessionId: string, approved: boolean, optionId?: string): Promise<void> {
-    const session = this.requireSession(sessionId)
-    const approval = session.pendingApproval
-    if (!approval) return
+  async getPendingRequests(sessionId: string): Promise<Array<{ requestId: string; responseType: 'permission' | 'question' }>> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return []
+    const pending = session.pendingApprovals ? [...session.pendingApprovals.values()] : session.pendingApproval ? [session.pendingApproval] : []
+    return pending.map(row => ({ requestId: String(row.requestId), responseType: row.responseKind === 'userInput' ? 'question' : 'permission' }))
+  }
 
+  private takePending(session: AppServerSession, requestId?: string): PendingApproval | undefined {
+    return requestId === undefined ? session.pendingApproval ?? undefined
+      : session.pendingApprovals?.get(requestId) ?? (String(session.pendingApproval?.requestId) === requestId ? session.pendingApproval ?? undefined : undefined)
+  }
+
+  private resolvePending(session: AppServerSession, approval: PendingApproval): void {
+    session.pendingApprovals?.delete(String(approval.requestId))
+    session.pendingApproval = session.pendingApprovals?.values().next().value ?? null
+    if (!session.pendingApproval && session.status === SessionStatusType.WAITING_APPROVAL) session.status = SessionStatusType.BUSY
+  }
+
+  async respondToApproval(sessionId: string, approved: boolean, optionId?: string, requestId?: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    const approval = this.takePending(session, requestId)
+    if (!approval || approval.responseKind === 'userInput') return false
     const selected = optionId || approval.options.find((option) =>
       approved
         ? ['acceptForSession', 'accept', 'approved_for_session', 'approved'].includes(option.optionId)
         : ['cancel', 'abort', 'decline', 'denied'].includes(option.optionId)
     )?.optionId || (approved ? 'accept' : 'cancel')
-    const response = this.buildApprovalResponse(approval.responseKind, selected, approved)
+    const result = this.buildApprovalResponse(approval.responseKind, selected, approved)
+    if (requestId !== undefined) await writeJsonRpcAcknowledged(session, { jsonrpc: '2.0', id: approval.requestId, result }, LABEL)
+    else if (!this.sendRpcResponse(session, approval.requestId, result)) return false
+    this.resolvePending(session, approval)
+    if (!approved && !session.pendingApproval) session.status = SessionStatusType.IDLE
+    return true
+  }
 
-    this.sendRpcResponse(session, approval.requestId, response)
-    session.pendingApproval = null
-    if (!approved) {
-      session.status = SessionStatusType.IDLE
-    }
+  async respondToQuestion(sessionId: string, answers: Record<string, string>, _config: SessionConfig, requestId?: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    const approval = this.takePending(session, requestId)
+    if (!approval || approval.responseKind !== 'userInput' || !approval.questions?.length) return false
+    const entries = approval.questions.map((question, index) => {
+      const answer = answers[question.id] ?? answers[question.header] ?? answers[question.question]
+        ?? (approval.questions!.length === 1 ? answers.answer : Object.values(answers)[index])
+      if (typeof answer !== 'string' || !answer.trim()) throw new Error('Answer each current Codex question.')
+      return [question.id, { answers: [answer] }] as const
+    })
+    // Generated codex-cli 0.162.1 v2 ToolRequestUserInputResponse schema.
+    await writeJsonRpcAcknowledged(session, { jsonrpc: '2.0', id: approval.requestId, result: { answers: Object.fromEntries(entries) } }, LABEL)
+    this.addEvent(session, { method: '21x/question-resolved', params: { requestId: String(approval.requestId), answered: true } })
+    this.resolvePending(session, approval)
+    return true
   }
 
   async getRunningTools(sessionId: string, _config: SessionConfig): Promise<RunningTool[]> {
@@ -869,6 +909,13 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   private handleServerRequest(session: AppServerSession, request: JsonRpcRequest): void {
     const params = isObject(request.params) ? request.params : {}
+    const nativeId = session.threadId || session.sessionId
+    const threadId = asString(params.threadId) || asString(params.thread_id)
+    const turnId = asString(params.turnId) || asString(params.turn_id)
+    if (threadId && threadId !== nativeId || turnId && (session.activeTurnId || session.lastTurnId) && turnId !== (session.activeTurnId || session.lastTurnId)) {
+      writeJsonRpc(session, { jsonrpc: '2.0', id: request.id, error: { code: -32602, message: 'Request does not belong to the current native session turn' } }, LABEL)
+      return
+    }
     if (request.method.includes('Approval') || request.method.includes('requestApproval')) {
       this.handleApprovalRequest(session, request, params)
       return
@@ -886,7 +933,15 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     const params = isObject(notification.params) ? notification.params : {}
     const nativeId = session.threadId || session.sessionId
     const sourceThread = asString(params.threadId) || asString(params.thread_id)
-    const sourceTurn = asString(params.turnId) || asString(params.turn_id)
+    const sourceTurn = asString(params.turnId) || asString(params.turn_id) || (isObject(params.turn) ? asString(params.turn.id) : undefined)
+    if (sourceThread && sourceThread !== nativeId) return
+    if (notification.method !== 'turn/started' && sourceTurn && (session.activeTurnId || session.lastTurnId) && sourceTurn !== (session.activeTurnId || session.lastTurnId)) return
+    if (['turn/completed', 'turn/interrupted'].includes(notification.method) || notification.method === 'turn/started' && sourceTurn && sourceTurn !== (session.activeTurnId || session.lastTurnId)) {
+      for (const approval of session.pendingApprovals?.values() ?? (session.pendingApproval ? [session.pendingApproval] : [])) {
+        if (approval.responseKind === 'userInput') this.addEvent(session, { method: '21x/question-resolved', params: { requestId: String(approval.requestId), answered: false } })
+      }
+      session.pendingApprovals?.clear(); session.pendingApproval = null
+    }
     if ((!sourceThread || sourceThread === nativeId) && (!sourceTurn || !session.lastTurnId || sourceTurn === session.lastTurnId)) {
       const tracker = this.compactionTracker(session)
       const item = isObject(params.item) ? params.item : null
@@ -987,11 +1042,10 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
     if (notification.method === 'serverRequest/resolved') {
       const requestId = params.requestId
-      if (session.pendingApproval && String(session.pendingApproval.requestId) === String(requestId)) {
-        session.pendingApproval = null
-        if (session.status === SessionStatusType.WAITING_APPROVAL) {
-          session.status = SessionStatusType.BUSY
-        }
+      const approval = this.takePending(session, String(requestId))
+      if (approval) {
+        if (approval.responseKind === 'userInput') this.addEvent(session, { method: '21x/question-resolved', params: { requestId: String(approval.requestId), answered: false } })
+        this.resolvePending(session, approval)
       }
     }
 
@@ -1003,15 +1057,14 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     request: JsonRpcRequest,
     params: Record<string, unknown>
   ): void {
-    if (session.config.permissionMode === 'allow') {
-      const responseKind = this.getApprovalResponseKind(request.method)
+    const responseKind = this.getApprovalResponseKind(request.method)
+    if (session.config.permissionMode === 'allow' && responseKind !== 'userInput') {
       const selected = responseKind === 'execCommand' ? 'approved' : 'accept'
       this.sendRpcResponse(session, request.id, this.buildApprovalResponse(responseKind, selected, true))
       return
     }
 
     const toolCallId = asString(params.approvalId) || asString(params.itemId) || asString(params.callId) || String(request.id)
-    const responseKind = this.getApprovalResponseKind(request.method)
 
     const rawDecisions = Array.isArray(params.availableDecisions) ? params.availableDecisions : []
     const approvalOptions = rawDecisions.length > 0
@@ -1028,13 +1081,25 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
           { optionId: 'cancel', name: 'Deny', kind: 'reject' }
         ]
 
-    session.pendingApproval = {
+    const questions = responseKind === 'userInput' && Array.isArray(params.questions) ? params.questions : undefined
+    if (responseKind === 'userInput' && (!questions?.length || questions.length > 3 || questions.some(question => !question || typeof question !== 'object' || typeof question.id !== 'string' || !question.id || typeof question.header !== 'string' || typeof question.question !== 'string'))) {
+      this.sendRpcResponse(session, request.id, { answers: {} })
+      return
+    }
+    if ((session.pendingApprovals?.size ?? 0) >= 256) throw new Error('Too many pending Codex requests')
+    const approval: PendingApproval = {
       requestId: request.id,
       toolCallId,
       question: summarizeApproval(params, request.method),
       options: approvalOptions,
-      responseKind
+      responseKind,
+      ...(questions ? { questions: questions.map(question => ({ id: String(question.id), header: String(question.header), question: String(question.question),
+        ...(Array.isArray(question.options) ? { options: question.options.filter(option => isObject(option) && typeof option.label === 'string').map(option => ({ label: String(option.label), ...(typeof option.description === 'string' ? { description: option.description } : {}) })) } : {}) })) } : {})
     }
+    const pending = session.pendingApprovals ??= new Map()
+    pending.set(String(request.id), approval)
+    if (approval.responseKind === 'userInput') this.addEvent(session, { method: '21x/question', params: { requestId: String(request.id), questions: approval.questions } })
+    session.pendingApproval = pending.values().next().value ?? null
     session.status = SessionStatusType.WAITING_APPROVAL
     this.onDataAvailable?.(session.threadId || session.sessionId)
   }
@@ -1239,8 +1304,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     return sendJsonRpcRequest(session, method, params, LABEL)
   }
 
-  private sendRpcResponse(session: AppServerSession, id: string | number, result: unknown): void {
-    writeJsonRpc(session, { jsonrpc: '2.0', id, result }, LABEL)
+  private sendRpcResponse(session: AppServerSession, id: string | number, result: unknown): boolean {
+    return writeJsonRpc(session, { jsonrpc: '2.0', id, result }, LABEL)
   }
 
   private sendRpcNotification(session: AppServerSession, method: string, params?: unknown): void {
@@ -1254,6 +1319,19 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     partContentLengths: Map<string, string>,
     session: AppServerSession
   ): MessagePart[] {
+    if (isObject(event) && event.method === '21x/question' && isObject(event.params)) {
+      const requestId = asString(event.params.requestId)
+      if (!requestId || !Array.isArray(event.params.questions)) return []
+      const id = `question-${requestId}`
+      if (seenPartIds.has(id)) return []
+      seenPartIds.add(id)
+      return [{ id, type: MessagePartType.QUESTION, tool: { name: 'question', status: 'running', requestId, questions: event.params.questions } }]
+    }
+    if (isObject(event) && event.method === '21x/question-resolved' && isObject(event.params)) {
+      const requestId = asString(event.params.requestId)
+      return requestId ? [{ id: `question-${requestId}`, type: MessagePartType.QUESTION, update: true,
+        tool: { name: 'question', requestId, status: event.params.answered === true ? 'completed' : 'cancelled' } }] : []
+    }
     return convertEventToMessageParts(event, seenPartIds, partContentLengths, session)
   }
 

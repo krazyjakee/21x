@@ -1,3 +1,7 @@
+import { TASK_LIFECYCLE_CODECS, TASK_LIFECYCLE_EVENT_CODECS } from '@shared/task-lifecycle-codecs'
+import { PRODUCTION_AGENT_CODECS } from '@shared/production-agent-codecs'
+import { PRODUCTION_AGENT_EVENT_CODECS } from '@shared/production-agent-events'
+import { COMMANDER_COMMAND_CODECS, COMMANDER_EVENT_CODECS } from '@shared/commander-desktop-codecs'
 import type { DesktopApi } from '@shared/desktop-api'
 import { DATABASE_COMMAND_CODECS, DATABASE_EVENT_CODECS } from '@shared/database-desktop-codecs'
 import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_EVENT_CODECS } from '@shared/configuration-desktop-codecs'
@@ -9,8 +13,8 @@ import { DesktopClient, type DesktopClientState } from './desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS }
-const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS,
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS }
+const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
 /** Explicit binding is separate from codec validation and native/service authorization. */
@@ -25,15 +29,29 @@ export const NATIVE_COMMAND_BINDINGS = {
   'projectRepo:list': 'projects.repos.list', 'projectRepo:add': 'projects.repos.add', 'projectRepo:update': 'projects.repos.update', 'projectRepo:remove': 'projects.repos.remove', 'projectRepo:reorder': 'projects.repos.reorder',
   'projectResource:list': 'projects.resources.list', 'projectResource:add': 'projects.resources.add', 'projectResource:update': 'projects.resources.update', 'projectResource:remove': 'projects.resources.remove', 'projectResource:reorder': 'projects.resources.reorder',
   'agentSession:start': 'agentSession.start', 'agentSession:resume': 'agentSession.resume', 'agentSession:approve': 'agentSession.approve', 'agentSession:stop': 'agentSession.stop',
-  'agentConfig:getProviders': 'agentConfig.getProviders', 'agentConfig:listModels': 'agentConfig.listModels'
+  'agentConfig:getProviders': 'agentConfig.getProviders', 'agentConfig:listModels': 'agentConfig.listModels',
+  'db:getSubtasks': 'db.getSubtasks', 'db:reorderSubtasks': 'db.reorderSubtasks', 'project:moveTask': 'projects.moveTask',
+  'tasks:getCoordinatorTaskId': 'tasks.getCoordinatorTaskId', 'plugin:executeAction': 'plugins.executeAction',
+  'agentSession:startTask': 'agentSession.startTask', 'agentSession:send': 'agentSession.send', 'agentSession:sendByTaskId': 'agentSession.sendByTaskId',
+  'agentSession:abort': 'agentSession.abort', 'agentSession:stopByTaskId': 'agentSession.stopByTaskId', 'agentSession:switchAgent': 'agentSession.switchAgent',
+  'agent:getStartQueue': 'agents.getStartQueue', 'agent:getStartRecoveryState': 'agents.getStartRecoveryState', 'agentSession:getRawTranscript': 'agentSession.getRawTranscript',
+  'captainRuntime:get': 'captainRuntime.get', 'captainRuntime:switch': 'captainRuntime.switch', 'captainRuntime:retry': 'captainRuntime.retry', 'captainRuntime:rollback': 'captainRuntime.rollback',
+  'commander:listSessions': 'commander.listSessions', 'commander:createSession': 'commander.createSession', 'commander:renameSession': 'commander.renameSession',
+  'commander:archiveSession': 'commander.archiveSession', 'commander:listMessages': 'commander.listMessages', 'commander:markRead': 'commander.markRead',
+  'commander:setActiveSession': 'commander.setActiveSession', 'commander:send': 'commander.send', 'commander:getImage': 'commander.getImage',
+  'commander:cancel': 'commander.cancel', 'commander:undoAction': 'commander.undoAction', 'commander:getActivity': 'commander.getActivity',
+  'chat:start': 'chat.start', 'chat:cancel': 'chat.cancel'
 } as const satisfies Record<keyof typeof commands, ApiPath<DesktopApi>>
 export const NATIVE_EVENT_BINDINGS = {
   'task:created': 'onTaskCreated', 'task:updated': 'onTaskUpdated', 'task:deleted': 'onTaskDeleted', 'project:changed': 'projects.onChanged', 'transcript:changed': 'onTranscriptChanged',
   'skills:changed': 'skills.onChanged', 'agent:status': 'onAgentStatus', 'agent:startQueueChanged': 'onAgentStartQueueChanged',
-  'project:statusChanged': 'projects.onStatusChanged', 'concurrency:changed': 'concurrency.onChanged', 'tasks:refresh': 'onTasksRefresh'
+  'project:statusChanged': 'projects.onStatusChanged', 'concurrency:changed': 'concurrency.onChanged', 'tasks:refresh': 'onTasksRefresh',
+  'commander:event': 'commander.onEvent', 'chat:event': 'chat.onEvent'
   // Recovery-state codec exists, but there is no production API binding yet.
 } as const satisfies Partial<Record<keyof typeof events, ApiPath<DesktopApi>>>
-const reads = new Set<keyof typeof commands>(['db:getTasks', 'db:getTask', 'project:getAll', 'project:get', 'project:getDefault', 'settings:get', 'settings:getAll', 'agent:getAll', 'skills:getAll', 'projectRepo:list', 'projectResource:list', 'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage', 'agentConfig:getProviders', 'agentConfig:listModels'])
+const reads = new Set<keyof typeof commands>(['db:getTasks', 'db:getTask', 'project:getAll', 'project:get', 'project:getDefault', 'settings:get', 'settings:getAll', 'agent:getAll', 'skills:getAll', 'projectRepo:list', 'projectResource:list', 'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage', 'agentConfig:getProviders', 'agentConfig:listModels', 'db:getSubtasks', 'tasks:getCoordinatorTaskId', 'agent:getStartQueue',
+  'agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'captainRuntime:get', 'commander:listSessions',
+  'commander:listMessages', 'commander:getImage', 'commander:getActivity'])
 
 export interface NativeDesktopHost extends DesktopHost {
   reconnect: () => Promise<void>
@@ -86,7 +104,8 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
         const revision = operation === 'agentSession:getTranscriptDelta' ? result.maxRev : result.mode === 'delta' && result.hasMore === false ? result.watermark : undefined
         if (typeof revision === 'number') hydratedRevisions.set(String(args[0]), revision)
       }
-      if ((operation === 'agentSession:start' || operation === 'agentSession:resume') && isRecord(result) && typeof result.sessionId === 'string' && result.sessionId) sessionTasks.set(result.sessionId, String(args[1]))
+      if ((operation === 'agentSession:start' || operation === 'agentSession:resume') && isRecord(result) && typeof result.sessionId === 'string' && result.sessionId && !sessionTasks.has(result.sessionId)) sessionTasks.set(result.sessionId, String(args[1]))
+      if (operation === 'agentSession:startTask' && isRecord(result) && typeof result.sessionId === 'string' && result.sessionId && typeof result.startedTaskId === 'string') sessionTasks.set(result.sessionId, result.startedTaskId)
       return result
     }
     if (path === 'onTasksRefresh') return (listener: () => void) => {

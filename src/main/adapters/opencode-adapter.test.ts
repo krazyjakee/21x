@@ -3,11 +3,22 @@ import { OpencodeAdapter } from './opencode-adapter'
 import { attachAndVerifyMcpServers, waitForMcpServersReady } from './opencode-mcp'
 import { setTillDoneSession } from './opencode-runtime-plugins'
 import { SessionStatusType } from './coding-agent-adapter'
+import type { SessionConfig } from './coding-agent-adapter'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
 describe('OpencodeAdapter', () => {
+  it.each(['sdk-error', 'rejected-flight'])('requires actual server acknowledgement of abort (%s)', async cause => {
+    const adapter = new OpencodeAdapter()
+    const abort = cause === 'sdk-error' ? vi.fn(async () => ({ error: { private: 'provider body' } })) : vi.fn(async () => { throw new Error('private provider body') })
+    const internal = adapter as unknown as { clients: Map<string, unknown>; promptAborts: Map<string, AbortController> }
+    internal.clients.set('owned-session', { session: { abort } })
+    const local = new AbortController(); internal.promptAborts.set('owned-session', local)
+    await expect(adapter.abortPrompt('owned-session', { workspaceDir: '/owned-workspace' } as SessionConfig)).rejects.toThrow('OpenCode abort was not confirmed')
+    expect(local.signal.aborted).toBe(true)
+    expect(abort).toHaveBeenCalledWith({ path: { id: 'owned-session' }, query: { directory: '/owned-workspace' } })
+  })
   it('refuses a responding server whose protocol reports unhealthy', async () => {
     const adapter = new OpencodeAdapter()
     vi.spyOn(adapter as unknown as { getClient: () => Promise<unknown> }, 'getClient').mockResolvedValue({ global: { health: async () => ({ data: { healthy: false, version: 'test' } }) } })

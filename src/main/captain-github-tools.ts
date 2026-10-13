@@ -63,7 +63,7 @@ export interface CaptainGithubToolDeps {
   mergeDb?: MergeDb
   /** The delegated issue-write ledger; without it the issue tools answer "not available". */
   issueDb?: IssueWriteDb
-  /** Shows the person a notice. Default: an OS notification when supported. */
+  /** Shows the person a notice through the owning desktop host. */
   notifyUser?: (title: string, body: string) => void
   /** Pushes to the window. Default: the Task API notifier (index.ts sets it). */
   notifyRenderer?: (channel: string, data: unknown) => void
@@ -75,15 +75,8 @@ export function configureCaptainGithubTools(next: CaptainGithubToolDeps | null):
   deps = next
 }
 
-// Electron is loaded on demand: this module sits under the Task API server,
-// which unit tests (and the stdio MCP entry's import graph) load without it.
-function defaultNotifyUser(title: string, body: string): void {
-  import('electron')
-    .then(({ Notification }) => {
-      if (!Notification.isSupported()) return
-      new Notification({ title, body }).show()
-    })
-    .catch((error) => console.error('[CaptainGithubTools] OS notification failed:', error))
+function defaultNotifyUser(_title: string, _body: string): void {
+  console.warn('[CaptainGithubTools] Desktop notification host is unavailable.')
 }
 
 function notifyUser(title: string, body: string): void {
@@ -203,8 +196,8 @@ export function createCaptainCallHandler(): CoordinatorCallHandler {
 }
 
 /** Main-process wiring: answers the Captain's GitHub tools from `db`. */
-export function installCaptainGithubTools(db: DatabaseManager): void {
-  configureCaptainGithubTools({ db, mergeDb: db, issueDb: db })
+export function installCaptainGithubTools(db: DatabaseManager, host: Pick<CaptainGithubToolDeps, 'notifyUser'> = {}): void {
+  configureCaptainGithubTools({ db, mergeDb: db, issueDb: db, ...host })
   setCoordinatorCallHandler(createCaptainCallHandler())
 }
 

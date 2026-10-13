@@ -1,0 +1,327 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "issues": [
+    202,
+    208,
+    210,
+    211,
+    214
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseCommit": "482bf1898f37b3ab1c2abe80854e7c53be951f68",
+    "targetBranch": "master",
+    "schemaVersion": 37,
+    "changedSourceHashes": {
+      "docs/tauri-migration/approval-scope.md": "efb8d6fac17847ed23c7c1990051dfd3aafb9a337c2a81ff6f676b53246cf6b5",
+      "docs/tauri-migration/commander-desktop.md": "dde6e14daf3baa9b7c825767190efdfbf4642bd0a3048d3a57a020fa38a3f5c5",
+      "docs/tauri-migration/event-forwarding-review.json": "e141a215b4e090d36840ec0399f9e1b1ad11e781204db1af63ce328025739518",
+      "docs/tauri-migration/inventory.json": "bc79d7dc02511ba20e7dc4f3d473127d5d014e7c7ee381f1239bbb5e61cd8ac3",
+      "docs/tauri-migration/operations.json": "77a0ff56b9e14f44deec807fc44243b2b58ec05b2a21b927fe8657e90e18a8da",
+      "docs/tauri-migration/production-agent-lifecycle.md": "1968fa49de497cbedf96fac5b1e1401d79974f0e0363b3ecc8708c5504e20a5d",
+      "docs/tauri-migration/production-transport.md": "a158f7868d4c0481503e15cfa3c65abff70e9ee7fc7e43086235586e40292302",
+      "docs/tauri-migration/task-lifecycle.md": "7d4104b24f35aea80e15cb1455136842bd4aa12abcdde1e438a1477052e8c4b0",
+      "package.json": "f450deb29391fdc775a72b8fdeea4f91edeaad69c976a99f52a4bef2624d26a4",
+      "scripts/production-service-proof.test.ts": "68d4e586b1946a145240c813948abcca88d0bdcae902fc513c8c8bc529f61614",
+      "scripts/tauri-stage-production.mjs": "83471c96d01b9809cfbdd5c25009996b4aed7ed4f6ce920c460c55c0f367eec6",
+      "scripts/tauri-stage-production.test.ts": "a7972c130699991598a1304f9633a62f60cf1366c9493bebc43b85eac2df2d2d",
+      "scripts/tauri-test.mjs": "8b7eb66a8df11f0d4be5c8174b85b76981b0cfe39d0d284feb3dda75c840a9a7",
+      "src-tauri/.gitignore": "3d6513f9d6edd4cf7d9e9fdf69da87632aeb62cb496bb416fb38c7e49c303645",
+      "src/main/adapters/acp-adapter.ts": "7130ef4cf37a824727275259ebf4311ce1b3e057ccf70b4ab19bdfe9223db064",
+      "src/main/adapters/claude-code-adapter.ts": "90205c40d2d93f96bc2d3905ffbc40afba028ab34806801c265939b543e33c96",
+      "src/main/adapters/codex-app-server-adapter.test.ts": "27b9c982c5376147043f4415f10d77dd18f3d884df63361ed0032b5e0060e202",
+      "src/main/adapters/codex-app-server-adapter.ts": "f500efa135d85ab7efd2a984086d380c0c68c3cf81672afe4dbdbb3cd4bda3d7",
+      "src/main/adapters/coding-agent-adapter.ts": "5a531045743918e3b57214fdef1d654e70a6bfc52ee6686da63c00dc02a014fb",
+      "src/main/adapters/opencode-adapter.test.ts": "b523a7d3555460fbbb96a54aabf240d04631eeb8006fbef4462f957c691434b8",
+      "src/main/adapters/opencode-adapter.ts": "a23d79c42183912cbf7d36770f4307cbfb1bb31ca539a166fe293192e99c3416",
+      "src/main/adapters/pi-adapter.test.ts": "6edebff7807aa432de7601d8f42b4dbe5a3a839b7d417bb1230c3a69151b09c5",
+      "src/main/adapters/pi-adapter.ts": "63cf4cc2fe3d1affeb5155a6061a228c846346565b0e8c8f52eceddc6498910d",
+      "src/main/adapters/shared/json-rpc-acknowledgement.test.ts": "3b29d941e4d1c20757b9287ba49cb718bb88993fe4e8c670956cc4d11299d128",
+      "src/main/adapters/shared/json-rpc.ts": "b77c96c11a24ce53951ccdf53fc6d575134895ab1c003e790b56bf92353b6d41",
+      "src/main/agent-manager-core.ts": "c7aa4dbedef1f9483524cc84058f3f0d1c19072ec34fce9524c21c0e4f06c66a",
+      "src/main/agent-manager-scoped-approval.test.ts": "fdf7cac0e7d0f971c633c1ff7478087cd6c7e07b4292e143205642af0c2e7448",
+      "src/main/captain-github-tools.ts": "691acd715d3d71cae09382fce17b5cbe9054c5d80e02d9a8a92aa7b821bb990b",
+      "src/main/child-stream-guards.ts": "821e7ba8af6a8035b7fdeff01d042f9326fae6f70e55f4a46dbb0fbbf7264e60",
+      "src/main/platform/native-application-key-store.test.ts": "995b3d78bef3c552e0d2f6c03cef6478468c0bac258c32f72dd9706d4aaaeb1e",
+      "src/main/platform/native-application-key-store.ts": "8af901b1fb94f821be4c6dc34f6329e624064cdddfb0fc717004354d57a61b10",
+      "src/main/task-api-server-core.ts": "386c095021a808b73b8a00cb9d61914f29c209b4af54e3135ce9a41c2eb8c46b",
+      "src/main/task-api-server.ts": "36c34665c4634d0c704d4593e5d7cda051101bd84cfaf25b89c43cf36a81be5b",
+      "src/main/task-updates.ts": "4db22881507ea3edbfcae091193f1cd5d239e260bb9f806911fed0a66aa1c7a4",
+      "src/renderer/src/lib/desktop-rehydration.ts": "3190423b6acff8a3f13a02a622195b02787d0507de406685188ac9b0d2c6fa72",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "89ddadcef81a09e13d8b4c2c94e9349b50f02a171055b0755f46722302d8b8b6",
+      "src/renderer/src/lib/native-desktop-host.ts": "794c16cc5234302a0a116707cfc5667e1bbbec0d6200702a9eff14e279dee07a",
+      "src/renderer/src/stores/commander-desktop-recovery.test.ts": "c152e07aae384ac0489832b824ab684ef8b64263ae20a34b7cddd0c8b82170dd",
+      "src/renderer/src/stores/commander-store.ts": "1560c66e266513086775b25782fc645f378f9fb88d64064aa809f8d8c4fad75b",
+      "src/service/commander-backend.test.ts": "ca622f2a54eb4f37eb416d8e586dbd03dd7b6a40f78f33082855f70a9a9d0724",
+      "src/service/commander-backend.ts": "e3222cd90f3f3e4b17acaf77a631b881cdb1f89a7204be3cc380ae9710062d06",
+      "src/service/production-agent-backend.test.ts": "9829d4f38cd8aca6d05a21817f0bfa1c758a0d443b2253e2bbdbf7d272c66b0f",
+      "src/service/production-agent-backend.ts": "a12bbcae2630901fdcbbd0ea5b5050c7a5312375fbdb96335521a7939d9458ab",
+      "src/service/production-desktop-bindings.test.ts": "097bb8812ac8b948572daef8d28021dc14253a5f0d0b5109deed6bd0fdb86138",
+      "src/service/production-desktop-bindings.ts": "b66d334affa259557c6dc0ade7519d7c727427c17efbb38b2ab70e0b0cd92c00",
+      "src/service/production-owner.ts": "6c492bfd9cb3fb90ead55dc7b7d1fd7e5393fe821221293e6945b0d9448c10e6",
+      "src/service/production-service.test.ts": "7caef2a1419c63eea20271d11edf15d09f61c1600b4412ef26f15bcb96996b22",
+      "src/service/production-service.ts": "b59bb176fac97b1e462c23529b60be70cc9877304d8d6e670be54ad667a3a340",
+      "src/service/production-stdio.ts": "072a4c60b96d600946358b3f58393234807ab80c0899757736c375bfa10e3eba",
+      "src/service/task-lifecycle-backend.test.ts": "71c03d0fb69bb7b5315ac436af84a9f037c93eb5b215091a2fe6530a6605c317",
+      "src/service/task-lifecycle-backend.ts": "10887ad4379963347129a27a78622be8552b1191781cb15dc1f80c3e59c61470",
+      "src/shared/commander-desktop-codecs.test.ts": "86bd7c3ff44da68d41bedcc9750c38ae7119a822efe36fea3c585997ba136d10",
+      "src/shared/commander-desktop-codecs.ts": "c51427814606fcab3af95822bf4f5dc5b55fb6612e1de5a82cc805e6bce67348",
+      "src/shared/desktop-event-forwarding.ts": "43f47cbdade58781e77735b95855193b37f2dd1816364c0dd69e96b7f63e29a5",
+      "src/shared/production-agent-codecs.test.ts": "c1b42a323a4b89db9b8135ab30be70fdc60999d7fb3d5448177e63e550a45eb0",
+      "src/shared/production-agent-codecs.ts": "f75c9ca4541607ae072f2c2bf23d10b3cb2d001f6dcb03c39f61e3270ff6184a",
+      "src/shared/production-agent-events.test.ts": "09a9d876ca5c66f9a3290b9a238c3df83ae9b946fc26fc6c86ae29182fb0feba",
+      "src/shared/production-agent-events.ts": "8a00317e97c71eadfa54deee771830c1d71c897035a362a83128c87215d5d3fe",
+      "src/shared/production-bootstrap.test.ts": "0cfd60a5f33c2a2d5d78f460753bf7c0c6409ca84abd5787e688266682ba5c0f",
+      "src/shared/production-bootstrap.ts": "e79ad23a1e9d4381afe98125fa24fdd3f77fc268269315a1775823c21becfdd0",
+      "src/shared/task-lifecycle-codecs.test.ts": "2e6b63046d576caba46faf0500ed53de2ccef7b572548542d4df33d8630f4ed7",
+      "src/shared/task-lifecycle-codecs.ts": "2183f11cf9f3fac9392342153168fb28325406fa239a39940c780b5510fc7ff7",
+      "vitest.tauri.config.ts": "ceb5391e0897ca60f978e62f29f7fc634e3e2439530b57abe5b77e084efc90d1"
+    }
+  },
+  "environment": {
+    "os": "Linux 6.8.0-139-generic x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "codexSchemaGenerator": "0.162.1 (schema generation only)",
+    "nativeInputDisplay": "owned Xephyr :199",
+    "installedTauriWebView": "not exercised"
+  },
+  "scope": "Actual production singleton/database/task and agent lifecycle/Commander/Chat owners with controlled model and host boundaries; actual staged Node private stdin/stdout/FD3 resource preflight and engine graph loading; scripted native Electron input. Source codecs are separate from native capability grants. No provider inference, OS credential operation, installed Rust production callback/process supervisor, true PTY load, all-OS or independent human acceptance claim.",
+  "bindings": {
+    "productionCommands": 75,
+    "taskLifecycleCommands": 10,
+    "agentLifecycleCommands": 17,
+    "commanderAndChatCommands": 14,
+    "existingPackagedNativeDiagnosticCommands": 38
+  },
+  "implemented": {
+    "202": [
+      "75 finite production codecs using actual domain owners with separate read/write scope and exact wire event projection",
+      "Private launch authority comes from sealed construction/FD3, never renderer bootstrap fields"
+    ],
+    "208": [
+      "Explicit staged standalone production entry checks exact executable, pins, complete physical runtime byte closure and resource/write-path separation before loading SQLite/vendor graph",
+      "Epoch-first initialization and exact mandatory native prepare/drain callbacks, retained raw work and blocked profile ownership",
+      "Protected helper failure/deadline waits actual process close before raw bootstrap settlement; runtime entry never receives credentials in launch descriptor"
+    ],
+    "210": [
+      "Full public ordinary task DTOs, scheduler identity/effects, source acceptance and app-only completion, descendant/attachment cleanup, subtree moves and exact subtask ordering",
+      "Actual manager mutation fence joins accepted sends and prevents overlapping task/agent configuration writers",
+      "No client-controlled role/source/native binding/workspace authority and no unsafe cross-project subtree reparenting"
+    ],
+    "211": [
+      "Actual native pending request IDs across all five adapter implementations; exact task/agent/session/request ownership checked before reply",
+      "Question/permission refusals do not send continuation or manufacture success; private human-response writes await acknowledgement",
+      "Codex structured native question answers match generated v2 schema; foreign thread/turn/retired request events cannot grant approval; allow-mode still asks human questions",
+      "Strict cancellation requires idle confirmation; accepted but unsettled interrupts retain working ownership/polling; OpenCode unsuccessful native abort is rejected and resume never grants stale permissions"
+    ],
+    "214": [
+      "Actual Commander/Chat runtime session/message/image/Undo/cancellation operations with bounded SQL/image preflight, exact session/project grants and caller-owned lightweight Chat events",
+      "Quiet correlated report/outbox behavior preserved, read-only Commander reconnect merges live observations/drafts and fences stale epoch/filter/history results",
+      "Task/agent/Commander publication failures latch admission; initial owner events hydrate durably instead of inventing heartbeat freshness"
+    ]
+  },
+  "artifact": {
+    "buildIdentity": "production-da09817567944af302014c880b1fb465",
+    "resourceManifestSha256": "b0c3c1ef1cb77b1f5629b2ce713e4ab812ce5127d5707bd58ddaed484477f6ef",
+    "verifiedClosureFiles": 6822,
+    "entries": {
+      "node": {
+        "path": "node/node",
+        "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+        "bytes": 124836408
+      },
+      "credentialHelper": {
+        "path": "native/twentyonex-credential-key",
+        "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+        "bytes": 25759896
+      },
+      "stdio": {
+        "path": "service/production-stdio.mjs",
+        "sha256": "bc116cd7a6ddc4080d56d6aa787d1f7aabcb781c5fe332ca9f339c929c5772e9",
+        "bytes": 14304
+      },
+      "engine": {
+        "path": "service/production-engine.mjs",
+        "sha256": "abe6e53861f25dd07a9d416222c29a2da62b23bad5c306f1db5afa6b6082edfe",
+        "bytes": 4425284
+      },
+      "taskMcp": {
+        "path": "service/production-task-mcp.mjs",
+        "sha256": "32c77c2d5c8ec6501f5ffbd912a00234949f104a32dd2b81c134e4335f0da379",
+        "bytes": 759913
+      }
+    },
+    "redistributionReviewComplete": false,
+    "note": "Development staging resources ignored by git; native key helper compiled but never invoked in this batch. Actual private entry proof negotiates and shuts down before native/credential initialization."
+  },
+  "expectedActual": [
+    "Expected cancellation/raw shutdown timeout not to release database/profile/key ownership; controlled actual-owner tests pass.",
+    "Expected quiet report correlation/inbox and exact Undo to survive durable history reload without a paid model turn; actual-store/service tests pass.",
+    "Expected live messages/done/errors/session updates during reconnect to survive older history reads; focused race regressions pass.",
+    "Expected malformed/foreign/stale/wrong native request identity to be refused before effects; domain and real manager tests pass.",
+    "Expected changed staged manifest to produce no frame/profile access; actual standalone Node FD3 proof passes.",
+    "Expected an accepted interrupt still reported busy not to manufacture cancellation completion; actual-manager regression passes."
+  ],
+  "correctionsDuringVerification": [
+    "Corrected the retained hyphenated subtask event name and exact codec registry binding.",
+    "Isolated actual production-owner modules before cold-SDK lifecycle test clocks; preconfigured test secret storage cannot impersonate a production key owner.",
+    "Preserved existing protected-key tests and merged raw helper close/deadline regressions after a test-file collision.",
+    "Used Node isBuiltin for prefix-only native builtins such as node:sqlite; unknown external/Electron imports remain rejected.",
+    "Preserved live Commander observations across reconnect and rejected stale session/search/archive reads.",
+    "Authenticated main-profile grants stay separate from row existence so deleted rows retain their tombstone events; finite domain operations still validate exact references.",
+    "Restarted the expired owned native display before collecting all native input receipts."
+  ],
+  "remainingAcceptance": [
+    "Rust production launcher FD3/private callbacks/process supervision and actual installed host/service/worker crash/forced-quit/reconnect on supported OS families.",
+    "Full settings/credential/configuration effects, native terminal/attachment/file/voice/mobile/connector/canvas services and reviewed capability registration.",
+    "Large history/image pagination and durable lightweight-chat recovery beyond the stated bounds.",
+    "Live authenticated five-backend SDK/CLI/HITL evidence and platform/native process lifetime/outcome proof.",
+    "Historical-profile/release signing/update/performance/redistribution gates and final Electron retirement.",
+    "Hosted #92 explicitly deferred by user; #93/#94 optional unselected; #91/#95 independent manual/platform acceptance remains open."
+  ],
+  "tests": {
+    "application": {
+      "command": "rtk pnpm test:run --maxWorkers=1 --reporter=json --outputFile=.git/issue-closing/batch8-app.json",
+      "passed": 6010,
+      "failed": 0,
+      "skipped": 23,
+      "reportSha256": "8c10947778b586aa1d103fffff3e8ced3636a968b132e7e83d16b87e41324b48"
+    },
+    "standalone": {
+      "command": "rtk pnpm test:tauri --service-proofs --production-proofs --reporter=json --outputFile=.git/issue-closing/batch8-tauri.json",
+      "passed": 2265,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "ccfc1b0f8d839bd0af77b801ea4b23945ac198f2d7528260e9be06f25b7aa91f"
+    },
+    "finalApplicationFollowup": {
+      "command": "rtk pnpm test:run src/main/platform/native-application-key-store.test.ts scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts scripts/tauri-stage-production.test.ts src/renderer/src/stores/commander-desktop-recovery.test.ts --reporter=json --outputFile=.git/issue-closing/batch8-final-followup.json",
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "715f41a0fa4ed2a28bdbf8cb3a8a7723e33f965a4ce604d993b451da9fd90614"
+    },
+    "finalCancellationApplication": {
+      "command": "rtk pnpm test:run src/main/agent-manager-scoped-approval.test.ts src/service/production-agent-backend.test.ts src/main/adapters/acp-adapter.test.ts src/main/agent-manager-activity-outcomes.test.ts src/service/production-service.test.ts --reporter=json --outputFile=.git/issue-closing/batch8-cancellation-delivery.json",
+      "passed": 129,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "27ef6f6e1f0085133858f98d39872e8d03ae69e886bb97a6e47b581d85b0db42"
+    },
+    "finalStandaloneFollowup": {
+      "command": "rtk pnpm test:tauri --production-proofs src/main/agent-manager-scoped-approval.test.ts src/service/production-agent-backend.test.ts src/main/adapters/acp-adapter.test.ts src/main/agent-manager-activity-outcomes.test.ts src/service/production-service.test.ts src/main/platform/native-application-key-store.test.ts scripts/production-service-proof.test.ts scripts/tauri-contracts.test.ts scripts/tauri-inventory.test.ts --reporter=json --outputFile=.git/issue-closing/batch8-tauri-complete.json",
+      "passed": 158,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "7179899aa52f22e2bd6bde8a07a083feeb2f89bd7232857c2f27fbf020075333"
+    }
+  },
+  "verification": {
+    "forcedTypecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": "rtk pnpm lint",
+      "exitCode": 0,
+      "logSha256": "705ae9f2f2f3b02ff2824c4f2535931bcd4b4c9f7ccf1b3f1d9f22f46e262bab",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "shippingBuild": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "logSha256": "26c7578ea5cd3a42c3033abbc748ca1e92707a872ec39b1b66238b23b07dfed0"
+    },
+    "productionRendererBuild": {
+      "command": "rtk pnpm tauri:production:frontend:build",
+      "exitCode": 0,
+      "logSha256": "292bb4e38e9d6ad5d9ef064165249125627cf29c0053d064dd534f726acca0a8"
+    },
+    "diagnosticRendererBuild": {
+      "command": "rtk pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "logSha256": "66c251a6eeb491eb0912c7592392f140283495ce9131d0de0be5f5d944949c2d"
+    },
+    "standaloneDatabaseStage": {
+      "command": "rtk pnpm tauri:prepare:database",
+      "exitCode": 0,
+      "logSha256": "41ecb5bcdbc2e474623317092a8b609aaba63490e55ed5d8210ce24bc14c685f"
+    },
+    "nativeProtectedHelperBuild": {
+      "command": "rtk cargo build --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-credentials --bin twentyonex-credential-key",
+      "exitCode": 0,
+      "logSha256": "fd2c832df066329fe2620879514a1301060a2cbc4dd61510f93a74ec5f5cc7de"
+    },
+    "productionResourceStage": {
+      "command": "rtk pnpm tauri:prepare:production",
+      "exitCode": 0,
+      "logSha256": "c7db8db248c442a954eb43bea1434338a1266a849dfd74892a3c24e555844258"
+    },
+    "inventoryFreshness": {
+      "command": "rtk node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "logSha256": "99ae3b64fa13480ea29da5dcf8518e44cf133390bc7805caea2105f87f6ed1f9"
+    },
+    "contractFreshness": {
+      "command": "rtk node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "diffWhitespace": {
+      "command": "rtk git diff --check",
+      "exitCode": 0,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "nativeCommander": {
+      "command": "DISPLAY=:199 rtk pnpm test:commander-input",
+      "exitCode": 0,
+      "logSha256": "a602cd53167f67182caf2b37096dff3a8687c7307b285aef62da5a79a5b82b0f",
+      "checks": 16
+    },
+    "nativeTaskLayout": {
+      "command": "DISPLAY=:199 rtk pnpm test:task-layout",
+      "exitCode": 0,
+      "logSha256": "5a14fc20023eca64ae8c4a62684dfe69a36f4d7db39ffbabbc7d1f7eddb26089",
+      "checks": 10
+    },
+    "nativeActivity": {
+      "command": "DISPLAY=:199 rtk pnpm test:activity-input",
+      "exitCode": 0,
+      "logSha256": "4325ad99499753c5a887619a25eb15f2f7908d212ff93b763c6948186ab11021",
+      "checks": 13,
+      "passedCases": [
+        "hydration is static and agent health cannot bless a cached dead session",
+        "many cards and canvas mirrors have one motion owner per entity",
+        "successful five-second observations keep an eighteen-second silent tool fresh",
+        "no new observation and a missed done expire at the fifteen-second deadline",
+        "explicit disconnect immediately removes motion and shows unknown",
+        "real hidden/show/focus rechecks elapsed age before motion resumes",
+        "agent epochs, replaced sessions and replayed stamps cannot renew ownership",
+        "late source response and retired Commander epoch are fenced",
+        "new queue push wins over an older in-flight queue read",
+        "cancelled and interrupted Captain/task turns stay Stopped, explicit success alone finishes",
+        "observed review accent settles while Ready for review persists",
+        "both themes honor reduced motion and actual badge contrast",
+        "native NavRail tooltip focus and Commander/PiP share source ownership"
+      ]
+    },
+    "nativeTaskGroups": {
+      "command": "DISPLAY=:199 rtk pnpm test:task-groups",
+      "exitCode": 0,
+      "logSha256": "969b1f0e6f76d8c9e778964f475582dcc964d9d811cdccea8bf89bd403c050c0",
+      "checks": 5,
+      "passedCases": [
+        "one distinct group card, no independently draggable members, keyboard disclosure",
+        "shared Start and HITL target only the hidden execution task",
+        "native pointer drag moves one group unit through the group API",
+        "selected source failure stays selected; app-only approval affects one member",
+        "queued membership refusal is visible; removal preserves shared history"
+      ]
+    }
+  }
+}

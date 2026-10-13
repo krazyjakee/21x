@@ -1,3 +1,4 @@
+import { writeJsonRpcAcknowledged } from './shared/json-rpc'
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 import { AdapterCompactionTracker, compactionFingerprint, promptContextTokens, type AdapterCompactionObservation } from '../sessions/compaction'
 /**
@@ -819,6 +820,12 @@ export class PiAdapter implements CodingAgentAdapter {
     return session.parts.splice(0)
   }
 
+  async getPendingRequests(sessionId: string): Promise<Array<{ requestId: string; responseType: 'permission' | 'question' }>> {
+    const session = this.sessions.get(sessionId)
+    return session ? [...session.pendingUiRequests.values()].map(request => ({ requestId: request.id,
+      responseType: request.method === 'confirm' ? 'permission' : 'question' })) : []
+  }
+
   getPendingApproval(sessionId: string): {
     requestId: string
     toolCallId: string
@@ -853,11 +860,13 @@ export class PiAdapter implements CodingAgentAdapter {
       ? session.pendingUiRequests.get(requestId)
       : Array.from(session.pendingUiRequests.values()).find((item) => item.method === 'confirm')
     if (request?.method !== 'confirm') return false
-    this.sendRecord(session, {
+    const response = {
       type: 'extension_ui_response',
       id: request.id,
       confirmed: approved,
-    })
+    }
+    if (requestId !== undefined) await writeJsonRpcAcknowledged(session, response, 'Pi')
+    else this.sendRecord(session, response)
     session.pendingUiRequests.delete(request.id)
     session.parts.push({
       id: `question-${request.id}`,
@@ -908,11 +917,13 @@ export class PiAdapter implements CodingAgentAdapter {
       return false
     }
     const value = answers[request.title] ?? answers[request.message] ?? answers.answer ?? Object.values(answers)[0] ?? ''
-    this.sendRecord(session, {
+    const response = {
       type: 'extension_ui_response',
       id: request.id,
       value,
-    })
+    }
+    if (requestId !== undefined) await writeJsonRpcAcknowledged(session, response, 'Pi')
+    else this.sendRecord(session, response)
     session.pendingUiRequests.delete(request.id)
     session.parts.push({
       id: `pi-question-${request.id}`,

@@ -1761,3 +1761,53 @@ describe('CodexAppServerAdapter model listing', () => {
     expect(terminate).toHaveBeenCalled()
   })
 })
+
+describe('exact Codex human request ownership', () => {
+  function fixture() {
+    const instance = new CodexAppServerAdapter(), adapter = adapterPrivate(instance), session = createSession()
+    session.threadId = 'thread-1'; session.activeTurnId = 'turn-1'
+    session.process.stdin = Object.assign(new EventEmitter(), { writable: true,
+      write: vi.fn((_bytes: string, callback?: (error?: Error) => void) => { callback?.(); return true }) })
+    adapter.sessions.set('thread-1', session)
+    return { instance, adapter, session }
+  }
+  function request(f: ReturnType<typeof fixture>, id: number, method = 'item/commandExecution/requestApproval', params = {}) {
+    f.adapter.handleRpcMessage(f.session, { jsonrpc: '2.0', id, method,
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: `tool-${id}`, ...params } })
+  }
+  it('preserves multiple live approvals and refuses a stale ID without consuming another callback', async () => {
+    const f = fixture(); request(f, 41); request(f, 42)
+    expect(await f.instance.getPendingRequests('thread-1')).toEqual([
+      { requestId: '41', responseType: 'permission' }, { requestId: '42', responseType: 'permission' }])
+    expect(await f.instance.respondToApproval('thread-1', true, undefined, 'retired')).toBe(false)
+    expect(f.session.process.stdin.write).not.toHaveBeenCalled()
+    expect(await f.instance.respondToApproval('thread-1', true, undefined, '42')).toBe(true)
+    expect(await f.instance.getPendingRequests('thread-1')).toEqual([{ requestId: '41', responseType: 'permission' }])
+  })
+  it('renders structured questions and uses the version-specific answers map even with automatic tool approval', async () => {
+    const f = fixture(); f.session.config.permissionMode = 'allow'
+    request(f, 43, 'item/tool/requestUserInput', { questions: [
+      { id: 'layout', header: 'Layout', question: 'Which layout?', options: [{ label: 'Stage', description: 'Stage first' }] }
+    ] })
+    expect(f.session.process.stdin.write).not.toHaveBeenCalled()
+    expect(f.instance.getPendingApproval('thread-1')).toBeNull()
+    const parts = await f.instance.pollMessages('thread-1', new Set(), new Set(), new Map(), { workspaceDir: '/fixture' } as import('./coding-agent-adapter').SessionConfig)
+    expect(parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: MessagePartType.QUESTION,
+      tool: expect.objectContaining({ name: 'question', requestId: '43', questions: [expect.objectContaining({ id: 'layout', header: 'Layout' })] }) })]))
+    expect(await f.instance.respondToQuestion('thread-1', { Layout: 'Stage' }, { workspaceDir: '/fixture' } as import('./coding-agent-adapter').SessionConfig, '43')).toBe(true)
+    expect(f.session.process.stdin.write).toHaveBeenCalledWith(
+      JSON.stringify({ jsonrpc: '2.0', id: 43, result: { answers: { layout: { answers: ['Stage'] } } } }) + '\n', expect.any(Function))
+    expect(await f.instance.respondToQuestion('thread-1', { Layout: 'Stage' }, {} as import('./coding-agent-adapter').SessionConfig, '43')).toBe(false)
+  })
+  it('refuses foreign thread/turn requests and retires pending questions at the actual terminal boundary', async () => {
+    const f = fixture(); request(f, 45, 'item/commandExecution/requestApproval', { threadId: 'foreign-thread' })
+    request(f, 46, 'item/commandExecution/requestApproval', { turnId: 'retired-turn' })
+    expect(await f.instance.getPendingRequests('thread-1')).toEqual([])
+    request(f, 47, 'item/tool/requestUserInput', { questions: [{ id: 'next', header: 'Next', question: 'Continue?' }] })
+    f.adapter.handleRpcMessage(f.session, { method: 'turn/completed', params: { threadId: 'foreign-thread', turn: { id: 'turn-1' } } })
+    expect(await f.instance.getPendingRequests('thread-1')).toHaveLength(1)
+    f.session.threadId = null
+    f.adapter.handleRpcMessage(f.session, { method: 'turn/completed', params: { turn: { id: 'turn-1' } } })
+    expect(await f.instance.getPendingRequests('thread-1')).toEqual([])
+  })
+})

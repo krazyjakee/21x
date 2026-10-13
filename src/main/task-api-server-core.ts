@@ -33,6 +33,7 @@ export { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTr
 export type TaskApiRouteHandler = (db: DatabaseManager, route: string, params: Record<string, unknown>, scope?: TaskMcpScope) => Promise<unknown>
 interface ServerOwner { db: DatabaseManager; listener: TaskApiListener; startup: Promise<number> }
 export interface TaskApiHost {
+  notifyUser?: (title: string, body: string) => void
   /** Only the legacy adapter supplies the retired embedded browser host. */
   legacyBrowserRoute?: TaskApiRouteHandler
 }
@@ -90,7 +91,7 @@ export function startTaskApiServer(db: DatabaseManager, host: TaskApiHost = {}):
   if ([...owners].some(owner => owner.db === db && !owner.listener.isFullyClosed)) {
     return Promise.reject(new Error('TASK_API_SHUTTING_DOWN'))
   }
-  installCaptainGithubTools(db)
+  installCaptainGithubTools(db, { notifyUser: host.notifyUser })
   const listener: TaskApiListener = new TaskApiListener(async (req, res) => {
     try {
       const url = new URL(req.url || '/', `http://localhost`)

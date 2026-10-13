@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { resolve } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nativeCredentialEnvironment, NativeApplicationKeyStore } from './native-application-key-store'
 
 const mocked = vi.hoisted(() => ({ spawn: vi.fn() }))
@@ -16,6 +16,7 @@ class Child extends EventEmitter {
 
 let child: Child
 beforeEach(() => { child = new Child(); mocked.spawn.mockReset().mockReturnValue(child) })
+afterEach(() => vi.useRealTimers())
 
 describe('native key-store private bootstrap boundary', () => {
   it('retains only OS/keychain/session environment, dropping API secrets and preload hooks', () => {
@@ -62,8 +63,28 @@ describe('native key-store private bootstrap boundary', () => {
 
   it('rejects oversized output and kills the helper without exposing its bytes', async () => {
     const pending = new NativeApplicationKeyStore(helperPath).load('fixture')
-    child.stdout.write(Buffer.alloc(4097, 83))
-    await expect(pending).rejects.toThrow('KEYSTORE_PROTOCOL_ERROR')
+    const settled = vi.fn(); void pending.then(settled, settled)
+    const rejected = expect(pending).rejects.toThrow('KEYSTORE_PROTOCOL_ERROR')
+    const bytes = Buffer.alloc(4097, 83); child.stdout.write(bytes)
+    await Promise.resolve()
+    expect(bytes).toEqual(Buffer.alloc(bytes.length))
     expect(child.kill).toHaveBeenCalled()
+    expect(settled).not.toHaveBeenCalled()
+    child.emit('close', 1)
+    await rejected
   })
+})
+
+it('holds the raw protected-key request after a deadline until actual helper close acknowledges termination', async () => {
+  vi.useFakeTimers()
+  const store = new NativeApplicationKeyStore(helperPath, 10), settled = vi.fn()
+  const result = store.load('fixture-profile')
+  void result.then(settled, settled)
+  const rejected = expect(result).rejects.toMatchObject({ code: 'KEYSTORE_NO_ACCESS' })
+  await vi.advanceTimersByTimeAsync(10)
+  expect(child.kill).toHaveBeenCalledOnce()
+  expect(settled).not.toHaveBeenCalled()
+  child.emit('close', null, 'SIGTERM')
+  await rejected
+  expect(settled).toHaveBeenCalledOnce()
 })

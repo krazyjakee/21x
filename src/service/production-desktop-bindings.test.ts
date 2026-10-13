@@ -10,17 +10,24 @@ import type { DesktopCallerContext } from './transport/desktop-registry'
 import { DATABASE_COMMAND_CODECS } from '../shared/database-desktop-codecs'
 import { CONFIGURATION_COMMAND_CODECS } from '../shared/configuration-desktop-codecs'
 import { CodingAgentType } from '../renderer/src/types'
+import { COMMANDER_COMMAND_CODECS } from '../shared/commander-desktop-codecs'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
-beforeEach(() => vi.resetModules())
+let ownerModule: typeof import('./production-owner')
+let bindingModule: typeof import('./production-desktop-bindings')
+beforeEach(async () => {
+  vi.resetModules()
+  ownerModule = await import('./production-owner')
+  bindingModule = await import('./production-desktop-bindings')
+})
 afterEach(async () => {
   for (const finish of finishers.splice(0)) finish()
   for (const { owner, root } of owned.splice(0)) { await owner.close(); rmSync(root, { recursive: true, force: true }) }
   vi.restoreAllMocks()
 })
 async function fixture() {
-  const { ProductionOwner } = await import('./production-owner')
-  const { ProductionDesktopBindings } = await import('./production-desktop-bindings')
+  const { ProductionOwner } = ownerModule
+  const { ProductionDesktopBindings } = bindingModule
   const root = mkdtempSync(join(tmpdir(), '21x-production-bindings-')), resourceRoot = join(root, 'resources')
   mkdirSync(resourceRoot)
   const keys = new Map<string, Buffer>(), adapter = new FakeAdapter()
@@ -42,6 +49,8 @@ async function fixture() {
   const trusted = (value: DesktopCallerContext) => value.engineEpoch === epoch && value.webviewId === 'main' && value.origin === 'tauri://localhost'
   const options: ProductionDesktopBindingOptions = { authority: {
     isTrustedDesktop: trusted, canAccessProject: (id, value, access) => trusted(value) && !!services.db.getProject(id) && (value.principal === 'trusted-desktop-main') && (access === 'read' || value.webviewId === 'main'),
+    canAccessTask: (_id, value) => trusted(value), canAccessSource: (_id, value) => trusted(value),
+    canAccessSession: (_id, value) => trusted(value), canAccessGlobalCommander: trusted,
     canAccessAgent: (_id, value) => trusted(value), canManageGlobalConfiguration: trusted, canQueryBackend: (_type, _url, value) => trusted(value),
     canCreateProject: trusted, canEditSettings: trusted, canAccessGlobalSkills: trusted, canChangeSkillScope: trusted, canReorderProjects: trusted },
     emit: (operation, payload) => events.push({ operation, payload }), fatal: () => {} }
@@ -52,7 +61,7 @@ async function fixture() {
 describe('reviewed bindings attached to the actual production singleton', () => {
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(39)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(75)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)
@@ -67,13 +76,13 @@ describe('reviewed bindings attached to the actual production singleton', () => 
     await f.owner.close(); expect(db.db.open).toBe(false)
     await expect(f.backend.invoke('db:getTasks', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'DISCONNECTED' })
   })
-  it('denies stale/foreign callers, browser operations and unimplemented lifecycle writes', async () => {
+  it('denies stale/foreign callers, browser operations and nonexistent session owners', async () => {
     const f = await fixture()
     await expect(f.backend.invoke('db:getTasks', {}, { ...f.caller, engineEpoch: 'stale' }, f.signal)).rejects.toMatchObject({ code: 'STALE_EPOCH' })
     await expect(f.backend.invoke('db:getTasks', {}, { ...f.caller, webviewId: 'artifact' }, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     await expect(f.backend.invoke('browser:create', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
-    await expect(f.backend.invoke('db:updateTask', { id: 'invented', data: { status: 'completed' } }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
-    await expect(f.backend.invoke('agentSession:start', { agentId: 'invented', taskId: 'invented' }, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    await expect(f.backend.invoke('db:updateTask', { id: 'invented', data: { status: 'completed' } }, f.caller, f.signal)).resolves.toEqual({ defined: false })
+    await expect(f.backend.invoke('agentSession:start', { agentId: 'invented', taskId: 'invented' }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
   })
   it('keeps a cancelled raw model flight and the database lease until explicit drain retry', async () => {
     const f = await fixture(); let finish!: () => void, entered!: () => void
@@ -94,5 +103,31 @@ describe('reviewed bindings attached to the actual production singleton', () => 
     await expect(f.backend.invoke('db:createTask', { data: { title: 'Denied write' } }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     await expect(f.backend.invoke('db:getTasks', {}, f.caller, f.signal)).resolves.toMatchObject({ defined: true })
     expect(f.services.db.getTasks().some(task => task.title === 'Denied write')).toBe(false)
+  })
+  it('projects actual owner events with current read grants and closes publication on invalid provider output', async () => {
+    const f = await fixture(), task = f.services.db.createTask({ title: 'Scoped event' })!
+    const wire = f.backend.encodeOwnerEvent('task:updated', { taskId: task.id, updates: { title: 'Fresh title' } })
+    expect(f.backend.projectOwnerEvent('task:updated', wire, f.caller)).toEqual(wire)
+    f.options.authority.canAccessTask = () => false
+    expect(f.backend.projectOwnerEvent('task:updated', wire, f.caller)).toBeUndefined()
+    expect(f.backend.projectOwnerEvent('tasks:refresh', {}, f.caller)).toEqual({})
+    f.options.authority.canAccessProject = () => false
+    expect(f.backend.projectOwnerEvent('tasks:refresh', {}, f.caller)).toBeUndefined()
+    const fatal = vi.fn(); f.options.fatal = fatal
+    expect(() => f.backend.encodeOwnerEvent('agent:status', { sessionId: 'invented', taskId: task.id, agentId: 'invented', status: 'manufactured' })).toThrow()
+    expect(fatal).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_RESULT' }))
+    await expect(f.backend.invoke('db:getTasks', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  })
+  it('uses the same Commander store for session creation and durable history while enforcing session read scope', async () => {
+    const f = await fixture(), codec = COMMANDER_COMMAND_CODECS['commander:createSession']
+    const result = await f.backend.invoke('commander:createSession', codec.encodeArguments([{ title: 'Production conversation' }]), f.caller, f.signal)
+    expect(result).toMatchObject({ defined: true, value: { title: 'Production conversation' } })
+    if (!result || typeof result !== 'object' || Array.isArray(result) || !('value' in result) || typeof result.value !== 'object' || !result.value || Array.isArray(result.value)) throw new Error('Missing Commander session')
+    const id = result.value.id as string
+    expect(f.services.commanderStore.getSession(id)?.title).toBe('Production conversation')
+    const history = COMMANDER_COMMAND_CODECS['commander:listMessages']
+    await expect(f.backend.invoke('commander:listMessages', history.encodeArguments([id]), f.caller, f.signal)).resolves.toMatchObject({ value: { messages: [], activeTurnId: null } })
+    f.options.authority.canAccessSession = () => false
+    await expect(f.backend.invoke('commander:listMessages', history.encodeArguments([id]), f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
   })
 })
