@@ -1,0 +1,29 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "e272f50",
+  "scope": "Standalone Node connector transport and dual utility/Node IPC host entry. Real compiled host loads pinned Trello and runs its no-network disable hook. Test assets use repository packages; production packaged resource staging and runtime selection remain open.",
+  "sourceSha256": {
+    "src/main/connectors/piece-host/node-transport.ts": "a3dc7e83e041664fa07f07ce70b68ecb308cf229a70c8eaccb856bf984074854",
+    "src/main/connectors/piece-host/host-entry.ts": "e86c91618653dd71ca44123107e5880cbb049a164a2280aa8f1a0f0744156481",
+    "src/main/connectors/piece-host/worker-environment.ts": "75047a4537e34a626935e3cfcab08ad10680a382233a695392071c9ad8ec73eb",
+    "src/main/connectors/piece-host/utility-transport.ts": "df6acfee2c772952453516ac71f988f785b0d8c6bb1b2c851e087ec4dc8c854b",
+    "src/main/connectors/piece-host/node-transport.test.ts": "431c27228dd89ba1dae5f5b149934cd79f608841e2c948a5f678c8efe3b61f38",
+    "test/fixtures/piece-node-worker.cjs": "6500193eaade327dbe5ea7aa239417990bdbe9c5a17f536a7e7b8f09ef75463b"
+  },
+  "tests": {
+    "standalone": {
+      "passed": 22,
+      "skipped": 0,
+      "files": 2,
+      "reportSha256": "1a289c3a7ed06b447e80883c8b7c3a9372f809271452a79f1583cdefc8e260b5"
+    }
+  },
+  "newTransportCases": 4,
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

@@ -23,6 +23,7 @@ const mainFiles = [
   'test/tauri-runtime.test.ts',
   'src/main/node-worker-runtime.test.ts',
   'src/main/connectors/piece-host/piece-host.test.ts',
+  'src/main/connectors/piece-host/node-transport.test.ts',
   'src/main/connectors/oauth-lifetime.test.ts',
   'src/main/connectors/bridge/scheduler-lifetime.test.ts',
   'src/main/oauth/local-oauth-server.test.ts',

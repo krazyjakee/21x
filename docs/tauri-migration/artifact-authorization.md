@@ -76,3 +76,11 @@ GUI receipt at `942af9c` distinguishes an immediate string failure from a timeou
 TypeError or missing transport, but does not establish its native error class.
 Exact pinned origin-parser classifications were added at `40f8061`; both remain
 failures under v2, and no arbitrary error text is recorded.
+
+The [Windows retry at `0604c83`](https://github.com/krazyjakee/21x/actions/runs/38340619029)
+reached the installed GUI and identified `Origin header is not a valid URL` from
+pinned Tauri's native request parser. Its [failed report](evidence/installed-artifact-0604c83-windows-x64-origin-failed-gui.json)
+records `directInvalidOrigin: true`, no accepted call, no timeout, and all three
+separate-WebView ACL denials. WebView2 reported `131.0.2903.86`. The parser rejects
+the opaque frame before ACL evaluation; this remains a failed v2 authorization
+receipt. It does not establish authenticated direct-frame IPC exclusion.

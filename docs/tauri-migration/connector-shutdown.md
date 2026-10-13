@@ -35,3 +35,14 @@ The [four-target service-only worker receipts](evidence/service-workers-four-tar
 at `b995a2f` passed the real bundled-Node IPC child control and all six startup/
 transcript controls on Windows, macOS x64/arm64 and Linux. They remain service-only
 proofs and precede the later OAuth lifetime changes.
+
+`createNodeProcessTransport` now starts the connector host using the owning
+standalone Node executable, with no inherited preloads or agent credentials.
+It preserves structured messages and reports actual process close, including to
+late exit listeners. The host entry supports Node IPC as well as utilityProcess,
+keeps the existing allowlist/TLS guard, and exits if its Node parent disconnects.
+[Local transport evidence](evidence/connector-node-transport-local.json) includes
+the real compiled host loading pinned Trello and executing its local disable
+hook with system Node hidden. The Electron runtime still selects utilityProcess;
+packaged connector assets, resource containment and service runtime selection
+remain to integrate. This control does not exercise a provider API.
