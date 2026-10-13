@@ -17,12 +17,19 @@
       "skipped": 0,
       "files": 2,
       "reportSha256": "1a289c3a7ed06b447e80883c8b7c3a9372f809271452a79f1583cdefc8e260b5"
+    },
+    "standaloneAndServiceBeforeMatcherChange": {
+      "passed": 526,
+      "skipped": 0,
+      "files": 51,
+      "reportSha256": "9f74933fa68932927968a2f8807ef45e602faba0291d5dbc5c367c30e9281493"
     }
   },
   "newTransportCases": 4,
   "checks": {
     "forcedTypecheck": "passed",
-    "changedSourceLint": "passed"
+    "changedSourceLint": "passed",
+    "legacyDesktopBuild": "passed"
   },
   "productionReady": false,
   "electronRetirementReady": false

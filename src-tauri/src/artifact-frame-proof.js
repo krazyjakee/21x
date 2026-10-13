@@ -1,6 +1,7 @@
 /** Opaque sandbox frame: no same-origin, popups, navigation, downloads or native grants. */
 (() => {
   let started = false;
+  const nativeDenial = __21X_DENIAL_MATCHER__;
   const report = { parentAccessDenied: false, parentGlobalDenied: false,
     frameBridgeAbsent: typeof window.__TAURI__?.core?.invoke !== 'function',
     relayDesktopDenied: false, relayStatusDenied: false, relayListenDenied: false,
@@ -34,7 +35,7 @@
         if (typeof value === 'function') value();
         report.directAccepted = true;
       } catch (error) {
-        report[key] = error?.code === 'UNAUTHORIZED' || typeof error === 'string' && /not allowed|not authorized|denied/i.test(error);
+        report[key] = nativeDenial(error, { directDesktopDenied: 'desktop', directStatusDenied: 'status', directListenDenied: 'listen' }[key]);
         if (error?.code === 'PROOF_DEADLINE') report.directDeadlineReached = true;
         else if (!report[key]) {
           report.directUnrecognizedFailure = true;

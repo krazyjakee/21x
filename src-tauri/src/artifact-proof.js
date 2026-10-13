@@ -3,6 +3,7 @@
   const result = { complete: false, phase: configuration.mode };
   window.__21X_ARTIFACT_PROOF__ = result;
   const native = window.__TAURI__;
+  const nativeDenial = __21X_DENIAL_MATCHER__;
   result.transportAvailable = typeof native?.core?.invoke === 'function' && typeof native?.event?.listen === 'function';
   const commands = {
     desktop: () => native.core.invoke('desktop_invoke', { operation: 'db:getTasks', payload: {}, engineEpoch: configuration.engineEpoch }),
@@ -22,7 +23,7 @@
       // Accept only recognized native authorization errors, never absence,
       // malformed arguments, unknown commands, generic failure or timeout.
       if (error?.code === 'PROOF_DEADLINE') result.deadlineReached = true;
-      return error?.code === 'UNAUTHORIZED' || typeof error === 'string' && /not allowed|not authorized|denied/i.test(error);
+      return nativeDenial(error, command);
     } finally { clearTimeout(timeout); }
   }
   if (configuration.mode === 'main') {

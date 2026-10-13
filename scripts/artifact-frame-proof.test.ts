@@ -3,7 +3,8 @@ import { resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const script = readFileSync(resolve('src-tauri/src/artifact-frame-proof.js'), 'utf8')
+const matcher = readFileSync(resolve('src-tauri/src/artifact-denial-matcher.js'), 'utf8')
+const script = readFileSync(resolve('src-tauri/src/artifact-frame-proof.js'), 'utf8').replace('__21X_DENIAL_MATCHER__', matcher)
 
 function frame(native?: { core: { invoke: ReturnType<typeof vi.fn> }; event: { listen: ReturnType<typeof vi.fn> } }) {
   const completed: Record<string, unknown>[] = []
@@ -34,8 +35,12 @@ describe('opaque artifact frame diagnostic', () => {
       parentAccessDenied: true, parentGlobalDenied: true, relayDesktopDenied: true, relayStatusDenied: true, relayListenDenied: true })
   })
 
-  it.each([{ code: 'UNAUTHORIZED' }, 'plugin:event|listen not allowed'])('requires native authorization errors when APIs are injected: %s', async error => {
-    const native = { core: { invoke: vi.fn(async () => { throw error }) }, event: { listen: vi.fn(async () => { throw error }) } }
+  it.each(['native-code', 'release-acl', 'debug-acl'])('requires native authorization errors when APIs are injected: %s', async format => {
+    const error = (raw: string, pretty: string) => format === 'native-code' ? { code: 'UNAUTHORIZED' }
+      : format === 'release-acl' ? `Command ${raw} not allowed by ACL`
+        : `${pretty} not allowed on window "artifact-proof", webview "artifact-proof", URL: local\n\nallowed on: [windows: "main", URL: local]\n\nreferenced by: capability: main, permission: allow-command`
+    const native = { core: { invoke: vi.fn(async command => { throw error(command, command) }) },
+      event: { listen: vi.fn(async () => { throw error('plugin:event|listen', 'event.listen') }) } }
     const { completed } = frame(native)
     await vi.waitFor(() => expect(completed).toHaveLength(1))
     expect(native.core.invoke).toHaveBeenNthCalledWith(1, 'desktop_invoke', {
@@ -75,6 +80,17 @@ describe('opaque artifact frame diagnostic', () => {
     expect(completed).toHaveLength(1)
     expect(completed[0]).toMatchObject({ directDesktopDenied: false, directStatusDenied: false,
       directListenDenied: false, directDeadlineReached: true, directUnrecognizedFailure: false })
+  })
+
+  it.each(['engine_status not allowed. Command not found', 'event.listen not allowed. Plugin not found',
+    'Network permission denied', 'desktop_invoke not authorized', 'Command other_command not allowed by ACL'])
+  ('rejects unrelated denial text and missing native commands: %s', async error => {
+    const native = { core: { invoke: vi.fn(async () => { throw error }) },
+      event: { listen: vi.fn(async () => { throw error }) } }
+    const { completed } = frame(native)
+    await vi.waitFor(() => expect(completed).toHaveLength(1))
+    expect(completed[0]).toMatchObject({ directDesktopDenied: false, directStatusDenied: false,
+      directListenDenied: false, directUnrecognizedFailure: true, directAccepted: false })
   })
 
   it.each([

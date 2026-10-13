@@ -15,16 +15,18 @@ const LABEL: &str = "artifact-proof";
 const SCHEME: &str = "artifact-proof";
 const SCRIPT: &str = include_str!("artifact-proof.js");
 const FRAME_SCRIPT: &str = include_str!("artifact-frame-proof.js");
+const DENIAL_MATCHER: &str = include_str!("artifact-denial-matcher.js");
 
 pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.register_uri_scheme_protocol(SCHEME, |context, request| {
         let enabled = context.app_handle().try_state::<std::sync::Arc<crate::NativeSmoke>>()
             .is_some_and(|smoke| smoke.enabled());
         let permitted = enabled && context.webview_label() == LABEL && request.method() == "GET";
+        let frame_script = FRAME_SCRIPT.replace("__21X_DENIAL_MATCHER__", DENIAL_MATCHER);
         let (kind, body): (&str, &[u8]) = match (permitted, request.uri().path()) {
             (true, "/outer") => ("text/html", b"<!doctype html><meta charset=utf-8><title>Artifact authorization diagnostic</title><iframe id=hostile-artifact sandbox=allow-scripts src=frame></iframe>"),
             (true, "/frame") => ("text/html", b"<!doctype html><meta charset=utf-8><title>Opaque hostile fixture</title><script src=frame.js></script>"),
-            (true, "/frame.js") => ("text/javascript", FRAME_SCRIPT.as_bytes()),
+            (true, "/frame.js") => ("text/javascript", frame_script.as_bytes()),
             _ => ("text/plain", b"Artifact diagnostic resource unavailable."),
         };
         // This protocol exists only in this debug feature, only for this label.
@@ -40,10 +42,12 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
 }
 
 fn script(mode: &str, epoch: &str) -> String {
-    SCRIPT.replace(
-        "__21X_PROOF_CONFIG__",
-        &json!({"mode":mode,"engineEpoch":epoch}).to_string(),
-    )
+    SCRIPT
+        .replace("__21X_DENIAL_MATCHER__", DENIAL_MATCHER)
+        .replace(
+            "__21X_PROOF_CONFIG__",
+            &json!({"mode":mode,"engineEpoch":epoch}).to_string(),
+        )
 }
 fn evaluate(window: &WebviewWindow) -> Option<Value> {
     evaluate_expression(window, "window.__21X_ARTIFACT_PROOF__ || null")

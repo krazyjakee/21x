@@ -84,3 +84,12 @@ records `directInvalidOrigin: true`, no accepted call, no timeout, and all three
 separate-WebView ACL denials. WebView2 reported `131.0.2903.86`. The parser rejects
 the opaque frame before ACL evaluation; this remains a failed v2 authorization
 receipt. It does not establish authenticated direct-frame IPC exclusion.
+
+The denial matcher now accepts only the fixed native `UNAUTHORIZED` code or
+command-specific release/debug ACL formats from the pinned Tauri source. Generic
+denial wording, unknown command/plugin messages and another command's ACL error
+fail the control. Both diagnostic documents use the same compiled matcher.
+[Local evidence](evidence/artifact-denial-matcher-local.json) records fourteen
+frame controls, twenty-one package policy/provenance controls and three native
+tests. New package runs retain checksums even before the GUI starts and can retain
+contained runtime/process observations on failure without changing acceptance.
