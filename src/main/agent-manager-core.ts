@@ -5124,6 +5124,11 @@ export class AgentManager extends EventEmitter {
   }
 
   async getProviders(serverUrl?: string, directory?: string, backendType?: string): Promise<{ providers: { id: string; name: string; [key: string]: unknown }[]; default: Record<string, string> } | null> {
+    return this.ownShutdownWork(this.getProvidersNow(serverUrl, directory, backendType))
+  }
+
+  private async getProvidersNow(serverUrl?: string, directory?: string, backendType?: string): ReturnType<AgentManager['getProviders']> {
+    if (this.shuttingDown) return null
     try {
       const defaultAgent = this.defaultAgent()
       const baseUrl = serverUrl || defaultAgent?.server_url || DEFAULT_SERVER_URL
@@ -5151,8 +5156,11 @@ export class AgentManager extends EventEmitter {
           // notifyConfigChanged already logs; proceed with cached config
         }
       }
-
-      return await adapter.getProviders(baseUrl, directory)
+      // A settings refresh can finish after shutdown started. Keep its raw
+      // flight owned, and never start another provider operation afterward.
+      if (this.shuttingDown) return null
+      const providers = await adapter.getProviders(baseUrl, directory)
+      return this.shuttingDown ? null : providers
     } catch (error: unknown) {
       console.log('[AgentManager] Could not get providers:', error instanceof Error ? error.message : error)
       return null
@@ -5164,10 +5172,16 @@ export class AgentManager extends EventEmitter {
    * backend has no such listing or the CLI could not be asked.
    */
   async listModels(backendType: string): Promise<BackendModel[] | null> {
+    return this.ownShutdownWork(this.listModelsNow(backendType))
+  }
+
+  private async listModelsNow(backendType: string): Promise<BackendModel[] | null> {
+    if (this.shuttingDown) return null
     const adapter = this.getAdapterByType(backendType)
     if (!adapter?.listModels) return null
     try {
-      return await adapter.listModels()
+      const models = await adapter.listModels()
+      return this.shuttingDown ? null : models
     } catch (error: unknown) {
       console.log(`[AgentManager] Could not list ${backendType} models:`, error instanceof Error ? error.message : error)
       return null

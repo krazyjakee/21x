@@ -1,0 +1,139 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "23109a4de0c1b2a140361cfd5f677a4a24c508bd",
+  "workflowRun": "https://github.com/krazyjakee/21x/actions/runs/38323026423",
+  "proofMode": "synthetic-agent",
+  "scope": "Installed debug synthetic agent flow on macOS x64/arm64 and Linux x64; not production or full four-target acceptance.",
+  "targets": [
+    {
+      "target": "macos-x64",
+      "hostArch": "x86_64",
+      "conclusion": "success",
+      "jobUrl": "https://github.com/krazyjakee/21x/actions/runs/38323026423/job/115055263759",
+      "compactArtifactId": 11780017186,
+      "compactArtifactSha256": "79e3076a37722b98534846e2f5e4e1c50ef01bb186d7c5e4d6896626e9af0a9b",
+      "packageSha256": "91fafcd75a27a6a82cd96e0e9e24e221d07eea8dd32ddf961f46155ae393f5e2",
+      "guiReceiptsPassed": 20,
+      "retained": {
+        "packaged-gui-smoke.json": {
+          "path": "installed-agent-23109a4-macos-x64-packaged-gui-smoke.json",
+          "sha256": "e7af5c4b2c5aa51ef329703ea1e7d017f1f16c19b9da80fac6deac3ecf26c80f"
+        },
+        "configuration-service-proof.json": {
+          "path": "installed-agent-23109a4-macos-x64-configuration-service-proof.json",
+          "sha256": "929521047a97e3610218841dbd8228d977df3027b6479a38d2063a0dcab0af99"
+        },
+        "transcript-page-proof.json": {
+          "path": "installed-agent-23109a4-macos-x64-transcript-page-proof.json",
+          "sha256": "0fa3fa98d05fc16b9527eb92529c0558d22e66819a1e46f34981c66f57e0d7d1"
+        },
+        "agent-service-proof.json": {
+          "path": "installed-agent-23109a4-macos-x64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "agent-desktop-proof.json": {
+          "path": "installed-agent-23109a4-macos-x64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "staged-native-preflight.json": {
+          "path": "installed-agent-23109a4-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "database-proof.json": {
+          "path": "installed-agent-23109a4-macos-x64-database-proof.json",
+          "sha256": "dddfee22c5977c8e9a71be1173b3bc011df0031c515176aa6ed4b79951830260"
+        }
+      }
+    },
+    {
+      "target": "macos-arm64",
+      "hostArch": "aarch64",
+      "conclusion": "success",
+      "jobUrl": "https://github.com/krazyjakee/21x/actions/runs/38323026423/job/115055263695",
+      "compactArtifactId": 11781110681,
+      "compactArtifactSha256": "1260ebb8eb47904eccd0c8c33a955c08ecb0bb6e009e54f0541ae44f293f54f6",
+      "packageSha256": "94f24f6691f027cb707a98bde5fce6c55436505ecbccb621561b86118c3e4a63",
+      "guiReceiptsPassed": 20,
+      "retained": {
+        "packaged-gui-smoke.json": {
+          "path": "installed-agent-23109a4-macos-arm64-packaged-gui-smoke.json",
+          "sha256": "b422a789cd8f0cf6c99f29c5c0c9f0a7d76656fb1752c395091ed0f677c24d8a"
+        },
+        "configuration-service-proof.json": {
+          "path": "installed-agent-23109a4-macos-arm64-configuration-service-proof.json",
+          "sha256": "929521047a97e3610218841dbd8228d977df3027b6479a38d2063a0dcab0af99"
+        },
+        "transcript-page-proof.json": {
+          "path": "installed-agent-23109a4-macos-arm64-transcript-page-proof.json",
+          "sha256": "0fa3fa98d05fc16b9527eb92529c0558d22e66819a1e46f34981c66f57e0d7d1"
+        },
+        "agent-service-proof.json": {
+          "path": "installed-agent-23109a4-macos-arm64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "agent-desktop-proof.json": {
+          "path": "installed-agent-23109a4-macos-arm64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "staged-native-preflight.json": {
+          "path": "installed-agent-23109a4-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "database-proof.json": {
+          "path": "installed-agent-23109a4-macos-arm64-database-proof.json",
+          "sha256": "dddfee22c5977c8e9a71be1173b3bc011df0031c515176aa6ed4b79951830260"
+        }
+      }
+    },
+    {
+      "target": "linux-appimage-x64",
+      "hostArch": "x86_64",
+      "conclusion": "success",
+      "jobUrl": "https://github.com/krazyjakee/21x/actions/runs/38323026423/job/115055263740",
+      "compactArtifactId": 11780628065,
+      "compactArtifactSha256": "5e98899055ba076b09dfc502ab59b98b66e452263603b0e1fbb4a5414e51203a",
+      "packageSha256": "9e334220a1e5c1f7bab40a9ed10130f48c5271951acc2284088e1b0e9703ac31",
+      "guiReceiptsPassed": 20,
+      "retained": {
+        "packaged-gui-smoke.json": {
+          "path": "installed-agent-23109a4-linux-appimage-x64-packaged-gui-smoke.json",
+          "sha256": "c93275e8b6c6374aeac6616e4e7499f141e6177e1d1002a143ee2cf33b0c933b"
+        },
+        "configuration-service-proof.json": {
+          "path": "installed-agent-23109a4-linux-appimage-x64-configuration-service-proof.json",
+          "sha256": "929521047a97e3610218841dbd8228d977df3027b6479a38d2063a0dcab0af99"
+        },
+        "transcript-page-proof.json": {
+          "path": "installed-agent-23109a4-linux-appimage-x64-transcript-page-proof.json",
+          "sha256": "0fa3fa98d05fc16b9527eb92529c0558d22e66819a1e46f34981c66f57e0d7d1"
+        },
+        "agent-service-proof.json": {
+          "path": "installed-agent-23109a4-linux-appimage-x64-agent-service-proof.json",
+          "sha256": "d309297c736fadc4bfd6cd02cfabb8932225f1b1fec694fa8ab148cc87b155e2"
+        },
+        "agent-desktop-proof.json": {
+          "path": "installed-agent-23109a4-linux-appimage-x64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "staged-native-preflight.json": {
+          "path": "installed-agent-23109a4-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "database-proof.json": {
+          "path": "installed-agent-23109a4-linux-appimage-x64-database-proof.json",
+          "sha256": "dddfee22c5977c8e9a71be1173b3bc011df0031c515176aa6ed4b79951830260"
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "All three Unix targets passed. The matrix conclusion is failure because Windows failed scanner loading before packaging.",
+    "The Windows retry at 8b9954a passed portable tests/report capture but failed bundled-service initialization with DISCONNECTED before native compilation. Diagnosis/retry remains open.",
+    "Portable tests passed on Unix (460 cases/41 files), but pnpm separator forwarding prevented JSON report capture. Source 8b9954a fixes and requires that report; its hosted Verify passed.",
+    "Artifact authorization is running separately on 8b9954a. Production/release and retirement gates remain open."
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "workflowConclusion": "failure"
+}

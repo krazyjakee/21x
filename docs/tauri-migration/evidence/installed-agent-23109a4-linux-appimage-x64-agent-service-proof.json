@@ -1,0 +1,14 @@
+{
+  "reportVersion": 1,
+  "passed": true,
+  "actualBundledService": true,
+  "phase": "complete",
+  "publicFixtureIdentity": true,
+  "actualApprovalProjection": true,
+  "pendingOwnerSnapshot": true,
+  "approvalAcceptedAndCompleted": true,
+  "staleApprovalAndActiveDeleteDenied": true,
+  "managedTaskDeletionRemainsUnbound": true,
+  "eventCount": 14,
+  "syntheticProfileRemoved": true
+}

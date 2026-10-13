@@ -109,6 +109,17 @@ export async function runTranscriptPageProof({ serviceEntry, node = process.env.
       oversizedFieldPreviewOnly: true, missingTaskAndMalformedRequestsDenied: true, acknowledgedServiceExit: true })
   } catch (error) {
     report.errorCode = ['INVALID_RESULT', 'INVALID_REQUEST', 'INVALID_ARGUMENTS', 'FRAME_TOO_LARGE', 'STALE_EPOCH', 'TIMEOUT', 'DISCONNECTED'].includes(error.code) ? error.code : 'PROOF_FAILED'
+    // Fixed classifications only: never publish arbitrary dependency stderr.
+    const diagnostics = client.diagnostics()
+    const bootstrap = ['runtime', 'dependencies', 'engine'].find(stage => diagnostics.includes(`[database-service] trusted bootstrap ${stage} unavailable\n`))
+    const startup = ['runtime', 'stdio', 'profile', 'resources'].find(stage => diagnostics.includes(`[database-service] startup ${stage} unavailable\n`))
+    report.serviceFailureStage = bootstrap ? `bootstrap-${bootstrap}` : startup ? `startup-${startup}`
+      : diagnostics.includes('[database-service] startup failed\n') ? 'startup' : 'unclassified'
+    if (error.code === 'DISCONNECTED') {
+      const exit = await client.waitClosed()
+      report.serviceExitCode = exit.code
+      report.serviceExitSignal = exit.signal
+    }
   } finally {
     try { await client.stop(); await rm(profileRoot, { recursive: true, force: true }); report.syntheticProfileRemoved = true }
     catch { report.passed = false; report.syntheticProfileRemoved = false }

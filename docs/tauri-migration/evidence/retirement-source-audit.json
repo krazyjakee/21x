@@ -4,7 +4,7 @@
     "package.json": "713504fea3119509b367606ba78ab18b6665da9df32725a09839552a27041cac",
     "vite.tauri.config.ts": "19bdd613e845a8776edc91af70645a4efb593f9b22f7e773945de478ba1d1b45",
     "src-tauri/tauri.conf.json": "dd4d99c96496b93d4629860ce188e5b5a674acf8bc6be31630c3937f13971c18",
-    "src/service/database-service.ts": "8e00306a0c7049c46e85bdc6d7176c47507967a89c9b898cd313c3f3e4bac7c9",
+    "src/service/database-service.ts": "bb20b495c2db9724a52cdaac8dffadcb6d5517afea3fc7ac73564746f2a8a456",
     "src/service/configuration-backend.ts": "42efdec80e5e8de2743760771fb5530d2b3497035a327c264064fb62da3ecdbd",
     "src/service/agent-backend.ts": "4f805731787787d01afafa16d6607cc0c56bee665a40626c56003d509f239d02",
     "src/shared/database-desktop-codecs.ts": "1301a41eaa42001a31430f136e14081fd79b636596426eee8c5af02037b3c928",
@@ -14,9 +14,9 @@
     "src-tauri/engine/src/configuration_desktop.rs": "e51edc68156533ef5308d0770a74c338f3c2500c2172d295b03fcb3e7ecabc88",
     "src-tauri/engine/src/agent_desktop.rs": "99e0b3a94925617884d993c8d6d861324ab230951e2bbeb24c2b40a8789318fa",
     "src/renderer/src/lib/ipc-client.ts": "6f91f28183a7c05709613cd5071c5b3eeb0d415c3e81acb889e1db3b79241a78",
-    "docs/tauri-migration/operations.json": "fb4b7251472cb192098491baa4b6dc2585256a019ae1dff0743895d2889648f5"
+    "docs/tauri-migration/operations.json": "1b49bd688fb7171d1c572fe3cd2ee3705c96189d66970970e938330a2114f212"
   },
-  "sourceInventorySha256": "03cd8e5a2f3a7bd630f9185919f141bf6688aea6a5f9755df12ef644250b4dc9",
+  "sourceInventorySha256": "2566c4845dde7be9707aa3f8a8ad5ceddf52ee3a710a86b4297f2ab92be2646d",
   "productionReady": false,
   "electronRetirementReady": false,
   "methodology": "Source inventory and explicit scoped codec lists, reviewed against current synthetic service/native bootstrap. Counts are declarations, not production authority, complete semantics, installed evidence or a gate pass. The 18 content-only configuration bindings share the packaged synthetic database and exact native policy; Agent CRUD and lifecycle settings remain unbound.",

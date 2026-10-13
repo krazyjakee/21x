@@ -1797,6 +1797,84 @@ describe('AgentManager shutdown', () => {
     await stopped
   }
 
+  it.each(['resolve', 'reject'] as const)('owns a pending provider configuration refresh through shutdown when it will %s', async outcome => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let finish!: () => void
+    const refresh = new Promise<void>((resolve, reject) => { finish = outcome === 'resolve' ? resolve : () => reject(new Error('Unavailable provider')) })
+    const fake = Object.assign(new FakeAdapter(), {
+      notifyConfigChanged: vi.fn(() => refresh), getProviders: vi.fn(async () => ({ providers: [], default: {} }))
+    })
+    vi.mocked(PiAdapter).mockImplementationOnce(function () { return fake } as unknown as typeof PiAdapter)
+    const db = createMockDb({ coding_agent: 'pi' })
+    const mgr = new AgentManager(db)
+    const listing = mgr.getProviders()
+    try {
+      expect(fake.notifyConfigChanged).toHaveBeenCalledOnce()
+      await expectIncompleteShutdown(mgr)
+      vi.mocked(db.getAgents).mockClear()
+      await expect(mgr.getProviders()).resolves.toBeNull()
+      expect(db.getAgents).not.toHaveBeenCalled()
+      finish()
+      await expect(listing).resolves.toBeNull()
+      expect(fake.getProviders).not.toHaveBeenCalled()
+      await mgr.stopAllSessions()
+    } finally {
+      finish()
+      await listing
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['providers', 'models'] as const)('owns an outstanding %s listing without a live session and rejects late results', async kind => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    const fake = Object.assign(new FakeAdapter(), {
+      getProviders: vi.fn(async () => { await held; return { providers: [{ id: 'provider', name: 'Provider' }], default: {} } }),
+      listModels: vi.fn(async () => { await held; return [{ id: 'model', name: 'Model' }] })
+    })
+    vi.mocked(PiAdapter).mockImplementationOnce(function () { return fake } as unknown as typeof PiAdapter)
+    const db = createMockDb({ coding_agent: 'pi' })
+    const mgr = new AgentManager(db)
+    const read = () => kind === 'providers' ? mgr.getProviders() : mgr.listModels('pi')
+    const listing = read()
+    const method = kind === 'providers' ? fake.getProviders : fake.listModels
+    try {
+      expect(method).toHaveBeenCalledOnce()
+      expect(mgr.getActiveSessionsForTask('task-1')).toEqual([])
+      await expectIncompleteShutdown(mgr)
+      vi.mocked(db.getAgents).mockClear()
+      await expect(read()).resolves.toBeNull()
+      expect(db.getAgents).not.toHaveBeenCalled()
+      expect(method).toHaveBeenCalledOnce()
+      finish()
+      await expect(listing).resolves.toBeNull()
+      await mgr.stopAllSessions()
+    } finally {
+      finish()
+      await listing
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([false, true])('preserves live provider/model reads when configuration refresh failure is %s', async refreshFails => {
+    const providers = { providers: [{ id: 'provider', name: 'Provider' }], default: {} }
+    const models = [{ id: 'model', name: 'Model' }]
+    const fake = Object.assign(new FakeAdapter(), {
+      notifyConfigChanged: vi.fn(async () => { if (refreshFails) throw new Error('Use cached configuration') }),
+      getProviders: vi.fn(async () => providers), listModels: vi.fn(async () => models)
+    })
+    vi.mocked(PiAdapter).mockImplementationOnce(function () { return fake } as unknown as typeof PiAdapter)
+    const mgr = new AgentManager(createMockDb({ coding_agent: 'pi' }))
+    try {
+      await expect(mgr.getProviders('http://localhost:1234', '/fixture')).resolves.toEqual(providers)
+      expect(fake.getProviders).toHaveBeenCalledWith('http://localhost:1234', '/fixture')
+      await expect(mgr.listModels('pi')).resolves.toEqual(models)
+    } finally { await mgr.stopAllSessions() }
+  })
+
   it('retains a user Stop already in flight after its session has left the live map', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const fake = new FakeAdapter({ sessionIds: ['stopping-session'] })

@@ -31,3 +31,14 @@ Verify and both native platform workflows reuse their native staging for the def
 Windows exposed a second tooling failure before packaging: its CRLF checkout made Vitest reject shebang-bearing scanner modules. Converting those two modules to CRLF reproduced both failures locally. `.gitattributes` now keeps `.mjs` files in LF; a regression exercises Git's checkout filters with `core.autocrlf=true`. Another regression starts the actual staged runner with pnpm-style arguments and verifies that it filters to one test and writes JSON. The focused runtime/scanner suite passed 21 cases in three files. The historical 460/463 reports above describe their original revision; these two added controls increase the current default/service suite to 462/465.
 
 Complete removal of Electron test setup, UI launchers, rebuild scripts and shipping dependencies remains #222/#223 work. The [retained macOS installed reports](evidence/installed-agent-macos-23109a4.json) establish only their stated synthetic scope; the Windows retry and Linux/artifact matrix remain separate acceptance work.
+
+The subsequent provider/startup continuation adds four actual bundled prerequisite-denial controls (runtime, redirected stdout, invalid profile and invalid resources). The service suite now has 469 cases in 44 files; the default suite remains 462/41. Startup diagnostics use fixed classifications without dependency exceptions or private paths.
+
+For quick platform diagnosis, dispatch the packaged-platform workflow with `service_only=true` and a synthetic mode:
+
+```sh
+gh workflow run tauri-packaged-platforms.yml --ref codex/tauri-migration-readiness \
+  -f target=windows-x64 -f mode=synthetic-agent -f service_only=true
+```
+
+This runs pinned native staging, portable tests, preflight and the actual private-pipe configuration/transcript/agent proofs. It omits Rust installation/compilation, GUI packaging and installed execution. A separate concurrency group and `-service-only` evidence name keep this cheap diagnostic run distinct from installed acceptance; its provenance also states that scope. Service-only feasibility mode rejects rather than producing an empty database-service proof.

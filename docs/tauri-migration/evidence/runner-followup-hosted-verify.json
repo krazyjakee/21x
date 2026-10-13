@@ -1,0 +1,47 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "8b9954a31dbb93eb38a46170488bfbc49539e67c",
+  "pullRequest": "https://github.com/krazyjakee/21x/pull/224",
+  "workflowRun": "https://github.com/krazyjakee/21x/actions/runs/38326133274",
+  "conclusion": "success",
+  "scope": "Hosted application Verify after portable runner/checkout fixes; no provider/startup continuation is included.",
+  "fullApplicationTests": {
+    "passed": 5149,
+    "skipped": 10,
+    "passedFiles": 356,
+    "skippedFiles": 7,
+    "totalFiles": 363
+  },
+  "standaloneNodeTests": {
+    "passed": 462,
+    "skipped": 0,
+    "files": 41,
+    "node": "v22.23.2",
+    "allSharedFilesIncluded": true
+  },
+  "nativeTests": {
+    "defaultUnitPassed": 3,
+    "syntheticUnitPassed": 20,
+    "stagedFeasibilityPassed": 4
+  },
+  "checks": {
+    "connectorPolicy": "passed",
+    "lint": "passed",
+    "typecheck": "passed",
+    "inventoryAndContracts": "passed",
+    "electronAndMobileBuild": "passed",
+    "isolatedTauriFrontendBuild": "passed",
+    "foundationSubprocessSuite": "passed",
+    "installedEvidencePolicy": "passed",
+    "navigationRailRealScrollport": "passed",
+    "commanderNativeKeyboardAndFocus": "passed"
+  },
+  "limitations": [
+    "Optional private-pipe/standalone graph wrappers are skipped by the Electron-launched full suite; the separate portable suite enables its graph proofs and installed workflows run service proofs explicitly.",
+    "Local full application validation with opt-in proofs passed 5155 cases with four environmental skips.",
+    "This is not full Tauri production, live-profile or release acceptance."
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

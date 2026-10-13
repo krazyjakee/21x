@@ -13,12 +13,16 @@ on:
         type: choice
         default: feasibility
         options: [feasibility, synthetic-desktop, synthetic-agent, artifact-authorization-proof]
+      service_only:
+        description: 'Run staged portable/service proofs without Rust compilation or installed GUI acceptance.'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: tauri-packaged-platforms
+  group: tauri-packaged-platforms${{ inputs.service_only && '-service-only' || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -32,7 +36,13 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ inputs.target }}
+          PROOF_MODE: ${{ inputs.mode }}
+          SERVICE_ONLY: ${{ inputs.service_only }}
         run: |
+          if [ "$SERVICE_ONLY" = 'true' ] && [ "$PROOF_MODE" = 'feasibility' ]; then
+            echo 'Service-only proofs require a synthetic database mode.' >&2
+            exit 2
+          fi
           macos_x64='{"label":"macos-x64","runner":"macos-15-intel","arch":"x64","bundle":"dmg"}'
           macos_arm64='{"label":"macos-arm64","runner":"macos-14","arch":"arm64","bundle":"dmg"}'
           windows_x64='{"label":"windows-x64","runner":"windows-2022","arch":"x64","bundle":"nsis"}'
@@ -62,6 +72,7 @@ jobs:
       npm_package_config_node_gyp_jobs: '1'
       HUSKY: '0'
       TAURI_NATIVE_PROOF_MODE: ${{ inputs.mode || 'feasibility' }}
+      TAURI_SERVICE_ONLY: ${{ inputs.service_only && 'true' || 'false' }}
     defaults:
       run:
         shell: bash
@@ -77,13 +88,15 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install pinned Rust with one compilation job
+        if: ${{ !inputs.service_only }}
         run: rustup toolchain install 1.98.0 --profile minimal --no-self-update && rustup default 1.98.0
       - name: Linux native and AppImage prerequisites
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !inputs.service_only
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev xvfb xauth dbus-x11 patchelf libfuse2t64
       - name: Cache compressed Rust dependencies only
+        if: ${{ !inputs.service_only }}
         uses: actions/cache@v4
         with:
           path: |
@@ -94,7 +107,12 @@ jobs:
         run: |
           mkdir -p native-evidence
           git rev-parse HEAD > native-evidence/commit.txt
-          rustc --version > native-evidence/rust.txt
+          if [ "$TAURI_SERVICE_ONLY" = 'true' ]; then
+            printf 'Rust not used by staged service-only proof\n' > native-evidence/rust.txt
+          else
+            rustc --version > native-evidence/rust.txt
+          fi
+          node -e 'process.stdout.write(JSON.stringify({serviceOnly:process.env.TAURI_SERVICE_ONLY === "true", installedGuiRequested:process.env.TAURI_SERVICE_ONLY !== "true"}))' > native-evidence/proof-scope.json
           node --version > native-evidence/node.txt
           node -p 'process.platform + "/" + process.arch' > native-evidence/architecture.txt
       - name: Install locked JavaScript tools without Electron lifecycle builds
@@ -129,6 +147,7 @@ jobs:
             TAURI_SQLITE_MODULE="$sqlite_module" "$staged_node" scripts/agent-desktop-proof.mjs | tee native-evidence/agent-desktop-proof.json
             TAURI_NODE_RUNTIME="$staged_node" TAURI_DATABASE_SERVICE_ENTRY="$service_entry" "$staged_node" scripts/agent-service-proof.mjs | tee native-evidence/agent-service-proof.json
           fi
+          if [ "$TAURI_SERVICE_ONLY" = 'true' ]; then exit 0; fi
           export TWENTYONEX_TEST_RESOURCES="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources"))')"
           native_features=synthetic-desktop
           if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-agent' ]; then native_features=synthetic-agent; fi
@@ -136,11 +155,13 @@ jobs:
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-desktop -- --ignored staged_synthetic_database_roundtrip_emits_real_target_events --test-threads=1 2>&1 | tee native-evidence/database-native-roundtrip.log
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-desktop -- --ignored staged_synthetic_configuration_roundtrip_preserves_real_content_effects --test-threads=1 2>&1 | tee native-evidence/configuration-native-roundtrip.log
       - name: Check supervisor on this actual platform with the same staged resources
+        if: ${{ !inputs.service_only }}
         run: |
           export TWENTYONEX_TEST_RESOURCES="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources"))')"
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features native-fixture-tests -- --test-threads=1 2>&1 | tee native-evidence/engine-unit-tests.log
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features native-fixture-tests -- --ignored --test-threads=1 2>&1 | tee native-evidence/engine-staged-tests.log
       - name: Build the actual platform package
+        if: ${{ !inputs.service_only }}
         env:
           # Preserve staged Node/addon bytes in the debug AppImage proof.
           NO_STRIP: 'true'
@@ -153,19 +174,20 @@ jobs:
           esac
           pnpm tauri:build --verbose --debug --bundles ${{ matrix.bundle }} "${feature_args[@]}" -- --locked 2>&1 | tee native-evidence/native-build.log
       - name: Exercise packaged GUI, resources, native probes and quit
+        if: ${{ !inputs.service_only }}
         timeout-minutes: 8
         run: python scripts/tauri-packaged-smoke.py --kind ${{ matrix.bundle }} --arch ${{ matrix.arch }} --mode "$TAURI_NATIVE_PROOF_MODE" --evidence native-evidence
       - name: Upload compact evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-platform-evidence-${{ matrix.label }}-${{ inputs.mode || 'feasibility' }}-${{ github.sha }}
+          name: tauri-platform-evidence-${{ matrix.label }}-${{ inputs.mode || 'feasibility' }}${{ inputs.service_only && '-service-only' || '' }}-${{ github.sha }}
           path: native-evidence/
           if-no-files-found: warn
           retention-days: 7
           compression-level: 0
       - name: Upload package separately
-        if: always()
+        if: always() && !inputs.service_only
         uses: actions/upload-artifact@v4
         with:
           name: tauri-platform-package-${{ matrix.label }}-${{ inputs.mode || 'feasibility' }}-${{ github.sha }}

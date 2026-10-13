@@ -1,0 +1,57 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "developmentFrontend": false,
+    "hostArch": "x86_64",
+    "initialized": true,
+    "profileRoot": "/home/runner/work/_temp/21x-packaged-6rl3fuc4/21x-database-service-13955-1791850282516764601-0",
+    "resourceRoot": "/home/runner/work/_temp/21x-packaged-6rl3fuc4/squashfs-root/usr/lib/21x Tauri Feasibility/resources",
+    "syntheticAgent": true,
+    "syntheticDesktop": true,
+    "syntheticDesktopProof": {
+      "agentCompleted": true,
+      "agentStarted": true,
+      "agentStatusEventObserved": true,
+      "agentTranscriptRehydrated": true,
+      "approvalAccepted": true,
+      "approvalRequested": true,
+      "missingResultPreserved": true,
+      "projectCreated": true,
+      "rehydrated": true,
+      "rendererReloaded": true,
+      "retiredOperationDenied": true,
+      "settingPersisted": true,
+      "staleApprovalDenied": true,
+      "staleEpochDenied": true,
+      "taskCreated": true,
+      "taskEventObserved": true,
+      "taskUpdated": true,
+      "transcriptDeltaRead": true,
+      "transcriptSnapshotRead": true,
+      "updateEventObserved": true
+    },
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "unix-process-group-linux-parent-death-signal"
+  },
+  "stage": "complete",
+  "verification": {
+    "packageKind": "appimage",
+    "proofMode": "synthetic-agent",
+    "packageSha256": "9e334220a1e5c1f7bab40a9ed10130f48c5271951acc2284088e1b0e9703ac31",
+    "artifact": "21x Tauri Feasibility_0.1.0_amd64.AppImage",
+    "packagedExecutable": "/home/runner/work/_temp/21x-packaged-6rl3fuc4/squashfs-root/usr/bin/twentyonex-tauri-feasibility",
+    "packagedResources": true,
+    "ownedRunningProcessesAfterExit": []
+  }
+}

@@ -29,8 +29,10 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const contained = (base, path) => { const value = relative(base, path); return !isAbsolute(value) && value !== '..' && !value.startsWith('..' + sep); };
+let phase = 'runtime';
 try {
   if (process.versions.electron || process.version !== ${JSON.stringify('v' + pins.nodeVersion)} || process.env.TWENTYONEX_DATABASE_MODE !== 'synthetic-only') throw new Error();
+  phase = 'dependencies';
   const modules = join(here, 'node_modules');
   const details = lstatSync(modules);
   if (!details.isDirectory() || details.isSymbolicLink()) throw new Error();
@@ -41,12 +43,13 @@ try {
     if (!contained(base, packageDirectory) || !contained(base, realpathSync(fileURLToPath(import.meta.resolve(name))))) throw new Error();
     if (JSON.parse(readFileSync(join(location, 'package.json'), 'utf8')).version !== version) throw new Error();
   }
+  phase = 'engine';
   const engine = join(here, 'database-engine.mjs');
   const engineDetails = lstatSync(engine);
   if (!engineDetails.isFile() || engineDetails.isSymbolicLink() || !contained(realpathSync(here), realpathSync(engine))) throw new Error();
   await import('./database-engine.mjs');
 } catch {
-  process.stderr.write('[database-service] trusted bootstrap unavailable\\n');
+  process.stderr.write('[database-service] trusted bootstrap ' + phase + ' unavailable\\n');
   process.exitCode = 1;
 }
 `

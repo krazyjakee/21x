@@ -23,6 +23,16 @@ import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_EVENT_CODECS } from '../sha
 const MARKER = '.21x-synthetic-database.json'
 const fail = (): never => { throw new ServiceProtocolError('INVALID_ARGUMENTS') }
 
+function startupPrerequisite<T>(stage: 'runtime' | 'stdio' | 'profile' | 'resources', check: () => T): T {
+  try { return check() }
+  catch {
+    // Fixed stages identify unavailable startup prerequisites without logging
+    // profile paths, request contents or arbitrary dependency exceptions.
+    process.stderr.write(`[database-service] startup ${stage} unavailable\n`)
+    return fail()
+  }
+}
+
 function canonicalSyntheticRoot(value: string | undefined): string {
   if (!value || !isAbsolute(value)) return fail()
   const root = realpathSync.native(value)
@@ -50,14 +60,21 @@ function marker(profileRoot: string): boolean {
 
 /** Actual private NDJSON service, gated to disposable synthetic profiles. */
 export function startDatabaseStdio(): void {
-  if (process.versions.electron || process.env.TWENTYONEX_DATABASE_MODE !== 'synthetic-only') return fail()
-  if (![0, 1].every(fd => { const file = fstatSync(fd); return file.isFIFO() || file.isSocket() })) return fail()
-  const agentMode = process.env.TWENTYONEX_AGENT_MODE === 'deterministic-fixture'
-  if (process.env.TWENTYONEX_AGENT_MODE !== undefined && !agentMode) return fail()
-  const profileRoot = canonicalSyntheticRoot(process.env.TWENTYONEX_PROFILE_ROOT)
-  const configuredResource = process.env.TWENTYONEX_RESOURCE_ROOT
-  if (!configuredResource || !isAbsolute(configuredResource)) return fail()
-  const resourceRoot = realpathSync.native(configuredResource)
+  const agentMode = startupPrerequisite('runtime', () => {
+    if (process.versions.electron || process.env.TWENTYONEX_DATABASE_MODE !== 'synthetic-only') return fail()
+    const enabled = process.env.TWENTYONEX_AGENT_MODE === 'deterministic-fixture'
+    if (process.env.TWENTYONEX_AGENT_MODE !== undefined && !enabled) return fail()
+    return enabled
+  })
+  startupPrerequisite('stdio', () => {
+    if (![0, 1].every(fd => { const file = fstatSync(fd); return file.isFIFO() || file.isSocket() })) return fail()
+  })
+  const profileRoot = startupPrerequisite('profile', () => canonicalSyntheticRoot(process.env.TWENTYONEX_PROFILE_ROOT))
+  const resourceRoot = startupPrerequisite('resources', () => {
+    const configured = process.env.TWENTYONEX_RESOURCE_ROOT
+    if (!configured || !isAbsolute(configured)) return fail()
+    return realpathSync.native(configured)
+  })
   const engineEpoch = randomUUID()
   const bootstrapResult = { protocolVersion: SERVICE_PROTOCOL_VERSION, engineEpoch, nodeVersion: process.version }
   const caller = { principal: 'trusted-desktop-main' as const, engineEpoch }
