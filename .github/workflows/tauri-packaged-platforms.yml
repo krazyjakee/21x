@@ -48,7 +48,12 @@ jobs:
           windows_x64='{"label":"windows-x64","runner":"windows-2022","arch":"x64","bundle":"nsis"}'
           linux_appimage='{"label":"linux-appimage-x64","runner":"ubuntu-24.04","arch":"x64","bundle":"appimage"}'
           case "$TARGET" in
-            all) selected="$macos_x64,$macos_arm64,$windows_x64,$linux_appimage" ;;
+            all)
+              if [ "$PROOF_MODE" = 'artifact-authorization-proof' ]; then
+                selected="$windows_x64,$macos_x64,$macos_arm64,$linux_appimage"
+              else
+                selected="$macos_x64,$macos_arm64,$windows_x64,$linux_appimage"
+              fi ;;
             macos-x64) selected="$macos_x64" ;;
             macos-arm64) selected="$macos_arm64" ;;
             windows-x64) selected="$windows_x64" ;;
