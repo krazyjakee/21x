@@ -3,7 +3,7 @@ import { finishSessionFeedback, updateTaskFromUser } from './session-feedback'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createHash } from 'crypto'
 import { WebSocket } from 'ws'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture } from '../../test/helpers/portable-db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
 import {
@@ -22,6 +22,17 @@ import {
 // which is the new functionality we're testing.
 
 let db: DatabaseManager
+const fixtures: ReturnType<typeof createPortableDbFixture>[] = []
+function createTestDb(): ReturnType<typeof createPortableDbFixture> {
+  const fixture = createPortableDbFixture()
+  fixtures.push(fixture)
+  return fixture
+}
+afterEach(async () => {
+  await stopMobileApiServer()
+  for (const fixture of fixtures) if (fixture.rawDb.open) fixture.rawDb.close()
+  fixtures.length = 0
+})
 
 describe('mobile-api-server: POST /api/tasks (create)', () => {
   beforeEach(() => {

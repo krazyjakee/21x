@@ -31,6 +31,21 @@ import { afterTaskCreated, afterTaskUpdated, prepareUserTaskUpdate, startPrepare
 import { mimeTypeForPath } from './mime'
 
 // ── State ────────────────────────────────────────────────────
+interface MobileServerOwner {
+  db: DatabaseManager
+  http: HttpServer
+  websocket: WebSocketServer
+  requests: Set<Promise<void>>
+  closing: boolean
+  startup: Promise<number>
+  rejectStartup: (error: Error) => void
+  nativeClosed: Promise<void>
+  websocketClosed: Promise<void>
+  drain: Promise<void> | null
+}
+const mobileOwners = new Set<MobileServerOwner>()
+const closedMobileSources = new WeakSet<DatabaseManager>()
+let currentOwner: MobileServerOwner | null = null
 let server: HttpServer | null = null
 let wss: WebSocketServer | null = null
 let dbRef: DatabaseManager | null = null
@@ -131,7 +146,10 @@ export function startMobileApiServer(
   forgejoManager?: ForgejoManager | null,
   host = '127.0.0.1'
 ): Promise<number> {
-  if (server) return Promise.resolve(boundPort ?? port)
+  if (closedMobileSources.has(db)) return Promise.reject(new Error('MOBILE_API_CLOSED'))
+  if (currentOwner) return currentOwner.db === db ? currentOwner.startup : Promise.reject(new Error('MOBILE_API_ALREADY_STARTED'))
+  if (mobileOwners.size) return stopMobileApiServer().then(() => startMobileApiServer(
+    db, agentManager, githubManager, port, syncManager, pluginRegistry, gitlabManager, forgejoManager, host))
 
   dbRef = db
   agentRef = agentManager
@@ -143,13 +161,34 @@ export function startMobileApiServer(
   pairWindowStart = 0
   pairWindowCount = 0
 
-  return new Promise((resolve, reject) => {
-    server = createServer(handleHttpRequest)
+  let owner!: MobileServerOwner
+  const startup = new Promise<number>((resolve, reject) => {
+    server = createServer((req, res) => {
+      req.on('error', () => {})
+      const work = Promise.resolve().then(async () => {
+        if (owner.closing) { if (!res.destroyed) { res.writeHead(503); res.end() }; return }
+        await handleHttpRequest(req, res, () => owner.closing)
+      })
+      owner.requests.add(work)
+      void work.then(() => owner.requests.delete(work), () => { owner.requests.delete(work); res.destroy() })
+    })
 
     // WebSocket upgrade
     wss = new WebSocketServer({ noServer: true })
+    const http = server
+    const websocket = wss
+    const nativeClosed = new Promise<void>(done => http.once('close', () => {
+      if (owner.closing) reject(new Error('MOBILE_API_CLOSED'))
+      done()
+    }))
+    const websocketClosed = new Promise<void>(done => websocket.once('close', done))
+    owner = { db, http, websocket, requests: new Set(), closing: false, startup: Promise.resolve(0),
+      rejectStartup: reject, nativeClosed, websocketClosed, drain: null }
+    currentOwner = owner
+    mobileOwners.add(owner)
 
     server.on('upgrade', (req, socket, head) => {
+      if (owner.closing) { socket.destroy(); return }
       const url = new URL(req.url || '/', `http://localhost`)
       const token = url.searchParams.get('token')
       if (!validateSession(token)) {
@@ -164,7 +203,8 @@ export function startMobileApiServer(
       }
 
       if (req.url?.startsWith('/ws')) {
-        wss!.handleUpgrade(req, socket, head, (ws) => {
+        websocket.handleUpgrade(req, socket, head, (ws) => {
+          if (owner.closing) { ws.terminate(); return }
           wsClients.add(ws)
           console.log(`[MobileAPI] WebSocket client connected (total: ${wsClients.size})`)
 
@@ -197,6 +237,7 @@ export function startMobileApiServer(
 
     const starting = server
     server.listen(port, host, () => {
+      if (owner.closing || currentOwner !== owner) { reject(new Error('MOBILE_API_CLOSED')); return }
       const address = starting.address()
       boundPort = typeof address === 'object' && address ? address.port : port
       boundHost = host
@@ -204,15 +245,15 @@ export function startMobileApiServer(
       resolve(boundPort)
     })
 
-    starting.on('error', (err) => {
-      if (server === starting) {
-        wss?.close()
-        wss = null
-        server = null
-      }
-      reject(err)
+    starting.on('error', () => {
+      reject(new Error('MOBILE_API_STARTUP_FAILED'))
+      if (currentOwner === owner) void stopMobileApiServer()
     })
   })
+  owner.startup = startup
+  void startup.catch(() => {})
+  return startup
+
 }
 
 export interface MobileApiDeps {
@@ -241,6 +282,7 @@ export function setMobileApiDeps(deps: MobileApiDeps): void {
 export function applyMobileAccessSettings(port = MOBILE_API_PORT): Promise<number | null> {
   const run = async (): Promise<number | null> => {
     const deps = mobileDeps
+    if (deps && closedMobileSources.has(deps.db)) return null
     if (!deps || !isMobileAccessEnabled(deps.db)) {
       await stopMobileApiServer()
       return null
@@ -267,23 +309,46 @@ export function setMobileApiNotifier(fn: (channel: string, data: unknown) => voi
   notifyDesktop = fn
 }
 
+/** Close network admission while retaining native close and raw route ownership. */
 export function stopMobileApiServer(): Promise<void> {
-  for (const ws of wsClients) {
-    ws.close()
-  }
-  wsClients.clear()
-  wss?.close()
-  wss = null
-  const closing = server
+  currentOwner = null
   server = null
+  wss = null
   boundHost = null
   boundPort = null
-  if (!closing) return Promise.resolve()
-  return new Promise((resolve) => {
-    closing.close(() => resolve())
-    // Drop keep-alive sockets so the port is released now, not on idle timeout.
-    closing.closeAllConnections()
+  wsClients.clear()
+  for (const owner of mobileOwners) {
+    if (owner.closing) continue
+    owner.closing = true
+    owner.rejectStartup(new Error('MOBILE_API_CLOSED'))
+    for (const ws of owner.websocket.clients) ws.terminate()
+    owner.websocket.close()
+    owner.http.close()
+    owner.http.closeAllConnections()
+    owner.drain = (async () => {
+      await Promise.allSettled([owner.nativeClosed, owner.websocketClosed, owner.startup])
+      do { await Promise.allSettled([...owner.requests]) } while (owner.requests.size)
+      mobileOwners.delete(owner)
+    })()
+  }
+  return Promise.all([...mobileOwners].map(owner => owner.drain)).then(() => {})
+}
+
+/** Final source shutdown; incomplete joins retain ownership for a later retry. */
+export async function closeMobileApiServer(timeoutMs = 2000): Promise<void> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+    throw new RangeError('Mobile API shutdown deadline must be an integer from 1 to 3000 ms')
+  }
+  if (mobileDeps) closedMobileSources.add(mobileDeps.db)
+  if (dbRef) closedMobileSources.add(dbRef)
+  for (const owner of mobileOwners) closedMobileSources.add(owner.db)
+  const drain = stopMobileApiServer()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('MOBILE_API_SHUTDOWN_INCOMPLETE')), timeoutMs)
   })
+  try { await Promise.race([Promise.allSettled([drain, applyQueue]), expired]) }
+  finally { if (timer) clearTimeout(timer) }
 }
 
 /**
@@ -303,7 +368,7 @@ export function broadcastToMobileClients(channel: string, data: unknown): void {
 
 // ── HTTP request handler ─────────────────────────────────────
 
-function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, isClosing: () => boolean): Promise<void> {
   // CORS — only allow localhost origins (for Vite dev server).
   // The mobile SPA is served from the same origin and doesn't need CORS.
   const origin = req.headers.origin
@@ -336,7 +401,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
     return
   }
   if (pathname === '/api/auth/pair/initiate' || pathname === '/api/auth/pair/verify') {
-    void handleApiRoute(req, res, pathname, url)
+    await handleApiRoute(req, res, pathname, url, isClosing)
     return
   }
 
@@ -347,7 +412,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
       res.end(JSON.stringify({ error: 'Unauthorized' }))
       return
     }
-    void handleApiRoute(req, res, pathname, url)
+    await handleApiRoute(req, res, pathname, url, isClosing)
     return
   }
 
@@ -360,7 +425,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
 
 const MAX_BODY_BYTES = 1_048_576
 
-async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL): Promise<void> {
+async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL, isClosing: () => boolean): Promise<void> {
   res.setHeader('Content-Type', 'application/json')
 
   if (req.method !== 'POST' && req.method !== 'GET') {
@@ -370,12 +435,14 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
   }
 
   try {
-    const result = req.method === 'POST'
-      ? await routePost(pathname, await readJsonBody(req, MAX_BODY_BYTES), req)
-      : await routeGet(pathname, url)
+    const body = req.method === 'POST' ? await readJsonBody(req, MAX_BODY_BYTES) : undefined
+    if (isClosing()) return
+    const result = body ? await routePost(pathname, body, req) : await routeGet(pathname, url)
+    if (res.destroyed) return
     res.writeHead(200)
     res.end(JSON.stringify(result))
   } catch (err: unknown) {
+    if (res.destroyed) return
     const status = (err as { status?: number }).status || 500
     const message = err instanceof Error ? err.message : String(err)
     res.writeHead(status)

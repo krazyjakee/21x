@@ -45,7 +45,7 @@ import { CaptainWaker } from './captain-waker'
 import { startScheduledCoordination, stopScheduledCoordination } from './scheduled-coordination'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
-import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
+import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
 import { APP_NAME, DEEP_LINK_SCHEMES, parseOAuthCallbackUrl } from './app-identity'
@@ -179,6 +179,7 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 
 async function shutdownAppServices(): Promise<void> {
   stopTaskApiServer()
+  void stopMobileApiServer()
   syncManager?.stop()
   connectorBridgePlugin?.stopPolling()
   if (db) disposeConnectorRuntime(db)
@@ -195,12 +196,11 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason
   stopSecretBroker()
-  stopMobileApiServer()
 
   sweepLeakedMcpProcesses()
   // A short grace here: quitting must stay quick, and anything that ignores

@@ -34,6 +34,8 @@ const mainFiles = [
   'src/main/task-api-server.test.ts', 'src/main/task-api/skill-routes.test.ts',
   'src/main/task-api-lifetime.test.ts',
   'src/main/task-mcp-endpoint.test.ts',
+  'src/main/mobile-api-server.test.ts',
+  'src/main/mobile-api-lifetime.test.ts',
   'src/main/agent-installer/detect.test.ts', 'src/main/agent-installer/install.test.ts',
   'src/main/sync-manager-lifetime.test.ts',
   'src/main/sync-manager.test.ts',
