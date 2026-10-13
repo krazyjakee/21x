@@ -3,6 +3,9 @@
   let started = false;
   const nativeDenial = __21X_DENIAL_MATCHER__;
   const report = { parentAccessDenied: false, parentGlobalDenied: false,
+    opaqueOrigin: window.origin === 'null',
+    crossOriginProtocolDocument: window.location?.protocol === 'artifact-frame-proof:' ||
+      window.location?.hostname === 'artifact-frame-proof.localhost',
     frameBridgeAbsent: typeof window.__TAURI__?.core?.invoke !== 'function',
     relayDesktopDenied: false, relayStatusDenied: false, relayListenDenied: false,
     directAttempted: false, directDesktopDenied: false, directStatusDenied: false, directListenDenied: false,
@@ -10,7 +13,8 @@
     internalInvokeAvailable: typeof window.__TAURI_INTERNALS__?.invoke === 'function',
     internalIpcAvailable: typeof window.__TAURI_INTERNALS__?.ipc === 'function',
     directTypeError: false, directStringError: false, directSecurityError: false,
-    directInvalidOrigin: false, directMissingOrigin: false };
+    directInvalidOrigin: false, directMissingOrigin: false,
+    directDesktopOriginRejected: false, directStatusOriginRejected: false, directListenOriginRejected: false };
   const pending = new Set(['desktop', 'status', 'listen']);
   let directComplete = report.frameBridgeAbsent;
   const finish = () => {
@@ -44,7 +48,11 @@
           if (typeof error === 'string') report.directStringError = true;
           // Exact parser errors from pinned Tauri ipc/protocol.rs. They diagnose
           // malformed opaque-origin IPC; neither counts as an ACL denial.
-          if (error === 'Origin header is not a valid URL') report.directInvalidOrigin = true;
+          if (error === 'Origin header is not a valid URL') {
+            report.directInvalidOrigin = true;
+            report[{ directDesktopDenied: 'directDesktopOriginRejected', directStatusDenied: 'directStatusOriginRejected',
+              directListenDenied: 'directListenOriginRejected' }[key]] = true;
+          }
           if (error === 'missing Origin header') report.directMissingOrigin = true;
         }
       } finally { clearTimeout(timeout); }

@@ -54,12 +54,13 @@
         const authorized = result.transportAvailable ? await denied(event.data.command) : false;
         event.source.postMessage({ kind: 'artifact-result', command: event.data.command, denied: authorized }, '*');
       } else if (event.data.kind === 'artifact-complete') {
-        const names = ['parentAccessDenied', 'parentGlobalDenied', 'frameBridgeAbsent',
+        const names = ['parentAccessDenied', 'parentGlobalDenied', 'frameBridgeAbsent', 'opaqueOrigin', 'crossOriginProtocolDocument',
           'relayDesktopDenied', 'relayStatusDenied', 'relayListenDenied',
           'directAttempted', 'directDesktopDenied', 'directStatusDenied', 'directListenDenied',
           'directDeadlineReached', 'directUnrecognizedFailure', 'directAccepted',
           'internalInvokeAvailable', 'internalIpcAvailable', 'directTypeError', 'directStringError', 'directSecurityError',
-          'directInvalidOrigin', 'directMissingOrigin'];
+          'directInvalidOrigin', 'directMissingOrigin',
+          'directDesktopOriginRejected', 'directStatusOriginRejected', 'directListenOriginRejected'];
         if (Object.keys(event.data).length !== names.length + 1 || !names.every(key => typeof event.data[key] === 'boolean')) return;
         for (const key of names) result[key] = event.data[key];
         result.frameLoaded = true;

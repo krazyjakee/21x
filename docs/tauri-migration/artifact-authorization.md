@@ -26,12 +26,28 @@ The native diagnostic performs these bounded phases:
 
 1. The trusted main screen successfully invokes `desktop_invoke` with `db:getTasks`, invokes `engine_status`, and registers `desktop:event`. These positive controls establish that the tested commands and transport actually work.
 2. A native-created `artifact-proof` Webview loads the same bundled application URL. Its label has no capability match. It makes the same correctly formed requests and must receive recognized native authorization denials for all three. Missing APIs, generic errors and timeouts fail this phase. This tests exclusion independently from remote-origin policy.
-3. The same excluded Webview loads a fixed debug-only protocol page containing a script-only sandbox frame. The frame must be unable to access the parent's DOM or Tauri globals. It requests three attempts through its **unprivileged parent**, which actually invokes the APIs and returns Boolean denial results. Policy version 2 records whether the frame has its own API. If absent, direct calls/denials remain explicitly false. If injected, it must also make correctly formed direct desktop/status/listen requests and receive recognized native authorization errors for all three. Accepted calls, generic transport errors, missing APIs and deadlines fail this branch. Evidence names the method `parent-relay-and-conditional-direct-frame`; it continues to report `sameMainIframeIsolationProven: false`.
-4. A real synthetic database task creation produces a valid service event. The main listener must receive it. The artifact window closes, the diagnostic listener is removed, and existing native smoke checks still require main-window close, engine shutdown and owned-child exit.
+3. The excluded Webview loads a fixed page with an opaque script-only sandbox frame. The frame must have an opaque origin and be unable to access its parent's DOM/globals. Its parent relay must receive all three native ACL denials. If frame APIs are injected, direct calls must receive either all three actual ACL denials or all three exact native invalid-Origin parser rejections. The latter remain separately recorded and do not claim authenticated frame IPC exclusion.
+4. The same excluded Webview loads another fixed page whose sandboxed child uses a second diagnostic protocol and `allow-scripts allow-same-origin`. The child URL differs from its parent's origin, so parent DOM/globals must remain inaccessible. When its own APIs are injected, its origin must be non-opaque and all three direct requests must receive actual command-specific native ACL denials. Invalid-Origin errors, generic failures, accepted calls and deadlines fail this phase. API absence remains explicit on platforms that inject only into the top document.
+5. A real synthetic database task creation produces a valid service event. The main listener must receive it. The artifact window closes, the diagnostic listener is removed, and existing native smoke checks still require main-window close, engine shutdown and owned-child exit.
 
-The custom protocol serves only three compiled fixtures to the fixed excluded label while native smoke is active. Its own response CSP permits that fixture frame/script; application configuration and the main CSP stay unchanged. Navigation is restricted to the initial bundled document and fixed fixture routes; popups, downloads and permission requests are denied. No capability wildcard or remote grant is added. Native evaluation collects Boolean metadata without granting a reporting command to the artifact.
+Policy version 3 names the method `opaque-rejection-and-valid-origin-frame-acl`.
+It retains `sameMainIframeIsolationProven: false` and
+`opaqueFrameAuthenticatedIpcProven: false`. The second frame supplies the native
+ACL control that opaque Windows origins cannot reach through the standard SDK.
+An opaque parser rejection cannot satisfy the second frame's authorization check.
 
-The phases wait for a document-specific `PageLoadEvent::Finished` result and matching phase marker. The proof has a 15-second deadline, bounded evaluation waits and a bounded canary request. Failure closes the owned diagnostic window through a scope guard. No mutation is replayed.
+The two diagnostic protocols serve only compiled fixed fixtures to the excluded
+label while smoke is active. Their response CSP permits those fixture frames and
+scripts; application configuration and the main CSP stay unchanged. No external
+website, capability wildcard or remote grant is added. Navigation, popups,
+downloads and permission requests remain restricted. Native evaluation collects
+Boolean metadata without a reporting command in the artifact.
+
+Each navigation waits for document readiness at its exact fixed route and a
+matching phase marker. The original 15-second overall deadline, bounded evaluation
+waits and bounded canary request remain. Failure closes the owned window through
+a scope guard. No mutation is replayed. Local v3 controls compile and pass; installed
+v3 acceptance remains pending and old v1/v2 receipts keep their original scope.
 
 ## Packaged initial URL correction
 

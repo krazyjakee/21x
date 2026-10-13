@@ -18,7 +18,8 @@ function frame(native?: { core: { invoke: ReturnType<typeof vi.fn> }; event: { l
       } else if (message.kind === 'artifact-complete') completed.push(message)
     }
   }
-  const window = { __TAURI__: native, addEventListener: (_name: string, callback: typeof receive) => { receive = callback } }
+  const window = { __TAURI__: native, origin: 'null', location: { protocol: 'artifact-proof:', hostname: 'localhost' },
+    addEventListener: (_name: string, callback: typeof receive) => { receive = callback } }
   runInNewContext(script, { window, parent, setTimeout, clearTimeout })
   receive({ source: parent, data: { kind: 'artifact-start', engineEpoch: 'current-epoch' } })
   return { completed, receive, parent }
@@ -104,5 +105,10 @@ describe('opaque artifact frame diagnostic', () => {
     expect(completed[0]).toMatchObject({ [key]: true, directStringError: true,
       directDesktopDenied: false, directStatusDenied: false, directListenDenied: false,
       directUnrecognizedFailure: true, directAccepted: false, directDeadlineReached: false })
+    expect(completed[0]).toMatchObject({
+      directDesktopOriginRejected: key === 'directInvalidOrigin',
+      directStatusOriginRejected: key === 'directInvalidOrigin',
+      directListenOriginRejected: key === 'directInvalidOrigin'
+    })
   })
 })

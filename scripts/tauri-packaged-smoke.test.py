@@ -44,7 +44,8 @@ class ReportValidationTests(unittest.TestCase):
         if mode == "artifact-authorization-proof":
             runtime["artifactAuthorizationProof"] = {
                 "passed": True, "boundary": "separate-webview", "sameMainIframeIsolationProven": False,
-                "policyVersion": 2, "frameNativeAttemptMethod": "parent-relay-and-conditional-direct-frame", "defaultMainCspUnchanged": True,
+                "policyVersion": 3, "frameNativeAttemptMethod": "opaque-rejection-and-valid-origin-frame-acl",
+                "authenticatedFrameOrigin": "separate-fixed-protocol", "opaqueFrameAuthenticatedIpcProven": False, "defaultMainCspUnchanged": True,
                 "artifactWindowClosed": True, "excludedDocumentReady": True, "mainReceivedTargetedServiceEvent": True,
                 "mainPositiveControls": dict.fromkeys(("transportAvailable", "desktopAccepted", "statusAccepted", "listenAccepted"), True),
                 "sameLocalOriginExcludedWebview": dict.fromkeys(("transportAvailable", "desktopDenied", "statusDenied", "listenDenied"), True),
@@ -53,7 +54,12 @@ class ReportValidationTests(unittest.TestCase):
             }
             runtime["artifactAuthorizationProof"]["sandboxedArtifactFrame"].update(
                 directAttempted=False, directDesktopDenied=False, directStatusDenied=False, directListenDenied=False,
-                directDeadlineReached=False, directUnrecognizedFailure=False, directAccepted=False)
+                directDeadlineReached=False, directUnrecognizedFailure=False, directAccepted=False,
+                directDesktopOriginRejected=False, directStatusOriginRejected=False, directListenOriginRejected=False,
+                directInvalidOrigin=False, directMissingOrigin=False, opaqueOrigin=True, crossOriginProtocolDocument=False)
+            runtime["artifactAuthorizationProof"]["authenticatedCrossOriginFrame"] = copy.deepcopy(
+                runtime["artifactAuthorizationProof"]["sandboxedArtifactFrame"])
+            runtime["artifactAuthorizationProof"]["authenticatedCrossOriginFrame"]["crossOriginProtocolDocument"] = True
         return {"stage": "complete", "passed": True, "gui": gui, "runtime": runtime,
                 "shutdown": {"engineUnavailable": True, "ownedChildExited": True}}
 
@@ -95,9 +101,9 @@ class ReportValidationTests(unittest.TestCase):
         mode = "artifact-authorization-proof"
         original = self.report(mode)
         authority = original["runtime"]["artifactAuthorizationProof"]
-        for section in ("mainPositiveControls", "sameLocalOriginExcludedWebview", "sandboxedArtifactFrame"):
+        for section in ("mainPositiveControls", "sameLocalOriginExcludedWebview", "sandboxedArtifactFrame", "authenticatedCrossOriginFrame"):
             for key in authority[section]:
-                if key.startswith("direct"):
+                if key.startswith("direct") or key in ("opaqueOrigin", "crossOriginProtocolDocument"):
                     continue
                 report = copy.deepcopy(original)
                 report["runtime"]["artifactAuthorizationProof"][section][key] = False
@@ -128,7 +134,7 @@ class ReportValidationTests(unittest.TestCase):
 
     def test_rejects_older_artifact_policy_as_new_direct_frame_evidence(self):
         mode = "artifact-authorization-proof"
-        for value in (None, 1, "2"):
+        for value in (None, 1, 2, "3"):
             report = self.report(mode)
             report["runtime"]["artifactAuthorizationProof"]["policyVersion"] = value
             with self.subTest(value=value), self.assertRaises(AssertionError):
@@ -149,6 +155,41 @@ class ReportValidationTests(unittest.TestCase):
         mode = "artifact-authorization-proof"
         report = self.report(mode)
         report["runtime"]["artifactAuthorizationProof"]["sameMainIframeIsolationProven"] = True
+        with self.assertRaises(AssertionError):
+            self.verify(report, mode)
+
+    def test_opaque_origin_rejection_never_substitutes_for_valid_origin_frame_acl(self):
+        mode = "artifact-authorization-proof"
+        report = self.report(mode)
+        opaque = report["runtime"]["artifactAuthorizationProof"]["sandboxedArtifactFrame"]
+        opaque.update(frameBridgeAbsent=False, directAttempted=True, directUnrecognizedFailure=True,
+                      directInvalidOrigin=True, directStringError=True, directTypeError=False, directSecurityError=False,
+                      directDesktopOriginRejected=True, directStatusOriginRejected=True, directListenOriginRejected=True)
+        self.verify(report, mode)
+        invalid = copy.deepcopy(report)
+        invalid["runtime"]["artifactAuthorizationProof"]["authenticatedCrossOriginFrame"] = copy.deepcopy(opaque)
+        invalid["runtime"]["artifactAuthorizationProof"]["authenticatedCrossOriginFrame"]["crossOriginProtocolDocument"] = True
+        with self.assertRaises(AssertionError):
+            self.verify(invalid, mode)
+        for key in ("directDesktopOriginRejected", "directStatusOriginRejected", "directListenOriginRejected"):
+            invalid = copy.deepcopy(report)
+            invalid["runtime"]["artifactAuthorizationProof"]["sandboxedArtifactFrame"][key] = False
+            with self.subTest(key=key), self.assertRaises(AssertionError):
+                self.verify(invalid, mode)
+
+    def test_injected_valid_origin_frame_requires_each_real_acl_denial(self):
+        mode = "artifact-authorization-proof"
+        report = self.report(mode)
+        frame = report["runtime"]["artifactAuthorizationProof"]["authenticatedCrossOriginFrame"]
+        frame.update(frameBridgeAbsent=False, directAttempted=True, opaqueOrigin=False,
+                     directDesktopDenied=True, directStatusDenied=True, directListenDenied=True)
+        self.verify(report, mode)
+        for key in ("directDesktopDenied", "directStatusDenied", "directListenDenied", "crossOriginProtocolDocument"):
+            invalid = copy.deepcopy(report)
+            invalid["runtime"]["artifactAuthorizationProof"]["authenticatedCrossOriginFrame"][key] = False
+            with self.subTest(key=key), self.assertRaises(AssertionError):
+                self.verify(invalid, mode)
+        frame["opaqueOrigin"] = True
         with self.assertRaises(AssertionError):
             self.verify(report, mode)
 

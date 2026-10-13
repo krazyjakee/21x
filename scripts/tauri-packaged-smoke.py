@@ -26,8 +26,10 @@ AGENT_RECEIPTS = (
 def verify_artifact_authority(authority):
     assert authority["passed"] is True and authority["boundary"] == "separate-webview"
     assert authority["sameMainIframeIsolationProven"] is False
-    assert authority["policyVersion"] == 2
-    assert authority["frameNativeAttemptMethod"] == "parent-relay-and-conditional-direct-frame"
+    assert authority["policyVersion"] == 3
+    assert authority["frameNativeAttemptMethod"] == "opaque-rejection-and-valid-origin-frame-acl"
+    assert authority["authenticatedFrameOrigin"] == "separate-fixed-protocol"
+    assert authority["opaqueFrameAuthenticatedIpcProven"] is False
     for key in ("artifactWindowClosed", "excludedDocumentReady", "mainReceivedTargetedServiceEvent", "defaultMainCspUnchanged"):
         assert authority[key] is True
     for section, keys in (
@@ -35,10 +37,32 @@ def verify_artifact_authority(authority):
         ("sameLocalOriginExcludedWebview", ("transportAvailable", "desktopDenied", "statusDenied", "listenDenied")),
         ("sandboxedArtifactFrame", ("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
                                    "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
+        ("authenticatedCrossOriginFrame", ("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
+                                          "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
     ):
         assert all(authority[section][key] is True for key in keys)
-    frame = authority["sandboxedArtifactFrame"]
+    opaque = authority["sandboxedArtifactFrame"]
+    assert opaque["opaqueOrigin"] is True and opaque["crossOriginProtocolDocument"] is False
+    origin_keys = ("directDesktopOriginRejected", "directStatusOriginRejected", "directListenOriginRejected")
+    if all(opaque[key] is True for key in origin_keys):
+        assert opaque["frameBridgeAbsent"] is False and opaque["directAttempted"] is True
+        assert opaque["directUnrecognizedFailure"] is True
+        assert opaque["directInvalidOrigin"] is True and opaque["directStringError"] is True
+        assert all(opaque[key] is False for key in ("directAccepted", "directDeadlineReached", "directTypeError",
+                   "directSecurityError", "directMissingOrigin", "directDesktopDenied", "directStatusDenied", "directListenDenied"))
+    else:
+        verify_frame_acl(opaque)
+    verify_frame_acl(authority["authenticatedCrossOriginFrame"])
+    authenticated = authority["authenticatedCrossOriginFrame"]
+    assert type(authenticated["opaqueOrigin"]) is bool
+    assert authenticated["crossOriginProtocolDocument"] is True
+    assert authenticated["frameBridgeAbsent"] is True or authenticated["opaqueOrigin"] is False
+
+
+def verify_frame_acl(frame):
     assert all(frame[key] is False for key in ("directDeadlineReached", "directUnrecognizedFailure", "directAccepted"))
+    assert all(frame[key] is False for key in ("directDesktopOriginRejected", "directStatusOriginRejected", "directListenOriginRejected",
+                                              "directInvalidOrigin", "directMissingOrigin"))
     if frame["frameBridgeAbsent"] is True:
         assert frame["directAttempted"] is False
         assert all(frame[key] is False for key in ("directDesktopDenied", "directStatusDenied", "directListenDenied"))

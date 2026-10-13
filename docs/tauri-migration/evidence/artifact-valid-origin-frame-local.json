@@ -1,0 +1,27 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "34e084a52d3834e0a5073a3ff740adb706a245d0",
+  "scope": "Prepared artifact policy v3: opaque isolation/parser rejection plus a distinct fixed-protocol child for valid-origin native ACL attempts. Parser rejection does not satisfy authenticated-frame ACL. No installed acceptance is claimed.",
+  "sourceSha256": {
+    "src-tauri/src/artifact_proof.rs": "eb7e38899e1210f73a99205b3042f6d819364924f4d6f3322125e0cb5f81652b",
+    "src-tauri/src/artifact-proof.js": "55d5c34ba0e4ba84e157eaf836e9dee6ee11163935f4b9a7ba9235aa1741ea98",
+    "src-tauri/src/artifact-frame-proof.js": "e2442297f0cdba6cc867f810d1ac53e4682cc9db735016dde5878033df8ae5f9",
+    "scripts/artifact-frame-proof.test.ts": "1157ba0ed63efed3b854f80bd97f1f62a910e5c9a5dbb16d60ebff28b43c1942",
+    "scripts/tauri-packaged-smoke.py": "db58961d3f2426432991acda7acc9ac46622402d2d6972d09ef44d4e01ad064e",
+    "scripts/tauri-packaged-smoke.test.py": "0510ab5806931e697517b1955a9a5df16620ec333e205a3927f637dbcbc11fff"
+  },
+  "tests": {
+    "frameVmPassed": 14,
+    "frameReportSha256": "5db1384483e0730e9577b224e1ec2961141d6bcc41354fb43bd822fff1b2b5bd",
+    "nativeArtifactPassed": 5,
+    "packagePolicyPassed": 23
+  },
+  "policyVersion": 3,
+  "mainCspUnchanged": true,
+  "overallDeadlineSeconds": 15,
+  "sameMainIframeIsolationProven": false,
+  "opaqueFrameAuthenticatedIpcProven": false,
+  "productionReady": false,
+  "electronRetirementReady": false
+}
