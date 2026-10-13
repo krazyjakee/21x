@@ -40,6 +40,7 @@ const mainFiles = [
   'src/main/captain-waker.test.ts', 'src/main/captain-waker-lifetime.test.ts',
   'src/main/recurrence-scheduler.test.ts', 'src/main/recurrence-scheduler-lifetime.test.ts',
   'src/main/scheduled-coordination.test.ts', 'src/main/scheduled-coordination-lifetime.test.ts',
+  'src/main/heartbeat-scheduler.test.ts', 'src/main/heartbeat-scheduler-lifetime.test.ts',
   'src/main/agent-installer/detect.test.ts', 'src/main/agent-installer/install.test.ts',
   'src/main/sync-manager-lifetime.test.ts',
   'src/main/sync-manager.test.ts',

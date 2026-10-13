@@ -322,33 +322,6 @@
       },
       {
         "allowedNames": [
-          "heartbeat:alert",
-          "heartbeat:disabled",
-          "task:updated",
-          "tasks:refresh"
-        ],
-        "channelOwners": {
-          "heartbeat:alert": "service",
-          "heartbeat:disabled": "service",
-          "task:updated": "service",
-          "tasks:refresh": "service"
-        },
-        "destination": "trusted-desktop-main",
-        "id": "heartbeat-desktop",
-        "producerOwner": "heartbeat-scheduler",
-        "review": "Only four current scheduler event names.",
-        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
-        "source": {
-          "channelExpression": "channel",
-          "column": 7,
-          "file": "src/main/heartbeat-scheduler.ts",
-          "line": 795,
-          "method": "send",
-          "target": "guardedIpcSend"
-        }
-      },
-      {
-        "allowedNames": [
           "artifact:updated",
           "project:statusChanged",
           "task:checkpointAnswered",
@@ -517,7 +490,7 @@
       }
     ],
     "reviewVersion": 1,
-    "reviewedReferences": 11,
+    "reviewedReferences": 10,
     "stalePolicies": [],
     "status": "manual-source-review; not runtime validation or namespace authority",
     "unreviewedReferences": 0
@@ -7616,12 +7589,12 @@
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
-          "column": 5,
+          "column": 35,
           "file": "src/main/heartbeat-scheduler.ts",
-          "line": 652,
+          "line": 18,
           "method": "send",
           "resolution": "literal",
-          "target": "reviewed-event-wrapper"
+          "target": "guardedIpcSend"
         },
         {
           "column": 5,
@@ -7725,12 +7698,12 @@
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
-          "column": 9,
+          "column": 38,
           "file": "src/main/heartbeat-scheduler.ts",
-          "line": 743,
+          "line": 19,
           "method": "send",
           "resolution": "literal",
-          "target": "reviewed-event-wrapper"
+          "target": "guardedIpcSend"
         },
         {
           "column": 5,
@@ -12971,20 +12944,12 @@
           "target": "reviewed-event-wrapper"
         },
         {
-          "column": 5,
+          "column": 32,
           "file": "src/main/heartbeat-scheduler.ts",
-          "line": 94,
+          "line": 16,
           "method": "send",
           "resolution": "literal",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 5,
-          "file": "src/main/heartbeat-scheduler.ts",
-          "line": 115,
-          "method": "send",
-          "resolution": "literal",
-          "target": "reviewed-event-wrapper"
+          "target": "guardedIpcSend"
         },
         {
           "column": 50,
@@ -13660,12 +13625,12 @@
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
-          "column": 5,
+          "column": 33,
           "file": "src/main/heartbeat-scheduler.ts",
-          "line": 659,
+          "line": 17,
           "method": "send",
           "resolution": "literal",
-          "target": "reviewed-event-wrapper"
+          "target": "guardedIpcSend"
         },
         {
           "column": 23,
@@ -18981,35 +18946,6 @@
       "methodExpression": null,
       "resolution": "unresolved",
       "target": "webContents"
-    },
-    {
-      "channel": null,
-      "channelExpression": "channel",
-      "column": 7,
-      "file": "src/main/heartbeat-scheduler.ts",
-      "forwardingReview": {
-        "allowedNames": [
-          "heartbeat:alert",
-          "heartbeat:disabled",
-          "task:updated",
-          "tasks:refresh"
-        ],
-        "channelOwners": {
-          "heartbeat:alert": "service",
-          "heartbeat:disabled": "service",
-          "task:updated": "service",
-          "tasks:refresh": "service"
-        },
-        "destination": "trusted-desktop-main",
-        "policyId": "heartbeat-desktop",
-        "producerOwner": "heartbeat-scheduler",
-        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
-      },
-      "line": 795,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "unresolved",
-      "target": "guardedIpcSend"
     },
     {
       "channel": null,

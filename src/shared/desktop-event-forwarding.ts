@@ -318,33 +318,6 @@ export const DESKTOP_EVENT_FORWARDING = {
     "review": "The splitting branch explicitly checks these two legacy contracts; raw agent output batches currently persist rather than broadcast.",
     "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
   },
-  "heartbeat-desktop": {
-    "id": "heartbeat-desktop",
-    "source": {
-      "file": "src/main/heartbeat-scheduler.ts",
-      "line": 795,
-      "column": 7,
-      "target": "guardedIpcSend",
-      "method": "send",
-      "channelExpression": "channel"
-    },
-    "producerOwner": "heartbeat-scheduler",
-    "allowedNames": [
-      "heartbeat:alert",
-      "heartbeat:disabled",
-      "task:updated",
-      "tasks:refresh"
-    ],
-    "channelOwners": {
-      "heartbeat:alert": "service",
-      "heartbeat:disabled": "service",
-      "task:updated": "service",
-      "tasks:refresh": "service"
-    },
-    "destination": "trusted-desktop-main",
-    "review": "Only four current scheduler event names.",
-    "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
-  },
   "task-api-relay": {
     "id": "task-api-relay",
     "source": {

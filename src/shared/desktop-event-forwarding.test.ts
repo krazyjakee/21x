@@ -26,7 +26,10 @@ describe('reviewed finite event forwarding source routes', () => {
   })
 
   it('does not turn forwarding review into installed runtime authority', () => {
-    expect(Object.keys(policies)).toHaveLength(11)
+    // Heartbeat's adapter now dispatches four literal names, so it has no
+    // dynamic forwarding site that could imply a broader runtime grant.
+    expect(Object.keys(policies)).toHaveLength(10)
+    expect(policies).not.toHaveProperty('heartbeat-desktop')
     for (const policy of Object.values(policies)) {
       expect(policy.runtimeEnforcement).toContain('not-installed')
       expect(policy.destination).toBe('trusted-desktop-main')

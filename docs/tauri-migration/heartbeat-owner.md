@@ -1,0 +1,11 @@
+# Portable heartbeat monitoring and shutdown
+
+`HeartbeatSchedulerCore` owns periodic checks, manual starts, preflight work, session polling, findings forwarding and cleanup. Native notification and four explicitly named guarded desktop events live in the Electron adapter. The core retains raw work from manual “Run now” calls after their public response returns. Repeated starts coalesce their queued pass and keep a single periodic timer.
+
+Final shutdown closes admission and cancels session polling timers. It joins accepted preflight checks, Captain sends, task-agent forwarding and heartbeat-session cleanup before SQLite closes. Failed bounded close retains this work for retry. Late results cannot start the next phase, write heartbeat status or schedule another check. An accepted cleanup may finish its own database write while the owner remains held. A task stays busy until its previous cleanup settles, preventing a new heartbeat from racing session destruction.
+
+All 88 existing heartbeat/preflight regressions run under standalone Node with fixture agents and a stubbed `gh` executable. Seven new lifetime controls use real portable SQLite with held sends/preflight/cleanup/forwarding, cancelled polling, queued admission, deadline validation and cleanup exclusion. A separate desktop adapter test verifies guarded events follow a recreated window, destroyed windows receive none, and native notification dispatch is retained.
+
+[Local evidence](evidence/heartbeat-owner-local.json) records exact commands, report/source hashes and validation. These fixtures make no real provider/`gh` request or installed notification claim. Workspace cleanup and complete production/native orchestration still require acceptance under [#212](https://github.com/krazyjakee/21x/issues/212) / [#208](https://github.com/krazyjakee/21x/issues/208).
+
+Full validation passed 1,423 standalone/private-pipe cases with zero skips in 93 files and 5,322 application assertions with 20 optional skips in 387 files. The accepted application command exited zero with no unhandled errors; an earlier stale forwarding-count assertion remains recorded as failed. Final targeted controls verify owned OS temp fixture cleanup and native `show()` dispatch after those test-only refinements. Forced typecheck, contract freshness, changed-source lint and desktop/mobile build passed.

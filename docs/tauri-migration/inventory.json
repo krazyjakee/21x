@@ -4632,20 +4632,20 @@
     {
       "bindings": [
         {
-          "imported": "BrowserWindow",
-          "local": "BrowserWindow",
-          "typeOnly": false
-        },
-        {
           "imported": "Notification",
           "local": "Notification",
           "typeOnly": false
+        },
+        {
+          "imported": "BrowserWindow",
+          "local": "BrowserWindow",
+          "typeOnly": true
         }
       ],
       "column": 1,
       "file": "src/main/heartbeat-scheduler.ts",
-      "line": 2,
-      "mode": "runtime",
+      "line": 1,
+      "mode": "mixed",
       "syntax": "import"
     },
     {
@@ -5481,6 +5481,7 @@
     "src/main/gitlab-manager.ts",
     "src/main/guarded-ipc-send.ts",
     "src/main/heartbeat-preflight.ts",
+    "src/main/heartbeat-scheduler-core.ts",
     "src/main/heartbeat-scheduler.ts",
     "src/main/http-utils.ts",
     "src/main/index.ts",
@@ -6648,67 +6649,45 @@
     {
       "channel": "task:updated",
       "channelExpression": null,
-      "column": 5,
+      "column": 32,
       "file": "src/main/heartbeat-scheduler.ts",
-      "line": 94,
+      "line": 16,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "task:updated",
-      "channelExpression": null,
-      "column": 5,
-      "file": "src/main/heartbeat-scheduler.ts",
-      "line": 115,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": "heartbeat:alert",
-      "channelExpression": null,
-      "column": 5,
-      "file": "src/main/heartbeat-scheduler.ts",
-      "line": 652,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "literal",
-      "target": "reviewed-event-wrapper"
+      "target": "guardedIpcSend"
     },
     {
       "channel": "tasks:refresh",
       "channelExpression": null,
-      "column": 5,
+      "column": 33,
       "file": "src/main/heartbeat-scheduler.ts",
-      "line": 659,
+      "line": 17,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
-      "target": "reviewed-event-wrapper"
+      "target": "guardedIpcSend"
+    },
+    {
+      "channel": "heartbeat:alert",
+      "channelExpression": null,
+      "column": 35,
+      "file": "src/main/heartbeat-scheduler.ts",
+      "line": 18,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "guardedIpcSend"
     },
     {
       "channel": "heartbeat:disabled",
       "channelExpression": null,
-      "column": 9,
+      "column": 38,
       "file": "src/main/heartbeat-scheduler.ts",
-      "line": 743,
+      "line": 19,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
-      "target": "reviewed-event-wrapper"
-    },
-    {
-      "channel": null,
-      "channelExpression": "channel",
-      "column": 7,
-      "file": "src/main/heartbeat-scheduler.ts",
-      "line": 795,
-      "method": "send",
-      "methodExpression": null,
-      "resolution": "unresolved",
       "target": "guardedIpcSend"
     },
     {
@@ -14052,11 +14031,11 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 696,
-    "operations": 715,
+    "files": 697,
+    "operations": 713,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 4,
-    "unresolvedOperations": 11,
+    "unresolvedOperations": 10,
     "webviews": 1
   },
   "webviews": [

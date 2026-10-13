@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 // Stub `gh` so pre-flight tests never touch the network. The scheduler calls
 // promisify(execFile), so the stub exposes the promisify custom symbol.
@@ -29,7 +32,7 @@ vi.mock('child_process', () => {
   return { execFile }
 })
 
-import { HeartbeatScheduler } from './heartbeat-scheduler'
+import { HeartbeatSchedulerCore as HeartbeatScheduler } from './heartbeat-scheduler-core'
 import {
   extractGitHubUrls,
   hasFailedCheckRuns,
@@ -72,7 +75,7 @@ function mockDbManager(overrides: Record<string, unknown> = {}): DatabaseManager
     getHeartbeatLogs: vi.fn().mockReturnValue([]),
     createHeartbeatLog: vi.fn(),
     getHeartbeatConsecutiveErrors: vi.fn().mockReturnValue(0),
-    getWorkspaceDir: vi.fn().mockReturnValue('/tmp/workspace/task-1'),
+    getWorkspaceDir: vi.fn().mockReturnValue(join(tmpdir(), '21x-heartbeat-fixture', 'task-1')),
     getAgent: vi.fn().mockReturnValue({ id: 'agent-1', name: 'Test Agent' }),
     getAgents: vi.fn().mockReturnValue([{ id: 'agent-1', name: 'Test Agent', is_default: true }]),
     ...overrides,
@@ -105,8 +108,8 @@ describe('HeartbeatScheduler', () => {
     scheduler = new HeartbeatScheduler(db as unknown as DatabaseManager, agent as unknown as AgentManager)
   })
 
-  afterEach(() => {
-    scheduler.stop()
+  afterEach(async () => {
+    await scheduler.close()
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
@@ -607,7 +610,8 @@ describe('HeartbeatScheduler', () => {
     it('sends task:updated event to renderer so sidebar updates', () => {
       vi.setSystemTime(new Date('2024-01-15T12:00:00.000Z'))
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
 
       scheduler.enableHeartbeat('task-1', 60)
 
@@ -637,7 +641,8 @@ describe('HeartbeatScheduler', () => {
 
     it('sends task:updated event to renderer so sidebar updates', () => {
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
 
       scheduler.disableHeartbeat('task-1')
 
@@ -657,11 +662,12 @@ describe('HeartbeatScheduler', () => {
   // ── task:updated events for sidebar sync ──────────────
 
   describe('task:updated renderer events', () => {
-    let mockWindow: { webContents: { send: ReturnType<typeof vi.fn> }; isDestroyed: ReturnType<typeof vi.fn> }
+    let mockWindow: { webContents: { send: ReturnType<typeof vi.fn<(...args: unknown[]) => void>> }; isDestroyed: ReturnType<typeof vi.fn<() => boolean>> }
 
     beforeEach(() => {
       mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
     })
 
     it('sends task:updated to renderer when heartbeat is enabled', () => {
@@ -709,11 +715,12 @@ describe('HeartbeatScheduler', () => {
   // ── task:updated events for sidebar sync ──────────────
 
   describe('task:updated renderer events', () => {
-    let mockWindow: { webContents: { send: ReturnType<typeof vi.fn> }; isDestroyed: ReturnType<typeof vi.fn> }
+    let mockWindow: { webContents: { send: ReturnType<typeof vi.fn<(...args: unknown[]) => void>> }; isDestroyed: ReturnType<typeof vi.fn<() => boolean>> }
 
     beforeEach(() => {
       mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
     })
 
     it('sends task:updated to renderer when heartbeat is enabled', () => {
@@ -860,7 +867,8 @@ describe('HeartbeatScheduler', () => {
       ;(db.getHeartbeatDueTasks as ReturnType<typeof vi.fn>).mockReturnValue([completedTask])
 
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
 
       // Wait for the initial checkHeartbeats to run
       await vi.advanceTimersByTimeAsync(0)
@@ -876,7 +884,8 @@ describe('HeartbeatScheduler', () => {
       ;(db.getHeartbeatDueTasks as ReturnType<typeof vi.fn>).mockReturnValue([completedTask])
 
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
 
       await vi.advanceTimersByTimeAsync(0)
 
@@ -900,7 +909,8 @@ describe('HeartbeatScheduler', () => {
       )
 
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
 
       await vi.advanceTimersByTimeAsync(0)
 
@@ -926,7 +936,8 @@ describe('HeartbeatScheduler', () => {
       vi.spyOn(scheduler, 'hasHeartbeatFile').mockReturnValue(true)
 
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
 
       await vi.advanceTimersByTimeAsync(0)
 
@@ -965,41 +976,47 @@ describe('HeartbeatScheduler', () => {
   // ── start / stop ────────────────────────────────────────
 
   describe('start / stop', () => {
-    it('starts periodic checking', () => {
+    it('starts periodic checking', async () => {
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
 
-      // checkHeartbeats should have been called immediately
+      await vi.advanceTimersByTimeAsync(0)
+      // The initial owned pass runs without waiting for an interval.
       expect(db.getHeartbeatDueTasks).toHaveBeenCalledTimes(1)
 
       // Advance timer by one tick (60s)
-      vi.advanceTimersByTime(HEARTBEAT_DEFAULTS.checkIntervalMs)
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_DEFAULTS.checkIntervalMs)
       expect(db.getHeartbeatDueTasks).toHaveBeenCalledTimes(2)
     })
 
-    it('stops the interval', () => {
+    it('stops the interval', async () => {
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
       scheduler.stop()
 
-      vi.advanceTimersByTime(HEARTBEAT_DEFAULTS.checkIntervalMs * 5)
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_DEFAULTS.checkIntervalMs * 5)
       // Should not have been called more than once (initial call only)
       expect(db.getHeartbeatDueTasks).toHaveBeenCalledTimes(1)
     })
 
-    it('is idempotent — calling start() again clears previous interval', () => {
+    it('is idempotent — calling start() again clears previous interval', async () => {
       const mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
 
       // Start the scheduler twice
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
+      scheduler.setEventHost({ emit: (channel, data) => { if (!mockWindow.isDestroyed()) mockWindow.webContents.send(channel, data) } })
+      scheduler.start()
 
-      // Two immediate calls from two start() invocations
-      expect(db.getHeartbeatDueTasks).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(0)
+      // Repeated starts share the same queued pass.
+      expect(db.getHeartbeatDueTasks).toHaveBeenCalledTimes(1)
 
       // Advance by one tick — should only fire ONCE (old interval was cleared)
-      vi.advanceTimersByTime(HEARTBEAT_DEFAULTS.checkIntervalMs)
-      expect(db.getHeartbeatDueTasks).toHaveBeenCalledTimes(3) // 2 + 1, not 2 + 2
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_DEFAULTS.checkIntervalMs)
+      expect(db.getHeartbeatDueTasks).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -1079,18 +1096,20 @@ describe('HeartbeatScheduler', () => {
 
   describe('writeHeartbeatFile', () => {
     it('resets the heartbeat baseline when instructions change', () => {
+      const workspace = mkdtempSync(join(tmpdir(), '21x-heartbeat-instructions-'))
       const db = mockDbManager({
-        getWorkspaceDir: vi.fn().mockReturnValue(`/tmp/heartbeat-${Date.now()}`),
+        getWorkspaceDir: vi.fn().mockReturnValue(workspace),
         getTask: vi.fn().mockReturnValue(makeTask()),
       })
       const scheduler = new HeartbeatScheduler(db as unknown as DatabaseManager, agent as unknown as AgentManager)
 
-      scheduler.writeHeartbeatFile('task-1', `# Heartbeat Checks\n- [ ] Check PR conflicts`)
-
-      expect(db.updateTask).toHaveBeenCalledWith('task-1', expect.objectContaining({
-        heartbeat_last_check_at: null,
-        heartbeat_next_check_at: expect.any(String),
-      }))
+      try {
+        scheduler.writeHeartbeatFile('task-1', `# Heartbeat Checks\n- [ ] Check PR conflicts`)
+        expect(db.updateTask).toHaveBeenCalledWith('task-1', expect.objectContaining({
+          heartbeat_last_check_at: null,
+          heartbeat_next_check_at: expect.any(String),
+        }))
+      } finally { rmSync(workspace, { recursive: true, force: true }) }
     })
   })
 
