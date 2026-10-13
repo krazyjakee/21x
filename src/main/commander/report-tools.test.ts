@@ -5,7 +5,7 @@
  * route with its coordinator-only guard.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import type { CommanderEvent } from '../../shared/commander'
 import type { ChatProvider, ChatProviderEvent, ChatProviderRequest } from '../chat/providers/types'
 import type { DatabaseManager } from '../database'
@@ -18,6 +18,7 @@ import { CommanderVoice, type CommanderVoiceSpeech } from '../voice/commander-vo
 import { createCommanderProjectTools, type CommanderAgents } from './project-tools'
 import { CaptainDeliveryService } from './captain-delivery'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
+import { formatCommanderReport, splitCommanderReport } from '../../shared/commander-report'
 import { deliverCaptainReport, setCaptainReportHandler } from './report-inbox'
 import {
   captainActionReportText,
@@ -336,8 +337,8 @@ describe('report delivery', () => {
     const [request] = chatRequests(provider)
     expect(request.system).toContain('A report from project "Alpha" has just arrived')
     // The turn is told to summarise in plain language, not to relay (#107).
-    expect(request.system).toContain('Summarise it for the user now in plain language')
-    expect(request.system).toContain('Leave out issue and PR numbers, branch names')
+    expect(request.system).toContain('Explain the work for the user now in plain language')
+    expect(request.system).toContain('human-readable task or change title and a plain-language description')
     expect(request.system).not.toContain('Relay it to the user now')
     expect(request.messages.at(-1)?.content).toContain(`[Report from project ${alpha.id}]\nSite shipped.`)
   })
@@ -370,6 +371,34 @@ describe('report delivery', () => {
     await vi.waitFor(() => expect(chatRequests(provider)).toHaveLength(2))
     await settled(service, session.id)
     expect(store.listMessages(session.id).map((m) => m.role)).toEqual(['user', 'assistant', 'report', 'assistant'])
+  })
+
+  it('gives one relay the semantic context of multiple related pull-request reports', async () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const provider = fakeProvider(() => 'The project update is ready.')
+    const service = makeService({ ...provider, stream(request, signal) {
+      const stream = provider.stream(request, signal)
+      return (async function* () { if (!startedByReport(request)) await gate; yield* stream })()
+    } })
+    const session = store.createSession('Progress')
+    service.setActiveSession(session.id)
+    const turn = service.sendUserMessage(session.id, 'What is changing on the board?')
+    await vi.waitFor(() => expect(chatRequests(provider)).toHaveLength(1))
+    for (const context of [
+      { title: 'Board activity sorting', description: 'Recently updated tasks stay visible.', impact: 'Active work is easier to find.', outcome: 'Integrated.', nextStep: 'The Captain is arranging keyboard accessibility.', userAction: 'No action is needed.' },
+      { title: 'Keyboard accessibility', description: 'The board can be navigated from the keyboard.', impact: 'Keyboard users can find work without a mouse.', outcome: 'Under review.', nextStep: 'The reviewer will finish accessibility checks.', userAction: 'No user decision is needed.' }
+    ]) service.deliverReport({ sessionId: session.id, projectId: alpha.id, projectName: 'Alpha', content: formatCommanderReport(context, 'PR source evidence') })
+    release()
+    await turn.done
+    await settled(service, session.id)
+    const relays = chatRequests(provider).filter(startedByReport)
+    expect(relays).toHaveLength(1)
+    const context = relays[0].messages.map((message) => message.content).join('\n')
+    for (const phrase of ['Board activity sorting', 'Recently updated tasks stay visible', 'Active work is easier to find', 'Keyboard accessibility', 'without a mouse', 'reviewer will finish accessibility checks']) expect(context).toContain(phrase)
+    expect(relays[0].system).toContain('Synthesise multiple related updates into one coherent progress explanation')
+    expect(store.listMessages(session.id).filter((message) => message.role === 'report')).toHaveLength(2)
   })
 
   it.each([false, true])('speaks only the summary and retains the report (mid-turn: %s)', async (midTurn) => {
@@ -507,11 +536,62 @@ describe('Captain actions as reports', () => {
   })
 
   it('words a blocked merge as a blocker', () => {
-    expect(captainActionReportText(event({ outcome: 'needs_user', summary: 'PR #1 needs a reviewer' }))).toBe('Blocked on an external approval: PR #1 needs a reviewer')
+    const report = splitCommanderReport(captainActionReportText(event({ outcome: 'needs_user', summary: 'PR #1 needs a reviewer' })))
+    expect(report.content).toContain('Blocked; the Captain reports that help is needed')
+    expect(report.content).toContain('required action has not been described')
+    expect(report.technicalDetails).toContain('PR #1 needs a reviewer')
   })
 })
 
 describe('report_to_commander route and scope', () => {
+  it.each([
+    { title: 'Board activity sorting', description: 'Recently updated tasks stay visible.', impact: 'Active work is easier to find.', outcome: 'Integrated into the main codebase.', next_step: 'The Captain will arrange scrollbar accessibility work.', user_action: 'No action is needed from you.' },
+    { title: 'Scrollbar accessibility', description: 'The team is improving keyboard navigation.', impact: 'Keyboard users will be able to navigate the board.', outcome: 'In progress; the benefit is not available yet.', next_step: 'The task agent will finish implementation and request review.', user_action: 'No decision is waiting on you.' },
+    { title: 'Release preparation', description: 'The completed changes are awaiting the required reviewer.', impact: 'The release cannot proceed until review is finished.', outcome: 'Blocked on the release reviewer.', next_step: 'The reviewer must approve; the Captain can then continue.', user_action: 'Choose a reviewer or provide the required review yourself.' },
+    { title: 'Theme options', description: 'Two navigation designs are proposed.', impact: 'The choice changes how users find their work.', outcome: 'Awaiting your decision.', next_step: 'The Captain will assign implementation after your choice.', user_action: 'Choose the compact layout or the spacious layout.' }
+  ])('persists understandable context for $outcome and passes it to the relay unchanged', async (context) => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const provider = fakeProvider(() => 'Explanation received.')
+    const service = makeService(provider)
+    install(service)
+    const session = store.createSession()
+    service.setActiveSession(session.id)
+    const evidence = 'PR #153, correlation_id=technical-only, ' + 'a'.repeat(40)
+    const result = await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, message: evidence, ...context })
+    expect(result).toMatchObject({ success: true })
+    await settled(service, session.id)
+    const stored = store.listMessages(session.id).find((message) => message.role === 'report')!
+    const presentation = splitCommanderReport(stored.content)
+    for (const value of Object.values(context)) expect(presentation.content).toContain(value)
+    expect(presentation.technicalDetails).toBe(evidence)
+    expect(chatRequests(provider)[0].messages.at(-1)?.content).toContain(context.description)
+    expect(chatRequests(provider)[0].messages.at(-1)?.content).toContain(context.impact)
+    expect(chatRequests(provider)[0].system).toContain('next meaningful step and who owns it')
+  })
+
+  it('retrieves scoped task meaning and exposes missing impact instead of guessing', async () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const beta = db.createProject({ name: 'Beta' })!
+    const task = db.createTask({ title: 'Board activity sorting', description: 'Recently updated tasks stay visible.', project_id: alpha.id })!
+    install(makeService(fakeProvider()))
+    const session = store.createSession()
+    expect(await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, task_id: 'missing-task', message: 'Done' })).toEqual({ error: 'Task not found in this project' })
+    expect(await handleTaskRoute(db, '/report_to_commander', { project_id: beta.id, task_id: task.id, message: 'Done' })).toEqual({ error: 'Task not found in this project' })
+    expect(await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, task_id: task.id, message: 'PR #153 merged' })).toMatchObject({ success: true })
+    const report = splitCommanderReport(store.listMessages(session.id)[0].content)
+    expect(report.content).toContain('Board activity sorting')
+    expect(report.content).toContain('Recently updated tasks stay visible')
+    expect(report.content).toContain('effect on the project or its users has not been reported')
+    expect(report.content).toContain('does not specify whether you need to act')
+    expect(report.technicalDetails).toBe('PR #153 merged')
+  })
+
+  it('bounds the complete report and validates semantic fields', async () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    expect(await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, message: 'Evidence', impact: 42 })).toEqual({ error: 'impact must be a non-empty string' })
+    expect(await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, message: 'e'.repeat(3_800), title: 'A change' })).toMatchObject({ error: expect.stringContaining('complete report') })
+  })
+
   it('validates, refuses without the Commander, and forces the scope project like update_project_status', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     expect(await handleTaskRoute(db, '/report_to_commander', { message: 'x' })).toEqual({ error: 'project_id is required' })

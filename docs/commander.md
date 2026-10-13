@@ -270,7 +270,11 @@ right place. The pieces:
 
 - **The Captain's tool.** `report_to_commander(message, correlation_id?)`
   is a project-scoped, coordinator-only task-management tool (route
-  `/report_to_commander`, message capped at 4,000 characters). The Captain
+  `/report_to_commander`, complete stored report capped at 4,000 characters).
+  Optional `title`, `description`, `impact`, `outcome`, `next_step` and
+  `user_action` fields supply the human explanation; `message` then carries
+  supporting evidence. `task_id` can fill missing title and description from
+  a task in the same project. Existing message-only callers still work. The Captain
   prompt (section 11) tells it to answer a Commander request with it, quoting
   the `correlation_id` from the relay message, and to report unasked when the
   user must decide something. The route hands the report to the seam in
@@ -293,25 +297,32 @@ right place. The pieces:
   store's `selectSession` and cleared when the view unmounts or the window
   closes). If the report's session is that one and idle, a turn starts at
   once with a relay note appended to the system prompt, so the Commander
-  answers it with a short plain-language summary (#107, below); the stored history ends
+  answers it with a plain-language explanation (#173, below); the stored history ends
   with the report, which the context builder already renders as a user-side
   note. If that session is mid-turn, the relay runs when the turn ends. Any
   other session only gets the unread report and its badge; opening it later
   shows the report as a card without a relay turn. With no provider (no API
   key) the report is still stored.
-- **Plain-language summaries** (#107, `REPORT_SUMMARY_RULES` in
-  `prompts.ts`). The Commander never relays or quotes a report as written.
-  It leads with the outcome, then gives progress, blockers (and who or what
-  they wait on) and any decision the user must make, with the options, in 2 to 5
-  sentences (short bullets only when there are several decisions). It leaves
-  out issue and PR numbers, branch names, commit SHAs, file paths, batch
-  labels and implementation order unless the user must act on one ("approve
-  PR #12"). The full report stays stored and shown as a card in the chat; if
-  the user asks for details, the Commander gives them from the report.
-  Example: a report "Batch B2 merged in PR #104 on sessions-b2-no-silent-drop
-  (630894c); B3 next, blocked on #99 review" becomes "Web finished the chat
-  history fix and is moving to the next step, which waits on your review of
-  the pending change."
+- **Communication contract** (#173, `REPORT_SUMMARY_RULES` in `prompts.ts`).
+  Every normal reply, report relay, status/history explanation and spoken
+  response names and describes the change, explains its known benefit or
+  project impact, states its current outcome, gives the next meaningful step
+  and owner, and says whether the user must act. Enough context must survive
+  to understand the work and its consequences; there is no fixed sentence
+  limit. Related reports are synthesised into one progress explanation.
+  Integrated work is not necessarily released. The Commander retrieves project
+  context when necessary and states what remains unknown rather than deriving
+  meaning or impact from an identifier.
+  PR references may follow the explanation as concise links. Hashes, internal
+  policy values, tool names, correlation IDs and raw check/review mechanics
+  stay in audit evidence or the report card's closed **Technical details**
+  disclosure, and can be supplied on explicit request. Original persisted
+  reports remain available; older technical notices show an honest missing
+  explanation rather than an invented interpretation.
+  Example: "The board now sorts work by its latest meaningful activity, so
+  recently updated tasks stay visible. The change has been added to the main
+  codebase. The Captain is arranging scrollbar accessibility work next. No
+  action is needed from you." Each claim must come from the source context.
 - **Loop protection.** A turn started by a report may call `ask_captain`
   only while the session's budget lasts: 3 calls
   (`MAX_REPORT_ASKS_WITHOUT_USER_TURN`) across report-triggered turns since
@@ -321,8 +332,13 @@ right place. The pieces:
 - **Captain actions.** `installCommanderReportBridge` also installs the
   `captain-github-tools.ts` handler: a merge, a settled issue write, or a
   merge blocked on a person outside 21x becomes an unprompted, project-tagged
-  report ("Captain action: …" or "Blocked on an external approval: …")
-  routed by the rules above.
+  report routed by the rules above. The fresh pull-request title and bounded
+  source description/impact excerpts describe the work when available, with
+  attribution to the author. Integration, release uncertainty, next owner and
+  user action are explicit. Full source evidence, URLs and the original action
+  summary remain in Technical details; missing meaning is labelled unknown.
+  The former `tell_commander` policy was removed in schema 32; old policy
+  notices follow the same missing-context and technical-evidence rules.
 
 ## Voice mode (#64)
 
@@ -406,8 +422,10 @@ of scope.
   Commander turn, and that turn's plain-language summary is spoken
   like any reply. Reports arriving during a reply wait for it to finish
   before their summary turn starts. A report with no summary turn (no
-  provider or a stored briefing) is announced in one line,
-  "Report from <project>; details in the chat."
+  provider or a stored briefing) reads the structured human explanation when
+  one is present, including change, impact, outcome, next owner and user action.
+  Audit evidence and URLs/hashes/PR numbers are omitted. An older unstructured
+  report is announced in one line, "Report from <project>; details in the chat."
 - **Barge-in**: speaking while a reply is playing, or pressing the Stop button,
   stops playback in the renderer at once, then main interrupts the passage (which
   cancels the synthesis request or closes the ElevenLabs connection and drops
@@ -446,8 +464,8 @@ one-minute tick, so it runs with the window closed. At each occurrence it:
    (`buildProjectStatus`): summary, counts, top blockers, and pending approvals
    (agent steps waiting for approval). Projects that need the user come first. There is no
    model and no raw task data in this step;
-2. if a chat provider is configured, asks the Commander model for a three to
-   five sentence spoken-style summary of that text (`BRIEFING_SUMMARY_PROMPT`,
+2. if a chat provider is configured, asks the Commander model for a plain-language
+   spoken explanation with the same reporting contract (`BRIEFING_SUMMARY_PROMPT`,
    30 s timeout). With no provider, or on failure, this step is skipped;
 3. creates a new session titled `Briefing <YYYY-MM-DD>`. It stores the
    briefing as a `report` message (through `CommanderService.appendReport`

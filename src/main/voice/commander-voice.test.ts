@@ -4,6 +4,7 @@ import type { CommanderEvent, CommanderMessage } from '../../shared/commander'
 import { VOICE_TTS_EVENTS, type VoiceTtsVoice } from '../../shared/voice-tts'
 import { CommanderVoice, commanderVoiceKey, spokenReport } from './commander-voice'
 import { VoiceSpeechService } from './voice-speech-service'
+import { formatCommanderReport } from '../../shared/commander-report'
 import type { VoiceTtsWorkerClient } from './voice-tts-worker-client'
 import type { VoiceTtsModelManager } from './voice-tts-model-manager'
 
@@ -128,6 +129,37 @@ beforeEach(() => {
 })
 
 describe('speaking the reply as it streams', () => {
+  it('keeps large numbers and compact dates in spoken explanations while filtering hash references', () => {
+    const content = formatCommanderReport({
+      title: 'Revenue update',
+      description: `Revenue reached 1000000 on 20261013. Reference 1a2b3c4 and ${'a'.repeat(40)}. Commit SHA 1234567.`
+    }, 'Technical evidence')
+    const spoken = spokenReport('Web', content)
+    expect(spoken).toContain('Revenue reached 1000000 on 20261013')
+    expect(spoken).not.toMatch(/1a2b3c4|a{40}|1234567/)
+  })
+
+  it('speaks a structured report explanation without audit evidence when no relay starts', async () => {
+    const { worker, speech, commander, voice } = setup()
+    await speech.prepare()
+    voice.setActiveSession('s1')
+    const content = formatCommanderReport({
+      title: 'Board activity sorting',
+      description: 'Recently updated tasks stay visible.',
+      impact: 'Active work is easier to find.',
+      outcome: 'Integrated into the main codebase.',
+      nextStep: 'The Captain is arranging accessibility work.',
+      userAction: 'No action is needed from you.'
+    }, 'PR #153 https://github.com/acme/app/pull/153 ' + 'a'.repeat(40) + ' policy/tell_commander')
+    commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', content)] })
+    await flush()
+    await flush()
+    const spoken = [...worker.spoken.flatMap((entry) => entry.sentences), ...worker.appended].join(' ')
+    for (const meaning of ['Board activity sorting', 'Recently updated tasks stay visible', 'Active work is easier to find', 'Integrated into the main codebase', 'Captain is arranging accessibility', 'No action is needed']) expect(spoken).toContain(meaning)
+    expect(spoken).not.toMatch(/PR #153|https:|tell_commander|a{40}/)
+    voice.dispose()
+  })
+
   it('hands each finished sentence over and flushes the tail when the turn ends', async () => {
     const { worker, speech, commander, voice } = setup()
     await speech.prepare()

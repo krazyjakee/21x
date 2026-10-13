@@ -5,6 +5,7 @@ import type { ChatProvider, ChatProviderEvent } from './chat/providers/types'
 import { CommanderStore } from './commander/commander-store'
 import {
   BRIEFING_STATE_KEY,
+  BRIEFING_SUMMARY_PROMPT,
   ScheduledCoordination,
   buildBriefingText,
   latestOccurrence,
@@ -23,6 +24,7 @@ import {
   serializeCommanderBriefingSettings
 } from '../shared/scheduled-coordination'
 import { SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
+import { REPORT_SUMMARY_RULES } from './commander/prompts'
 
 // Monday 21 September 2026. Schedules sit at midday UTC so the local date in
 // the session title is the same day on any test machine within ±11h of UTC.
@@ -30,6 +32,15 @@ const MONDAY_1130 = Date.parse('2026-09-21T11:30:00.000Z')
 const MINUTE = 60_000
 const REVIEW_CRON = '0 12 * * 1-5'
 const BRIEFING_CRON = '0 12 * * 1-5'
+
+describe('scheduled briefing communication', () => {
+  it('keeps the same complete spoken contract without claiming to retrieve unavailable context', () => {
+    expect(BRIEFING_SUMMARY_PROMPT).toContain(REPORT_SUMMARY_RULES)
+    expect(BRIEFING_SUMMARY_PROMPT).toContain('Use enough sentences to preserve essential context')
+    expect(BRIEFING_SUMMARY_PROMPT).toContain('You have no tools in this briefing: state missing context plainly')
+    expect(BRIEFING_SUMMARY_PROMPT).toContain('Do not invent tasks, impact, next steps or numbers')
+  })
+})
 
 let db: DatabaseManager
 let now: number

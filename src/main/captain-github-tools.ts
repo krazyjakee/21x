@@ -16,9 +16,11 @@ import { setCoordinatorCallHandler, type CoordinatorCallHandler } from './mcp-se
 import { parseGitHubPullRequestUrl } from '../shared/pr-readiness'
 import { handleIssueWriteTool } from './issue-write-gate'
 import { reconcileIssueWrites, type IssueWriteDb, type IssueWriteHooks } from './issue-writes'
+import type { IssueWriteRecord } from '../shared/issue-actions'
 import { MERGE_PULL_REQUEST_TOOL, MERGE_TOOL_NAMES } from './mcp-servers/merge-tools'
 import { ISSUE_WRITE_TOOL_NAMES } from './mcp-servers/issue-write-tools'
 import { isMergeMethod, performMerge, type MergeDb, type MergeHooks, type MergeMethod } from './pull-request-merge'
+import { commanderSourceContext, formatCommanderReport, type CommanderReportContext } from '../shared/commander-report'
 
 // ── Events and the Commander seam ─────────────────────────────
 
@@ -27,6 +29,8 @@ export interface CaptainActionEvent {
   tool: string
   /** One line a person can read: what the Captain did, or what is blocked. */
   summary: string
+  /** Human meaning alongside the original audit summary; absent on old producers. */
+  report?: CommanderReportContext
   /** `performed`: the Captain merged or wrote an issue. `needs_user`: it is blocked on a person outside 21x. */
   outcome: 'performed' | 'needs_user'
   /** ISO time. */
@@ -54,7 +58,7 @@ export function reportCaptainAction(event: CaptainActionEvent): void {
 // ── Wiring ────────────────────────────────────────────────────
 
 export interface CaptainGithubToolDeps {
-  db: Pick<DatabaseManager, 'getProject'>
+  db: Pick<DatabaseManager, 'getProject'> & Partial<Pick<DatabaseManager, 'getTask'>>
   /** Merges; without it the merge tool answers "not available". */
   mergeDb?: MergeDb
   /** The delegated issue-write ledger; without it the issue tools answer "not available". */
@@ -95,20 +99,47 @@ function projectName(projectId: string): string {
   return deps?.db.getProject(projectId)?.name ?? projectId
 }
 
+function issueReportContext(projectId: string, action: string, args: Record<string, unknown>, record?: IssueWriteRecord): CommanderReportContext {
+  const taskId = typeof args.task_id === 'string' ? args.task_id : record?.task_id
+  const task = taskId ? deps?.db.getTask?.(taskId) : undefined
+  const scopedTask = task?.project_id === projectId ? task : undefined
+  let issueTitle: string | undefined
+  if (record?.external_result) {
+    try {
+      const result = JSON.parse(record.external_result) as { title?: unknown }
+      if (typeof result?.title === 'string') issueTitle = result.title
+    } catch { /* Recovered records may have a prose result instead of JSON. */ }
+  }
+  const title = (typeof args.title === 'string' ? args.title : issueTitle) || scopedTask?.title || 'Project work tracking'
+  const source = commanderSourceContext(typeof args.body === 'string' ? args.body : scopedTask?.description)
+  const unresolved = record?.status === 'unresolved'
+  const operation = action.includes('create') ? 'created' : action.includes('update') ? 'updated' : 'linked to the project'
+  return {
+    title,
+    description: `The issue tracking “${title}” ${unresolved ? 'was sent to GitHub, but its result could not be confirmed' : `was ${operation}`}.${source.description ? ` The work description says: ${source.description}` : ''}`,
+    impact: unresolved ? 'The work tracking may already have changed; repeating the write could duplicate it.' : 'The requested work tracking is recorded; this does not mean the underlying project work is finished.',
+    outcome: unresolved ? 'Awaiting confirmation of the issue write.' : 'The issue change is confirmed.',
+    nextStep: unresolved ? '21x will reconcile the interrupted write; the Captain needs to confirm its outcome before retrying.' : 'The Captain needs to confirm the next planned step for the tracked work.',
+    userAction: unresolved ? 'Do not repeat the write while its result is uncertain.' : 'No action is needed from you for this issue update.',
+    references: [record?.external_url, typeof args.body === 'string' ? args.body : scopedTask?.description].filter((value): value is string => Boolean(value))
+  }
+}
+
 /** What a merge tells the person and the Commander. `performMerge` sends its own notification for a merge. */
 function mergeHooks(): MergeHooks {
   return {
     notifyUser,
     pushToRenderer,
-    report: (projectId, kind, summary) => {
+    report: (projectId, kind, summary, report) => {
       reportCaptainAction({
         projectId,
         tool: MERGE_PULL_REQUEST_TOOL,
         summary,
+        report,
         outcome: kind === 'merged' ? 'performed' : 'needs_user',
         at: new Date().toISOString()
       })
-      if (kind === 'needs_user') notifyUser(`A PR in ${projectName(projectId)} needs a reviewer`, summary)
+      if (kind === 'needs_user') notifyUser(`${report?.title || 'Project work'} needs attention in ${projectName(projectId)}`, report ? formatCommanderReport({ ...report, references: undefined }) : 'The Captain reports that work is blocked and needs help. The required action has not been described.')
     }
   }
 }
@@ -123,10 +154,14 @@ function issueWriteHooks(): IssueWriteHooks {
         projectId,
         tool: record.action,
         summary,
+        report: issueReportContext(projectId, record.action, {}, record),
         outcome: kind === 'unresolved' ? 'needs_user' : 'performed',
         at: new Date().toISOString()
       })
-      if (kind !== 'written') notifyUser(`Issue write in ${projectName(projectId)}`, summary)
+      if (kind !== 'written') {
+        const context = issueReportContext(projectId, record.action, {}, record)
+        notifyUser(`${context.title} tracking update in ${projectName(projectId)}`, formatCommanderReport({ ...context, references: undefined }))
+      }
     }
   }
 }
@@ -156,8 +191,9 @@ export function createCaptainCallHandler(): CoordinatorCallHandler {
         args,
         hooks: issueWriteHooks(),
         reportPerformed: (summary) => {
-          reportCaptainAction({ projectId, tool, summary, outcome: 'performed', at: new Date().toISOString() })
-          notifyUser(`Captain of ${projectName(projectId)}`, `Did: ${summary}`)
+          const report = issueReportContext(projectId, tool, args)
+          reportCaptainAction({ projectId, tool, summary, report, outcome: 'performed', at: new Date().toISOString() })
+          notifyUser(`${report.title} tracking updated in ${projectName(projectId)}`, formatCommanderReport({ ...report, references: undefined }))
         }
       })
     }

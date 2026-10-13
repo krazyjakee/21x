@@ -15,7 +15,7 @@ import Database from 'better-sqlite3'
 import { execFile } from 'child_process'
 import { createServer } from 'http'
 import { promisify } from 'util'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { makeAgent, makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
 import { callToolForScope, setCoordinatorCallHandler, type TaskApiInvoke, type TaskMcpScope } from './mcp-servers/task-management-core'
@@ -36,11 +36,7 @@ import { findIdempotencyMarker } from '../shared/issue-actions'
 import { buildCaptainSystemPrompt } from './prompts/captain'
 import { listToolsForScope } from './mcp-servers/task-management-core'
 
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp') },
-  Notification: class { show = vi.fn(); on = vi.fn(); static isSupported = vi.fn(() => false) },
-  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn(), isStarted: vi.fn(() => false) }
-}))
+
 
 // The two blocked voice tasks, used as fixtures.
 const VOICE_INPUT_TASK = 'ysreze49jdacahwa19ez3r33'
@@ -190,6 +186,24 @@ afterEach(() => {
 // ── The policy distinction ────────────────────────────────────
 
 describe('a delegated issue write needs no grant', () => {
+  it('reports the named work and tracking outcome without exposing issue audit machinery in notifications', async () => {
+    const h = setup()
+    expect(await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x', title: 'Reliable voice input', body: 'Keep the start of each spoken request so instructions are not lost.', task_id: h.taskIds[VOICE_INPUT_TASK]
+    })).toMatchObject({ status: 'created' })
+    expect(h.events[0].report).toMatchObject({
+      title: 'Reliable voice input',
+      description: expect.stringContaining('Keep the start of each spoken request'),
+      impact: expect.stringContaining('does not mean the underlying project work is finished'),
+      outcome: 'The issue change is confirmed.',
+      nextStep: expect.stringContaining('Captain needs to confirm'),
+      userAction: 'No action is needed from you for this issue update.'
+    })
+    expect(h.events[0].summary).toContain('/issues/200')
+    expect(h.notifyUser).toHaveBeenCalledWith('Reliable voice input tracking updated in Voice', expect.stringContaining('Keep the start of each spoken request'))
+    expect(h.notifyUser.mock.calls[0][1]).not.toContain('/issues/200')
+  })
+
   it('files the issue from a message the user typed in the project chat', async () => {
     const h = setup()
 

@@ -5,7 +5,7 @@
  * replaced by a fake that serves `pr view` and records every merge.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from './database'
 import { callToolForScope, setCoordinatorCallHandler, type TaskApiInvoke, type TaskMcpScope } from './mcp-servers/task-management-core'
 import {
@@ -25,14 +25,11 @@ import {
 } from './pull-request-merge'
 import { createPullRequestReviewHandoff, recordPullRequestReviewAttestation } from './pr-review-attestations'
 import { captainActionReportText } from './commander/report-tools'
+import { splitCommanderReport } from '../shared/commander-report'
 import { parseGitHubPullRequestUrl } from '../shared/pr-readiness'
 import { captainTools } from './mcp-servers/task-management-tools'
 
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp') },
-  Notification: class { show = vi.fn(); on = vi.fn(); static isSupported = vi.fn(() => false) },
-  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn(), isStarted: vi.fn(() => false) }
-}))
+
 
 const SHA = 'a'.repeat(40)
 const PR_URL = 'https://github.com/acme/app/pull/12'
@@ -161,6 +158,23 @@ afterEach(() => {
 })
 
 describe('merging a ready pull request', () => {
+  it('reports supplied change description and impact while preserving the original audit references', async () => {
+    const h = setup()
+    h.setPr({ title: 'Board activity sorting', body: '## Summary\nRecently updated tasks now stay visible at the top of the board.\n\n## Impact\nYou can find active work more easily.\n\n## Technical details\npolicy/tell_commander\nCommit ' + SHA })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ status: 'merged' })
+    const report = splitCommanderReport(captainActionReportText(h.events[0]))
+    expect(report.content).toMatch(/^Board activity sorting/)
+    expect(report.content).toContain('Recently updated tasks now stay visible')
+    expect(report.content).toContain('You can find active work more easily')
+    expect(report.content).toContain('integrated after its required checks completed')
+    expect(report.content).toContain('Captain needs to confirm the next planned work or release step')
+    expect(report.content).toContain('No action is needed from you for this integration')
+    expect(report.content).not.toMatch(/tell_commander|a{40}|https:/)
+    expect(report.technicalDetails).toContain(PR_URL)
+    expect(report.technicalDetails).toContain(SHA)
+    expect(report.technicalDetails).toContain('policy/tell_commander')
+  })
+
   it('merges without asking, writes the journal and reports to the Commander', async () => {
     const h = setup()
     const out = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
@@ -168,8 +182,14 @@ describe('merging a ready pull request', () => {
     expect(h.merges).toHaveLength(1)
     expect(journal(h)[0].summary).toMatch(/Merged https:\/\/github.com\/acme\/app\/pull\/12 "Add login"/)
     expect(h.events).toEqual([expect.objectContaining({ projectId: h.projectId, tool: 'merge_pull_request', outcome: 'performed' })])
-    expect(captainActionReportText(h.events[0])).toMatch(/^Captain action: Merged /)
-    expect(h.notifyUser).toHaveBeenCalledWith('Captain of App merged a PR', expect.stringContaining(PR_URL))
+    const report = captainActionReportText(h.events[0])
+    expect(report).toMatch(/^Add login/)
+    expect(report).toContain('has been added to the main codebase')
+    expect(report).toContain('Next step: The Captain')
+    expect(report).toContain('No action is needed from you for this integration')
+    expect(report).toContain(PR_URL)
+    expect(h.notifyUser).toHaveBeenCalledWith('Add login integrated in App', expect.stringContaining('No action is needed from you for this integration'))
+    expect(h.notifyUser.mock.calls[0][1]).not.toContain(PR_URL)
   })
 
   it('offers only the merge tool: no grant tools remain', () => {
@@ -229,7 +249,7 @@ describe('failing checks or branch protection block the merge', () => {
     await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
     const needsUser = h.events.filter((e) => e.outcome === 'needs_user')
     expect(needsUser).toHaveLength(1)
-    expect(captainActionReportText(needsUser[0])).toMatch(/Blocked on an external approval/)
+    expect(captainActionReportText(needsUser[0])).toContain('Blocked until an external reviewer provides the required approval')
     expect(h.merges).toHaveLength(0)
   })
 

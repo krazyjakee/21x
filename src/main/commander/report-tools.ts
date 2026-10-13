@@ -5,6 +5,7 @@ import type { CommanderStore } from './commander-store'
 import { setCaptainReportHandler, type CaptainReportHandler, type ReportRoutedBy } from './report-inbox'
 import { createHash } from 'crypto'
 import type { DeliveryRecord, DeliveryStore } from '../sessions/delivery-store'
+import { formatCommanderReport } from '../../shared/commander-report'
 
 /**
  * Captain reports into Commander sessions (#62; docs/commander.md).
@@ -93,8 +94,14 @@ export function guardReportAsks(tools: ChatToolDefinition[], budget: ReportAskBu
 
 /** The report text for a merge, an issue write, or a merge blocked on a person outside 21x. */
 export function captainActionReportText(event: CaptainActionEvent): string {
-  if (event.outcome === 'needs_user') return `Blocked on an external approval: ${event.summary}`
-  return `Captain action: ${event.summary}.`
+  if (event.report) return formatCommanderReport(event.report, event.summary)
+  // Backwards-compatible event callers may carry only audit identifiers. Keep
+  // that evidence while making the missing meaning clear to readers/models.
+  return formatCommanderReport({
+    outcome: event.outcome === 'needs_user' ? 'Blocked; the Captain reports that help is needed.' : 'The Captain reports that the action completed.',
+    nextStep: 'The Captain needs to confirm what changed, its impact and the next step.',
+    userAction: event.outcome === 'needs_user' ? 'The required action has not been described; ask the Captain to clarify it.' : undefined
+  }, event.summary)
 }
 
 // ── Wiring ────────────────────────────────────────────────────

@@ -408,13 +408,25 @@ Rows go with their project (`ON DELETE CASCADE`); archiving leaves them.
 ### Reporting to the Commander (#62)
 
 `report_to_commander(message, correlation_id?)` (route `/report_to_commander`;
-coordinator-only and project-forced like `update_project_status`, message
-capped at 4,000 characters) hands a report to the Commander through the seam
+coordinator-only and project-forced like `update_project_status`, complete report
+capped at 4,000 characters including any formatted context) hands a report to
+the Commander through the seam
 in `src/main/commander/report-inbox.ts`; docs/commander.md describes where it
 lands. Section 11 of the Captain prompt tells it to answer Commander
 requests with it (quoting the relay's correlation id) and to report unasked
 when the user must decide something. The Captain's merges and issue writes
 reach the Commander the same way, without the Captain doing anything.
+
+The reporting contract (#173) covers completed, active, blocked and proposed
+work. Supply a human-readable `title`, `description`, known `impact`, current
+`outcome`, `next_step` with its owner, and `user_action` with any decision and
+options. Optional `task_id` retrieves missing title/description only from this
+project. Put technical evidence in `message`; the entire formatted report must
+fit within 4,000 characters. Missing impact or next steps must be stated as
+unknown. Related updates become one coherent explanation; normal conversation,
+status/history, report cards and speech use the same standard. Technical
+references remain available in the report card's closed Technical details
+disclosure and the audit history.
 
 ## Project limits and pause (#65)
 

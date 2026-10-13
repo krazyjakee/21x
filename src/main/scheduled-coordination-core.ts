@@ -35,6 +35,7 @@ import type { ChatProvider } from './chat/providers/types'
 import type { CommanderService } from './commander/commander-service'
 import { completeText } from './commander/commander-service'
 import { CommanderStore } from './commander/commander-store'
+import { REPORT_SUMMARY_RULES } from './commander/prompts'
 import { resolveCaptainAgentId, type CaptainWakerAgents } from './captain-waker'
 import { buildProjectStatus, type ProjectStatusAgents } from './project-status'
 import { isAllProjectsPaused, localDayKey } from './project-limits'
@@ -218,9 +219,10 @@ export function buildBriefingText(entries: BriefingProjectEntry[], day: string):
 export const BRIEFING_SUMMARY_PROMPT = [
   'You are the Commander, briefing the user on their projects.',
   'Below is a briefing built from each project\'s status record.',
-  'Write a short spoken-style summary: three to five plain sentences, no markdown, no lists, no headings.',
+  'Write a spoken-style explanation in plain language, no markdown, no lists, no headings. Use enough sentences to preserve essential context.',
   'Lead with what needs the user (approvals, reviews, blockers), then one line on overall progress.',
-  'Use only facts from the briefing. Do not invent tasks or numbers.'
+  REPORT_SUMMARY_RULES,
+  'Use only facts from the briefing. You have no tools in this briefing: state missing context plainly rather than claiming to retrieve it. Do not invent tasks, impact, next steps or numbers.'
 ].join('\n')
 
 /** The notification body: one line that says whether to look now. */

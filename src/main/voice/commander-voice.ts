@@ -11,7 +11,8 @@
  * - never reads a Captain report aloud as written (#107). A report that is
  *   relayed starts a Commander turn, and that turn's plain-language summary
  *   is what is spoken. A report that gets no turn (no provider, or a stored
- *   briefing) is announced in one line that points to the chat;
+ *   briefing) reads its structured human explanation when present, or is
+ *   announced in one line that points to the chat;
  * - on barge-in stops playback, cancels the synthesis request or connection,
  *   and cancels the Commander turn, so the cancelled reply is neither heard
  *   later nor written further.
@@ -28,6 +29,7 @@ import type { CommanderEvent, CommanderMessage } from '../../shared/commander'
 import { commanderVoiceKey } from '../../shared/commander-call'
 import type { VoiceSpeechRequest } from '../../shared/voice-tts'
 import type { VoiceAnswerPart } from './voice-speech-service'
+import { COMMANDER_TECHNICAL_DETAILS, splitCommanderReport } from '../../shared/commander-report'
 
 /** The part of the Commander service this bridge uses. */
 export interface CommanderVoiceCommander {
@@ -63,10 +65,21 @@ export { commanderVoiceKey }
 
 /**
  * What is said for a report that no summary turn will speak for. The report
- * itself is never read out: it is technical, and it is in the chat.
+ * audit evidence is never read out. Structured human context follows the same
+ * spoken contract as a Commander relay; older prose gets a short arrival cue.
  */
-export function spokenReport(projectName: string | null | undefined): string {
+export function spokenReport(projectName: string | null | undefined, content?: string): string {
   const from = projectName?.trim() ? `Report from ${projectName.trim()}` : 'A report arrived'
+  if (content?.includes(COMMANDER_TECHNICAL_DETAILS)) {
+    // Structured reports already contain the communication contract. Read the
+    // explanation when no model relay is available, never its audit section.
+    const explanation = splitCommanderReport(content).content
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/https?:\/\/\S+|\b(?:commit(?:\s+(?:hash|sha))?|(?:head[_ ]?)?sha)\s*[:=]?\s*[0-9a-f]{7,40}\b|\b(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b|\bPR\s*#\s*\d+\b/gi, '')
+      .replace(/[*#`]/g, '')
+      .replace(/\n+/g, '. ')
+    return `${from}. ${explanation}`
+  }
   return `${from}; details in the chat.`
 }
 
@@ -268,14 +281,14 @@ export class CommanderVoice {
   }
 
   /**
-   * A Captain report in the active session. Its content is not spoken: when
+   * A Captain report in the active session. Its audit content is not spoken: when
    * the Commander relays it, the relay turn starts in the same tick (see
    * CommanderService.deliverReport) and its summary is read like any reply.
-   * The one-line cue is spoken only when no such turn follows.
+   * The human explanation (or legacy one-line cue) is spoken only when no such turn follows.
    */
   private onReport(sessionId: string, message: CommanderMessage): void {
     if (sessionId !== this.activeSessionId) return
-    const text = spokenReport(message.project_id ? this.options.resolveProjectName?.(message.project_id) : null)
+    const text = spokenReport(message.project_id ? this.options.resolveProjectName?.(message.project_id) : null, message.content)
     const key = commanderVoiceKey(sessionId)
 
     const open = [...this.turns.values()].find((t) => t.sessionId === sessionId && !t.dead)

@@ -1,35 +1,49 @@
-/**
- * The Commander answers a Captain report with a short plain-language summary
- * rather than relaying it (#107). These pin the wording the model is given.
- */
 import { describe, expect, it } from 'vitest'
-import { COMMANDER_SYSTEM_PROMPT, REPORT_SUMMARY_RULES, reportRelayNote } from './prompts'
+import { COMMANDER_SYSTEM_PROMPT, COMMANDER_SUMMARY_PROMPT, REPORT_SUMMARY_RULES, reportRelayNote } from './prompts'
 
 describe('report summary instructions', () => {
-  it('asks for the outcome first, then progress, blockers and decisions, briefly', () => {
-    expect(REPORT_SUMMARY_RULES).toMatch(/^Lead with the outcome/)
-    expect(REPORT_SUMMARY_RULES).toContain('progress, blockers (and who or what they wait on)')
-    expect(REPORT_SUMMARY_RULES).toContain('any decision the user must make, with the options')
-    expect(REPORT_SUMMARY_RULES).toContain('2 to 5 sentences')
+  it('keeps a single explanation after the last tool result, without narration between calls (#114)', () => {
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('Do not write any text before or between tool calls')
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('Call the tools silently and write one reply after the last tool result')
   })
 
-  it('keeps technical detail out unless the user must act on it', () => {
-    for (const detail of ['issue and PR numbers', 'branch names', 'commit SHAs', 'file paths', 'batch labels', 'implementation order']) {
+  it('covers meaning, impact, outcome, next owner and user action for every work state', () => {
+    for (const phrase of ['completed, in-progress, blocked or proposed work', 'human-readable task or change title', 'plain-language description', 'visible benefit, fixed problem or project impact', 'next meaningful step and who owns it', 'required user action', 'no sentence limit']) {
+      expect(REPORT_SUMMARY_RULES).toContain(phrase)
+    }
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('Every reply, Captain report relay and status/history explanation')
+  })
+
+  it('keeps technical evidence secondary and available on explicit request', () => {
+    for (const detail of ['commit hashes', 'tell_commander', 'tool names', 'correlation IDs', 'raw check names', 'review machinery']) {
       expect(REPORT_SUMMARY_RULES).toContain(detail)
     }
-    expect(REPORT_SUMMARY_RULES).toContain('unless the user must act on one')
+    expect(REPORT_SUMMARY_RULES).toContain('unless the user explicitly asks for technical details')
+    expect(REPORT_SUMMARY_RULES).toContain('secondary concise link after naming and describing the change')
   })
 
   it('puts the rules in the system prompt, with details on request', () => {
     expect(COMMANDER_SYSTEM_PROMPT).toContain(REPORT_SUMMARY_RULES)
     expect(COMMANDER_SYSTEM_PROMPT).toContain('never a verbatim relay or quote')
-    expect(COMMANDER_SYSTEM_PROMPT).toContain('If the user asks for details, give them from the report.')
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('If the user asks for technical details, give them from the report.')
   })
 
   it('tells a report-started turn to summarise, not relay', () => {
     const note = reportRelayNote('"Web"')
     expect(note).toContain(REPORT_SUMMARY_RULES)
     expect(note).not.toContain('Relay it to the user now')
-    expect(note).toMatchInlineSnapshot(`"A report from project "Web" has just arrived; it is the last message. Refer to the project coordinator as Captain even if the report uses an older role name. Summarise it for the user now in plain language, naming the project; do not quote or relay it verbatim, since the full report is shown in the chat. Lead with the outcome, then give progress, blockers (and who or what they wait on) and any decision the user must make, with the options. Aim for 2 to 5 sentences; use short bullets only when there are several decisions. Leave out issue and PR numbers, branch names, commit SHAs, file paths, batch labels and implementation order, unless the user must act on one (for example "approve PR #12"). Only call ask_captain in response when the report itself asks for something the user already told you in this conversation; otherwise summarise it and stop."`)
+    expect(note).toContain('consider the pending reports together')
+    expect(note).toContain('project "Web"')
+    expect(note).toContain('do not quote or relay it verbatim')
+  })
+
+  it('requires coherent synthesis, honest missing context and the same spoken contract', () => {
+    expect(REPORT_SUMMARY_RULES).toContain('Synthesise multiple related updates into one coherent progress explanation')
+    expect(REPORT_SUMMARY_RULES).toContain('Never invent impact or meaning')
+    expect(REPORT_SUMMARY_RULES).toContain('read the associated project summary or history')
+    expect(REPORT_SUMMARY_RULES).toContain('state plainly what is unknown')
+    expect(REPORT_SUMMARY_RULES).toContain('Spoken replies follow the same contract')
+    expect(REPORT_SUMMARY_RULES).toContain('Integrated work is not necessarily released')
+    expect(COMMANDER_SUMMARY_PROMPT).toContain('human-readable change titles and descriptions, reported impact, current outcomes, next steps and their owners, required user actions, unknown context')
   })
 })

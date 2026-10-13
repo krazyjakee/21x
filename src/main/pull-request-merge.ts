@@ -15,6 +15,7 @@ import * as childProcess from 'child_process'
 import { createHash } from 'crypto'
 import { promisify } from 'util'
 import type { DatabaseManager } from './database'
+import { commanderSourceContext, formatCommanderReport, type CommanderReportContext } from '../shared/commander-report'
 import {
   parseGitHubPullRequestUrl,
   type PullRequestRef,
@@ -66,6 +67,8 @@ export interface PullRequestGateState {
   url: string
   number: number
   title: string
+  /** Source context for a meaningful report; never used as merge authority. */
+  body?: string
   state: string
   isDraft: boolean
   /** MERGEABLE | CONFLICTING | UNKNOWN */
@@ -112,7 +115,7 @@ function checkState(check: RawCheck): 'passed' | 'skipped' | 'failed' | 'pending
   return 'pending'
 }
 
-const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup,author,reviewRequests'
+const PR_VIEW_FIELDS = 'url,number,title,body,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup,author,reviewRequests'
 // gh pr view does not expose baseRefOid on supported CLI versions.
 // Read the latest review per reviewer here as well because gh pr view omits
 // the commit each review covered. Readiness needs exact-head evidence, not an
@@ -220,6 +223,7 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
     url: typeof raw.url === 'string' ? raw.url : pr.url,
     number: typeof raw.number === 'number' ? raw.number : pr.number,
     title: typeof raw.title === 'string' ? raw.title : '',
+    body: typeof raw.body === 'string' ? raw.body : undefined,
     state: String(raw.state ?? '').toUpperCase(),
     isDraft: raw.isDraft === true,
     mergeable: String(raw.mergeable ?? '').toUpperCase(),
@@ -504,7 +508,30 @@ export interface MergeHooks {
   notifyUser?: (title: string, body: string) => void
   pushToRenderer?: (channel: string, data: unknown) => void
   /** A report to the Commander: a PR was merged, or a merge needs a person on GitHub. */
-  report?: (projectId: string, kind: 'merged' | 'needs_user', summary: string) => void
+  report?: (projectId: string, kind: 'merged' | 'needs_user', summary: string, context?: CommanderReportContext) => void
+}
+
+/** Reports keep source evidence without guessing product benefit or release timing. */
+function mergeReportContext(pr: PullRequestRef, state: PullRequestGateState, outcome: 'merged' | 'approval' | 'changes'): CommanderReportContext {
+  const title = state.title?.trim() || 'Project change awaiting a description'
+  const source = commanderSourceContext(state.body)
+  return {
+    title,
+    description: source.description ? `The pull-request description says: ${source.description}` : state.title?.trim()
+      ? `The project change “${title}” ${outcome === 'merged' ? 'has been added to the main codebase' : 'has not been added to the main codebase yet'}.`
+      : 'The pull request does not provide a change title; what it changes still needs to be confirmed.',
+    impact: source.impact ? `The author reports: ${source.impact}` : 'The specific effect on users has not been confirmed in this report.',
+    outcome: outcome === 'merged' ? 'The change was integrated after its required checks completed. Release timing has not been reported.'
+      : outcome === 'approval' ? 'Blocked until an external reviewer provides the required approval.'
+        : 'Review found changes that must be addressed before integration.',
+    nextStep: outcome === 'merged' ? 'The Captain needs to confirm the next planned work or release step.'
+      : outcome === 'approval' ? 'The required reviewer must review the change; the Captain can retry after approval.'
+        : 'The task agent needs to fix the review findings, then the Captain can arrange a fresh review.',
+    userAction: outcome === 'merged' ? 'No action is needed from you for this integration.'
+      : outcome === 'approval' ? 'Arrange the required review, or tell the Captain who should provide it.'
+        : 'No additional user approval is requested; the work needs corrections.',
+    references: [pr.url, ...(state.body?.trim() ? [`Pull-request description (source context):\n${state.body.trim()}`] : [])]
+  }
 }
 
 export interface MergeRequest {
@@ -539,7 +566,7 @@ export function refuseUnmergeable(
     const key = `${pr.url}@${state.headRefOid}`
     if ((readiness ? readiness.changed : !reportedBlocks.has(key))) {
       reportedBlocks.add(key)
-      hooks.report?.(projectId, 'needs_user', `${summary}. This needs a person on GitHub; 21x will not bypass it.`)
+      hooks.report?.(projectId, 'needs_user', `${summary}. This needs a person on GitHub; 21x will not bypass it.`, mergeReportContext(pr, state, 'approval'))
     }
   }
   return {
@@ -589,7 +616,7 @@ export async function performMerge(db: MergeDb, request: MergeRequest, hooks: Me
   const attestation = readiness.attestation
   if (attestation?.verdict === 'CHANGES_REQUIRED') {
     const review = `head ${state.headRefOid} has unresolved changes from its latest verified 21x independent review${attestation.summary ? `: ${attestation.summary}` : ''}`
-    if (readiness.changed) hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged: ${review}.`)
+    if (readiness.changed) hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged: ${review}.`, mergeReportContext(pr, state, 'changes'))
     return {
       status: 'blocked',
       blocker_class: 'blocked',
@@ -624,7 +651,8 @@ export async function performMerge(db: MergeDb, request: MergeRequest, hooks: Me
     completed: [`Merged ${pr.owner}/${pr.repo}#${pr.number}${title}`]
   })
   hooks.pushToRenderer?.('project:statusChanged', { projectId })
-  hooks.notifyUser?.(`Captain of ${project.name} merged a PR`, summary)
-  hooks.report?.(projectId, 'merged', summary)
+  const reportContext = mergeReportContext(pr, state, 'merged')
+  hooks.notifyUser?.(`${reportContext.title} integrated in ${project.name}`, formatCommanderReport({ ...reportContext, references: undefined }))
+  hooks.report?.(projectId, 'merged', summary, reportContext)
   return { status: 'merged', pr_url: pr.url, head_sha: state.headRefOid, method, message: 'Merged.' }
 }

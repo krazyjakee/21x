@@ -45,4 +45,13 @@ describe('buildCaptainSystemPrompt', () => {
     expect(prompt.startsWith(buildCaptainSystemPrompt())).toBe(true)
     expect(prompt.endsWith('Be terse.')).toBe(true)
   })
+
+  it('supplies meaningful Commander report fields and preserves honest unknowns', () => {
+    const prompt = buildCaptainSystemPrompt()
+    expect(prompt).toContain('human-readable title, description of the change, known impact, current outcome, next_step with its owner, and user_action')
+    expect(prompt).toContain('Use task_id to retrieve the task title and description')
+    expect(prompt).toContain('If impact or the next step is unknown, say so plainly')
+    expect(prompt).toContain('Do not invent impact or imply that integrated work is released')
+    expect(prompt).toContain('Combine related updates into one coherent explanation')
+  })
 })

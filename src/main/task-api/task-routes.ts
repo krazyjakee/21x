@@ -9,6 +9,7 @@ import { afterTaskCreated, afterTaskUpdated, prepareUserTaskUpdate, startPrepare
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import { listProjectRepos, projectGitDefaults, taskProjectId, validateProjectRepos } from '../agent-manager/project-repos'
 import { deliverCaptainReport } from '../commander/report-inbox'
+import { formatCommanderReport, type CommanderReportContext } from '../../shared/commander-report'
 import { agentController, notifyRenderer } from './state'
 import { validateSkillAssignment } from './skill-routes'
 
@@ -449,9 +450,27 @@ function reportToCommander(db: DatabaseManager, params: Record<string, unknown>)
   const projectId = projectFilter(params)
   if (!projectId) return { error: 'project_id is required' }
   if (!db.getProject(projectId)) return { error: 'Project not found' }
-  const message = typeof params.message === 'string' ? params.message.trim() : ''
+  let message = typeof params.message === 'string' ? params.message.trim() : ''
   if (!message) return { error: 'message is required' }
   if (message.length > MAX_REPORT_CHARS) return { error: `message must be at most ${MAX_REPORT_CHARS} characters` }
+  const context: CommanderReportContext = {}
+  const fields = { title: 'title', description: 'description', impact: 'impact', outcome: 'outcome', next_step: 'nextStep', user_action: 'userAction' } as const
+  for (const [input, field] of Object.entries(fields)) {
+    if (params[input] === undefined) continue
+    if (typeof params[input] !== 'string' || !(params[input] as string).trim()) return { error: `${input} must be a non-empty string` }
+    context[field] = (params[input] as string).trim()
+  }
+  if (params.task_id !== undefined) {
+    if (typeof params.task_id !== 'string') return { error: 'task_id must be a string' }
+    const task = db.getTask(params.task_id)
+    if (!task || task.project_id !== projectId) return { error: 'Task not found in this project' }
+    context.title ??= task.title
+    context.description ??= task.description || undefined
+  }
+  if (Object.keys(context).length) {
+    message = formatCommanderReport(context, message)
+    if (message.length > MAX_REPORT_CHARS) return { error: `complete report must be at most ${MAX_REPORT_CHARS} characters including context and evidence` }
+  }
   if (typeof params.correlation_id === 'string' && params.correlation_id.trim().length > 100) return { error: 'correlation_id must be at most 100 characters' }
   if (typeof params.delivery_id === 'string' && params.delivery_id.trim().length > 200) return { error: 'delivery_id must be at most 200 characters' }
   const correlationId = typeof params.correlation_id === 'string' && params.correlation_id.trim() ? params.correlation_id.trim().slice(0, 100) : null

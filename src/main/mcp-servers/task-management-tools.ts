@@ -438,11 +438,18 @@ export const captainTools: Tool[] = [
       'Send a report to the Commander, the fast chat that relays between the user and every project (#62). ' +
       'Use it to answer a request that arrived from the Commander (quote its correlation_id so the reply lands in the right conversation) ' +
       'and, without a correlation_id, to escalate: a decision the user must take, a blocker, or something finished that the user asked about elsewhere. ' +
-      'Keep it to a few sentences the Commander can relay as-is; the user reads it as "Project X says …". Only the project Captain may call it.',
+      'Explain the work in clear, thorough, non-technical terms: title, description, impact, current outcome, next step and owner, and required user action. Do not invent missing impact. Supply those fields so the visible card can separate the explanation from technical evidence in message. The complete formatted report, including evidence, must fit within 4000 characters. Only the project Captain may call it.',
     inputSchema: {
       type: 'object',
       properties: {
-        message: { type: 'string', description: 'The report: outcome first, then what the user must decide, if anything. At most 4000 characters.' },
+        message: { type: 'string', description: 'Plain-language report for legacy callers, or supporting details/evidence when the report fields are supplied. At most 4000 characters.' },
+        task_id: { type: 'string', description: 'Optional task in this project; fills missing title and description from the task.' },
+        title: { type: 'string', description: 'Human-readable task or change title, not an identifier.' },
+        description: { type: 'string', description: 'What changed or is being worked on, in plain language.' },
+        impact: { type: 'string', description: 'Known visible benefit, fixed problem or project impact. State what is unknown rather than guessing.' },
+        outcome: { type: 'string', description: 'Completed, integrated, under review, in progress, proposed or blocked, with enough context to understand the result.' },
+        next_step: { type: 'string', description: 'Next meaningful step and who owns it, or state that it has not been confirmed.' },
+        user_action: { type: 'string', description: 'Required user decision/action and options; say no action is needed only when supported.' },
         correlation_id: { type: 'string', description: 'The correlation_id from the Commander message this answers. Omit for an unprompted report.' },
         delivery_id: { type: 'string', description: 'Optional stable idempotency key retained across retries. Correlated terminal reports derive one automatically.' }
       },
