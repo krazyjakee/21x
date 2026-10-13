@@ -1,0 +1,58 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Portable injected-fetch installer owner and legacy system-proxy-fetch adapter. Real loopback streamed HTTP plus held raw fetch/cancellation acknowledgements. Full local service/application tests include all ten core and two legacy adapter cases. No real installer, elevation, system-proxy attestation, signature/checksum or production Tauri native binding is claimed.",
+  "sourceFilesSha256": {
+    "src/main/agent-installer/installer-network.js": "796f476cead00997bf814b92e348247547f337b577818d89c03e6eb0b308f234",
+    "src/main/agent-installer/installer-utils.js": "232fcb070c0d47b491083f2489fbf74a502f66de4155927fd971a9349cc51c5a",
+    "src/main/agent-installer/installer-network.test.ts": "905efdaaae857023cb8047a5e2e631dea1a825bfa75d8602d8babed3dd4b6559",
+    "src/main/agent-installer/installer-utils-network.test.ts": "e2424fb297d1ac056b19782934f648a33c0eca4a04309e63e99ee27c605c8669",
+    "vitest.tauri.config.ts": "b93a6ce0b5e22ab86f3f6a60ae86ec4456392280cb7ccaaf8aecc7727cfeeeca"
+  },
+  "reports": [
+    {
+      "command": "pnpm test:tauri -- --service-proofs",
+      "report": "/tmp/21x-installer-network-final-service.json",
+      "sha256": "2885d37f794a146b1d20f1feaab7a5b5b20c796ee0d0f79f4cd0be7ed0164f61",
+      "passed": 1055,
+      "skipped": 0,
+      "files": 76
+    },
+    {
+      "command": "pnpm test -- --run",
+      "report": "/tmp/21x-installer-network-final-legacy.json",
+      "sha256": "16a79713b300d27b2fe0b8acc95fb363f10976741860cd9d1b50116c5380a989",
+      "passed": 5267,
+      "skipped": 20,
+      "files": 376
+    },
+    {
+      "command": "pnpm test:tauri -- src/main/agent-installer",
+      "report": "/tmp/21x-installer-network-standalone-final.json",
+      "sha256": "f93473c8e7908a02d315d874e80a33a41a06694dff771aa2bf0bc9dfa0703501",
+      "passed": 28,
+      "skipped": 0,
+      "files": 3
+    },
+    {
+      "command": "pnpm test -- src/main/agent-installer",
+      "report": "/tmp/21x-installer-network-legacy-final.json",
+      "sha256": "b74d35eb7e572ab1df88e2637cb238083aa0698aeb9d79da094247e9a1907870",
+      "passed": 30,
+      "skipped": 0,
+      "files": 4
+    }
+  ],
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "scope": "Existing production desktop/mobile build, existing chunk/dynamic import warnings remain."
+  },
+  "typecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "typecheckCommand": "pnpm exec tsc --build --noEmit --force",
+  "fullRunsBeforeTypeOnlyFixtureAnnotation": true
+}

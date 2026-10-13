@@ -1,0 +1,48 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "942af9c3a61bc6337afb4c3c83a90bf543439797",
+  "pullRequest": "https://github.com/krazyjakee/21x/pull/224",
+  "workflowRun": "https://github.com/krazyjakee/21x/actions/runs/38337818378",
+  "conclusion": "success",
+  "scope": "Hosted Verify with manager/worker/connector piece close ownership and artifact policy v2; excludes later OAuth owner changes.",
+  "fullApplicationTests": {
+    "passed": 5183,
+    "skipped": 16,
+    "passedFiles": 357,
+    "skippedFiles": 7,
+    "totalFiles": 364
+  },
+  "standaloneNodeTests": {
+    "passed": 496,
+    "skipped": 0,
+    "files": 44,
+    "node": "v22.23.2",
+    "allSharedFilesIncluded": true
+  },
+  "nativeTests": {
+    "defaultUnitPassed": 3,
+    "syntheticUnitPassed": 20,
+    "stagedFeasibilityPassed": 4
+  },
+  "checks": {
+    "connectorPolicy": "passed",
+    "lint": "passed",
+    "typecheck": "passed",
+    "inventoryAndContracts": "passed",
+    "electronAndMobileBuild": "passed",
+    "isolatedTauriFrontendBuild": "passed",
+    "foundationSubprocessSuite": "passed",
+    "installedEvidencePolicy": "passed",
+    "navigationRailRealScrollport": "passed",
+    "commanderNativeKeyboardAndFocus": "passed"
+  },
+  "limitations": [
+    "Optional service/private-pipe and native voice controls remain skipped in the Electron-launched suite; platform workflows require standalone service controls separately.",
+    "This run precedes the OAuth owner continuation, measured locally in connector-oauth-owner-local.json.",
+    "No full Tauri production, live-profile or release acceptance."
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "logSha256": "515386446ed147df398313ab05e08cbd4ee198dddd564ae8bdcb7681cb4b3368"
+}

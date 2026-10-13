@@ -1,0 +1,9 @@
+# Chat runtime shutdown ownership
+
+`ChatRuntime` now closes admission and retains each raw provider/tool turn until its work and iterator cleanup settle. Shutdown aborts all turns, suppresses late events and checks cancellation after every streamed event, stream completion and tool result. A provider that ignores abort stays owned through bounded-close failure/retry. An accepted tool effect may finish while held, but it cannot start the next tool or provider round. Ordinary `cancelAll()` remains reusable and returns a cancelled result even if an uncooperative stream ends normally.
+
+The application chat registrar retains its runtimes, rejects final starts before provider settings/key access and joins cleanup before SQLite closes. Its sender-destruction listener is removed when the raw turn settles. Four new portable lifetime controls exercise held providers, iterator cleanup, tool effects, queued starts and ordinary cancellation. A native registrar test uses actual portable SQLite and an abort-ignoring provider's late cleanup write. Existing runtime and Commander regression cases remain preserved.
+
+[Local evidence](evidence/chat-runtime-owner-local.json) records exact hashes and validation. All providers/tools are fixtures; no paid model requests are made. This owner covers lightweight chat and the shared streaming loop. Commander's separate title, summary, post-turn persistence and report-delivery owners still need their own shutdown drain under [#214](https://github.com/krazyjakee/21x/issues/214) / [#208](https://github.com/krazyjakee/21x/issues/208). Production Tauri chat bindings and installed interaction remain open.
+
+Full validation passed 1,472 standalone/private-pipe tests with zero skips in 101 files and 5,351 application tests with 20 optional skips in 394 files. Both commands exited zero without unhandled errors. Forced typecheck, changed-source lint, contract freshness and desktop/mobile build passed.

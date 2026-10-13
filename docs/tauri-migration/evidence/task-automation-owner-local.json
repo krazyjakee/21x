@@ -1,0 +1,89 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Actual SQLite reconciliation lifetime with fixture agent operations; 29 scheduling regressions plus five raw-pass controls. Renderer focus-timer teardown regression. No installed production scheduler, Captain, heartbeat or workspace cleanup parity claim.",
+  "sourceFilesSha256": {
+    "src/main/task-automation-scheduler.ts": "770e5c6153ca0fab6772be55f6e9d3029a8df65be8082dc8324122f6405bf2cd",
+    "src/main/task-automation-lifetime.test.ts": "58fd8d922aad845d5f1d09ca6f5b3e9fb8e2e5ad76f79bd4ad9e895930303757",
+    "src/main/task-automation-scheduler.test.ts": "c8730e5a6faffa843d13cc7832f5a0fa044ddcea1dc3d5fafd8f11208311a93f",
+    "src/main/index.ts": "639a0bd15e241867d75e5511d5f246e27405a8c8298b1f2be5cc9ec67b2f4181",
+    "src/renderer/src/components/canvas/TerminalPanelContent.tsx": "f83297da0e41b1fda14ce160e336e34f8793a455e6721eb5655f27d49de53d0e",
+    "src/renderer/src/components/canvas/TerminalPanelContent.test.tsx": "ab5ea15b2dc076235faa70bfc3cbd90822f3bcb85660a4d006e392f79ac3ca25",
+    "vitest.tauri.config.ts": "c06c49fbcbee5c91ac5db2560206694c511b7c11acf95d3fa189f32fab5ccf4c"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-task-automation-full-service.json",
+      "sha256": "66ac00933c3ccb97bc04e01791109f5b946341b28e9f337121aab64efc35ea1d",
+      "passed": 1257,
+      "failed": 0,
+      "skipped": 0,
+      "files": 85,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "Complete standalone/private-pipe suite before renderer timer fix; renderer is outside this configuration."
+    },
+    {
+      "report": "/tmp/21x-task-automation-full-legacy.json",
+      "sha256": "c51d30bac99acf4236bfee8f95a411572e38e90e55676b2fc3ea0eef9700a002",
+      "passed": 5293,
+      "failed": 0,
+      "skipped": 20,
+      "files": 380,
+      "commandExitCode": 1,
+      "accepted": false,
+      "note": "All assertions passed but unhandled ReferenceError from delayed TerminalPanelContent focus timer.",
+      "capturedLogSha256": "9d3c27af328df441dc4e04c3138402618cd0a189004469e276e7076de4f8069e",
+      "unhandledErrorsReported": true
+    },
+    {
+      "report": "/tmp/21x-task-automation-checked-legacy.json",
+      "sha256": "ec9627838c4c6fa092d794425af641701c73282a4fd35d99d6dc30f8e98e7083",
+      "passed": 5293,
+      "failed": 1,
+      "skipped": 20,
+      "files": 380,
+      "commandExitCode": 1,
+      "accepted": false,
+      "note": "Terminal timer error no longer reported; one profile migration rehearsal exceeded its 5000 ms test deadline.",
+      "capturedLogSha256": "882a05afd4d825e7cb93d301deca57e764fb55d160f5ca34e863f290da92b07b",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-task-automation-rehearsal-recheck.json",
+      "sha256": "c01c1f68729e551e8256298bbbde86eacadc26f9ea76278cbdf1d64a04217b67",
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "Independent actual SQLite import rehearsal rerun."
+    },
+    {
+      "report": "/tmp/21x-task-automation-bounded-legacy.json",
+      "sha256": "56b3c7c909aa3b98dfd57184a5fb0f4444c8e65f7666fb7e1183e9110a31e969",
+      "passed": 5294,
+      "failed": 0,
+      "skipped": 20,
+      "files": 380,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "Full suite with maxWorkers=4; unchanged per-test deadlines.",
+      "capturedLogSha256": "5ef60c1f8aa8b7bfebed552d56c678f3300b46f020938afa6e8686c67f7f3729",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "finalStandaloneCommand": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-task-automation-full-service.json",
+  "finalApplicationCommand": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-task-automation-bounded-legacy.json",
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "e30fccb07df6f1801085c626fb79dcbb3cd686ededf70c80c4521be1b92c390d"
+  }
+}

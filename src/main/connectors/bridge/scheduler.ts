@@ -22,6 +22,11 @@ import { nextPendingAt, readCursor } from './state'
 
 export const BRIDGE_SCHEDULER_TICK_MS = 30_000
 
+export class BridgeSchedulerShutdownIncompleteError extends Error {
+  readonly code = 'BRIDGE_SCHEDULER_SHUTDOWN_INCOMPLETE'
+  constructor() { super('Connector polling work has not finished'); this.name = 'BridgeSchedulerShutdownIncompleteError' }
+}
+
 export interface BridgeSchedulerOptions {
   db: Pick<DatabaseManager, 'getTaskSources'>
   store: ConnectorStore
@@ -34,11 +39,13 @@ export interface BridgeSchedulerOptions {
 
 export class BridgeScheduler {
   private timer: ReturnType<typeof setInterval> | null = null
-  private ticking = false
+  private activeTick: Promise<void> | null = null
+  private closing = false
 
   constructor(private readonly options: BridgeSchedulerOptions) {}
 
   start(): void {
+    if (this.closing) throw new Error('Connector polling is shutting down')
     if (this.timer) return
     this.timer = setInterval(() => void this.tick(), this.options.tickMs ?? BRIDGE_SCHEDULER_TICK_MS)
     this.timer.unref?.()
@@ -48,6 +55,21 @@ export class BridgeScheduler {
   stop(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+  }
+
+  /** Stop scheduling and join the active pass, including all source callbacks. */
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Connector polling shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.closing = true
+    this.stop()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new BridgeSchedulerShutdownIncompleteError()), timeoutMs)
+    })
+    try { await Promise.race([Promise.allSettled(this.activeTick ? [this.activeTick] : []), expired]) }
+    finally { if (timer) clearTimeout(timer) }
   }
 
   /** Whether the instance should run now. */
@@ -63,13 +85,21 @@ export class BridgeScheduler {
   }
 
   /** One scheduling pass. Exposed for tests. */
-  async tick(): Promise<void> {
-    if (this.ticking) return
-    this.ticking = true
+  tick(): Promise<void> {
+    if (this.closing) return Promise.resolve()
+    if (this.activeTick) return this.activeTick
+    // Install ownership before callbacks can reenter scheduling or shutdown.
+    const work = Promise.resolve().then(() => this.closing ? undefined : this.runTick())
+    this.activeTick = work
+    void work.finally(() => { if (this.activeTick === work) this.activeTick = null }).catch(() => undefined)
+    return work
+  }
+
+  private async runTick(): Promise<void> {
+    const now = (this.options.now ?? Date.now)()
+    const seen = new Set<string>()
+    const runs: Promise<void>[] = []
     try {
-      const now = (this.options.now ?? Date.now)()
-      const seen = new Set<string>()
-      const runs: Promise<void>[] = []
       for (const source of this.options.db.getTaskSources()) {
         if (source.plugin_id !== CONNECTOR_BRIDGE_PLUGIN_ID || !source.enabled) continue
         const cfg = parseBridgeConfig(source.config ?? {})
@@ -78,14 +108,11 @@ export class BridgeScheduler {
         if (this.options.isBusy(cfg.instanceId)) continue
         if (!this.isDue(cfg.instanceId, cfg.pollIntervalMinutes, now)) continue
         runs.push(
-          this.options.runSource(source.id).catch((err) => {
+          Promise.resolve().then(() => this.options.runSource(source.id)).catch((err) => {
             console.warn('[connector-bridge] Scheduled sync failed:', err instanceof Error ? err.message : err)
           })
         )
       }
-      await Promise.all(runs)
-    } finally {
-      this.ticking = false
-    }
+    } finally { await Promise.all(runs) }
   }
 }

@@ -2,7 +2,9 @@ import { DesktopClient } from '../renderer/src/lib/desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, type TauriDesktopApi } from '../renderer/src/lib/tauri-desktop-transport'
 import { DATABASE_COMMAND_CODECS, DATABASE_EVENT_CODECS } from '../shared/database-desktop-codecs'
 import { AGENT_COMMAND_CODECS, AGENT_EVENT_CODECS } from '../shared/agent-desktop-codecs'
+import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_CONTENT_OPERATIONS, CONFIGURATION_EVENT_CODECS } from '../shared/configuration-desktop-codecs'
 import { createProjection, applyPartsToProjection } from '../shared/transcript/projection'
+import { hydrateTranscriptProjection } from '../renderer/src/lib/transcript-pagination'
 import { isRecord, ServiceProtocolError } from '../shared/service-protocol'
 import type { Task } from '../renderer/src/types'
 
@@ -30,16 +32,21 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi, agentEnab
   const tasks = new Map<string, Task>()
   let selected: string | undefined
   let selectionGeneration = 0
+  let selectionRead: AbortController | undefined
+  let requiredTranscriptRev = 0
   let revision = 0
   let hydrated = false
+  let transcriptHydrated = false
   const projection = createProjection()
   const observers = new Map<string, Set<(id: string) => void>>()
   let refreshAgentControls = (): void => {}
   const client = new DesktopClient({
-    transport: createTauriDesktopTransport(native), commands: { ...DATABASE_COMMAND_CODECS, ...(agentEnabled ? AGENT_COMMAND_CODECS : {}) },
-    events: { ...DATABASE_EVENT_CODECS, ...(agentEnabled ? AGENT_EVENT_CODECS : {}) },
+    transport: createTauriDesktopTransport(native), commands: { ...DATABASE_COMMAND_CODECS,
+      ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(operation => [operation, CONFIGURATION_COMMAND_CODECS[operation]])),
+      ...(agentEnabled ? AGENT_COMMAND_CODECS : {}) },
+    events: { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...(agentEnabled ? AGENT_EVENT_CODECS : {}) },
     onState: state => {
-      if (state.status !== 'ready') hydrated = false
+      if (state.status !== 'ready') { hydrated = false; transcriptHydrated = false; selectionRead?.abort() }
       status.textContent = state.status === 'ready' ? 'Connected to isolated test data.' :
         state.status === 'connecting' ? 'Connecting…' : 'Connection unavailable. Reload the window to reconnect.'
       create.disabled = state.status !== 'ready' || !hydrated
@@ -68,16 +75,30 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi, agentEnab
   function failed(): void { status.textContent = 'The isolated data operation failed.' }
   async function selectTask(id: string, reset = false): Promise<void> {
     const generation = ++selectionGeneration
+    selectionRead?.abort()
+    const reading = new AbortController()
+    selectionRead = reading
+    transcriptHydrated = false
+    refreshAgentControls()
     if (selected !== id || reset) {
       projection.parts.clear(); projection.sorted.length = 0; projection.rev = 0
     }
+    if (selected !== id) requiredTranscriptRev = 0
     selected = id
-    const snapshot = await client.invoke('agentSession:getTranscriptSnapshot', [id])
+    try {
+      let recovered = false
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const cursor = await hydrateTranscriptProjection((taskId, page, options) => client.invoke('agentSession:getTranscriptPage', [taskId, page], options), id, projection,
+          { signal: reading.signal })
+        if (cursor >= requiredTranscriptRev) { recovered = true; break }
+      }
+      if (!recovered) throw new ServiceProtocolError('BACKPRESSURE')
+    } catch (error) {
+      if (reading.signal.aborted) return
+      throw error
+    } finally { if (selectionRead === reading) selectionRead = undefined }
     if (generation !== selectionGeneration) return
-    applyPartsToProjection(projection, snapshot, Math.max(0, ...snapshot.map(part => part.rev)))
-    const delta = await client.invoke('agentSession:getTranscriptDelta', [id, projection.rev])
-    if (generation !== selectionGeneration) return
-    applyPartsToProjection(projection, delta.parts, delta.maxRev)
+    transcriptHydrated = true
     drawTranscript()
   }
   client.subscribe('task:created', ({ task }) => { tasks.set(task.id, task); revision++; drawTasks(); notify('task:created', task.id) })
@@ -89,7 +110,15 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi, agentEnab
   client.subscribe('task:deleted', ({ taskId }) => { tasks.delete(taskId); revision++; drawTasks(); notify('task:deleted', taskId) })
   client.subscribe('transcript:changed', event => {
     if (event.taskId !== selected) return
-    if (event.reloadRequired) { void selectTask(event.taskId, true).catch(failed); return }
+    if (event.reloadRequired) {
+      requiredTranscriptRev = Math.max(requiredTranscriptRev, event.maxRev)
+      transcriptHydrated = false
+      refreshAgentControls()
+      // Coalesce invalidations while a read is active; repeated large updates
+      // must not continually abort their own recovery or enable stale approval.
+      if (!selectionRead) void selectTask(event.taskId, true).catch(failed)
+      return
+    }
     applyPartsToProjection(projection, event.parts, event.maxRev)
     drawTranscript()
   })
@@ -116,7 +145,7 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi, agentEnab
   refreshAgentControls = () => {
     const connected = hydrated && client.connection.status === 'ready'
     agentStart.disabled = !connected || !fixtureAgentId || conversationUsed
-    agentApprove.disabled = agentReject.disabled = !connected || agentStatus !== 'waiting_approval' || !pendingApproval()
+    agentApprove.disabled = agentReject.disabled = !connected || !transcriptHydrated || agentStatus !== 'waiting_approval' || !pendingApproval()
     agentStop.disabled = !connected || !fixtureSessionId
     agentControls.querySelector('[data-agent-state]')!.textContent = `Isolated deterministic agent: ${agentStatus}.`
   }

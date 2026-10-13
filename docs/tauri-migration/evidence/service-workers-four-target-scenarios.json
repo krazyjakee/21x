@@ -1,0 +1,166 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38330476030",
+  "overallRunConclusion": "success",
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "sourceCommit": "b995a2fcd2751e386bf7660cd1aaa2f5a358d50f",
+      "portableTests": {
+        "passed": 472,
+        "skipped": 0,
+        "files": 42
+      },
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "proofs": {
+        "proof-scope.json": {
+          "report": "service-workers-b995a2f-linux-appimage-x64-proof-scope.json",
+          "sha256": "c1aa16135dfae315703e24a4274b436104eda49f7421ab1ee8843a9c70d58a00"
+        },
+        "staged-native-preflight.json": {
+          "report": "service-workers-b995a2f-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "startup-transcript-tests.json": {
+          "report": "service-workers-b995a2f-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "ac47ac24ada016e0d420ed9d85263ccfec83fb288af6e4b1a79ce6db30bf7e86"
+        },
+        "agent-service-proof.json": {
+          "report": "service-workers-b995a2f-linux-appimage-x64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "configuration-service-proof.json": {
+          "report": "service-workers-b995a2f-linux-appimage-x64-configuration-service-proof.json",
+          "sha256": "929521047a97e3610218841dbd8228d977df3027b6479a38d2063a0dcab0af99"
+        },
+        "transcript-page-proof.json": {
+          "report": "service-workers-b995a2f-linux-appimage-x64-transcript-page-proof.json",
+          "sha256": "0fa3fa98d05fc16b9527eb92529c0558d22e66819a1e46f34981c66f57e0d7d1"
+        }
+      },
+      "compactArtifactId": 11783595148,
+      "compactArtifactSha256": "a4e3a5ba889f38dbb37fb417a698e0629dc34f185cd2ba62c146ed884be5f388"
+    },
+    {
+      "target": "macos-arm64",
+      "sourceCommit": "b995a2fcd2751e386bf7660cd1aaa2f5a358d50f",
+      "portableTests": {
+        "passed": 472,
+        "skipped": 0,
+        "files": 42
+      },
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "proofs": {
+        "proof-scope.json": {
+          "report": "service-workers-b995a2f-macos-arm64-proof-scope.json",
+          "sha256": "c1aa16135dfae315703e24a4274b436104eda49f7421ab1ee8843a9c70d58a00"
+        },
+        "staged-native-preflight.json": {
+          "report": "service-workers-b995a2f-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "startup-transcript-tests.json": {
+          "report": "service-workers-b995a2f-macos-arm64-startup-transcript-tests.json",
+          "sha256": "745cb99fe410d6c8833352e28c4477698d5cffa08899a6e8a79b24e1eb83422b"
+        },
+        "agent-service-proof.json": {
+          "report": "service-workers-b995a2f-macos-arm64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "configuration-service-proof.json": {
+          "report": "service-workers-b995a2f-macos-arm64-configuration-service-proof.json",
+          "sha256": "929521047a97e3610218841dbd8228d977df3027b6479a38d2063a0dcab0af99"
+        },
+        "transcript-page-proof.json": {
+          "report": "service-workers-b995a2f-macos-arm64-transcript-page-proof.json",
+          "sha256": "0fa3fa98d05fc16b9527eb92529c0558d22e66819a1e46f34981c66f57e0d7d1"
+        }
+      },
+      "compactArtifactId": 11782532106,
+      "compactArtifactSha256": "976fd028619a10cc23033929a8d311924b6fd425e536ee72c23f3cac5ccb933c"
+    },
+    {
+      "target": "macos-x64",
+      "sourceCommit": "b995a2fcd2751e386bf7660cd1aaa2f5a358d50f",
+      "portableTests": {
+        "passed": 472,
+        "skipped": 0,
+        "files": 42
+      },
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "proofs": {
+        "proof-scope.json": {
+          "report": "service-workers-b995a2f-macos-x64-proof-scope.json",
+          "sha256": "c1aa16135dfae315703e24a4274b436104eda49f7421ab1ee8843a9c70d58a00"
+        },
+        "staged-native-preflight.json": {
+          "report": "service-workers-b995a2f-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "startup-transcript-tests.json": {
+          "report": "service-workers-b995a2f-macos-x64-startup-transcript-tests.json",
+          "sha256": "e51e423c4cbe111a5a56cb72e819ceb02df1e54f05351c848bf37867d68a0e2b"
+        },
+        "agent-service-proof.json": {
+          "report": "service-workers-b995a2f-macos-x64-agent-service-proof.json",
+          "sha256": "d309297c736fadc4bfd6cd02cfabb8932225f1b1fec694fa8ab148cc87b155e2"
+        },
+        "configuration-service-proof.json": {
+          "report": "service-workers-b995a2f-macos-x64-configuration-service-proof.json",
+          "sha256": "929521047a97e3610218841dbd8228d977df3027b6479a38d2063a0dcab0af99"
+        },
+        "transcript-page-proof.json": {
+          "report": "service-workers-b995a2f-macos-x64-transcript-page-proof.json",
+          "sha256": "0fa3fa98d05fc16b9527eb92529c0558d22e66819a1e46f34981c66f57e0d7d1"
+        }
+      },
+      "compactArtifactId": 11782461951,
+      "compactArtifactSha256": "cc7bcc00aa2b907fe4866bff9fb478e82cc155ccc424a547c3dc625acd6af9b3"
+    },
+    {
+      "target": "windows-x64",
+      "sourceCommit": "b995a2fcd2751e386bf7660cd1aaa2f5a358d50f",
+      "portableTests": {
+        "passed": 472,
+        "skipped": 0,
+        "files": 42
+      },
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "proofs": {
+        "proof-scope.json": {
+          "report": "service-workers-b995a2f-windows-x64-proof-scope.json",
+          "sha256": "c1aa16135dfae315703e24a4274b436104eda49f7421ab1ee8843a9c70d58a00"
+        },
+        "staged-native-preflight.json": {
+          "report": "service-workers-b995a2f-windows-x64-staged-native-preflight.json",
+          "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+        },
+        "startup-transcript-tests.json": {
+          "report": "service-workers-b995a2f-windows-x64-startup-transcript-tests.json",
+          "sha256": "3e90f3249b06749a9631185d459f0b868fbdddf9957f6bb18ac9ca9ea47525e0"
+        },
+        "agent-service-proof.json": {
+          "report": "service-workers-b995a2f-windows-x64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "configuration-service-proof.json": {
+          "report": "service-workers-b995a2f-windows-x64-configuration-service-proof.json",
+          "sha256": "929521047a97e3610218841dbd8228d977df3027b6479a38d2063a0dcab0af99"
+        },
+        "transcript-page-proof.json": {
+          "report": "service-workers-b995a2f-windows-x64-transcript-page-proof.json",
+          "sha256": "0fa3fa98d05fc16b9527eb92529c0558d22e66819a1e46f34981c66f57e0d7d1"
+        }
+      },
+      "compactArtifactId": 11783235479,
+      "compactArtifactSha256": "d29264993bd3d9064e942b9b84c11498c8505e9b694ca168e5cd7446f3349ad0"
+    }
+  ],
+  "limits": "Service-only: standalone Node worker/native import/private pipe synthetic controls. No installed GUI, real provider session, production connector transport or packaged performance evidence.",
+  "productionReady": false
+}

@@ -486,7 +486,10 @@ fn main() {
             app.manage(owned_profile);
             if setup_smoke.enabled() {
                 setup_smoke.evidence.lock().unwrap()["runtime"] = json!({
-                    "initialized":true, "syntheticDesktop":app.state::<Engine>().status()["syntheticDesktop"],
+                    "initialized":true, "hostArch":std::env::consts::ARCH,
+                    "webviewVersion":tauri::webview_version().ok(),
+                    "webviewDefaultRuntime":std::env::var_os("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER").is_none(),
+                    "syntheticDesktop":app.state::<Engine>().status()["syntheticDesktop"],
                     "syntheticAgent":app.state::<Engine>().status()["syntheticAgent"],
                     "resourceRoot":std::fs::canonicalize(&resources)?,
                     "profileRoot":std::fs::canonicalize(&profile)?, "developmentFrontend":tauri::is_dev(),

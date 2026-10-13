@@ -1,0 +1,32 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "0604c8301cf760241e7eaf94b4948a54bf187c44",
+  "scope": "Additive polling drain joining source callback promises, including an earlier source when a later store lookup throws. Production plugin and runtime teardown integration remains open.",
+  "sourceSha256": {
+    "src/main/connectors/bridge/scheduler.ts": "d565734dce312cefed9050b9ed0010959d6bc931f082aa6057c392e2ed47617b",
+    "src/main/connectors/bridge/scheduler-lifetime.test.ts": "68ddea3b3babc6f516175c94b1a9cb4bf4db0ad9955ea22dfa67b9c63067f16a",
+    "vitest.tauri.config.ts": "8b8bb4af3a92b172b9bdc168453497d6edf31aaa0bc33b34072a06781badc4cb"
+  },
+  "tests": {
+    "standalone": {
+      "passed": 5,
+      "skipped": 0,
+      "files": 1,
+      "reportSha256": "72e9f5f25ac5cc856f606855436f2624763f20bb11b22c43a44e41a5c202cbd4"
+    },
+    "legacy": {
+      "passed": 47,
+      "skipped": 0,
+      "files": 3,
+      "reportSha256": "aaa8b811279625190dcb3b2aa357c2811e756ed47d0587811cebdde3ea2ef73a"
+    }
+  },
+  "newPollingOwnershipCases": 5,
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

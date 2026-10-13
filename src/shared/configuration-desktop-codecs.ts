@@ -37,6 +37,9 @@ export const CONFIGURATION_DESKTOP_OPERATIONS = [
   'projectResource:list', 'projectResource:add', 'projectResource:update', 'projectResource:remove', 'projectResource:reorder'
 ] as const
 export type ConfigurationDesktopOperation = typeof CONFIGURATION_DESKTOP_OPERATIONS[number]
+export const CONFIGURATION_CONTENT_OPERATIONS = CONFIGURATION_DESKTOP_OPERATIONS.filter(
+  (operation): operation is Exclude<ConfigurationDesktopOperation, `agent:${string}`> => !operation.startsWith('agent:')
+)
 export interface ConfigurationCommandCodec<K extends ConfigurationDesktopOperation> {
   encodeArguments: (args: DesktopCommandMap[K]['apiArguments']) => JsonValue
   decodeArguments: (payload: JsonValue) => DesktopCommandMap[K]['apiArguments']

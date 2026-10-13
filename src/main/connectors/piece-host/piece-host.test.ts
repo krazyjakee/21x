@@ -8,7 +8,7 @@ import { applySchema } from '../../database/schema'
 import { ConnectorStore } from '../connector-store'
 import type { ConnectorCredentials } from '../credentials'
 import type { ConnectorPieceAllowlist } from '../allowlist'
-import { kvBackendFromConnectorStore, PieceHostClient, type PieceHostTransport, type PieceKvBackend } from './client'
+import { kvBackendFromConnectorStore, PieceHostClient, PieceHostShutdownIncompleteError, type PieceHostTransport, type PieceKvBackend } from './client'
 import {
   PieceCancelledError,
   PieceExecutionError,
@@ -307,7 +307,9 @@ class MemoryKv implements PieceKvBackend {
   }
 }
 
-function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, ConnectorCredentials | null> } = {}): {
+function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, ConnectorCredentials | null>;
+  getCredentials?: (id: string) => ConnectorCredentials | null | Promise<ConnectorCredentials | null>
+} = {}): {
   client: PieceHostClient
   processes: FakeHostProcess[]
 } {
@@ -320,7 +322,7 @@ function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, Connecto
       return p
     },
     kv: opts.kv ?? new MemoryKv(),
-    credentials: { get: (id) => creds[id] ?? null },
+    credentials: { get: opts.getCredentials ?? ((id) => creds[id] ?? null) },
     allowlist: CLIENT_ALLOWLIST,
     defaultTimeoutMs: 2_000
   })
@@ -328,6 +330,107 @@ function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, Connecto
 }
 
 const base = { instanceId: 'inst-1', pieceName: PIECE, pieceVersion: VERSION }
+
+describe('piece host credential-read lifetime', () => {
+  it('retains a raw credential read after public disposal and a bounded close deadline', async () => {
+    let finish!: (value: ConnectorCredentials | null) => void
+    const held = new Promise<ConnectorCredentials | null>(resolve => { finish = resolve })
+    const { client, processes } = makeClient({ getCredentials: () => held })
+    const call = client.runAction({ ...base, actionName: 'echo' }).catch(error => error)
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      await expect(client.close(10)).rejects.toBeInstanceOf(PieceHostShutdownIncompleteError)
+      expect(await call).toBeInstanceOf(PieceCancelledError)
+      finish(null)
+      await client.close()
+      expect(processes).toHaveLength(0)
+    } finally { finish(null); await call; await client.close() }
+  })
+
+  it('requires an actual worker exit acknowledgement after requesting kill', async () => {
+    const { client, processes } = makeClient()
+    await client.runAction({ ...base, actionName: 'echo' })
+    let kills = 0
+    processes[0].kill = () => { kills++ }
+    try {
+      await expect(client.close(10)).rejects.toBeInstanceOf(PieceHostShutdownIncompleteError)
+      expect(kills).toBe(1)
+      expect(processes[0].alive).toBe(true)
+      processes[0].crash(0)
+      await client.close()
+      expect(kills).toBe(1)
+    } finally { processes[0].crash(0); await client.close() }
+  })
+
+  it('joins a raw KV callback after its call and worker have been cancelled', async () => {
+    let finish!: (value: unknown) => void
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<unknown>(resolve => { finish = resolve })
+    let writes = 0
+    const { client } = makeClient({ kv: {
+      get: () => { entered(); return held }, put: () => { writes++ }, delete: () => null
+    } })
+    const call = client.runAction({ ...base, actionName: 'counter' }).catch(error => error)
+    try {
+      await started
+      await expect(client.close(10)).rejects.toBeInstanceOf(PieceHostShutdownIncompleteError)
+      expect(await call).toBeInstanceOf(PieceCancelledError)
+      finish(0)
+      await client.close()
+      expect(writes).toBe(0)
+    } finally { finish(null); await call; await client.close() }
+  })
+
+  it('joins normal worker exit and refuses new calls after close', async () => {
+    let reads = 0
+    const { client, processes } = makeClient({ getCredentials: () => { reads++; return null } })
+    await client.runAction({ ...base, actionName: 'echo' })
+    await client.close()
+    expect(processes[0].alive).toBe(false)
+    await expect(client.runAction({ ...base, actionName: 'echo' })).rejects.toBeInstanceOf(PieceCancelledError)
+    expect(reads).toBe(1)
+    await client.close()
+  })
+
+  it.each(['cancel', 'timeout', 'dispose'] as const)('does not spawn a worker when credentials resolve after %s', async reason => {
+    let finish!: (value: ConnectorCredentials | null) => void
+    const held = new Promise<ConnectorCredentials | null>(resolve => { finish = resolve })
+    const { client, processes } = makeClient({ getCredentials: () => held })
+    const controller = new AbortController()
+    const result = client.runAction({ ...base, actionName: 'echo', signal: controller.signal,
+      timeoutMs: reason === 'timeout' ? 10 : 2000 }).catch(error => error)
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      if (reason === 'cancel') controller.abort()
+      if (reason === 'dispose') client.dispose()
+      expect(await result).toBeInstanceOf(reason === 'timeout' ? PieceTimeoutError : PieceCancelledError)
+      finish({ type: 'secret_text', secret: 'late-fixture-credential' })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(processes).toHaveLength(0)
+      expect(client.starts).toBe(0)
+    } finally { finish(null); client.dispose(); await result }
+  })
+
+  it('does not let a cancelled credential read replace the next call owner', async () => {
+    let finish!: (value: ConnectorCredentials | null) => void
+    const held = new Promise<ConnectorCredentials | null>(resolve => { finish = resolve })
+    let reads = 0
+    const { client, processes } = makeClient({ getCredentials: () => ++reads === 1 ? held : null })
+    const controller = new AbortController()
+    const cancelled = client.runAction({ ...base, actionName: 'echo', signal: controller.signal }).catch(error => error)
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      controller.abort()
+      expect(await cancelled).toBeInstanceOf(PieceCancelledError)
+      const next = client.runAction({ ...base, actionName: 'echo', propsValue: { text: 'current' } })
+      finish(null)
+      expect(await next).toMatchObject({ text: 'current' })
+      expect(client.starts).toBe(1)
+      expect(processes).toHaveLength(1)
+    } finally { finish(null); client.dispose(); await cancelled }
+  })
+})
 
 describe('PieceHostClient + host runtime', () => {
   beforeEach(() => {
@@ -460,42 +563,60 @@ describe('PieceHostClient + host runtime', () => {
 
 describe('polling trigger cursor in connector_kv', () => {
   let dir: string
+  const owners: { db: InstanceType<typeof Database>; client?: PieceHostClient }[] = []
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), '21x-piece-host-'))
     remote.items = []
   })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  afterEach(async () => {
+    for (const owner of owners) {
+      await owner.client?.close()
+      if (owner.db.open) owner.db.close()
+    }
+    owners.length = 0
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   function openStore(): { db: InstanceType<typeof Database>; store: ConnectorStore } {
     const db = new Database(join(dir, 'app.db'))
+    owners.push({ db })
     db.pragma('foreign_keys = ON')
     applySchema(db)
     return { db, store: new ConnectorStore({ db }) }
   }
 
   it('persists the cursor across a simulated app restart', async () => {
+    const phase = async <T>(name: string, work: () => T | Promise<T>): Promise<T> => {
+      const started = performance.now()
+      try { return await work() }
+      finally { console.info('[piece-restart-proof]', { phase: name, durationMs: Math.round(performance.now() - started) }) }
+    }
     // First app run: enable the trigger, which stores the initial cursor.
-    const first = openStore()
+    const first = await phase('first-schema', openStore)
     const instance = first.store.createInstance({ pieceName: PIECE, pieceVersion: VERSION })
     const run1 = makeClient({ kv: kvBackendFromConnectorStore(first.store) })
-    const trigger = { ...base, instanceId: instance.id, triggerName: 'new_items' }
-    await run1.client.runTrigger({ ...trigger, hook: 'onEnable' })
+    owners[owners.length - 1].client = run1.client
+    const trigger = { ...base, instanceId: instance.id, triggerName: 'new_items', timeoutMs: 2000 }
+    await phase('enable', () => run1.client.runTrigger({ ...trigger, hook: 'onEnable' }))
     remote.items = [
       { id: 'a', ts: 150 },
       { id: 'b', ts: 200 }
     ]
-    expect(await run1.client.runTrigger({ ...trigger, hook: 'run' })).toEqual(['a', 'b'])
+    expect(await phase('first-poll', () => run1.client.runTrigger({ ...trigger, hook: 'run' }))).toEqual(['a', 'b'])
     expect(first.store.kvGet(instance.id, 'flow', 'lastPoll')).toBe(200)
-    run1.client.dispose()
+    await phase('first-worker-close', () => run1.client.close())
     first.db.close()
 
     // Second app run: new database handle, new client, new host process.
-    const second = openStore()
+    const second = await phase('second-schema', openStore)
     const run2 = makeClient({ kv: kvBackendFromConnectorStore(second.store) })
+    owners[owners.length - 1].client = run2.client
     remote.items.push({ id: 'c', ts: 300 })
-    expect(await run2.client.runTrigger({ ...trigger, hook: 'run' })).toEqual(['c'])
+    expect(await phase('second-poll', () => run2.client.runTrigger({ ...trigger, hook: 'run' }))).toEqual(['c'])
     expect(second.store.kvGet(instance.id, 'flow', 'lastPoll')).toBe(300)
-    run2.client.dispose()
+    await phase('second-worker-close', () => run2.client.close())
     second.db.close()
-  })
+  // Two real on-disk schema initializations can exceed Vitest's five-second
+  // fixture budget on Windows. Calls and close barriers retain two-second bounds.
+  }, 15_000)
 })

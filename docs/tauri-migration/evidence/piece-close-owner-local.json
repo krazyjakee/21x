@@ -1,0 +1,44 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "400ee094",
+  "scope": "Working-tree additive bounded connector close barrier. Production bridge stop still needs to integrate this barrier and higher-level polling/OAuth work.",
+  "sourceSha256": {
+    "src/main/connectors/piece-host/client.ts": "157eb5c1b285e131d81575630d1193ce90311db94d7ece494aaaa2eb45f52e73",
+    "src/main/connectors/piece-host/piece-host.test.ts": "f5c277bbbf07d402771077abd86902793d6f3f6d203ea1b93cbba5de3fcb5d4d"
+  },
+  "tests": {
+    "standaloneAndService": {
+      "passed": 504,
+      "skipped": 0,
+      "files": 47,
+      "reportSha256": "dc009eb76c5d332e1e02d91daeed8fbfce8eb6b65be16ec308cd9e791c7e29ef"
+    },
+    "standalonePieceHost": {
+      "passed": 18,
+      "skipped": 0,
+      "files": 1,
+      "reportSha256": "0f47f7de3eb0b96921f433fcedfd8cb408d54e75e1f68eff6622bd32fb3f7c28"
+    },
+    "legacyPieceHost": {
+      "passed": 18,
+      "skipped": 0,
+      "files": 1,
+      "reportSha256": "904647e8fcd8f17dc45e7dd4f4b4d95281cdd1c25a6289e5e376b30c5c10e44c"
+    }
+  },
+  "newCloseOwnershipCases": 4,
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "diffWhitespace": "passed"
+  },
+  "priorFullApplication": {
+    "passed": 5190,
+    "skipped": 5,
+    "files": 364,
+    "report": "piece-credential-lifetime-local.json"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

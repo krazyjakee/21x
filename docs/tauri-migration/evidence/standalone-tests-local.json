@@ -1,0 +1,77 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "issue": 222,
+  "scope": "Selected portable suite on staged standalone Node. No full production launcher/UI/platform retirement claim.",
+  "source": {
+    "baseCommit": "38f1a1b0250c7ed4fb1d6268b26074399e01ab12",
+    "workingTree": true,
+    "filesSha256": {
+      "package.json": "713504fea3119509b367606ba78ab18b6665da9df32725a09839552a27041cac",
+      "vitest.tauri.config.ts": "0fc40645e817447cc3b60dc6cb12b533bce6b91e418a5df24902719a03c6b75b",
+      "scripts/tauri-test.mjs": "95975e7b1a1587e084c28fa62c23247056530781018a9fb00d4d509067a03b8d",
+      "test/setup-tauri.ts": "370763b7a3695079389e5aa7a4ea9dd868780a9adca8f592e06b3d243f9abd23",
+      "test/forbid-electron.ts": "d62db4933a530e1416e23bbb7d87eb68214ba38208503fd46f679a3d9cd57fff",
+      "test/tauri-runtime.test.ts": "991b0198d2ea13baeb0c17699b649662ed81730f254591ecb672b42b89c8a360",
+      "test/helpers/portable-db-test-helper.ts": "a67cbd6d9e2ca093ba17b52cf5be287de438a496eb7f9ae4a3d15eb6ddd12891",
+      "src/main/database-transcript-page.test.ts": "88bb88baf25617c951577c601bea9bf67e2fbd30a67fe4e0ed0bded842f3917c",
+      "src/main/transcript-events.test.ts": "86712be0a41b1fe3eed30583c7ef2dd673f877ebc7cd2f40bfc411a7dbbbed88",
+      "src/main/agent-manager-core.ts": "db07c3ce85276cfc17a033c33a95cb8ded49fdc4ee7d1e6b3631646a4853e7be",
+      "docs/tauri-migration/event-forwarding-review.json": "e378169c9e058836c24d68c949cecdbec0c00be4eb593837cffdcf90908b0656",
+      ".github/workflows/verify.yml": "e4b138c01ec32785e187f2c2a95164b50d1f63c34baf3f56de33f607300df7e1",
+      ".github/workflows/tauri-native-linux.yml": "d817a9071085704fee3d98b91e420b5142bfae21b3b64f7dc752d425a96e5083",
+      ".github/workflows/tauri-packaged-platforms.yml": "a492bf3fe394653162c3395842eb81513e9a0a1e687f8102a04150f01cd162c7"
+    }
+  },
+  "environment": {
+    "platform": "linux-x64",
+    "node": "v22.23.2",
+    "nodeAbi": "127",
+    "sqlite": "13.0.3",
+    "electronRuntime": false
+  },
+  "defaultSuite": {
+    "passed": 460,
+    "failed": 0,
+    "skipped": 0,
+    "files": 41
+  },
+  "withServiceProofs": {
+    "passed": 463,
+    "failed": 0,
+    "skipped": 0,
+    "files": 44
+  },
+  "sharedSuite": {
+    "files": 29,
+    "cases": 393
+  },
+  "controls": {
+    "actualNodeAndAbiChecked": true,
+    "vitestResolvedElectronImportRejected": true,
+    "canonicalStagedSqliteRequired": true,
+    "rootNativeAddonFallback": false,
+    "nativeAddonRebuildsPerformed": false
+  },
+  "affectedLegacyDatabaseCases": {
+    "passed": 28,
+    "files": 3
+  },
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "workflowFiles": 3,
+    "workflowShellSteps": 40,
+    "inventoryAndContractFreshness": "passed",
+    "gitDiffCheck": "passed"
+  },
+  "rawReportHashes": {
+    "defaultSuite": "7e23d253acedb4ff97cc00aad96c32224e0a02c6179ed7cbc260c0dcc7bff45f",
+    "withServiceProofs": "4407092ab9af95d9ec245e7a874ad860d16d16e8ff73a743a66085aa56dae0c0"
+  },
+  "earlierFullApplicationEvidence": "issue-continuation-local.json",
+  "latestOwnerLifetimeEvidence": "approval-lifetime-local.json",
+  "hostedAndInstalledRunsForThisSource": "not_run",
+  "productionReady": false,
+  "electronRetirementReady": false
+}

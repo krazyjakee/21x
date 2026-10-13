@@ -1,0 +1,35 @@
+{
+  "evidenceVersion": 1,
+  "sourceCommit": "4605298166f10a44fd35cc5cae1e3a6b0d8d978a",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38382183022",
+  "target": "windows-x64",
+  "conclusion": "failure",
+  "scope": "Native terminal fixture failed its resize-output assertion after startup. Original fixture sent LF rather than terminal Enter; correction uses CR as node-pty Windows tests do and strips ConPTY control sequences only for text comparison. Acceptance requires the corrected Windows retry.",
+  "artifactId": 11803739451,
+  "artifactDigest": "sha256:07f0d9414720a81fb9e3ffa402c85cf86ab72a4b9b1dcd0476fdf34865adc896",
+  "portablePassed": 1462,
+  "portableFailed": 1,
+  "portableSkipped": 0,
+  "portableReportSha256": "ac6c43203b02ecde024a8ce16429fe6f815eeb19b044a79ac50442817f6e13bd",
+  "failedAssertions": [
+    {
+      "file": "D:/a/21x/21x/test/tauri-terminal-native.test.ts",
+      "assertion": {
+        "ancestorTitles": [
+          "actual staged standalone terminal owner"
+        ],
+        "fullName": "actual staged standalone terminal owner spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+        "status": "failed",
+        "title": "spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+        "duration": 5277.1312,
+        "failureMessages": [
+          "AssertionError: expected '\\u001b[?25l\\u001b[8;40;120t\\u001b[HFI\u2026' to contain 'FIXTURE_SIZE=120x40'\n    at __vite_ssr_import_0__.vi.waitFor.timeout (D:/a/21x/21x/test/tauri-terminal-native.test.ts:49:24)\n    at Timeout.checkCallback (file:///D:/a/21x/21x/node_modules/.pnpm/vitest@4.0.18_@opentelemetry+api@1.9.0_@types+node@25.2.3_happy-dom@20.5.0_jiti@2.6.1_lightni_aa2a7lq7sag3awhocjbwlaeanu/node_modules/vitest/dist/chunks/vi.2VT5v0um.js:3634:20)\n    at listOnTimeout (node:internal/timers:585:17)\n    at processTimers (node:internal/timers:521:7)"
+        ],
+        "meta": {}
+      }
+    }
+  ],
+  "accepted": false,
+  "productionReady": false,
+  "electronRetirementReady": false
+}

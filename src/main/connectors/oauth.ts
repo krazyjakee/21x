@@ -4,6 +4,7 @@ import { CONNECTOR_PIECE_ALLOWLIST, getAllowedPiece, type AllowedPieceOAuth, typ
 import type { ConnectorStore } from './connector-store'
 import {
   ConnectorCredentialsUnavailableError,
+  redactCredentials,
   type ConnectorCredentialStorage,
   type ConnectorCredentialStore,
   type ConnectorCredentials,
@@ -49,6 +50,16 @@ export class ConnectorOAuthError extends Error {
   }
 }
 
+export class ConnectorOAuthClosedError extends Error {
+  readonly code = 'CONNECTOR_OAUTH_CLOSED'
+  constructor() { super('Connector OAuth is shutting down'); this.name = 'ConnectorOAuthClosedError' }
+}
+
+export class ConnectorOAuthShutdownIncompleteError extends Error {
+  readonly code = 'CONNECTOR_OAUTH_SHUTDOWN_INCOMPLETE'
+  constructor() { super('Connector OAuth work has not finished'); this.name = 'ConnectorOAuthShutdownIncompleteError' }
+}
+
 export interface ConnectorOAuthConnectInput {
   /** Required for `user-supplied` mode; ignored for `registered`. */
   clientId?: string
@@ -92,6 +103,9 @@ export class ConnectorOAuthService implements PieceCredentialSource {
   private readonly allowlist: ConnectorPieceAllowlist
   private readonly now: () => number
   private readonly refreshing = new Map<string, Promise<ConnectorCredentials | null>>()
+  private readonly pendingWork = new Set<Promise<unknown>>()
+  private closing = false
+  private readonly shutdown = new AbortController()
 
   constructor(private readonly options: ConnectorOAuthServiceOptions) {
     this.store = options.store
@@ -112,6 +126,14 @@ export class ConnectorOAuthService implements PieceCredentialSource {
    * caller can offer session-only storage.
    */
   async connect(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage = 'persistent'): Promise<void> {
+    this.requireOpen()
+    return this.ownWork(this.connectInternal(instanceId, input, storage).catch(error => {
+      this.requireOpen()
+      throw error
+    }))
+  }
+
+  private async connectInternal(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage): Promise<void> {
     const instance = this.store.getInstance(instanceId)
     if (!instance) throw new Error(`Connector instance not found: ${instanceId}`)
     const spec = this.oauthSpec(instance.pieceName)
@@ -134,8 +156,10 @@ export class ConnectorOAuthService implements PieceCredentialSource {
       provider,
       config: clientSecret ? { client_id: clientId, client_secret: clientSecret } : { client_id: clientId },
       openExternal: this.options.openExternal,
-      server: this.options.createServer?.()
+      server: this.options.createServer?.(),
+      signal: this.shutdown.signal
     })
+    this.requireOpen()
     const creds: ConnectorOAuth2Credentials = {
       type: 'oauth2',
       clientId,
@@ -151,10 +175,12 @@ export class ConnectorOAuthService implements PieceCredentialSource {
 
   /** Forgets the token set and the client registration. */
   disconnect(instanceId: string): void {
+    this.requireOpen()
     this.credentials.clear(instanceId)
   }
 
   status(instanceId: string): ConnectorOAuthStatus {
+    this.requireOpen()
     const creds = this.credentials.get(instanceId)
     if (!creds || creds.type !== 'oauth2') return { state: 'none', expiresAt: null }
     if (creds.revoked || !creds.accessToken) return { state: 'revoked', expiresAt: null }
@@ -166,13 +192,46 @@ export class ConnectorOAuthService implements PieceCredentialSource {
    * token. Throws ConnectorOAuthError when the OAuth token is unusable.
    */
   get(instanceId: string): Promise<ConnectorCredentials | null> {
+    if (this.closing) return Promise.reject(new ConnectorOAuthClosedError())
     const inflight = this.refreshing.get(instanceId)
     if (inflight) return inflight
-    const run = this.resolve(instanceId).finally(() => {
+    const run = this.ownWork(this.resolve(instanceId).finally(() => {
       if (this.refreshing.get(instanceId) === run) this.refreshing.delete(instanceId)
-    })
+    }))
     this.refreshing.set(instanceId, run)
     return run
+  }
+
+  /** Stop admission and join raw token/browser work before the owner closes its store. */
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Connector OAuth shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.stop()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new ConnectorOAuthShutdownIncompleteError()), timeoutMs)
+    })
+    try {
+      do { await Promise.race([Promise.allSettled([...this.pendingWork]), expired]) }
+      while (this.pendingWork.size)
+    } finally { if (timer) clearTimeout(timer) }
+  }
+
+  /** Cancel admission and token/browser work while retaining it for a later close join. */
+  stop(): void {
+    this.closing = true
+    this.shutdown.abort(new ConnectorOAuthClosedError())
+  }
+
+  private requireOpen(): void {
+    if (this.closing) throw new ConnectorOAuthClosedError()
+  }
+
+  private ownWork<T>(work: Promise<T>): Promise<T> {
+    this.pendingWork.add(work)
+    void work.then(() => this.pendingWork.delete(work), () => this.pendingWork.delete(work))
+    return work
   }
 
   private async resolve(instanceId: string): Promise<ConnectorCredentials | null> {
@@ -194,6 +253,7 @@ export class ConnectorOAuthService implements PieceCredentialSource {
     const provider = this.provider(pieceName, spec)
     try {
       const token = await provider.refreshToken(creds.refreshToken, creds.clientId, creds.clientSecret ?? '')
+      this.requireOpen()
       const updated: ConnectorOAuth2Credentials = {
         ...creds,
         accessToken: token.access_token,
@@ -205,12 +265,13 @@ export class ConnectorOAuthService implements PieceCredentialSource {
       this.persist(instanceId, updated)
       return updated
     } catch (err) {
+      this.requireOpen()
       if (err instanceof OAuthTokenRequestError && err.isInvalidGrant) {
         this.markRevoked(instanceId, creds)
         throw new ConnectorOAuthError('revoked', `${label} access was revoked or has expired; reconnect it in the task source settings.`)
       }
       if (err instanceof ConnectorCredentialsUnavailableError) throw err
-      const detail = err instanceof Error ? err.message : String(err)
+      const detail = redactCredentials(err instanceof Error ? err.message : String(err), creds)
       throw new ConnectorOAuthError('refresh_failed', `${label} access token could not be renewed: ${detail}`)
     }
   }
@@ -230,7 +291,7 @@ export class ConnectorOAuthService implements PieceCredentialSource {
   }
 
   private provider(pieceName: string, spec: AllowedPieceOAuth): ConnectorOAuthProvider {
-    const fetchImpl = this.options.fetch
+    const fetchImpl = this.options.fetch ?? globalThis.fetch
     return new ConnectorOAuthProvider(
       {
         id: `connector:${pieceName}`,
@@ -240,7 +301,10 @@ export class ConnectorOAuthService implements PieceCredentialSource {
         pkce: spec.pkce,
         authParams: spec.authParams
       },
-      fetchImpl ? (input, init) => fetchImpl(input, init) : undefined
+      (input, init) => {
+        this.requireOpen()
+        return fetchImpl(input, { ...init, signal: this.shutdown.signal })
+      }
     )
   }
 

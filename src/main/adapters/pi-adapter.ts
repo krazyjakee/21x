@@ -222,7 +222,7 @@ export class PiAdapter implements CodingAgentAdapter {
 
   /**
    * Windows npm launchers need a shell; other platforms run the JS entry point.
-   * On macOS, Pi requires installed Node >=22.19 on PATH.
+   * Legacy macOS Electron uses installed Node; standalone hosts reuse their Node executable.
    */
   private piInvocation(
     executable: string,

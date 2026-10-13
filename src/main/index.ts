@@ -24,8 +24,11 @@ import { ForgejoIssuesPlugin } from './plugins/forgejo-issues-plugin'
 import { NotionPlugin } from './plugins/notion-plugin'
 import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { ConnectorBridgePlugin } from './plugins/connector-bridge-plugin'
-import { disposeConnectorRuntime } from './connectors/bridge/runtime'
+import { closeConnectorRuntime, disposeConnectorRuntime } from './connectors/bridge/runtime'
 import { registerIpcHandlers } from './ipc-handlers'
+import { shutdownTerminalServices, closeTerminalServices } from './ipc/terminal'
+import { shutdownChatServices, closeChatServices } from './ipc/chat'
+import { shutdownCommanderServices, closeCommanderServices } from './ipc/commander'
 import { panelBrowserBroker } from './panel-browser-broker'
 import { hardenWebviewPreferences } from './webview-hardening'
 import { VoiceSessionManager } from './voice/voice-session-manager'
@@ -35,17 +38,19 @@ import { RecurrenceScheduler } from './recurrence-scheduler'
 import { HeartbeatScheduler } from './heartbeat-scheduler'
 import { TaskAutomationScheduler } from './task-automation-scheduler'
 import { WorkspaceCleanupScheduler } from './workspace-cleanup-scheduler'
+import { OverdueNotifier } from './overdue-notifier'
 import { ClaudePluginManager } from './claude-plugin-manager'
 import { parseProcessTable, selectKillableMcpPids, WINDOWS_PROCESS_TABLE_SCRIPT } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
 import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspace-paths'
-import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer } from './task-api-server'
+import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer, closeTaskApiServer } from './task-api-server'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { CaptainWaker } from './captain-waker'
-import { startScheduledCoordination, stopScheduledCoordination } from './scheduled-coordination'
-import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
+import { startScheduledCoordination, stopScheduledCoordination, closeScheduledCoordination } from './scheduled-coordination'
+import { startSecretBroker, shutdownSecretBroker, closeSecretBroker, writeSecretShellWrapper } from './secret-broker'
+import { shutdownMcpProbes, closeMcpProbes } from './agent-manager/mcp-server-test'
 import { isMainWindowUrl } from './main-window-url'
-import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
+import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
 import { APP_NAME, DEEP_LINK_SCHEMES, parseOAuthCallbackUrl } from './app-identity'
@@ -89,6 +94,9 @@ let workspaceCleanupScheduler: WorkspaceCleanupScheduler | null = null
 let claudePluginManager: ClaudePluginManager | null = null
 let voiceSessionManager: VoiceSessionManager | null = null
 let isShuttingDown = false
+const overdueNotifier = new OverdueNotifier(() => {
+  if (mainWindow && !mainWindow.isDestroyed()) guardedIpcSend(mainWindow.webContents, 'overdue:check')
+})
 
 /**
  * Kills stdio MCP server processes that this instance leaked.
@@ -178,23 +186,35 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 }
 
 async function shutdownAppServices(): Promise<void> {
+  overdueNotifier.shutdown()
+  shutdownTerminalServices()
+  shutdownChatServices()
+  shutdownCommanderServices()
+  shutdownSecretBroker()
+  shutdownMcpProbes()
+  claudePluginManager?.shutdown()
+  stopTaskApiServer()
+  void stopMobileApiServer()
+  syncManager?.stop()
+  connectorBridgePlugin?.stopPolling()
+  if (db) disposeConnectorRuntime(db)
   voiceSessionManager?.shutdown()
-  recurrenceScheduler?.stop()
+  recurrenceScheduler?.shutdown()
   stopScheduledCoordination()
-  heartbeatScheduler?.stop()
-  captainWaker?.stop()
-  taskAutomationScheduler?.stop()
-  workspaceCleanupScheduler?.stop()
+  heartbeatScheduler?.shutdown()
+  captainWaker?.shutdown()
+  taskAutomationScheduler?.shutdown()
+  workspaceCleanupScheduler?.shutdown()
 
   await agentManager?.stopAllSessions()
   await agentManager?.stopServer()
 
   oauthManager?.destroy()
-  connectorBridgePlugin?.stopPolling()
-  if (db) disposeConnectorRuntime(db)
-  stopSecretBroker()
-  stopMobileApiServer()
-  stopTaskApiServer()
+  const serviceDrains = await Promise.allSettled([
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices(), closeSecretBroker(), closeMcpProbes(), claudePluginManager?.close()
+  ])
+  const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
+  if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason
 
   sweepLeakedMcpProcesses()
   // A short grace here: quitting must stay quick, and anything that ignores
@@ -279,10 +299,6 @@ function createWindow(): void {
       workspaceCleanupScheduler.start(mainWindow)
     }
 
-    // Periodic overdue check — nudges renderer every 60s
-    setInterval(() => {
-      guardedIpcSend(mainWindow?.webContents, 'overdue:check')
-    }, 60_000)
   }
   mainWindow.once('ready-to-show', showWindowOnce)
   mainWindow.webContents.once('did-finish-load', () => {
@@ -421,7 +437,9 @@ function createWindow(): void {
   // An MCP caller has no window, so the main-process loop is what honours the
   // auto-start / auto-complete flags it sets.
   setTaskAutomationTrigger(() => {
-    void taskAutomationScheduler?.runNow()
+    void taskAutomationScheduler?.runNow().catch(error => {
+      if (!(error instanceof Error && error.message === 'TASK_AUTOMATION_CLOSED')) console.error('[TaskAutomation] Trigger failed:', error)
+    })
   })
 
   // Wire up transcript provider for subtask MCP agents to access sibling transcripts
@@ -791,11 +809,20 @@ app.whenReady().then(async () => {
   pluginRegistry.register(connectorBridgePlugin)
   connectorBridgePlugin.startPolling({
     db,
-    onSynced: () => guardedIpcSend(mainWindow?.webContents, 'tasks:refresh')
+    onSynced: () => { guardedIpcSend(mainWindow?.webContents, 'tasks:refresh') }
   })
 
   syncManager = new SyncManager(db, pluginRegistry, oauthManager)
   agentManager.setSyncManager(syncManager)
+
+  // Start secret broker and write shell wrapper (awaited so broker is ready before any sessions)
+  try {
+    const brokerPort = await startSecretBroker(db)
+    console.log(`[Main] Secret broker started on port ${brokerPort}`)
+    writeSecretShellWrapper()
+  } catch (err) {
+    console.error('[Main] Failed to start secret broker:', err)
+  }
 
   // Process memory is gone after a crash, but starts, switches and accepted
   // messages are durable. Repair or visibly fail them before schedulers can
@@ -822,8 +849,10 @@ app.whenReady().then(async () => {
     canPlayAudio: () => mainWindow != null && !mainWindow.isDestroyed()
   })
   workspaceCleanupScheduler = new WorkspaceCleanupScheduler(db, worktreeManager)
+  // The reminder clock belongs to the application, across window recreation.
+  overdueNotifier.start()
 
-  claudePluginManager = new ClaudePluginManager(db)
+  claudePluginManager = new ClaudePluginManager(db, join(app.getPath('userData'), 'plugins'))
 
   // Voice control (design §5.1). It never blocks start-up: when the local
   // speech runtime or the model is absent, voice simply stays switched off.
@@ -876,15 +905,6 @@ app.whenReady().then(async () => {
 
   // Build the application menu (includes "Check for Updates…")
   buildAppMenu()
-
-  // Start secret broker and write shell wrapper (awaited so broker is ready before any sessions)
-  try {
-    const brokerPort = await startSecretBroker(db)
-    console.log(`[Main] Secret broker started on port ${brokerPort}`)
-    writeSecretShellWrapper()
-  } catch (err) {
-    console.error('[Main] Failed to start secret broker:', err)
-  }
 
   // Start mobile API server — only when mobile access is enabled in Settings.
   // The mobile IPC handlers re-apply the settings when they change.
@@ -1075,7 +1095,5 @@ app.on('before-quit', async (event) => {
   isShuttingDown = true
   isQuitting = true
 
-  void shutdownAppServices().finally(() => {
-    app.exit(0)
-  })
+  void shutdownAppServices().then(() => app.exit(0), () => app.exit(1))
 })

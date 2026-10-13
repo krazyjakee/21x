@@ -4,6 +4,7 @@
 
 import { ChildProcess } from 'child_process'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { join } from 'path'
 import { AcpAdapter } from './acp-adapter'
 import { SessionStatusType, MessagePartType, MessagePart } from './coding-agent-adapter'
 
@@ -2455,7 +2456,7 @@ describe('AcpAdapter process spawning for packaged Electron apps', () => {
     // New @agentclientprotocol/codex-acp is a Node script, spawned via process.execPath
     expect(config.command).toBe(process.execPath)
     expect(config.args[0]).toContain('codex-acp')
-    expect(config.args[0]).toContain('dist/index.js')
+    expect(config.args[0]).toContain(join('dist', 'index.js'))
     expect(config.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
   })
 })

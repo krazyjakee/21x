@@ -1,0 +1,91 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Actual portable SQLite and owned OS temp directory scheduler lifetime; injected process operations, real dependency pruning control, mocked native window events. No live workspace cleanup or native process termination.",
+  "sourceFilesSha256": {
+    "src/main/workspace-cleanup-scheduler-core.ts": "9be24c5c33067d3ccc02c05f20a5e6ecdaba793e55a1f2f112ccca2c75839c76",
+    "src/main/workspace-cleanup-scheduler.ts": "e872cc956843ac80a49c290a6f009b70e80af4e8229f65dd6aa0533038c43b10",
+    "src/main/workspace-cleanup-scheduler.test.ts": "f4df77d5a148e76fd71fa4b819384e7149bb8c97bf533c6efd6506e80093584d",
+    "src/main/workspace-cleanup-scheduler-lifetime.test.ts": "a17bfa888b8b3c42f1653b264eebab5177e418e717b58fb2af6fc6205af16e67",
+    "src/main/workspace-cleanup-scheduler-host.test.ts": "34ba565738e0d8294f2ad26dadead2401d6a236bb6a9f214887e43c1ec9f02ea",
+    "src/main/index.ts": "c8a55a7fb8ec144c3076b45072981b7b89d946a670fabc24a620e1e101a8d27e",
+    "src/shared/desktop-event-forwarding.test.ts": "36375364d142766a6217cb5cc0f627085d6b5c4aee7400aa1adc2f4c92f18ee5",
+    "vitest.tauri.config.ts": "fcf75536ca41b0fbb77fd85deef017bd6b388cbb0ab015cb91bb91951161a5ba"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-workspace-initial-service.json",
+      "sha256": "4c8ce67aae759b708d7d3d6bcaed5e5f9658632f800bb9fdee5ff479bf8e0add",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "2746d2e893eabc371a6e5d2630a334e05a1f6933d3215bc000ed3f4dc07ea411",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-workspace-final-service.json",
+      "sha256": "abb3def388cffd7ee6d64c7364ab143fe18f1a1f302ff1a109995ddcb5244b01",
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "83098bf92850a60a6156f525fed4eab317f81d129fb290469fd37d65b557af50",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-workspace-final-host.json",
+      "sha256": "3759d87d446d542d25504f7aeff915c07a4f40a69aff6b317038223de0aa3aef",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "fe8d87e531540abe33be4a7f63e78219d239fae24658c9f797373b056cc1553f",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-workspace-full-service.json",
+      "sha256": "d1a8c520ecee4b55909eb4ff3eeb80c06a139e48bee5d26695d478a631d7a8e8",
+      "passed": 1441,
+      "failed": 0,
+      "skipped": 0,
+      "files": 95,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "1de55ab7a5aab68f730bab901a40113dfa0f1d24710d15bfa3820944e8f2ab24",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-workspace-full-legacy.json",
+      "sha256": "b78f783d35671b39c5e5a3142f75d49135f51578203bcaf7bceb165a6c166800",
+      "passed": 5331,
+      "failed": 0,
+      "skipped": 20,
+      "files": 389,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "648be9f0983d20187544905be7f03a3c745601d7d4fdab63e5b22108195d716d",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-workspace-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-workspace-full-legacy.json"
+  },
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "18a78b60e7c2ba4e96a135a31c87a52e94c015ca8bed80984cb507a3122a83e5"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

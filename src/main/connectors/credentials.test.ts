@@ -1,21 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { safeStorage } from 'electron'
+import { getSecretStorage } from '../platform/secret-storage'
 import type Database from 'better-sqlite3'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import { ConnectorStore } from './connector-store'
 import {
   CONNECTOR_CREDENTIALS_REMEDIATION,
   ConnectorCredentialStore,
+  ConnectorCredentialStoreClosedError,
   ConnectorCredentialsUnavailableError,
   redactCredentials,
   type ConnectorCredentials
 } from './credentials'
 
 /**
- * The shared setup mocks safeStorage as unavailable with an identity
- * transform. These tests stand in a fake keychain that really transforms the
- * bytes (as in database-encryption.test.ts), so ciphertext in the database is
- * verifiably not the plaintext.
+ * Injects a fake keychain through the shared storage boundary. The fixture
+ * transforms bytes so stored ciphertext differs from plaintext; it does not
+ * establish OS keychain or cross-host ciphertext compatibility.
  */
 
 const MARKER = Buffer.from('fake-keychain:')
@@ -39,9 +39,9 @@ function fakeDecrypt(value: Buffer): string {
 }
 
 function useFakeKeychain(available: boolean): void {
-  vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(available)
-  vi.mocked(safeStorage.encryptString).mockImplementation(fakeEncrypt)
-  vi.mocked(safeStorage.decryptString).mockImplementation(fakeDecrypt)
+  vi.mocked(getSecretStorage().isEncryptionAvailable).mockReturnValue(available)
+  vi.mocked(getSecretStorage().encryptString).mockImplementation(fakeEncrypt)
+  vi.mocked(getSecretStorage().decryptString).mockImplementation(fakeDecrypt)
 }
 
 const SECRET: ConnectorCredentials = { type: 'secret_text', secret: 'sk-live-abcdef123456' }
@@ -63,6 +63,9 @@ describe('ConnectorCredentialStore', () => {
   }
 
   beforeEach(() => {
+    vi.spyOn(getSecretStorage(), 'isEncryptionAvailable')
+    vi.spyOn(getSecretStorage(), 'encryptString')
+    vi.spyOn(getSecretStorage(), 'decryptString')
     ;({ rawDb } = createTestDb())
     store = new ConnectorStore({ db: rawDb })
     creds = new ConnectorCredentialStore(store)
@@ -70,9 +73,10 @@ describe('ConnectorCredentialStore', () => {
   })
 
   afterEach(() => {
-    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false)
-    vi.mocked(safeStorage.encryptString).mockImplementation((value: string) => Buffer.from(value, 'utf8'))
-    vi.mocked(safeStorage.decryptString).mockImplementation((value: Buffer) => value.toString('utf8'))
+    vi.mocked(getSecretStorage().isEncryptionAvailable).mockRestore()
+    vi.mocked(getSecretStorage().encryptString).mockRestore()
+    vi.mocked(getSecretStorage().decryptString).mockRestore()
+    rawDb.close()
   })
 
   describe('with encryption available', () => {
@@ -127,7 +131,7 @@ describe('ConnectorCredentialStore', () => {
     beforeEach(() => useFakeKeychain(false))
 
     it('refuses persistent setup with a typed error and remediation, and stores nothing', () => {
-      vi.mocked(safeStorage.encryptString).mockClear()
+      vi.mocked(getSecretStorage().encryptString).mockClear()
       expect(creds.isPersistentStorageAvailable()).toBe(false)
       let error: unknown
       try {
@@ -143,7 +147,7 @@ describe('ConnectorCredentialStore', () => {
       })
       expect((error as Error).message).not.toContain(SECRET.secret)
       expect(storedAuth(instanceId)).toBeNull()
-      expect(safeStorage.encryptString).not.toHaveBeenCalled()
+      expect(getSecretStorage().encryptString).not.toHaveBeenCalled()
       expect(creds.get(instanceId)).toBeNull()
     })
 
@@ -194,9 +198,38 @@ describe('ConnectorCredentialStore', () => {
     creds.set(instanceId, SECRET)
     expect(creds.redact(instanceId, `401 for key ${SECRET.secret}`)).toBe('401 for key [REDACTED]')
   })
+
+  it('forgets session credentials and refuses all access after close without reading or changing SQLite', () => {
+    useFakeKeychain(true)
+    creds.set(instanceId, SECRET)
+    const sessionId = store.createInstance({ pieceName: 'p', pieceVersion: '1' }).id
+    creds.set(sessionId, BASIC, 'session')
+    const before = rawDb.prepare('SELECT * FROM connector_instances ORDER BY id').all()
+    const read = vi.spyOn(store, 'getAuthBlob')
+    const write = vi.spyOn(store, 'setAuthBlob')
+    creds.close()
+    creds.close()
+    for (const call of [
+      () => creds.get(sessionId), () => creds.get(instanceId), () => creds.getStorage(sessionId),
+      () => creds.set(sessionId, BASIC, 'session'), () => creds.clear(instanceId),
+      () => creds.isPersistentStorageAvailable(), () => creds.redact(instanceId, 'fixture')
+    ]) expect(call).toThrow(ConnectorCredentialStoreClosedError)
+    expect(read).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
+    expect(rawDb.prepare('SELECT * FROM connector_instances ORDER BY id').all()).toEqual(before)
+    expect(new ConnectorCredentialStore(store).get(instanceId)).toEqual(SECRET)
+    expect(new ConnectorCredentialStore(store).get(sessionId)).toBeNull()
+    read.mockRestore()
+    write.mockRestore()
+  })
 })
 
 describe('redactCredentials', () => {
+  it('removes form-encoded secrets reflected in token request bodies', () => {
+    const secret = 'fixture-secret+/=%~ 123456'
+    const body = new URLSearchParams({ client_secret: secret }).toString()
+    expect(redactCredentials(body, { type: 'secret_text', secret })).toBe('client_secret=[REDACTED]')
+  })
   it('redacts a secret-text value', () => {
     expect(redactCredentials('Authorization: Bearer sk-live-abcdef123456', SECRET)).toBe('Authorization: Bearer [REDACTED]')
   })

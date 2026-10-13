@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture } from '../../test/helpers/portable-db-test-helper'
 import { CaptainWaker, buildCaptainWakeMessage, resolveCaptainAgentId, taskIdsTouchedByCall } from './captain-waker'
 import { emitTaskEvent, projectEvents, type ProjectEvent } from './project-events'
 import { CAPTAIN_WAKEUPS_SETTING } from '../shared/captain-wakeups'
@@ -292,7 +292,7 @@ describe('CaptainWaker', () => {
 
 describe('emitTaskEvent', () => {
   it('raises an event for the task\'s project with its title, and never for a coordinator row', () => {
-    const { db } = createTestDb()
+    const { db, rawDb } = createPortableDbFixture()
     const project = db.createProject({ name: 'Alpha' })!
     const task = db.createTask({ title: 'Ship it', project_id: project.id } as never)!
     const seen: ProjectEvent[] = []
@@ -308,15 +308,18 @@ describe('emitTaskEvent', () => {
       expect(seen).toHaveLength(1)
     } finally {
       off()
+      rawDb.close()
     }
   })
 
   it('clips long details', () => {
-    const { db } = createTestDb()
-    const task = db.createTask({ title: 'T' } as never)!
-    const raised = emitTaskEvent(db, 'heartbeat_finding', task.id, 'x'.repeat(1_000))
-    expect(raised?.detail?.length).toBe(400)
-    expect(raised?.detail?.endsWith('…')).toBe(true)
+    const { db, rawDb } = createPortableDbFixture()
+    try {
+      const task = db.createTask({ title: 'T' } as never)!
+      const raised = emitTaskEvent(db, 'heartbeat_finding', task.id, 'x'.repeat(1_000))
+      expect(raised?.detail?.length).toBe(400)
+      expect(raised?.detail?.endsWith('…')).toBe(true)
+    } finally { rawDb.close() }
   })
 })
 

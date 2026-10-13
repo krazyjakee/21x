@@ -4,7 +4,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-host-dispatch",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 5322,
+      "line": 5389,
       "column": 52,
       "target": "reviewed-event-wrapper",
       "method": "send",
@@ -43,7 +43,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-broadcast",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 5327,
+      "line": 5394,
       "column": 7,
       "target": "reviewed-event-wrapper",
       "method": "send",
@@ -80,7 +80,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-persist-or-broadcast",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 5358,
+      "line": 5425,
       "column": 5,
       "target": "reviewed-event-wrapper",
       "method": "send",
@@ -291,8 +291,7 @@ export const DESKTOP_EVENT_FORWARDING = {
       "heartbeat-desktop",
       "task-api-relay",
       "mobile-to-desktop-relay",
-      "voice-desktop-relay",
-      "workspace-cleanup-desktop"
+      "voice-desktop-relay"
     ]
   },
   "guarded-split": {
@@ -318,38 +317,11 @@ export const DESKTOP_EVENT_FORWARDING = {
     "review": "The splitting branch explicitly checks these two legacy contracts; raw agent output batches currently persist rather than broadcast.",
     "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
   },
-  "heartbeat-desktop": {
-    "id": "heartbeat-desktop",
-    "source": {
-      "file": "src/main/heartbeat-scheduler.ts",
-      "line": 795,
-      "column": 7,
-      "target": "guardedIpcSend",
-      "method": "send",
-      "channelExpression": "channel"
-    },
-    "producerOwner": "heartbeat-scheduler",
-    "allowedNames": [
-      "heartbeat:alert",
-      "heartbeat:disabled",
-      "task:updated",
-      "tasks:refresh"
-    ],
-    "channelOwners": {
-      "heartbeat:alert": "service",
-      "heartbeat:disabled": "service",
-      "task:updated": "service",
-      "tasks:refresh": "service"
-    },
-    "destination": "trusted-desktop-main",
-    "review": "Only four current scheduler event names.",
-    "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
-  },
   "task-api-relay": {
     "id": "task-api-relay",
     "source": {
       "file": "src/main/index.ts",
-      "line": 416,
+      "line": 432,
       "column": 7,
       "target": "guardedIpcSend",
       "method": "send",
@@ -388,7 +360,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "mobile-to-desktop-relay",
     "source": {
       "file": "src/main/index.ts",
-      "line": 435,
+      "line": 453,
       "column": 7,
       "target": "guardedIpcSend",
       "method": "send",
@@ -489,29 +461,6 @@ export const DESKTOP_EVENT_FORWARDING = {
       "voice:state",
       "voice:status"
     ]
-  },
-  "workspace-cleanup-desktop": {
-    "id": "workspace-cleanup-desktop",
-    "source": {
-      "file": "src/main/workspace-cleanup-scheduler.ts",
-      "line": 427,
-      "column": 7,
-      "target": "guardedIpcSend",
-      "method": "send",
-      "channelExpression": "channel"
-    },
-    "producerOwner": "workspace-cleanup-scheduler",
-    "allowedNames": [
-      "workspace:cleanup-complete",
-      "workspace:cleanup-progress"
-    ],
-    "channelOwners": {
-      "workspace:cleanup-complete": "service",
-      "workspace:cleanup-progress": "service"
-    },
-    "destination": "trusted-desktop-main",
-    "review": "Only cleanup progress/completion names.",
-    "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
   }
 } as const
 export type DesktopForwardingPolicyId = keyof typeof DESKTOP_EVENT_FORWARDING

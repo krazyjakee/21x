@@ -18,6 +18,7 @@ export interface LoopbackCallbackServer {
   start(): Promise<string>
   waitForCallback(): Promise<{ code: string; state: string }>
   stop(): void
+  close?(): Promise<void>
 }
 
 export interface ConnectorOAuthFlowOptions {
@@ -26,6 +27,7 @@ export interface ConnectorOAuthFlowOptions {
   config: Record<string, unknown>
   openExternal: (url: string) => Promise<void> | void
   server?: LoopbackCallbackServer
+  signal?: AbortSignal
 }
 
 export interface ConnectorOAuthFlowResult {
@@ -35,8 +37,12 @@ export interface ConnectorOAuthFlowResult {
 
 export async function runLoopbackOAuthFlow(options: ConnectorOAuthFlowOptions): Promise<ConnectorOAuthFlowResult> {
   const server = options.server ?? new LocalOAuthServer()
+  const stopOnAbort = () => server.stop()
+  options.signal?.addEventListener('abort', stopOnAbort, { once: true })
   try {
+    options.signal?.throwIfAborted()
     const redirectUri = await server.start()
+    options.signal?.throwIfAborted()
     const { verifier, challenge } = generatePkce()
     const state = createId()
     const authUrl = options.provider.generateAuthUrl(options.config, state, challenge, redirectUri)
@@ -44,11 +50,16 @@ export async function runLoopbackOAuthFlow(options: ConnectorOAuthFlowOptions): 
     const callback = server.waitForCallback()
     callback.catch(() => undefined)
     await options.openExternal(authUrl)
+    options.signal?.throwIfAborted()
     const received = await callback
+    options.signal?.throwIfAborted()
     if (received.state !== state) throw new Error('OAuth state mismatch - possible CSRF attack')
     const token = await options.provider.exchangeCode(received.code, verifier, options.config, redirectUri)
+    options.signal?.throwIfAborted()
     return { token, redirectUri }
   } finally {
+    options.signal?.removeEventListener('abort', stopOnAbort)
     server.stop()
+    await server.close?.()
   }
 }

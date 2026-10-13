@@ -1,0 +1,105 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Portable terminal raw handle/probe ownership and trusted Electron IPC. Actual staged node-pty 1.1.0 under owning Node 22.23.2 ABI127 on local Linux x64, with fixture Node child, owned OS temp cwd, resize/reattach/replay/stale kill/native close. No user shell startup, installed desktop, descendant-tree or other OS claim.",
+  "sourceFilesSha256": {
+    "src/main/terminal-service-core.ts": "fcb63e47c86b3dd65f0ad1c0bfc3b7df1271281a7f9031d7e2ad0d9795f9e174",
+    "src/main/terminal-service-core.test.ts": "bfcc9e7d436e73d2c53ccff9892e77a56023464a207e4c422ecd0a33f3de123c",
+    "src/main/terminal-service.ts": "01e0c307117a477e93d300ea7bbe1fb2f56a86baad9718a7e5e65191cf5dccf7",
+    "src/main/terminal-process.ts": "62ae5dad7cbee3a65774521000933e88caf6371848aca07c3fa8143067a7c500",
+    "src/main/terminal-process.test.ts": "198f47be8799c338e6b1856803adef0f87ef8d33a00e6988b7fcc2fd9af30d5d",
+    "src/main/ipc/terminal.ts": "5ff2e80a76d201bf29a9c1c328f9aa1aebeef58dbc2645741e43a2c498cb7a7b",
+    "src/main/ipc-handlers.test.ts": "d83b2a63f7721d6d6806178c102a93098e8eaecc34ec854ae9ad0dec3b7a2d43",
+    "src/main/index.ts": "7caa9f477121bcdb65ddf8cb3592da37322c081efed9410c10e6c2316041eb52",
+    "test/tauri-terminal-native.test.ts": "443f057f55d70ccc61787f59b6ba9d553cb9562d890b506ea60bfe0153cd552d",
+    "vitest.tauri.config.ts": "e34b793c997bd64899aa5814f16863c7a1112b0258add66e7231449b60f6c74b"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-terminal-core-service.json",
+      "sha256": "f119b13a498d22b78569e29a0674d6df255962b36cc46edcb75f8161d704d873",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "8e200746fbddf07224e7abd308b87691b2b42fc5ca55caa3dfcf181234654282",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-terminal-core-host.json",
+      "sha256": "a88996d39b5c6c56d25c7db38cc59d45770158e54d8bc6956c94359ba13a5dce",
+      "passed": 28,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "9af7a5d22690674467651e0cd9e2b4ef4499f4077783e4335bc66a83e19a4a58",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-terminal-native-service.json",
+      "sha256": "a141162d99c1fec6826418d62d340cda36d0fc508f4b3523679f5b718e568bc3",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "0ebcb96dc8ca33acd09fd4dd74290c595f39cd3491effd2c65d39211538b47f2",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-terminal-final-service.json",
+      "sha256": "c8a84efba4df12b9936b030ccf524c57de8e1b01dc71a90ba3a71a7e4b4909fd",
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "files": 3,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "010f8ff403c5b7aca2b86a927852359d8b4821c50064925d8f8c8c779ecf703b",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-terminal-full-service.json",
+      "sha256": "60cddee9385e54dea9193c5d41a6db34f2a26406704fceac45c11d7d1b22a264",
+      "passed": 1456,
+      "failed": 0,
+      "skipped": 0,
+      "files": 99,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "2a5e8032208f874421e3428bc55d42bcdaf02d9b688fcc5240c464b3005dbfda",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-terminal-full-legacy.json",
+      "sha256": "ca68ee8aa5b3d1724c23ad87a74387857eacbab336c59987a83bd38467448faa",
+      "passed": 5346,
+      "failed": 0,
+      "skipped": 20,
+      "files": 392,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "4dcf0eb8e63f680614d338047405631339c5ac2fd360ec651b2994b044872f9f",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-terminal-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-terminal-full-legacy.json"
+  },
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "c3cdfdc9785f6970d83dfc41ac8e7630d8c800261b8c8673d735d0b1d7fad27e"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

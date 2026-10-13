@@ -1,4 +1,5 @@
 import type { TranscriptPartRecord } from '@shared/transcript/types'
+import type { TranscriptPage, TranscriptPageRequest } from '@shared/transcript-page'
 import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import type { UiCommand } from '@shared/ui-commands'
 import type { CaptainRuntimeState } from '@shared/captain-runtime'
@@ -311,6 +312,7 @@ interface ElectronAPI {
     getRawTranscript: (taskId: string) => Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>>
     getTranscriptSnapshot: (taskId: string, sinceSeq?: number) => Promise<TranscriptPartRecord[]>
     getTranscriptDelta: (taskId: string, sinceRev: number) => Promise<{ parts: TranscriptPartRecord[]; maxRev: number }>
+    getTranscriptPage: (taskId: string, page: TranscriptPageRequest) => Promise<TranscriptPage>
   }
   captainRuntime: {
     get: (projectId: string) => Promise<CaptainRuntimeState | null>

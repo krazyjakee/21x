@@ -10,6 +10,7 @@ import type {
 } from '../shared/projects'
 import type { CaptainMemory } from '../shared/captain-memory'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
+import type { TranscriptPage, TranscriptPageRequest } from '../shared/transcript-page'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
@@ -155,7 +156,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getTranscriptSnapshot: (taskId: string, sinceSeq?: number): Promise<Array<{ taskId: string; partId: string; seq: number; role: string; content: string; partType?: string; tool?: unknown; payload?: unknown; createdAt: number; updatedAt: number; rev: number }>> =>
       ipcRenderer.invoke('agentSession:getTranscriptSnapshot', taskId, sinceSeq),
     getTranscriptDelta: (taskId: string, sinceRev: number): Promise<{ parts: Array<{ taskId: string; partId: string; seq: number; role: string; content: string; partType?: string; tool?: unknown; payload?: unknown; createdAt: number; updatedAt: number; rev: number }>; maxRev: number }> =>
-      ipcRenderer.invoke('agentSession:getTranscriptDelta', taskId, sinceRev)
+      ipcRenderer.invoke('agentSession:getTranscriptDelta', taskId, sinceRev),
+    getTranscriptPage: (taskId: string, page: TranscriptPageRequest): Promise<TranscriptPage> =>
+      ipcRenderer.invoke('agentSession:getTranscriptPage', taskId, page)
   },
   captainRuntime: {
     get: (projectId: string): Promise<CaptainRuntimeState | null> => ipcRenderer.invoke('captainRuntime:get', projectId),

@@ -14,6 +14,8 @@ export interface SyncResult {
 }
 
 export class SyncManager {
+  private closing = false
+  private readonly pendingWork = new Set<Promise<unknown>>()
   constructor(
     private db: DatabaseManager,
     private pluginRegistry: PluginRegistry,
@@ -24,7 +26,11 @@ export class SyncManager {
     return { db: this.db, oauthManager: this.oauthManager, sourceId }
   }
 
-  async importTasks(sourceId: string): Promise<SyncResult> {
+  importTasks(sourceId: string): Promise<SyncResult> {
+    return this.runOwned(() => this.importTasksInternal(sourceId))
+  }
+
+  private async importTasksInternal(sourceId: string): Promise<SyncResult> {
     const result: SyncResult = { source_id: sourceId, imported: 0, updated: 0, errors: [] }
 
     const source = this.db.getTaskSource(sourceId)
@@ -75,7 +81,11 @@ export class SyncManager {
     return result
   }
 
-  async exportTaskUpdate(taskId: string, changedFields: Record<string, unknown>): Promise<void> {
+  exportTaskUpdate(taskId: string, changedFields: Record<string, unknown>): Promise<void> {
+    return this.runOwned(() => this.exportTaskUpdateInternal(taskId, changedFields))
+  }
+
+  private async exportTaskUpdateInternal(taskId: string, changedFields: Record<string, unknown>): Promise<void> {
     const task = this.db.getTask(taskId)
     if (!task?.source_id || !task.external_id) return
 
@@ -97,7 +107,16 @@ export class SyncManager {
     await plugin.exportUpdate(task, fields, config, ctx)
   }
 
-  async executeAction(
+  executeAction(
+    actionId: string,
+    task: TaskRecord,
+    input: string | undefined,
+    sourceId: string
+  ): Promise<ActionResult> {
+    return this.runOwned(() => this.executeActionInternal(actionId, task, input, sourceId))
+  }
+
+  private async executeActionInternal(
     actionId: string,
     task: TaskRecord,
     input: string | undefined,
@@ -126,7 +145,11 @@ export class SyncManager {
     return result
   }
 
-  async getSourceUsers(sourceId: string): Promise<SourceUser[]> {
+  getSourceUsers(sourceId: string): Promise<SourceUser[]> {
+    return this.runOwned(() => this.getSourceUsersInternal(sourceId))
+  }
+
+  private async getSourceUsersInternal(sourceId: string): Promise<SourceUser[]> {
     const source = this.db.getTaskSource(sourceId)
     if (!source) return []
 
@@ -138,7 +161,15 @@ export class SyncManager {
     return plugin.getUsers(config, ctx)
   }
 
-  async reassignTask(
+  reassignTask(
+    taskId: string,
+    userIds: string[],
+    assigneeDisplay: string
+  ): Promise<ReassignResult> {
+    return this.runOwned(() => this.reassignTaskInternal(taskId, userIds, assigneeDisplay))
+  }
+
+  private async reassignTaskInternal(
     taskId: string,
     userIds: string[],
     assigneeDisplay: string
@@ -169,4 +200,42 @@ export class SyncManager {
   private getConfig(source: { config: Record<string, unknown> }): Record<string, unknown> {
     return { ...source.config }
   }
+
+  stop(): void { this.closing = true }
+
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Source sync shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.stop()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new SyncManagerShutdownIncompleteError()), timeoutMs)
+    })
+    try {
+      do { await Promise.race([Promise.allSettled([...this.pendingWork]), expired]) }
+      while (this.pendingWork.size)
+    } finally { if (timer) clearTimeout(timer) }
+  }
+
+  private runOwned<T>(work: () => Promise<T>): Promise<T> {
+    if (this.closing) return Promise.reject(new SyncManagerClosedError())
+    const run = Promise.resolve().then(() => {
+      if (this.closing) throw new SyncManagerClosedError()
+      return work()
+    })
+    this.pendingWork.add(run)
+    void run.then(() => this.pendingWork.delete(run), () => this.pendingWork.delete(run))
+    return run
+  }
+}
+
+export class SyncManagerClosedError extends Error {
+  readonly code = 'SOURCE_SYNC_CLOSED'
+  constructor() { super('Source sync is shutting down'); this.name = 'SyncManagerClosedError' }
+}
+
+export class SyncManagerShutdownIncompleteError extends Error {
+  readonly code = 'SOURCE_SYNC_SHUTDOWN_INCOMPLETE'
+  constructor() { super('Source sync work has not finished'); this.name = 'SyncManagerShutdownIncompleteError' }
 }

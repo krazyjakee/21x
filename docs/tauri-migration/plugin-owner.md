@@ -1,0 +1,13 @@
+# Portable plugin manager ownership
+
+`ClaudePluginManager` now requires an explicit absolute plugin directory. The application supplies its existing profile path. The portable manager contains no Electron import, lazy require or shared temporary-directory fallback.
+
+Catalog fetching, discovery and installation retain their raw operations. Shutdown closes all read/write admission, clears the catalog cache, aborts source requests and joins accepted work before SQLite close. Ignored aborts and late body reads remain owned after a bounded close fails; retry joins the same work. Late catalogs cannot refill the cache, scans cannot advance to another marketplace, and completed downloads cannot publish plugins/resources after final shutdown.
+
+The actual source downloader propagates cancellation through catalog fallback, GitHub recursion, raw-file fallback and URL downloads. Unused responses are cancelled. Late response bodies are checked before file writes, and shutdown errors do not trigger further fallback requests. Network failure logs omit reflected exception/URL contents. Already-created partial files remain in the owned directory; this change does not invent an unsafe rollback that deletes pre-existing data.
+
+Installations that target the same directory name cannot run concurrently, including across marketplaces. A second installed plugin with that name is rejected to avoid overwriting the first plugin's directory/resources. Top-level plugin names must be single bounded identifier-like path components; invalid legacy names are refused before uninstall changes resources or removes files. Full nested-entry, symlink/reparse-point, archive, redirect and byte/depth policies, atomic staging/publication and historical collision recovery remain separate release work under #213. These name checks do not claim complete downloader filesystem containment.
+
+Thirty-three existing marketplace/install/resource controls now use the real portable SQLite manager. Eight new tests cover explicit paths, held catalog/download/body work, abort propagation, no late SQL/publication, queued discovery, concurrent/cross-marketplace collision rejection and unsafe top-level names. Tests use temporary directories, synthetic catalogs and controlled network responses; no marketplace or live profile is accessed. [Local evidence](evidence/plugin-owner-local.json) records exact results and source hashes.
+
+Production Tauri bootstrap, plugin operation/native authority, real installed marketplace behavior and complete downloader policy remain open under [#213](https://github.com/krazyjakee/21x/issues/213), [#208](https://github.com/krazyjakee/21x/issues/208) and [#202](https://github.com/krazyjakee/21x/issues/202).

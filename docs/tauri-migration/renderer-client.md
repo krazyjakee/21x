@@ -20,6 +20,14 @@ cancelled mutation may have committed; its owner must reconcile durable state.
 Cancellation settles the renderer request and signals the adapter, but actual
 service cancellation depends on the adapter's implementation.
 
+`transcript-pagination.ts` now performs bounded display hydration through the
+versioned `agentSession:getTranscriptPage` command. It streams snapshot pages into
+the projection, then reconciles from their captured revision watermark independently
+of newer live-event cursors. It rejects foreign/nonprogressing pages, holds the
+watermark fixed, bounds time/page count and ignores cancelled late results. The
+synthetic task slice uses this helper and keeps approvals disabled until hydration
+finishes. See [page semantics and local evidence](transcript-pages.md).
+
 Disposal cancels pending requests and releases the native listener, including
 when registration finishes late. Separate callback registrations remain
 independent. Consumer callbacks cannot leak raw diagnostics into native logs.

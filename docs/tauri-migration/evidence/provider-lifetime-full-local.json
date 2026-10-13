@@ -1,0 +1,13 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "3d3ff988aff1660ed3fc16ed65783bc46d8f9cd5",
+  "scope": "Full application recheck with optional standalone/private-pipe proof wrappers enabled; provider/startup continuation before Interrupt/reaper and Windows stdio fixes.",
+  "passed": 5165,
+  "failed": 0,
+  "skipped": 4,
+  "files": 363,
+  "reportSha256": "3664e4ce30194f9b56a322c9f6bb5597c5a538ee77c834ba90100a1f1b980561",
+  "productionReady": false,
+  "electronRetirementReady": false
+}

@@ -39,6 +39,64 @@ afterEach(() => {
 })
 
 describe('graceful peer drain', () => {
+  it('does not enter a queued handler after disconnect before its first microtask', async () => {
+    const handle = vi.fn(() => null)
+    const service = peer({ role: 'service', operations: { 'test.echo': { ...schema, handle } } })
+    service.receive(encodeServiceFrame(request()))
+    service.disconnect()
+    await service.waitForHandlers()
+    expect(handle).not.toHaveBeenCalled()
+    expect(service.activeCount).toBe(0)
+  })
+
+  it('retains raw handlers after disconnect until they settle without sending late replies', async () => {
+    let release!: (value: JsonValue) => void
+    let signal!: AbortSignal
+    const write = vi.fn(async () => {})
+    const service = peer({ role: 'service', write, operations: { 'test.echo': { ...schema, handle: (_payload, input) => {
+      signal = input
+      return new Promise<JsonValue>(resolve => { release = resolve })
+    } } } })
+    service.receive(encodeServiceFrame(request()))
+    await drain()
+    service.disconnect()
+    expect(signal.aborted).toBe(true)
+    expect(service.activeCount).toBe(1)
+    let done = false
+    const waited = service.waitForHandlers().then(() => { done = true })
+    await drain()
+    expect(done).toBe(false)
+    release('late effect acknowledged')
+    await waited
+    expect(service.activeCount).toBe(0)
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('keeps ownership after the terminal handler wait times out', async () => {
+    vi.useFakeTimers()
+    let release!: (value: JsonValue) => void
+    const service = peer({ role: 'service', operations: { 'test.echo': { ...schema, handle: () => new Promise<JsonValue>(resolve => { release = resolve }) } } })
+    service.receive(encodeServiceFrame(request()))
+    await drain()
+    service.disconnect()
+    const waited = expect(service.waitForHandlers(10)).rejects.toMatchObject({ code: 'TIMEOUT' })
+    await vi.advanceTimersByTimeAsync(10)
+    await waited
+    expect(service.activeCount).toBe(1)
+    const retry = service.waitForHandlers(10)
+    release(null)
+    await retry
+    expect(service.activeCount).toBe(0)
+  })
+
+  it('requires terminal state and bounds the raw-handler wait deadline', async () => {
+    const service = peer({ role: 'service' })
+    await expect(service.waitForHandlers()).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    service.disconnect()
+    for (const value of [0, -1, 3001, NaN]) await expect(service.waitForHandlers(value)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+    await expect(service.waitForHandlers()).resolves.toBeUndefined()
+  })
+
   it('waits for active handlers and the final queued response to drain', async () => {
     let releaseWrite: (() => void) | undefined
     const service = peer({ role: 'service', operations: { 'test.echo': { ...schema, handle: payload => payload } }, write: () => new Promise(resolve => { releaseWrite = resolve }) })

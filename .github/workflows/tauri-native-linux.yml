@@ -67,10 +67,21 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Stage the standalone Node runtime and native addons once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
+      - name: Stage reviewed connector worker and pinned package bytes
+        run: pnpm tauri:prepare:connectors | tee native-evidence/connector-worker-staging.json
+      - name: Run portable unit tests under staged standalone Node
+        run: |
+          pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
+          test -s native-evidence/standalone-tests.json
+          node -e 'const report = require("./native-evidence/standalone-tests.json"); if (!report.success || report.numFailedTests) process.exit(1)'
       - name: Stage the synthetic database service and check its actual native boundary
         if: inputs.mode != 'feasibility'
         run: |
           pnpm tauri:prepare:database | tee native-evidence/database-staging.json
+          pnpm test:tauri -- --service-proofs scripts/connector-worker-service-proof.test.ts --silent --reporter=json --outputFile=native-evidence/connector-worker-service-tests.json
+          node -e 'const report = require("./native-evidence/connector-worker-service-tests.json"); if (!report.success || report.numPassedTests !== 1 || report.numPendingTests) process.exit(1)'
+          TAURI_NODE_RUNTIME="$PWD/src-tauri/resources/node/node" TAURI_DATABASE_SERVICE_ENTRY="$PWD/src-tauri/resources/service/database-stdio.mjs" "$PWD/src-tauri/resources/node/node" scripts/transcript-page-proof.mjs | tee native-evidence/transcript-page-proof.json
+          TAURI_NODE_RUNTIME="$PWD/src-tauri/resources/node/node" TAURI_DATABASE_SERVICE_ENTRY="$PWD/src-tauri/resources/service/database-stdio.mjs" "$PWD/src-tauri/resources/node/node" scripts/configuration-service-proof.mjs | tee native-evidence/configuration-service-proof.json
           if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-agent' ]; then
             TAURI_SQLITE_MODULE="$PWD/src-tauri/resources/service/node_modules/better-sqlite3" node scripts/agent-desktop-proof.mjs | tee native-evidence/agent-desktop-proof.json
             TAURI_NODE_RUNTIME="$PWD/src-tauri/resources/node/node" TAURI_DATABASE_SERVICE_ENTRY="$PWD/src-tauri/resources/service/database-stdio.mjs" node scripts/agent-service-proof.mjs | tee native-evidence/agent-service-proof.json
@@ -80,6 +91,7 @@ jobs:
           if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-agent' ]; then native_features=synthetic-agent; fi
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features "$native_features" -- --test-threads=1 2>&1 | tee native-evidence/database-native-unit.log
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-desktop -- --ignored staged_synthetic_database_roundtrip_emits_real_target_events --test-threads=1 2>&1 | tee native-evidence/database-native-roundtrip.log
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-desktop -- --ignored staged_synthetic_configuration_roundtrip_preserves_real_content_effects --test-threads=1 2>&1 | tee native-evidence/configuration-native-roundtrip.log
       - name: Build the native host and Debian package
         run: |
           feature_args=()
@@ -123,7 +135,13 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import importlib.util
+          import sys
           from pathlib import Path
+          sys.dont_write_bytecode = True
+          spec = importlib.util.spec_from_file_location('packaged_smoke', 'scripts/tauri-packaged-smoke.py')
+          packaged_smoke = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(packaged_smoke)
           report_path = Path('native-evidence/installed-gui-smoke.json')
           report = json.loads(report_path.read_text())
           assert report['stage'] == 'complete' and report['passed'] is True
@@ -146,10 +164,9 @@ jobs:
               assert authority['passed'] is True
               assert authority['boundary'] == 'separate-webview'
               assert authority['sameMainIframeIsolationProven'] is False
-              assert authority['frameNativeAttemptMethod'] == 'unprivileged-parent-relay'
+              packaged_smoke.verify_artifact_authority(authority)
           assert runtime['resourceRoot'].startswith('/usr/lib/')
-          owned_node = (Path(runtime['resourceRoot']) / 'node/node').resolve()
-          assert owned_node.is_file()
+          owned_node = packaged_smoke.verified_owned_node(runtime, Path(runtime['resourceRoot']).resolve())
           assert (Path(runtime['resourceRoot']) / 'service/feasibility.mjs').is_file()
           assert report['shutdown']['engineUnavailable'] is True
           assert report['shutdown']['ownedChildExited'] is True
@@ -165,6 +182,7 @@ jobs:
                   if profile_marker in environment or executable == owned_node:
                       orphaned.append(process.name)
           report['verification'] = {'installedResources': True, 'ownedRunningProcessesAfterExit': orphaned}
+          report['verification']['runtimeVersions'] = packaged_smoke.runtime_versions(owned_node, runtime, 'x64')
           report_path.write_text(json.dumps(report, indent=2) + '\n')
           assert not orphaned, 'Owned staged Node process remained alive after native quit'
           print(json.dumps(report, indent=2))

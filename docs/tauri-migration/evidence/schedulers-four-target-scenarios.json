@@ -1,0 +1,104 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "251685c12eb59968049f39b504892bcf58f66b1b",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38379569126",
+  "conclusion": "success",
+  "scope": "Four-target default standalone service tests including recurrence, scheduled coordination, heartbeat, workspace cleanup and overdue ownership. Fixtures use controlled agents/providers/process ports and owned temporary directories. Includes real staged native preflight and connector worker hooks. Predates terminal owner/native PTY and chat shutdown changes. No installed GUI, real provider, production bootstrap or retirement acceptance.",
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "artifactId": 11802624669,
+      "artifactDigest": "sha256:9bba2dd2b2aed605ea4d6b1b74e23eb130e53d90f5d151da1bfad8236f3a8cf3",
+      "portablePassed": 1436,
+      "portableSkipped": 0,
+      "portableFiles": 92,
+      "portableReportSha256": "97222ca6af01268fddbdd45602ca054dae2560257313daca3de87d16cc718c50",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "schedulers-251685c-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "schedulers-251685c-linux-appimage-x64-connector-worker-service-tests.json",
+          "sha256": "808b6e637e82904e630cc80ea5398c11014cabe2b094c2310da8e6249670fb28"
+        },
+        "startup-transcript-tests.json": {
+          "report": "schedulers-251685c-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "82ae4028ee28dd2f39a89766cb4adad3afd24b39b44fb609b79a8a18fbe2face"
+        }
+      }
+    },
+    {
+      "target": "macos-arm64",
+      "artifactId": 11802819065,
+      "artifactDigest": "sha256:8afc6219a9ed32495b74841259bdca492e07eb04ee8bfb237f15486b5ea71792",
+      "portablePassed": 1436,
+      "portableSkipped": 0,
+      "portableFiles": 92,
+      "portableReportSha256": "e2277ed247952c1b86134075520db089eaebc9693fa480a9de878006f9bd2f90",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "schedulers-251685c-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "schedulers-251685c-macos-arm64-connector-worker-service-tests.json",
+          "sha256": "7f1ee76c0c00bb0d5d4bc47a74ef258d55eefef9d3c36d0d40cd2de96309e24d"
+        },
+        "startup-transcript-tests.json": {
+          "report": "schedulers-251685c-macos-arm64-startup-transcript-tests.json",
+          "sha256": "9d9a69eedd2403c13a0e9c2a7b4a8864b4b9fe4e98ffa24afc0fd7042d4e14b1"
+        }
+      }
+    },
+    {
+      "target": "macos-x64",
+      "artifactId": 11802383700,
+      "artifactDigest": "sha256:be408249a6f4d5f9a1c13ada44251762130d5789428d6c5b3a28a7b2e0eed13d",
+      "portablePassed": 1436,
+      "portableSkipped": 0,
+      "portableFiles": 92,
+      "portableReportSha256": "b2e40c4dc8ba9a36d28abe997805d4b67a0cf77d3bc7907d94a3468efb9c289c",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "schedulers-251685c-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "schedulers-251685c-macos-x64-connector-worker-service-tests.json",
+          "sha256": "bf991ca122f4cca695577dd8c3357782f32551043498273246a078ec22053731"
+        },
+        "startup-transcript-tests.json": {
+          "report": "schedulers-251685c-macos-x64-startup-transcript-tests.json",
+          "sha256": "f8376e9d97a4212ba9a998346da9e2f31218631078c1a9d93263caea1691bf6c"
+        }
+      }
+    },
+    {
+      "target": "windows-x64",
+      "artifactId": 11803471193,
+      "artifactDigest": "sha256:0917919310792027bd23b1858da873c9e4f7d7604d3e08b24c61f5d06a514513",
+      "portablePassed": 1436,
+      "portableSkipped": 0,
+      "portableFiles": 92,
+      "portableReportSha256": "8aa29cdb21341e60ef7ca16e8c500c35efc8fa3be9cc4539862a2675460140c9",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "schedulers-251685c-windows-x64-staged-native-preflight.json",
+          "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "schedulers-251685c-windows-x64-connector-worker-service-tests.json",
+          "sha256": "e27fbef7c1e5c5282a8c5a4b6a4ece9b24add72d8e58baf768b170be62321de4"
+        },
+        "startup-transcript-tests.json": {
+          "report": "schedulers-251685c-windows-x64-startup-transcript-tests.json",
+          "sha256": "e8ed509b08ce70275abe0b60c12a7426e587202ecde2ac4d197af480019cf9b7"
+        }
+      }
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

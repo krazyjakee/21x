@@ -1,0 +1,95 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "85e09e3d05ecf0bab309d9be8d180b2502ff0748",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38353990675",
+  "conclusion": "failure",
+  "scope": "Three Unix targets passed default standalone provider regressions, actual staged local hooks and startup controls. Windows failed four platform fixture assertions before staged proof. Test interactions for five backend protocols are mocked; no installed GUI or real provider API claim. Corrections are separate pending acceptance.",
+  "targets": [
+    {
+      "target": "windows-x64",
+      "artifactId": 11792431838,
+      "artifactDigest": "f585075280e6b83cec2d6b4c64b28db02d78e88d135fcef40e2f636ebbdc14df",
+      "portablePassed": 1014,
+      "portableFailed": 4,
+      "portableSkipped": 0,
+      "portableFiles": 69,
+      "reportSha256": "8297baa4910c8615fc4defcaa2081460ec77b2967bfdee4443508b11306618ff",
+      "retained": {}
+    },
+    {
+      "target": "linux-appimage-x64",
+      "artifactId": 11792122125,
+      "artifactDigest": "5cfc6a15318ca02ae2793a2ca8610fd3db41d01a02f66c3e7858bb02843c28dd",
+      "portablePassed": 1018,
+      "portableFailed": 0,
+      "portableSkipped": 0,
+      "portableFiles": 69,
+      "reportSha256": "a21c260dfea978d5239100a9caaad68f33ecda3fb4819c32967887d3b8bff648",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "provider-regressions-85e09e3-linux-appimage-x64-connector-worker-service-tests.json",
+          "sha256": "bc5a5ee48731b6a3c18a717daf9d1ce2df7f23ce852264d0397648ff11c44448"
+        },
+        "startup-transcript-tests.json": {
+          "report": "provider-regressions-85e09e3-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "54c9239fa4c9fa07aad604f9bcb7e5c9a5c63afc8c8155609fb8d72f76260feb"
+        },
+        "staged-native-preflight.json": {
+          "report": "provider-regressions-85e09e3-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        }
+      }
+    },
+    {
+      "target": "macos-x64",
+      "artifactId": 11791907060,
+      "artifactDigest": "d053a2f200e3f13933ea90c261690b0d8a6469124ff373fc9e960da914958dd9",
+      "portablePassed": 1018,
+      "portableFailed": 0,
+      "portableSkipped": 0,
+      "portableFiles": 69,
+      "reportSha256": "33e24fc6397e67e70bdeb4490970e1238d25fe6cdd8a6495bacdf8295c93f71e",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "provider-regressions-85e09e3-macos-x64-connector-worker-service-tests.json",
+          "sha256": "f6d42e5977db51df978a7ba4955da1146f70eecfbe174072fc9ac664c3513229"
+        },
+        "startup-transcript-tests.json": {
+          "report": "provider-regressions-85e09e3-macos-x64-startup-transcript-tests.json",
+          "sha256": "e22dc503d909b63697ebefa0f59dd2c1bb916b308954f345be117be9b1a320a9"
+        },
+        "staged-native-preflight.json": {
+          "report": "provider-regressions-85e09e3-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        }
+      }
+    },
+    {
+      "target": "macos-arm64",
+      "artifactId": 11791854453,
+      "artifactDigest": "731a5dae5bdd4dd263338d7282905a1c6e96816cdd31020eab5a13426e67c205",
+      "portablePassed": 1018,
+      "portableFailed": 0,
+      "portableSkipped": 0,
+      "portableFiles": 69,
+      "reportSha256": "612a219b63cab1156d6293db0e5102fbd7bfae657f9ab982388c16370a2a6dd3",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "provider-regressions-85e09e3-macos-arm64-connector-worker-service-tests.json",
+          "sha256": "9c2cca95e94cf659b8c06a8e563b78a06768cdd7c0e66c2994ad81276fb265e7"
+        },
+        "startup-transcript-tests.json": {
+          "report": "provider-regressions-85e09e3-macos-arm64-startup-transcript-tests.json",
+          "sha256": "98d299294afacb243cfbbf47bd5a59baa043ee118b4866c5f267585206b21832"
+        },
+        "staged-native-preflight.json": {
+          "report": "provider-regressions-85e09e3-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        }
+      }
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

@@ -232,12 +232,27 @@ describe('registerIpcHandlers', () => {
     const senderFrame = { url: pathToFileURL(join(__dirname, '../renderer/index.html')).href, parent: null }
     await createHandler?.({ sender, senderFrame }, { id: 'panel-1', cols: 80, rows: 24 })
 
-    await killHandler?.({}, { id: 'panel-1', expectedPid: 9999 })
+    await killHandler?.({ sender, senderFrame }, { id: 'panel-1', expectedPid: 9999 })
     expect(mockChildKill).not.toHaveBeenCalled()
 
-    await killHandler?.({}, { id: 'panel-1', expectedPid: 4242 })
+    await killHandler?.({ sender, senderFrame }, { id: 'panel-1', expectedPid: 4242 })
     expect(mockChildKill).toHaveBeenCalledTimes(1)
     expect(mockChildKill).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('terminal buffer, cwd, resize and kill refuse embedded callers', async () => {
+    register()
+    const handlers = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const event = { sender: { getType: () => 'webview' }, senderFrame: { url: 'https://example.invalid', parent: null } }
+    try {
+      for (const name of ['terminal:getBuffer', 'terminal:getCwd', 'terminal:resize', 'terminal:kill']) {
+        const handler = handlers.find(([channel]) => channel === name)![1]
+        expect(() => handler(event, { id: 'fixture', cols: 80, rows: 24 })).toThrow(name)
+      }
+      expect(mockSpawn).not.toHaveBeenCalled()
+      expect(mockChildKill).not.toHaveBeenCalled()
+    } finally { warn.mockRestore() }
   })
 
   it('terminal:create refuses a sender that is not the main window frame', async () => {

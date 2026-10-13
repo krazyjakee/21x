@@ -1,0 +1,73 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Actual portable SQLite/loopback HTTP/WebSocket mobile lifecycle and existing mobile regressions. Raw route write retained through disconnected failed-close/retry. Startup/binding/admission/settings/native WebSocket close controls. Controllers are fixtures; no real device, tunnel, production Tauri bootstrap/native UI or model session claim.",
+  "sourceFilesSha256": {
+    "src/main/mobile-api-server.ts": "1e450507d7f57c8d3ed54aede7eef5722f95dc2f4d4f6510c26271c60c3c56ea",
+    "src/main/mobile-api-lifetime.test.ts": "e69441625ba7556c5e29449cd1322a370f3c73c7a18fd087b84b0416d76baee6",
+    "src/main/mobile-api-server.test.ts": "43aebed8d78061c07fb352890021580966273bc773c76471d0ca142ba1ae7028",
+    "src/main/index.ts": "0d34a27c6fe1376ea94cc1350f6a0117aaf5191bdfde2d627c74ff52fb1022e0",
+    "vitest.tauri.config.ts": "1c1f671bfbd520a32d8c4ac0319ee4b552588bfae075735e85c873eb07477d07"
+  },
+  "reports": [
+    {
+      "command": "pnpm test:tauri -- --service-proofs",
+      "report": "/tmp/21x-mobile-final-service.json",
+      "sha256": "3eaaf6ea6f57c87b692c2717fd94cb961ecbcd8e98d667cf5e7075b230612b7c",
+      "passed": 1223,
+      "skipped": 0,
+      "files": 83
+    },
+    {
+      "command": "pnpm test -- --run",
+      "report": "/tmp/21x-mobile-final-legacy.json",
+      "sha256": "e4b4ff2350bef2c49c04494dc1371b7c8f222a03d194d8e81143665c10ddad00",
+      "passed": 5288,
+      "skipped": 20,
+      "files": 379,
+      "commandExitCode": 1,
+      "accepted": false,
+      "note": "All assertions passed and reporter success=true, but launcher exit was 1. Follow-up raw dual-reporter run is required."
+    },
+    {
+      "command": "pnpm test:tauri -- src/main/mobile-api-lifetime.test.ts src/main/mobile-api-server.test.ts",
+      "report": "/tmp/21x-mobile-lifetime-standalone.json",
+      "sha256": "956e46d36a416616cbe8a67479729bff26bd91852ec470a9cb9537b33035e292",
+      "passed": 53,
+      "skipped": 0,
+      "files": 2
+    },
+    {
+      "command": "pnpm test -- src/main/mobile-api-lifetime.test.ts src/main/mobile-api-server.test.ts",
+      "report": "/tmp/21x-mobile-lifetime-legacy.json",
+      "sha256": "d8f47c5d23dd82870dd92d0ee54f97decb247bb982383d4444316a3a71d040b6",
+      "passed": 53,
+      "skipped": 0,
+      "files": 2
+    },
+    {
+      "command": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --reporter=default --reporter=json --outputFile=/tmp/21x-mobile-checked-legacy.json",
+      "report": "/tmp/21x-mobile-checked-legacy.json",
+      "sha256": "023c389befa3747073004de0cc9a40d5648155d668408e2da2caff2d565e544a",
+      "passed": 5288,
+      "skipped": 20,
+      "files": 379,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "95fb71e8686208ece289061efd79b38b1af9a45498e1274491a94a047a2e2262",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "focusedRunsBeforeDirectSourceRegression": true,
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "056dee001f360e707460a17a668118d6340f90858f48e428f1710086ee48f6d8",
+    "beforeFinalDirectSourceGuard": true
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

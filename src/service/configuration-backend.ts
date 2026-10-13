@@ -4,17 +4,15 @@ import type { CreateSkillData, UpdateSkillData } from '../main/database/types'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import type { DesktopCommandMap } from '../shared/desktop-operations'
 import {
-  CONFIGURATION_COMMAND_CODECS, CONFIGURATION_DESKTOP_EVENTS, CONFIGURATION_DESKTOP_OPERATIONS,
+  CONFIGURATION_COMMAND_CODECS, CONFIGURATION_DESKTOP_EVENTS, CONFIGURATION_CONTENT_OPERATIONS,
   CONFIGURATION_EVENT_CODECS, projectPublicProject,
-  type ConfigurationDesktopEvent, type ConfigurationDesktopOperation
+  type ConfigurationDesktopEvent
 } from '../shared/configuration-desktop-codecs'
 import { isJsonValue, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
 import { DesktopOperationRegistry, type DesktopCallerContext } from './transport/desktop-registry'
 import type { OperationSchema } from './transport/peer'
 
-export const CONFIGURATION_BOUND_OPERATIONS = CONFIGURATION_DESKTOP_OPERATIONS.filter(
-  (operation): operation is Exclude<ConfigurationDesktopOperation, `agent:${string}`> => !operation.startsWith('agent:')
-)
+export const CONFIGURATION_BOUND_OPERATIONS = CONFIGURATION_CONTENT_OPERATIONS
 type Operation = typeof CONFIGURATION_BOUND_OPERATIONS[number]
 type Access = 'read' | 'write'
 type Notify = (operation: ConfigurationDesktopEvent, payload: JsonValue) => void

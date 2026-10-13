@@ -1,0 +1,160 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "a282c8cd1edfac3a5961f8e8e563d6d6a394e500",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38342036089",
+  "conclusion": "success",
+  "scope": "Four-target service-only tests of real Node IPC and compiled host loading repository pinned Trello with system Node hidden. Predates staged connector resources and later source shutdown integration.",
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "passed": 518,
+      "skipped": 0,
+      "files": 48,
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "workerTests": [
+        {
+          "name": "shares the minimal HTTP environment without inheriting credentials, preloads or Electron mode",
+          "passed": true
+        },
+        {
+          "name": "rejects a PATH-based entry before launching a worker",
+          "passed": true
+        },
+        {
+          "name": "uses owning Node, preserves structured data and joins actual close with system Node hidden",
+          "passed": true
+        },
+        {
+          "name": "runs the real compiled host and pinned Trello disable hook over Node IPC",
+          "passed": true
+        }
+      ],
+      "testReportSha256": "038c1034a3e9a0f7652153c3bb4d08f13b537cf9b9dab39b75cfb44c34c1b36b",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "node-connector-a282c8c-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "startup-transcript-tests.json": {
+          "report": "node-connector-a282c8c-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "37e20dc619bab218602749c6b055d667db79fb74091cfe98ba4f5e5e354ae695"
+        }
+      }
+    },
+    {
+      "target": "macos-arm64",
+      "passed": 518,
+      "skipped": 0,
+      "files": 48,
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "workerTests": [
+        {
+          "name": "shares the minimal HTTP environment without inheriting credentials, preloads or Electron mode",
+          "passed": true
+        },
+        {
+          "name": "rejects a PATH-based entry before launching a worker",
+          "passed": true
+        },
+        {
+          "name": "uses owning Node, preserves structured data and joins actual close with system Node hidden",
+          "passed": true
+        },
+        {
+          "name": "runs the real compiled host and pinned Trello disable hook over Node IPC",
+          "passed": true
+        }
+      ],
+      "testReportSha256": "e5466f07424e5e5a15532acc8e5683b40421564d832ea4e3b8c39f7cc6f45239",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "node-connector-a282c8c-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "startup-transcript-tests.json": {
+          "report": "node-connector-a282c8c-macos-arm64-startup-transcript-tests.json",
+          "sha256": "6a8afe83915a933b57e7ed490f1e45d790ff0dcea42a2cfed4e9c39763fcf38b"
+        }
+      }
+    },
+    {
+      "target": "macos-x64",
+      "passed": 518,
+      "skipped": 0,
+      "files": 48,
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "workerTests": [
+        {
+          "name": "shares the minimal HTTP environment without inheriting credentials, preloads or Electron mode",
+          "passed": true
+        },
+        {
+          "name": "rejects a PATH-based entry before launching a worker",
+          "passed": true
+        },
+        {
+          "name": "uses owning Node, preserves structured data and joins actual close with system Node hidden",
+          "passed": true
+        },
+        {
+          "name": "runs the real compiled host and pinned Trello disable hook over Node IPC",
+          "passed": true
+        }
+      ],
+      "testReportSha256": "518eb493d85803626e941524119cbda5f23438cb71fe61087ff31cde7bd068a1",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "node-connector-a282c8c-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "startup-transcript-tests.json": {
+          "report": "node-connector-a282c8c-macos-x64-startup-transcript-tests.json",
+          "sha256": "58a9436511798f35a5d5772083024bb1a889391dcbb759554b8744ec275cea7c"
+        }
+      }
+    },
+    {
+      "target": "windows-x64",
+      "passed": 518,
+      "skipped": 0,
+      "files": 48,
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "workerTests": [
+        {
+          "name": "shares the minimal HTTP environment without inheriting credentials, preloads or Electron mode",
+          "passed": true
+        },
+        {
+          "name": "rejects a PATH-based entry before launching a worker",
+          "passed": true
+        },
+        {
+          "name": "uses owning Node, preserves structured data and joins actual close with system Node hidden",
+          "passed": true
+        },
+        {
+          "name": "runs the real compiled host and pinned Trello disable hook over Node IPC",
+          "passed": true
+        }
+      ],
+      "testReportSha256": "de9517ea19c70d086396448757c8405c7318a1d1dac1b034043b5419a7ca940e",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "node-connector-a282c8c-windows-x64-staged-native-preflight.json",
+          "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+        },
+        "startup-transcript-tests.json": {
+          "report": "node-connector-a282c8c-windows-x64-startup-transcript-tests.json",
+          "sha256": "b00f6599c5d36e97f98010d856b0d872e35b6112a2730a7a664535c38aae85f1"
+        }
+      }
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

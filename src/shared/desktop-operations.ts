@@ -17,6 +17,7 @@ export interface DesktopCommandMap {
   "agentSession:approve": { apiArguments: Parameters<NonNullable<DesktopApi["agentSession"]["approve"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agentSession"]["approve"]>>> }
   "agentSession:getRawTranscript": { apiArguments: Parameters<NonNullable<DesktopApi["agentSession"]["getRawTranscript"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agentSession"]["getRawTranscript"]>>> }
   "agentSession:getTranscriptDelta": { apiArguments: Parameters<NonNullable<DesktopApi["agentSession"]["getTranscriptDelta"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agentSession"]["getTranscriptDelta"]>>> }
+  "agentSession:getTranscriptPage": { apiArguments: Parameters<NonNullable<DesktopApi["agentSession"]["getTranscriptPage"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agentSession"]["getTranscriptPage"]>>> }
   "agentSession:getTranscriptSnapshot": { apiArguments: Parameters<NonNullable<DesktopApi["agentSession"]["getTranscriptSnapshot"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agentSession"]["getTranscriptSnapshot"]>>> }
   "agentSession:resume": { apiArguments: Parameters<NonNullable<DesktopApi["agentSession"]["resume"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agentSession"]["resume"]>>> }
   "agentSession:send": { apiArguments: Parameters<NonNullable<DesktopApi["agentSession"]["send"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agentSession"]["send"]>>> }
@@ -338,6 +339,7 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "command/agentSession:approve": {"name":"agentSession:approve","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agentSession:getRawTranscript": {"name":"agentSession:getRawTranscript","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agentSession:getTranscriptDelta": {"name":"agentSession:getTranscriptDelta","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/agentSession:getTranscriptPage": {"name":"agentSession:getTranscriptPage","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agentSession:getTranscriptSnapshot": {"name":"agentSession:getTranscriptSnapshot","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agentSession:resume": {"name":"agentSession:resume","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agentSession:send": {"name":"agentSession:send","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},

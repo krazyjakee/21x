@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { safeStorage } from 'electron'
+import { getSecretStorage } from '../../platform/secret-storage'
 import { get as httpGet } from 'http'
 import { readdirSync, readFileSync, statSync } from 'fs'
 import { join, relative } from 'path'
-import { createTestDb } from '../../../../test/helpers/db-test-helper'
+import { createPortableTestDb } from '../../../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from '../../database'
 import { PluginActionId, TaskStatus } from '../../../shared/constants'
-import { ConnectorBridgePlugin } from '../../plugins/connector-bridge-plugin'
+import { ConnectorBridgeCore as ConnectorBridgePlugin } from '../../plugins/connector-bridge-core'
 import type { PluginContext } from '../../plugins/types'
 import { pkceChallenge } from '../../oauth/pkce'
 import { CONNECTOR_PIECE_ALLOWLIST, type ConnectorPieceAllowlist } from '../allowlist'
@@ -431,7 +431,7 @@ function secretsOf(...tokens: string[]): string[] {
 }
 
 beforeEach(() => {
-  ;({ db } = createTestDb())
+  db = createPortableTestDb()
   instanceId = new ConnectorStore(db).createInstance({ pieceName: PIECE, pieceVersion: VERSION, displayName: 'Todoist' }).id
   projectId = db.createProject({ name: 'Todoist project' })!.id
   config = { piece_name: PIECE, connector_instance_id: instanceId, props: { filter_query: FILTER }, poll_interval_minutes: 10 }
@@ -443,9 +443,9 @@ beforeEach(() => {
   realFetch = globalThis.fetch
   globalThis.fetch = api.fetch as unknown as typeof globalThis.fetch
   tlsEnv = process.env.NODE_TLS_REJECT_UNAUTHORIZED
-  vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true)
-  vi.mocked(safeStorage.encryptString).mockImplementation(fakeEncrypt)
-  vi.mocked(safeStorage.decryptString).mockImplementation(fakeDecrypt)
+  vi.spyOn(getSecretStorage(), 'isEncryptionAvailable').mockReturnValue(true)
+  vi.spyOn(getSecretStorage(), 'encryptString').mockImplementation(fakeEncrypt)
+  vi.spyOn(getSecretStorage(), 'decryptString').mockImplementation(fakeDecrypt)
   consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
   consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 })
@@ -455,7 +455,9 @@ afterEach(() => {
   globalThis.fetch = realFetch
   if (tlsEnv === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
   else process.env.NODE_TLS_REJECT_UNAUTHORIZED = tlsEnv
-  vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false)
+  vi.mocked(getSecretStorage().isEncryptionAvailable).mockRestore()
+  vi.mocked(getSecretStorage().encryptString).mockRestore()
+  vi.mocked(getSecretStorage().decryptString).mockRestore()
   consoleError.mockRestore()
   consoleWarn.mockRestore()
 })
@@ -471,7 +473,7 @@ describe('Todoist is only an allowlist entry, a declarative mapping and a regist
         const path = join(dir, name)
         if (statSync(path).isDirectory()) walk(path)
         else if (name.endsWith('.ts') && !name.endsWith('.test.ts') && /todoist/i.test(readFileSync(path, 'utf8'))) {
-          hits.push(relative(root, path))
+          hits.push(relative(root, path).split('\\').join('/'))
         }
       }
     }
@@ -584,7 +586,7 @@ describe('connect through the loopback flow', () => {
   })
 
   it('fails fast with the keychain remediation before opening the browser when persistent storage is unavailable', async () => {
-    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false)
+    vi.mocked(getSecretStorage().isEncryptionAvailable).mockReturnValue(false)
     const h = makeHarness()
     await expect(h.oauth.connect(instanceId, { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET })).rejects.toMatchObject({ code: 'CONNECTOR_CREDENTIALS_UNAVAILABLE', sessionOnlyAvailable: true })
     expect(api.authorizeUrls).toHaveLength(0)

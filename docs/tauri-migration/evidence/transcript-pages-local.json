@@ -1,0 +1,73 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-12",
+  "issue": 207,
+  "scope": "Scoped durable display pagination and recovery. No general binary/attachment/audio/terminal stream, installed GUI, provider parity or gate closure claim.",
+  "source": {
+    "baseCommit": "38f1a1b0250c7ed4fb1d6268b26074399e01ab12",
+    "workingTree": true,
+    "filesSha256": {
+      "src/shared/transcript-page.ts": "77db964521d1d518a022bc9437be458cbb4e37471af8fe59302a39f8159be90b",
+      "src/shared/database-desktop-codecs.ts": "1301a41eaa42001a31430f136e14081fd79b636596426eee8c5af02037b3c928",
+      "src/main/database/manager.ts": "3b09bee8329a3431df0aba4314df56015091eb8cfc41001fa978d75eadbdf20c",
+      "src/service/database-backend.ts": "717c5a7a7ce232af511043ec40dcf9ec65a1d8c2866ffa0857e6bf60dfb71e33",
+      "src/main/ipc/agents.ts": "96568840ed059e58bda84a9a8a026960a11a48b9bcf760c616aa0f57d0200d5a",
+      "src/preload/index.ts": "ffdf5fd1c178877bf9cb2d600c9d7f276159d625e5bd6e9f7e13eac778db85b2",
+      "src/renderer/src/types/electron.d.ts": "c7030fb165a13590b0eca3247e30faee8c148e9e2662d3b941d3135d0f4ea44d",
+      "src/renderer/src/lib/transcript-pagination.ts": "f4a4817a89017e3e7efc6c3944105ad7c49b5903606cccfe9d8d0544ce0d1eb9",
+      "src/tauri-spike/task-slice.ts": "d840056d6a9651594c20bb05f31b17b32b9a546f77d08890b860d9520844bd61",
+      "src-tauri/engine/src/desktop.rs": "edfd03a9a5e24542b3fd2f1b7668d0c15815dd2c0961d53a86acaffbbf487414",
+      "src-tauri/engine/src/lib.rs": "3dcbff82b4ddfeaa0e4192b8aea162013b8539555bed235ffc9e42948c20ee21",
+      "scripts/transcript-page-proof.mjs": "97771328ae5f3b1db9788fe85c72662bc24ab0d86ff6e9282954001fb9691c7f",
+      ".github/workflows/tauri-packaged-platforms.yml": "1dc98d0401bf0c871cc1e403e28f3572bfbd30ee7b955dc36a04c1ecf520d6f6",
+      ".github/workflows/tauri-native-linux.yml": "c6c89b32338afcaa7b20f06657f45aec1159d800f5637d731ea672e5d2853706",
+      "src/main/transcript-page-authority.test.ts": "5c59e7de9259fb43f064fb18e81380b371563eb3928a73a3550a2f7bb62f5297"
+    }
+  },
+  "environment": {
+    "platform": "linux-x64",
+    "node": "v22.23.2",
+    "sqlite": "13.0.3",
+    "rust": "1.98.0"
+  },
+  "actualBundledServiceProof": {
+    "reportVersion": 1,
+    "passed": true,
+    "actualBundledService": true,
+    "phase": "complete",
+    "parts": 642,
+    "snapshotPages": 43,
+    "deltaPages": 3,
+    "largestPageBytes": 248188,
+    "pageByteLimit": 262144,
+    "racingUpdatesRecovered": true,
+    "widePayloadsBounded": true,
+    "oversizedFieldPreviewOnly": true,
+    "missingTaskAndMalformedRequestsDenied": true,
+    "acknowledgedServiceExit": true,
+    "syntheticProfileRemoved": true
+  },
+  "typescriptCases": {
+    "passed": 338,
+    "files": 13,
+    "actualBindingAuthorityCases": 4
+  },
+  "rust": {
+    "unitPassed": 18,
+    "stagedPassed": 5,
+    "nativeHostCheck": "passed"
+  },
+  "typecheck": "passed",
+  "changedTypeScriptLint": "passed",
+  "isolatedFrontendBuild": "passed",
+  "sourceInventoryAndContractFreshness": "passed",
+  "workflowSyntax": {
+    "passed": true,
+    "shellSteps": 25
+  },
+  "existingBundledAgentProof": {
+    "passed": true,
+    "events": 15
+  },
+  "installedPlatformRuns": "not_run_for_this_working_tree"
+}

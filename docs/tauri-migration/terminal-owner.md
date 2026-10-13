@@ -1,0 +1,13 @@
+# Portable terminal ownership
+
+`TerminalServiceCore` owns current and retiring terminals plus raw cwd probes. Replacement and explicit kill remove the terminal from admission but retain the native handle until actual close. Old output/exit callbacks are fenced by entry identity, including equal-PID replacements. Shutdown stops admission, kills only owned handle objects and joins their close notifications and accepted probes; bounded-close failures retain ownership for retry. Cwd results are discarded if the terminal was replaced or shutdown began.
+
+The core supports create, write, resize, bounded buffer replay, trusted-host reattachment, exit and PID-guarded kill. Reattachment changes the event destination without respawning. Replay is capped at 500 lines and one million characters; at most 64 live or retiring PTYs are admitted. Bad dimensions/input are rejected, and write/resize failures cannot crash the host.
+
+Electron IPC delegates to this owner and checks the trusted main frame for all six terminal commands. Application shutdown closes these owners before SQLite/profile teardown. Legacy Unix keeps its Python PTY bridge; its spawn errors are handled and its owner waits for process `close`, including pipes, rather than early `exit`. Windows retains node-pty. The standalone factory receives its staged ABI-matched node-pty module explicitly and uses it on every platform.
+
+Local native validation loads node-pty 1.1.0 from staged resources under the owning standalone Node. It runs a fixture Node child in an owned OS temporary directory, avoiding user shell startup files. It verifies resize, input/output, cwd passed at creation, reattachment/replay, stale-PID protection and actual process exit. Core controls use injected handles; the legacy process error/close control uses simulated process events. [Evidence](evidence/terminal-owner-local.json) records exact scope and report/source hashes.
+
+This is service and legacy-host implementation, not a production Tauri command binding. Installed renderer reconnect, native focus/keyboard behavior, real shell/CLI environments and complete descendant cleanup still require acceptance under [#214](https://github.com/krazyjakee/21x/issues/214) / [#208](https://github.com/krazyjakee/21x/issues/208). Legacy Python resize remains unsupported; standalone node-pty supplies resize. Commander/chat and attachment-worker migration remain open.
+
+Full validation passed 1,456 standalone/private-pipe tests with zero skips in 99 files and 5,346 application tests with 20 optional skips in 392 files. Both commands exited zero without unhandled errors. Forced typecheck, changed-source lint, contract freshness and desktop/mobile build passed.

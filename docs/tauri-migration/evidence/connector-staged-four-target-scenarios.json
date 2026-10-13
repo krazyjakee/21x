@@ -1,0 +1,129 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "All four targets passed staged connector resource/runtime/plugin local-hook service tests across explicit revisions. Both pinned Trello/Todoist local disable hooks use the actual staged Node child; no provider API, external OAuth or installed GUI claim. Earlier matrices remain failed overall.",
+  "targets": [
+    {
+      "target": "macos-x64",
+      "sourceCommit": "7fb35a069a1a501ee41e8ab52ab2bed1b83ef300",
+      "run": "https://github.com/krazyjakee/21x/actions/runs/38348839508",
+      "jobConclusion": "success",
+      "artifactId": 11789966663,
+      "artifactDigest": "db6d5c4bbfbec403490d7e530fc3cb4b8f1a956ec715fcc171ec699275c0f77a",
+      "portablePassed": 613,
+      "portableSkipped": 0,
+      "portableFiles": 54,
+      "portableReportSha256": "2f2ec276998f32352ad8485e529a931b42ebfc67af63e3b488ee8e10ea7d7cde",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "connector-staged-7fb35a0-macos-x64-connector-worker-service-tests.json",
+          "sha256": "78946fdb5eb33324de4e4cb0ff6f28c9a9186031f7dad78ae0f4eed5142c8983"
+        },
+        "staged-native-preflight.json": {
+          "report": "connector-staged-7fb35a0-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "startup-transcript-tests.json": {
+          "report": "connector-staged-7fb35a0-macos-x64-startup-transcript-tests.json",
+          "sha256": "ed465bbaef9acdd9f0df3269f0c1662a8fdf597c259b8a07ac2be8775291a181"
+        },
+        "connector-worker-staging.json": {
+          "report": "connector-staged-7fb35a0-macos-x64-connector-worker-staging.json",
+          "sha256": "22fb8b92dcec4f64269c2315a3fd773f40f3744e4cbb682cea62e961be0417cd"
+        }
+      }
+    },
+    {
+      "target": "macos-arm64",
+      "sourceCommit": "7fb35a069a1a501ee41e8ab52ab2bed1b83ef300",
+      "run": "https://github.com/krazyjakee/21x/actions/runs/38348839508",
+      "jobConclusion": "success",
+      "artifactId": 11790181262,
+      "artifactDigest": "251157391f4ab97d63b69c8473b8571ad5d6a137f1608482d772e6e70410d7ca",
+      "portablePassed": 613,
+      "portableSkipped": 0,
+      "portableFiles": 54,
+      "portableReportSha256": "1252039017f7e01767dbe339630fe91e6ba0b3defba38245dd62b68161571ae2",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "connector-staged-7fb35a0-macos-arm64-connector-worker-service-tests.json",
+          "sha256": "1101a153aee8226c4b9686d0226f7365756eb675a1d78997e12948f6905f89ce"
+        },
+        "staged-native-preflight.json": {
+          "report": "connector-staged-7fb35a0-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "startup-transcript-tests.json": {
+          "report": "connector-staged-7fb35a0-macos-arm64-startup-transcript-tests.json",
+          "sha256": "46596859c65cb52f078566cc9ddecd12b00b70754f22e680ea11fe3f094cb230"
+        },
+        "connector-worker-staging.json": {
+          "report": "connector-staged-7fb35a0-macos-arm64-connector-worker-staging.json",
+          "sha256": "22fb8b92dcec4f64269c2315a3fd773f40f3744e4cbb682cea62e961be0417cd"
+        }
+      }
+    },
+    {
+      "target": "linux-appimage-x64",
+      "sourceCommit": "7fb35a069a1a501ee41e8ab52ab2bed1b83ef300",
+      "run": "https://github.com/krazyjakee/21x/actions/runs/38348839508",
+      "jobConclusion": "success",
+      "artifactId": 11790022380,
+      "artifactDigest": "77ea3dadf2881119eaa65d10c2baa21c8b1e6d6df178a337e0a771fb71864991",
+      "portablePassed": 613,
+      "portableSkipped": 0,
+      "portableFiles": 54,
+      "portableReportSha256": "d6a81321890ec3a0cb3a3e535695a8d5608ebf2a1d854951a64614574c10eefb",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "connector-staged-7fb35a0-linux-appimage-x64-connector-worker-service-tests.json",
+          "sha256": "29ad7de5a217e453062cb12221c816f9bee1f52c590bda1efbf37bc97764557f"
+        },
+        "staged-native-preflight.json": {
+          "report": "connector-staged-7fb35a0-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "startup-transcript-tests.json": {
+          "report": "connector-staged-7fb35a0-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "868eca72ef662a58d14c78a5431cc4484f1c24b109b1b2bd240f4553563f8245"
+        },
+        "connector-worker-staging.json": {
+          "report": "connector-staged-7fb35a0-linux-appimage-x64-connector-worker-staging.json",
+          "sha256": "4d10e993eaa7142f8e74b7f9a51d2a8f543ec07ac5e2896d0951f0962aac6ac9"
+        }
+      }
+    },
+    {
+      "target": "windows-x64",
+      "sourceCommit": "144fab38cf5a5cbdd0a415131f68e0c92de87a27",
+      "run": "https://github.com/krazyjakee/21x/actions/runs/38351072660",
+      "jobConclusion": "success",
+      "artifactId": 11790662547,
+      "artifactDigest": "fc33a35db4ee5108c663c6d970c5448e0054228e2010144316075c17011a5e8f",
+      "portablePassed": 700,
+      "portableSkipped": 0,
+      "portableFiles": 59,
+      "portableReportSha256": "9ab4e3025094c158a247d95d5e1fcc35e3626a1468fa64810179f3a94fa1ab1f",
+      "retained": {
+        "connector-worker-service-tests.json": {
+          "report": "connector-staged-144fab3-windows-x64-connector-worker-service-tests.json",
+          "sha256": "3684a995cebc2417f64823eb53bbb859079c066b7fa06c704dab7f234b65b850"
+        },
+        "staged-native-preflight.json": {
+          "report": "connector-staged-144fab3-windows-x64-staged-native-preflight.json",
+          "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+        },
+        "startup-transcript-tests.json": {
+          "report": "connector-staged-144fab3-windows-x64-startup-transcript-tests.json",
+          "sha256": "7b50a840ff8623c9e841730ea69098f97e4ce3d77b315b692b8ef765f16aa4c4"
+        },
+        "connector-worker-staging.json": {
+          "report": "connector-staged-144fab3-windows-x64-connector-worker-staging.json",
+          "sha256": "5e5fc7ff85314321d502604b05b74a01ee35cf055087cd5a20d599b1a0863f9a"
+        }
+      }
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

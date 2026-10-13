@@ -8,13 +8,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execSync } from 'child_process'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
-import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotifier, setTaskApiAgentController } from './task-api-server'
+import { getTaskApiToken, startTaskApiServer, closeTaskApiServer, setTaskApiNotifier, setTaskApiAgentController } from './task-api-server-core'
 import { setGhRunner } from './pull-request-merge'
 import { buildTaskMcpUrl, parseScopeFromUrl } from './task-mcp-endpoint'
-import { mcpOptionsForTask } from './agent-manager/session-config'
+import { mcpOptionsForTask } from './agent-manager/session-config-core'
 
 let db: DatabaseManager
 
@@ -22,11 +22,12 @@ beforeEach(() => {
   ;({ db } = createTestDb())
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await closeTaskApiServer()
   setGhRunner(null)
   setTaskApiNotifier(() => undefined)
   setTaskApiAgentController(null)
-  stopTaskApiServer()
+  db.db.close()
 })
 
 async function connect(url: string): Promise<Client> {

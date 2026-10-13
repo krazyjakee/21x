@@ -1,0 +1,57 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "8b9954a31dbb93eb38a46170488bfbc49539e67c",
+  "scope": "Working-tree provider-listing shutdown ownership, fixed startup classifications and staged service-only CI preparation. Current Windows startup diagnosis and installed artifact acceptance remain outstanding.",
+  "sourceSha256": {
+    "src/main/agent-manager-core.ts": "47f4b61f4c08d0febb7021a24382158fdc18291ac51532d70bccc11704aae2f5",
+    "src/main/agent-manager.test.ts": "258b388f0d880f4b53478fcdfad47f19f290ff00166347671a367a8fa4470c32",
+    "src/service/database-service.ts": "bb20b495c2db9724a52cdaac8dffadcb6d5517afea3fc7ac73564746f2a8a456",
+    "scripts/tauri-stage-database.mjs": "edca7512ecfb1cf69852c16776f101ea69202851e453a053b55d57a4e8bcbe03",
+    "scripts/transcript-page-proof.mjs": "2aa0fa339bfdb6dce6e5ab66c2228b37ebf0b4ac078e180a7fb098fddd2e5062",
+    "scripts/transcript-page-proof.test.ts": "9e5ae917ae03651aea31592f0db3405b853ff31add2622ab59a9231f56c5ee48",
+    ".github/workflows/tauri-packaged-platforms.yml": "9f2b692df678f76dbc2a2f8ee813ac5e2cc755f04268dbc219955a94e4df5fef"
+  },
+  "tests": {
+    "managerAdmissionConcurrency": {
+      "passed": 274,
+      "skipped": 0,
+      "files": 3,
+      "reportSha256": "4018bf6a6821b1a829eb4863bc8cddc5feecc0d2fb3417485fb3c2053a3adc26"
+    },
+    "standaloneAndService": {
+      "passed": 469,
+      "skipped": 0,
+      "files": 44,
+      "reportSha256": "7928c9658666549e18dc48e20fafcc22a55c8966bb89ded234954781f41de2aa"
+    },
+    "startupPrerequisiteControls": {
+      "passed": 5,
+      "skipped": 0,
+      "files": 1,
+      "reportSha256": "9ba08f80ba9c46c3bcda9d0c282196898ead77d7c01acb84e4ada4de1f82941b"
+    }
+  },
+  "newProviderLifetimeCases": 6,
+  "newStartupNegativeCases": 4,
+  "checks": {
+    "typecheck": "passed",
+    "changedSourceLint": "passed",
+    "workflowShellSyntax": "passed (three files, 40 steps)",
+    "sourceInventoryAndContractFreshness": "passed",
+    "diffWhitespace": "passed"
+  },
+  "wholeApplicationRecheck": "in progress; not counted in this scoped report",
+  "installedEvidence": {
+    "agentSource": "23109a4",
+    "unixTargetsPassed": [
+      "macos-x64",
+      "macos-arm64",
+      "linux-appimage-x64"
+    ],
+    "windowsRetrySource": "8b9954a",
+    "windowsRetry": "portable tests and JSON capture passed; service disconnected before native build"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

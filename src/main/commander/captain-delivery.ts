@@ -31,6 +31,8 @@ export class CaptainDeliveryService {
   private readonly owner = `captain-delivery:${process.pid}:${randomUUID()}`
   private readonly now: () => number
   private readonly inFlight = new Map<string, Promise<void>>()
+  private closing = false
+  private recovery: Promise<void> | null = null
   private sweepTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly options: CaptainDeliveryOptions) {
@@ -39,6 +41,7 @@ export class CaptainDeliveryService {
   }
 
   enqueueRequest(input: CaptainRequestInput): DeliveryRecord {
+    if (this.closing) throw new Error('CAPTAIN_DELIVERY_CLOSED')
     const correlationId = correlationForDeliveryKey(input.idempotencyKey)
     const record = this.options.db.db.transaction(() => {
       const { record } = this.store.enqueue({
@@ -61,14 +64,16 @@ export class CaptainDeliveryService {
   }
 
   dispatch(record: DeliveryRecord): Promise<void> {
+    if (this.closing) return Promise.reject(new Error('CAPTAIN_DELIVERY_CLOSED'))
     const existing = this.inFlight.get(record.id)
     if (existing) return existing
-    const work = this.dispatchNow(record).finally(() => this.inFlight.delete(record.id))
+    const work = Promise.resolve().then(() => this.dispatchNow(record)).finally(() => this.inFlight.delete(record.id))
     this.inFlight.set(record.id, work)
     return work
   }
 
   private async dispatchNow(record: DeliveryRecord): Promise<void> {
+    if (this.closing) return
     if (record.state === 'accepted' || record.state === 'acknowledged') return
     const claimed = this.store.claim(record.id, this.owner, CLAIM_MS)
     if (!claimed) return
@@ -90,12 +95,22 @@ export class CaptainDeliveryService {
       if (failed?.state === 'failed') {
         const message = this.store.getByKey(`captain-request-message:${claimed.id}`)
         if (message?.state === 'pending') this.store.terminal(message.id, 'cancelled', 'The originating Captain request failed.')
-        this.options.onTerminalFailure(failed, detail, false)
+        if (!this.closing) this.options.onTerminalFailure(failed, detail, false)
       }
     }
   }
 
-  async reconcile(): Promise<void> {
+  reconcile(): Promise<void> {
+    if (this.closing) return Promise.reject(new Error('CAPTAIN_DELIVERY_CLOSED'))
+    if (this.recovery) return this.recovery
+    const work = Promise.resolve().then(() => this.reconcileNow())
+    this.recovery = work
+    void work.finally(() => { if (this.recovery === work) this.recovery = null }).catch(() => {})
+    return work
+  }
+
+  private async reconcileNow(): Promise<void> {
+    if (this.closing) return
     if (!this.sweepTimer) {
       this.sweepTimer = setInterval(() => { void this.reconcile().catch((error) => console.error('[CaptainDelivery] Recovery failed:', error)) }, 30_000)
       this.sweepTimer.unref?.()
@@ -103,10 +118,12 @@ export class CaptainDeliveryService {
     this.sweepDeadlines()
     const dispatches: Promise<void>[] = []
     for (const record of this.store.listRecoverable('captain_request')) {
+      if (this.closing) break
       if (record.state !== 'accepted') dispatches.push(this.dispatch(record))
     }
     // Replaying is safe: the terminal callback uses a stable outbox/inbox key.
     for (const record of this.store.listTerminalRequests()) {
+      if (this.closing) break
       this.options.onTerminalFailure(record, record.lastError ?? 'Captain request failed.', record.state === 'timed_out')
     }
     await Promise.all(dispatches)
@@ -115,6 +132,25 @@ export class CaptainDeliveryService {
   dispose(): void {
     if (this.sweepTimer) clearInterval(this.sweepTimer)
     this.sweepTimer = null
+  }
+
+  shutdown(): void {
+    this.closing = true
+    this.dispose()
+  }
+
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Captain delivery shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.shutdown()
+    const drain = Promise.allSettled([...this.inFlight.values(), ...(this.recovery ? [this.recovery] : [])])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('CAPTAIN_DELIVERY_SHUTDOWN_INCOMPLETE')), timeoutMs)
+    })
+    try { await Promise.race([drain, expired]) }
+    finally { if (timer) clearTimeout(timer) }
   }
 
   private sweepDeadlines(): void {

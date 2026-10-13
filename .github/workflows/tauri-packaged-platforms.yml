@@ -8,12 +8,21 @@ on:
         type: choice
         default: all
         options: [all, macos-x64, macos-arm64, windows-x64, linux-appimage-x64]
+      mode:
+        description: 'Installed proof to run on the selected targets.'
+        type: choice
+        default: feasibility
+        options: [feasibility, synthetic-desktop, synthetic-agent, artifact-authorization-proof]
+      service_only:
+        description: 'Run staged portable/service proofs without Rust compilation or installed GUI acceptance.'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: tauri-packaged-platforms
+  group: tauri-packaged-platforms${{ inputs.service_only && '-service-only' || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -27,13 +36,24 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ inputs.target }}
+          PROOF_MODE: ${{ inputs.mode }}
+          SERVICE_ONLY: ${{ inputs.service_only }}
         run: |
+          if [ "$SERVICE_ONLY" = 'true' ] && [ "$PROOF_MODE" = 'feasibility' ]; then
+            echo 'Service-only proofs require a synthetic database mode.' >&2
+            exit 2
+          fi
           macos_x64='{"label":"macos-x64","runner":"macos-15-intel","arch":"x64","bundle":"dmg"}'
           macos_arm64='{"label":"macos-arm64","runner":"macos-14","arch":"arm64","bundle":"dmg"}'
           windows_x64='{"label":"windows-x64","runner":"windows-2022","arch":"x64","bundle":"nsis"}'
           linux_appimage='{"label":"linux-appimage-x64","runner":"ubuntu-24.04","arch":"x64","bundle":"appimage"}'
           case "$TARGET" in
-            all) selected="$macos_x64,$macos_arm64,$windows_x64,$linux_appimage" ;;
+            all)
+              if [ "$PROOF_MODE" = 'artifact-authorization-proof' ]; then
+                selected="$windows_x64,$macos_x64,$macos_arm64,$linux_appimage"
+              else
+                selected="$macos_x64,$macos_arm64,$windows_x64,$linux_appimage"
+              fi ;;
             macos-x64) selected="$macos_x64" ;;
             macos-arm64) selected="$macos_arm64" ;;
             windows-x64) selected="$windows_x64" ;;
@@ -56,6 +76,8 @@ jobs:
       MAKEFLAGS: '-j1'
       npm_package_config_node_gyp_jobs: '1'
       HUSKY: '0'
+      TAURI_NATIVE_PROOF_MODE: ${{ inputs.mode || 'feasibility' }}
+      TAURI_SERVICE_ONLY: ${{ inputs.service_only && 'true' || 'false' }}
     defaults:
       run:
         shell: bash
@@ -71,13 +93,15 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install pinned Rust with one compilation job
+        if: ${{ !inputs.service_only }}
         run: rustup toolchain install 1.98.0 --profile minimal --no-self-update && rustup default 1.98.0
       - name: Linux native and AppImage prerequisites
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !inputs.service_only
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev xvfb xauth dbus-x11 patchelf libfuse2t64
       - name: Cache compressed Rust dependencies only
+        if: ${{ !inputs.service_only }}
         uses: actions/cache@v4
         with:
           path: |
@@ -88,13 +112,27 @@ jobs:
         run: |
           mkdir -p native-evidence
           git rev-parse HEAD > native-evidence/commit.txt
-          rustc --version > native-evidence/rust.txt
+          if [ "$TAURI_SERVICE_ONLY" = 'true' ]; then
+            printf 'Rust not used by staged service-only proof\n' > native-evidence/rust.txt
+          else
+            rustc --version > native-evidence/rust.txt
+          fi
+          node -e 'process.stdout.write(JSON.stringify({serviceOnly:process.env.TAURI_SERVICE_ONLY === "true", installedGuiRequested:process.env.TAURI_SERVICE_ONLY !== "true"}))' > native-evidence/proof-scope.json
           node --version > native-evidence/node.txt
           node -p 'process.platform + "/" + process.arch' > native-evidence/architecture.txt
       - name: Install locked JavaScript tools without Electron lifecycle builds
         run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Check installed evidence validation on this platform
+        run: python scripts/tauri-packaged-smoke.test.py
       - name: Stage pinned standalone Node and native modules once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
+      - name: Stage reviewed connector worker and pinned package bytes
+        run: pnpm tauri:prepare:connectors | tee native-evidence/connector-worker-staging.json
+      - name: Run portable unit tests under staged standalone Node
+        run: |
+          pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
+          test -s native-evidence/standalone-tests.json
+          node -e 'const report = require("./native-evidence/standalone-tests.json"); if (!report.success || report.numFailedTests) process.exit(1)'
       - name: Preserve Node and dependency redistribution notices
         run: node scripts/tauri-resource-notices.mjs | tee native-evidence/third-party-notices.json
       - name: Check actual staged native probes before compiling the GUI
@@ -103,33 +141,70 @@ jobs:
         run: |
           sqlite_module="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/service/node_modules/better-sqlite3"))')"
           node scripts/database-proof.mjs --sqlite-module "$sqlite_module" | tee native-evidence/database-proof.json
+      - name: Stage the actual synthetic service and prove the agent boundary
+        if: inputs.mode != 'feasibility'
+        run: |
+          pnpm tauri:prepare:database | tee native-evidence/database-staging.json
+          pnpm test:tauri -- --service-proofs scripts/connector-worker-service-proof.test.ts --silent --reporter=json --outputFile=native-evidence/connector-worker-service-tests.json
+          node -e 'const report = require("./native-evidence/connector-worker-service-tests.json"); if (!report.success || report.numPassedTests !== 1 || report.numPendingTests) process.exit(1)'
+          pnpm test:tauri -- --service-proofs scripts/transcript-page-proof.test.ts --silent --reporter=json --outputFile=native-evidence/startup-transcript-tests.json
+          node -e 'const report = require("./native-evidence/startup-transcript-tests.json"); if (!report.success || report.numPassedTests !== 6 || report.numPendingTests) process.exit(1)'
+          staged_node="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/node", process.platform === "win32" ? "node.exe" : "node"))')"
+          sqlite_module="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/service/node_modules/better-sqlite3"))')"
+          service_entry="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/service/database-stdio.mjs"))')"
+          TAURI_NODE_RUNTIME="$staged_node" TAURI_DATABASE_SERVICE_ENTRY="$service_entry" "$staged_node" scripts/transcript-page-proof.mjs | tee native-evidence/transcript-page-proof.json
+          TAURI_NODE_RUNTIME="$staged_node" TAURI_DATABASE_SERVICE_ENTRY="$service_entry" "$staged_node" scripts/configuration-service-proof.mjs | tee native-evidence/configuration-service-proof.json
+          if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-agent' ]; then
+            TAURI_SQLITE_MODULE="$sqlite_module" "$staged_node" scripts/agent-desktop-proof.mjs | tee native-evidence/agent-desktop-proof.json
+            TAURI_NODE_RUNTIME="$staged_node" TAURI_DATABASE_SERVICE_ENTRY="$service_entry" "$staged_node" scripts/agent-service-proof.mjs | tee native-evidence/agent-service-proof.json
+          fi
+          if [ "$TAURI_SERVICE_ONLY" = 'true' ]; then exit 0; fi
+          export TWENTYONEX_TEST_RESOURCES="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources"))')"
+          native_features=synthetic-desktop
+          if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-agent' ]; then native_features=synthetic-agent; fi
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features "$native_features" -- --test-threads=1 2>&1 | tee native-evidence/database-native-unit.log
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-desktop -- --ignored staged_synthetic_database_roundtrip_emits_real_target_events --test-threads=1 2>&1 | tee native-evidence/database-native-roundtrip.log
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-desktop -- --ignored staged_synthetic_configuration_roundtrip_preserves_real_content_effects --test-threads=1 2>&1 | tee native-evidence/configuration-native-roundtrip.log
       - name: Check supervisor on this actual platform with the same staged resources
+        if: ${{ !inputs.service_only }}
         run: |
           export TWENTYONEX_TEST_RESOURCES="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources"))')"
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features native-fixture-tests -- --test-threads=1 2>&1 | tee native-evidence/engine-unit-tests.log
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features native-fixture-tests -- --ignored --test-threads=1 2>&1 | tee native-evidence/engine-staged-tests.log
       - name: Build the actual platform package
+        if: ${{ !inputs.service_only }}
         env:
           # Preserve staged Node/addon bytes in the debug AppImage proof.
           NO_STRIP: 'true'
-        run: pnpm tauri:build --verbose --debug --bundles ${{ matrix.bundle }} -- --locked 2>&1 | tee native-evidence/native-build.log
+        run: |
+          feature_args=()
+          case "$TAURI_NATIVE_PROOF_MODE" in
+            feasibility) ;;
+            synthetic-desktop|synthetic-agent|artifact-authorization-proof) feature_args=(--features "$TAURI_NATIVE_PROOF_MODE") ;;
+            *) exit 2 ;;
+          esac
+          pnpm tauri:build --verbose --debug --bundles ${{ matrix.bundle }} "${feature_args[@]}" -- --locked 2>&1 | tee native-evidence/native-build.log
+      - name: Check compiled artifact policy before installed execution
+        if: inputs.mode == 'artifact-authorization-proof' && !inputs.service_only
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features artifact-authorization-proof --bin twentyonex-tauri-feasibility -- --test-threads=1 2>&1 | tee native-evidence/artifact-policy-native-tests.log
       - name: Exercise packaged GUI, resources, native probes and quit
+        if: ${{ !inputs.service_only }}
         timeout-minutes: 8
-        run: python scripts/tauri-packaged-smoke.py --kind ${{ matrix.bundle }} --arch ${{ matrix.arch }} --evidence native-evidence
+        run: python scripts/tauri-packaged-smoke.py --kind ${{ matrix.bundle }} --arch ${{ matrix.arch }} --mode "$TAURI_NATIVE_PROOF_MODE" --evidence native-evidence --require-runtime-versions
       - name: Upload compact evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-platform-evidence-${{ matrix.label }}-${{ github.sha }}
+          name: tauri-platform-evidence-${{ matrix.label }}-${{ inputs.mode || 'feasibility' }}${{ inputs.service_only && '-service-only' || '' }}-${{ github.sha }}
           path: native-evidence/
           if-no-files-found: warn
           retention-days: 7
           compression-level: 0
       - name: Upload package separately
-        if: always()
+        if: always() && !inputs.service_only
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-platform-package-${{ matrix.label }}-${{ github.sha }}
+          name: tauri-platform-package-${{ matrix.label }}-${{ inputs.mode || 'feasibility' }}-${{ github.sha }}
           path: |
             src-tauri/target/debug/bundle/dmg/*.dmg
             src-tauri/target/debug/bundle/nsis/*-setup.exe

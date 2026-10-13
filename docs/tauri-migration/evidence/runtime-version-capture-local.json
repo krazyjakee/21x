@@ -1,0 +1,33 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "f15cd46120884d28139fe27a9876674e61c2fe82",
+  "scope": "Working-tree strict runtime-version capture and fixed frame failure classifiers. Actual Windows direct authorization remains unproven.",
+  "sourceSha256": {
+    "src-tauri/src/main.rs": "0953e424a7998589ed9716b96ce96ab716a5769462d2cfdbbda3849845b5f86f",
+    "src-tauri/src/artifact-frame-proof.js": "4b327501fbf3dd3f5fad5c44ebfc7052838b6e2414ef178a11e296f84fde486d",
+    "src-tauri/src/artifact-proof.js": "1e3c83db5dcf1bd9395bfaa328bd0d99feccea84c88f222fb3a964a94a6b034a",
+    "scripts/tauri-packaged-smoke.py": "2344a13f54aa34690fd8229578ff283018fed79972bf3ccf3698debdc5336fd5",
+    "scripts/tauri-packaged-smoke.test.py": "3d89c2ef835fd2bdf89487c99cd91fd1deed092631a41d16e90cae82120eab2c",
+    ".github/workflows/tauri-packaged-platforms.yml": "bfb5ac7a02181d645b5d796800da021dc74a70ba7218209a35557011785eeb4f",
+    ".github/workflows/tauri-native-linux.yml": "c80dc54bf59b1c7b7c8974e3c6ccaa1057b04184c3cf33577c3111fface6a6d7"
+  },
+  "checks": {
+    "pythonPolicyCases": 18,
+    "actualScriptVmCases": 6,
+    "nativeBinaryUnitCases": 3,
+    "workflowFilesAndShellSteps": "three files/41 steps",
+    "pythonInlineSyntax": "passed",
+    "nativeFormatting": "passed"
+  },
+  "windowsV2Failure": {
+    "run": "https://github.com/krazyjakee/21x/actions/runs/38333559978",
+    "report": "installed-artifact-f15cd46-windows-x64-v2-failed-gui.json",
+    "directAttempted": true,
+    "directUnrecognizedFailure": true,
+    "directAccepted": false,
+    "directDeadlineReached": false
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

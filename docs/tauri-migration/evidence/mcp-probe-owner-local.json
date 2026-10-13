@@ -1,0 +1,96 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Portable MCP probe lifetime using an actual owning Node child, authenticated loopback HTTP, controlled abort-ignoring transports and native-close fixtures. No real MCP catalog/provider, installed shell process tree or production Tauri binding claim.",
+  "sourceFilesSha256": {
+    "src/main/agent-manager/mcp-probe-service.ts": "c0f263496da4d40961c3d0da8ec83de4a2ae4d4c0a995543f9eeb6c32a5d4acb",
+    "src/main/agent-manager/mcp-server-test.ts": "7c1278232ee0f7cf922d689557c8687d0c86fe6e053dc1b9adf16f5fde835eb1",
+    "src/main/agent-manager/mcp-probe-service.test.ts": "25806960cd2b14cecdbcc9d6e4987a5f2f133f0db90a990d61d0597b4f3caf17",
+    "src/main/ipc/mcp.ts": "ec084f9fe8be588029c1a2f6af49869eb87071fb579cb69c356b4f8459afaa44",
+    "src/main/ipc/mcp-lifetime.test.ts": "2cfa62097fb917d2a950edc38ecc5227198c096c0ff7f2fd25b6470720d005f0",
+    "src/main/index.ts": "92fdc78e598fcd319d49a8e210efc7464007a0f68d42e546155e8cd0dbb3b8aa",
+    "vitest.tauri.config.ts": "59955de525d4c389991c7bd61ded3da6a45e7629bb8460bdc00f483b6fc80a82"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-mcp-target-service.json",
+      "sha256": "9db264b998866474baa8020b0b07570677ff64193d5157b4ff391548a543f3e6",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "21799c7190cf8fb12dd553b1735ab577c25f273c3b3ebb04bd478b85aa8204b8",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-mcp-final-service.json",
+      "sha256": "2ca90e64e62509d6d5123256472924b3373d37e238b2c4721243f0b5bda330da",
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "ac5c7ea00e598df98c83d81df63a5fbf01681c5bfec6e5b814ad835d1e56d03b",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-mcp-target-legacy.json",
+      "sha256": "5ea23fe451820d805d24772a98d3a750fbdf2b7f729728a017a599ac2a6c853d",
+      "passed": 50,
+      "failed": 0,
+      "skipped": 0,
+      "files": 4,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "bbe82e524dbc06a133e9763594f682e3320787156ca4c211c602db397b4aa050",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-mcp-full-service.json",
+      "sha256": "ac153918944750e655c8749120e85657d0100fedee6cbf082d320b2c2d05110a",
+      "passed": 1558,
+      "failed": 0,
+      "skipped": 0,
+      "files": 108,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "ed02fd230351af399829d651b217ac8118325989043d3170a2ea6e5f1155b6c7",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-mcp-full-legacy.json",
+      "sha256": "663c056f2041cd2661161c38a5bbc8333c252b0e59631ffd9787c9cd0f1ebbb9",
+      "passed": 5384,
+      "failed": 0,
+      "skipped": 20,
+      "files": 401,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "8dbe4249b77aeac0b0d0671a39dd550d2c30288d0931923d9d5c2ac122898204",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "initialTypecheck": {
+    "commandExitCode": 2,
+    "accepted": false,
+    "logSha256": "f7dfc3aa5e01293b5ff487736fe7ba1fbf3ef580892889f99596ae2622604012",
+    "correction": "Replaced a rest/spread fetch wrapper with explicit input/init parameters to preserve the overloaded fetch type."
+  },
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "a84be279ebd3217dda4ec107e201a29e536bda62927243e2e65b18d1b1c9b53b"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=default --reporter=json --outputFile=/tmp/21x-mcp-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-mcp-full-legacy.json"
+  }
+}

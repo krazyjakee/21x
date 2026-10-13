@@ -3,6 +3,7 @@
   const result = { complete: false, phase: configuration.mode };
   window.__21X_ARTIFACT_PROOF__ = result;
   const native = window.__TAURI__;
+  const nativeDenial = __21X_DENIAL_MATCHER__;
   result.transportAvailable = typeof native?.core?.invoke === 'function' && typeof native?.event?.listen === 'function';
   const commands = {
     desktop: () => native.core.invoke('desktop_invoke', { operation: 'db:getTasks', payload: {}, engineEpoch: configuration.engineEpoch }),
@@ -22,7 +23,7 @@
       // Accept only recognized native authorization errors, never absence,
       // malformed arguments, unknown commands, generic failure or timeout.
       if (error?.code === 'PROOF_DEADLINE') result.deadlineReached = true;
-      return error?.code === 'UNAUTHORIZED' || typeof error === 'string' && /not allowed|not authorized|denied/i.test(error);
+      return nativeDenial(error, command);
     } finally { clearTimeout(timeout); }
   }
   if (configuration.mode === 'main') {
@@ -53,8 +54,13 @@
         const authorized = result.transportAvailable ? await denied(event.data.command) : false;
         event.source.postMessage({ kind: 'artifact-result', command: event.data.command, denied: authorized }, '*');
       } else if (event.data.kind === 'artifact-complete') {
-        const names = ['parentAccessDenied', 'parentGlobalDenied', 'frameBridgeAbsent',
-          'relayDesktopDenied', 'relayStatusDenied', 'relayListenDenied'];
+        const names = ['parentAccessDenied', 'parentGlobalDenied', 'frameBridgeAbsent', 'opaqueOrigin', 'crossOriginProtocolDocument',
+          'relayDesktopDenied', 'relayStatusDenied', 'relayListenDenied',
+          'directAttempted', 'directDesktopDenied', 'directStatusDenied', 'directListenDenied',
+          'directDeadlineReached', 'directUnrecognizedFailure', 'directAccepted',
+          'internalInvokeAvailable', 'internalIpcAvailable', 'directTypeError', 'directStringError', 'directSecurityError',
+          'directInvalidOrigin', 'directMissingOrigin',
+          'directDesktopOriginRejected', 'directStatusOriginRejected', 'directListenOriginRejected'];
         if (Object.keys(event.data).length !== names.length + 1 || !names.every(key => typeof event.data[key] === 'boolean')) return;
         for (const key of names) result[key] = event.data[key];
         result.frameLoaded = true;
@@ -65,7 +71,7 @@
     };
     window.addEventListener('message', receive);
     const start = setInterval(() => {
-      frame?.contentWindow?.postMessage({ kind: 'artifact-start' }, '*');
+      frame?.contentWindow?.postMessage({ kind: 'artifact-start', engineEpoch: configuration.engineEpoch }, '*');
     }, 50);
     setTimeout(() => { clearInterval(start); window.removeEventListener('message', receive); }, 8000);
   }

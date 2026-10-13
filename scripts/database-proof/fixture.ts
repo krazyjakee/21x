@@ -6,6 +6,7 @@ import { DatabaseManager, type DatabaseRuntimeOptions } from '../../src/main/dat
 import { seedTaskManagementMcpServer, AmbiguousManagedMcpServerError } from '../../src/main/database/seed-core'
 import { configureSecretStorage } from '../../src/main/platform/secret-storage'
 import { AuthenticatedSecretStorage } from '../../src/main/platform/authenticated-secret-storage'
+import { CredentialSettingFormatError } from '../../src/main/database/serializers'
 
 /** Runs in a real standalone Node process, with no Electron shim or production profile. */
 export function runDatabaseFixture(directory: string) {
@@ -90,8 +91,19 @@ export function runDatabaseFixture(directory: string) {
     assert.equal(db.getSetting('synthetic_api_key'), '\uFEFFfixture-secret-你好')
     assert.equal(db.getAllSettings().synthetic_api_key, '\uFEFFfixture-secret-你好')
     const rawKey = (db.db.prepare('SELECT value FROM settings WHERE key = ?').get('synthetic_api_key') as { value: string }).value
-    assert.ok(rawKey.startsWith('safeStorage:v1:')) // Preserve existing settings storage semantics.
+    const prefix = '21x-credential:21x.aes256gcm.v1:'
+    assert.ok(rawKey.startsWith(prefix)) // This fixture selected the authenticated Node format.
     assert.equal(rawKey.includes('fixture-secret'), false)
+    const ciphertext = Buffer.from(rawKey.slice(prefix.length), 'base64')
+    assert.equal(storage.decryptString(ciphertext), '\uFEFFfixture-secret-你好')
+    const tampered = Buffer.from(ciphertext)
+    tampered[tampered.length - 1] ^= 1
+    const setRaw = db.db.prepare('UPDATE settings SET value = ? WHERE key = ?')
+    for (const invalid of [prefix + tampered.toString('base64'), 'safeStorage:v1:' + ciphertext.toString('base64')]) {
+      setRaw.run(invalid, 'synthetic_api_key')
+      assert.throws(() => db.getSetting('synthetic_api_key'), CredentialSettingFormatError)
+    }
+    setRaw.run(rawKey, 'synthetic_api_key')
     const originalManaged = db.getMcpServer(managed.id)!
     assert.throws(() => seedTaskManagementMcpServer(db.db, { ...options.managedTaskMcp, command: originalCommand }), AmbiguousManagedMcpServerError)
     assert.deepEqual(db.getMcpServer(managed.id), originalManaged)
@@ -124,7 +136,7 @@ export function runDatabaseFixture(directory: string) {
       passed: true,
       runtime: 'standalone-node',
       schemaVersion: 32,
-      proofs: ['task-crud', 'durable-transcript-snapshot-delta-reopen', 'project-captain-seeds', 'explicit-paths', 'encrypted-settings-provider', 'managed-mcp-idempotency-ownership']
+      proofs: ['task-crud', 'durable-transcript-snapshot-delta-reopen', 'project-captain-seeds', 'explicit-paths', 'encrypted-settings-provider', 'authenticated-settings-envelope-tamper', 'managed-mcp-idempotency-ownership']
     }
   } finally {
     manager?.close()

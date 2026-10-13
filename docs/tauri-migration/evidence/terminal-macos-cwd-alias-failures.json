@@ -1,0 +1,67 @@
+{
+  "evidenceVersion": 1,
+  "sourceCommit": "4605298166f10a44fd35cc5cae1e3a6b0d8d978a",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38382183022",
+  "scope": "Completed Mac job failures only; other target status was pending at capture. Both native fixture tests passed startup/resize and failed the cwd alias string comparison. These reports remain failed; corrected fixture canonicalizes the OS temp path before creation/expectation.",
+  "targets": [
+    {
+      "target": "macos-arm64",
+      "conclusion": "failure",
+      "artifactId": 11804392143,
+      "artifactDigest": "sha256:866648c86c11dc6b264e4c2189e3cec5d470f62abcaf5a529e6123d9001b8e3a",
+      "portablePassed": 1462,
+      "portableFailed": 1,
+      "portableSkipped": 0,
+      "portableReportSha256": "c31f4822af009219501ed81976763bfc6a506eecb7615c40f192b9dd70ac2ff4",
+      "failedAssertions": [
+        {
+          "file": "/Users/runner/work/21x/21x/test/tauri-terminal-native.test.ts",
+          "assertion": {
+            "ancestorTitles": [
+              "actual staged standalone terminal owner"
+            ],
+            "fullName": "actual staged standalone terminal owner spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+            "status": "failed",
+            "title": "spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+            "duration": 5079.8274169999995,
+            "failureMessages": [
+              "AssertionError: expected 'size\\r\\ncwd\\r\\nFIXTURE_SIZE=120x40\\r\\\u2026' to contain 'FIXTURE_CWD=/var/folders/s6/5hzmn6lx4\u2026'\n    at __vite_ssr_import_0__.vi.waitFor.timeout (/Users/runner/work/21x/21x/test/tauri-terminal-native.test.ts:50:24)\n    at Timeout.checkCallback (file:///Users/runner/work/21x/21x/node_modules/.pnpm/vitest@4.0.18_@opentelemetry+api@1.9.0_@types+node@25.2.3_happy-dom@20.5.0_jiti@2.6.1_lightni_aa2a7lq7sag3awhocjbwlaeanu/node_modules/vitest/dist/chunks/vi.2VT5v0um.js:3634:20)\n    at listOnTimeout (node:internal/timers:585:17)\n    at processTimers (node:internal/timers:521:7)"
+            ],
+            "meta": {}
+          }
+        }
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "conclusion": "failure",
+      "artifactId": 11804680651,
+      "artifactDigest": "sha256:4e77c2e4d99d302b89a305eae2406dfe6f51b492dd97b4a47de15bba0e5982f6",
+      "portablePassed": 1462,
+      "portableFailed": 1,
+      "portableSkipped": 0,
+      "portableReportSha256": "59f0b96da403d6a911d1692e10e98938b9fc5b35ef387939f99c909163439f23",
+      "failedAssertions": [
+        {
+          "file": "/Users/runner/work/21x/21x/test/tauri-terminal-native.test.ts",
+          "assertion": {
+            "ancestorTitles": [
+              "actual staged standalone terminal owner"
+            ],
+            "fullName": "actual staged standalone terminal owner spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+            "status": "failed",
+            "title": "spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+            "duration": 5191.575577,
+            "failureMessages": [
+              "AssertionError: expected 'size\\r\\ncwd\\r\\nFIXTURE_SIZE=120x40\\r\\\u2026' to contain 'FIXTURE_CWD=/var/folders/20/jp1_0n3n7\u2026'\n    at __vite_ssr_import_0__.vi.waitFor.timeout (/Users/runner/work/21x/21x/test/tauri-terminal-native.test.ts:50:24)\n    at Timeout.checkCallback (file:///Users/runner/work/21x/21x/node_modules/.pnpm/vitest@4.0.18_@opentelemetry+api@1.9.0_@types+node@25.2.3_happy-dom@20.5.0_jiti@2.6.1_lightni_aa2a7lq7sag3awhocjbwlaeanu/node_modules/vitest/dist/chunks/vi.2VT5v0um.js:3634:20)\n    at listOnTimeout (node:internal/timers:585:17)\n    at processTimers (node:internal/timers:521:7)"
+            ],
+            "meta": {}
+          }
+        }
+      ]
+    }
+  ],
+  "accepted": false,
+  "productionReady": false,
+  "electronRetirementReady": false
+}

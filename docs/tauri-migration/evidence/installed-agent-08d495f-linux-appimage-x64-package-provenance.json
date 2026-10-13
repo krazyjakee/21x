@@ -1,0 +1,8 @@
+{
+  "packageKind": "appimage",
+  "proofMode": "synthetic-agent",
+  "packageSha256": "556ca75de87182e122b59393595d420d1acc6d7aab304732415d4a84815f5ca9",
+  "artifact": "21x Tauri Feasibility_0.1.0_amd64.AppImage",
+  "packagedExecutable": "/home/runner/work/_temp/21x-packaged-43cnd7l2/squashfs-root/usr/bin/twentyonex-tauri-feasibility",
+  "smokeCommandSucceeded": true
+}

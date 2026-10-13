@@ -1,0 +1,113 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Actual portable SQLite heartbeat lifetime with fixture agent/preflight operations. Detached polling/forwarding and cleanup ownership, failed-close retry, cancelled timers and late-write suppression; all 88 existing heartbeat/preflight cases with stubbed gh. Native notification/event adapter uses mocks, not installed UI.",
+  "sourceFilesSha256": {
+    "src/main/heartbeat-scheduler-core.ts": "6123b1f2bf8ba1c0d32f8f8a3c03472e6e9abcd5e1723b61b9b9ed37a35e15e9",
+    "src/main/heartbeat-scheduler.ts": "4adf118908f6a97fa2fec22c3c8fc99e9c3dae656b506b4176f2e2c1fce04742",
+    "src/main/heartbeat-scheduler.test.ts": "0d6ff6d915f44830377d50fc5aacb13e2b09de1eb77d9f1bb04862aa5ad953f9",
+    "src/main/heartbeat-scheduler-lifetime.test.ts": "a747fab50abe022428e6ca34b36f249c4bb689fc15809a55a8a11b000ad375a6",
+    "src/main/heartbeat-scheduler-host.test.ts": "da55a4491367b2c2d03f6281ed3352f74437b1e6156bdc12ccbf5442b54095f7",
+    "src/main/index.ts": "17f0e169f159b836a1f78a0e6725a9098d67221fae3eab4ff1f6d75777dc80ae",
+    "src/shared/desktop-event-forwarding.test.ts": "bcca255d002164283d3fd875144df5409d85eeed21b20eb6edd88d4068ef2945",
+    "vitest.tauri.config.ts": "9b7afb399d9004b6299188a526ad893caeb42cae21fc1a2bc35675029425ffcb"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-heartbeat-initial-service.json",
+      "sha256": "0db651c8dd80384568dad85978ebb07a9826795ab7d4681b6c42dce7d23332a5",
+      "passed": 88,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "bc96fd6a331c35818692866f05cff4d1d3ad9f72cc17fd0b72790c45c4f4122b",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-heartbeat-lifetime-final-service.json",
+      "sha256": "1b0b048e6d8312f332ac3d3896c8f7901932a4a6d7504b6c18ef9278d76fa8e2",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true
+    },
+    {
+      "report": "/tmp/21x-heartbeat-full-service.json",
+      "sha256": "759ebb49da8a02f42aa7bd9c65092ee6fdd1f5c3f863c414dc2efb3d6eb7280b",
+      "passed": 1423,
+      "failed": 0,
+      "skipped": 0,
+      "files": 93,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "a398f645bbfbdfdee4e19ce8a28d7167e11816f3eda2d6c72825a012d1bf9582",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-heartbeat-full-legacy.json",
+      "sha256": "76cb13c5577489465931a31194d9ea09abb35eb738f611c39c7125d220064901",
+      "passed": 5321,
+      "failed": 1,
+      "skipped": 20,
+      "files": 387,
+      "commandExitCode": 1,
+      "accepted": false,
+      "capturedLogSha256": "812ac32ca4244adade09df4f940f7fc7f29ac516f5454c7f0fda93ae799155b8",
+      "unhandledErrorsReported": false,
+      "note": "One stale assertion expected eleven dynamic forwarding sites; heartbeat now dispatches four literal names, leaving ten dynamic sites. Corrected in the final application run."
+    },
+    {
+      "report": "/tmp/21x-heartbeat-final-legacy.json",
+      "sha256": "a475a205c45c0d28ab2dd7354c31e7d41d9dc60f43e6183e71d6340b1627c786",
+      "passed": 5322,
+      "failed": 0,
+      "skipped": 20,
+      "files": 387,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "cde61c3ff11e0cc5424e370b812da18e04070cf460eef93713b8a10fa487c516",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-heartbeat-path-service.json",
+      "sha256": "6db6f1034258d3902e1a4ee631166a82dfebf428fdff5115f375ccbc518e1742",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 86,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "Filtered final path/host controls; skipped tests are outside the filter. Uses owned OS temp fixture cleanup and verifies native show callback."
+    },
+    {
+      "report": "/tmp/21x-heartbeat-path-host-legacy.json",
+      "sha256": "3bc05c38c0e3d1b85f6793abce96581b381b34c08e2ca7a17e2ef7134e923773",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 86,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "Filtered final path/host controls; skipped tests are outside the filter. Uses owned OS temp fixture cleanup and verifies native show callback."
+    }
+  ],
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-heartbeat-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-heartbeat-final-legacy.json"
+  },
+  "fullSuitesBeforeFinalTestOnlyTempFixtureAndShowAssertion": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "8e5981c29d51110979f9989695dacd777a288c78f506128f4d26e5e784fe3b6d"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "forcedTypecheckPassed": true
+}

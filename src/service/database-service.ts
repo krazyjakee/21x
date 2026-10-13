@@ -2,6 +2,8 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { fstatSync, lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
+import { Socket } from 'node:net'
+import { isatty } from 'node:tty'
 import { acquireProfileLock, PROFILE_LOCK_FILE, type ProfileLock } from '../main/platform/profile-lock'
 import { configureSecretStorage } from '../main/platform/secret-storage'
 import { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
@@ -17,9 +19,21 @@ import {
   SERVICE_PROTOCOL_VERSION
 } from '../shared/service-protocol'
 import { DATABASE_COMMAND_CODECS, DATABASE_EVENT_CODECS } from '../shared/database-desktop-codecs'
+import { ConfigurationBackend, CONFIGURATION_BOUND_OPERATIONS } from './configuration-backend'
+import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_EVENT_CODECS } from '../shared/configuration-desktop-codecs'
 
 const MARKER = '.21x-synthetic-database.json'
 const fail = (): never => { throw new ServiceProtocolError('INVALID_ARGUMENTS') }
+
+function startupPrerequisite<T>(stage: 'runtime' | 'stdio' | 'profile' | 'resources', check: () => T): T {
+  try { return check() }
+  catch {
+    // Fixed stages identify unavailable startup prerequisites without logging
+    // profile paths, request contents or arbitrary dependency exceptions.
+    process.stderr.write(`[database-service] startup ${stage} unavailable\n`)
+    return fail()
+  }
+}
 
 function canonicalSyntheticRoot(value: string | undefined): string {
   if (!value || !isAbsolute(value)) return fail()
@@ -48,20 +62,37 @@ function marker(profileRoot: string): boolean {
 
 /** Actual private NDJSON service, gated to disposable synthetic profiles. */
 export function startDatabaseStdio(): void {
-  if (process.versions.electron || process.env.TWENTYONEX_DATABASE_MODE !== 'synthetic-only') return fail()
-  if (![0, 1].every(fd => { const file = fstatSync(fd); return file.isFIFO() || file.isSocket() })) return fail()
-  const agentMode = process.env.TWENTYONEX_AGENT_MODE === 'deterministic-fixture'
-  if (process.env.TWENTYONEX_AGENT_MODE !== undefined && !agentMode) return fail()
-  const profileRoot = canonicalSyntheticRoot(process.env.TWENTYONEX_PROFILE_ROOT)
-  const configuredResource = process.env.TWENTYONEX_RESOURCE_ROOT
-  if (!configuredResource || !isAbsolute(configuredResource)) return fail()
-  const resourceRoot = realpathSync.native(configuredResource)
+  const agentMode = startupPrerequisite('runtime', () => {
+    if (process.versions.electron || process.env.TWENTYONEX_DATABASE_MODE !== 'synthetic-only') return fail()
+    const enabled = process.env.TWENTYONEX_AGENT_MODE === 'deterministic-fixture'
+    if (process.env.TWENTYONEX_AGENT_MODE !== undefined && !enabled) return fail()
+    return enabled
+  })
+  startupPrerequisite('stdio', () => {
+    if (process.platform === 'win32') {
+      // Node wraps inherited PIPE/TCP stdio as net.Socket. Its Windows child
+      // launcher can supply sockets that fstat cannot classify as FIFO/socket.
+      // File streams and terminal handles still fail before protocol startup.
+      if (!(process.stdin instanceof Socket) || !(process.stdout instanceof Socket) ||
+          isatty(0) || isatty(1) || process.stdin.fd !== 0 || process.stdout.fd !== 1 ||
+          !process.stdin.readable || !process.stdout.writable || process.stdin.destroyed || process.stdout.destroyed) return fail()
+      return
+    }
+    if (![0, 1].every(fd => { const file = fstatSync(fd); return file.isFIFO() || file.isSocket() })) return fail()
+  })
+  const profileRoot = startupPrerequisite('profile', () => canonicalSyntheticRoot(process.env.TWENTYONEX_PROFILE_ROOT))
+  const resourceRoot = startupPrerequisite('resources', () => {
+    const configured = process.env.TWENTYONEX_RESOURCE_ROOT
+    if (!configured || !isAbsolute(configured)) return fail()
+    return realpathSync.native(configured)
+  })
   const engineEpoch = randomUUID()
   const bootstrapResult = { protocolVersion: SERVICE_PROTOCOL_VERSION, engineEpoch, nodeVersion: process.version }
   const caller = { principal: 'trusted-desktop-main' as const, engineEpoch }
   let lock: ProfileLock | undefined
   let storage: AuthenticatedSecretStorage | undefined
   let backend: DatabaseBackend | undefined
+  let configurationBackend: ConfigurationBackend | undefined
   let agentManager: AgentManager | undefined
   let agentBackend: AgentBackend | undefined
   let initialized = false
@@ -73,6 +104,7 @@ export function startDatabaseStdio(): void {
     if (cleaned) return
     cleaned = true
     closing = true
+    peer.disconnect()
     let error = failed
     const forced = setTimeout(() => process.exit(1), 3000)
     forced.unref()
@@ -80,6 +112,7 @@ export function startDatabaseStdio(): void {
     try {
       await agentManager?.stopAllSessions()
       await agentManager?.stopServer()
+      await peer.waitForHandlers()
     } catch {
       // Startup/teardown ownership is incomplete. Keep SQLite/provider/profile
       // ownership alive until this process exits; no early writer handoff.
@@ -90,6 +123,7 @@ export function startDatabaseStdio(): void {
     agentBackend?.dispose()
     agentBackend = undefined
     agentManager = undefined
+    configurationBackend = undefined
     let databaseClosed = true
     try { backend?.close() } catch { error = true; databaseClosed = !backend?.database.db.open }
     if (databaseClosed) backend = undefined
@@ -111,7 +145,18 @@ export function startDatabaseStdio(): void {
     process.removeListener('SIGTERM', onSignal)
     process.removeListener('SIGINT', onSignal)
   }
-  const onSignal = (): void => { peer.disconnect(); void cleanup() }
+  const onSignal = (): void => { void cleanup() }
+  const cleanupAfterDrain = (failed = false): void => {
+    // An aborted handler may never settle. Bound graceful draining before
+    // terminal cleanup; failed cleanup retains writer ownership until exit.
+    const deadline = setTimeout(() => { void cleanup(true) }, 2000)
+    deadline.unref()
+    setImmediate(() => {
+      void peer.drain().then(() => { clearTimeout(deadline); void cleanup(failed) }, () => {
+        clearTimeout(deadline); void cleanup(true)
+      })
+    })
+  }
   const operations: Record<string, OperationSchema> = {
     'engine.ping': { validatePayload: value => isRecord(value) && hasExactKeys(value, []), validateResult: isBootstrapResult, handle: () => bootstrapResult },
     'engine.initialize': {
@@ -135,7 +180,21 @@ export function startDatabaseStdio(): void {
             // WebView label/origin/frame before forwarding any renderer request.
             isTrustedDesktop: value => value.principal === 'trusted-desktop-main' && value.engineEpoch === engineEpoch,
             canAccessProject: () => true, canCreateProject: () => true, canEditSettings: () => true,
+            assertOwnerAvailable: () => { if (closing) throw new ServiceProtocolError('DISCONNECTED') },
             canDeleteTask: id => !agentManager?.hasTaskStartOwnership(id),
+            emit: (operation, data) => peer.emit(operation, data, ++sequence)
+          })
+          const database = backend.database
+          configurationBackend = new ConfigurationBackend({ database, engineEpoch,
+            assertAvailable: () => {
+              if (closing || !lock || !database.db.open) throw new ServiceProtocolError('DISCONNECTED')
+              lock.assertHeld()
+            },
+            isTrustedDesktop: value => value.principal === 'trusted-desktop-main' && value.engineEpoch === engineEpoch,
+            // These permissions apply only to the disposable marked profile.
+            // Content codecs exclude credentials and lifecycle configuration.
+            canAccessProject: () => true, canAccessGlobalSkills: () => true,
+            canChangeSkillScope: () => true, canReorderProjects: () => true,
             emit: (operation, data) => peer.emit(operation, data, ++sequence)
           })
           if (agentMode) {
@@ -152,7 +211,7 @@ export function startDatabaseStdio(): void {
             agentManager = new AgentManager(database, host)
             agentBackend = new AgentBackend({ fixtureMode: 'synthetic-only', database, manager: agentManager,
               fixtureAdapter: adapter, fixtureAgentId: fixtureAgent.id, fixtureTaskId: fixtureTask.id, engineEpoch,
-              assertAvailable: () => { lock?.assertHeld(); if (!lock || !database.db.open) throw new ServiceProtocolError('DISCONNECTED') },
+              assertAvailable: () => { lock?.assertHeld(); if (closing || !lock || !database.db.open) throw new ServiceProtocolError('DISCONNECTED') },
               isTrustedDesktop: value => value.principal === 'trusted-desktop-main' && value.engineEpoch === engineEpoch,
               canAccessProject: projectId => projectId === fixtureTask.project_id,
               emit: (operation, data) => { if (!closing) peer.emit(operation, data, ++sequence) },
@@ -164,7 +223,7 @@ export function startDatabaseStdio(): void {
           return bootstrapResult
         } catch {
           closing = true
-          setImmediate(() => { void peer.drain().then(() => { void cleanup(true) }, () => { void cleanup(true) }) })
+          cleanupAfterDrain(true)
           throw new ServiceProtocolError('INTERNAL_ERROR')
         }
       }
@@ -176,7 +235,7 @@ export function startDatabaseStdio(): void {
         if (!initialized || closing) return fail()
         closing = true
         // Wait until the handler's response and all preceding events drain.
-        setImmediate(() => { void peer.drain().then(() => { void cleanup() }, () => { void cleanup(true) }) })
+        cleanupAfterDrain()
         return { stopped: true }
       }
     },
@@ -207,7 +266,18 @@ export function startDatabaseStdio(): void {
       return agentBackend.registry.invoke(operation, payload, caller, signal)
     }
   }
-  const eventCodecs = { ...DATABASE_EVENT_CODECS, ...(agentMode ? AGENT_EVENT_CODECS : {}) }
+  for (const operation of CONFIGURATION_BOUND_OPERATIONS) {
+    const codec = CONFIGURATION_COMMAND_CODECS[operation]
+    operations[operation] = {
+      validatePayload: value => { try { return isJsonValue(value) && codec.validateArguments(codec.decodeArguments(value)) } catch { return false } },
+      validateResult: codec.validateWireResult,
+      handle: (payload, signal) => {
+        if (!configurationBackend || !initialized || closing) return fail()
+        return configurationBackend.registry.invoke(operation, payload, caller, signal)
+      }
+    }
+  }
+  const eventCodecs = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...(agentMode ? AGENT_EVENT_CODECS : {}) }
   const peer = new ServicePeer({
     role: 'service', engineEpoch, operations,
     eventSchemas: Object.fromEntries(Object.entries(eventCodecs).map(([operation, codec]) => [operation, codec.validatePayload])),
@@ -215,7 +285,7 @@ export function startDatabaseStdio(): void {
       if (process.stdout.destroyed) { reject(new ServiceProtocolError('DISCONNECTED')); return }
       process.stdout.write(bytes, error => error ? reject(new ServiceProtocolError('DISCONNECTED')) : resolve())
     }),
-    onDisconnect: () => { void cleanup(!closing) }
+    onDisconnect: () => { void cleanup(true) }
   })
   process.stdin.on('data', (data: Buffer) => peer.receive(data))
   process.stdin.on('end', () => peer.end())

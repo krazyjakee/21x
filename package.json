@@ -30,11 +30,13 @@
     "tauri:prepare": "node scripts/tauri-prepare.mjs",
     "tauri:prepare:native": "node scripts/tauri-prepare.mjs --native",
     "tauri:prepare:database": "node scripts/tauri-stage-database.mjs",
+    "tauri:prepare:connectors": "node scripts/tauri-stage-connectors.mjs",
     "tauri:frontend:dev": "vite --config vite.tauri.config.ts",
     "tauri:frontend:build": "vite build --config vite.tauri.config.ts",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "test:tauri:spike": "node --test --test-concurrency=1 src/service/feasibility.test.mjs scripts/tauri-prepare.test.mjs",
+    "test:tauri:spike": "node --test --test-concurrency=1 src/service/feasibility.test.mjs scripts/tauri-prepare.test.mjs scripts/tauri-stage-connectors.test.mjs",
+    "test:tauri": "node scripts/tauri-test.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {

@@ -25,5 +25,6 @@ describe('portable database standalone Node proof', () => {
     expect(report.portableModuleCount).toBeGreaterThan(10)
     expect(report.proofs).toContain('durable-transcript-snapshot-delta-reopen')
     expect(report.proofs).toContain('managed-mcp-idempotency-ownership')
+    expect(report.proofs).toContain('authenticated-settings-envelope-tamper')
   }, 35_000)
 })

@@ -1,0 +1,35 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Existing five-backend protocol adapters, Claude history and permission regressions run under pinned standalone Node. SDK/process interactions are mocked; this does not prove installed real providers, authenticated model sessions, provider shutdown trees or Tauri native bindings.",
+  "sourceFilesSha256": {
+    "vitest.tauri.config.ts": "43067e3cf920b86be2fc34c8da3765f071f3b3ce219259dcce79f544d826dd9d",
+    "src/main/adapters/codex-app-server-adapter.test.ts": "a038683ce5a965c353da780bf55f30e0a6b9fbbbeae2649a27c67b471e21cbd8",
+    "src/main/adapters/opencode-adapter.test.ts": "307a4136e0984a4b04fd7ca5c800e598b015aa32d863c0d1c3289d0d84ba2eb6",
+    "src/main/adapters/pi-adapter.test.ts": "ff7fa9b9ac39bf24859777acf87c45496e004ffa99aba5732b023d747c3a2447",
+    "src/main/adapters/permission-mode.test.ts": "be42933e4cf29951c26e56b1b2e78d9a5bf1118fdf05991c690e59133154b7ae",
+    "src/main/adapters/claude-code-history.test.ts": "e37eb726c5ed447f26169c1283ce2ae3360fd7aeba416222399ac21ed32e08c0",
+    "src/main/adapters/acp-adapter.test.ts": "65b0b550c813fffa41880579401c97484b4b7536e20701b7e56892aae45092e1",
+    "src/main/adapters/claude-code-adapter.test.ts": "a6ce11f75a30539db85e61c88c9f2c2c71563472a12ff8fcf2e2127795c70827"
+  },
+  "reports": [
+    {
+      "command": "pnpm test:tauri -- src/main/adapters",
+      "report": "/tmp/21x-provider-adapters-standalone.json",
+      "sha256": "c158c60f02a24810351ce2179c4f6c95c9a4b939ce37e8bbda48bba3e0b051d0",
+      "passed": 299,
+      "skipped": 0,
+      "files": 7
+    },
+    {
+      "command": "pnpm test:tauri -- --service-proofs",
+      "report": "/tmp/21x-provider-adapters-full-service.json",
+      "sha256": "9489d0a580ac4debcd1b5dc6340cccd74891d2d3f81fafef867c1a7a2bb8f44f",
+      "passed": 1027,
+      "skipped": 0,
+      "files": 73
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

@@ -3,10 +3,134 @@ import argparse
 import hashlib
 import json
 import os
+import platform
+import re
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+
+PROOF_MODES = ("feasibility", "synthetic-desktop", "synthetic-agent", "artifact-authorization-proof")
+DESKTOP_RECEIPTS = (
+    "taskCreated", "taskEventObserved", "taskUpdated", "updateEventObserved",
+    "projectCreated", "missingResultPreserved", "settingPersisted",
+    "transcriptSnapshotRead", "transcriptDeltaRead", "rendererReloaded",
+    "rehydrated", "retiredOperationDenied", "staleEpochDenied",
+)
+AGENT_RECEIPTS = (
+    "agentStarted", "approvalRequested", "staleApprovalDenied", "approvalAccepted",
+    "agentCompleted", "agentStatusEventObserved", "agentTranscriptRehydrated",
+)
+
+
+def verify_artifact_authority(authority):
+    assert authority["passed"] is True and authority["boundary"] == "separate-webview"
+    assert authority["sameMainIframeIsolationProven"] is False
+    assert authority["policyVersion"] == 3
+    assert authority["frameNativeAttemptMethod"] == "opaque-rejection-and-valid-origin-frame-acl"
+    assert authority["authenticatedFrameOrigin"] == "separate-fixed-protocol"
+    assert authority["opaqueFrameAuthenticatedIpcProven"] is False
+    for key in ("artifactWindowClosed", "excludedDocumentReady", "mainReceivedTargetedServiceEvent", "defaultMainCspUnchanged"):
+        assert authority[key] is True
+    for section, keys in (
+        ("mainPositiveControls", ("transportAvailable", "desktopAccepted", "statusAccepted", "listenAccepted")),
+        ("sameLocalOriginExcludedWebview", ("transportAvailable", "desktopDenied", "statusDenied", "listenDenied")),
+        ("sandboxedArtifactFrame", ("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
+                                   "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
+        ("authenticatedCrossOriginFrame", ("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
+                                          "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
+    ):
+        assert all(authority[section][key] is True for key in keys)
+    opaque = authority["sandboxedArtifactFrame"]
+    assert opaque["opaqueOrigin"] is True and opaque["crossOriginProtocolDocument"] is False
+    origin_keys = ("directDesktopOriginRejected", "directStatusOriginRejected", "directListenOriginRejected")
+    if all(opaque[key] is True for key in origin_keys):
+        assert opaque["frameBridgeAbsent"] is False and opaque["directAttempted"] is True
+        assert opaque["directUnrecognizedFailure"] is True
+        assert opaque["directInvalidOrigin"] is True and opaque["directStringError"] is True
+        assert all(opaque[key] is False for key in ("directAccepted", "directDeadlineReached", "directTypeError",
+                   "directSecurityError", "directMissingOrigin", "directDesktopDenied", "directStatusDenied", "directListenDenied"))
+    else:
+        verify_frame_acl(opaque)
+    verify_frame_acl(authority["authenticatedCrossOriginFrame"])
+    authenticated = authority["authenticatedCrossOriginFrame"]
+    assert type(authenticated["opaqueOrigin"]) is bool
+    assert authenticated["crossOriginProtocolDocument"] is True
+    assert authenticated["frameBridgeAbsent"] is True or authenticated["opaqueOrigin"] is False
+
+
+def verify_frame_acl(frame):
+    assert all(frame[key] is False for key in ("directDeadlineReached", "directUnrecognizedFailure", "directAccepted"))
+    assert all(frame[key] is False for key in ("directDesktopOriginRejected", "directStatusOriginRejected", "directListenOriginRejected",
+                                              "directInvalidOrigin", "directMissingOrigin"))
+    if frame["frameBridgeAbsent"] is True:
+        assert frame["directAttempted"] is False
+        assert all(frame[key] is False for key in ("directDesktopDenied", "directStatusDenied", "directListenDenied"))
+    else:
+        assert frame["frameBridgeAbsent"] is False
+        assert all(frame[key] is True for key in ("directAttempted", "directDesktopDenied", "directStatusDenied", "directListenDenied"))
+
+
+def verify_report(report, *, mode, arch, installed, root):
+    """Fail closed if a successful package report exercised a different proof."""
+    assert mode in PROOF_MODES
+    assert report["stage"] == "complete" and report["passed"] is True
+    runtime = report["runtime"]
+    assert runtime["initialized"] is True and runtime["systemNodeHidden"] is True
+    assert runtime["developmentFrontend"] is False
+    assert runtime["hostArch"] == {"x64": "x86_64", "arm64": "aarch64"}[arch]
+    for key in ("webviewLoadFinished", "remoteNavigationDenied", "windowCloseRequested", "windowCloseObserved"):
+        assert report["gui"][key] is True
+    assert report["shutdown"]["engineUnavailable"] is True
+    assert report["shutdown"]["ownedChildExited"] is True
+    resources = physical_path(runtime["resourceRoot"])
+    assert resources.is_relative_to(installed)
+    profile = physical_path(runtime["profileRoot"])
+    assert runtime["syntheticDesktop"] is (mode != "feasibility")
+    assert runtime["syntheticAgent"] is (mode == "synthetic-agent")
+    if mode == "feasibility":
+        assert profile == root / "profile"
+        assert runtime["nativeProbe"]["ok"] is True
+        assert runtime["nativeProbe"]["arch"] == arch
+        assert report["gui"]["rendererPing"] is True
+        assert report["gui"]["restrictedOperationDenied"] is True
+    else:
+        assert profile.is_relative_to(root) and profile.name.startswith("21x-database-service-")
+        keys = DESKTOP_RECEIPTS + (AGENT_RECEIPTS if mode == "synthetic-agent" else ())
+        proof = runtime["syntheticDesktopProof"]
+        assert set(proof) == set(keys) and all(proof[key] is True for key in keys)
+        assert (resources / "service/database-stdio.mjs").is_file()
+        assert (resources / "service/database-engine.mjs").is_file()
+    if mode == "artifact-authorization-proof":
+        verify_artifact_authority(runtime["artifactAuthorizationProof"])
+    else:
+        assert "artifactAuthorizationProof" not in runtime
+    owned_node = verified_owned_node(runtime, installed)
+    for required in (owned_node, resources / "node/LICENSE", resources / "service/THIRD_PARTY_NOTICES.json",
+                     resources / "service/feasibility.mjs"):
+        assert required.is_file()
+    return owned_node.resolve()
+
+
+def verified_owned_node(runtime, installed):
+    resources = physical_path(runtime["resourceRoot"])
+    assert resources.is_relative_to(installed)
+    entry = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
+    assert entry.is_file() and not entry.is_symlink()
+    owned_node = entry.resolve()
+    assert owned_node.is_relative_to(resources) and owned_node.is_relative_to(installed)
+    return owned_node
+
+
+def observe_package(report, *, installed, arch, provenance, require_versions):
+    """Retain failed-run provenance without marking its native proof accepted."""
+    owned_node = verified_owned_node(report["runtime"], installed)
+    verification = {**provenance, "ownedNodeContained": True,
+                    "ownedRunningProcessesAfterExit": running_owned_node(owned_node)}
+    if require_versions:
+        verification["runtimeVersions"] = runtime_versions(owned_node, report["runtime"], arch)
+    report["verification"] = verification
+    return owned_node
 
 
 def run(command, *, cwd=None, env=None, timeout=180, log=None):
@@ -123,11 +247,41 @@ def running_owned_node(owned_node):
     raise RuntimeError("No owned process observation for this platform")
 
 
+def runtime_versions(owned_node, runtime, arch):
+    """Query only the verified packaged binary and native-selected WebView."""
+    env = {key: value for key, value in os.environ.items()
+           if key.upper() in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR")}
+    code = "JSON.stringify({nodeVersion:process.version,nodeAbi:process.versions.modules,platform:process.platform,arch:process.arch})"
+    node = json.loads(subprocess.check_output([str(owned_node), "-p", code],
+                                             env=env, text=True, timeout=15))
+    assert node["arch"] == arch and node["platform"] == sys.platform
+    assert isinstance(node["nodeVersion"], str) and re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", node["nodeVersion"])
+    assert isinstance(node["nodeAbi"], str) and node["nodeAbi"].isdecimal()
+    webview = runtime.get("webviewVersion")
+    assert isinstance(webview, str) and 0 < len(webview) <= 128
+    assert runtime.get("webviewDefaultRuntime") is True
+    os_version = {"system": platform.system(), "release": platform.release(), "version": platform.version()}
+    if sys.platform == "darwin":
+        os_version["macOS"] = platform.mac_ver()[0]
+    if sys.platform.startswith("linux"):
+        distribution = {}
+        for line in Path("/etc/os-release").read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key in ("ID", "VERSION_ID"):
+                distribution[key] = value.strip('"')
+        os_version["distribution"] = distribution
+        os_version["libc"] = list(platform.libc_ver())
+    return {"schemaVersion": 1, "os": os_version, "node": node,
+            "webview": {"version": webview, "source": "tauri::webview_version", "defaultRuntime": True}}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kind", choices=["dmg", "nsis", "appimage"], required=True)
     parser.add_argument("--arch", choices=["x64", "arm64"], required=True)
+    parser.add_argument("--mode", choices=PROOF_MODES, default="feasibility")
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--require-runtime-versions", action="store_true")
     args = parser.parse_args()
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
@@ -137,28 +291,34 @@ def main():
         report_path = evidence / "packaged-gui-smoke.json"
         env = {**os.environ, **extra,
                "TWENTYONEX_NATIVE_SMOKE_REPORT": str(report_path),
-               "TWENTYONEX_NATIVE_SMOKE_PROFILE": str(root / "profile")}
-        run(command, cwd=root, env=env, timeout=120, log=evidence / "packaged-gui-smoke.log")
+               "TWENTYONEX_NATIVE_SMOKE_PROFILE": str(root / "profile"),
+               "TMPDIR": str(root), "TMP": str(root), "TEMP": str(root)}
+        provenance = {"packageKind": args.kind, "proofMode": args.mode, "packageSha256": checksum,
+                      "artifact": artifact.name, "packagedExecutable": str(executable),
+                      "smokeCommandSucceeded": False}
+        provenance_path = evidence / "package-provenance.json"
+        provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
+        try:
+            run(command, cwd=root, env=env, timeout=120, log=evidence / "packaged-gui-smoke.log")
+        except (RuntimeError, subprocess.TimeoutExpired):
+            if report_path.is_file() and report_path.stat().st_size <= 1024 * 1024:
+                try:
+                    report = json.loads(report_path.read_text())
+                    observe_package(report, installed=installed, arch=args.arch, provenance=provenance,
+                                    require_versions=args.require_runtime_versions)
+                    report_path.write_text(json.dumps(report, indent=2) + "\n")
+                except (AssertionError, KeyError, ValueError, OSError, subprocess.SubprocessError):
+                    provenance["nativeMetadataUnavailable"] = True
+                    provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
+            raise
+        provenance["smokeCommandSucceeded"] = True
+        provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
         report = json.loads(report_path.read_text())
-        runtime = report["runtime"]
-        assert report["stage"] == "complete" and report["passed"] is True
-        assert runtime["initialized"] and runtime["systemNodeHidden"]
-        assert runtime["developmentFrontend"] is False
-        assert runtime["nativeProbe"]["ok"] is True
-        assert runtime["nativeProbe"]["arch"] == args.arch
-        resources = physical_path(runtime["resourceRoot"])
-        assert resources.is_relative_to(installed)
-        assert physical_path(runtime["profileRoot"]) == root / "profile"
-        owned_node = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
-        assert owned_node.is_file()
-        assert (resources / "node/LICENSE").is_file()
-        assert (resources / "service/THIRD_PARTY_NOTICES.json").is_file()
-        assert (resources / "service/feasibility.mjs").is_file()
-        assert report["shutdown"]["engineUnavailable"] is True
-        survivors = running_owned_node(owned_node.resolve())
-        report["verification"] = {"packageKind": args.kind, "packageSha256": checksum,
-                                  "artifact": artifact.name, "packagedExecutable": str(executable),
-                                  "packagedResources": True, "ownedRunningProcessesAfterExit": survivors}
+        owned_node = verify_report(report, mode=args.mode, arch=args.arch, installed=installed, root=root)
+        observe_package(report, installed=installed, arch=args.arch, provenance=provenance,
+                        require_versions=args.require_runtime_versions)
+        survivors = report["verification"]["ownedRunningProcessesAfterExit"]
+        report["verification"]["packagedResources"] = True
         report_path.write_text(json.dumps(report, indent=2) + "\n")
         assert not survivors, "Owned packaged Node survived native shutdown"
         print(json.dumps(report, indent=2))

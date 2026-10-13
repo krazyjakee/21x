@@ -1,0 +1,70 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Actual portable SQLite recurrence, project inheritance, atomic insert/advance rollback, renderer failure duplicate prevention, one timer/coalesced pass and final shutdown. Electron adapter checks recreated-window destination through guarded events. Fixture hosts; no installed production scheduler or real provider claim.",
+  "sourceFilesSha256": {
+    "src/main/recurrence-scheduler-core.ts": "356bc9b6066d30a2c2fc09c2d28e7452ff424224f9662996dc9663bbe03089be",
+    "src/main/recurrence-scheduler.ts": "51fcbd92c624f2187f26c78ba18f1e0c9de562d8e8575bb351a7b52170cee741",
+    "src/main/recurrence-scheduler.test.ts": "b4aabf184bf183452b36e76657a0bd6dd12a64f1755e37764cffb89e1a7941d2",
+    "src/main/recurrence-scheduler-lifetime.test.ts": "1554b8f07adf73f03a4e0bdab3659ffdff26991416e5290238e57a71e451528a",
+    "src/main/recurrence-scheduler-host.test.ts": "dda019cdf26c9d1287b0bed70ede8078ac775c4e8e3160eccc976aec50855e2a",
+    "src/main/index.ts": "a18fd9a261ed5c79c5ee530ef45ca7438bba5e39bdd8d329dbaf0a6fc2b017ff",
+    "vitest.tauri.config.ts": "b6f3be6ed0d6fcfb20b524e34ddf8f8a479c6b5ae9eed32e872a8a1ee1e5f077"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-recurrence-service.json",
+      "sha256": "00e059eb8234a37b46b9ebfc16e8a061e1bda2c6a5b26b90ae7e9d78601776df",
+      "passed": 30,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true
+    },
+    {
+      "report": "/tmp/21x-recurrence-legacy.json",
+      "sha256": "06d3c9947e4b2a78f5371e124da11f9926a69786fdf14a9ac808bdb54b686515",
+      "passed": 30,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true
+    },
+    {
+      "report": "/tmp/21x-recurrence-full-service.json",
+      "sha256": "194ae21aab416bb592005ee5d7dc173d6d9a90e93fa821a10cc69bfbd9fdd5cc",
+      "passed": 1311,
+      "skipped": 0,
+      "files": 89,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "84610e784419dc1446d9785249909e81d72469ce77702b893b3a38191d6c1421",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-recurrence-full-legacy.json",
+      "sha256": "90084288312c8411e55b6719d8b8f5782fbc464c763be9f5c3eb4e105fc62b64",
+      "passed": 5307,
+      "skipped": 20,
+      "files": 383,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "2850a1ca72cdf830cdb5aa5d7dcff2f016ce770d2d475abe33cc8f1fdab634c3",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-recurrence-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-recurrence-full-legacy.json"
+  },
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "956c99bda8c55a33c4f3cbe47d52dde7763d701bea7571ceeb6b540829a9934e"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

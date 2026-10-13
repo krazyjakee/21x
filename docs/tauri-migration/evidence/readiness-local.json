@@ -1,0 +1,80 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-12",
+  "baseCommit": "38f1a1b0250c7ed4fb1d6268b26074399e01ab12",
+  "workingTree": true,
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "fullVitest": {
+    "passed": 5101,
+    "skipped": 8,
+    "passedFiles": 352,
+    "skippedFiles": 4,
+    "workers": 1
+  },
+  "fullLint": {
+    "passed": true,
+    "errors": 0,
+    "warnings": 165
+  },
+  "typecheck": "passed",
+  "shippingDesktopAndMobileBuild": "passed_with_existing_warnings",
+  "foundationSubprocessTests": {
+    "passed": 26
+  },
+  "pythonEvidencePolicyTests": {
+    "passed": 11
+  },
+  "rustSyntheticAgentTests": {
+    "unitPassed": 16,
+    "stagedPassed": 5
+  },
+  "freshnessDefectsCorrected": [
+    "stale AST inventory source coordinates",
+    "three shifted AgentManager event-forwarding review positions"
+  ],
+  "issueCoverage": {
+    "tracker": 193,
+    "contractsUmbrella": 202,
+    "newOpenIssues": [
+      204,
+      205,
+      206,
+      207,
+      208,
+      209,
+      210,
+      211,
+      212,
+      213,
+      214,
+      215,
+      216,
+      217,
+      218,
+      219,
+      220,
+      221,
+      222,
+      223
+    ]
+  },
+  "notExecuted": [
+    "installed native GUI/platform runs for this working tree",
+    "production model-provider parity",
+    "signed historical-profile/live data cutover",
+    "release/update publishing",
+    "local native UI regression launchers requiring unavailable Xvfb"
+  ],
+  "scope": "Local regression and source audit only. Scoped fixtures and imports do not establish production Tauri readiness or acceptance of any G0-G5 gate.",
+  "inventoryFreshness": "passed_after_coordinate_refresh",
+  "contractFreshness": "passed_after_coordinate_refresh",
+  "postRefreshContractTests": {
+    "passed": 20,
+    "files": 3
+  },
+  "workflowYamlAndShellSyntax": {
+    "passed": true,
+    "shellSteps": 26
+  }
+}

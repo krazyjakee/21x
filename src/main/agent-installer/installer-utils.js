@@ -1,8 +1,10 @@
 import { spawn } from 'child_process'
-import { createWriteStream, mkdirSync, readdirSync, rmSync } from 'fs'
+import { mkdirSync, readdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { detectInstalledAgents } from './detect.js'
+import { InstallerNetwork } from './installer-network.js'
+import { InstallerProcessOwner } from './installer-process.js'
 
 /** @typedef {(progress: { stage: string, output: string, percent: number }) => void} OnProgress */
 
@@ -51,8 +53,9 @@ export function findFile(dir, name) {
 export async function fetchJson(url, headers) {
   try {
     const { net } = await import('electron')
-    const resp = await net.fetch(url, { signal: AbortSignal.timeout(8000), headers })
-    return resp.ok ? await resp.json() : null
+    const network = new InstallerNetwork(net.fetch.bind(net))
+    try { return await network.fetchJson(url, headers) }
+    finally { await network.close() }
   } catch {
     return null
   }
@@ -68,50 +71,9 @@ export async function fetchJson(url, headers) {
  */
 export async function downloadFile(url, destPath, onProgress) {
   const { net } = await import('electron')
-
-  return new Promise((resolve, reject) => {
-    const request = net.request(url)
-
-    request.on('response', (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        const redirectUrl = Array.isArray(response.headers.location) ? response.headers.location[0] : response.headers.location
-        onProgress({ stage: 'installing', output: `Redirecting...\n`, percent: 10 })
-        downloadFile(redirectUrl, destPath, onProgress).then(resolve).catch(reject)
-        return
-      }
-
-      if (response.statusCode !== 200) {
-        reject(new Error(`Download failed: HTTP ${response.statusCode}`))
-        return
-      }
-
-      const contentLength = parseInt(response.headers['content-length']?.[0] || response.headers['content-length'] || '0', 10)
-      let downloaded = 0
-      const file = createWriteStream(destPath)
-
-      response.on('data', (chunk) => {
-        file.write(chunk)
-        downloaded += chunk.length
-        if (contentLength > 0) {
-          const pct = Math.round((downloaded / contentLength) * 60) + 10
-          onProgress({ stage: 'installing', output: `Downloaded ${(downloaded / 1024 / 1024).toFixed(1)} MB\r`, percent: Math.min(pct, 70) })
-        }
-      })
-
-      response.on('end', () => {
-        file.end()
-        file.on('finish', () => resolve())
-      })
-
-      response.on('error', (err) => {
-        file.destroy()
-        reject(err)
-      })
-    })
-
-    request.on('error', (err) => reject(err))
-    request.end()
-  })
+  const network = new InstallerNetwork(net.fetch.bind(net))
+  try { await network.downloadFile(url, destPath, onProgress) }
+  finally { await network.close() }
 }
 
 /**
@@ -126,24 +88,8 @@ export async function downloadFile(url, destPath, onProgress) {
  * @returns {Promise<{ error: Error | null, code: number | null, stdout: string, stderr: string }>}
  */
 export function streamProcess(cmd, args, onProgress, percent, options = {}) {
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options })
-    let stdout = ''
-    let stderr = ''
-
-    proc.stdout?.on('data', (chunk) => {
-      const text = chunk.toString()
-      stdout += text
-      onProgress({ stage: 'installing', output: text, percent })
-    })
-    proc.stderr?.on('data', (chunk) => {
-      const text = chunk.toString()
-      stderr += text
-      onProgress({ stage: 'installing', output: text, percent })
-    })
-    proc.on('error', (error) => resolve({ error, code: null, stdout, stderr }))
-    proc.on('close', (code) => resolve({ error: null, code, stdout, stderr }))
-  })
+  const owner = new InstallerProcessOwner(spawn)
+  return owner.run(cmd, args, onProgress, percent, options).finally(() => owner.close())
 }
 
 /** Run a helper command (tar, unzip) silently; throws on failure. */

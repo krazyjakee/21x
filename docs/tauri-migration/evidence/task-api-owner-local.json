@@ -1,0 +1,67 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Portable real task/skill/session/artifact HTTP routes and HTTP MCP with actual standalone SQLite. Raw route retained across socket disconnect, failed close and late DB write. Startup/native close/admission/body-limit/tool-availability controls; legacy browser host explicitly injected only by old adapter. No production Tauri bootstrap/native bindings, live profile or real model session claim.",
+  "sourceFilesSha256": {
+    "src/main/task-api-server.ts": "5a59a9394d2255c3fbbf96c4914a714da79cd71a6208a2ac54230eb17020bf49",
+    "src/main/task-api-server-core.ts": "a13b5812689e76519b08cad1ab120ab65ba083889211c3c4815f7d5bb9e34797",
+    "src/main/task-api/listener.ts": "e46d9bd4f7e2f024b12134ad6ee5bccb9b6be7234f9da8fbfd5c9b1175c70d8b",
+    "src/main/task-api-lifetime.test.ts": "b83ae2500e0b3af44e7f1fc9d349b3d65682e723ad8aeb3db8760a1c901d9055",
+    "src/main/task-mcp-endpoint.ts": "c8e8bab4088acb0b04a32815304965b9273e3de9850d8099717d5176f9b65928",
+    "src/main/mcp-servers/task-management-core.ts": "4188ba0a633979c31195ca41039bc8eece7ca0bb46773ab7302202cd6a987f95",
+    "src/main/index.ts": "10e8bd788f5f508736bb05820d170ebcd3672debc259da1de77410f129a88fc0",
+    "vitest.tauri.config.ts": "519394d5e0407c61f0ac8b277aad2beb3968d371bcfc205a6e2d989658b56eec"
+  },
+  "reports": [
+    {
+      "command": "pnpm test:tauri -- --service-proofs",
+      "report": "/tmp/21x-task-api-complete-service.json",
+      "sha256": "80393fea874a71582667e6216d070382a4e8a512bfbed24d780a1c01326ca5e8",
+      "passed": 1146,
+      "skipped": 0,
+      "files": 80
+    },
+    {
+      "command": "pnpm test -- --run",
+      "report": "/tmp/21x-task-api-complete-legacy.json",
+      "sha256": "30c15da346a0e72e5ccb2b79fadf97d24f157f3038395dbdc2008458a6ef95db",
+      "passed": 5281,
+      "skipped": 20,
+      "files": 378
+    },
+    {
+      "command": "pnpm test:tauri -- src/main/task-api-lifetime.test.ts src/main/task-api-server.test.ts src/main/task-api/skill-routes.test.ts",
+      "report": "/tmp/21x-task-api-lifetime-standalone-final.json",
+      "sha256": "e4741e10de1e5ca23700641dc710c982f16a47303a8ea60abb1f11d61738a7aa",
+      "passed": 84,
+      "skipped": 0,
+      "files": 3
+    },
+    {
+      "command": "pnpm test -- src/main/task-api src/main/task-api-server.test.ts src/main/task-api-lifetime.test.ts src/main/task-mcp-endpoint.test.ts src/main/mcp-servers/task-management",
+      "report": "/tmp/21x-task-api-lifetime-legacy-final.json",
+      "sha256": "7fa06d959867efc89ed6b6e9e8fcf86aaf1719a270a178966f8d502ac30b44c7",
+      "passed": 338,
+      "skipped": 0,
+      "files": 10
+    }
+  ],
+  "forcedTypecheckPassed": true,
+  "changedSourceLint": {
+    "errors": 0,
+    "existingWarnings": 1
+  },
+  "sourceContractFreshnessPassed": true,
+  "syntheticServiceBundle": {
+    "bytes": 766251,
+    "changed": false
+  },
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "8493fdfb57bd6eac2e6d8f70c67f8fed4b31a2038e57bd0fb7c6a04ed08b3f79",
+    "beforeFinalRequestErrorGuard": true
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

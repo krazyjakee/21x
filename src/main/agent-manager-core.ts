@@ -253,6 +253,7 @@ export class AgentManager extends EventEmitter {
    *  not polled at all between sweeps. */
   private static readonly IDLE_REAP_SWEEP_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
   private reaperTimer: ReturnType<typeof setInterval> | null = null
+  private reaperSweep: Promise<void> | null = null
 
   /** Parents currently being woken after subtask completion (dedupe guard so
    *  several subtasks finishing at once produce a single wake-up). */
@@ -809,12 +810,23 @@ export class AgentManager extends EventEmitter {
     setImmediate(() => this.updatePowerSaveBlocker())
   }
 
-  private async reapInactiveSessions(): Promise<void> {
+  private reapInactiveSessions(): Promise<void> {
+    if (this.shuttingDown) return Promise.resolve()
+    if (this.reaperSweep) return this.reaperSweep
+    const sweep = this.ownShutdownWork(this.reapInactiveSessionsNow())
+    this.reaperSweep = sweep
+    const settled = (): void => { if (this.reaperSweep === sweep) this.reaperSweep = null }
+    void sweep.then(settled, settled)
+    return sweep
+  }
+
+  private async reapInactiveSessionsNow(): Promise<void> {
     // Safety net for limits raised in settings or the agent form: nothing
     // else signals those, so re-check the queue on every sweep.
     this.scheduleStartQueueDrain()
     const now = Date.now()
     for (const [sessionId, session] of [...this.sessions.entries()]) {
+      if (this.shuttingDown) return
       // Only idle sessions are candidates — an active turn is never reaped.
       if (session.status !== 'idle') continue
 
@@ -836,6 +848,10 @@ export class AgentManager extends EventEmitter {
       // have no DB subtask row, so hasActiveSubtaskWork can't see them — but
       // destroying the session here aborts the query and kills them outright.
       if (await this.hasActiveDelegationTools(session)) continue
+      if (this.shuttingDown) return
+      if (!this.ownsSessionGeneration(sessionId, session) || session.status !== 'idle' ||
+          Date.now() - (session.lastActivityAt ?? session.createdAt.getTime()) < AgentManager.IDLE_SESSION_REAP_THRESHOLD_MS) continue
+      if (this.hasActiveSubtaskWork(session.taskId)) continue
 
       console.log(
         `[AgentManager] Releasing runtime of idle session ${sessionId} (task ${session.taskId}, idle ${Math.round(idleForMs / 1000)}s). ` +
@@ -1029,7 +1045,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private assertSessionGeneration(sessionId: string, session: AgentSession): void {
-    if (!this.ownsSessionGeneration(sessionId, session)) {
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) {
       throw new Error('Message delivery was cancelled because the user stopped this task.')
     }
   }
@@ -1123,11 +1139,11 @@ export class AgentManager extends EventEmitter {
   }
 
   private async initializeAndProbeAdapter(adapter: CodingAgentAdapter, taskId: string, generation = this.captainRuntimes.get(taskId)?.generation): Promise<void> {
-    const init = adapter.initialize()
+    const init = this.ownShutdownWork(adapter.initialize())
     try {
       await withStartupDeadline(init, AGENT_SERVER_START_TIMEOUT_MS, 'Agent server startup')
       const health = typeof adapter.checkHealth === 'function'
-        ? await withStartupDeadline(adapter.checkHealth(), AGENT_SERVER_START_TIMEOUT_MS, 'Agent health probe')
+        ? await withStartupDeadline(this.ownShutdownWork(adapter.checkHealth()), AGENT_SERVER_START_TIMEOUT_MS, 'Agent health probe')
         : { available: true }
       if (!health.available) {
         this.transitionCaptainRuntime(taskId, 'unhealthy', {
@@ -1146,7 +1162,9 @@ export class AgentManager extends EventEmitter {
       }, generation)
     } catch (error) {
       const stoppable = adapter as CodingAgentAdapter & { stopServer?: () => Promise<void> }
-      if (![...this.sessions.values()].some((session) => session.adapter === adapter) && typeof stoppable.stopServer === 'function') void stoppable.stopServer().catch(() => {})
+      if (![...this.sessions.values()].some((session) => session.adapter === adapter) && typeof stoppable.stopServer === 'function') {
+        void this.ownShutdownWork(stoppable.stopServer()).catch(() => {})
+      }
       throw error
     }
   }
@@ -1172,7 +1190,7 @@ export class AgentManager extends EventEmitter {
         ? readiness.getSessionStatus(sessionId, sessionConfig)
         : Promise.resolve({ type: SessionStatusType.IDLE })
     const status = await withStartupDeadline(
-      statusPromise,
+      this.ownShutdownWork(statusPromise),
       AGENT_SERVER_START_TIMEOUT_MS,
       'Agent session readiness probe'
     )
@@ -1266,12 +1284,12 @@ export class AgentManager extends EventEmitter {
     await this.initializeAndProbeAdapter(adapter, taskId, runtimeGeneration)
 
     if (!mayStart()) throw new Error('Start ownership was withdrawn before session creation.')
-    const creating = adapter.createSession(sessionConfig)
+    const creating = this.ownShutdownWork(adapter.createSession(sessionConfig))
     const adapterSessionId = await withStartupDeadline(
       creating,
       AGENT_SESSION_START_TIMEOUT_MS,
       'Agent session startup',
-      (lateSessionId) => adapter.destroySession(lateSessionId, sessionConfig).catch(() => {})
+      (lateSessionId) => this.ownShutdownWork(adapter.destroySession(lateSessionId, sessionConfig)).catch(() => {})
     )
     console.log(`[AgentManager] Session created: ${adapterSessionId}, workspaceDir=${workspaceDir}`)
     try {
@@ -2357,10 +2375,10 @@ export class AgentManager extends EventEmitter {
     try {
       console.log('[AgentManager] Calling adapter.resumeSession...')
       messages = await withStartupDeadline(
-        adapter.resumeSession(adapterSessionId, sessionConfig),
+        this.ownShutdownWork(adapter.resumeSession(adapterSessionId, sessionConfig)),
         AGENT_SESSION_START_TIMEOUT_MS,
         'Agent session resume',
-        () => adapter.destroySession(adapterSessionId, sessionConfig).catch(() => {})
+        () => this.ownShutdownWork(adapter.destroySession(adapterSessionId, sessionConfig)).catch(() => {})
       )
       console.log('[AgentManager] adapter.resumeSession completed successfully')
     } catch (error: unknown) {
@@ -3426,6 +3444,11 @@ export class AgentManager extends EventEmitter {
    * live write-through capture is authoritative and is never re-ingested.
    */
   async getTranscriptSnapshot(taskId: string, sinceSeq?: number): Promise<ReturnType<DatabaseManager['getTranscriptParts']>> {
+    return this.ownShutdownWork(this.readTranscriptSnapshot(taskId, sinceSeq))
+  }
+
+  private async readTranscriptSnapshot(taskId: string, sinceSeq?: number): Promise<ReturnType<DatabaseManager['getTranscriptParts']>> {
+    if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     if (!this.ingestedTasks.has(taskId)) {
       await this.backfillTranscriptProjection(taskId)
     }
@@ -3438,6 +3461,11 @@ export class AgentManager extends EventEmitter {
    * delta after a fresh start is complete.
    */
   async getTranscriptDelta(taskId: string, sinceRev: number): Promise<ReturnType<DatabaseManager['getTranscriptDelta']>> {
+    return this.ownShutdownWork(this.readTranscriptDelta(taskId, sinceRev))
+  }
+
+  private async readTranscriptDelta(taskId: string, sinceRev: number): Promise<ReturnType<DatabaseManager['getTranscriptDelta']>> {
+    if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     if (!this.ingestedTasks.has(taskId)) {
       await this.backfillTranscriptProjection(taskId)
     }
@@ -3509,9 +3537,10 @@ export class AgentManager extends EventEmitter {
 
   /** Full message list of the task's live session; null when there is none. */
   private async getLiveMessages(taskId: string): Promise<SessionMessage[] | null> {
+    if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     const session = this.findSessionByTaskId(taskId)?.session
     if (!session?.adapter?.getAllMessages) return null
-    return session.adapter.getAllMessages(session.id, this.sessionConfigFor(session))
+    return this.ownShutdownWork(session.adapter.getAllMessages(session.id, this.sessionConfigFor(session)))
   }
 
   /** Raw transcript for the renderer's hidden "Copy Debug Info" feature. */
@@ -3797,24 +3826,32 @@ export class AgentManager extends EventEmitter {
 
   /** Interrupts the current generation and stops polling; keeps the transcript and task status. */
   async abortSession(sessionId: string): Promise<void> {
+    return this.ownShutdownWork(this.abortSessionNow(sessionId))
+  }
+
+  private async abortSessionNow(sessionId: string): Promise<void> {
+    if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     const resolved = this.resolveSession(sessionId, 'abortSession')
     if (!resolved) return
     const { session } = resolved
     sessionId = resolved.sessionId
+    this.assertSessionGeneration(sessionId, session)
 
     console.log(`[AgentManager] Aborting session ${sessionId}`)
     this.stopAdapterPolling(sessionId)
 
-    const adapter = this.getAdapter(session.agentId)
+    const adapter = session.adapter ?? this.getAdapter(session.agentId)
     if (adapter) {
       try {
         const sessionConfig = await this.buildSessionConfig(session.agentId, session.taskId, session.workspaceDir)
+        this.assertSessionGeneration(sessionId, session)
         await adapter.abortPrompt(sessionId, sessionConfig)
       } catch (error) {
         console.error(`[AgentManager] Error aborting adapter session:`, error)
       }
     }
 
+    this.assertSessionGeneration(sessionId, session)
     session.status = 'idle'
     this.emitStatus(sessionId, session, 'idle')
   }
@@ -4843,10 +4880,23 @@ export class AgentManager extends EventEmitter {
     responseType?: 'permission' | 'question',
     requestId?: string
   ): Promise<void> {
+    return this.ownShutdownWork(this.respondToPermissionNow(sessionId, approved, message, optionId, responseType, requestId))
+  }
+
+  private async respondToPermissionNow(
+    sessionId: string,
+    approved: boolean,
+    message?: string,
+    optionId?: string,
+    responseType?: 'permission' | 'question',
+    requestId?: string
+  ): Promise<void> {
+    if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     const resolved = this.resolveSession(sessionId, 'respondToPermission')
     if (!resolved) throw new Error(`Session not found: ${sessionId}`)
     const { session } = resolved
     sessionId = resolved.sessionId
+    this.assertSessionGeneration(sessionId, session)
 
     const adapter = this.getAdapter(session.agentId)
 
@@ -4889,9 +4939,11 @@ export class AgentManager extends EventEmitter {
       console.log(`[AgentManager] Responding to question via adapter for session ${sessionId}`)
 
       const adapterConfig = await this.buildSessionConfig(session.agentId, session.taskId, session.workspaceDir)
+      this.assertSessionGeneration(sessionId, session)
       const response = requestId
         ? await adapter.respondToQuestion(sessionId, answers, adapterConfig, requestId)
         : await adapter.respondToQuestion(sessionId, answers, adapterConfig)
+      this.assertSessionGeneration(sessionId, session)
       const handled = typeof response === 'object' ? response.handled : response
       if (handled === false) {
         console.log(`[AgentManager] Ignored stale question response for session ${sessionId}`)
@@ -4963,6 +5015,7 @@ export class AgentManager extends EventEmitter {
       const handled = await (adapter as unknown as {
         respondToApproval: (sid: string, approved: boolean, opt?: string, requestId?: string) => Promise<boolean | void>
       }).respondToApproval(sessionId, approved, selectedOption, requestId)
+      this.assertSessionGeneration(sessionId, session)
 
       // Provider callbacks do not survive a restored session. Resolve the old
       // card immediately instead of approving a newer request or sending a
@@ -5058,7 +5111,7 @@ export class AgentManager extends EventEmitter {
     })
     try {
       while (true) {
-        const work = [...this.shutdownWork, ...this.sessionStarts.values(),
+        const work = [...this.shutdownWork, ...this.sessionStarts.values(), ...this.sessionStops.values(),
           ...[...this.captainSwitches.values()].map(entry => entry.promise),
           ...(this.startupReconciliation ? [this.startupReconciliation] : [])]
         if (!work.length) {
@@ -5095,6 +5148,11 @@ export class AgentManager extends EventEmitter {
   }
 
   async getProviders(serverUrl?: string, directory?: string, backendType?: string): Promise<{ providers: { id: string; name: string; [key: string]: unknown }[]; default: Record<string, string> } | null> {
+    return this.ownShutdownWork(this.getProvidersNow(serverUrl, directory, backendType))
+  }
+
+  private async getProvidersNow(serverUrl?: string, directory?: string, backendType?: string): ReturnType<AgentManager['getProviders']> {
+    if (this.shuttingDown) return null
     try {
       const defaultAgent = this.defaultAgent()
       const baseUrl = serverUrl || defaultAgent?.server_url || DEFAULT_SERVER_URL
@@ -5122,8 +5180,11 @@ export class AgentManager extends EventEmitter {
           // notifyConfigChanged already logs; proceed with cached config
         }
       }
-
-      return await adapter.getProviders(baseUrl, directory)
+      // A settings refresh can finish after shutdown started. Keep its raw
+      // flight owned, and never start another provider operation afterward.
+      if (this.shuttingDown) return null
+      const providers = await adapter.getProviders(baseUrl, directory)
+      return this.shuttingDown ? null : providers
     } catch (error: unknown) {
       console.log('[AgentManager] Could not get providers:', error instanceof Error ? error.message : error)
       return null
@@ -5135,10 +5196,16 @@ export class AgentManager extends EventEmitter {
    * backend has no such listing or the CLI could not be asked.
    */
   async listModels(backendType: string): Promise<BackendModel[] | null> {
+    return this.ownShutdownWork(this.listModelsNow(backendType))
+  }
+
+  private async listModelsNow(backendType: string): Promise<BackendModel[] | null> {
+    if (this.shuttingDown) return null
     const adapter = this.getAdapterByType(backendType)
     if (!adapter?.listModels) return null
     try {
-      return await adapter.listModels()
+      const models = await adapter.listModels()
+      return this.shuttingDown ? null : models
     } catch (error: unknown) {
       console.log(`[AgentManager] Could not list ${backendType} models:`, error instanceof Error ? error.message : error)
       return null

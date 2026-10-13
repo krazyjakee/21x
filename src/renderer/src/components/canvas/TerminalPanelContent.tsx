@@ -208,9 +208,11 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
       tlog(`[Terminal:${terminalId}] calling term.focus(), textarea exists:`, !!term.textarea)
       term.focus()
       // Verify focus actually took
-      setTimeout(() => {
+      const focusCheck = setTimeout(() => {
+        if (!isMountedRef.current || xtermRef.current !== term) return
         tlog(`[Terminal:${terminalId}] after focus, activeElement:`, document.activeElement?.tagName, document.activeElement?.className)
       }, 100)
+      cleanupRef.current.push(() => clearTimeout(focusCheck))
 
       isReadyRef.current = true
       setIsReady(true)

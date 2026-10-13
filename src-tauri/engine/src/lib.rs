@@ -19,6 +19,8 @@ use tokio::{
 #[cfg(feature = "synthetic-agent")]
 mod agent_desktop;
 #[cfg(feature = "synthetic-desktop")]
+mod configuration_desktop;
+#[cfg(feature = "synthetic-desktop")]
 mod desktop;
 mod process_tree;
 #[cfg(feature = "synthetic-desktop")]
@@ -477,7 +479,12 @@ impl Engine {
         if current.is_empty() || epoch != current {
             return Err(EngineError::new("STALE_EPOCH"));
         }
-        let result = self.request(operation, payload).await?;
+        let result = self.request(operation, payload.clone()).await?;
+        if operation == "agentSession:getTranscriptPage"
+            && !desktop::valid_page_for_request(&payload, &result)
+        {
+            return Err(EngineError::new("INVALID_RESULT"));
+        }
         Ok(json!({"engineEpoch": current, "result": result}))
     }
 
@@ -858,6 +865,23 @@ mod tests {
             "fixture projection"
         );
         assert_eq!(delta["result"]["value"]["maxRev"], projection["maxRev"]);
+        let page = engine
+            .desktop_request(
+                &epoch,
+                "agentSession:getTranscriptPage",
+                json!({"taskId":id,"page":{"version":1,"mode":"snapshot","after":0,"limit":1}}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            page["result"]["value"]["parts"][0]["partId"],
+            "native-part-1"
+        );
+        assert_eq!(page["result"]["value"]["watermark"], projection["maxRev"]);
+        let complete = engine.desktop_request(&epoch, "agentSession:getTranscriptPage",
+            json!({"taskId":id,"page":{"version":1,"mode":"delta","after":projection["maxRev"]}})).await.unwrap();
+        assert_eq!(complete["result"]["value"]["parts"], json!([]));
+        assert_eq!(complete["result"]["value"]["cursor"], projection["maxRev"]);
         {
             let received = events.lock().unwrap();
             assert_eq!(received.len(), 5);
@@ -874,6 +898,272 @@ mod tests {
                 assert_eq!(received[index]["operation"], *operation);
                 assert_eq!(received[index]["engineEpoch"], epoch);
                 assert_eq!(received[index]["sequence"], (index + 1) as u64);
+            }
+        }
+        engine.shutdown().await;
+        assert_eq!(engine.status()["ownedChildExited"], true);
+    }
+
+    #[cfg(feature = "synthetic-desktop")]
+    #[tokio::test]
+    #[ignore = "requires explicitly staged content configuration service and standalone SQLite"]
+    async fn staged_synthetic_configuration_roundtrip_preserves_real_content_effects() {
+        async fn command(engine: &Engine, epoch: &str, operation: &str, payload: Value) -> Value {
+            engine
+                .desktop_request(epoch, operation, payload)
+                .await
+                .unwrap()["result"]
+                .clone()
+        }
+        let resources = std::env::var_os("TWENTYONEX_TEST_RESOURCES")
+            .expect("explicit staged synthetic resources");
+        let profile = IsolatedProfile::with_prefix("21x-database-service");
+        let events = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let received = events.clone();
+        let sink: DesktopEventSink = Arc::new(move |frame| {
+            received.lock().unwrap().push(frame);
+            Ok(())
+        });
+        let engine = Engine::start_synthetic(PathBuf::from(resources), profile.0.clone(), sink)
+            .await
+            .unwrap();
+        let epoch = engine.status()["engineEpoch"].as_str().unwrap().to_string();
+        let project = command(
+            &engine,
+            &epoch,
+            "project:create",
+            json!({"data":{"name":"native configuration"}}),
+        )
+        .await;
+        let project_id = project["value"]["id"].as_str().unwrap();
+        let default = command(&engine, &epoch, "project:getDefault", json!({})).await;
+        let default_id = default["value"]["id"].as_str().unwrap();
+        assert_eq!(
+            command(
+                &engine,
+                &epoch,
+                "project:update",
+                json!({"id":project_id,"data":{"description":"saved context"}})
+            )
+            .await["value"]["description"],
+            "saved context"
+        );
+        assert_eq!(
+            command(&engine, &epoch, "project:archive", json!({"id":project_id})).await["value"]
+                ["archived"],
+            true
+        );
+        assert_eq!(
+            command(
+                &engine,
+                &epoch,
+                "project:archive",
+                json!({"id":project_id,"archived":false})
+            )
+            .await["value"]["archived"],
+            false
+        );
+        assert_eq!(
+            command(
+                &engine,
+                &epoch,
+                "project:reorder",
+                json!({"orderedIds":[project_id,default_id]})
+            )
+            .await,
+            json!({"defined":false})
+        );
+        let skill = command(&engine, &epoch, "skills:create", json!({"data":{"name":"native skill","description":"fixture","content":"old","project_id":project_id}})).await;
+        let skill_id = skill["value"]["id"].as_str().unwrap();
+        let version = skill["value"]["version"].as_u64().unwrap();
+        let edited = command(
+            &engine,
+            &epoch,
+            "skills:update",
+            json!({"id":skill_id,"data":{"content":"new","expected_version":version}}),
+        )
+        .await;
+        assert!(edited["value"]["version"].as_u64().unwrap() > version);
+        assert_eq!(
+            engine
+                .desktop_request(
+                    &epoch,
+                    "skills:update",
+                    json!({"id":skill_id,"data":{"content":"stale","expected_version":version}})
+                )
+                .await
+                .unwrap_err()
+                .code,
+            "SKILL_VERSION_CONFLICT"
+        );
+        assert_eq!(
+            command(
+                &engine,
+                &epoch,
+                "skills:setProject",
+                json!({"id":skill_id,"projectId":null})
+            )
+            .await["value"]["project_id"],
+            Value::Null
+        );
+        assert!(
+            command(&engine, &epoch, "skills:getAll", json!({})).await["value"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == skill_id && row["content"] == "new")
+        );
+        assert_eq!(
+            command(
+                &engine,
+                &epoch,
+                "skills:update",
+                json!({"id":"missing","data":{"content":"ignored"}})
+            )
+            .await,
+            json!({"defined":false})
+        );
+        for (family, data, update) in [
+            (
+                "projectRepo",
+                json!({"name":"repo","provider":"github","org":"fixture"}),
+                json!({"default_branch":"release"}),
+            ),
+            (
+                "projectResource",
+                json!({"label":"note","url":null,"notes":"old"}),
+                json!({"notes":"new"}),
+            ),
+        ] {
+            let first = command(
+                &engine,
+                &epoch,
+                &format!("{family}:add"),
+                json!({"projectId":project_id,"data":data}),
+            )
+            .await;
+            let second = command(
+                &engine,
+                &epoch,
+                &format!("{family}:add"),
+                json!({"projectId":project_id,"data":data}),
+            )
+            .await;
+            let foreign = command(
+                &engine,
+                &epoch,
+                &format!("{family}:add"),
+                json!({"projectId":default_id,"data":data}),
+            )
+            .await;
+            let first_id = &first["value"]["id"];
+            let second_id = &second["value"]["id"];
+            let edited = command(
+                &engine,
+                &epoch,
+                &format!("{family}:update"),
+                json!({"id":first_id,"data":update}),
+            )
+            .await;
+            for (key, value) in update.as_object().unwrap() {
+                assert_eq!(&edited["value"][key], value);
+            }
+            assert_eq!(
+                command(
+                    &engine,
+                    &epoch,
+                    &format!("{family}:reorder"),
+                    json!({"projectId":project_id,"orderedIds":[second_id,first_id]})
+                )
+                .await,
+                json!({"defined":false})
+            );
+            assert_eq!(
+                command(
+                    &engine,
+                    &epoch,
+                    &format!("{family}:list"),
+                    json!({"projectId":project_id})
+                )
+                .await["value"][0]["id"],
+                *second_id
+            );
+            assert_eq!(engine.desktop_request(&epoch, &format!("{family}:reorder"), json!({"projectId":project_id,"orderedIds":[foreign["value"]["id"],first_id]})).await.unwrap_err().code, "INVALID_REQUEST");
+            assert_eq!(
+                command(
+                    &engine,
+                    &epoch,
+                    &format!("{family}:remove"),
+                    json!({"id":second_id})
+                )
+                .await["value"],
+                true
+            );
+            assert_eq!(
+                command(
+                    &engine,
+                    &epoch,
+                    &format!("{family}:update"),
+                    json!({"id":"missing","data":update})
+                )
+                .await,
+                json!({"defined":false})
+            );
+        }
+        assert_eq!(
+            command(&engine, &epoch, "skills:delete", json!({"id":skill_id})).await["value"],
+            true
+        );
+        assert_eq!(
+            engine
+                .desktop_request(&epoch, "agent:create", json!({"data":{"name":"bypass"}}))
+                .await
+                .unwrap_err()
+                .code,
+            "UNKNOWN_OPERATION"
+        );
+        assert_eq!(
+            engine
+                .desktop_request(
+                    &epoch,
+                    "project:update",
+                    json!({"id":project_id,"data":{"settings":{}}})
+                )
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_ARGUMENTS"
+        );
+        assert_eq!(
+            engine
+                .desktop_request("stale", "skills:getAll", json!({}))
+                .await
+                .unwrap_err()
+                .code,
+            "STALE_EPOCH"
+        );
+        assert_eq!(
+            engine
+                .desktop_request(&epoch, "project:archive", json!({"id":default_id}))
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_REQUEST"
+        );
+        {
+            let received = events.lock().unwrap();
+            assert!(received
+                .iter()
+                .any(|frame| frame["operation"] == "skills:changed"
+                    && frame["payload"]["kind"] == "scope"));
+            assert!(received
+                .iter()
+                .any(|frame| frame["operation"] == "project:changed"
+                    && frame["payload"]["kind"] == "resources"));
+            for (index, frame) in received.iter().enumerate() {
+                assert_eq!(frame["engineEpoch"], epoch);
+                assert_eq!(frame["sequence"], (index + 1) as u64);
+                assert!(desktop::valid_event(frame));
             }
         }
         engine.shutdown().await;

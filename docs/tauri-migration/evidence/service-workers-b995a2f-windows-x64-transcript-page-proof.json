@@ -1,0 +1,19 @@
+{
+  "reportVersion": 1,
+  "passed": true,
+  "actualBundledService": true,
+  "phase": "complete",
+  "parts": 642,
+  "snapshotPages": 43,
+  "deltaPages": 3,
+  "largestPageBytes": 248188,
+  "pageByteLimit": 262144,
+  "racingUpdatesRecovered": true,
+  "widePayloadsBounded": true,
+  "overflowInvalidations": 21,
+  "boundedLiveInvalidationRecovery": true,
+  "oversizedFieldPreviewOnly": true,
+  "missingTaskAndMalformedRequestsDenied": true,
+  "acknowledgedServiceExit": true,
+  "syntheticProfileRemoved": true
+}

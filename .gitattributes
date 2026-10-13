@@ -1,0 +1,2 @@
+# Vitest must load CLI modules with their shebang intact on Windows too.
+*.mjs text eol=lf

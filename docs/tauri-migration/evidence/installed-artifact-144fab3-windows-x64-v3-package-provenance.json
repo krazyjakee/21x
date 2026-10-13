@@ -1,0 +1,8 @@
+{
+  "packageKind": "nsis",
+  "proofMode": "artifact-authorization-proof",
+  "packageSha256": "c1b19362cfca8caa69e1c78a981992d58a8aeaee73b7d1e4466b248556fc5de0",
+  "artifact": "21x Tauri Feasibility_0.1.0_x64-setup.exe",
+  "packagedExecutable": "D:\\a\\_temp\\21x-packaged-gkiadivj\\installed\\twentyonex-tauri-feasibility.exe",
+  "smokeCommandSucceeded": true
+}

@@ -1,0 +1,49 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "40f8061db4a79ee2ce3b5b84ec82af807b0e46e3",
+  "scope": "Working-tree OAuth admission/late-result guards and bounded raw-work drain. Production runtime teardown integration and native HTTP close acknowledgement remain open.",
+  "sourceSha256": {
+    "src/main/connectors/oauth.ts": "cebf04068a7859516c3d678bc54fc51ded8012af293f0fb72bfaf9d4f101b34d",
+    "src/main/connectors/oauth-lifetime.test.ts": "e5dfdd03c5b4a513e2bf7ca83e598e10fcef87e764d2bdec9d9d35445dbbc0f8",
+    "src/main/oauth/connector-oauth-flow.ts": "f5c565ed64680632d8f0ead2309d03cf2b7af8072e2c6f6378fcbf6fe740e391",
+    "src/main/oauth/local-oauth-server.ts": "90790aebfd57eb568435855517660bb197a66a6a36431fc68e34bdfe3dede3f5",
+    "src/main/oauth/local-oauth-server.test.ts": "ee2ed11e7efadddfaceeec5eabe9a3f50c4124ba21349c9f2329876062f4989b",
+    "vitest.tauri.config.ts": "74d56471b809df9d18901fa9980ae331652853dadbf59f21066481dae7a618d7"
+  },
+  "tests": {
+    "standalone": {
+      "passed": 509,
+      "skipped": 0,
+      "files": 46,
+      "reportSha256": "f2eb62abaf6050a7112d01f19fb318b48c2b7e27434b0b75c43a9c0dbd9f89d0"
+    },
+    "full": {
+      "passed": 5194,
+      "skipped": 16,
+      "files": 365,
+      "reportSha256": "15066929d0e160db63fdc001688f5571142a1a19bbda0794289cdaab602a46c8"
+    },
+    "legacy": {
+      "passed": 28,
+      "skipped": 0,
+      "files": 3,
+      "reportSha256": "0fbe5c74ca2502561edf0d36fb0de0b3509cb75d7098fe7e7c5fcd2ab948327c"
+    },
+    "standaloneAndService": {
+      "passed": 517,
+      "skipped": 0,
+      "files": 49,
+      "reportSha256": "ed18c0203dde96c705c28a441d4f5b15452bd4502b47eb5e5307f933d703ec3a"
+    }
+  },
+  "newOAuthLifetimeCases": 7,
+  "newCallbackServerCases": 2,
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "diffWhitespace": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

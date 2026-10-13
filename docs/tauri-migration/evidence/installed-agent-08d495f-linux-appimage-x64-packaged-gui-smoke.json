@@ -1,0 +1,88 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "developmentFrontend": false,
+    "hostArch": "x86_64",
+    "initialized": true,
+    "profileRoot": "/home/runner/work/_temp/21x-packaged-43cnd7l2/21x-database-service-14490-1791880117400579332-0",
+    "resourceRoot": "/home/runner/work/_temp/21x-packaged-43cnd7l2/squashfs-root/usr/lib/21x Tauri Feasibility/resources",
+    "syntheticAgent": true,
+    "syntheticDesktop": true,
+    "syntheticDesktopProof": {
+      "agentCompleted": true,
+      "agentStarted": true,
+      "agentStatusEventObserved": true,
+      "agentTranscriptRehydrated": true,
+      "approvalAccepted": true,
+      "approvalRequested": true,
+      "missingResultPreserved": true,
+      "projectCreated": true,
+      "rehydrated": true,
+      "rendererReloaded": true,
+      "retiredOperationDenied": true,
+      "settingPersisted": true,
+      "staleApprovalDenied": true,
+      "staleEpochDenied": true,
+      "taskCreated": true,
+      "taskEventObserved": true,
+      "taskUpdated": true,
+      "transcriptDeltaRead": true,
+      "transcriptSnapshotRead": true,
+      "updateEventObserved": true
+    },
+    "systemNodeHidden": true,
+    "webviewDefaultRuntime": true,
+    "webviewVersion": "2.52.6"
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "unix-process-group-linux-parent-death-signal"
+  },
+  "stage": "complete",
+  "verification": {
+    "packageKind": "appimage",
+    "proofMode": "synthetic-agent",
+    "packageSha256": "556ca75de87182e122b59393595d420d1acc6d7aab304732415d4a84815f5ca9",
+    "artifact": "21x Tauri Feasibility_0.1.0_amd64.AppImage",
+    "packagedExecutable": "/home/runner/work/_temp/21x-packaged-43cnd7l2/squashfs-root/usr/bin/twentyonex-tauri-feasibility",
+    "smokeCommandSucceeded": true,
+    "ownedNodeContained": true,
+    "ownedRunningProcessesAfterExit": [],
+    "runtimeVersions": {
+      "schemaVersion": 1,
+      "os": {
+        "system": "Linux",
+        "release": "6.17.0-1022-azure",
+        "version": "#22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026",
+        "distribution": {
+          "VERSION_ID": "24.04",
+          "ID": "ubuntu"
+        },
+        "libc": [
+          "glibc",
+          "2.39"
+        ]
+      },
+      "node": {
+        "nodeVersion": "v22.23.2",
+        "nodeAbi": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "webview": {
+        "version": "2.52.6",
+        "source": "tauri::webview_version",
+        "defaultRuntime": true
+      }
+    },
+    "packagedResources": true
+  }
+}

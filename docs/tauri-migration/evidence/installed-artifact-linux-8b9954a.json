@@ -1,0 +1,19 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "8b9954a31dbb93eb38a46170488bfbc49539e67c",
+  "workflowRun": "https://github.com/krazyjakee/21x/actions/runs/38326219903",
+  "target": "linux-appimage-x64",
+  "conclusion": "success",
+  "scope": "Installed separate-artifact-WebView authorization with positive main controls and sandboxed-frame relay denial; not same-main-WebView iframe isolation or production viewer acceptance.",
+  "compactArtifactId": 11781692878,
+  "compactArtifactSha256": "3ee7eb4412c86c2848a075003851a070f6205ae5746e5326f889fb618674e4d6",
+  "packageSha256": "ee4d564c17f34e95263f0c29a78f0061cb1f3ff22f557ba9b5ace9089850a648",
+  "retainedGui": {
+    "path": "installed-artifact-8b9954a-linux-appimage-x64-packaged-gui-smoke.json",
+    "sha256": "4cb7c613d5f13c91881fdb6a9f16033a80e6897f417a90ed5c5ca2ee6690623f"
+  },
+  "otherTargets": "macOS x64/arm64 also passed the original relay policy; Windows needs the new conditional direct-frame proof",
+  "productionReady": false,
+  "electronRetirementReady": false
+}

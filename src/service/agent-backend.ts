@@ -5,7 +5,8 @@ import {
   AGENT_COMMAND_CODECS, AGENT_DESKTOP_EVENTS, AGENT_DESKTOP_OPERATIONS, AGENT_EVENT_CODECS, AGENT_QUEUE_FIELDS, AGENT_RECOVERY_ERROR,
   type AgentDesktopEvent, type AgentDesktopOperation
 } from '../shared/agent-desktop-codecs'
-import { DATABASE_COMMAND_CODECS, encodeDatabaseTranscriptPart } from '../shared/database-desktop-codecs'
+import { DATABASE_COMMAND_CODECS } from '../shared/database-desktop-codecs'
+import { encodeDurableTranscriptEvent } from './transcript-events'
 import type { DesktopCommandMap } from '../shared/desktop-operations'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
 import { DesktopOperationRegistry, type DesktopCallerContext } from './transport/desktop-registry'
@@ -174,8 +175,7 @@ export class AgentBackend {
           const taskId = session?.taskId
           if (!taskId || !requestId || !pending || pending.requestId !== requestId || pending.taskId !== taskId || pending.agentId !== fixtureAgentId ||
             session?.status !== 'waiting_approval' || !this.sessionAllowed(sessionId, caller) ||
-            !db.getTranscriptParts(taskId).some(part => isRecord(part.tool) && part.partId === `question-${requestId}` &&
-              part.tool.name === 'permission' && part.tool.status === 'running' && part.tool.requestId === requestId)) {
+            !db.hasTranscriptPermission(taskId, `question-${requestId}`, requestId)) {
             throw new ServiceProtocolError('INVALID_REQUEST')
           }
           const before = fixtureAdapter.decisions().length
@@ -211,11 +211,7 @@ export class AgentBackend {
       if (!task.defined) throw new ServiceProtocolError('INVALID_RESULT')
       payload = { taskId: source.taskId as string, updates: task.value }
     } else if (event === 'transcript:changed') {
-      if (!hasExactKeys(source, ['taskId', 'parts', 'maxRev'], ['reloadRequired']) || !Array.isArray(source.parts)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
-      payload = { ...source, parts: source.parts.map(encodeDatabaseTranscriptPart) }
-      if ((source.maxRev as number) > this.options.database.getTranscriptMaxRev(source.taskId as string)) throw new ServiceProtocolError('INVALID_RESULT')
-      const saved = this.options.database.getTranscriptParts(source.taskId as string)
-      if (source.parts.some(part => !isRecord(part) || !saved.some(row => row.partId === part.partId && row.rev === part.rev))) throw new ServiceProtocolError('INVALID_RESULT')
+      payload = encodeDurableTranscriptEvent(this.options.database, source)
     } else if (event === 'agent:startQueueChanged') {
       if (!hasExactKeys(source, ['queue'], ['failed']) || !Array.isArray(source.queue) || source.queue.length > 1) throw new ServiceProtocolError('INVALID_ARGUMENTS')
       const queue = source.queue.map(row => {

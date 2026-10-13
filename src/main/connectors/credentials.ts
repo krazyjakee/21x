@@ -65,6 +65,14 @@ export class ConnectorCredentialsUnavailableError extends Error {
   }
 }
 
+export class ConnectorCredentialStoreClosedError extends Error {
+  readonly code = 'CONNECTOR_CREDENTIAL_STORE_CLOSED'
+  constructor() {
+    super('Connector credential store is closed')
+    this.name = 'ConnectorCredentialStoreClosedError'
+  }
+}
+
 const REDACTED = '[REDACTED]'
 /** Shorter values would redact ordinary words and digits; they carry little secret entropy anyway. */
 const MIN_REDACT_LENGTH = 4
@@ -99,6 +107,8 @@ export function credentialSecrets(creds: ConnectorCredentials): string[] {
   for (const s of [...out]) {
     const encoded = encodeURIComponent(s)
     if (encoded !== s) out.push(encoded)
+    const formEncoded = new URLSearchParams({ value: s }).toString().slice('value='.length)
+    if (formEncoded !== s && formEncoded !== encoded) out.push(formEncoded)
   }
   return out
 }
@@ -139,6 +149,7 @@ function isCredentials(value: unknown): value is ConnectorCredentials {
 
 export class ConnectorCredentialStore {
   private readonly session = new Map<string, ConnectorCredentials>()
+  private closed = false
 
   constructor(private readonly store: ConnectorStore) {
     // Removing a connector wipes its session credentials too; the persistent
@@ -148,6 +159,7 @@ export class ConnectorCredentialStore {
 
   /** Whether persistent (encrypted) credentials can be stored right now. */
   isPersistentStorageAvailable(): boolean {
+    this.requireOpen()
     return getSecretStorage().isEncryptionAvailable()
   }
 
@@ -158,6 +170,7 @@ export class ConnectorCredentialStore {
    * only, and clears any persisted copy.
    */
   set(instanceId: string, creds: ConnectorCredentials, storage: ConnectorCredentialStorage = 'persistent'): void {
+    this.requireOpen()
     if (!isCredentials(creds)) throw new Error('Invalid connector credentials')
     if (!this.store.getInstance(instanceId)) throw new Error(`Connector instance not found: ${instanceId}`)
     if (storage === 'persistent') {
@@ -178,6 +191,7 @@ export class ConnectorCredentialStore {
    * unavailable). Session credentials win over persisted ones.
    */
   get(instanceId: string): ConnectorCredentials | null {
+    this.requireOpen()
     const sessionCreds = this.session.get(instanceId)
     if (sessionCreds) return sessionCreds
     const row = this.store.getAuthBlob(instanceId)
@@ -196,12 +210,14 @@ export class ConnectorCredentialStore {
 
   /** Where the instance's credentials live, or null when it has none. */
   getStorage(instanceId: string): ConnectorCredentialStorage | null {
+    this.requireOpen()
     if (this.session.has(instanceId)) return 'session'
     return this.store.getAuthBlob(instanceId)?.auth ? 'persistent' : null
   }
 
   /** Forgets the instance's credentials in both memory and the database. */
   clear(instanceId: string): void {
+    this.requireOpen()
     this.session.delete(instanceId)
     this.store.setAuthBlob(instanceId, null, null)
   }
@@ -209,5 +225,15 @@ export class ConnectorCredentialStore {
   /** redactCredentials() with this instance's current credentials. */
   redact(instanceId: string, text: string): string {
     return redactCredentials(text, this.get(instanceId))
+  }
+
+  /** Called only after runtime owners drain. Drops session references without touching SQLite. */
+  close(): void {
+    this.closed = true
+    this.session.clear()
+  }
+
+  private requireOpen(): void {
+    if (this.closed) throw new ConnectorCredentialStoreClosedError()
   }
 }

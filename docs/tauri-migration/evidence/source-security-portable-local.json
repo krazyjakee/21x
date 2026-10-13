@@ -1,0 +1,39 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "7fb35a069a1a501ee41e8ab52ab2bed1b83ef300",
+  "scope": "Existing source manager, connector storage/credential/redaction, SSRF and TLS regressions now run in the standalone graph. Fixture encryption/network policies remain unit controls, not real provider or OS-keychain acceptance.",
+  "sourceSha256": {
+    "src/main/connectors/credentials.test.ts": "bfdd2e64bdbc8dfdbd2cef319771852cd3136506dbe2ad9dfe7ec10594ba7e75",
+    "src/main/connectors/connector-store.test.ts": "b022518ed96ce75b6a7452e017873f9b09234ef053697343c3acb88a96ce6b77",
+    "src/main/sync-manager.test.ts": "c169e34416d89ffca566e80fd9650395848bf35b3f9dcb92be40d041bdf90a80",
+    "test/helpers/portable-db-test-helper.ts": "b61d4701da77211029efc5dedae3f56f6b80f29a311b1981d11817ab93520549",
+    "vitest.tauri.config.ts": "af787804d5205c2168374b085efadc8a2c2cbd9fb389ac609e817b6d4c6091c6"
+  },
+  "tests": {
+    "standaloneAndService": {
+      "passed": 709,
+      "skipped": 0,
+      "files": 63,
+      "reportSha256": "d8f7d81cf366d29ba5d55431ad9729c6ad3c1a0afe8beb0557d793a008345a53"
+    },
+    "standaloneSourceAndSecurity": {
+      "passed": 87,
+      "skipped": 0,
+      "files": 5,
+      "reportSha256": "e1c138fa3b6e20b6ded7fe397b40120b597f403b3b3b4cd2cef63b4bdf8227dc"
+    },
+    "legacySourceAndSecurity": {
+      "passed": 87,
+      "skipped": 0,
+      "files": 5,
+      "reportSha256": "f089dc568a6319f85c5bdad5fcd4d3fc884b1c5dd9e097e713ce6de3a3d1ea65"
+    }
+  },
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

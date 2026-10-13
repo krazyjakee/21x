@@ -168,12 +168,15 @@ export function toolResultTags(content: string, isError: boolean): { projectId?:
 /** One non-streaming-to-anyone model call; returns the text. */
 export async function completeText(provider: ChatProvider, request: Omit<ChatProviderRequest, 'tools' | 'toolChoice'>, signal: AbortSignal): Promise<string> {
   let text = ''
+  signal.throwIfAborted()
   for await (const event of provider.stream({ ...request, tools: [], toolChoice: 'none' }, signal)) {
+    signal.throwIfAborted()
     if (event.type === 'text_delta') {
       if (text.length + event.text.length > 8_000) throw new Error('One-shot response exceeded the size limit')
       text += event.text
     }
   }
+  signal.throwIfAborted()
   return text
 }
 
@@ -182,6 +185,9 @@ export class CommanderService {
   private readonly runtime: ChatRuntime
   private readonly budget: ContextBudget
   private readonly active = new Map<string, ChatTurnHandle>()
+  private readonly work = new Set<Promise<unknown>>()
+  private readonly shutdownSignal = new AbortController()
+  private closing = false
   private readonly folding = new Set<string>()
   private readonly naming = new Set<string>()
   /** Sessions whose last fold failed; cleared by the next successful one (read with foldFailure). */
@@ -199,11 +205,44 @@ export class CommanderService {
     this.budget = { ...DEFAULT_CONTEXT_BUDGET, ...options.budget }
   }
 
+  shutdown(): void {
+    this.closing = true
+    this.shutdownSignal.abort()
+    this.runtime.shutdown()
+    this.pendingRelay.clear()
+    this.activeSessionId = null
+    this.listeners.clear()
+  }
+
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Commander shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.shutdown()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('COMMANDER_SHUTDOWN_INCOMPLETE')), timeoutMs)
+    })
+    try { await Promise.race([Promise.all([Promise.allSettled([...this.work]), this.runtime.close(timeoutMs)]), expired]) }
+    finally { if (timer) clearTimeout(timer) }
+  }
+
+  private retain<T>(work: Promise<T>): Promise<T> {
+    this.work.add(work)
+    void work.finally(() => this.work.delete(work)).catch(() => {})
+    return work
+  }
+
+  private assertOpen(): void {
+    if (this.closing) throw new Error('COMMANDER_SERVICE_CLOSED')
+  }
+
   /** Main-process observers of the event stream (#64 voice mode). Additive; the renderer path is `options.emit`. */
   private readonly listeners = new Set<(event: CommanderEvent) => void>()
 
   /** Subscribes a main-process observer to every event the renderer receives. Returns the unsubscribe. */
   onEvent(listener: (event: CommanderEvent) => void): () => void {
+    this.assertOpen()
     this.listeners.add(listener)
     return () => {
       this.listeners.delete(listener)
@@ -211,6 +250,7 @@ export class CommanderService {
   }
 
   private emit(event: CommanderEvent): void {
+    if (this.closing) return
     try {
       this.options.emit(event)
     } catch (err) {
@@ -243,6 +283,7 @@ export class CommanderService {
 
   /** The renderer says which session the Commander view shows; null when the view is closed. */
   setActiveSession(sessionId: string | null): void {
+    if (this.closing) return
     this.activeSessionId = sessionId
   }
 
@@ -255,6 +296,7 @@ export class CommanderService {
    * a userMessageId to tools.
    */
   sendUserMessage(sessionId: string, text: string, origin: 'typed' | 'voice' = 'typed', images?: unknown): SendResult {
+    this.assertOpen()
     const content = typeof text === 'string' ? text.trim() : ''
     const attached = validateChatImageInputs(images)
     if (!content && attached.length === 0) throw new Error('Message is empty')
@@ -318,8 +360,6 @@ export class CommanderService {
     )
     turnId = handle.turnId
     this.active.set(sessionId, handle)
-    this.emit({ type: 'turn_started', sessionId, turnId })
-
     const done = handle.done
       .then((result) => this.finishTurn(sessionId, context.messages.length, result))
       .catch((err) => {
@@ -337,6 +377,8 @@ export class CommanderService {
       .then(() => this.relayPending(sessionId))
       .catch((err) => console.error('[Commander] report relay failed:', err))
 
+    this.retain(done)
+    this.emit({ type: 'turn_started', sessionId, turnId })
     return { turnId, done }
   }
 
@@ -374,10 +416,11 @@ export class CommanderService {
   }
 
   private async afterTurn(sessionId: string, provider: ChatProvider): Promise<void> {
+    if (this.closing) return
     const session = this.store.getSession(sessionId)
     if (!session) return
     if (!session.title) await this.generateTitle(sessionId, provider)
-    await this.foldHistory(sessionId, provider)
+    if (!this.closing) await this.foldHistory(sessionId, provider)
   }
 
   cancel(sessionId: string): boolean {
@@ -397,6 +440,11 @@ export class CommanderService {
    * overwrites a title set meanwhile (for example, a rename).
    */
   async generateTitle(sessionId: string, provider?: ChatProvider): Promise<string | null> {
+    this.assertOpen()
+    return this.retain(Promise.resolve().then(() => this.closing ? null : this.generateTitleNow(sessionId, provider)))
+  }
+
+  private async generateTitleNow(sessionId: string, provider?: ChatProvider): Promise<string | null> {
     if (this.naming.has(sessionId)) return null
     this.naming.add(sessionId)
     try {
@@ -416,13 +464,15 @@ export class CommanderService {
               messages: [{ role: 'user', content: `User: ${firstUser.content.slice(0, 2000) || '[shared an image]'}\n\nCommander: ${firstReply.content.slice(0, 2000)}` }],
               maxTokens: 32
             },
-            AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
+            AbortSignal.any([this.shutdownSignal.signal, AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)])
           )
           title = cleanGeneratedTitle(raw)
         } catch (err) {
+          if (this.closing) return null
           console.warn('[Commander] title generation failed, using fallback:', err instanceof Error ? err.message : err)
         }
       }
+      if (this.closing) return null
       if (!title) title = fallbackTitle(firstUser.content || (firstUser.images?.length ? 'Shared an image' : ''))
 
       // A rename while the model was thinking wins.
@@ -453,6 +503,11 @@ export class CommanderService {
    * retried after the next turn.
    */
   async foldHistory(sessionId: string, provider?: ChatProvider): Promise<CommanderMessage | null> {
+    this.assertOpen()
+    return this.retain(Promise.resolve().then(() => this.closing ? null : this.foldHistoryNow(sessionId, provider)))
+  }
+
+  private async foldHistoryNow(sessionId: string, provider?: ChatProvider): Promise<CommanderMessage | null> {
     if (this.folding.has(sessionId)) return null
     this.folding.add(sessionId)
     try {
@@ -471,7 +526,7 @@ export class CommanderService {
       let summary = plan.previousSummary ?? ''
       try {
         const model = provider ?? this.options.createProvider()
-        const signal = AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
+        const signal = AbortSignal.any([this.shutdownSignal.signal, AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)])
         // A large single turn is folded in bounded requests. Intermediate
         // summaries remain local: any failed/empty chunk leaves the durable
         // summary and its cursor untouched, ready for a complete retry.
@@ -493,10 +548,10 @@ export class CommanderService {
         }
       } catch {
         // Provider errors can include credentials, request text or private URLs.
-        this.recordFoldFailure(sessionId, 'summary request failed')
+        if (!this.closing) this.recordFoldFailure(sessionId, 'summary request failed')
         return null
       }
-      if (!this.store.getSession(sessionId)) return null
+      if (this.closing || !this.store.getSession(sessionId)) return null
       const stored = this.store.appendMessage(sessionId, { role: 'summary', content: summary, correlationId: plan.lastFoldedId })
       this.foldFailures.delete(sessionId)
       this.emit({ type: 'messages_appended', sessionId, messages: [stored] })
@@ -515,6 +570,7 @@ export class CommanderService {
   }
 
   private storeReport(input: AppendReportInput, emit = true): { message: CommanderMessage; inserted: boolean } {
+    this.assertOpen()
     const content = input.content?.trim()
     if (!content) throw new Error('Report is empty')
     const messageInput = {
@@ -562,6 +618,7 @@ export class CommanderService {
   }
 
   private relayReport(sessionId: string, projectName: string | null): boolean {
+    if (this.closing) return false
     let provider: ChatProvider
     try {
       provider = this.options.createProvider()
@@ -580,6 +637,7 @@ export class CommanderService {
 
   /** After a turn: relays a report that arrived during it, if the session is still open and idle. */
   private relayPending(sessionId: string): void {
+    if (this.closing) return
     const pending = this.pendingRelay.get(sessionId)
     if (!pending) return
     this.pendingRelay.delete(sessionId)

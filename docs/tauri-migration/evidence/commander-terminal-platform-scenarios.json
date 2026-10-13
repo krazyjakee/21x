@@ -1,0 +1,153 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "97c70543143fd3486cf873a23889ac6a81d3e735",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38384203303",
+  "conclusion": "failure",
+  "scope": "Default standalone suite including terminal, chat and Commander ownership. Linux and both macOS jobs passed. Windows passed 1518 assertions and failed the one real native terminal resize fixture; the input correction alone was insufficient. This matrix predates the secret broker extraction and the raw-input terminal fixture correction. No four-platform terminal acceptance, installed interaction, real provider, production bootstrap or Electron retirement claim.",
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "artifactId": 11807345099,
+      "artifactDigest": "sha256:416081c3afec77e99c0c4105b93956c3d2fc63f33e84c3203ee2ecb6baad8ed4",
+      "portablePassed": 1519,
+      "portableFailed": 0,
+      "portableSkipped": 0,
+      "portableFiles": 100,
+      "portableReportSha256": "a69f3aeb790dc3645ef7fc25150e16e3cb895aadd22f24cc3fede41b5e00d47e",
+      "jobConclusion": "success",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "commander-97c7054-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "commander-97c7054-linux-appimage-x64-connector-worker-service-tests.json",
+          "sha256": "bee851384dcb33af5d592ef67c28a0e3d58f00f9dc7721d82224470124053db6"
+        },
+        "startup-transcript-tests.json": {
+          "report": "commander-97c7054-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "0b5969865544d13cce7ed6bb417f7da3f8757e02dc2948907f937eeaaab3fd32"
+        }
+      },
+      "nativeTerminalResults": [
+        {
+          "ancestorTitles": [
+            "actual staged standalone terminal owner"
+          ],
+          "fullName": "actual staged standalone terminal owner spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+          "status": "passed",
+          "title": "spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+          "duration": 113.73260699999997,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "artifactId": 11806385261,
+      "artifactDigest": "sha256:11590a833fe21bf5be23bf7adfa0825eb1930292194b1fb8d71cc99bf1738cf7",
+      "portablePassed": 1519,
+      "portableFailed": 0,
+      "portableSkipped": 0,
+      "portableFiles": 100,
+      "portableReportSha256": "822e0442438f802a83d5e5ac453e6f38be588e6f5472413d6899f6434fa60fc9",
+      "jobConclusion": "success",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "commander-97c7054-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "commander-97c7054-macos-arm64-connector-worker-service-tests.json",
+          "sha256": "af2976c337163a477447eac02282502b3586f9ff63d77d16389eb04b10182da3"
+        },
+        "startup-transcript-tests.json": {
+          "report": "commander-97c7054-macos-arm64-startup-transcript-tests.json",
+          "sha256": "b2c0ff81d90240a111e2a0cb5a024eb83db7e0af9572191a50856869ffbc22a3"
+        }
+      },
+      "nativeTerminalResults": [
+        {
+          "ancestorTitles": [
+            "actual staged standalone terminal owner"
+          ],
+          "fullName": "actual staged standalone terminal owner spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+          "status": "passed",
+          "title": "spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+          "duration": 119.935292,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ]
+    },
+    {
+      "target": "macos-x64",
+      "artifactId": 11805186501,
+      "artifactDigest": "sha256:2028546dfa277e21765dfa56b5db6db76a9bb309326798c001d4d0b6cd76ea7d",
+      "portablePassed": 1519,
+      "portableFailed": 0,
+      "portableSkipped": 0,
+      "portableFiles": 100,
+      "portableReportSha256": "ba6bfe0c8680f0cd8d732791585616e08da620fe387048a2ae78e368fc8eabbf",
+      "jobConclusion": "success",
+      "retained": {
+        "staged-native-preflight.json": {
+          "report": "commander-97c7054-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "connector-worker-service-tests.json": {
+          "report": "commander-97c7054-macos-x64-connector-worker-service-tests.json",
+          "sha256": "406286ffd8a7c37dfe39227e9e833c294a3de666b1d72d8df0800cb02a2078bb"
+        },
+        "startup-transcript-tests.json": {
+          "report": "commander-97c7054-macos-x64-startup-transcript-tests.json",
+          "sha256": "4cc006e72096c9d90d4de3e45da2660183dd5807c26eb75f9bb08f70ac53678d"
+        }
+      },
+      "nativeTerminalResults": [
+        {
+          "ancestorTitles": [
+            "actual staged standalone terminal owner"
+          ],
+          "fullName": "actual staged standalone terminal owner spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+          "status": "passed",
+          "title": "spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+          "duration": 231.22131599999994,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ]
+    },
+    {
+      "target": "windows-x64",
+      "artifactId": 11806555882,
+      "artifactDigest": "sha256:8dd76a33a1390aa0e6b1e9abd6264e59f0186ea94ae34f93d6d68b67a457dc6d",
+      "portablePassed": 1518,
+      "portableFailed": 1,
+      "portableSkipped": 0,
+      "portableFiles": 100,
+      "portableReportSha256": "0a26e4bc4213e12148116505f78869da8a78800ecd83d92d281de66ffb9f8874",
+      "jobConclusion": "failure",
+      "retained": {},
+      "nativeTerminalResults": [
+        {
+          "ancestorTitles": [
+            "actual staged standalone terminal owner"
+          ],
+          "fullName": "actual staged standalone terminal owner spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+          "status": "failed",
+          "title": "spawns the owning Node fixture, resizes, reattaches, buffers, guards stale kills and joins native exit",
+          "duration": 5215.1027,
+          "failureMessages": [
+            "AssertionError: expected 'FIXTURE_READY\\r\\nsize\\r\\nFIXTURE_SIZE\u2026' to contain 'FIXTURE_SIZE=120x40'\n    at __vite_ssr_import_0__.vi.waitFor.timeout (D:/a/21x/21x/test/tauri-terminal-native.test.ts:52:23)\n    at Timeout.checkCallback (file:///D:/a/21x/21x/node_modules/.pnpm/vitest@4.0.18_@opentelemetry+api@1.9.0_@types+node@25.2.3_happy-dom@20.5.0_jiti@2.6.1_lightni_aa2a7lq7sag3awhocjbwlaeanu/node_modules/vitest/dist/chunks/vi.2VT5v0um.js:3634:20)\n    at listOnTimeout (node:internal/timers:585:17)\n    at processTimers (node:internal/timers:521:7)"
+          ],
+          "meta": {}
+        }
+      ]
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

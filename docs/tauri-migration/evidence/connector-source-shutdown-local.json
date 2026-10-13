@@ -1,0 +1,59 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "a0c74f64b88540011adbaf8bd392db020be3d5cb",
+  "scope": "Working-tree integration of source, bridge/plugin and connector runtime drains into Electron teardown. Refuses source/runtime admission, retains raw work after disposal/deadlines, and joins final DB writes before SQLite close. No Tauri production bootstrap, real provider, live profile or installed production acceptance.",
+  "sourceSha256": {
+    "src/main/connectors/bridge/engine.ts": "31c9acb3cd851726b6c2d6937a0e63827f7b485b73601a69c55b4307fa67bc5a",
+    "src/main/connectors/bridge/engine-lifetime.test.ts": "81ae5462861d0ff96bd5a42f67692691947119f3ecb67ccdbed3a4bc8ba1d367",
+    "src/main/plugins/connector-bridge-plugin.ts": "fab9061c71eb5148edde64c1b46763bf7e0f6566d55309c5a6422cfd6aba1a9b",
+    "src/main/connectors/bridge/bridge.test.ts": "678fd2cb25a36eac91edfeaf8b02802060a09d5b2639d4cc63c9f23071a5a4b3",
+    "src/main/connectors/bridge/runtime.ts": "155e35849358a0aca8f5f1262219699c9f0848ada663a199f5e007d74c03f79e",
+    "src/main/connectors/bridge/runtime-lifetime.test.ts": "1532722e6e7f17897c00f4e31d2af0efa55e5a3694cad70a282fbb72224b9dcc",
+    "src/main/connectors/oauth.ts": "b667e4afadc0a7b6b0e0e8ae032cb07f1835ecd6dd83395168c0b01296bfe8f7",
+    "src/main/sync-manager.ts": "8aaf53451fe9b21f58259bc0ff7042ba2b38af8990b13177c440e09beabaf5d8",
+    "src/main/sync-manager-lifetime.test.ts": "ba52f738726562c6edd86fb28a00db26cfbae5842a09002d59942a0d73fc5662",
+    "src/main/index.ts": "f238818cac9d2f80080ac54ab2449862e381ff985b02b3194551fd6bb64a9cce",
+    "vitest.tauri.config.ts": "f127722847f88212cacc1906ca29897632a1d0263b6f7d35d2165c5298402ffc"
+  },
+  "tests": {
+    "fullApplication": {
+      "passed": 5229,
+      "skipped": 19,
+      "files": 370,
+      "reportSha256": "52f125aaa2f51358f63b053566e64256300b47ba9119509b3afeb581b0476d33"
+    },
+    "standaloneAndService": {
+      "passed": 548,
+      "skipped": 0,
+      "files": 53,
+      "reportSha256": "84c1123144c754e34494f236dbecc621ac16abb072fa31122fed67dcd6c9f400"
+    },
+    "sourceConnectorSubset": {
+      "passed": 109,
+      "skipped": 0,
+      "files": 7,
+      "reportSha256": "225f60666ad5372cb2e03c2cd699ee6a8df65a28e9ac573003d326630c36d0fc"
+    },
+    "sourceFreshnessAfterCoordinateRefresh": {
+      "passed": 17,
+      "skipped": 0,
+      "files": 2,
+      "reportSha256": "1f9f460e28d843a6d9ea6e1bdde2ee05af83731b27d23e5ca07bad3a54084621"
+    }
+  },
+  "newOwnershipCases": {
+    "bridgeEngine": 5,
+    "bridgePlugin": 4,
+    "runtime": 3,
+    "sourceSync": 8
+  },
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "desktopBuild": "passed",
+    "inventoryAndContracts": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

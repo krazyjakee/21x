@@ -1,0 +1,27 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "2ecb3e22",
+  "scope": "Strict command-specific native ACL matcher and failed-package provenance. Existing installed receipts retain their own historical matcher revisions. No new installed acceptance is claimed.",
+  "sourceSha256": {
+    "src-tauri/src/artifact-denial-matcher.js": "b0607f4209fd923829ad3efc7a6d0a95b255a09c0c76abc50936ff3c6f76d68c",
+    "src-tauri/src/artifact-proof.js": "89d8eeed075a661276aaea2a23a09816893af0ef2ae9a30309e1868db27dc058",
+    "src-tauri/src/artifact-frame-proof.js": "d06592a4e3e6169c9f387e0697fb0cd684791be6539c8fc4b5b9db7b7ef20a40",
+    "src-tauri/src/artifact_proof.rs": "dbbb9bb47884a6e83f33b867486c31ea93f12f3040f18322b6e782da0e18e1b1",
+    "scripts/artifact-frame-proof.test.ts": "83fd63ca788f52be313ac0f9ea858e16c31204a113e774422d432ddde0fbefed",
+    "scripts/tauri-packaged-smoke.py": "305580c592a83107bffc6b7259c74d38ff188dbb843d7bc49080c1639205a050",
+    "scripts/tauri-packaged-smoke.test.py": "5c5937c535231cbe8032b48c60a2ce54a485226e76d6a0afa6bedde681e83b85"
+  },
+  "tests": {
+    "frameVmPassed": 14,
+    "packagePolicyProvenancePassed": 21,
+    "nativeArtifactPassed": 3
+  },
+  "checks": {
+    "changedSourceLint": "passed",
+    "nativeCompile": "passed",
+    "rustFormatting": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

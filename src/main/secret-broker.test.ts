@@ -204,10 +204,10 @@ describe('buildWindowsSecretShellScript', () => {
     expect(script).toContain('[Environment]::SetEnvironmentVariable')
   })
 
-  it('escapes backslashes in the debug log path', () => {
-    const script = buildWindowsSecretShellScript('C:\\Users\\test\\debug.log')
+  it('quotes the debug log as a literal PowerShell path', () => {
+    const script = buildWindowsSecretShellScript("C:\\Users\\test's $profile\\debug.log")
 
-    expect(script).toContain('C:\\\\Users\\\\test\\\\debug.log')
+    expect(script).toContain("-LiteralPath 'C:\\Users\\test''s $profile\\debug.log'")
   })
 
   it('clears broker env vars after fetching secrets', () => {

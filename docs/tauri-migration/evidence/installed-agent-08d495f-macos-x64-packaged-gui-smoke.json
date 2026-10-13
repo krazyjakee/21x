@@ -1,0 +1,81 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "developmentFrontend": false,
+    "hostArch": "x86_64",
+    "initialized": true,
+    "profileRoot": "/Users/runner/work/_temp/21x-packaged-bg5nbyus/21x-database-service-34309-1791878420657314000-0",
+    "resourceRoot": "/Users/runner/work/_temp/21x-packaged-bg5nbyus/21x Tauri Feasibility.app/Contents/Resources/resources",
+    "syntheticAgent": true,
+    "syntheticDesktop": true,
+    "syntheticDesktopProof": {
+      "agentCompleted": true,
+      "agentStarted": true,
+      "agentStatusEventObserved": true,
+      "agentTranscriptRehydrated": true,
+      "approvalAccepted": true,
+      "approvalRequested": true,
+      "missingResultPreserved": true,
+      "projectCreated": true,
+      "rehydrated": true,
+      "rendererReloaded": true,
+      "retiredOperationDenied": true,
+      "settingPersisted": true,
+      "staleApprovalDenied": true,
+      "staleEpochDenied": true,
+      "taskCreated": true,
+      "taskEventObserved": true,
+      "taskUpdated": true,
+      "transcriptDeltaRead": true,
+      "transcriptSnapshotRead": true,
+      "updateEventObserved": true
+    },
+    "systemNodeHidden": true,
+    "webviewDefaultRuntime": true,
+    "webviewVersion": "20621.3.11.11.3"
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "unix-process-group-cooperative-parent-loss"
+  },
+  "stage": "complete",
+  "verification": {
+    "packageKind": "dmg",
+    "proofMode": "synthetic-agent",
+    "packageSha256": "2e0f8461d718dc0686b785d924c813e2b4891ca540007f2a3ce4fa72f6dcc28c",
+    "artifact": "21x Tauri Feasibility_0.1.0_x64.dmg",
+    "packagedExecutable": "/Users/runner/work/_temp/21x-packaged-bg5nbyus/21x Tauri Feasibility.app/Contents/MacOS/twentyonex-tauri-feasibility",
+    "smokeCommandSucceeded": true,
+    "ownedNodeContained": true,
+    "ownedRunningProcessesAfterExit": [],
+    "runtimeVersions": {
+      "schemaVersion": 1,
+      "os": {
+        "system": "Darwin",
+        "release": "24.6.0",
+        "version": "Darwin Kernel Version 24.6.0: Tue Jul 21 20:50:07 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_X86_64",
+        "macOS": "15.7.9"
+      },
+      "node": {
+        "nodeVersion": "v22.23.2",
+        "nodeAbi": "127",
+        "platform": "darwin",
+        "arch": "x64"
+      },
+      "webview": {
+        "version": "20621.3.11.11.3",
+        "source": "tauri::webview_version",
+        "defaultRuntime": true
+      }
+    },
+    "packagedResources": true
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-12",
+  "issues": [
+    207,
+    208,
+    210,
+    222
+  ],
+  "scope": "Local scoped transcript overflow, content configuration and raw handler ownership. No installed-platform, live-profile, production parity or acceptance-gate claim.",
+  "source": {
+    "baseCommit": "38f1a1b0250c7ed4fb1d6268b26074399e01ab12",
+    "workingTree": true,
+    "filesSha256": {
+      "src/main/database/manager.ts": "7292fbe1729dadf47ea2c0d57f38578532497f0cd126362b75284a08e6b74f33",
+      "src/main/agent-manager-core.ts": "2a842814227a39cb20747b9abc1e638ea7b7e37c8d853d0ecc8a8d7cc3785c4a",
+      "src/service/transcript-events.ts": "d77ace9f511f664a85e83c418d77148459759ef9ce2d8bc01195b8820179ad68",
+      "src/service/agent-backend.ts": "4f805731787787d01afafa16d6607cc0c56bee665a40626c56003d509f239d02",
+      "src/service/database-backend.ts": "2f89e7dac6ffdb42605f83c4b57843132298ea34f79d931f0f77b953ac90dac4",
+      "src/service/database-service.ts": "8e00306a0c7049c46e85bdc6d7176c47507967a89c9b898cd313c3f3e4bac7c9",
+      "src/service/configuration-backend.ts": "42efdec80e5e8de2743760771fb5530d2b3497035a327c264064fb62da3ecdbd",
+      "src/service/transport/peer.ts": "2b776b988ff859a93a318cf93a67a8807d5164674bee7fc0d20551b1a5b941f4",
+      "src/shared/transcript-page.ts": "77db964521d1d518a022bc9437be458cbb4e37471af8fe59302a39f8159be90b",
+      "src/shared/database-desktop-codecs.ts": "1301a41eaa42001a31430f136e14081fd79b636596426eee8c5af02037b3c928",
+      "src/shared/configuration-desktop-codecs.ts": "9500cb85047e874bf74c4d0992c21fc9e12bb0fcfe18f2fd9e2d869fa09404c4",
+      "src/tauri-spike/task-slice.ts": "34dd1154aaf11d7a0ed049ed724d67c9a0f955bd944dbedc13c90fa3baf9c916",
+      "src/renderer/src/lib/transcript-pagination.ts": "f4a4817a89017e3e7efc6c3944105ad7c49b5903606cccfe9d8d0544ce0d1eb9",
+      "src-tauri/engine/src/lib.rs": "ef77e8a3433f40576607101d5006e7d86159ebb1aa51aa1c362445748509f81b",
+      "src-tauri/engine/src/desktop.rs": "7d7d361e5d331af655526bf3d695a4d2e38f892fb3ef576e3339b8fce2ef63b1",
+      "src-tauri/engine/src/configuration_desktop.rs": "e51edc68156533ef5308d0770a74c338f3c2500c2172d295b03fcb3e7ecabc88",
+      "scripts/configuration-service-proof.mjs": "1dc84647df36b7812d31eb66819c091bd26864d84c22ee2fc14e42a6e9323495",
+      "scripts/transcript-page-proof.mjs": "c9eadc703582b0101816359996e79d9a72226a9f411403428143c1942f79671e",
+      "scripts/database-proof/fixture.ts": "32a06076841f1e5b558813e83d0340f239a9cace21f29850c269addaf5512f02",
+      ".github/workflows/verify.yml": "9df54f0cf425c32ef2885766a99a7b04304de10ef17cb02b966081d7b07a0f09",
+      ".github/workflows/tauri-native-linux.yml": "3271dc7912589ac005c79c1c014f79fbbdf41bec76091e137c76e1b58a6aac45",
+      ".github/workflows/tauri-packaged-platforms.yml": "2047a489bc57da5952b38f39f17339138904c556e3f4e9e2d4568aeded4b2443"
+    }
+  },
+  "environment": {
+    "platform": "linux-x64",
+    "bundledNode": "v22.23.2",
+    "sqlite": "13.0.3",
+    "rust": "1.98.0"
+  },
+  "fullVitest": {
+    "passed": 5148,
+    "failed": 0,
+    "skipped": 4,
+    "files": 363,
+    "passedFiles": 363,
+    "rawReportSha256": "2fef2487d14578aedb6439bf1539190abced17a8bca6253ea4857ec07a893d48",
+    "optInStandaloneProofsEnabled": true
+  },
+  "latestFocusedSuite": {
+    "passed": 67,
+    "files": 7,
+    "protocolCases": 46,
+    "actualDatabaseBindingCases": 6,
+    "bundledServiceProofs": 3,
+    "durableEventCases": 9,
+    "mountedRendererCases": 3
+  },
+  "correctedDatabaseProof": {
+    "passed": true,
+    "credentialFormatCases": 22,
+    "format": "21x-credential:21x.aes256gcm.v1:",
+    "realDecryptTamperMislabelAndReopenChecked": true
+  },
+  "rust": {
+    "unitPassed": 20,
+    "stagedPassed": 6,
+    "hostCompileWithAgentAndArtifactFeatures": "passed"
+  },
+  "actualBundledProofs": {
+    "configuration": {
+      "reportVersion": 1,
+      "passed": true,
+      "actualBundledService": true,
+      "syntheticOnly": true,
+      "phase": "complete",
+      "contentCommands": 18,
+      "commands": [
+        "project:archive",
+        "project:reorder",
+        "project:update",
+        "projectRepo:add",
+        "projectRepo:list",
+        "projectRepo:remove",
+        "projectRepo:reorder",
+        "projectRepo:update",
+        "projectResource:add",
+        "projectResource:list",
+        "projectResource:remove",
+        "projectResource:reorder",
+        "projectResource:update",
+        "skills:create",
+        "skills:delete",
+        "skills:getAll",
+        "skills:setProject",
+        "skills:update"
+      ],
+      "skillConflictsPreserved": true,
+      "invalidReordersRejected": true,
+      "lifecycleFieldsRejected": true,
+      "publicInvalidationsOnly": true,
+      "cancellationBeforeEffects": true,
+      "newEpochAndDurability": true,
+      "acknowledgedServiceExit": true,
+      "syntheticProfileRemoved": true
+    },
+    "transcript": {
+      "reportVersion": 1,
+      "passed": true,
+      "actualBundledService": true,
+      "phase": "complete",
+      "parts": 642,
+      "snapshotPages": 43,
+      "deltaPages": 3,
+      "largestPageBytes": 248188,
+      "pageByteLimit": 262144,
+      "racingUpdatesRecovered": true,
+      "widePayloadsBounded": true,
+      "overflowInvalidations": 21,
+      "boundedLiveInvalidationRecovery": true,
+      "oversizedFieldPreviewOnly": true,
+      "missingTaskAndMalformedRequestsDenied": true,
+      "acknowledgedServiceExit": true,
+      "syntheticProfileRemoved": true
+    },
+    "agent": {
+      "reportVersion": 1,
+      "passed": true,
+      "actualBundledService": true,
+      "phase": "complete",
+      "publicFixtureIdentity": true,
+      "actualApprovalProjection": true,
+      "pendingOwnerSnapshot": true,
+      "approvalAcceptedAndCompleted": true,
+      "staleApprovalAndActiveDeleteDenied": true,
+      "managedTaskDeletionRemainsUnbound": true,
+      "eventCount": 14,
+      "syntheticProfileRemoved": true
+    }
+  },
+  "stagedResourceHashes": {
+    "node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+    "service/database-stdio.mjs": "20e1b61db2d83fd85e6bc4629388808b2c781fa6ef07db7eabb51fad76ee1894",
+    "service/database-engine.mjs": "3097522a37bcef403e5d3815e0cfcde837106c57ea533c91e49befc2a5b66b84"
+  },
+  "preflight": {
+    "sqlite": true,
+    "pty": true,
+    "worker": true,
+    "representativeSdkImportsOnly": true,
+    "nodeAbi": "127"
+  },
+  "checks": {
+    "forcedTypecheck": "passed",
+    "fullLint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "latestChangedSourceLint": "passed",
+    "electronAndMobileBuild": "passed",
+    "isolatedFrontendBuild": "passed",
+    "foundationSubprocessCases": 26,
+    "installedEvidencePolicyCases": 11,
+    "workflowFiles": 3,
+    "workflowShellSteps": 38,
+    "inventoryAndContractFreshness": "passed",
+    "rustFormatting": "passed",
+    "gitDiffCheck": "passed"
+  },
+  "sourceAudit": {
+    "retainedCommands": 259,
+    "retainedEvents": 52,
+    "packagedSyntheticAgentCommands": 38,
+    "missingPackagedCommands": 221,
+    "productionReady": false,
+    "electronRetirementReady": false
+  },
+  "limitations": [
+    "All changes remain local and uncommitted",
+    "No hosted or installed runs for this working tree",
+    "Full production renderer, SDK/host/background parity and live credential/profile cutover remain open",
+    "General stream contracts and installed performance/load/recovery still require evidence"
+  ]
+}

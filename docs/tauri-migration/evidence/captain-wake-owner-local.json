@@ -1,0 +1,93 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Actual portable SQLite/project event bus with fixture Captain send operations. Retained raw delivery, failed-close/retry, stale timer/queued-send cancellation, multi-project delivery and raw rejection handling. No real model, installed production Captain or remaining scheduler parity claim.",
+  "sourceFilesSha256": {
+    "src/main/captain-waker.ts": "8434b10307fa44854b6f0f034977e4ef19c40354c78087776a4d74534ce1099e",
+    "src/main/captain-waker.test.ts": "918196e44f7abc6617ab0843e55f3e642126bfba47ea9114d53a0d73f658a37d",
+    "src/main/captain-waker-lifetime.test.ts": "5ba34cc1a9485215a63ad5c74e0cba08a89d2b39e1da2fc8a612816e026a0a0a",
+    "src/main/index.ts": "4e55bd1b6e1481d11ada8391e65d3c500de8f823c3025b4ad58deaeb15d5d35f",
+    "src/main/platform/profile-migration-rehearsal.test.ts": "730b7fdc8c64989a6e523defb3944e89d2d22387e6fa5325ef859448e1414cd2",
+    "vitest.tauri.config.ts": "eedc0bd8d52ee8989d74963acbabdbcb9a10010574001b2dc0469b3050237e40"
+  },
+  "rehearsalSourceSha256BeforeDeadlineChange": "bc71cd8d5fb9bf3dcf9825ffbafbde588824635820cd14982ebeb57d5e37fd37",
+  "reports": [
+    {
+      "report": "/tmp/21x-captain-owner-full-service.json",
+      "sha256": "bfdab42c2143b9235c7ba2fadd6264b129b84edd50114dc1cf2b799bf018cc68",
+      "passed": 1281,
+      "failed": 0,
+      "skipped": 0,
+      "files": 87,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "Complete portable/private-pipe suite, including final Captain lifetime controls.",
+      "capturedLogSha256": "9eeec357c3ed499e35cd33a2755add49dcf806842e1e608f25cb96359991e889",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-captain-owner-full-legacy.json",
+      "sha256": "f2c55ffdb8ddae01cc1419a5d611dd9f8d34ac0eefc4e5b1f14094d779fa93ef",
+      "passed": 5298,
+      "failed": 1,
+      "skipped": 20,
+      "files": 381,
+      "commandExitCode": 1,
+      "accepted": false,
+      "note": "One actual SQLite/fsync recovery test exceeded default 5000 ms under four workers.",
+      "capturedLogSha256": "078ba255134762e03a7bea7a1b8412e8913f64afdef6b91834caf4217cd832f3",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-captain-owner-checked-legacy.json",
+      "sha256": "0f2948ce270d05d89f73c0baf6fae45db6a75d4461ab50cf998c468f358c826b",
+      "passed": 5296,
+      "failed": 3,
+      "skipped": 20,
+      "files": 381,
+      "commandExitCode": 1,
+      "accepted": false,
+      "note": "Three actual SQLite/fsync cases took 5263, 5555 and 5491 ms under two workers; production assertions unchanged.",
+      "capturedLogSha256": "b9944ce031fa693e4cd785bb115e9f81f6fd16f386fdc9eed3a0a3e0b4cf7263",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-captain-owner-final-legacy.json",
+      "sha256": "e03a6dac6a1dfeaa12e40fdc75851a2da3495fb8ccbcd1cb9b2ac282004b028c",
+      "passed": 5299,
+      "failed": 0,
+      "skipped": 20,
+      "files": 381,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "Four workers; explicit 15000 ms per-test budget only for durable profile-rehearsal suite.",
+      "capturedLogSha256": "e0f656ff22af4e529e8f9313a39c00537f157a17c7612d8ffc9287b7d30847fd",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-captain-owner-focused-final-service.json",
+      "sha256": "ee140fd12402e0f13d44c061c6d2641f6c159b1fcad0fe0bede980a846437a9c",
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "All 19 existing plus five final lifetime tests."
+    }
+  ],
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-captain-owner-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-captain-owner-final-legacy.json"
+  },
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "751feb8aff7d9285760c7b45ad82462b03db5c49e05b0832a1a73a52fd3d605f"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

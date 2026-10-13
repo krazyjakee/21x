@@ -1,0 +1,30 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Existing 23 actual HTTP MCP scope/task/project/visibility regressions run under standalone Node and legacy launcher using portable SQLite. GitHub/model-controller interactions are fixtures; no real provider, remote write, production Tauri native host or live profile claim. Test cleanup joins API ownership before database close.",
+  "sourceFilesSha256": {
+    "src/main/task-mcp-endpoint.test.ts": "d2a3e5d7e1688a5184e0048197af4500e6f5a015073dfc62073466fd6f5d786a",
+    "vitest.tauri.config.ts": "b3957a63ccfc3cc1ff61f6683e3ced2ebc087c1c22ef69725ecfa1ea9266309f"
+  },
+  "reports": [
+    {
+      "command": "pnpm test:tauri -- src/main/task-mcp-endpoint.test.ts",
+      "report": "/tmp/21x-mcp-endpoint-standalone.json",
+      "sha256": "9f3383a0bb48e7f4f618604e584be3ae9fda2f2c66f692ceb9480c4c714404c9",
+      "passed": 23,
+      "skipped": 0,
+      "files": 1
+    },
+    {
+      "command": "pnpm test -- src/main/task-mcp-endpoint.test.ts",
+      "report": "/tmp/21x-mcp-endpoint-legacy.json",
+      "sha256": "e4d59f457eda5855b0b58b29d30f1bc2338628783b8c0ac8d5d58daa1c101f3f",
+      "passed": 23,
+      "skipped": 0,
+      "files": 1
+    }
+  ],
+  "forcedTypecheckPassed": true,
+  "productionReady": false,
+  "electronRetirementReady": false
+}

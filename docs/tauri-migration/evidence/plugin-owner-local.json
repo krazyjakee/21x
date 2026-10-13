@@ -1,0 +1,77 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Portable plugin manager, actual SQLite/resource operations in owned temporary directories and controlled catalog/download/body responses. Covers lifetime, cancellation and top-level name/collision guards; no real marketplace, complete filesystem containment, installed UI or production Tauri binding claim.",
+  "sourceFilesSha256": {
+    "src/main/claude-plugin-manager.ts": "fb24a3ecdd060493e204701d1c79f7602caa2a6205f8cb8012dc8556886d8ce5",
+    "src/main/claude-plugins/sources.ts": "00889958d96249a41f433bd701a48d20b67e418cce89d77e978a074b4639c7b6",
+    "src/main/claude-plugin-manager.test.ts": "497b7ba4e515fb13754e5bcb979996f10f713dd9c0fe261784fe4c627ccc747b",
+    "src/main/claude-plugin-lifetime.test.ts": "e77570a60ce9587d87954dde20eee046aafcbab8c405fdc405a21cad22677e55",
+    "src/main/index.ts": "ba4f2e6df07bb8b9129b367570d1eba9e68c3d3d10986e89a947a6389b45c6ab",
+    "vitest.tauri.config.ts": "9ee943824ca2ea78a4b5522d0e2d39d9ecf96a296fb7bf86414601acbfbb8073"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-plugin-initial-service.json",
+      "sha256": "c9e61ca5d09ac469b959f5b67f46daa85fa652765e4d73272355e4aab92d9157",
+      "passed": 33,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "d999b0d356bd71fda51a83d0ee9371ddc3903d948f4e0f0e323218c8aea613a8",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-plugin-target-service.json",
+      "sha256": "fd8b776ec4088a4c64f7f14d82f694516c47b801353dd4fb7c19b71daa132dd6",
+      "passed": 41,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "6770f2e07d8591907b5a93032019efd49b00d83bf827df11567968e755be3c87",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-plugin-full-service.json",
+      "sha256": "8315dc2784044b1839965a5e1e6c54997b3b0668493ce52f48efc0cd7cab2e68",
+      "passed": 1599,
+      "failed": 0,
+      "skipped": 0,
+      "files": 110,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "74558d047950f5c2f734fc6885033c62e480f29aed6cfe3e85580f8f04e0353c",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-plugin-full-legacy.json",
+      "sha256": "53b54d8daf0e97e0cdcccf59e472a883b47c410e99ded6987f7d825fbdc81438",
+      "passed": 5392,
+      "failed": 0,
+      "skipped": 20,
+      "files": 402,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "f524cf79c8eeb756086b1c65ecc287123af23fd17cc47bdabe02f4e397830943",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "eb821affad9697a964c99e4078c26526bbd0a950811e22f4b6ebc9fabad155f3"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=default --reporter=json --outputFile=/tmp/21x-plugin-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-plugin-full-legacy.json"
+  }
+}

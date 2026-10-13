@@ -2,13 +2,14 @@ import { DatabaseManager, type DatabaseRuntimeOptions, type TranscriptPartInput 
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import {
   DATABASE_COMMAND_CODECS, DATABASE_DESKTOP_EVENTS, DATABASE_DESKTOP_OPERATIONS, DATABASE_EVENT_CODECS,
-  encodeDatabaseTranscriptPart, isDatabaseId, isSyntheticSettingKey,
+  isDatabaseId, isSyntheticSettingKey,
   type DatabaseDesktopEvent, type DatabaseDesktopOperation
 } from '../shared/database-desktop-codecs'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
 import type { DesktopCommandMap } from '../shared/desktop-operations'
 import { DesktopOperationRegistry, type DesktopCallerContext } from './transport/desktop-registry'
 import type { OperationSchema } from './transport/peer'
+import { encodeDurableTranscriptEvent } from './transcript-events'
 
 /** Structural interface supplied by the shared writer-process lifetime lock. */
 export interface DatabaseProfileLock {
@@ -23,6 +24,8 @@ export interface DatabaseBackendOptions {
   canAccessProject: (projectId: string, caller: DesktopCallerContext) => boolean
   canCreateProject: (caller: DesktopCallerContext) => boolean
   canEditSettings: (caller: DesktopCallerContext) => boolean
+  /** Attached service closing state, checked again after authorization yields. */
+  assertOwnerAvailable?: () => void
   /** An attached lifecycle owner must deny deletion while it still owns work. */
   canDeleteTask?: (taskId: string, caller: DesktopCallerContext) => boolean
   emit: (operation: DatabaseDesktopEvent, payload: JsonValue) => void
@@ -86,8 +89,8 @@ export class DatabaseBackend {
     if (!this.database.getTask(input.taskId) || !this.canUseTask(input.taskId, caller, true)) throw new ServiceProtocolError('INVALID_REQUEST')
     const result = this.database.upsertTranscriptParts(input.taskId, input.parts, 'live')
     if (result.changedPartIds.length) {
-      const changed = this.database.getTranscriptDelta(input.taskId, 0).parts.filter(part => result.changedPartIds.includes(part.partId)).map(encodeDatabaseTranscriptPart)
-      this.emit('transcript:changed', { taskId: input.taskId, parts: changed, maxRev: result.maxRev })
+      const changed = result.changedPartIds.map(partId => ({ taskId: input.taskId, partId, rev: this.database.getTranscriptEventPart(input.taskId, partId)!.rev }))
+      this.emit('transcript:changed', encodeDurableTranscriptEvent(this.database, { taskId: input.taskId, parts: changed, maxRev: result.maxRev }))
       const task = this.database.getTask(input.taskId)
       if (task) this.emit('task:updated', { taskId: task.id, updates: this.taskDto(task) })
     }
@@ -96,6 +99,7 @@ export class DatabaseBackend {
 
   private assertAvailable(): void {
     if (this.closed) throw new ServiceProtocolError('DISCONNECTED')
+    this.options.assertOwnerAvailable?.()
     try { this.options.lock.assertHeld() } catch { throw new ServiceProtocolError('DISCONNECTED') }
   }
 
@@ -177,11 +181,13 @@ export class DatabaseBackend {
     this.bind('settings:getAll', () => true, () => Object.fromEntries(Object.entries(db.getAllSettings()).filter(([key]) => isSyntheticSettingKey(key))))
     this.bind('agentSession:getTranscriptSnapshot', ([taskId], caller) => this.canUseTask(taskId, caller), ([taskId, sinceSeq]) => db.getTranscriptParts(taskId, sinceSeq))
     this.bind('agentSession:getTranscriptDelta', ([taskId], caller) => this.canUseTask(taskId, caller), ([taskId, sinceRev]) => db.getTranscriptDelta(taskId, sinceRev))
+    this.bind('agentSession:getTranscriptPage', ([taskId], caller) => !!db.getTask(taskId) && this.canUseTask(taskId, caller), ([taskId, page]) => db.getTranscriptPage(taskId, page))
   }
 }
 
 export function isFixtureTranscriptInput(value: unknown): value is { taskId: string; parts: TranscriptPartInput[] } {
   return isRecord(value) && hasExactKeys(value, ['taskId', 'parts']) && isDatabaseId(value.taskId) && Array.isArray(value.parts) && value.parts.length <= 32 &&
+    new Set(value.parts.map(part => isRecord(part) ? part.id : undefined)).size === value.parts.length &&
     value.parts.every(part => isRecord(part) && hasExactKeys(part, ['id', 'role', 'content'], ['partType', 'tool', 'payload', 'receivedAt']) &&
       typeof part.id === 'string' && part.id.length > 0 && part.id.length <= 512 && !part.id.includes('\0') &&
       ['user', 'assistant', 'system'].includes(part.role as string) && typeof part.content === 'string' && part.content.length <= 16_384 &&

@@ -1,0 +1,131 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Actual portable SQLite Commander and Captain delivery lifetime with fixture model/agent operations, plus application startup-recovery ownership and late SQL. No real model, remote issue write, installed interaction or production Tauri binding claim.",
+  "sourceFilesSha256": {
+    "src/main/commander/commander-service.ts": "91ecf709f69bea5b083638223af837d40532a74dcca210be0c9ed9b9b3299717",
+    "src/main/commander/captain-delivery.ts": "f82fb57f33050baae179ec04b218bd11268122b5100cf900945bf9329c30c34f",
+    "src/main/commander/commander-service.test.ts": "6d417fb8cc68eafd820145fb9afb07446ff2ffe5e982a31ba9ed536e8bd454f1",
+    "src/main/commander/captain-delivery.test.ts": "e615dd4dd704e60c9f0c5e2de51772edca8e49cabc192dfe85e42de0917c68e9",
+    "src/main/commander/commander-lifetime.test.ts": "4c6b1236cc4e14287e4388e240f378b408d3749053a37c924bd7a205f5a279cc",
+    "src/main/ipc/commander.ts": "a49cc1654acb4a4eda47691fdc63b6ce5f72672b8dd95cf6b6a7b2ba8dd84b9b",
+    "src/main/ipc/commander-lifetime.test.ts": "05af29807bc8cf0e8685840300e1d4a394aeacab68bc040313581afcc2ce67f2",
+    "src/main/index.ts": "891128973d543e306480f86b8b605248a607d453d7c222b4988cdc96e67d8b1b",
+    "vitest.tauri.config.ts": "d5a2078fd51dc72ba8b8bae501d540126ca6dd32be7c66137750b5a4d9754f1c",
+    "test/tauri-terminal-native.test.ts": "3d8909e74a6d1972f68ebba88e5d4cf085020233f6fa4ce3e22fa77bddb373e5"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-commander-initial-service.json",
+      "sha256": "c60e5963c0dcb8bb37168d87902b5a060bff5f5b94aba6aba8d2219981fc019c",
+      "passed": 49,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "56baf25f027e251635943c2bbb47d0fb30cd575ca55c8ff174f158fb36316cbd",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-commander-lifetime-service.json",
+      "sha256": "fbb8f66047aa8443177ec4f2c3a3873931fee2f5af74771c9abe2c6d8803de71",
+      "passed": 6,
+      "failed": 1,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 1,
+      "accepted": false,
+      "capturedLogSha256": "637a356c1c16966d002d7702dd1eac03eefab13f64d571bd29414c2eb8a4044b",
+      "unhandledErrorsReported": false,
+      "note": "Title lifetime fixture wrote an ISO string into a numeric-millisecond timestamp field, so the provider path did not run. Corrected fixture uses a numeric timestamp; failed run is not accepted."
+    },
+    {
+      "report": "/tmp/21x-commander-host.json",
+      "sha256": "ecd6de3a20e07e06b71caf1e99a0fbcbc706a54c0dfe2c0b455868d21748af9a",
+      "passed": 26,
+      "failed": 1,
+      "skipped": 0,
+      "files": 3,
+      "commandExitCode": 1,
+      "accepted": false,
+      "capturedLogSha256": "2770906dc7f82d4d92624028f757dbc00b15652c58553fcc94270ae1cf15e2f8",
+      "unhandledErrorsReported": false,
+      "note": "Title lifetime fixture wrote an ISO string into a numeric-millisecond timestamp field, so the provider path did not run. Corrected fixture uses a numeric timestamp; failed run is not accepted."
+    },
+    {
+      "report": "/tmp/21x-commander-final-service.json",
+      "sha256": "cd046121ed3bd29928d38b3e092b7001e392807e012dc0a7b7964e1bd6457210",
+      "passed": 56,
+      "failed": 0,
+      "skipped": 0,
+      "files": 3,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "657c2919f64c73e955d3f4c2b89f7e474d97fe6fe49318784dfcf73fbcfd258e",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-commander-final-host.json",
+      "sha256": "d9ecb810ebd2869e16d9775c1204713e718f233608b25353affa37e84dd6f8fa",
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0,
+      "files": 3,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "f77fc9eb7fa57319d0e29513a50d8d1e2a4bf6dbdc742a423eebba185e560416",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-commander-full-service.json",
+      "sha256": "6d7620e45c7724a20e1d31626962961d5984ffb84dd3541f74f54c0609fc81b9",
+      "passed": 1528,
+      "failed": 0,
+      "skipped": 0,
+      "files": 104,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "d7c46494718e1999df1134cb708d477d353510c2de9f444db465a186f3f9baaf",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-commander-full-legacy.json",
+      "sha256": "922e50e7fe206069b206e7535488f05695676768293f3e2a3be9fc91d6ccea69",
+      "passed": 5359,
+      "failed": 0,
+      "skipped": 20,
+      "files": 396,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "afdfff344c42119882855ae84dbe26c1808729b385c40acd9cce4bc1433a4a10",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-terminal-native-platform-fixture.json",
+      "sha256": "7ce831f523baba4a242341555df629831e1eecc1c3ecd35033d04d10d4b0b663",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1,
+      "commandExitCode": 0,
+      "accepted": true,
+      "note": "Final local native fixture refinement uses canonical temp path, terminal Enter (CR), and normalized ConPTY text comparison. Windows/Mac acceptance still requires hosted retry."
+    }
+  ],
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-commander-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-commander-full-legacy.json"
+  },
+  "fullSuitesBeforeFinalNativeFixturePathAndInputRefinement": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "0a1212873477c2ed0568378082f859de171bbc6b03802fffa92962867c6f071b"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "forcedTypecheckPassed": true
+}

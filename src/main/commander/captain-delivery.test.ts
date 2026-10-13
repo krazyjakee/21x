@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import { CaptainDeliveryService, correlationForDeliveryKey } from './captain-delivery'
 
 describe('CaptainDeliveryService', () => {

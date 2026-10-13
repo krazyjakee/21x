@@ -1,0 +1,43 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "144fab38cf5a5cbdd0a415131f68e0c92de87a27",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38351070116",
+  "conclusion": "success",
+  "target": "windows-x64",
+  "scope": "Installed isolated NSIS artifact policy v3; real native valid-origin child ACL controls and separate opaque-origin parser rejection. Synthetic diagnostic only.",
+  "artifactId": 11790573776,
+  "artifactDigest": "0bb9fed703203ce3e3a5820aa7e7c51e1dde0e7249ca1a2dacb66cd462ce3556",
+  "packageSha256": "c1b19362cfca8caa69e1c78a981992d58a8aeaee73b7d1e4466b248556fc5de0",
+  "runtimeVersions": {
+    "schemaVersion": 1,
+    "os": {
+      "system": "Windows",
+      "release": "10",
+      "version": "10.0.20348"
+    },
+    "node": {
+      "nodeVersion": "v22.23.2",
+      "nodeAbi": "127",
+      "platform": "win32",
+      "arch": "x64"
+    },
+    "webview": {
+      "version": "131.0.2903.86",
+      "source": "tauri::webview_version",
+      "defaultRuntime": true
+    }
+  },
+  "retained": {
+    "packaged-gui-smoke.json": {
+      "report": "installed-artifact-144fab3-windows-x64-v3-packaged-gui-smoke.json",
+      "sha256": "25c03d62c3f8a0cbb1a4d3e76802679503f601460632b70a3b7551c6af1f4c00"
+    },
+    "package-provenance.json": {
+      "report": "installed-artifact-144fab3-windows-x64-v3-package-provenance.json",
+      "sha256": "4ca5e9b318380600c3ea31cc0613be0533786e62d53b68bd8e40dacc9ba8900d"
+    }
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

@@ -1,0 +1,41 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "b995a2fcd2751e386bf7660cd1aaa2f5a358d50f",
+  "scope": "Working-tree version-2 artifact diagnostic: actual direct requests are required when the sandbox frame has injected APIs. Actual Windows direct authorization remains unproven until its installed retry.",
+  "sourceSha256": {
+    "src-tauri/src/artifact_proof.rs": "c8084f6df8f7ce42ce4b1369df1ce532446a780b87db657c7c74c20519cb4443",
+    "src-tauri/src/artifact-proof.js": "5b5f85164ae7ede903770957b46652caef25576ab7ddc7a3155e0ba5d7c72130",
+    "src-tauri/src/artifact-frame-proof.js": "376e0bb5b73f121251fdbdef5fde023814e0e316be4bff1915bd00b4c4f669e5",
+    "scripts/artifact-frame-proof.test.ts": "c3507181f62d2ac3d4bd2beef927d204e2d1be025e98ce80f3240066742a813b",
+    "scripts/tauri-packaged-smoke.py": "8f69b8a427910f80eb72c4065b4b953bd9075d9e3d6464db3ec895f141dc4d42",
+    "scripts/tauri-packaged-smoke.test.py": "71e5b2ea468bcc3cd1c7d03cde272baf8877805c662e269b2be613aa22dba233",
+    "vitest.tauri.config.ts": "bd87cadfd587b29a85070deeb8bfe2eedfb02a43eec29087f500a62bd8eb0a36"
+  },
+  "originalWindowsFailure": {
+    "run": "https://github.com/krazyjakee/21x/actions/runs/38330478104",
+    "frameBridgeAbsent": false,
+    "excludedWindowNativeDenialsPassed": true,
+    "parentAccessAndRelayDenialsPassed": true,
+    "normalShutdownPassed": true
+  },
+  "standaloneTests": {
+    "passed": 486,
+    "skipped": 0,
+    "files": 46,
+    "reportSha256": "454f06b710d8be7f217e87445b2b81dafb9a2342d08142c2a4ee856bff564c1d"
+  },
+  "actualScriptVmCases": 6,
+  "pythonEvidencePolicyCases": 15,
+  "nativeBinaryUnitCases": 3,
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "nativeFormatting": "passed",
+    "javascriptSyntax": "passed",
+    "diffWhitespace": "passed"
+  },
+  "sameMainIframeIsolationProven": false,
+  "productionReady": false,
+  "electronRetirementReady": false
+}

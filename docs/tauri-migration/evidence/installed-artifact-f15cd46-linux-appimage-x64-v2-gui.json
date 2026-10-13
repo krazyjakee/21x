@@ -1,0 +1,109 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "artifactAuthorizationProof": {
+      "artifactWindowClosed": true,
+      "artifactWindowCreated": true,
+      "boundary": "separate-webview",
+      "defaultMainCspUnchanged": true,
+      "excludedDocumentReady": true,
+      "excludedPageFinished": true,
+      "excludedSameAppOrigin": true,
+      "excludedScriptSubmitted": true,
+      "frameNativeAttemptMethod": "parent-relay-and-conditional-direct-frame",
+      "mainPositiveControls": {
+        "complete": true,
+        "desktopAccepted": true,
+        "eventReceived": false,
+        "listenAccepted": true,
+        "phase": "main",
+        "statusAccepted": true,
+        "transportAvailable": true
+      },
+      "mainReceivedTargetedServiceEvent": true,
+      "navigation": {
+        "allowed": 3,
+        "denied": 0,
+        "lastClass": "fixed-artifact",
+        "observed": 3
+      },
+      "passed": true,
+      "policyVersion": 2,
+      "sameLocalOriginExcludedWebview": {
+        "attempt": "listen",
+        "complete": true,
+        "desktopDenied": true,
+        "listenDenied": true,
+        "phase": "excluded",
+        "statusDenied": true,
+        "transportAvailable": true
+      },
+      "sameMainIframeIsolationProven": false,
+      "sandboxedArtifactFrame": {
+        "attempt": "listen",
+        "complete": true,
+        "directAccepted": false,
+        "directAttempted": false,
+        "directDeadlineReached": false,
+        "directDesktopDenied": false,
+        "directListenDenied": false,
+        "directStatusDenied": false,
+        "directUnrecognizedFailure": false,
+        "frameBridgeAbsent": true,
+        "frameLoaded": true,
+        "parentAccessDenied": true,
+        "parentGlobalDenied": true,
+        "phase": "frame",
+        "relayDesktopDenied": true,
+        "relayListenDenied": true,
+        "relayStatusDenied": true,
+        "transportAvailable": true
+      }
+    },
+    "developmentFrontend": false,
+    "hostArch": "x86_64",
+    "initialized": true,
+    "profileRoot": "/home/runner/work/_temp/21x-packaged-20j6jvev/21x-database-service-13950-1791858670203816626-0",
+    "resourceRoot": "/home/runner/work/_temp/21x-packaged-20j6jvev/squashfs-root/usr/lib/21x Tauri Feasibility/resources",
+    "syntheticAgent": false,
+    "syntheticDesktop": true,
+    "syntheticDesktopProof": {
+      "missingResultPreserved": true,
+      "projectCreated": true,
+      "rehydrated": true,
+      "rendererReloaded": true,
+      "retiredOperationDenied": true,
+      "settingPersisted": true,
+      "staleEpochDenied": true,
+      "taskCreated": true,
+      "taskEventObserved": true,
+      "taskUpdated": true,
+      "transcriptDeltaRead": true,
+      "transcriptSnapshotRead": true,
+      "updateEventObserved": true
+    },
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "unix-process-group-linux-parent-death-signal"
+  },
+  "stage": "complete",
+  "verification": {
+    "packageKind": "appimage",
+    "proofMode": "artifact-authorization-proof",
+    "packageSha256": "05d0116bef1832ecf7a63ba5914b29b19c4cc7ee53896d0d757fa7ddd7500f32",
+    "artifact": "21x Tauri Feasibility_0.1.0_amd64.AppImage",
+    "packagedExecutable": "/home/runner/work/_temp/21x-packaged-20j6jvev/squashfs-root/usr/bin/twentyonex-tauri-feasibility",
+    "packagedResources": true,
+    "ownedRunningProcessesAfterExit": []
+  }
+}

@@ -39,6 +39,16 @@ interface GitHubContentEntry {
   download_url: string | null
 }
 
+async function fetchSource(url: string, signal?: AbortSignal, headers?: Record<string, string>): Promise<Response> {
+  signal?.throwIfAborted()
+  const response = await fetch(url, { signal, headers })
+  if (signal?.aborted) {
+    await response.body?.cancel()
+    signal.throwIfAborted()
+  }
+  return response
+}
+
 const stripDotSlash = (p: string): string => p.replace(/^\.\//, '')
 
 /** Splits "owner/repo#ref" into repo path and branch (default "main"). */
@@ -47,30 +57,33 @@ function parseRepoSlug(slug: string): { repoPath: string; branch: string } {
   return { repoPath, branch: ref || 'main' }
 }
 
-export async function fetchCatalogFromSource(source: MarketplaceSourceRecord): Promise<MarketplaceCatalog | null> {
+export async function fetchCatalogFromSource(source: MarketplaceSourceRecord, signal?: AbortSignal): Promise<MarketplaceCatalog | null> {
+  signal?.throwIfAborted()
   const { source_type, source_url } = source
-  if (source_type === 'github') return fetchGitHubCatalog(source_url)
-  if (source_type === 'url') return fetchJson(source_url)
+  if (source_type === 'github') return fetchGitHubCatalog(source_url, signal)
+  if (source_type === 'url') return fetchJson(source_url, signal)
   if (source_type === 'local') return readLocalCatalog(source_url)
   return null
 }
 
-async function fetchJson(url: string): Promise<MarketplaceCatalog> {
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
+async function fetchJson(url: string, signal?: AbortSignal): Promise<MarketplaceCatalog> {
+  const response = await fetchSource(url, signal)
+  if (!response.ok) { await response.body?.cancel(); throw new Error(`Failed to fetch: ${response.status}`) }
   return (await response.json()) as MarketplaceCatalog
 }
 
-async function fetchGitHubCatalog(repoSlug: string): Promise<MarketplaceCatalog | null> {
+async function fetchGitHubCatalog(repoSlug: string, signal?: AbortSignal): Promise<MarketplaceCatalog | null> {
   const { repoPath, branch } = parseRepoSlug(repoSlug)
   const url = `https://raw.githubusercontent.com/${repoPath}/${branch}/.claude-plugin/marketplace.json`
 
-  const response = await fetch(url)
+  const response = await fetchSource(url, signal)
   if (!response.ok) {
+    await response.body?.cancel()
     // Repos whose default branch isn't "main" (e.g. "master") still resolve via HEAD
     if (branch === 'main') {
-      const fallback = await fetch(`https://raw.githubusercontent.com/${repoPath}/HEAD/.claude-plugin/marketplace.json`)
+      const fallback = await fetchSource(`https://raw.githubusercontent.com/${repoPath}/HEAD/.claude-plugin/marketplace.json`, signal)
       if (fallback.ok) return (await fallback.json()) as MarketplaceCatalog
+      await fallback.body?.cancel()
     }
     throw new Error(`Failed to fetch marketplace.json: ${response.status}`)
   }
@@ -93,21 +106,23 @@ export async function downloadPluginFiles(
   pluginName: string,
   source: ClaudePluginSource,
   marketplaceSource?: MarketplaceSourceRecord,
-  pluginRoot?: string
+  pluginRoot?: string,
+  signal?: AbortSignal
 ): Promise<string> {
+  signal?.throwIfAborted()
   const pluginDir = join(pluginsDir, pluginName)
   mkdirSync(pluginDir, { recursive: true })
 
   if (source.source === 'github' && source.repo) {
-    await downloadFromGitHub(source.repo, source.ref || 'main', source.path || '', pluginDir)
+    await downloadFromGitHub(source.repo, source.ref || 'main', source.path || '', pluginDir, signal)
   } else if (source.path && marketplaceSource?.source_type === 'github') {
     // Relative path within the marketplace's own repo
     const { repoPath, branch } = parseRepoSlug(marketplaceSource.source_url)
     let remotePath = stripDotSlash(source.path)
     if (pluginRoot) remotePath = `${stripDotSlash(pluginRoot)}/${remotePath}`
-    await downloadFromGitHub(repoPath, branch, remotePath, pluginDir)
+    await downloadFromGitHub(repoPath, branch, remotePath, pluginDir, signal)
   } else if (source.url) {
-    await downloadFromUrl(source.url, pluginDir)
+    await downloadFromUrl(source.url, pluginDir, signal)
   } else if (source.path && marketplaceSource?.source_type === 'local') {
     copyFromLocal(marketplaceSource.source_url, source.path, pluginRoot, pluginDir)
   }
@@ -115,9 +130,13 @@ export async function downloadPluginFiles(
   return pluginDir
 }
 
-async function downloadToFile(url: string, localPath: string): Promise<void> {
-  const response = await fetch(url)
-  if (response.ok) writeFileSync(localPath, await response.text(), 'utf-8')
+async function downloadToFile(url: string, localPath: string, signal?: AbortSignal): Promise<void> {
+  const response = await fetchSource(url, signal)
+  if (response.ok) {
+    const body = await response.text()
+    signal?.throwIfAborted()
+    writeFileSync(localPath, body, 'utf-8')
+  } else { await response.body?.cancel() }
 }
 
 /** Recursively downloads a repo directory via the GitHub Contents API. */
@@ -125,13 +144,16 @@ async function downloadFromGitHub(
   repoPath: string,
   branch: string,
   remotePath: string,
-  localDir: string
+  localDir: string,
+  signal?: AbortSignal
 ): Promise<void> {
+  signal?.throwIfAborted()
   const apiUrl = `https://api.github.com/repos/${repoPath}/contents/${remotePath}?ref=${branch}`
 
   try {
-    const response = await fetch(apiUrl, { headers: { Accept: 'application/vnd.github.v3+json' } })
+    const response = await fetchSource(apiUrl, signal, { Accept: 'application/vnd.github.v3+json' })
     if (!response.ok) {
+      await response.body?.cancel()
       if (response.status === 404) {
         console.warn(`[ClaudePluginManager] Path not found on GitHub: ${remotePath}`)
         return
@@ -140,22 +162,25 @@ async function downloadFromGitHub(
     }
 
     const data = await response.json()
+    signal?.throwIfAborted()
     if (Array.isArray(data)) {
       for (const entry of data as GitHubContentEntry[]) {
+        signal?.throwIfAborted()
         if (entry.type === 'file' && entry.download_url) {
-          await downloadToFile(entry.download_url, join(localDir, entry.name))
+          await downloadToFile(entry.download_url, join(localDir, entry.name), signal)
         } else if (entry.type === 'dir') {
           const subDir = join(localDir, entry.name)
           mkdirSync(subDir, { recursive: true })
-          await downloadFromGitHub(repoPath, branch, `${remotePath}/${entry.name}`, subDir)
+          await downloadFromGitHub(repoPath, branch, `${remotePath}/${entry.name}`, subDir, signal)
         }
       }
     } else if (data.type === 'file' && data.download_url) {
-      await downloadToFile(data.download_url, join(localDir, remotePath.split('/').pop() || 'file'))
+      await downloadToFile(data.download_url, join(localDir, remotePath.split('/').pop() || 'file'), signal)
     }
-  } catch (err) {
-    console.error(`[ClaudePluginManager] Failed to download from GitHub (${repoPath}/${remotePath}):`, err)
-    await downloadKnownFilesRaw(repoPath, branch, remotePath, localDir)
+  } catch {
+    signal?.throwIfAborted()
+    console.error('[ClaudePluginManager] Failed to download from GitHub')
+    await downloadKnownFilesRaw(repoPath, branch, remotePath, localDir, signal)
   }
 }
 
@@ -167,49 +192,60 @@ async function downloadKnownFilesRaw(
   repoPath: string,
   branch: string,
   remotePath: string,
-  localDir: string
+  localDir: string,
+  signal?: AbortSignal
 ): Promise<void> {
+  signal?.throwIfAborted()
   const baseUrl = `https://raw.githubusercontent.com/${repoPath}/${branch}/${remotePath}`
 
   for (const file of ['plugin.json', '.mcp.json', 'CLAUDE.md']) {
     try {
-      await downloadToFile(`${baseUrl}/${file}`, join(localDir, file))
+      await downloadToFile(`${baseUrl}/${file}`, join(localDir, file), signal)
     } catch {
+      signal?.throwIfAborted()
       // Missing files are expected
     }
   }
 
   for (const dir of ['skills', 'commands']) {
     try {
-      const response = await fetch(`${baseUrl}/${dir}/`)
+      const response = await fetchSource(`${baseUrl}/${dir}/`, signal)
+      await response.body?.cancel()
+      signal?.throwIfAborted()
       if (response.ok) mkdirSync(join(localDir, dir), { recursive: true })
     } catch {
+      signal?.throwIfAborted()
       // Missing dirs are expected
     }
   }
 }
 
-async function downloadFromUrl(url: string, localDir: string): Promise<void> {
+async function downloadFromUrl(url: string, localDir: string, signal?: AbortSignal): Promise<void> {
   try {
-    const response = await fetch(url)
-    if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
+    const response = await fetchSource(url, signal)
+    if (!response.ok) { await response.body?.cancel(); throw new Error(`Failed to fetch: ${response.status}`) }
 
     const contentType = response.headers.get('content-type') || ''
     if (contentType.includes('application/json') || url.endsWith('.json')) {
-      writeFileSync(join(localDir, url.split('/').pop() || 'plugin.json'), await response.text(), 'utf-8')
+      const body = await response.text()
+      signal?.throwIfAborted()
+      writeFileSync(join(localDir, url.split('/').pop() || 'plugin.json'), body, 'utf-8')
     } else {
       // Archives (tarball/zip) are saved as-is; extraction is not supported
       const buffer = Buffer.from(await response.arrayBuffer())
+      signal?.throwIfAborted()
       writeFileSync(join(localDir, url.split('/').pop() || 'plugin-archive'), buffer)
     }
-  } catch (err) {
-    console.warn(`[ClaudePluginManager] Failed to download from URL ${url}:`, err)
+  } catch {
+    signal?.throwIfAborted()
+    console.warn('[ClaudePluginManager] Failed to download from URL')
   }
 
   if (!url.endsWith('plugin.json')) {
     try {
-      await downloadToFile(`${url.replace(/\/[^/]*$/, '')}/plugin.json`, join(localDir, 'plugin.json'))
+      await downloadToFile(`${url.replace(/\/[^/]*$/, '')}/plugin.json`, join(localDir, 'plugin.json'), signal)
     } catch {
+      signal?.throwIfAborted()
       // plugin.json alongside the URL is optional
     }
   }

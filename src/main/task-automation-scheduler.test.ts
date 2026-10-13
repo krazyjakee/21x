@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { makeTask, makeAgent } from '../../test/helpers/task-fixtures'
 import { TaskAutomationScheduler } from './task-automation-scheduler'
 import { TaskStatus } from '../shared/constants'
@@ -26,6 +26,8 @@ function mockAgentManager(overrides: Record<string, unknown> = {}): AgentManager
 beforeEach(() => {
   ;({ db } = createTestDb())
 })
+
+afterEach(() => db.db.close())
 
 // ── Auto-start ──────────────────────────────────────────────
 

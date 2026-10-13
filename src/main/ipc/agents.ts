@@ -1,6 +1,7 @@
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES, measureIpcMessage } from '../ipc-message-size'
 import { transcriptDisplayPart } from '../transcript-display'
+import type { TranscriptPageRequest } from '../../shared/transcript-page'
 import { ipcMain } from 'electron'
 import type { CreateAgentData, UpdateAgentData } from '../database'
 import type { IpcDeps } from './deps'
@@ -115,6 +116,7 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     if (measureIpcMessage(result, MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES).reason) throw new Error('Transcript delta is too large to display')
     return result
   })
+  ipcMain.handle('agentSession:getTranscriptPage', (_, taskId: string, page: TranscriptPageRequest) => db.getTranscriptPage(taskId, page))
 
   ipcMain.handle('agentConfig:getProviders', async (_, serverUrl?: string, backendType?: string) => {
     const result = await agentManager.getProviders(serverUrl, undefined, backendType)

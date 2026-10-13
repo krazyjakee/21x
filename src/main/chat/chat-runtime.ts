@@ -82,6 +82,8 @@ function clampToolLimit(requested: number | undefined): number {
 
 export class ChatRuntime {
   private readonly turns = new Map<string, AbortController>()
+  private readonly work = new Set<Promise<ChatTurnResult>>()
+  private closing = false
 
   /** Turn ids currently running. */
   get activeTurnIds(): string[] {
@@ -89,6 +91,7 @@ export class ChatRuntime {
   }
 
   startTurn(options: ChatTurnOptions, listener: ChatEventListener): ChatTurnHandle {
+    if (this.closing) throw new Error('CHAT_RUNTIME_CLOSED')
     const turnId = createId()
     const controller = new AbortController()
     const forward = (): void => controller.abort()
@@ -106,6 +109,8 @@ export class ChatRuntime {
         this.turns.delete(turnId)
         options.signal?.removeEventListener('abort', forward)
       })
+    this.work.add(done)
+    void done.finally(() => this.work.delete(done)).catch(() => {})
     return { turnId, done, cancel: () => controller.abort() }
   }
 
@@ -121,6 +126,24 @@ export class ChatRuntime {
     for (const controller of this.turns.values()) controller.abort()
   }
 
+  shutdown(): void {
+    this.closing = true
+    this.cancelAll()
+  }
+
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Chat shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.shutdown()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('CHAT_SHUTDOWN_INCOMPLETE')), timeoutMs)
+    })
+    try { await Promise.race([Promise.allSettled([...this.work]), expired]) }
+    finally { if (timer) clearTimeout(timer) }
+  }
+
   private async run(
     turnId: string,
     options: ChatTurnOptions,
@@ -134,6 +157,7 @@ export class ChatRuntime {
       : error instanceof Error ? error.message : String(error)
     const usage: ChatUsage = { inputTokens: 0, outputTokens: 0 }
     const emit = (event: ChatRuntimeEvent): void => {
+      if (this.closing) return
       try {
         listener(event)
       } catch (err) {
@@ -181,6 +205,7 @@ export class ChatRuntime {
           signal
         )
         for await (const event of stream) {
+          signal.throwIfAborted()
           if (event.type === 'text_delta') {
             currentText += event.text
             emit(event)
@@ -195,6 +220,7 @@ export class ChatRuntime {
           }
         }
 
+        signal.throwIfAborted()
         messages.push({ role: 'assistant', content: currentText, ...(currentCalls.length > 0 ? { toolCalls: currentCalls } : {}) })
         currentText = ''
         const calls = currentCalls
@@ -227,6 +253,7 @@ export class ChatRuntime {
             toolCallsUsed++
             result = await runTool(toolsByName.get(call.name), call.name, call.input, { signal, toolCallId: call.id })
           }
+          signal.throwIfAborted()
           const isError = result.isError === true
           emit({ type: 'tool_call_result', id: call.id, name: call.name, content: result.content, isError })
           messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: result.content, isError })

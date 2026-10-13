@@ -1,0 +1,246 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "08d495f0479d4e91826e3d22b1c1441112320c5d",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38364229676",
+  "conclusion": "success",
+  "scope": "Installed isolated diagnostic agent: exact 20 receipts (13 desktop plus 7 agent), pending approval reload, current/stale handling, durable output, native close and no surviving owned Node. Separate actual-owner service controls retain duplicate/reject/stop handling. No production provider, full renderer or release signing claim.",
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "artifactId": 11798467432,
+      "artifactDigest": "sha256:3bac9eac59e52fd8581ea7476e9363726080ec7180250b2a63dab81777221870",
+      "retained": {
+        "agent-desktop-proof.json": {
+          "report": "installed-agent-08d495f-linux-appimage-x64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "agent-service-proof.json": {
+          "report": "installed-agent-08d495f-linux-appimage-x64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "staged-native-preflight.json": {
+          "report": "installed-agent-08d495f-linux-appimage-x64-staged-native-preflight.json",
+          "sha256": "13d108216a5d0c021440b12090543c3e509c3a232ecb3ff68632ba9542e7c8d8"
+        },
+        "startup-transcript-tests.json": {
+          "report": "installed-agent-08d495f-linux-appimage-x64-startup-transcript-tests.json",
+          "sha256": "8e675b8139b815dd6c74c679243dd4d5b220be49d6a866b4636870f0817bd48b"
+        },
+        "packaged-gui-smoke.json": {
+          "report": "installed-agent-08d495f-linux-appimage-x64-packaged-gui-smoke.json",
+          "sha256": "80f0bf69487a4a0a6acd581070948be2450635d253fa7d6b2cc7f0a44ac3a1d9"
+        },
+        "package-provenance.json": {
+          "report": "installed-agent-08d495f-linux-appimage-x64-package-provenance.json",
+          "sha256": "03a81199bda8b445bea9f256b9737c054480f2185a7c7478438b925b3146bac0"
+        }
+      },
+      "portablePassed": 1137,
+      "portableSkipped": 0,
+      "portableFiles": 76,
+      "portableReportSha256": "d126a4e3b5364a1f327306c111538afc676d5ef6b957671de716fc589db5afc0",
+      "packageSha256": "556ca75de87182e122b59393595d420d1acc6d7aab304732415d4a84815f5ca9",
+      "runtimeVersions": {
+        "schemaVersion": 1,
+        "os": {
+          "system": "Linux",
+          "release": "6.17.0-1022-azure",
+          "version": "#22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026",
+          "distribution": {
+            "VERSION_ID": "24.04",
+            "ID": "ubuntu"
+          },
+          "libc": [
+            "glibc",
+            "2.39"
+          ]
+        },
+        "node": {
+          "nodeVersion": "v22.23.2",
+          "nodeAbi": "127",
+          "platform": "linux",
+          "arch": "x64"
+        },
+        "webview": {
+          "version": "2.52.6",
+          "source": "tauri::webview_version",
+          "defaultRuntime": true
+        }
+      },
+      "exactAgentReceipts": 20
+    },
+    {
+      "target": "macos-arm64",
+      "artifactId": 11797571073,
+      "artifactDigest": "sha256:3761c683cdf246e4f6d9f0d3ef61fdb0133cbf604f56c4ac2aaa4819774f9916",
+      "retained": {
+        "agent-desktop-proof.json": {
+          "report": "installed-agent-08d495f-macos-arm64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "agent-service-proof.json": {
+          "report": "installed-agent-08d495f-macos-arm64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "staged-native-preflight.json": {
+          "report": "installed-agent-08d495f-macos-arm64-staged-native-preflight.json",
+          "sha256": "c0d5144e471428f2fb8f4b9ac2a1b6daa02b8f67e6090807217183955db7f93a"
+        },
+        "startup-transcript-tests.json": {
+          "report": "installed-agent-08d495f-macos-arm64-startup-transcript-tests.json",
+          "sha256": "a66dde901882020be628157658cd1bcce80686343a007429487db7a9e48ebe55"
+        },
+        "packaged-gui-smoke.json": {
+          "report": "installed-agent-08d495f-macos-arm64-packaged-gui-smoke.json",
+          "sha256": "381890ead59136387385f381374fad0a0f3eb595d306443af652fe88675bcd33"
+        },
+        "package-provenance.json": {
+          "report": "installed-agent-08d495f-macos-arm64-package-provenance.json",
+          "sha256": "05e2ff2743607014a3aa13b29663952c05c219bb1dfb0fb1620a828894ee7600"
+        }
+      },
+      "portablePassed": 1137,
+      "portableSkipped": 0,
+      "portableFiles": 76,
+      "portableReportSha256": "5bdad64ed4ef569bca0cc02d489d313215f3ce7e3a17ec8b4f85fac095492236",
+      "packageSha256": "cefef3eb579f0b6c76ba524f675251452589356bbf8110ed8b31caa2a7b0fa52",
+      "runtimeVersions": {
+        "schemaVersion": 1,
+        "os": {
+          "system": "Darwin",
+          "release": "23.6.0",
+          "version": "Darwin Kernel Version 23.6.0: Tue Jul 21 21:56:54 PDT 2026; root:xnu-10063.141.1.713.39~1/RELEASE_ARM64_VMAPPLE",
+          "macOS": "14.8.9"
+        },
+        "node": {
+          "nodeVersion": "v22.23.2",
+          "nodeAbi": "127",
+          "platform": "darwin",
+          "arch": "arm64"
+        },
+        "webview": {
+          "version": "19618.3.11.11.5",
+          "source": "tauri::webview_version",
+          "defaultRuntime": true
+        }
+      },
+      "exactAgentReceipts": 20
+    },
+    {
+      "target": "macos-x64",
+      "artifactId": 11797446061,
+      "artifactDigest": "sha256:9f4932e4797347c3d70db5e5bf0817b2ef2dce85628f00eba4bc5bfb6a705406",
+      "retained": {
+        "agent-desktop-proof.json": {
+          "report": "installed-agent-08d495f-macos-x64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "agent-service-proof.json": {
+          "report": "installed-agent-08d495f-macos-x64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "staged-native-preflight.json": {
+          "report": "installed-agent-08d495f-macos-x64-staged-native-preflight.json",
+          "sha256": "4072e9cb5d8d4cd3d5a7b153e7df8c12b83ff77e98e617ee0397f6596ccfa419"
+        },
+        "startup-transcript-tests.json": {
+          "report": "installed-agent-08d495f-macos-x64-startup-transcript-tests.json",
+          "sha256": "ec95d4a9a8c59d463ed52d9d3f2ec134e6fd4cf2ecc07a7e3990f98fa01b0fd6"
+        },
+        "packaged-gui-smoke.json": {
+          "report": "installed-agent-08d495f-macos-x64-packaged-gui-smoke.json",
+          "sha256": "c0c32c836c7763c03b0dca6695bcd9e75bd6748764e9567f075ce74fc8bf0741"
+        },
+        "package-provenance.json": {
+          "report": "installed-agent-08d495f-macos-x64-package-provenance.json",
+          "sha256": "36038f58dbe53378fae6049f35ddde0e9e3f26f5f700ead557ba2ea4030065ad"
+        }
+      },
+      "portablePassed": 1137,
+      "portableSkipped": 0,
+      "portableFiles": 76,
+      "portableReportSha256": "4e52a6acdef91b5775972385d73539750745bd06cf0c3417a2ee43b4b6e7a462",
+      "packageSha256": "2e0f8461d718dc0686b785d924c813e2b4891ca540007f2a3ce4fa72f6dcc28c",
+      "runtimeVersions": {
+        "schemaVersion": 1,
+        "os": {
+          "system": "Darwin",
+          "release": "24.6.0",
+          "version": "Darwin Kernel Version 24.6.0: Tue Jul 21 20:50:07 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_X86_64",
+          "macOS": "15.7.9"
+        },
+        "node": {
+          "nodeVersion": "v22.23.2",
+          "nodeAbi": "127",
+          "platform": "darwin",
+          "arch": "x64"
+        },
+        "webview": {
+          "version": "20621.3.11.11.3",
+          "source": "tauri::webview_version",
+          "defaultRuntime": true
+        }
+      },
+      "exactAgentReceipts": 20
+    },
+    {
+      "target": "windows-x64",
+      "artifactId": 11797677487,
+      "artifactDigest": "sha256:4e864839e863c5c34fe6ee14c5d72c5c555eb712f53a35caa0405db8d30824ea",
+      "retained": {
+        "agent-desktop-proof.json": {
+          "report": "installed-agent-08d495f-windows-x64-agent-desktop-proof.json",
+          "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+        },
+        "agent-service-proof.json": {
+          "report": "installed-agent-08d495f-windows-x64-agent-service-proof.json",
+          "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+        },
+        "staged-native-preflight.json": {
+          "report": "installed-agent-08d495f-windows-x64-staged-native-preflight.json",
+          "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+        },
+        "startup-transcript-tests.json": {
+          "report": "installed-agent-08d495f-windows-x64-startup-transcript-tests.json",
+          "sha256": "1b58ba38823328eb748695751eaa8209b3ce736eac83a25df427acc6bff528d3"
+        },
+        "packaged-gui-smoke.json": {
+          "report": "installed-agent-08d495f-windows-x64-packaged-gui-smoke.json",
+          "sha256": "65fc47f70ef335c6d79cf519b2737bf6cad7b236841469fa156a81b79b84e50d"
+        },
+        "package-provenance.json": {
+          "report": "installed-agent-08d495f-windows-x64-package-provenance.json",
+          "sha256": "8b464fcc8c2ed0f27d19056267076a40a6166becd71f0a17a003f00201c650b2"
+        }
+      },
+      "portablePassed": 1137,
+      "portableSkipped": 0,
+      "portableFiles": 76,
+      "portableReportSha256": "89dd2592e895b136d3be9bb597ede707fd53635d6cef61d1eb20ff4bee7730a5",
+      "packageSha256": "556e962f1c309a29e031e7cafb569564a79119714ff9700f6141046dc9ad23be",
+      "runtimeVersions": {
+        "schemaVersion": 1,
+        "os": {
+          "system": "Windows",
+          "release": "10",
+          "version": "10.0.20348"
+        },
+        "node": {
+          "nodeVersion": "v22.23.2",
+          "nodeAbi": "127",
+          "platform": "win32",
+          "arch": "x64"
+        },
+        "webview": {
+          "version": "131.0.2903.86",
+          "source": "tauri::webview_version",
+          "defaultRuntime": true
+        }
+      },
+      "exactAgentReceipts": 20
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

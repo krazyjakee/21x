@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "checks": {
+    "sqlite": {
+      "ok": true,
+      "inMemory": true
+    },
+    "pty": {
+      "ok": true,
+      "phase": "exit",
+      "exitCode": 0,
+      "signal": 0,
+      "helper": null,
+      "dataChunks": 1,
+      "markerSeen": true
+    },
+    "worker": {
+      "ok": true,
+      "realFile": true
+    },
+    "@anthropic-ai/claude-agent-sdk": {
+      "ok": true,
+      "importedOnly": true
+    },
+    "@opencode-ai/sdk": {
+      "ok": true,
+      "importedOnly": true
+    }
+  },
+  "nodeVersion": "v22.23.2",
+  "nodeAbi": "127",
+  "platform": "linux",
+  "arch": "x64"
+}
