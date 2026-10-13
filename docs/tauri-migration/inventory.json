@@ -5185,7 +5185,7 @@
       ],
       "column": 1,
       "file": "src/main/secret-broker.ts",
-      "line": 22,
+      "line": 1,
       "mode": "runtime",
       "syntax": "import"
     },
@@ -5581,7 +5581,9 @@
     "src/main/repo-providers.ts",
     "src/main/scheduled-coordination-core.ts",
     "src/main/scheduled-coordination.ts",
+    "src/main/secret-broker-core.ts",
     "src/main/secret-broker.ts",
+    "src/main/secret-shell.ts",
     "src/main/session-feedback.ts",
     "src/main/sessions/delivery-store.ts",
     "src/main/sessions/runtime-store.ts",
@@ -13948,7 +13950,7 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 702,
+    "files": 704,
     "operations": 705,
     "runtimeElectronImports": 45,
     "typeOnlyElectronImports": 5,

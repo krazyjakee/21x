@@ -42,6 +42,7 @@ const mainFiles = [
   'src/main/scheduled-coordination.test.ts', 'src/main/scheduled-coordination-lifetime.test.ts',
   'src/main/commander/commander-service.test.ts', 'src/main/commander/captain-delivery.test.ts', 'src/main/commander/commander-lifetime.test.ts',
   'src/main/chat/chat-runtime.test.ts', 'src/main/chat/chat-runtime-lifetime.test.ts',
+  'src/main/secret-broker-core.test.ts', 'src/main/secret-shell.test.ts',
   'src/main/terminal-service-core.test.ts', 'src/main/terminal-process.test.ts',
   'src/main/overdue-notifier.test.ts',
   'src/main/workspace-cleanup-scheduler.test.ts', 'src/main/workspace-cleanup-scheduler-lifetime.test.ts',

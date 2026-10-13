@@ -47,7 +47,7 @@ import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTr
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { CaptainWaker } from './captain-waker'
 import { startScheduledCoordination, stopScheduledCoordination, closeScheduledCoordination } from './scheduled-coordination'
-import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
+import { startSecretBroker, shutdownSecretBroker, closeSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
 import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
@@ -189,6 +189,7 @@ async function shutdownAppServices(): Promise<void> {
   shutdownTerminalServices()
   shutdownChatServices()
   shutdownCommanderServices()
+  shutdownSecretBroker()
   stopTaskApiServer()
   void stopMobileApiServer()
   syncManager?.stop()
@@ -207,11 +208,10 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices(), closeSecretBroker()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason
-  stopSecretBroker()
 
   sweepLeakedMcpProcesses()
   // A short grace here: quitting must stay quick, and anything that ignores
@@ -812,6 +812,15 @@ app.whenReady().then(async () => {
   syncManager = new SyncManager(db, pluginRegistry, oauthManager)
   agentManager.setSyncManager(syncManager)
 
+  // Start secret broker and write shell wrapper (awaited so broker is ready before any sessions)
+  try {
+    const brokerPort = await startSecretBroker(db)
+    console.log(`[Main] Secret broker started on port ${brokerPort}`)
+    writeSecretShellWrapper()
+  } catch (err) {
+    console.error('[Main] Failed to start secret broker:', err)
+  }
+
   // Process memory is gone after a crash, but starts, switches and accepted
   // messages are durable. Repair or visibly fail them before schedulers can
   // enqueue more work against stale ownership.
@@ -893,15 +902,6 @@ app.whenReady().then(async () => {
 
   // Build the application menu (includes "Check for Updates…")
   buildAppMenu()
-
-  // Start secret broker and write shell wrapper (awaited so broker is ready before any sessions)
-  try {
-    const brokerPort = await startSecretBroker(db)
-    console.log(`[Main] Secret broker started on port ${brokerPort}`)
-    writeSecretShellWrapper()
-  } catch (err) {
-    console.error('[Main] Failed to start secret broker:', err)
-  }
 
   // Start mobile API server — only when mobile access is enabled in Settings.
   // The mobile IPC handlers re-apply the settings when they change.

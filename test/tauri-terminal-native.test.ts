@@ -15,12 +15,13 @@ describe('actual staged standalone terminal owner', () => {
     // macOS aliases /var to /private/var; cwd reports the physical path.
     const root = realpathSync(mkdtempSync(join(tmpdir(), '21x-terminal-native-')))
     const fixtureScript = `
+      process.stdin.setRawMode(true);
       process.stdout.write('FIXTURE_READY\\n');
       let pending = '';
       process.stdin.on('data', data => {
         pending += data.toString();
         let newline;
-        while ((newline = pending.indexOf('\\n')) >= 0) {
+        while ((newline = pending.search(/[\\r\\n]/)) >= 0) {
           const line = pending.slice(0, newline).trim(); pending = pending.slice(newline + 1);
           if (line === 'size') process.stdout.write('FIXTURE_SIZE=' + process.stdout.columns + 'x' + process.stdout.rows + '\\n');
           if (line === 'cwd') process.stdout.write('FIXTURE_CWD=' + process.cwd() + '\\n');
@@ -49,8 +50,11 @@ describe('actual staged standalone terminal owner', () => {
       await vi.waitFor(() => {
         // ConPTY emits screen control sequences around otherwise ordinary output.
         const plain = second.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-        expect(plain).toContain('FIXTURE_SIZE=120x40')
-        expect(plain).toContain('FIXTURE_CWD=' + root)
+        // Windows delivers resize notifications while reading a raw TTY. The
+        // first input can race that notification, so request another sample.
+        if (!plain.includes('FIXTURE_SIZE=120x40')) owner.write('native-fixture', 'size\r')
+        expect(plain, JSON.stringify({ raw: second, plain })).toContain('FIXTURE_SIZE=120x40')
+        expect(plain, JSON.stringify({ raw: second, plain })).toContain('FIXTURE_CWD=' + root)
       }, { timeout: 5000 })
       expect(owner.getBuffer('native-fixture').lines.join('\n')).toContain('FIXTURE_SIZE=120x40')
       await owner.close(3000)
