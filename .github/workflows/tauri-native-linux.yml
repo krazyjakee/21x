@@ -162,8 +162,7 @@ jobs:
               assert authority['sameMainIframeIsolationProven'] is False
               packaged_smoke.verify_artifact_authority(authority)
           assert runtime['resourceRoot'].startswith('/usr/lib/')
-          owned_node = (Path(runtime['resourceRoot']) / 'node/node').resolve()
-          assert owned_node.is_file()
+          owned_node = packaged_smoke.verified_owned_node(runtime, Path(runtime['resourceRoot']).resolve())
           assert (Path(runtime['resourceRoot']) / 'service/feasibility.mjs').is_file()
           assert report['shutdown']['engineUnavailable'] is True
           assert report['shutdown']['ownedChildExited'] is True
