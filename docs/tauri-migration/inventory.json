@@ -6079,6 +6079,7 @@
     "src/shared/agent-installer-codecs.ts",
     "src/shared/agent-utils.ts",
     "src/shared/artifact-codecs.ts",
+    "src/shared/artifact-native-callbacks.ts",
     "src/shared/artifact-navigation.ts",
     "src/shared/artifacts.ts",
     "src/shared/attachment-native-callbacks.ts",
@@ -14433,7 +14434,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 877,
+    "files": 878,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

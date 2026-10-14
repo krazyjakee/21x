@@ -430,6 +430,19 @@ mod platform {
         chain: Vec<Held>,
     }
     impl NativeWorkspaceFileGuard {
+        /// Clipboard handoff requires a bounded regular file but never reads it.
+        pub fn assert_clipboard_file(&self, max_bytes: u64) -> Result<(), EngineError> {
+            self.recheck()?;
+            let held = self
+                .chain
+                .last()
+                .ok_or_else(|| failure("WORKSPACE_PATH_REFUSED"))?;
+            let observed = metadata(&held.file)?;
+            if !observed.is_file() || observed.nlink() != 1 || observed.size() > max_bytes {
+                return Err(failure("WORKSPACE_PATH_REFUSED"));
+            }
+            Ok(())
+        }
         pub fn open_pinned_reader(
             self,
             max_bytes: u64,
@@ -569,6 +582,28 @@ mod platform {
                     e.code
                 }
             }
+        }
+        #[test]
+        fn clipboard_handoff_is_metadata_only_bounded_regular_single_link_file() {
+            let f = Fixture::new();
+            let owner = NativeWorkspaceFileOwner::open(f.root.clone()).unwrap();
+            let guard = owner.validate(&decoded(&f.receipt(&f.file))).unwrap();
+            guard.assert_clipboard_file(64 * 1024 * 1024).unwrap();
+            assert_eq!(fs::read(&f.file).unwrap(), b"public content");
+            assert!(owner
+                .validate(&decoded(&f.receipt(&f.task)))
+                .unwrap()
+                .assert_clipboard_file(u64::MAX)
+                .is_err());
+            assert!(guard.assert_clipboard_file(0).is_err());
+            let hard = f.base.join("hardlink");
+            fs::hard_link(&f.file, &hard).unwrap();
+            assert!(guard.assert_clipboard_file(u64::MAX).is_err());
+            fs::remove_file(hard).unwrap();
+            let file = fs::OpenOptions::new().write(true).open(&f.file).unwrap();
+            file.set_len(64 * 1024 * 1024 + 1).unwrap();
+            let oversized = owner.validate(&decoded(&f.receipt(&f.file))).unwrap();
+            assert!(oversized.assert_clipboard_file(64 * 1024 * 1024).is_err());
         }
         #[test]
         fn retains_actual_metadata_only_root_and_target_handles_without_reading() {
@@ -915,6 +950,9 @@ impl NativeWorkspaceFileOwner {
 }
 #[cfg(not(target_os = "linux"))]
 impl NativeWorkspaceFileGuard {
+    pub fn assert_clipboard_file(&self, _max_bytes: u64) -> Result<(), EngineError> {
+        Err(failure("WORKSPACE_NATIVE_UNAVAILABLE"))
+    }
     pub fn open_pinned_reader(
         self,
         _max_bytes: u64,

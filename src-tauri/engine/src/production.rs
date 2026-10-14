@@ -78,6 +78,8 @@ pub struct ProductionCapabilities {
     pub attachment_files: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub attachment_downloads: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
+    pub artifact_clipboard: HostCapability,
     pub external_urls: HostCapability,
     pub notifications: HostCapability,
     pub energy: HostCapability,
@@ -116,10 +118,15 @@ pub struct ProductionAttachmentDownloadHost {
     pub invoke: Arc<dyn Fn(Value, String, String, String) -> HostFuture<()> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
 }
+pub struct ProductionArtifactClipboardHost {
+    pub invoke: Arc<dyn Fn(Value, String, String, String) -> HostFuture<Value> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionNativeHost {
     pub workspace_file: Option<ProductionWorkspaceHost>,
     pub attachment_file: Option<ProductionAttachmentHost>,
     pub attachment_download: Option<ProductionAttachmentDownloadHost>,
+    pub artifact_clipboard: Option<ProductionArtifactClipboardHost>,
     pub event_sink: Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>,
     pub open_external: Option<Arc<dyn Fn(String) -> HostFuture<()> + Send + Sync>>,
     pub notification: Option<Arc<dyn Fn(String, String) -> HostFuture<bool> + Send + Sync>>,
@@ -222,6 +229,43 @@ fn attachment_download_host_matches(
         HostCapability::Unsupported => host.attachment_download.is_none(),
     }
 }
+fn artifact_clipboard_host_matches(
+    capability: &HostCapability,
+    host: &ProductionNativeHost,
+) -> bool {
+    match capability {
+        HostCapability::Host => {
+            host.artifact_clipboard.is_some() && ui_host_matches(&HostCapability::Host, host)
+        }
+        HostCapability::Unsupported => host.artifact_clipboard.is_none(),
+    }
+}
+async fn artifact_copy_callback(
+    host: &ProductionNativeHost,
+    capability: &HostCapability,
+    epoch: String,
+    payload: &Value,
+) -> Result<Value, EngineError> {
+    if *capability != HostCapability::Host || !artifact_clipboard_host_matches(capability, host) {
+        return Err(EngineError::new("UNKNOWN_OPERATION"));
+    }
+    if !contracts::artifact_copy_callback(payload) {
+        return Err(EngineError::new("INVALID_ARGUMENTS"));
+    }
+    let result = (host.artifact_clipboard.as_ref().unwrap().invoke)(
+        payload["receipt"].clone(),
+        payload["leaseId"].as_str().unwrap().to_owned(),
+        epoch,
+        payload["authorizationId"].as_str().unwrap().to_owned(),
+    )
+    .await?;
+    if !contracts::object(&result, &["mode"], &[])
+        || !matches!(result["mode"].as_str(), Some("file" | "unavailable"))
+    {
+        return Err(EngineError::new("INVALID_RESULT"));
+    }
+    Ok(result)
+}
 async fn attachment_download_callback(
     host: &ProductionNativeHost,
     capability: &HostCapability,
@@ -322,6 +366,8 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || capabilities.attachment_files == HostCapability::Host
             && capabilities.ui != HostCapability::Host
         || capabilities.attachment_downloads == HostCapability::Host
+            && capabilities.ui != HostCapability::Host
+        || capabilities.artifact_clipboard == HostCapability::Host
             && capabilities.ui != HostCapability::Host
         || [
             &value.paths.profile_root,
@@ -640,6 +686,10 @@ impl ProductionEngine {
                 &launch.descriptor.capabilities.attachment_downloads,
                 &host,
             )
+            || !artifact_clipboard_host_matches(
+                &launch.descriptor.capabilities.artifact_clipboard,
+                &host,
+            )
         {
             return Err(problem(
                 "INVALID_ARGUMENTS",
@@ -802,6 +852,83 @@ impl ProductionEngine {
         let result = self
             .request(
                 "engine.attachment.download.check",
+                json!({"authorizationId":authorization_id}),
+            )
+            .await?;
+        if result != json!({"authorized":true}) {
+            return Err(EngineError::new("INVALID_RESULT"));
+        }
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        Ok(())
+    }
+    pub async fn copy_artifact_file(
+        &self,
+        epoch: &str,
+        payload: Value,
+        lease_id: &str,
+    ) -> Result<Value, EngineError> {
+        if !contracts::valid_request("artifacts:copyFile", &payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let payload = json!({"taskId":payload["taskId"],"relativePath":payload["relativePath"],"leaseId":lease_id});
+        if !contracts::private_artifact_copy(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        // Missing optional clipboard authority is handled by Source as unavailable.
+        let result = self.request("engine.artifact.copyFile", payload).await?;
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        Ok(result)
+    }
+    pub async fn check_artifact_copy(
+        &self,
+        epoch: &str,
+        authorization_id: &str,
+    ) -> Result<(), EngineError> {
+        if !contracts::attachment_uuid(&json!(authorization_id)) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.artifact_clipboard != HostCapability::Host
+            || !artifact_clipboard_host_matches(&HostCapability::Host, &self.0.host)
+        {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        let result = self
+            .request(
+                "engine.artifact.copyFile.check",
                 json!({"authorizationId":authorization_id}),
             )
             .await?;
@@ -1203,7 +1330,7 @@ impl ProductionEngine {
                 }
                 Ok(result)
             }
-            "host.attachment.open" | "host.attachment.download" => {
+            "host.attachment.open" | "host.attachment.download" | "host.artifact.copyFile" => {
                 if self.0.closed.load(Ordering::SeqCst)
                     || self.0.stopping.load(Ordering::SeqCst)
                     || !self.0.ready.load(Ordering::SeqCst)
@@ -1212,7 +1339,15 @@ impl ProductionEngine {
                     return Err(EngineError::new("DISCONNECTED"));
                 }
                 let epoch = self.epoch();
-                let result = if operation == "host.attachment.download" {
+                let result = if operation == "host.artifact.copyFile" {
+                    artifact_copy_callback(
+                        &self.0.host,
+                        &self.0.descriptor.capabilities.artifact_clipboard,
+                        epoch.clone(),
+                        payload,
+                    )
+                    .await?
+                } else if operation == "host.attachment.download" {
                     attachment_download_callback(
                         &self.0.host,
                         &self.0.descriptor.capabilities.attachment_downloads,
@@ -1280,6 +1415,9 @@ impl ProductionEngine {
                     (files.close)().await?;
                 }
                 if let Some(files) = &self.0.host.attachment_download {
+                    (files.close)().await?;
+                }
+                if let Some(files) = &self.0.host.artifact_clipboard {
                     (files.close)().await?;
                 }
                 #[cfg(target_os = "linux")]
@@ -2237,6 +2375,7 @@ mod tests {
                 workspace_files: HostCapability::Unsupported,
                 attachment_files: HostCapability::Unsupported,
                 attachment_downloads: HostCapability::Unsupported,
+                artifact_clipboard: HostCapability::Unsupported,
                 external_urls: HostCapability::Unsupported,
                 notifications: HostCapability::Unsupported,
                 energy: HostCapability::Unsupported,
@@ -2248,6 +2387,67 @@ mod tests {
             },
         }
     }
+    #[tokio::test]
+    async fn artifact_clipboard_requires_its_own_host_ui_and_exact_result() {
+        let mut host = ui_host();
+        assert!(artifact_clipboard_host_matches(
+            &HostCapability::Unsupported,
+            &host
+        ));
+        assert!(!artifact_clipboard_host_matches(
+            &HostCapability::Host,
+            &host
+        ));
+        host.artifact_clipboard = Some(ProductionArtifactClipboardHost {
+            invoke: Arc::new(|_, _, _, _| Box::pin(async { Ok(json!({"mode":"path"})) })),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        assert!(artifact_clipboard_host_matches(
+            &HostCapability::Host,
+            &host
+        ));
+        assert!(!artifact_clipboard_host_matches(
+            &HostCapability::Unsupported,
+            &host
+        ));
+        let payload = json!({"receipt":{"version":1,"taskId":"task_fixture","workspaceRoot":"/workspace","path":"/workspace/task_fixture/report.md","root":{"path":"/workspace","kind":"directory","dev":"1","ino":"2","size":"4096","nlink":"2"},"ancestors":[{"path":"/workspace/task_fixture","kind":"directory","dev":"1","ino":"3","size":"4096","nlink":"2"}],"target":{"path":"/workspace/task_fixture/report.md","kind":"file","dev":"1","ino":"4","size":"10","nlink":"1"}},"leaseId":"document_fixture_1","authorizationId":"12345678-1234-4234-9234-123456789abc"});
+        assert_eq!(
+            artifact_copy_callback(&host, &HostCapability::Host, "epoch".into(), &payload)
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_RESULT"
+        );
+        host.artifact_clipboard.as_mut().unwrap().invoke =
+            Arc::new(|_, _, _, _| Box::pin(async { Ok(json!({"mode":"file"})) }));
+        assert_eq!(
+            artifact_copy_callback(&host, &HostCapability::Host, "epoch".into(), &payload)
+                .await
+                .unwrap(),
+            json!({"mode":"file"})
+        );
+        let mut injected = payload.clone();
+        injected["path"] = json!("/private");
+        assert_eq!(
+            artifact_copy_callback(&host, &HostCapability::Host, "epoch".into(), &injected)
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_ARGUMENTS"
+        );
+        host.ui_command = None;
+        assert!(!artifact_clipboard_host_matches(
+            &HostCapability::Host,
+            &host
+        ));
+    }
+
     #[test]
     fn trusted_descriptor_has_exact_path_and_capability_fields_without_credentials() {
         let root = Temporary::new();
@@ -2276,6 +2476,7 @@ mod tests {
             workspace_file: None,
             attachment_file: None,
             attachment_download: None,
+            artifact_clipboard: None,
             event_sink: Arc::new(|_| Ok(())),
             open_external: None,
             notification: None,

@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { ARTIFACT_CODECS, ARTIFACT_LIMITS, ARTIFACT_OPERATIONS, isArtifactRelativePath } from './artifact-codecs'
 describe('retained artifact finite DTOs', () => {
-  it('accepts exactly two task-scoped reads and rejects roots, traversal, malformed paths and extra capabilities', () => {
-    expect(ARTIFACT_OPERATIONS).toEqual(['artifacts:scan', 'artifacts:read'])
+  it('accepts two task-scoped reads and one finite copy control and rejects roots, traversal, malformed paths and extra capabilities', () => {
+    expect(ARTIFACT_OPERATIONS).toEqual(['artifacts:scan', 'artifacts:read', 'artifacts:copyFile'])
     const codec = ARTIFACT_CODECS['artifacts:read']
     expect(codec.decodeArguments(codec.encodeArguments(['task-1', 'repo/reports/result.md']))).toEqual(['task-1', 'repo/reports/result.md'])
     for (const path of ['/private/result.md', '../result.md', './result.md', 'a/../result.md', 'C:/private.md', 'a\\result.md', 'a//result.md', 'file:///private', 'a\0b.md']) expect(isArtifactRelativePath(path)).toBe(false)
     expect(() => codec.decodeArguments({ taskId: 'task-1', relativePath: 'result.md', root: '/private' })).toThrow()
+  })
+  it('retains exact copy modes with no caller destination, receipt, document or private result fields', () => {
+    const codec = ARTIFACT_CODECS['artifacts:copyFile']
+    expect(codec.decodeArguments(codec.encodeArguments(['task-1', 'repo/report 🌱.md']))).toEqual(['task-1', 'repo/report 🌱.md'])
+    for (const mode of ['file', 'image', 'path', 'unavailable']) expect(codec.encodeResult({ mode })).toEqual({ defined: true, value: { mode } })
+    for (const field of ['path', 'root', 'workspaceRoot', 'leaseId', 'authorizationId', 'receipt', 'filename', 'destination']) expect(() => codec.decodeArguments({ taskId: 'task-1', relativePath: 'report.md', [field]: 'forged' })).toThrow()
+    for (const path of ['../foreign', '/foreign', 'a//b', 'a/./b', 'a/../b', 'C:/foreign', 'a\\b', 'x\0y', '\ud800']) expect(codec.validateArguments(['task-1', path])).toBe(false)
+    expect(codec.validateArguments(['task-1', 'x'.repeat(ARTIFACT_LIMITS.pathBytes)])).toBe(true)
+    expect(codec.validateArguments(['task-1', 'x'.repeat(ARTIFACT_LIMITS.pathBytes + 1)])).toBe(false)
+    for (const result of [undefined, null, {}, { mode: 'copied' }, { mode: 'file', path: '/private' }, { mode: 'unavailable', error: 'private' }, { mode: 'image', content: 'data:image/png;base64,AAAA' }]) expect(codec.validateResult(result)).toBe(false)
+    expect(codec.validateWireResult({ defined: false })).toBe(false)
+    expect(codec.validateWireResult({ defined: true, value: { mode: 'file' } })).toBe(true)
   })
   it('preserves actual TypeScript/YAML/HTML MIME and raw inert content without adding viewer permissions', () => {
     const codec = ARTIFACT_CODECS['artifacts:read']

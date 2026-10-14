@@ -24,6 +24,8 @@ use twentyonex_engine::{
 #[path = "native_services.rs"]
 pub(crate) mod native_services;
 use native_services::NativeWorkOwner;
+#[path = "native_artifact_clipboard.rs"]
+pub(crate) mod native_artifact_clipboard;
 #[path = "native_attachment_download.rs"]
 pub(crate) mod native_attachment_download;
 #[path = "native_clipboard.rs"]
@@ -329,7 +331,11 @@ async fn desktop_invoke(
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
     if matches!(
         operation.as_str(),
-        "ui:publishState" | "agent-installer:install" | "attachments:open" | "attachments:download"
+        "ui:publishState"
+            | "agent-installer:install"
+            | "attachments:open"
+            | "attachments:download"
+            | "artifacts:copyFile"
     ) {
         if !twentyonex_engine::production::contracts::valid_request(&operation, &payload) {
             return Err(EngineError::new("INVALID_ARGUMENTS"));
@@ -347,6 +353,10 @@ async fn desktop_invoke(
         } else if operation == "attachments:open" {
             engine
                 .open_attachment(&engine_epoch, payload, &lease)
+                .await?
+        } else if operation == "artifacts:copyFile" {
+            engine
+                .copy_artifact_file(&engine_epoch, payload, &lease)
                 .await?
         } else {
             engine
@@ -531,6 +541,11 @@ async fn start(
             } else {
                 HostCapability::Unsupported
             },
+            artifact_clipboard: if cfg!(target_os = "linux") {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             external_urls: HostCapability::Host,
             notifications: HostCapability::Unsupported,
             energy: HostCapability::Unsupported,
@@ -551,6 +566,12 @@ async fn start(
         ui.clone(),
         descriptor.paths.attachment_root.clone(),
     )?;
+    let artifact_clipboard = native_artifact_clipboard::host(
+        app,
+        native_work.clone(),
+        ui.clone(),
+        descriptor.paths.workspace_root.clone(),
+    )?;
     let ui_snapshot = ui.snapshot_callback(app.clone(), native_work.clone());
     let ui_command = ui.command_callback(app.clone(), native_work.clone());
     let installer_progress = ui.installer_progress_callback(app.clone(), native_work.clone());
@@ -563,6 +584,7 @@ async fn start(
             workspace_file,
             attachment_file,
             attachment_download,
+            artifact_clipboard,
             event_sink: Arc::new(move |frame| {
                 handle
                     .emit_to(

@@ -30,6 +30,9 @@ describe('sealed production launch descriptor codecs', () => {
     expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, attachmentDownloads: 'host', ui: 'host' } })).toBe(true)
     expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, attachmentDownloads: 'unsupported' } })).toBe(true)
     expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, attachmentDownloads: true } })).toBe(false)
+    expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, artifactClipboard: 'host' } })).toBe(false)
+    expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, artifactClipboard: 'host', ui: 'host' } })).toBe(true)
+    expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, artifactClipboard: 'unsupported' } })).toBe(true)
     expect(isProductionLaunchDescriptor({ ...value, environment: { API_KEY: 'plaintext' } })).toBe(false)
   })
   it('initialize cannot override profile/workspace/credential/bootstrap authority', () => {

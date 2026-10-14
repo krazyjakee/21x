@@ -290,7 +290,7 @@ export class ProductionDesktopBindings {
       ...(installationLease.emitProgress ? { isCurrentProgressRecipient: caller => !!services.ui && services.ui.observedLeaseId === caller.uiLeaseId,
         emitProgress: (progress, caller) => installationLease.emitProgress!(progress, caller.uiLeaseId!) } : { emitProgress: undefined }) })
     this.artifacts = new ArtifactBackend({ database: services.db, ...owner.getArtifactBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
-      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask, canAccessProject: dynamicAuthority.canAccessProject })
+      canAccessAgent: dynamicAuthority.canAccessAgent, isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask, canAccessProject: dynamicAuthority.canAccessProject })
     const voiceLease = owner.getVoiceBindingLease()
     this.voice = voiceLease ? new VoiceManagementBackend({ ...voiceLease, engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageVoice: dynamicAuthority.canManageGlobalConfiguration }) : null

@@ -1,3 +1,6 @@
+import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isArtifactClipboardReceipt, isArtifactClipboardResult, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
+import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
+import type { ArtifactCopyFileResult } from '../shared/artifacts'
 import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isAttachmentPathReceipt, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import { randomUUID } from 'node:crypto'
 import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
@@ -19,6 +22,7 @@ import type { DesktopCallerContext } from './transport/desktop-registry'
 import { ServicePeer, type OperationSchema } from './transport/peer'
 
 export interface ProductionPrivateCallbacks {
+  copyArtifact(receipt: WorkspacePathReceipt, leaseId: string, beforeEffect: () => void): Promise<ArtifactCopyFileResult>
   openAttachment(receipt: AttachmentPathReceipt, leaseId: string): Promise<void>
   downloadAttachment(receipt: AttachmentPathReceipt, leaseId: string, beforeEffect: () => void): Promise<void>
   ui: ProductionUiNativeHost
@@ -65,6 +69,7 @@ export class ProductionService {
   private closeFlight: Promise<void> | null = null
   private initialization: Promise<void> | null = null
   private readonly domainFlights = new Set<Promise<unknown>>()
+  private readonly artifactCopyAuthorizations = new Map<string, () => void>()
   private readonly downloadAuthorizations = new Map<string, () => void>()
   private sequence = 0
   private readonly caller: DesktopCallerContext
@@ -77,6 +82,18 @@ export class ProductionService {
     if (!sealed.has(host)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const construction = host.construction, descriptor = construction.descriptor
     const callbacks: ProductionPrivateCallbacks = {
+      copyArtifact: async (receipt, leaseId, beforeEffect) => {
+        if (descriptor.capabilities.artifactClipboard !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
+        if (!isArtifactClipboardReceipt(receipt) || typeof beforeEffect !== 'function') throw new ServiceProtocolError('INVALID_ARGUMENTS')
+        if (this.artifactCopyAuthorizations.size >= 16) throw new ServiceProtocolError('BACKPRESSURE')
+        beforeEffect(); const authorizationId = randomUUID()
+        this.artifactCopyAuthorizations.set(authorizationId, beforeEffect)
+        try {
+          const result = await this.retain(this.peer.request('host.artifact.copyFile', { receipt: structuredClone(receipt) as unknown as JsonValue, leaseId, authorizationId }))
+          if (!isArtifactClipboardResult(result)) throw new ServiceProtocolError('INVALID_RESULT')
+          return result
+        } finally { this.artifactCopyAuthorizations.delete(authorizationId) }
+      },
       downloadAttachment: async (receipt, leaseId, beforeEffect) => {
         if (descriptor.capabilities.attachmentDownloads !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
         if (!isAttachmentPathReceipt(receipt)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -163,6 +180,7 @@ export class ProductionService {
     if (descriptor.capabilities.ui === 'host' ? !nativeUi || typeof nativeUi.snapshot !== 'function' || typeof nativeUi.send !== 'function' : nativeUi !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (descriptor.capabilities.attachmentFiles === 'host' ? typeof bootstrap.native.openAttachment !== 'function' || descriptor.capabilities.ui !== 'host' : bootstrap.native.openAttachment !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (descriptor.capabilities.attachmentDownloads === 'host' ? typeof bootstrap.native.downloadAttachment !== 'function' || descriptor.capabilities.ui !== 'host' : bootstrap.native.downloadAttachment !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    if (descriptor.capabilities.artifactClipboard === 'host' ? typeof bootstrap.native.copyArtifact !== 'function' || descriptor.capabilities.ui !== 'host' : bootstrap.native.copyArtifact !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     this.owner = new ProductionOwner(bootstrap, construction.boundaries)
     this.caller = { ...construction.caller, engineEpoch: this.owner.snapshot().epoch }
     const result = { protocolVersion: SERVICE_PROTOCOL_VERSION, engineEpoch: this.caller.engineEpoch, nodeVersion: process.version }
@@ -215,6 +233,21 @@ export class ProductionService {
         if (!current) throw new ServiceProtocolError('INVALID_REQUEST')
         current(); return { authorized: true }
       } }
+    operations['artifacts:copyFile'].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
+    operations['engine.artifact.copyFile'] = { validatePayload: isPrivateArtifactCopy,
+      validateResult: ARTIFACT_CODECS['artifacts:copyFile'].validateWireResult,
+      handle: (payload, signal) => {
+        if (!this.initialized || this.closing || !this.bindings || !isPrivateArtifactCopy(payload)) throw new ServiceProtocolError('DISCONNECTED')
+        return this.retain(this.bindings.invoke('artifacts:copyFile', { taskId: payload.taskId, relativePath: payload.relativePath }, { ...this.caller, uiLeaseId: payload.leaseId }, signal))
+      } }
+    operations['engine.artifact.copyFile.check'] = { validatePayload: isPrivateArtifactCopyCheck,
+      validateResult: value => isRecord(value) && hasExactKeys(value, ['authorized']) && value.authorized === true,
+      handle: payload => {
+        if (!this.initialized || this.closing || !isPrivateArtifactCopyCheck(payload)) throw new ServiceProtocolError('DISCONNECTED')
+        const current = this.artifactCopyAuthorizations.get(payload.authorizationId)
+        if (!current) throw new ServiceProtocolError('INVALID_REQUEST')
+        current(); return { authorized: true }
+      } }
     operations['engine.ping'] = { validatePayload: empty, validateResult: isBootstrapResult, handle: () => { this.pinged = true; return result } }
     operations['engine.initialize'] = { validatePayload: isProductionInitialize, validateResult: isBootstrapResult, handle: async (payload, signal) => {
       if (!this.pinged || this.initialized || this.initializing || this.closing || !isProductionInitialize(payload) || payload.launchId !== descriptor.launchId || signal.aborted) throw new ServiceProtocolError('INVALID_REQUEST')
@@ -261,6 +294,7 @@ export class ProductionService {
     if (descriptor.capabilities.ui === 'host') for (const [operation, schema] of Object.entries(UI_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.attachmentFiles === 'host') operations['host.attachment.open'] = ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.open']
     if (descriptor.capabilities.attachmentDownloads === 'host') operations['host.attachment.download'] = ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.download']
+    if (descriptor.capabilities.artifactClipboard === 'host') operations['host.artifact.copyFile'] = ARTIFACT_NATIVE_CALLBACK_SCHEMAS['host.artifact.copyFile']
     this.peer = new ServicePeer({ role: 'service', engineEpoch: this.caller.engineEpoch, operations,
       eventSchemas: Object.fromEntries(Object.keys(PRODUCTION_EVENT_CODECS).map(operation => [operation, (value: unknown) => validateProductionEventWire(operation, value)])),
       write: transport.write, onDisconnect: error => {
@@ -371,6 +405,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         ...(descriptor.capabilities.workspaceFiles === 'host' ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}),
         ...(descriptor.capabilities.attachmentFiles === 'host' ? { openAttachment: callbacks.openAttachment } : {}),
         ...(descriptor.capabilities.attachmentDownloads === 'host' ? { downloadAttachment: callbacks.downloadAttachment } : {}),
+        ...(descriptor.capabilities.artifactClipboard === 'host' ? { copyArtifact: callbacks.copyArtifact } : {}),
         // Browser opening alone does not register or own OAuth deep-link callbacks.
         oauthBrowser: 'unavailable',
         ...(descriptor.capabilities.ui === 'host' ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),

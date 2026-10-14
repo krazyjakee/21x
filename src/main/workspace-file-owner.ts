@@ -5,7 +5,7 @@ import type { WorkspacePathIdentity, WorkspacePathReceipt } from '../shared/work
 import { isWorkspacePathReceipt } from '../shared/workspace-native-callbacks'
 export type { WorkspacePathIdentity, WorkspacePathReceipt } from '../shared/workspace-native-callbacks'
 
-export const WORKSPACE_FILE_LIMITS = Object.freeze({ textBytes: 128 * 1024, pathBytes: 4096, depth: 64, flights: 16, taskReceipts: 4096 })
+export const WORKSPACE_FILE_LIMITS = Object.freeze({ textBytes: 128 * 1024, capturedFileBytes: 64 * 1024 * 1024, pathBytes: 4096, depth: 64, flights: 16, taskReceipts: 4096 })
 export interface WorkspaceFileControls { beforeEffect(): void; signal: AbortSignal }
 export interface WorkspaceFileHandle {
   stat(): Promise<BigIntStats>
@@ -118,11 +118,12 @@ export class WorkspaceFileOwner {
   private run<T>(taskId: string, controls: WorkspaceFileControls, effect: (controls: WorkspaceFileControls) => Promise<T>): Promise<T> {
     if (!taskIdValid(taskId) || !controls || typeof controls.beforeEffect !== 'function' || !controls.signal || typeof controls.signal.aborted !== 'boolean') return Promise.reject(new WorkspaceFileError('WORKSPACE_INVALID_ARGUMENTS'))
     const captured = Object.freeze({ beforeEffect: controls.beforeEffect, signal: controls.signal })
-    try { this.current(captured); if (this.flights.size + this.handles.size >= WORKSPACE_FILE_LIMITS.flights) fail('WORKSPACE_BUSY') }
+    try { this.current(captured); if ([...this.handles].some(handle => handle.failed) || this.flights.size + this.handles.size >= WORKSPACE_FILE_LIMITS.flights) fail('WORKSPACE_BUSY') }
     catch (cause) { return Promise.reject(cause) }
     const raw = effect(captured).then(value => { this.current(captured); return value }).catch(cause => {
       if (cause instanceof WorkspaceFileError) throw cause
       this.current(captured)
+      if (cause instanceof Error && cause.name === 'ServiceProtocolError') throw cause
       fail('WORKSPACE_IO_FAILED')
     })
     this.flights.add(raw); void raw.then(() => this.flights.delete(raw), () => this.flights.delete(raw))
@@ -275,6 +276,26 @@ export class WorkspaceFileOwner {
         await this.verify(captured.receipt, current)
         const bytes = Buffer.concat(chunks, total), binary = previewBytes !== undefined && bytes.subarray(0, 8192).includes(0)
         return { content: binary ? '' : bytes.toString('utf8'), size, binary, truncated: total < size }
+      } finally { await this.release(owned) }
+    })
+  }
+  /** Trusted metadata-only native effects. Retains the exact regular-file FD
+   * through the complete raw callback; no capacity override or bytes over RPC. */
+  withCapturedFile<T>(taskId: string, filePath: string, controls: WorkspaceFileControls, invoke: (receipt: WorkspacePathReceipt) => Promise<T>): Promise<T | null> {
+    if (typeof invoke !== 'function') return Promise.reject(new WorkspaceFileError('WORKSPACE_INVALID_ARGUMENTS'))
+    return this.run(taskId, controls, async current => {
+      const captured = await this.capture(taskId, filePath, current)
+      if (!captured) { this.current(current); return null }
+      if (captured.receipt.target.kind !== 'file' || captured.info.size > BigInt(WORKSPACE_FILE_LIMITS.capturedFileBytes)) fail('WORKSPACE_PATH_REFUSED')
+      const owned = await this.opened(captured, current)
+      try {
+        const receipt = Object.freeze({ ...captured.receipt, root: Object.freeze({ ...captured.receipt.root }), ancestors: Object.freeze(captured.receipt.ancestors.map(item => Object.freeze({ ...item }))), target: Object.freeze({ ...captured.receipt.target }) })
+        if (!isWorkspacePathReceipt(receipt)) fail('WORKSPACE_PATH_REFUSED')
+        const result = await this.step(current, () => invoke(receipt as unknown as WorkspacePathReceipt))
+        const final = await this.step(current, () => owned.handle.stat()), named = await this.step(current, () => this.fs.lstat(filePath))
+        if (!sameFile(captured.info, final) || !sameFile(final, named)) fail('WORKSPACE_PATH_CHANGED')
+        await this.verify(captured.receipt, current)
+        return result
       } finally { await this.release(owned) }
     })
   }

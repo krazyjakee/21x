@@ -304,3 +304,50 @@ describe('WorkspaceFileOwner actual captured filesystem', () => {
     await expect(lstat(join(root, 'next-task'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
+
+
+describe('WorkspaceFileOwner metadata-only captured regular file callback', () => {
+  it('captures a large exact file without reading bytes and returns null for missing sources', async () => {
+    await writeFile(file, Buffer.alloc(600 * 1024, 65))
+    const reads = vi.fn(), invoked = vi.fn(async (receipt: WorkspacePathReceipt) => { expect(isWorkspacePathReceipt(receipt)).toBe(true); expect(receipt.target).toMatchObject({ kind: 'file', size: String(600 * 1024), nlink: '1' }); return 'file' })
+    const owner = make({ fs: { open: async (path, flags) => { const handle = await realHandle(path, flags); return { ...handle, read: (...args) => { reads(); return handle.read(...args) } } } } })
+    expect(await owner.withCapturedFile('task-one', file, controls(), invoked)).toBe('file')
+    expect(await owner.withCapturedFile('task-one', join(workspace, 'missing'), controls(), invoked)).toBeNull()
+    expect(invoked).toHaveBeenCalledTimes(1); expect(reads).not.toHaveBeenCalled(); expect(owner.inflightCount).toBe(0)
+  })
+  it.skipIf(process.platform === 'win32')('refuses links/directories and size above the fixed callback budget before invoking native', async () => {
+    const owner = make(), invoked = vi.fn(async () => 'file'), outside = join(parent, 'unrelated.txt')
+    await symlink(outside, join(workspace, 'linked.txt')); await link(file, join(workspace, 'hardlink.txt'))
+    for (const path of [workspace, file, join(workspace, 'linked.txt'), join(workspace, 'hardlink.txt')]) await expect(owner.withCapturedFile('task-one', path, controls(), invoked)).rejects.toThrow('PATH_REFUSED')
+    await rm(join(workspace, 'hardlink.txt')); const handle = await open(file, 'r+'); try { await handle.truncate(WORKSPACE_FILE_LIMITS.capturedFileBytes + 1) } finally { await handle.close() }
+    await expect(owner.withCapturedFile('task-one', file, controls(), invoked)).rejects.toThrow('PATH_REFUSED')
+    expect(invoked).not.toHaveBeenCalled(); expect(owner.inflightCount).toBe(0)
+  })
+  it('retains the real source FD through ignored native cancellation and bounded close until actual acknowledgement', async () => {
+    const entered = deferred(), callback = deferred(), owner = make(), controller = new AbortController()
+    const invoked = vi.fn(async () => { entered.resolve(); await callback.promise; return 'file' })
+    const pending = owner.withCapturedFile('task-one', file, controls(() => {}, controller), invoked), outcome = pending.catch(error => error)
+    try {
+      await entered.promise; controller.abort()
+      await expect(owner.close(5)).rejects.toThrow('DRAIN_INCOMPLETE'); expect(owner.inflightCount).toBeGreaterThan(0)
+    } finally { callback.resolve() }
+    expect(await outcome).toMatchObject({ code: 'WORKSPACE_CANCELLED' }); await owner.close(); expect(owner.inflightCount).toBe(0); expect(invoked).toHaveBeenCalledTimes(1)
+  })
+  it.skipIf(process.platform === 'win32')('detects a named replacement after native acknowledgement without deleting either file or replaying', async () => {
+    const owner = make(), original = join(workspace, 'retained-original'), invoked = vi.fn(async () => { await rename(file, original); await writeFile(file, 'Replacement user bytes'); return 'file' })
+    await expect(owner.withCapturedFile('task-one', file, controls(), invoked)).rejects.toThrow('PATH_CHANGED')
+    expect(await readFile(original, 'utf8')).toBe('Actual workspace text 🌱\n'); expect(await readFile(file, 'utf8')).toBe('Replacement user bytes'); expect(invoked).toHaveBeenCalledTimes(1); expect(owner.inflightCount).toBe(0)
+  })
+  it('registers late opens before revoked guards and preserves failed close receipts for explicit retry', async () => {
+    const entered = deferred(), gate = deferred(); let allowed = true, failClose = true
+    const owner = make({ fs: { open: async (path, flags) => { const handle = await realHandle(path, flags); entered.resolve(); await gate.promise; return { ...handle, close: async () => { if (failClose) throw new Error('Controlled close failure'); await handle.close() } } } } })
+    const callback = vi.fn(async () => 'file'), pending = owner.withCapturedFile('task-one', file, controls(() => { if (!allowed) throw new Error('Revoked caller') }), callback), outcome = pending.catch(error => error)
+    try {
+      await entered.promise; allowed = false; gate.resolve()
+      expect(await outcome).toMatchObject({ code: 'WORKSPACE_CLOSE_FAILED' }); expect(callback).not.toHaveBeenCalled(); expect(owner.inflightCount).toBeGreaterThan(0)
+      allowed = true; await expect(owner.readTextFile('task-one', file, controls())).rejects.toThrow('BUSY')
+      await expect(owner.close()).rejects.toThrow('DRAIN_INCOMPLETE'); expect(owner.inflightCount).toBeGreaterThan(0)
+    } finally { gate.resolve(); allowed = true; failClose = false; await owner.close() }
+    expect(owner.inflightCount).toBe(0)
+  })
+})

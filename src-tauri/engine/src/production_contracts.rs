@@ -100,6 +100,7 @@ pub const COMMANDS: &[&str] = &[
     "agent-installer:install",
     "artifacts:scan",
     "artifacts:read",
+    "artifacts:copyFile",
     "mobile:getInfo",
     "mobile:setAccess",
     "mobile:startTunnel",
@@ -2329,7 +2330,7 @@ fn detection_result(value: &Value) -> bool {
     }
     true
 }
-const ARTIFACT_COMMANDS: &[&str] = &["artifacts:scan", "artifacts:read"];
+const ARTIFACT_COMMANDS: &[&str] = &["artifacts:scan", "artifacts:read", "artifacts:copyFile"];
 fn artifact_path(value: &Value) -> bool {
     value.as_str().is_some_and(|path| {
         !path.is_empty()
@@ -2456,7 +2457,7 @@ fn artifact_content(value: &Value) -> bool {
 fn artifact_request(operation: &str, value: &Value) -> bool {
     match operation {
         "artifacts:scan" => object(value, &["taskId"], &[]) && id(&value["taskId"]),
-        "artifacts:read" => {
+        "artifacts:read" | "artifacts:copyFile" => {
             object(value, &["taskId", "relativePath"], &[])
                 && id(&value["taskId"])
                 && artifact_path(&value["relativePath"])
@@ -2464,7 +2465,38 @@ fn artifact_request(operation: &str, value: &Value) -> bool {
         _ => false,
     }
 }
+pub(crate) fn artifact_copy_result(value: &Value) -> bool {
+    object(value, &["mode"], &[])
+        && matches!(
+            value["mode"].as_str(),
+            Some("file" | "image" | "path" | "unavailable")
+        )
+}
+pub(crate) fn private_artifact_copy(value: &Value) -> bool {
+    object(value, &["taskId", "relativePath", "leaseId"], &[])
+        && id(&value["taskId"])
+        && artifact_path(&value["relativePath"])
+        && crate::production_ui_contracts::lease_id(&value["leaseId"])
+}
+pub(crate) fn artifact_copy_callback(value: &Value) -> bool {
+    object(value, &["receipt", "leaseId", "authorizationId"], &[])
+        && crate::production_files::NativeWorkspaceReceipt::from_value(&value["receipt"]).is_ok()
+        && value["receipt"]["target"]["kind"] == "file"
+        && value["receipt"]["target"]["nlink"] == "1"
+        && value["receipt"]["target"]["size"]
+            .as_str()
+            .and_then(|s| s.parse::<u64>().ok())
+            .is_some_and(|size| size <= 64 * 1024 * 1024)
+        && crate::production_ui_contracts::lease_id(&value["leaseId"])
+        && attachment_uuid(&value["authorizationId"])
+        && value["authorizationId"]
+            .as_str()
+            .is_some_and(|s| s.as_bytes()[14] == b'4')
+}
 fn artifact_result(operation: &str, value: &Value) -> bool {
+    if operation == "artifacts:copyFile" {
+        return artifact_copy_result(value);
+    }
     if operation == "artifacts:read" {
         return artifact_content(value);
     }
@@ -5055,7 +5087,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 225);
+        assert_eq!(COMMANDS.len(), 226);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

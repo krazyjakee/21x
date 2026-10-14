@@ -1,3 +1,5 @@
+import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
+import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck } from '../shared/attachment-native-callbacks'
 import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
 import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
@@ -43,7 +45,7 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false) {
   let uiLease: string | null = 'document_fixture_1'
   let uiAcknowledgement: Promise<void> | null = null
   let attachmentAcknowledgement: Promise<void> | null = null
@@ -57,6 +59,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   if (ui) launch.capabilities.ui = 'host'
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
   if (attachmentDownloading) launch.capabilities.attachmentDownloads = 'host'
+  if (artifactClipboard) launch.capabilities.artifactClipboard = 'host'
   const selectedNode = process.env.TAURI_NODE_RUNTIME ?? join(process.cwd(), 'src-tauri', 'resources', 'node', process.platform === 'win32' ? 'node.exe' : 'node')
   const fixtureNpm = join(root, 'npm-cli.js')
   if (installation) writeFileSync(fixtureNpm, `const fs=require('node:fs'),p=require('node:path');const prefix=process.argv[process.argv.indexOf('--prefix')+1];const pkg=p.join(prefix,'lib','node_modules','opencode-ai');fs.mkdirSync(pkg,{recursive:true});fs.mkdirSync(p.join(prefix,'bin'),{recursive:true});fs.writeFileSync(p.join(pkg,'package.json'),JSON.stringify({name:'opencode-ai',version:'1.0.0',bin:{opencode:'index.js'}}));fs.writeFileSync(p.join(pkg,'index.js'), '#!'+process.execPath+${JSON.stringify("\nconsole.log('1.0.0')\n")});fs.chmodSync(p.join(pkg,'index.js'),0o700);fs.symlinkSync(p.join(pkg,'index.js'),p.join(prefix,'bin','opencode'));`)
@@ -123,6 +126,16 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     await host.request('engine.attachment.download.check', {authorizationId:payload.authorizationId})
     return {}
   } }
+  schemas['engine.artifact.copyFile'] = { validatePayload: isPrivateArtifactCopy, validateResult: ARTIFACT_CODECS['artifacts:copyFile'].validateWireResult }
+  schemas['engine.artifact.copyFile.check'] = { validatePayload: isPrivateArtifactCopyCheck, validateResult: value => isRecord(value) && hasExactKeys(value, ['authorized']) && value.authorized === true }
+  if (artifactClipboard) schemas['host.artifact.copyFile'] = { ...ARTIFACT_NATIVE_CALLBACK_SCHEMAS['host.artifact.copyFile'], handle: async payload => {
+    if (!isRecord(payload) || !uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    fileReceipts.push(structuredClone(payload.receipt)); attachmentAuthorizations.push(payload.authorizationId as string)
+    await fileAcknowledgement
+    if (!uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    await host.request('engine.artifact.copyFile.check', { authorizationId: payload.authorizationId })
+    nativeCalls.push('host.artifact.copyFile'); return { mode: 'file' }
+  } }
   schemas['engine.agent.install'] = { validatePayload: isPrivateAgentInstallation, validateResult: AGENT_INSTALLER_CODECS['agent-installer:install'].validateWireResult }
   schemas['engine.ui.publish'] = { validatePayload: isPrivateUiPublication, validateResult: UI_DESKTOP_CODECS['ui:publishState'].validateWireResult }
   if (ui) {
@@ -154,6 +167,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
         ...(ui ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         ...(attachmentOpening ? { openAttachment: callbacks.openAttachment } : {}),
         ...(attachmentDownloading ? { downloadAttachment: callbacks.downloadAttachment } : {}),
+        ...(artifactClipboard ? { copyArtifact: callbacks.copyArtifact } : {}),
         openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } })
   }), { write: async bytes => { deliver(host, bytes) } }); services.push(service)
   const initialize = async (): Promise<void> => {
@@ -469,3 +483,48 @@ it('rechecks live Source download scope after the dialog wait and retires author
   await expect(f.host.request('engine.attachment.download.check', { authorizationId })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
   expect(readFileSync(path).length).toBe(attachment.size); expect(f.attachmentReceipts).toHaveLength(1)
 }, 15000)
+
+describe('private artifact clipboard handoff', () => {
+  async function ready(capability = true) {
+    const f = fixture(false, true, false, false, false, capability); await f.initialize()
+    const actual = f.service.getReadyServices()!, task = actual.db.createTask(makeTask())!
+    const directory = join(f.launch.paths.workspaceRoot, task.id); mkdirSync(directory, { recursive: true }); writeFileSync(join(directory, 'report.md'), 'report')
+    return { ...f, actual, task, request: { taskId: task.id, relativePath: 'report.md', leaseId: 'document_fixture_1' } }
+  }
+  it('keeps file copy independent of open authority, read-only, and refuses public lease manufacture and nonce replay', async () => {
+    const f = await ready(); f.denyWrites()
+    await expect(f.host.request('artifacts:copyFile', { taskId: f.task.id, relativePath: 'report.md' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(await f.host.request('engine.artifact.copyFile', f.request)).toEqual({ defined: true, value: { mode: 'file' } })
+    expect(f.fileReceipts).toEqual([expect.objectContaining({ taskId: f.task.id, path: join(f.launch.paths.workspaceRoot, f.task.id, 'report.md') })])
+    expect(f.nativeCalls.filter(name => name === 'host.artifact.copyFile')).toHaveLength(1)
+    await expect(f.host.request('engine.artifact.copyFile.check', { authorizationId: f.attachmentAuthorizations[0] })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(f.wireEvents.filter(event => event.operation === 'task:updated' || event.operation === 'artifact:updated')).toEqual([])
+  })
+  it('returns unavailable without probing native clipboard when its capability is absent', async () => {
+    const f = await ready(false)
+    expect(await f.host.request('engine.artifact.copyFile', f.request)).toEqual({ defined: true, value: { mode: 'unavailable' } })
+    expect(f.fileReceipts).toEqual([])
+  })
+  it('returns unavailable without probing native clipboard when the saved file is absent', async () => {
+    const f = await ready()
+    expect(await f.host.request('engine.artifact.copyFile', { ...f.request, relativePath: 'missing.md' })).toEqual({ defined: true, value: { mode: 'unavailable' } })
+    expect(f.fileReceipts).toEqual([])
+  })
+  it('rechecks the original scope immediately before native handoff after a queued permission change', async () => {
+    const f = await ready(), gate = deferred(); release.push(gate.finish); f.holdFileAcknowledgement(gate.promise)
+    const request = f.host.request('engine.artifact.copyFile', f.request), failure = expect(request).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await vi.waitFor(() => expect(f.fileReceipts).toHaveLength(1))
+    f.deny(); gate.finish(); await failure
+    expect(f.nativeCalls.filter(name => name === 'host.artifact.copyFile')).toEqual([])
+  })
+  it('keeps the raw callback and profile owner until acknowledgement even after cancellation', async () => {
+    const f = await ready(), gate = deferred(); release.push(gate.finish); f.holdFileAcknowledgement(gate.promise)
+    const abort = new AbortController(), raw = f.host.request('engine.artifact.copyFile', f.request, { signal: abort.signal })
+    const cancelled = expect(raw).rejects.toMatchObject({ code: 'CANCELLED' })
+    await vi.waitFor(() => expect(f.fileReceipts).toHaveLength(1)); abort.abort(); await cancelled
+    expect(() => acquireProfileLock(f.launch.paths.profileRoot)).toThrow('PROFILE_DUPLICATE_OWNER')
+    let closed = false; const closing = f.service.close().then(() => { closed = true })
+    await new Promise(resolve => setTimeout(resolve, 20)); expect(closed).toBe(false)
+    gate.finish(); await closing
+  })
+})

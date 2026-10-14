@@ -4,12 +4,12 @@ import { ArtifactContentKind, ArtifactType } from './artifacts'
 import { isDatabaseId } from './database-desktop-codecs'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from './service-protocol'
 
-export const ARTIFACT_OPERATIONS = ['artifacts:scan', 'artifacts:read'] as const
+export const ARTIFACT_OPERATIONS = ['artifacts:scan', 'artifacts:read', 'artifacts:copyFile'] as const
 export type ArtifactOperation = typeof ARTIFACT_OPERATIONS[number]
-export const ARTIFACT_LIMITS = { resultBytes: 900_000, textBytes: 128 * 1024, imageBytes: 512 * 1024, files: 500, pathBytes: 2048, registryBytes: 1024 * 1024, taskJsonBytes: 1024 * 1024, members: 128 } as const
+export const ARTIFACT_LIMITS = { resultBytes: 900_000, copyFileBytes: 64 * 1024 * 1024, textBytes: 128 * 1024, imageBytes: 512 * 1024, files: 500, pathBytes: 2048, registryBytes: 1024 * 1024, taskJsonBytes: 1024 * 1024, members: 128 } as const
 const fail = (code: 'INVALID_ARGUMENTS' | 'INVALID_RESULT'): never => { throw new ServiceProtocolError(code) }
 const shape = (v: unknown, keys: string[], optional: string[] = []): v is Record<string, unknown> => isRecord(v) && hasExactKeys(v, keys, optional)
-const text = (v: unknown, max: number): v is string => typeof v === 'string' && !/[\u0000-\u001f\u007f]/.test(v) && new TextEncoder().encode(v).length <= max
+const text = (v: unknown, max: number): v is string => typeof v === 'string' && new TextDecoder('utf-8', { ignoreBOM: true }).decode(new TextEncoder().encode(v)) === v && !/[\u0000-\u001f\u007f]/.test(v) && new TextEncoder().encode(v).length <= max
 export const isArtifactRelativePath = (v: unknown): v is string => text(v, ARTIFACT_LIMITS.pathBytes) && !!v && !v.startsWith('/') && !/[\\:]/.test(v) && v.split('/').every(part => !!part && part !== '.' && part !== '..')
 const number = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v) && v >= 0
 const bounded = (v: unknown): boolean => isJsonValue(v) && new TextEncoder().encode(JSON.stringify(v)).length <= ARTIFACT_LIMITS.resultBytes
@@ -40,13 +40,13 @@ export interface ArtifactCodec<K extends ArtifactOperation> {
 function codec<K extends ArtifactOperation>(operation: K): ArtifactCodec<K> {
   const keys = operation === 'artifacts:scan' ? ['taskId'] : ['taskId', 'relativePath']
   const args = (v: unknown): v is unknown[] => Array.isArray(v) && v.length === keys.length && isDatabaseId(v[0]) && (operation === 'artifacts:scan' || isArtifactRelativePath(v[1]))
-  const valid = (v: unknown): boolean => bounded(v) && (operation === 'artifacts:read' ? content(v) : Array.isArray(v) && v.length <= ARTIFACT_LIMITS.files && v.every(entry) && new Set(v.map(item => item.path)).size === v.length && v.reduce((count, item) => count + (item.files?.length ?? 1), 0) <= ARTIFACT_LIMITS.files)
+  const valid = (v: unknown): boolean => operation === 'artifacts:copyFile' ? shape(v, ['mode']) && ['file', 'image', 'path', 'unavailable'].includes(v.mode as string) : bounded(v) && (operation === 'artifacts:read' ? content(v) : Array.isArray(v) && v.length <= ARTIFACT_LIMITS.files && v.every(entry) && new Set(v.map(item => item.path)).size === v.length && v.reduce((count, item) => count + (item.files?.length ?? 1), 0) <= ARTIFACT_LIMITS.files)
   return {
     validateArguments: args,
     encodeArguments(v) { if (!args(v)) return fail('INVALID_ARGUMENTS'); return Object.fromEntries(keys.map((key, index) => [key, v[index]])) as JsonValue },
     decodeArguments(v) { if (!shape(v, keys)) return fail('INVALID_ARGUMENTS'); const values = keys.map(key => v[key]); if (!args(values)) return fail('INVALID_ARGUMENTS'); return values as DesktopCommandMap[K]['apiArguments'] },
     validateResult: valid,
-    encodeResult(v) { const value = operation === 'artifacts:scan' && Array.isArray(v) ? v.map(row => isRecord(row) ? clean(row) : row) : isRecord(v) ? clean(v) : v; if (!valid(value)) return fail('INVALID_RESULT'); return { defined: true, value: value as JsonValue } },
+    encodeResult(v) { const value = operation === 'artifacts:copyFile' ? v : operation === 'artifacts:scan' && Array.isArray(v) ? v.map(row => isRecord(row) ? clean(row) : row) : isRecord(v) ? clean(v) : v; if (!valid(value)) return fail('INVALID_RESULT'); return { defined: true, value: value as JsonValue } },
     decodeResult(v) { if (!valid(v)) return fail('INVALID_RESULT'); return v as DesktopCommandMap[K]['result'] },
     validateWireResult: v => shape(v, ['defined', 'value']) && v.defined === true && valid(v.value)
   }

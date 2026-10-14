@@ -283,7 +283,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 228 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 229 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -292,7 +292,7 @@ it('binds the 228 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(228)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(229)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -723,7 +723,7 @@ it('never replays an accepted native URL opening after an epoch change', async (
   expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'shell:openExternal')).toHaveLength(1)
 })
 
-it('binds bounded artifact reads while native file/clipboard effects stay unavailable', async () => {
+it('binds bounded artifact reads while clipboard requires current document authority', async () => {
   const f = fixture()
   f.results.set('artifacts:scan', [{ path: 'report.md', title: 'report.md', type: 'markdown', updatedAt: 100, size: 10 }])
   f.results.set('artifacts:read', { kind: 'text', content: 'Owned report\n', mimeType: 'text/markdown' })
@@ -732,7 +732,7 @@ it('binds bounded artifact reads while native file/clipboard effects stay unavai
   expect(await f.host.api.artifacts.read('task_fixture', 'report.md')).toEqual(f.results.get('artifacts:read'))
   const before = f.invoke.mock.calls.length
   await expect(f.host.api.artifacts.read('task_fixture', '../private.txt')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
-  await expect(f.host.api.artifacts.copyFile!('task_fixture', 'report.md')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
+  await expect(f.host.api.artifacts.copyFile!('task_fixture', 'report.md')).rejects.toMatchObject({ code: 'DISCONNECTED' })
   expect(f.invoke.mock.calls.length).toBe(before)
 })
 
@@ -959,4 +959,17 @@ it('refuses private clipboard results and does not export or replay old document
   f.changeUiLease(); await f.host.reconnect(); await failure
   held.resolve({ engineEpoch: 'engine-1', result: { defined: true, value: { images: [], errors: [] } } })
   expect(f.invoke.mock.calls.filter(([, args]) => args?.operation === 'chatImages:readClipboard')).toHaveLength(count + 1)
+})
+
+it('binds artifact file copy to the current document and fences hydration without replay', async () => {
+  const f = fixture(true); releases.push(installDesktopHost(f.host)); f.results.set('artifacts:copyFile', { mode: 'file' })
+  await expect(desktopApi.artifacts.copyFile('task_1', 'report.md')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(await desktopApi.artifacts.copyFile('task_1', 'report.md')).toEqual({ mode: 'file' })
+  expect(f.invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'artifacts:copyFile', payload: { taskId: 'task_1', relativePath: 'report.md' }, engineEpoch: 'engine-1', uiLease: 'document-1' })
+  const before = f.invoke.mock.calls.length
+  await expect(desktopApi.artifacts.copyFile('task_1', '../private')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke).toHaveBeenCalledTimes(before)
+  f.results.set('artifacts:copyFile', { mode: 'file', filePath: '/private' })
+  await expect(desktopApi.artifacts.copyFile('task_1', 'report.md')).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })

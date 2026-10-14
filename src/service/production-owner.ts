@@ -1,3 +1,4 @@
+import type { ArtifactCopyFileResult } from '../shared/artifacts'
 import type { AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import type { DesktopCallerContext } from './transport/desktop-registry'
 import { isUiLeaseId } from '../shared/ui-desktop-codecs'
@@ -128,6 +129,7 @@ export interface ProductionOwnerBootstrap {
     ui?: ProductionUiNativeHost
     emitInstallationProgress?(progress: DesktopEventMap['agent-installer:progress'], leaseId: string): Promise<void>
     openAttachment?(receipt: AttachmentPathReceipt, leaseId: string): Promise<void>
+    copyArtifact?(receipt: WorkspacePathReceipt, leaseId: string, beforeEffect: () => void): Promise<ArtifactCopyFileResult>
     downloadAttachment?(receipt: AttachmentPathReceipt, leaseId: string, beforeEffect: () => void): Promise<void>
     sendUiCommand(command: UiCommand): { ok: true } | { ok: false; detail: string }
     /** Join only this launch's supervised children. Failure retains the lease. */
@@ -530,13 +532,24 @@ export class ProductionOwner {
     } }
   }
 
-  getArtifactBindingLease(): { workspaceRoot: string; assertArtifactOwners(database: DatabaseManager, workspaceRoot: string): void } {
+  getArtifactBindingLease() {
     this.getDatabaseBindingLease()
-    const services = this.services!, workspaceRoot = this.bootstrap.paths.workspaceRoot
-    return { workspaceRoot, assertArtifactOwners: (database, actualRoot) => {
+    const services = this.services!, workspaceRoot = this.bootstrap.paths.workspaceRoot, files = services.workspaceFiles
+    const native = this.bootstrap.native, copyArtifact = native.copyArtifact
+    const current = (): void => {
       this.getDatabaseBindingLease()
-      if (this.services !== services || database !== services.db || actualRoot !== workspaceRoot || this.databaseRuntime?.paths.workspaceRoot !== workspaceRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
-    } }
+      if (this.services !== services || services.workspaceFiles !== files || this.bootstrap.native !== native || native.copyArtifact !== copyArtifact || this.databaseRuntime?.paths.workspaceRoot !== workspaceRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      files.assertOwners(workspaceRoot)
+    }
+    return { workspaceRoot, files,
+      ...(copyArtifact ? { copyArtifact: async (receipt: WorkspacePathReceipt, caller: DesktopCallerContext, signal: AbortSignal, beforeEffect: () => void): Promise<ArtifactCopyFileResult> => {
+        const guard = (): void => { current(); beforeEffect(); if (signal.aborted || !isUiLeaseId(caller.uiLeaseId)) throw new ProductionOwnerError('SERVICE_OWNER_LOST') }
+        guard(); const result = await this.own(copyArtifact.call(native, receipt, caller.uiLeaseId!, guard)); guard(); return result
+      } } : {}),
+      assertArtifactOwners: (database: DatabaseManager, actualRoot: string, actualFiles?: WorkspaceFileOwner): void => {
+        current()
+        if (database !== services.db || actualRoot !== workspaceRoot || actualFiles !== undefined && actualFiles !== files) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      } }
   }
 
   getMobileBindingLease(): { deps: MobileApiDeps; tunnel: TunnelManagerCore | null; port?: number; lanAddress(): string; assertMobileOwners(deps: MobileApiDeps, tunnel: TunnelManagerCore | null): void } | null {

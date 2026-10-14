@@ -34,6 +34,8 @@ it('waits for native page completion before capturing a private publication rece
     expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'chatImages:readClipboard', payload: {}, engineEpoch: 'engine-1', uiLease: 'document:1' })
     await transport.invoke('attachments:download', { taskId: 'task_1', attachmentId: '00000000-0000-4000-8000-000000000001' }, { engineEpoch: 'engine-1', signal: new AbortController().signal })
     expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'attachments:download', payload: { taskId: 'task_1', attachmentId: '00000000-0000-4000-8000-000000000001' }, engineEpoch: 'engine-1', uiLease: 'document:1' })
+    await transport.invoke('artifacts:copyFile', { taskId: 'task_1', relativePath: 'report.md' }, { engineEpoch: 'engine-1', signal: new AbortController().signal })
+    expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'artifacts:copyFile', payload: { taskId: 'task_1', relativePath: 'report.md' }, engineEpoch: 'engine-1', uiLease: 'document:1' })
     invoke.mockResolvedValue({ available: true, protocolVersion: 1, engineEpoch: 'engine-2' })
     expect(await getTauriEngineEpoch(native)).toBe('engine-2'); expect(getTauriUiDocument(native)).toBeUndefined()
     await expect(transport.invoke('ui:publishState', { state: {} }, { engineEpoch: 'engine-2', signal: new AbortController().signal })).rejects.toMatchObject({ code: 'DISCONNECTED' })
@@ -56,5 +58,19 @@ it('revokes clipboard delivery as soon as replacement bootstrap starts, before i
   await failure
   finishBootstrap({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document:2' })
   await replacement
+  expect(invoke.mock.calls.filter(([command]) => command === 'desktop_invoke')).toHaveLength(1)
+})
+
+it('retires an accepted artifact copy result during replacement bootstrap without replay', async () => {
+  let finishCopy!: (value: unknown) => void
+  const raw = new Promise(resolve => { finishCopy = resolve })
+  const invoke = vi.fn().mockResolvedValueOnce({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document:1' }).mockReturnValueOnce(raw)
+    .mockResolvedValue({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document:2' })
+  const native = { core: { invoke }, event: { listen: vi.fn() } } as unknown as TauriDesktopApi
+  await getTauriEngineEpoch(native)
+  const old = createTauriDesktopTransport(native).invoke('artifacts:copyFile', { taskId: 'task_1', relativePath: 'report.md' }, { engineEpoch: 'engine-1', signal: new AbortController().signal })
+  const failure = expect(old).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  await getTauriEngineEpoch(native)
+  finishCopy({ engineEpoch: 'engine-1', result: { defined: true, value: { mode: 'file' } } }); await failure
   expect(invoke.mock.calls.filter(([command]) => command === 'desktop_invoke')).toHaveLength(1)
 })

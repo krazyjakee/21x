@@ -69,7 +69,7 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'voice:installModel': ['nemo-parakeet-tdt-0.6b-v3'], 'voice:removeModel': ['sherpa-streaming-zipformer-en'], 'voice:removeAllModels': [], 'voice:selectModel': ['nemo-fast-conformer-en-480ms'], 'voice:setEndpointSilence': [1.5],
   'voice:tts:getSnapshot': [], 'voice:tts:setEnabled': [false], 'voice:tts:setEngine': ['local'], 'voice:tts:setVoice': ['local:kitten-nano-en-v0_2:0'], 'voice:tts:setSpeed': [1.25], 'voice:tts:setMaxChars': [1200], 'voice:tts:setSpeakActionResults': [false], 'voice:tts:setOnlyVoiceTurns': [true],
   'voice:tts:installModel': ['kitten-nano-en-v0_2'], 'voice:tts:selectModel': ['kokoro-en-v0_19'], 'voice:tts:removeModel': ['kitten-nano-en-v0_2'],
-  'agent-installer:detect': [], 'agent-installer:install': ['opencode'], 'artifacts:scan': [task], 'artifacts:read': [task, 'artifacts/fixture/report.md'],
+  'agent-installer:detect': [], 'agent-installer:install': ['opencode'], 'artifacts:scan': [task], 'artifacts:copyFile': [task, 'report.md'], 'artifacts:read': [task, 'artifacts/fixture/report.md'],
   'db:getTasks': [project], 'db:getTask': [task], 'db:createTask': [{ title: 'Fixture task', project_id: project }],
   'db:updateTask': [task, { title: 'Updated fixture', status: 'ready_for_review' }], 'db:deleteTask': [task],
   'db:getSubtasks': [task], 'db:reorderSubtasks': [task, ['subtask_one', 'subtask_two']], 'project:moveTask': [task, project],
@@ -152,6 +152,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'chatImages:saveToTask', case: 'attachment-raw-name-sanitization', args: [task, ['../unsafe\0.png', 'CON.png', 'folder\\fixture.png', 'report\u202E.png', ''].map(name => ({ ...image, name }))] },
   { operation: 'chatImages:saveToTask', case: 'attachment-empty-images', args: [task, []] },
   { operation: 'attachments:open', case: 'attachment-open-uppercase-version-five-uuid', args: ['t'.repeat(128), 'ABCDEFAB-CDEF-5ABC-ABCD-ABCDEFABCDEF'] },
+  { operation: 'artifacts:copyFile', case: 'artifact-copy-unicode-path', args: ['t'.repeat(128), 'results/你好 report #1.png'] },
   { operation: 'attachments:download', case: 'attachment-download-uppercase-version-five-uuid', args: ['t'.repeat(128), 'ABCDEFAB-CDEF-5ABC-ABCD-ABCDEFABCDEF'] },
   { operation: 'attachments:remove', case: 'attachment-uppercase-version-five-uuid', args: ['t'.repeat(128), 'ABCDEFAB-CDEF-5ABC-ABCD-ABCDEFABCDEF'] },
   { operation: 'taskGroups:create', case: 'unicode-trimmed-title', args: [{ title: '\uFEFF🌱\uFEFF', task_ids: [task, 'task_second'] }] },
@@ -281,7 +282,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 225 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 226 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

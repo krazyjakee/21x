@@ -114,7 +114,7 @@ export const NATIVE_COMMAND_BINDINGS = {
   'claudePlugin:getMarketplaceSources': 'claudePlugins.getMarketplaceSources', 'claudePlugin:addMarketplaceSource': 'claudePlugins.addMarketplaceSource', 'claudePlugin:removeMarketplaceSource': 'claudePlugins.removeMarketplaceSource',
   'claudePlugin:fetchCatalog': 'claudePlugins.fetchCatalog', 'claudePlugin:discoverPlugins': 'claudePlugins.discoverPlugins', 'claudePlugin:getInstalledPlugins': 'claudePlugins.getInstalledPlugins',
   'claudePlugin:installPlugin': 'claudePlugins.installPlugin', 'claudePlugin:uninstallPlugin': 'claudePlugins.uninstallPlugin', 'claudePlugin:enablePlugin': 'claudePlugins.enablePlugin', 'claudePlugin:disablePlugin': 'claudePlugins.disablePlugin', 'claudePlugin:getPluginResources': 'claudePlugins.getPluginResources',
-  'agent-installer:detect': 'agentInstaller.detect', 'agent-installer:install': 'agentInstaller.install', 'artifacts:scan': 'artifacts.scan', 'artifacts:read': 'artifacts.read',
+  'agent-installer:detect': 'agentInstaller.detect', 'agent-installer:install': 'agentInstaller.install', 'artifacts:scan': 'artifacts.scan', 'artifacts:read': 'artifacts.read', 'artifacts:copyFile': 'artifacts.copyFile',
   'shell:openExternal': 'shell.openExternal', 'app:getVersion': 'app.getVersion',
   'tasks:getWorkspaceDir': 'tasks.getWorkspaceDir', 'shell:readTextFile': 'shell.readTextFile', 'shell:openPath': 'shell.openPath', 'shell:showItemInFolder': 'shell.showItemInFolder',
   'mobile:getInfo': 'mobile.getInfo', 'mobile:setAccess': 'mobile.setAccess', 'mobile:startTunnel': 'mobile.startTunnel', 'mobile:stopTunnel': 'mobile.stopTunnel',

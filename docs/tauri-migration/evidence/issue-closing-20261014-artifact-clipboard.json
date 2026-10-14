@@ -1,0 +1,341 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    215,
+    217
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "76fa313bf00e51238085dd2bb8ccfff75dc3c905",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/artifact-clipboard-bindings.md": "5e2bfaffd472219b9d4be1caf5749ac797a581178d6a1084e606f522b6824289",
+      "docs/tauri-migration/implementation-status.md": "b2920f2a1e3f816e2529d51c503678a191e73395d92301a609757bcb59c91fed",
+      "docs/tauri-migration/inventory.json": "c3749d824fb66fdf162e3afcbfbbad2a57f5c2c7b50ff8fff42c342bcd453ec0",
+      "scripts/production-contracts-proof.test.ts": "5677776cd8ad7cac159273cca1c40fd4ec1eeb76ad4d812372cd4fbe599ac31e",
+      "scripts/production-contracts-proof.ts": "eef07f00fe0854f658065d5e7b5d0058aebb0645fb038ced7b3c5f36c57f0b24",
+      "src-tauri/engine/src/production.rs": "bb8702757fc5a33b0e6de1252db5cea2329e4fd1ea07c0e2154cbf33df12550a",
+      "src-tauri/engine/src/production_contracts.rs": "99633cd8bf613d2d105e58deb068cc9e84da4496890d426ecc088d148a0a0eb9",
+      "src-tauri/engine/src/production_files.rs": "9c53ee1f749068069545b7719f8cd4f4cdd610854dda7b755d0b8cf7a8197ba7",
+      "src-tauri/src/native_artifact_clipboard.rs": "b91b9cf05aaedbba14b4aea8985c481c82fb52be2026327b4738a70bff1b8324",
+      "src-tauri/src/production_host.rs": "e79338cc3426c802d859417bb2dd6cf00b5da569523e1615dd9cad4e997fa552",
+      "src/main/workspace-file-owner.test.ts": "7b504797e48b42fc6c8fee9d02be42f8b5a110b9458095bfaccf905013a34321",
+      "src/main/workspace-file-owner.ts": "1cc8a3aa3a4d3b95e55449927eb64c2723c632bd3dfc86b1145c5e2fd8018b74",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "a802367b5e183b9e9c607f857fa989b47bc74af8079d4723f2e65c1e3e4db1cd",
+      "src/renderer/src/lib/native-desktop-host.ts": "15ae002e9e897361793a253d9f58ac84f2361759e4139c0d28e6373c9f87e3a8",
+      "src/renderer/src/lib/tauri-desktop-transport.test.ts": "6afec67f251116da75f32dc229081be2d5e8dfb15251d1a6b1e3722a1c73a0fa",
+      "src/renderer/src/lib/tauri-desktop-transport.ts": "c04f79d04eef460a8bf4632d792b29eb6cbdeaf9d1306f359a7d03697fde21c4",
+      "src/service/artifact-backend.test.ts": "5fa450211762436d1625d07d8e4cef6134327668e4aaec4c2ad451da465cb064",
+      "src/service/artifact-backend.ts": "e03d6330ed2cf460296f741ff367b3f93248512428e630b739bd80439f72a250",
+      "src/service/production-desktop-bindings.test.ts": "b186a81c13e7b52e46fae60eb526b8c060b5725f20a1ee0ad07ad58d195b3365",
+      "src/service/production-desktop-bindings.ts": "a2d124be7271e410c15b1f6c1b4e5064adae6a7cf4ce6d2dea7083a976652a87",
+      "src/service/production-owner.ts": "a864122cc250204f280ff3f93f0cc6d99728e4f8fed72bd3480dbd74a0c067f7",
+      "src/service/production-service.test.ts": "7b01e20eeb0449a2431094af9e58480a0a86cde7246e130951e242b56415ea18",
+      "src/service/production-service.ts": "72aad010d5d5f302a5957b5c40c4cc5adcd4d98a1bf99f0ab4130cbbd222fa57",
+      "src/shared/artifact-codecs.test.ts": "9c48d57a712f1dbd1dbf1925d62a7541acc3660c8cc90ed89b364846130dbfd2",
+      "src/shared/artifact-codecs.ts": "90de7da6635fd06b78fb7a2e930a0df12855bb99375ba391c76f19e937364ea1",
+      "src/shared/artifact-native-callbacks.test.ts": "30cdd1f317eb79d8c2e8ab437762bc346b1947537c8d54b7f95b5e768d444767",
+      "src/shared/artifact-native-callbacks.ts": "c411b3384538aa2a89db32264268c40b1f98b948bfa6b32028b92333ec9f9337",
+      "src/shared/production-bootstrap.test.ts": "2fbcf39164e9997ac57cef9c4429908383bb4275a86f29c41de0b9c2d12fb93d",
+      "src/shared/production-bootstrap.ts": "a926b5120d668d3de9e2167d67b6261766eaad14f2b3ed4687990f6fb313eed4"
+    },
+    "frozenInputs": 28,
+    "finalImplementationHashesRevalidated": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Linux artifact file URI clipboard publication with current document and captured Source/native workspace authority. Shipping application remains Electron.",
+  "bindings": {
+    "finiteServiceCommandContracts": 226,
+    "separateNativeServiceCommands": 3,
+    "facadeCommandBindings": 229,
+    "events": 30,
+    "newCommands": 1,
+    "newEvents": 0,
+    "publicOperation": "artifacts:copyFile",
+    "privateOperation": "engine.artifact.copyFile",
+    "privateCallback": "host.artifact.copyFile",
+    "privateSourceCheck": "engine.artifact.copyFile.check",
+    "capability": "artifactClipboard",
+    "fileByteCap": 67108864,
+    "nativeWaiterBudgetMs": 5000
+  },
+  "implemented": [
+    "Exact public task ID and safe relative path retain literal task/group/Captain workspaces. Public requests carry no root, path authority, document lease, callback receipt, nonce or clipboard contents.",
+    "Actual bounded SQL scopes and task/project/group/assigned agent read grants are captured and rechecked. Live agents continue without metadata mutation or task/session events; credential/full task getters are not used for copy authority.",
+    "Source WorkspaceFileOwner holds its no-follow regular single-link file descriptor through the complete raw callback, bounds at64MiB and performs metadata/version/path checks around acknowledgement without reading contents. Failed close retains the exact descriptor and blocks new effects until genuine drain retry.",
+    "Independent optional artifactClipboard requires actual native host/current UI. Missing capability or source returns unavailable. Public modes retain legacy image/path DTOs, while this private native callback permits onlyfile/unavailable.",
+    "An original-active-guard UUID exists only during the raw callback. Native blocking work checks it before scheduling publication and after actual GTK closure retirement. Forged, retired, cancelled or changed scope tickets refuse; GTK callbacks never block on Source RPC or filesystem reads.",
+    "GTK set_with_owner publishes fixed bounded percent-encoded text/uri-list bytes from the captured native path. The opaque GObject payload services future clipboard requests without filesystem authority. Document identity is checked around the actual GTK effect.",
+    "Public timeout/drop revokes later effects while actual blocking work/GTK closure remains owned. Shutdown drains accepted work, clears only a matching actual clipboard owner token, waits persistent payload retirement and releases the held root.",
+    "Renderer hydration/current-document ingress reject stale results without replay. Read/Scan remain available independently of clipboard support."
+  ],
+  "artifact": {
+    "buildIdentity": "production-2b4a72951a2548ad807fd6586a784905",
+    "resourceManifestSha256": "9648433b729ad47a22b9f7658d57dca38e2333b81ab27614b7fe84cbb0c88249",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "dependencyManifestsUnchanged": true,
+    "packageAndRuntimePinsUnchanged": true,
+    "cargoVersionsAndChecksumsUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 226,
+    "actualTypeScriptRequests": 468,
+    "sha256": "c93199f656ee3468d74d7073c29b061a256541c3551ac483ae1698d4168bc7e9",
+    "nativeParity": "Actual finite TypeScript request corpus accepted by native golden-request test"
+  },
+  "tests": {
+    "app": {
+      "passed": 7038,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "08a411c040b7cb258341d5eef2fe08d29cad64b5a3426f72f117f0fc411bf5fc",
+      "logSha256": "099670d30d3777f4d7d6bfd158a4a61725368bcd48094ea9affceb724bb0eb8e"
+    },
+    "standalone": {
+      "passed": 3570,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "175ae3a1f562324b412b1b537212dfeb3be522d6a5f888e661caddc10b3306f3",
+      "logSha256": "a8de2d579cadf9e054d256498e45355b4369543f431ddf9b475675b8dffbe5e3"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "4b1f82d27ef6776620c2d530418ea391378e72b48b1fe7bd5541ec5bfa308b4e",
+      "logSha256": "7723f817d6c0faad54b896319a47db96a985f21411b83ad958c1a4665d3e3aed"
+    },
+    "focused": {
+      "passed": 207,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "8ab4c022cd39882a5745e204a693e6186efacad4990110970f456026bf5f7212",
+      "logSha256": "a89f616d4aa6eb68cef6a13d08837b032591dded8c4d64336ec9fd8558798dd6"
+    },
+    "corpus-export": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "cd645b56eeaa358729c7e56fb70f7b9bcdb3de461693a7c35c1cf4c9e50799c7",
+      "logSha256": "4bcdb92478c5ae1d5d279438ed3a7dd975006cad42f28ba58e6b0bd756fad514"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 28.15,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.362,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 22.036,
+      "logSha256": "d523c6cd983a75cef5b68c268e71635fa71fa70f470ee7f3230e9db5595c8122"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.832,
+      "logSha256": "e178e4f307386a6698c1da4ddd158785b8ab2e633e900d73da0419de28ba59c0"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.702,
+      "logSha256": "5fc02a053617f0f974f284903676d758fa795ab9f1dced0464f021927c5c0633"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.735,
+      "logSha256": "c4e9c9d3a79cc6db0359c187b5c1bf0571eef5751785f4f58a01b22f583610b2"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.38,
+      "logSha256": "ae0bbf1d127d85002f655d47f8149c001cfcb67f0cee4a651434461e0dfd94db"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.434,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.625,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.045,
+      "logSha256": "714788d1ff695055ba3c8b68207bdcabfac082688780aacc4eea48ac8e1b4e2c"
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.056,
+      "logSha256": "10f70242f92c1922fb9899ac5d7d4fd3fe2b690efbacf966d1b251cb0ea34b1c"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.998,
+      "logSha256": "f48799687a8f9364c0846a2a58002b1879b6f6e224f387daa3f027d405787eca"
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch27-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.345,
+      "logSha256": "2087e2ca68764f99f919dbdd3b69a12145bff988b4ff9da386cbbb13d47200b9"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.052,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "validationCorrections": [
+    "Updated three exact optional-feature schema count fixtures for the one newly retained command; final integrated suite passed.",
+    "Moved a new Rust test into the production test module and configured its required actual UI callback fixture. Final native suites passed.",
+    "Corrected the renderer expectation to current-document refusal; the oversized SQL regression still proves refusal before JSON parsing/native effects and now asserts the registry authorization boundary code.",
+    "Separated unavailable-capability and missing-file tests so each owns exactly one actual production singleton.",
+    "Qualified the already-locked GTK GDK reexport; no dependency/version changes were needed."
+  ],
+  "remainingAcceptance": [
+    "Actual graphical GTK publication, owner cleanup and file-manager paste have not been exercised. Display-free policy/FD/raw callback fixtures prove only their stated scope.",
+    "File URI publication is a reference handoff, not a snapshot of contents. External paste depends on the referenced file remaining available; later pathname/consumer behavior is outside the handoff guarantee.",
+    "Source checks precede scheduling; Source grants and filesystem identity cannot be atomically coupled to an OS clipboard effect. Late refusal does not roll back an accepted URI offer.",
+    "Non-Linux file clipboard authority, image/path fallback, production artifact viewers and full retained canvas/desktop/platform/release acceptance remain open.",
+    "Hosted voice remains deferred by user decision. Issues#202/#208/#215/#217 and complete G0-G5 migration gates remain open."
+  ]
+}

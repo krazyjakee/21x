@@ -6,6 +6,21 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The artifact clipboard continuation binds the retained Copy file action to a
+Linux file URI clipboard owner. Source holds the authorized regular-file FD
+through actual handoff. A separate private capability and current physical
+document are required, and native checks the original live read scope before
+publication. Missing files or capability return unavailable. Shutdown clears
+only the app's own clipboard offer and waits for its real callback retirement.
+
+The finite surface has 226 service commands, three direct native commands and
+30 events. See [artifact clipboard ownership](artifact-clipboard-bindings.md).
+Later external paste depends on the referenced file remaining available.
+Installed GTK/file-manager acceptance and other platforms remain open. Hosted
+voice remains deferred; Electron is still the shipping application.
+
+The preceding download continuation retains its tested revision:
+
 The download continuation binds saved attachment IDs to a native Linux Save
 dialog and descriptor-owned file copying. Its independent private capability
 requires current document authority. Read-only task/group/agent scopes keep live
