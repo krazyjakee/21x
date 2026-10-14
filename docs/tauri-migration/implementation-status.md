@@ -6,6 +6,19 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The next local model continuation adds authenticated synthesis publication
+receipts using the production profile's existing protected key. Committed
+receipts survive an owner restart and authorize removal only when the exact
+model, roots, file identities and hashes still match. Prepared, retiring,
+tampered, historical and changed trees remain protected. Recognition downloads
+follow a finite publisher/CDN policy tied to the pinned catalogue revision and
+resource metadata; every final file still requires its exact catalogue size
+and checksum. These changes add no native or hosted voice capability.
+The retained contract surface remains 161 service commands, two separate native
+commands and 23 events. See the
+[model continuation evidence](evidence/issue-closing-20261014-local-model-receipts.json)
+for tested source, artifact and scope limits.
+
 The local voice continuation adds actual portable recognition, speech, model
 and optional-runtime owners, plus 21 finite management commands and four
 desktop-only management events. Both existing isolated worker scripts join the

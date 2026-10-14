@@ -34,25 +34,73 @@ escaping paths, duplicate files, and unsupported entries. Publication uses
 a cooperative namespace lock and rename after checking that the destination
 is absent. This is not an adversarial atomic no-replace primitive.
 
-Portable deletion requires this manager's exact publication inventory,
-including every directory/file identity and file hash tied to the archive
-checksum. Historical trees without a receipt, added personal files,
-changed bytes, and replaced namespaces are preserved and refused. Receipts
-currently live in memory: after restart, a retained model can be read but
-cannot be removed through this portable owner. Durable authenticated removal
-receipts remain a required follow-up. Unrelated files and legacy directories
-are never swept by portable `removeAll()`.
+Production model hosts must borrow an actual `VoiceModelInventoryOwner`.
+Its required options are `profileRootDir`, `inventoryRootDir`, `modelRootDir`,
+the captured `AuthenticatedSecretStorage`, and `assertCurrent`. Both model
+and inventory roots must be separate physical direct children of the trusted
+profile root. The explicit `inventory: 'memory-only-fixture'` mode exists for
+controlled tests; production never falls back to it. Electron hosts without
+portable policy keep their original behavior.
+
+The owner writes ciphertext using the existing profile-bound AES-GCM
+`encryptString` / `decryptString` format and key. The authenticated plaintext
+starts with the exact `21x:voice-model-publication:tts:v1` domain and binds
+the fixed manifest identity, archive format/checksum/size/address, current
+physical profile/inventory/model roots, and complete directory/file inventory.
+Each file carries its identity, size, modification time, and SHA-256. Reads
+use no-follow handles with ciphertext, JSON, path, count, depth, and actual
+tree-byte limits; oversized or foreign-purpose receipts are refused before
+they can grant deletion. No plaintext inventory file is written.
+
+Publication first persists and syncs an encrypted `prepared` receipt, then
+the manager renames the verified payload, and the owner verifies the exact
+published tree before persisting a `committed` receipt. Receipt publication
+uses exclusive temporary files and no-replace hard links; both files and
+parent directories are synced. Prepared cleanup finishes before install
+resolves. Only an unambiguous committed receipt authorizes same-key restart
+removal. Prepared-only, committed-plus-prepared, and interrupted retirement
+states refuse automatic recovery or replay. Directory sync errors remain
+explicit failures; Windows/macOS durability and installed acceptance are
+still unverified. Model-directory rename remains a cooperative operation,
+not an adversarial atomic compare-and-publish primitive.
+
+Before removal, the exact current inventory must match. Historical trees
+without receipts, added personal files, changed bytes, and replaced roots
+are preserved and refused. A durable retirement receipt precedes quarantine
+rename. Removal then verifies and retires each exact inventoried file before
+unlinking it; directories are removed only when empty. Unexpected additions,
+replacements, or interrupted deletions preserve their quarantine and receipt
+for explicit recovery. The owner never recursively sweeps model or inventory
+namespaces. These checks do not provide an adversarial OS-level atomic
+compare-and-unlink primitive against another process with the same filesystem
+privileges.
+
+Successful staging cleanup verifies the fixed archive's exact bytes and
+identity, unlinks that file, and removes only an empty staging directory.
+Failed or ambiguous durable stages remain preserved and block another
+same-model staging attempt. There is no automatic historical adoption or
+uncertain staging/quarantine cleanup; a reviewed explicit recovery flow remains
+open. Unrelated files and legacy directories are never swept by portable
+`removeAll()`.
 
 `runManagementMutation(effect, beforeWrite)` composes the recognition owner's
 single management lease with speech and model writes. It rejects competing
 mutations and rechecks the exact scope after awaits and before settings,
 publication, selection, and removal. Shared-runtime removal first joins
 `stopWorker()`. Final `shutdown()` fences new work immediately and `close()`
-joins accepted reads, downloads, streams, and worker receipts. Speech events
+joins accepted reads, downloads, streams, and worker receipts. The model
+manager also shuts down and joins its actual inventory owner. The inventory
+owner retains each file handle through acknowledged close, preserves failed
+close receipts for exact-handle retries, and never disposes borrowed storage.
+Shutdown deadlines cannot release the profile/key lease while raw ownership
+remains uncertain. Speech events
 remain desktop-only; no samples or credentials are delivered to mobile.
 
 The authored tests cover real filesystem extraction/hash/publication,
-historical and changed-tree preservation, ignored cancellation, raw close
+actual authenticated storage and same-key restart, wrong keys/profiles,
+tampered/domain-invalid/bounded receipts, incomplete publication phases,
+historical and changed-tree preservation, additions/replacements during
+retirement, delayed writes, failed close receipts, ignored cancellation, raw close
 and spawn-error ordering, management withdrawal, explicit hosted refusal,
 and actual Node IPC using synthetic speech. These are controlled owner tests,
 not live-model, installed-device, or permission evidence. Native audio,

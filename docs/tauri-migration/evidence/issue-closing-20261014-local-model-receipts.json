@@ -1,0 +1,458 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    218
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "c58bbf962bc6f1b5e10aafd425ff2b86d74d498f",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/implementation-status.md": "4b01933bbdefdb552f529e3788d40bf7f28562ef41faa14a0d6db336c3fa8012",
+      "docs/tauri-migration/inventory.json": "dcf8bc930e3795c1245d837e9349b8cd935559692ce89b462275bf8283ce67ec",
+      "docs/tauri-migration/voice-management-bindings.md": "9b3ad0a794bd475057846ea7a5c11344c477f7aa5ea6ab1cf602f8bae4dc8174",
+      "docs/tauri-migration/voice-recognition-owner.md": "670bef4e51f2445400dc0874d7dd786a7f69e80a7bbda1b1aebf3f488ed7c307",
+      "docs/tauri-migration/voice-speech-owner.md": "c31885e0227ddef45fb21b8134b831021148a9f90a250e23cf3336a1af7c6428",
+      "src/main/voice/voice-model-download-policy.test.ts": "be2ff2c6b18b24d1628e3e75d191e9737d348dc4863030868b0220ac821cd6fe",
+      "src/main/voice/voice-model-download-policy.ts": "57e4f042eb8ca3a91ea14abfe1f30914a795c2ce8796a9f33b2eadde870ade57",
+      "src/main/voice/voice-model-inventory-owner.test.ts": "441ba316ac4762ad0ae3a39491ff020f9a225144c1e7f4147612f2c6320fd5c7",
+      "src/main/voice/voice-model-inventory-owner.ts": "a312833467da39cbc7108d69929fea12193e6b9ed9b8900df25636f4b3cec5f5",
+      "src/main/voice/voice-model-manager.test.ts": "82485a2d831e2586cd240dfc8af277c47c456656d60964901916e2e94fd3aaa1",
+      "src/main/voice/voice-model-manager.ts": "d9a1390b74f67c08a605fe1212897cecd4d7437513b51fbbb77c4eb896f2ca2c",
+      "src/main/voice/voice-session-manager-core.test.ts": "a2c088189942153e6ff219f2fea12060021da9c71af9cd56f089b115ff9baf2e",
+      "src/main/voice/voice-speech-service.test.ts": "26d8bb974f5f7abae86cd2bc5af84876d8e40178e61de3133a0897be2722bec7",
+      "src/main/voice/voice-tts-model-manager.test.ts": "7c2ee1e5f59862cc9b0edbce0dd68a3421177b445188431233f3fbfa4fed8e94",
+      "src/main/voice/voice-tts-model-manager.ts": "246c9154cd551c0e7f28ff1875b864623729e3db88e4cbf813b9cd0d3892278e",
+      "src/service/production-desktop-bindings.test.ts": "d17d142f9599abd8f538fd655919da472f841ebfa858623433e916d776834cfb",
+      "src/service/production-owner.ts": "bcb97b0f2204cce0b8eefe764fc73fb3e596697dee7fcd5f3711c226f73b50ba",
+      "src/service/production-voice-owner.ts": "52d685b777b99117627badf2ab42090ff011e89a20c9a7b0dcc1a0876149ff79",
+      "src/service/voice-management-backend.test.ts": "7675b18d2b036245e1af4d744462aa083c95602a5863d3e70339f9a9267994f0",
+      "vitest.tauri.config.ts": "7aef31db79a170f031021a75870d323002faa811b9bf702419765d132ec78048"
+    }
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Durable authenticated local synthesis publication/removal receipts bound to the actual protected profile and reviewed finite recognition publisher/CDN download resources. No new RPC or native/hosted voice capability.",
+  "bindings": {
+    "finiteServiceCommandContracts": 161,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 163,
+    "events": 23,
+    "newCommands": 0,
+    "newEvents": 0
+  },
+  "implemented": [
+    "VoiceModelInventoryOwner borrows actual AuthenticatedSecretStorage and trusted profile/model/inventory roots. Domain-separated AES-GCM receipts bind the exact catalogue archive, root identities and complete bounded no-follow tree/hash inventory. No new key, crypto algorithm or plaintext receipt storage is introduced.",
+    "Prepared receipt is authenticated and directory-synced before publication; committed receipt follows exact published-tree verification. Only unambiguous committed receipts authorize restart removal. Prepared, retiring, dual, changed, historic, wrong-key/profile and tampered state refuses deletion, preserving exact files and quarantine for explicit recovery.",
+    "Actual synthesis manager requires the durable owner in production; controlled memory-only fixtures opt in explicitly. Downloads, receipt reads/writes, raw descriptor close, publication and exact retirement remain owned through grant loss/shutdown. Cleanup removes only captured files and empty directories, preserving additional private-stage and model bytes.",
+    "Production voice identity checks capture actual protected storage and roots. Raw inventory drain is part of the actual voice/model shutdown before database/profile lock/key release. Actual singleton same-key restart exercises authenticated retained receipts, added-user-file preservation and later unchanged-tree removal.",
+    "Recognition policy starts only from frozen pinned Hugging Face catalogue resources. Manual bounded redirects keep repository/revision/file and approved finite CDN path/hash/metadata bindings, omit credentials, join each intermediate body cancellation and retain the final response until manager cleanup. Final exact catalogue size/SHA256 remains authoritative; Xet CAS hash is separately bound. Unknown hosts, paths, schemes, ports, metadata, query keys, loops, grant loss and cancellation refuse without broadening scope.",
+    "Portable catalogue deadline and per-write current guards bound accepted downloads without releasing ignored raw cancellation. Electron range/resume behavior remains compatible; fixed diagnostics omit signed query material."
+  ],
+  "artifact": {
+    "buildIdentity": "production-344854874999bba95b188b83aa9b3ba6",
+    "resourceManifestSha256": "2d14f014b83d3262523ec9ee6e02212cec5074259cb7d26d45dc616b8f5d3211",
+    "verifiedClosureFiles": 6890,
+    "workerEntries": {
+      "voiceWorker": "service/voice-worker.cjs",
+      "voiceTtsWorker": "service/voice-tts-worker.cjs"
+    },
+    "workerFiles": {
+      "service/voice-worker.cjs": {
+        "sha256": "2156b0cc656969fd752f7cd00b93608f848b49c843ed04f76e643c31126ca3f7",
+        "bytes": 16701
+      },
+      "service/voice-tts-worker.cjs": {
+        "sha256": "e2634bbfa09521a85c370562d56fab0481409075cf6eaea9bcc6e4959d9a820e",
+        "bytes": 18210
+      }
+    },
+    "redistributionReviewComplete": false,
+    "cargoLockUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 161,
+    "requests": 350,
+    "sha256": "332243b9a9a4360675090c10bf5254b2803f45eb80f99421345adfb073df4513"
+  },
+  "tests": {
+    "app": {
+      "passed": 6506,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "2a18de86f1191274c2d5a8e9f062bf9217453cb16092580131f43f8dda67e44a",
+      "logSha256": "09840159ed751c192e980865a3ea74259796729589fb061de1c0281e6c203cd4"
+    },
+    "standalone": {
+      "passed": 2977,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "11d255cd624b49dc62c7345df5e35eb86cccc39562ff3c7cfab5c6f314f5a2f6",
+      "logSha256": "97cac02616f056018b32ea0b582dac279c5f4237c360029ec0ec3558ed733b37"
+    },
+    "focused": {
+      "passed": 468,
+      "failed": 0,
+      "skipped": 5,
+      "success": true,
+      "reportSha256": "fa1a8f025f2a8fa973db28df5b5eaa2b986dfbad2d5186f8c6fc9a99a37d0b5b",
+      "logSha256": "92430e2e0b8e142ebf628af6bf4d3b04d3d4bf83bf58b7fb932245b56243a042"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "7ff7eb7b35cb1c55f5514d3b1322bc23dbe5db935ec14a320675efde42633735",
+      "logSha256": "6cba5767af91d010aedf42f94d917865b5ffa6885c62522b71d0424cb6d1c596"
+    },
+    "corpus-export": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "7aec9d8ce5a2ef51685a59f0537bcc983901aa9e80c94f9b60ecc10541841c1b",
+      "logSha256": "a90b870b1ffd4868b19aa1da4aaa1bd0b0a49a76cdfa39dfd63b516b358130a5"
+    }
+  },
+  "standaloneOptionalInstalledInference": [
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "VoiceWorkerClient with the installed runtime loads the real recogniser, so the config shape cannot drift",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "Parakeet v3 with the installed runtime loads the offline recogniser and transcribes a complete turn",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "a single-shot turn reports a final and never a segment, so dictation cannot send by itself",
+      "reason": "requires an installed local recognition runtime/model"
+    }
+  ],
+  "liveTokenPolicy": {
+    "evidenceVersion": 1,
+    "node": "v22.23.2",
+    "resource": {
+      "modelId": "nemo-parakeet-tdt-0.6b-v3",
+      "filename": "tokens.txt",
+      "expectedSize": 93939,
+      "expectedSha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+    },
+    "scope": "Read-only one pinned token file through the actual policy; no model install, binary download, inference or native-device proof",
+    "status": "passed",
+    "failure": null,
+    "received": 93939,
+    "actualSha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
+    "elapsedMs": 245,
+    "requests": [
+      {
+        "host": "huggingface.co",
+        "path": "/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt",
+        "status": 307
+      },
+      {
+        "host": "huggingface.co",
+        "path": "/api/resolve-cache/models/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt",
+        "status": 200
+      }
+    ],
+    "reportSha256": "1bbc82ef0a1ceb82c6a3077fe928ca44061a93e868c0f93a99f193f79d133941",
+    "initial": {
+      "evidenceVersion": 1,
+      "node": "v22.23.2",
+      "resource": {
+        "modelId": "nemo-parakeet-tdt-0.6b-v3",
+        "filename": "tokens.txt",
+        "expectedSize": 93939,
+        "expectedSha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+      },
+      "scope": "Read-only one pinned token file through the actual policy; no model install, binary download, inference or native-device proof",
+      "status": "unavailable",
+      "failure": "VOICE_MODEL_DOWNLOAD_POLICY_REFUSED",
+      "received": 0,
+      "actualSha256": null,
+      "elapsedMs": 179,
+      "requests": [
+        {
+          "host": "huggingface.co",
+          "path": "/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt",
+          "status": 307
+        }
+      ]
+    },
+    "sanitizedPublisherMetadata": {
+      "status": 307,
+      "target": {
+        "host": "huggingface.co",
+        "path": "/api/resolve-cache/models/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt",
+        "query": [
+          {
+            "key": "/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt",
+            "empty": true,
+            "length": 0,
+            "quotedDigest": false
+          },
+          {
+            "key": "etag",
+            "empty": false,
+            "length": 42,
+            "quotedDigest": true
+          }
+        ]
+      },
+      "metadata": {
+        "x-repo-commit": "2bda32ec70b097a55adaa07d9a7173915b43cc78",
+        "x-linked-etag": "\"fc43e1c723e262df60b70e1919614417162d1fe2\"",
+        "x-linked-size": null,
+        "x-xet-hash": null,
+        "content-length": "344",
+        "content-encoding": null
+      }
+    }
+  },
+  "initialCompiler": {
+    "command": [
+      "rtk",
+      "pnpm",
+      "exec",
+      "tsc",
+      "--build",
+      "--noEmit",
+      "--force"
+    ],
+    "exitCode": 2,
+    "elapsedSeconds": 27.535,
+    "logSha256": "ba9640e8e407b8936d5ca63c895b562dc1f6c859fba4ea8e3f58e84ac6a0856b"
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 27.86,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 28.825,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 37.711,
+      "logSha256": "48791ee5836253c93fda9de2b26700d22c5e68249aca19cd5b013eb0c6f765e1"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.749,
+      "logSha256": "efcc0574fc77681fa77bfe734c3558c74e97fee35ae0303751f904fd92a91e39"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.707,
+      "logSha256": "2c689f78e389627d96688a4459d0ff418f7cfa417af129856a7be69092036ab2"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.904,
+      "logSha256": "f296f21bc61bb8e19198635bfaea8b08c487e22a298d8828fca09463667491ea"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.405,
+      "logSha256": "612f2d72a6364a548195966024cddd7b803b79ea85a2ea11e683d2cacd6c9ab2"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.222,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.489,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.352,
+      "logSha256": "4832ba7f6d5a2376ca88b3c5721ea109f43d66b761782370529b01698ac528a6",
+      "passed": 26,
+      "ignored": 4
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.207,
+      "logSha256": "985fdca2626adaeb91425081cf1ee762fb9aec65289f60858e20dfa94bc31e3d"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.107,
+      "logSha256": "41d7e74f5a9f9d5cb8bbe910150112f876362fd64ed6560cc7ff73c98de3f746",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch16-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.239,
+      "logSha256": "f2185f5467265de2ebe5112c765fc80688778d36a00ed47bb2ae308c3527bb1d",
+      "passed": 1,
+      "failed": 0
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.043,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "retainedFailures": {
+    "focused-initial": {
+      "passed": 448,
+      "failed": 17,
+      "skipped": 5,
+      "success": false,
+      "reportSha256": "e360c62fcab774ad997a426ec5f2ae0a35e8e5593f3a9d4aa5c35c1de656f3f0",
+      "logSha256": "6f6269626e75239474610d74d9af75dd6c809d7b345b3394f38841272d1d3da2"
+    }
+  },
+  "validationCorrections": [
+    "Initial focused448pass/17fail/5optional: synthetic catalogue tokens URL collided with the real pinned resource metadata; changed fixture-only publisher filenames while preserving production duplicate-resource refusal. Replaced an invalid ESM namespace spy with an explicitly trusted filesystem primitive seam. Initial compiler found an async never-return inference and intentional malformed-host cast; corrected both without weakening required inventory ownership.",
+    "Initial live token probe refused the publisher cache query reference. Sanitized actual307metadata identified the exact original resolve path encoded as an empty query key. Added only that resource-bound cache form and foreign/nonempty-reference rejection controls; subsequent actual-policy probe verified93939bytes and exact catalogue SHA256. No live CDN, complete model or inference acceptance is inferred."
+  ],
+  "remainingAcceptance": [
+    "#218 native microphone permission/denial/capture, focused dictation, task/HITL/group action leases, global shortcuts, custom directory/picker grants, native playback/epochs/interruption, installed real local recognition/TTS and all-platform cleanup remain open.",
+    "Portable runtime installation remains refused before npm/files until reviewed exact acquisition manifest and installation inventory. Installed runtime removal without inventory refuses. Reviewed recognition policy supports only its explicitly documented publisher/CDN subset, not arbitrary or future network destinations.",
+    "Durable inventory persistence and directory-sync behavior require installed supported-target acceptance. Prepared/retiring/ambiguous historical state deliberately has no automatic recovery/adoption. Filesystem receipts and cooperative publication reduce races without claiming atomic kernel containment against all same-user concurrent changes.",
+    "Three standalone optional installed-recognition tests require absent runtime/models. Synthetic archives/network streams prove their stated ownership, not live download/inference/device or all-platform acceptance.",
+    "Hosted voice #92 remains deferred by the user. Full production parity, signed installed resources/redistribution, live-profile cutover and Electron retirement gates remain open."
+  ]
+}

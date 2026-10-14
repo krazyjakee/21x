@@ -34,6 +34,7 @@ import {
   findTtsManifestEntry,
   isTtsManifestVerified,
 } from './voice-tts-manifest'
+import { VoiceModelInventoryOwner, type VoiceModelPublicationReceipt } from './voice-model-inventory-owner'
 
 export interface ResolvedTtsModel {
   id: string
@@ -57,6 +58,8 @@ export interface VoiceTtsModelManagerOptions {
 }
 export interface VoiceTtsModelHost {
   downloads: 'enabled' | 'disabled'
+  /** Actual authenticated owner, or an explicit controlled-fixture mode. */
+  inventory: VoiceModelInventoryOwner | 'memory-only-fixture'
   assertCurrent(): void
   beforeRequest(address: string): void
 }
@@ -89,6 +92,8 @@ export class VoiceTtsModelManager {
 
   constructor(private options: VoiceTtsModelManagerOptions) {
     if (options.host && !isAbsolute(options.rootDir)) throw new Error('VOICE_TTS_MODEL_ROOT_INVALID')
+    if (options.host && !(options.host.inventory instanceof VoiceModelInventoryOwner) && options.host.inventory !== 'memory-only-fixture') throw new Error('VOICE_TTS_INVENTORY_OWNER_REQUIRED')
+    if (options.host?.inventory instanceof VoiceModelInventoryOwner) options.host.inventory.assertModelRoot(options.rootDir)
     this.manifest = options.host ? structuredClone(VOICE_TTS_MODEL_MANIFEST) : null
     options.host?.assertCurrent()
     if (options.host) {
@@ -96,7 +101,8 @@ export class VoiceTtsModelManager {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     }
   }
-  get inflightCount(): number { return this.flights.size + this.reads.size }
+  get inflightCount(): number { return this.flights.size + this.reads.size + (this.inventoryOwner?.inflightCount ?? 0) }
+  private get inventoryOwner(): VoiceModelInventoryOwner | null { return this.options.host?.inventory instanceof VoiceModelInventoryOwner ? this.options.host.inventory : null }
   assertOwner(rootDir: string, host?: VoiceTtsModelHost): void {
     if (rootDir !== this.options.rootDir || host !== this.options.host) throw new Error('VOICE_TTS_MODEL_OWNER_MISMATCH')
     this.available()
@@ -111,11 +117,12 @@ export class VoiceTtsModelManager {
   private beforeWrite(): void { this.available(); const owner = this.management.getStore(); if (this.managementToken && owner?.token !== this.managementToken) throw new Error('VOICE_MANAGEMENT_BUSY'); owner?.beforeWrite() }
   private entry(id: string): VoiceTtsModelManifestEntry | undefined { return this.manifest?.find(entry => entry.id === id) ?? (this.manifest ? undefined : findTtsManifestEntry(id)) }
   private retain<T>(work: Promise<T>): Promise<T> { this.reads.add(work); void work.then(() => this.reads.delete(work), () => this.reads.delete(work)); return work }
-  shutdown(): void { this.closing = true; for (const controller of this.aborts.values()) controller.abort() }
+  shutdown(): void { this.closing = true; for (const controller of this.aborts.values()) controller.abort(); this.inventoryOwner?.shutdown() }
   async close(timeoutMs = 2000): Promise<void> {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) throw new RangeError('Invalid speech model shutdown deadline')
     this.shutdown(); let timer: ReturnType<typeof setTimeout> | undefined
-    try { await Promise.race([Promise.allSettled([...this.flights.values(), ...this.reads]), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('VOICE_TTS_MODELS_SHUTDOWN_INCOMPLETE')), timeoutMs) })]) }
+    try { await Promise.race([Promise.all([Promise.allSettled([...this.flights.values(), ...this.reads]), this.inventoryOwner?.close(timeoutMs)]), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('VOICE_TTS_MODELS_SHUTDOWN_INCOMPLETE')), timeoutMs) })]) }
+    catch { throw new Error('VOICE_TTS_MODELS_SHUTDOWN_INCOMPLETE') }
     finally { if (timer) clearTimeout(timer) }
   }
   /** Worker-bound synchronous proof of actual paths/files; no external path
@@ -285,6 +292,7 @@ export class VoiceTtsModelManager {
       if (info?.isSymbolicLink() || info && !info.isDirectory()) throw new Error('VOICE_TTS_MODEL_PATH_UNSAFE')
       if (!info) return
       this.assertResolvedModel((await this.resolve(id)) ?? (() => { throw new Error('VOICE_TTS_MODEL_NAMESPACE_AMBIGUOUS') })())
+      if (this.inventoryOwner) { await this.inventoryOwner.remove(this.entry(id)!, () => this.beforeWrite()); this.errors.delete(id); return }
       const publication = this.publications.get(id)
       if (!publication || publication.archive !== this.entry(id)!.archive.sha256 || publication.tree !== await this.inventory(path, this.entry(id)!)) throw new Error('VOICE_TTS_MODEL_REMOVAL_UNOWNED')
       const privateDir = await mkdtemp(join(this.options.rootDir, `.${id}.remove-`)), retired = join(privateDir, 'owned')
@@ -331,14 +339,16 @@ export class VoiceTtsModelManager {
     if (host.downloads !== 'enabled') throw new Error('VOICE_TTS_DOWNLOAD_UNAVAILABLE')
     host.beforeRequest(entry.archive.url)
     await this.root(true)
-    if (await this.isInstalled(entry)) return this.describe(entry, id, true)
+    if (await this.isInstalled(entry)) { await this.inventoryOwner?.assertCommitted(entry, () => this.beforeWrite()); return this.describe(entry, id, true) }
     const final = this.modelDir(id)
+    if (this.inventoryOwner && (await readdir(this.options.rootDir)).some(name => name.startsWith(`.${id}.stage-`) || name.startsWith(`.${id}.remove-`))) throw new Error('VOICE_TTS_MODEL_NAMESPACE_AMBIGUOUS')
     if (await lstat(final).catch(() => null)) throw new Error('VOICE_TTS_MODEL_NAMESPACE_AMBIGUOUS')
     const lock = await open(join(this.options.rootDir, `.${id}.install-lock`), 'wx', 0o600)
     let directory: string, receipt: Awaited<ReturnType<typeof lstat>>
     try { directory = await mkdtemp(join(this.options.rootDir, `.${id}.stage-`)); receipt = await lstat(directory) }
     catch (error) { const receipt = await lock.stat(); await lock.close(); const path = join(this.options.rootDir, `.${id}.install-lock`), current = await lstat(path).catch(() => null); if (current?.ino === receipt.ino && current.dev === receipt.dev && !current.isSymbolicLink()) await rm(path); throw error }
     const controller = new AbortController()
+    let published = false
     this.aborts.set(id, controller); this.errors.delete(id); this.setProgress(entry, 0)
     const check = async (): Promise<void> => { this.beforeWrite(); if (controller.signal.aborted) throw new Error('The download was cancelled.'); await this.root(); const current = await lstat(directory); if (current.isSymbolicLink() || current.ino !== receipt.ino || current.dev !== receipt.dev || await realpath(directory) !== directory) throw new Error('VOICE_TTS_MODEL_PATH_UNSAFE') }
     try {
@@ -349,19 +359,44 @@ export class VoiceTtsModelManager {
       for (const file of [entry.files.model, entry.files.voices, entry.files.tokens]) { const info = await lstat(join(payload, file)); if (!info.isFile() || info.isSymbolicLink() || info.size === 0) throw new Error('VOICE_TTS_MODEL_INCOMPLETE') }
       if (!(await lstat(join(payload, entry.files.dataDir))).isDirectory()) throw new Error('VOICE_TTS_MODEL_INCOMPLETE')
       if (await lstat(final).catch(() => null)) throw new Error('VOICE_TTS_MODEL_NAMESPACE_AMBIGUOUS')
-      const tree = await this.inventory(payload, entry)
+      let publication: VoiceModelPublicationReceipt | undefined
+      const tree = this.inventoryOwner ? null : await this.inventory(payload, entry)
+      if (this.inventoryOwner) publication = await this.inventoryOwner.prepare(entry, payload, () => this.beforeWrite())
       await check(); this.beforeWrite(); await rename(payload, final)
-      this.publications.set(id, { archive: entry.archive.sha256, tree })
+      if (this.inventoryOwner) await this.inventoryOwner.commit(entry, publication!, () => this.beforeWrite())
+      else this.publications.set(id, { archive: entry.archive.sha256, tree: tree! })
+      published = true
       this.available(); this.emit(entry, true)
       return this.describe(entry, id, true)
     } catch (error) { this.errors.set(id, controller.signal.aborted ? 'The download was cancelled.' : 'The voice model could not be installed.'); throw error }
     finally {
       this.aborts.delete(id); this.installing.delete(id)
-      const current = await lstat(directory).catch(() => null)
-      if (current && !current.isSymbolicLink() && current.ino === receipt.ino && current.dev === receipt.dev) await rm(directory, { recursive: true, force: true })
-      const ownedLock = await lock.stat(); await lock.close()
-      const path = join(this.options.rootDir, `.${id}.install-lock`), currentLock = await lstat(path).catch(() => null)
-      if (currentLock && !currentLock.isSymbolicLink() && currentLock.ino === ownedLock.ino && currentLock.dev === ownedLock.dev) await rm(path)
+      try {
+        const current = await lstat(directory).catch(() => null)
+        if (current && !current.isSymbolicLink() && current.ino === receipt.ino && current.dev === receipt.dev) {
+        if (!this.inventoryOwner) await rm(directory, { recursive: true, force: true })
+        else if (published) {
+          const archive = join(directory, 'model.tar.bz2')
+          const checkCleanup = (): void => {
+            const root = lstatSync(this.options.rootDir), stage = lstatSync(directory)
+            if (root.isSymbolicLink() || !this.rootIdentity || root.dev !== this.rootIdentity.dev || root.ino !== this.rootIdentity.ino || stage.isSymbolicLink() || stage.dev !== receipt.dev || stage.ino !== receipt.ino || realpathSync(directory) !== directory) throw new Error('VOICE_TTS_MODEL_PATH_UNSAFE')
+          }
+          checkCleanup(); const info = await lstat(archive)
+          if (!info.isFile() || info.isSymbolicLink() || info.size !== entry.archive.sizeBytes || await sha256OfFile(archive, { maxBytes: info.size, beforeRead: checkCleanup }) !== entry.archive.sha256) throw new Error('VOICE_TTS_MODEL_PATH_UNSAFE')
+          checkCleanup(); const after = await lstat(archive)
+          if (after.isSymbolicLink() || after.dev !== info.dev || after.ino !== info.ino || after.size !== info.size || after.mtimeMs !== info.mtimeMs) throw new Error('VOICE_TTS_MODEL_PATH_UNSAFE')
+          await unlink(archive); await rmdir(directory)
+        }
+        // An interrupted durable stage is retained for explicit recovery;
+        // recursive cleanup cannot establish ownership of unexpected bytes.
+        }
+      } finally {
+        let ownedLock: Awaited<ReturnType<typeof lock.stat>>
+        try { ownedLock = await lock.stat() } finally { await lock.close() }
+        const path = join(this.options.rootDir, `.${id}.install-lock`), currentLock = await lstat(path).catch(() => null)
+        const currentRoot = await lstat(this.options.rootDir).catch(() => null)
+        if (currentRoot?.isDirectory() && !currentRoot.isSymbolicLink() && this.rootIdentity && currentRoot.dev === this.rootIdentity.dev && currentRoot.ino === this.rootIdentity.ino && realpathSync(this.options.rootDir) === this.options.rootDir && currentLock?.isFile() && !currentLock.isSymbolicLink() && currentLock.size === 0 && currentLock.ino === ownedLock.ino && currentLock.dev === ownedLock.dev) await unlink(path)
+      }
     }
   }
 

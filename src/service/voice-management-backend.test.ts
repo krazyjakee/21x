@@ -37,7 +37,7 @@ beforeEach(async () => {
   models = new VoiceModelManager({ rootDir: modelRoot, portable: true, downloads: 'disabled', assertCurrent })
   runtime = new VoiceRuntimeOwner({ rootDir: runtimeRoot, installation: 'unavailable', assertCurrent })
   worker = new VoiceWorkerClient({ scriptPath: join(root, 'voice-worker.js'), runtime: () => ({ execPath: process.execPath, env: {} }), assertModulePath: path => { assertCurrent(); if (path !== null) throw new Error('No fixture runtime module') } })
-  ttsModels = new VoiceTtsModelManager({ rootDir: ttsRoot, host: { downloads: 'disabled', assertCurrent, beforeRequest: () => { throw new Error('No fixture downloads') } } })
+  ttsModels = new VoiceTtsModelManager({ rootDir: ttsRoot, host: { downloads: 'disabled', inventory: 'memory-only-fixture', assertCurrent, beforeRequest: () => { throw new Error('No fixture downloads') } } })
   ttsWorker = new VoiceTtsWorkerClient({ scriptPath: join(root, 'tts-worker.js'), execPath: process.execPath, env: {}, fork: vi.fn(() => { throw new Error('No fixture worker launch') }) as unknown as VoiceTtsWorkerHost['fork'], assertCurrent, assertRuntimeModule: () => { throw new Error('No fixture runtime module') }, assertModel: () => { throw new Error('No fixture model load') } })
   systemVoices = new VoiceSystemVoicesOwner({ platform: process.platform, capability: 'unavailable', executable: null, env: {}, execFile: vi.fn(() => { throw new Error('No fixture native listing') }) as unknown as VoiceSystemVoicesHost['execFile'], assertCurrent })
   speech = new VoiceSpeechService({ db, modelRootDir: ttsRoot, models: ttsModels, worker: ttsWorker, systemVoices, host: { hostedSpeech: 'disabled', audio: 'unavailable', assertCurrent }, notifyRenderer: () => {} })

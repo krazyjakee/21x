@@ -111,7 +111,7 @@ function makePortableSpeech(settings: Record<string, string> = {}, fetchImpl?: t
   const worker = new VoiceTtsWorkerClient({ scriptPath: join(__dirname, 'voice-tts-worker.js'), execPath: process.execPath, env: {}, fork: spawn, assertCurrent() {}, assertRuntimeModule() { throw new Error('No runtime authority') }, assertModel() { throw new Error('No playback authority') } })
   const enumerate = vi.fn<typeof execFile>()
   const systemVoices = new VoiceSystemVoicesOwner({ platform: process.platform, capability: 'unavailable', executable: null, env: {}, execFile: enumerate as unknown as typeof execFile, assertCurrent() {} })
-  const models = new VoiceTtsModelManager({ rootDir: root, fetchImpl, retry: { attempts: 1, baseDelayMs: 0 }, host: { downloads: fetchImpl ? 'enabled' : 'disabled', assertCurrent() {}, beforeRequest() {} } })
+  const models = new VoiceTtsModelManager({ rootDir: root, fetchImpl, retry: { attempts: 1, baseDelayMs: 0 }, host: { downloads: fetchImpl ? 'enabled' : 'disabled', inventory: 'memory-only-fixture', assertCurrent() {}, beforeRequest() {} } })
   const events: Array<{ channel: string; data: unknown }> = []
   const service = new VoiceSpeechService({ modelRootDir: root, db, worker, models, systemVoices, host: { hostedSpeech: 'disabled', audio: 'unavailable', assertCurrent() {} }, notifyRenderer: (channel, data) => events.push({ channel, data }) })
   return { service, db, worker, models, systemVoices, spawn, enumerate, store, root, events, async cleanup() { await service.close(); rmSync(root, { recursive: true, force: true }) } }

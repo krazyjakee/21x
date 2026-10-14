@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createHash } from 'crypto'
-import { mkdtemp, mkdir, writeFile, rm, stat, readFile, symlink, rename, readdir, realpath } from 'fs/promises'
+import { readdirSync, writeFileSync, renameSync } from 'fs'
+import { mkdtemp, mkdir, writeFile, rm, stat, readFile, symlink, rename, readdir, realpath, open } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { VoiceModelManager, customDirKind, sha256OfFile } from './voice-model-manager'
@@ -12,6 +13,7 @@ import {
   offeredManifestEntries,
 } from './voice-model-manifest'
 import type { VoiceModelManifestEntry, VoiceModelState } from '../../shared/voice'
+import { VOICE_MODEL_DOWNLOAD_DEADLINE_MS } from './voice-model-download-policy'
 
 const CONTENT = Buffer.from('a tiny stand-in for a speech model file')
 const DIGEST = createHash('sha256').update(CONTENT).digest('hex')
@@ -19,7 +21,7 @@ const DIGEST = createHash('sha256').update(CONTENT).digest('hex')
 function verifiedEntry(): VoiceModelManifestEntry {
   const file = (name: string) => ({
     name,
-    url: `https://example.invalid/${name}`,
+    url: `https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/fixture-${name}`,
     sha256: DIGEST,
     sizeBytes: CONTENT.length,
   })
@@ -233,7 +235,7 @@ describe('portable recognition model ownership', () => {
     expect(await readFile(join(root, 'older-model', 'notes.txt'), 'utf8')).toBe('notes')
     expect(request).not.toHaveBeenCalled(); await manager.close()
   })
-  it('uses fixed-manifest requests with redirects refused and joins overflowing body cancellation', async () => {
+  it('uses fixed-manifest manual requests and joins overflowing body cancellation', async () => {
     const entry = addToManifest(verifiedEntry()), cleanup = deferred<void>(), cancelling = deferred<void>()
     const fetchImpl = vi.fn(async () => new Response(new ReadableStream({
       start(controller) { controller.enqueue(new Uint8Array(CONTENT.length + 1)) },
@@ -242,10 +244,154 @@ describe('portable recognition model ownership', () => {
     const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: fetchImpl as typeof fetch })
     const install = manager.install(entry.id).catch(error => error)
     await cancelling.promise
-    expect(fetchImpl).toHaveBeenCalledWith(entry.files[0].url, expect.objectContaining({ redirect: 'error' }))
+      expect(fetchImpl).toHaveBeenCalledWith(entry.files[0].url, expect.objectContaining({ redirect: 'manual', credentials: 'omit' }))
     await expect(manager.close(10)).rejects.toThrow('DRAIN_INCOMPLETE')
     cleanup.resolve(); await install; await manager.close()
     expect(await readdir(join(root, entry.id))).toEqual([])
+  })
+  it('installs exact verified filesystem bytes through a public publisher/CDN redirect without forwarding credentials', async () => {
+    const entry = addToManifest(verifiedEntry()), xetHash = 'b'.repeat(64), objectId = 'a'.repeat(24)
+    const fetchImpl = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+      expect(options).toEqual(expect.objectContaining({ redirect: 'manual', credentials: 'omit' }))
+      expect(options?.headers).toEqual({ 'Accept-Encoding': 'identity' })
+      if (String(url).startsWith('https://huggingface.co/')) {
+        const filename = new URL(String(url)).pathname.split('/').at(-1)
+        return new Response(null, { status: 302, headers: {
+          location: `https://us.aws.cdn.hf.co/xet-bridge-us/${objectId}/${xetHash}?Expires=1900000000&response-content-disposition=${encodeURIComponent(`attachment; filename="${filename}"`)}`,
+          'x-repo-commit': '2bda32ec70b097a55adaa07d9a7173915b43cc78', 'x-linked-etag': `"${DIGEST}"`, 'x-linked-size': String(CONTENT.length), 'x-xet-hash': xetHash,
+        } })
+      }
+      return new Response(CONTENT, { headers: { 'content-length': String(CONTENT.length) } })
+    })
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: fetchImpl as typeof fetch })
+    const state = await manager.install(entry.id)
+    expect(state.installed).toBe(true); expect(fetchImpl).toHaveBeenCalledTimes(8)
+    for (const file of entry.files) expect(await sha256OfFile(join(root, entry.id, file.name))).toBe(file.sha256)
+    expect((await readdir(join(root, entry.id))).sort()).toEqual(entry.files.map(file => file.name).sort())
+    await manager.close(); expect(manager.inflightCount).toBe(0)
+  })
+  it('retains intermediate redirect cleanup through close and never requests the next destination after shutdown', async () => {
+    const entry = addToManifest(verifiedEntry()), cleanup = deferred<void>(), cancelling = deferred<void>()
+    const fetchImpl = vi.fn(async () => new Response(new ReadableStream({ cancel() { cancelling.resolve(); return cleanup.promise } }), {
+      status: 307, headers: { location: `/api/resolve-cache/models${new URL(entry.files[0].url).pathname.replace('/resolve/', '/')}` },
+    }))
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: fetchImpl as typeof fetch })
+    const install = manager.install(entry.id).catch(error => error)
+    await cancelling.promise
+    await expect(manager.close(10)).rejects.toThrow('DRAIN_INCOMPLETE')
+    expect(manager.inflightCount).toBeGreaterThan(0)
+    cleanup.resolve(); await install; await manager.close()
+    expect(fetchImpl).toHaveBeenCalledOnce(); expect(await readdir(join(root, entry.id))).toEqual([])
+  })
+  it('rechecks the current caller after intermediate response cleanup before any CDN request/publication', async () => {
+    const entry = addToManifest(verifiedEntry()), cleanup = deferred<void>(), cancelling = deferred<void>()
+    let granted = true
+    const fetchImpl = vi.fn(async () => new Response(new ReadableStream({ cancel() { cancelling.resolve(); return cleanup.promise } }), {
+      status: 302, headers: { location: `https://us.aws.cdn.hf.co/xet-bridge-us/${'a'.repeat(24)}/${'b'.repeat(64)}?Expires=1900000000`,
+        'x-repo-commit': '2bda32ec70b097a55adaa07d9a7173915b43cc78', 'x-linked-etag': DIGEST, 'x-linked-size': String(CONTENT.length), 'x-xet-hash': 'b'.repeat(64) },
+    }))
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: fetchImpl as typeof fetch })
+    const install = manager.withMutationGuard(() => manager.install(entry.id), () => { if (!granted) throw new Error('GRANT_REPLACED') }).catch(error => error)
+    await cancelling.promise; granted = false; cleanup.resolve(); await install
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    expect(await readdir(join(root, entry.id))).toEqual([])
+    await manager.close()
+  })
+  it('retains a deadline-expired fetch that ignores abort until its late body is cancelled', async () => {
+    const entry = addToManifest(verifiedEntry()), response = deferred<Response>(), requested = deferred<void>(), cancelled = vi.fn()
+    let signal: AbortSignal | null = null
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: (async (_url, options) => { signal = options?.signal as AbortSignal; requested.resolve(); return response.promise }) as typeof fetch })
+    vi.useFakeTimers()
+    const install = manager.install(entry.id).catch(error => error)
+    try {
+      await requested.promise
+      await vi.advanceTimersByTimeAsync(VOICE_MODEL_DOWNLOAD_DEADLINE_MS + 1)
+      expect((signal as unknown as AbortSignal).aborted).toBe(true)
+      expect(manager.inflightCount).toBeGreaterThan(0)
+    } finally { vi.useRealTimers() }
+    await expect(manager.close(10)).rejects.toThrow('DRAIN_INCOMPLETE')
+    response.resolve(new Response(new ReadableStream({ cancel: cancelled })))
+    await install; await manager.close()
+    expect(cancelled).toHaveBeenCalledOnce(); expect(await readdir(join(root, entry.id))).toEqual([])
+  })
+  it('actively cancels a quiet final response on shutdown and retains the actual reader cleanup receipt', async () => {
+    const entry = addToManifest(verifiedEntry()), reading = deferred<void>(), cancelling = deferred<void>(), cleanup = deferred<void>()
+    const response = new Response(new ReadableStream({
+      cancel() { cancelling.resolve(); return cleanup.promise },
+    }))
+    const body = response.body!, getReader = body.getReader
+    Object.defineProperty(body, 'getReader', { value: function (...args: unknown[]) { const reader = Reflect.apply(getReader, body, args); reading.resolve(); return reader } })
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: (async () => response) as typeof fetch })
+    const install = manager.install(entry.id).catch(error => error)
+    await reading.promise
+    expect(response.body!.locked).toBe(true)
+    const close = manager.close(10)
+    await cancelling.promise
+    await expect(close).rejects.toThrow('DRAIN_INCOMPLETE')
+    expect(manager.inflightCount).toBeGreaterThan(0)
+    cleanup.resolve(); await install; await manager.close()
+    expect(await readdir(join(root, entry.id))).toEqual([])
+  })
+  it('rejects tampered actual temp bytes before publication even when the received stream hash is correct', async () => {
+    const entry = addToManifest(verifiedEntry()), dir = join(root, entry.id)
+    let tampered = false
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: (async () => new Response(CONTENT)) as typeof fetch,
+      onProgress(state) {
+        if (state.phase !== 'verifying' || tampered) return
+        tampered = true
+        const temp = readdirSync(dir).find(name => name.endsWith('.part'))!
+        writeFileSync(join(dir, temp), Buffer.alloc(CONTENT.length, 120))
+      } })
+    await expect(manager.install(entry.id)).rejects.toThrow(/checksum mismatch/i)
+    expect(tampered).toBe(true); expect(await readdir(dir)).toEqual([])
+    await manager.close()
+  })
+  it('preserves a replacement temp inode and never publishes it even if its bytes match the manifest', async () => {
+    const entry = addToManifest(verifiedEntry()), dir = join(root, entry.id)
+    let replacement: string | null = null
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: (async () => new Response(CONTENT)) as typeof fetch,
+      onProgress(state) {
+        if (state.phase !== 'verifying' || replacement) return
+        replacement = join(dir, readdirSync(dir).find(name => name.endsWith('.part'))!)
+        renameSync(replacement, `${replacement}.retained-original`)
+        writeFileSync(replacement, CONTENT)
+      } })
+    await expect(manager.install(entry.id)).rejects.toThrow(/failed safely/)
+    expect(replacement).not.toBeNull()
+    expect(await readFile(replacement!)).toEqual(CONTENT)
+    expect(await readFile(`${replacement}.retained-original`)).toEqual(CONTENT)
+    await expect(stat(join(dir, 'encoder.onnx'))).rejects.toThrow()
+    await manager.close()
+  })
+  it('closes an actually opened FD when its initial stat fails, without claiming unknown replacement bytes', async () => {
+    const entry = addToManifest(verifiedEntry()), original = open, fetchImpl = vi.fn()
+    let opened: Awaited<ReturnType<typeof original>> | null = null
+    const openFile = (async (path, flags, mode) => {
+      const handle = await original(path, flags, mode)
+      if (String(path).includes('.owned-')) { opened = handle; vi.spyOn(handle, 'stat').mockRejectedValueOnce(new Error('synthetic stat failure; private path')) }
+      return handle
+    }) as typeof open
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: fetchImpl as typeof fetch, openFile })
+    try {
+      await expect(manager.install(entry.id)).rejects.toThrow(/failed safely/)
+      expect(opened).not.toBeNull(); expect((opened as unknown as { fd: number }).fd).toBe(-1)
+      expect(fetchImpl).not.toHaveBeenCalled(); expect(manager.inflightCount).toBe(0)
+      await expect(stat(join(root, entry.id, 'encoder.onnx'))).rejects.toThrow()
+    } finally { await manager.close() }
+  })
+  it('observes a rejected abort cleanup receipt and projects no raw signed-query error', async () => {
+    const entry = addToManifest(verifiedEntry()), reading = deferred<void>()
+    const response = new Response(new ReadableStream({ cancel() { return Promise.reject(new Error('private signed URL Signature=never-export')) } }))
+    const body = response.body!, getReader = body.getReader
+    Object.defineProperty(body, 'getReader', { value: function (...args: unknown[]) { const reader = Reflect.apply(getReader, body, args); reading.resolve(); return reader } })
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: (async () => response) as typeof fetch })
+    const install = manager.install(entry.id).catch(error => error)
+    await reading.promise
+    await manager.close()
+    const failure = await install
+    expect(failure.message).toMatch(/failed safely/)
+    expect(failure.message).not.toMatch(/Signature|private signed/)
+    expect(manager.inflightCount).toBe(0); expect(await readdir(join(root, entry.id))).toEqual([])
   })
   it('refuses a swapped parent and leaves replacement user data untouched', async () => {
     const entry = addToManifest(verifiedEntry()), receipt = deferred<Response>(), requested = deferred<void>()

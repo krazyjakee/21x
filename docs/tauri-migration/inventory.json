@@ -5626,6 +5626,8 @@
     "src/main/voice/voice-answer-parts.ts",
     "src/main/voice/voice-bridge.ts",
     "src/main/voice/voice-elevenlabs.ts",
+    "src/main/voice/voice-model-download-policy.ts",
+    "src/main/voice/voice-model-inventory-owner.ts",
     "src/main/voice/voice-model-manager.ts",
     "src/main/voice/voice-model-manifest.ts",
     "src/main/voice/voice-runtime-installer.ts",
@@ -14395,7 +14397,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 839,
+    "files": 841,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

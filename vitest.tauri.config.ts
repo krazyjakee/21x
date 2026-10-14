@@ -32,6 +32,7 @@ const mainFiles = [
   'src/main/node-worker-runtime.test.ts',
   'src/main/voice/voice-session-manager-core.test.ts',
   'src/main/voice/voice-worker-client.test.ts', 'src/main/voice/voice-model-manager.test.ts', 'src/main/voice/voice-runtime-installer.test.ts',
+  'src/main/voice/voice-model-download-policy.test.ts', 'src/main/voice/voice-model-inventory-owner.test.ts',
   'src/main/voice/voice-speech-service.test.ts', 'src/main/voice/voice-tts-worker-client.test.ts',
   'src/main/voice/voice-tts-model-manager.test.ts', 'src/main/voice/voice-system-voices.test.ts',
   'src/main/adapters/opencode-adapter.test.ts',

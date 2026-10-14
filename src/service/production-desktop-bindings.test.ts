@@ -5,7 +5,8 @@ import { MOBILE_CODECS } from '../shared/mobile-codecs'
 import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProductionOwner, ProductionOwnerBootstrap } from './production-owner'
@@ -34,7 +35,9 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   for (const finish of finishers.splice(0)) finish()
-  for (const { owner, root } of owned.splice(0)) { await owner.close(); rmSync(root, { recursive: true, force: true }) }
+  const completed = owned.splice(0)
+  for (const { owner } of completed) await owner.close()
+  for (const root of new Set(completed.map(value => value.root))) rmSync(root, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
 async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false, voice = false) {
@@ -58,8 +61,9 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
     native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: 'disabled' },
       prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }) }
   }
-  const owner = new ProductionOwner(bootstrap, { createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end', stopReason: 'end_turn' } } }),
-    ...(connectors ? { connectorTransport: () => { throw new Error('Credential form fixture must not create a worker') } } : {}) })
+  const boundaries = { createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end' as const, stopReason: 'end_turn' } } }),
+    ...(connectors ? { connectorTransport: () => { throw new Error('Credential form fixture must not create a worker') } } : {}) }
+  const owner = new ProductionOwner(bootstrap, boundaries)
   owned.push({ owner, root }); const services = await owner.start(), epoch = owner.snapshot().epoch
   const caller: DesktopCallerContext = { principal: 'trusted-desktop-main', engineEpoch: epoch, webviewId: 'main', origin: 'tauri://localhost' }
   const events: Array<{ operation: string; payload: unknown }> = []
@@ -89,10 +93,41 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
       ? { cwd: bootstrap.paths.workspaceRoot, root: bootstrap.paths.workspaceRoot } : null },
     emit: (operation, payload) => events.push({ operation, payload }), fatal: () => {} }
   const backend = await ProductionDesktopBindings.attach(owner, options), signal = new AbortController().signal
-  return { owner, services, backend, options, caller, signal, events }
+  return { owner, services, backend, options, caller, signal, events, bootstrap, boundaries, root }
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('authenticates local model publication across actual protected-profile owner restarts and preserves added user files', async () => {
+    const { findTtsManifestEntry } = await import('../main/voice/voice-tts-manifest')
+    const id = 'kitten-nano-en-v0_2', entry = findTtsManifestEntry(id)!, original = structuredClone(entry)
+    // Small contained archive exercises real receipt/encryption/filesystem ownership;
+    // it does not claim an installed speech runtime or live model acceptance.
+    const payload = Buffer.from('QlpoOTFBWSZTWR0ZuiEAAOt/gMmAAQBAA/+AECEAQP6p3sAESDAAttQlTUT0Jk9BGmEzQBM0CUSmT1HomCYEwBMEBVQppoyNAAMg0yaB+2cqwEg4Hy1QRO7UQRCVrZmDBwELFfUHgnIQRCNJeSK7O616mnjGGRVQhBFEQdL2tYChYTfrkGpag1gz6LgIiMhjeFaoDrTU+CRc0L1q7Lg82SJKlCthopRq6qCcTHw8vHIbuSAiBnLgd76SawFB2LuSKcKEgOjN0Qg=', 'base64')
+    entry.archive.sha256 = createHash('sha256').update(payload).digest('hex'); entry.archive.sizeBytes = payload.length; entry.archive.rootDir = 'wrapper'
+    entry.files = { model: 'tokens.txt', voices: 'tokens.txt', tokens: 'tokens.txt', dataDir: 'espeak-ng-data' }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new Uint8Array(payload)))
+    try {
+      const f = await fixture(undefined, false, false, true)
+      await f.owner.getVoiceBindingLease()!.speech.installModel(id)
+      const inventoryRoot = join(f.bootstrap.paths.profileRoot, 'voice-model-inventories')
+      expect(readdirSync(inventoryRoot)).toEqual([`${id}.committed`])
+      const receipt = readFileSync(join(inventoryRoot, `${id}.committed`))
+      expect(receipt.subarray(0, 11).toString()).toBe('21x-secret\x01')
+      expect(receipt.includes(Buffer.from('tts-publication'))).toBe(false)
+      const modelRoot = join(f.bootstrap.paths.profileRoot, 'voice-tts-models', id)
+      writeFileSync(join(modelRoot, 'personal.txt'), 'Preserve my notes')
+      await f.owner.close()
+      const restarted = new ownerModule.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, f.boundaries)
+      owned.push({ owner: restarted, root: f.root }); await restarted.start()
+      const speech = restarted.getVoiceBindingLease()!.speech
+      await expect(speech.removeModel(id)).rejects.toThrow()
+      expect(readFileSync(join(modelRoot, 'personal.txt'), 'utf8')).toBe('Preserve my notes')
+      unlinkSync(join(modelRoot, 'personal.txt'))
+      await speech.removeModel(id)
+      expect(existsSync(modelRoot)).toBe(false); expect(readdirSync(inventoryRoot)).toEqual([])
+      await restarted.close()
+    } finally { Object.assign(entry, original) }
+  })
   it('borrows actual local voice owners while refusing unbound microphone, playback and hosted effects', async () => {
     const f = await fixture(undefined, false, false, true)
     const lease = f.owner.getVoiceBindingLease()!

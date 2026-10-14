@@ -19,7 +19,7 @@ let voice: VoiceSessionManagerCore, models: VoiceModelManager, worker: VoiceWork
 let events: Array<{ channel: string; data: unknown }>, current: boolean, added: VoiceModelManifestEntry | null
 const content = Buffer.from('bounded recognition fixture'), digest = createHash('sha256').update(content).digest('hex')
 function addModel() {
-  const file = (name: string) => ({ name, url: `https://example.invalid/${name}`, sha256: digest, sizeBytes: content.length })
+  const file = (name: string) => ({ name, url: `https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/fixture-${name}`, sha256: digest, sizeBytes: content.length })
   added = { id: 'core-test-model', label: 'Core test model', description: 'Fixed synthetic model bytes', license: 'Apache-2.0', licenseUrl: 'https://example.invalid/license', languages: ['en'], minMemoryBytes: 1,
     files: ['encoder.onnx','decoder.onnx','joiner.onnx','tokens.txt'].map(file), roles: { encoder: 'encoder.onnx', decoder: 'decoder.onnx', joiner: 'joiner.onnx', tokens: 'tokens.txt' } }
   VOICE_MODEL_MANIFEST.push(added)

@@ -50,3 +50,13 @@ shutdown and public redaction. They are not live model-download, native audio,
 microphone, installed-package or cross-platform acceptance evidence. Default
 native capture and audio capabilities remain unavailable. Voice management is
 bound only when the owner verifies the complete optional staged worker pair.
+
+Production synthesis models use a durable inventory owner borrowing the same
+authenticated storage as the protected profile. Voice-owner identity checks
+also verify the exact storage and inventory roots. Model teardown joins raw
+inventory work before that storage is disposed or the profile lock is released.
+Source fixtures that intentionally exercise only in-memory publication declare
+`memory-only-fixture` explicitly; production never selects that mode. An actual
+singleton restart control installs a contained synthetic archive, reloads the
+same protected key, preserves an added user file, and removes the unchanged
+owned tree only after that user file has been removed.

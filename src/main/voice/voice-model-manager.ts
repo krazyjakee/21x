@@ -35,6 +35,7 @@ import {
   manifestKind,
   manifestSizeBytes,
 } from './voice-model-manifest'
+import { VoiceModelDownloadPolicy, VOICE_MODEL_DOWNLOAD_DEADLINE_MS } from './voice-model-download-policy'
 
 export interface ResolvedModel {
   id: string
@@ -62,6 +63,8 @@ export interface VoiceModelManagerOptions {
   rootDir: string
   /** Injected for tests. */
   fetchImpl?: typeof fetch
+  /** Trusted filesystem primitive; production uses the actual Node open. */
+  openFile?: typeof open
   onProgress?: (state: VoiceModelState) => void
   portable?: boolean
   downloads?: 'enabled' | 'disabled'
@@ -80,10 +83,12 @@ export class VoiceModelManager {
   private installations = new Map<string, Promise<VoiceModelState>>()
   private guards = new AsyncLocalStorage<() => void>()
   private readonly manifest: VoiceModelManifestEntry[]
+  private readonly downloadPolicy: VoiceModelDownloadPolicy | null
   private progressListener?: (state: VoiceModelState) => void
   constructor(private options: VoiceModelManagerOptions) {
     if (!isAbsolute(options.rootDir)) throw new Error('VOICE_MODEL_ROOT_REQUIRED')
     this.manifest = structuredClone(VOICE_MODEL_MANIFEST)
+    this.downloadPolicy = options.portable ? new VoiceModelDownloadPolicy(this.manifest.filter(isManifestVerified)) : null
     const methods = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
     for (const name of ['list','listLegacyInstalled','isInstalled','resolve','remove','removeAll'] as const) {
       const original = methods[name].bind(this)
@@ -290,14 +295,15 @@ export class VoiceModelManager {
     this.current()
     if (this.options.portable) await this.safeDirectory(dir)
     const controller = new AbortController()
+    const deadline = this.options.portable ? setTimeout(() => controller.abort(new Error('VOICE_MODEL_DOWNLOAD_DEADLINE')), VOICE_MODEL_DOWNLOAD_DEADLINE_MS) : null
+    deadline?.unref?.()
     this.aborts.set(entry.id, controller)
     this.errors.delete(entry.id)
     this.installing.set(entry.id, 0)
     this.phases.set(entry.id, 'downloading')
-    this.emit(entry)
-
     let done = 0
     try {
+      this.emit(entry)
       for (const file of entry.files) {
         this.current()
         if (controller.signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
@@ -337,7 +343,7 @@ export class VoiceModelManager {
       this.aborts.delete(entry.id)
       this.emit(entry)
       throw new Error(message)
-    }
+    } finally { if (deadline) clearTimeout(deadline) }
 
     this.installing.delete(entry.id)
     this.phases.delete(entry.id)
@@ -481,18 +487,32 @@ export class VoiceModelManager {
     const parent = await this.safeDirectory(dir)
     const partial = `${target}.owned-${randomUUID()}.part`
     this.current()
-    const handle = await open(partial, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW || 0), 0o600)
-    const receipt = await handle.stat()
+    if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
+    const handle = await (this.options.openFile ?? open)(partial, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW || 0), 0o600)
+    let receipt: Awaited<ReturnType<typeof handle.stat>> | null = null
     let published = false
     try {
-      this.current(); this.options.beforeRequest?.()
-      // A reviewed redirect inventory is not available for all catalogue CDN
-      // hosts. Refuse redirects rather than silently widening network scope.
-      const response = await this.fetchImpl(url, { signal, redirect: 'error' })
+      receipt = await handle.stat()
+      this.current()
+      if (!this.downloadPolicy) throw new Error('VOICE_MODEL_DOWNLOAD_POLICY_UNAVAILABLE')
+      const response = await this.downloadPolicy.request(url, { fetchImpl: this.fetchImpl, signal, assertCurrent: () => this.current(), beforeRequest: this.options.beforeRequest })
       const reader = response.body?.getReader()
       let received = 0
       const hash = createHash('sha256')
       let ended = false
+      let cancellation: Promise<void> | null = null
+      const cancelReader = (): Promise<void> => {
+        if (!cancellation) {
+          cancellation = reader ? reader.cancel() : Promise.resolve()
+          // Abort callbacks cannot leak a rejection; the operation still awaits
+          // this exact raw cleanup receipt before releasing the reader/file.
+          void cancellation.catch(() => {})
+        }
+        return cancellation
+      }
+      const abortReader = (): void => { void cancelReader() }
+      signal.addEventListener('abort', abortReader, { once: true })
+      if (signal.aborted) abortReader()
       try {
         this.current()
         if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
@@ -502,25 +522,37 @@ export class VoiceModelManager {
           this.current()
           if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
           if (done) { ended = true; break }
-          const bytes = Buffer.from(value)
-          received += bytes.length
+          received += value.byteLength
           if (received > sizeBytes) throw new Error('VOICE_MODEL_SIZE_MISMATCH')
+          const bytes = Buffer.from(value)
           let offset = 0
-          while (offset < bytes.length) { const written = await handle.write(bytes, offset); if (!written.bytesWritten) throw new Error('VOICE_MODEL_WRITE_FAILED'); offset += written.bytesWritten }
+          while (offset < bytes.length) {
+            this.current()
+            if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
+            const written = await handle.write(bytes, offset)
+            if (!written.bytesWritten) throw new Error('VOICE_MODEL_WRITE_FAILED')
+            offset += written.bytesWritten
+          }
           hash.update(bytes); onBytes(received)
         }
       } finally {
-        if (reader) { try { if (!ended) await reader.cancel() } finally { reader.releaseLock() } }
+        signal.removeEventListener('abort', abortReader)
+        if (reader) { try { if (!ended || cancellation) await cancelReader() } finally { reader.releaseLock() } }
       }
       this.current()
       if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
       onVerify()
       if (received !== sizeBytes || hash.digest('hex') !== expectedSha256) throw new Error('Checksum mismatch')
+      this.current()
+      if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
       await handle.sync()
+      const verifiedFile = await lstat(partial)
+      if (verifiedFile.size !== sizeBytes || await sha256OfFile(partial) !== expectedSha256) throw new Error('Checksum mismatch')
       const currentParent = await this.safeDirectory(dir)
       const currentFile = await lstat(partial)
-      if (!parent || !currentParent || parent.dev !== currentParent.dev || parent.ino !== currentParent.ino || currentFile.dev !== receipt.dev || currentFile.ino !== receipt.ino || !currentFile.isFile()) throw new Error('VOICE_MODEL_PATH_CHANGED')
+      if (!parent || !currentParent || parent.dev !== currentParent.dev || parent.ino !== currentParent.ino || currentFile.dev !== receipt.dev || currentFile.ino !== receipt.ino || currentFile.size !== verifiedFile.size || currentFile.mtimeMs !== verifiedFile.mtimeMs || !currentFile.isFile()) throw new Error('VOICE_MODEL_PATH_CHANGED')
       this.current()
+      if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
       // link is exclusive: a file created by another owner is never replaced.
       await link(partial, target)
       published = true
@@ -528,7 +560,7 @@ export class VoiceModelManager {
       await handle.close()
       const now = await lstat(partial).catch(() => null)
       const nowParent = await lstat(dir).catch(() => null)
-      if (now && nowParent && parent && now.dev === receipt.dev && now.ino === receipt.ino && nowParent.dev === parent.dev && nowParent.ino === parent.ino && !now.isSymbolicLink()) await unlink(partial)
+      if (receipt && now && nowParent && parent && now.dev === receipt.dev && now.ino === receipt.ino && nowParent.dev === parent.dev && nowParent.ino === parent.ino && !now.isSymbolicLink()) await unlink(partial)
     }
     if (!published) throw new Error('VOICE_MODEL_PUBLICATION_FAILED')
   }
@@ -568,8 +600,8 @@ function gigabytes(bytes: number): string {
 }
 
 /**
- * Turns a raw failure into one line the user can act on. The original message
- * is kept, so a diagnostic report still says what really happened.
+ * Projects bounded, fixed failure text. Provider errors, paths and signed
+ * download queries are never copied into the public model status.
  */
 export function describeInstallFailure(err: unknown, entry: VoiceModelManifestEntry): string {
   const raw = err instanceof Error ? err.message : String(err)

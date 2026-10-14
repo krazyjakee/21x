@@ -282,7 +282,7 @@ export class ProductionOwner {
     return { voice: owned.voice, speech: owned.speech, assertVoiceOwners: owners => {
       this.getDatabaseBindingLease()
       if (this.services !== services || this.services.voice !== owned || owners.voice !== owned.voice || owners.speech !== owned.speech) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
-      owned.assertOwners(services.db, services.agents)
+      owned.assertOwners(services.db, services.agents, this.storage!)
     } }
   }
 
@@ -615,7 +615,7 @@ export class ProductionOwner {
     agentDetection.assertOpen()
     this.register('agent-detection', () => agentDetection.stop(), () => agentDetection.close())
     const sessionContext = new SessionContextService(db)
-    const voice = this.bootstrap.voice ? createProductionVoiceOwner({ resources: this.bootstrap.voice, profileRoot, tempRoot: this.bootstrap.paths.tempRoot, db, agents,
+    const voice = this.bootstrap.voice ? createProductionVoiceOwner({ resources: this.bootstrap.voice, profileRoot, tempRoot: this.bootstrap.paths.tempRoot, db, agents, storage: this.storage!,
       assertCurrent: () => {
         if (this.abort.signal.aborted || !['starting', 'ready'].includes(this.phase) || processRegistry[registryKey] !== this.identity) throw new ProductionOwnerError('OWNER_CLOSING')
         this.lock!.assertHeld()

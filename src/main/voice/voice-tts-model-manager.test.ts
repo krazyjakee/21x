@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, symlinkSync, readdirSync } from 'fs'
-import { stat } from 'fs/promises'
+import { stat, open } from 'fs/promises'
 import { createHash } from 'crypto'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -13,6 +13,8 @@ import {
   type VoiceTtsModelManagerOptions,
 } from './voice-tts-model-manager'
 import { findTtsManifestEntry } from './voice-tts-manifest'
+import { AuthenticatedSecretStorage } from '../platform/authenticated-secret-storage'
+import { VoiceModelInventoryOwner, type VoiceModelInventoryOwnerOptions } from './voice-model-inventory-owner'
 
 /**
  * The manager writes a downloaded archive into the user's application data, so
@@ -52,9 +54,54 @@ describe('portable local synthesis model ownership', () => {
     entry.archive.sha256 = createHash('sha256').update(payload).digest('hex')
     entry.archive.sizeBytes = payload.length; entry.archive.rootDir = 'wrapper'
     entry.files = { model: 'tokens.txt', voices: 'tokens.txt', tokens: 'tokens.txt', dataDir: 'espeak-ng-data' }
-    try { return new VoiceTtsModelManager({ rootDir: root, host: { downloads: 'enabled', assertCurrent() {}, beforeRequest() {} }, retry: { attempts: 1, baseDelayMs: 0 }, fetchImpl: (async () => new Response(new Uint8Array(payload))) as typeof fetch, ...options }) }
+    try { return new VoiceTtsModelManager({ rootDir: root, host: { downloads: 'enabled', inventory: 'memory-only-fixture', assertCurrent() {}, beforeRequest() {} }, retry: { attempts: 1, baseDelayMs: 0 }, fetchImpl: (async () => new Response(new Uint8Array(payload))) as typeof fetch, ...options }) }
     finally { Object.assign(entry, original) }
   }
+  function durable(openFile?: VoiceModelInventoryOwnerOptions['openFile']) {
+    const modelRootDir = join(root, 'models'), inventoryRootDir = join(root, 'inventories')
+    mkdirSync(modelRootDir)
+    const storage = new AuthenticatedSecretStorage(Buffer.alloc(32, 74), 'synthetic-model-manager'), entry = findTtsManifestEntry(id)!, original = structuredClone(entry)
+    entry.archive.sha256 = createHash('sha256').update(payload).digest('hex'); entry.archive.sizeBytes = payload.length; entry.archive.rootDir = 'wrapper'
+    entry.files = { model: 'tokens.txt', voices: 'tokens.txt', tokens: 'tokens.txt', dataDir: 'espeak-ng-data' }
+    try {
+      const options = { profileRootDir: root, modelRootDir, inventoryRootDir, storage, openFile, assertCurrent() {} }
+      const inventory = new VoiceModelInventoryOwner(options)
+      const manager = portable({ rootDir: modelRootDir, host: { downloads: 'enabled', inventory, assertCurrent() {}, beforeRequest() {} } })
+      return { manager, inventory, storage, options, synthetic: structuredClone(entry) }
+    } finally { Object.assign(entry, original) }
+  }
+  it('requires an explicit durable owner or fixture marker instead of silently choosing in-memory authority', () => {
+    expect(() => new VoiceTtsModelManager({ rootDir: root, host: { downloads: 'enabled', assertCurrent() {}, beforeRequest() {} } as unknown as VoiceTtsModelManagerOptions['host'] })).toThrow('VOICE_TTS_INVENTORY_OWNER_REQUIRED')
+  })
+  it('composes real publication/receipt cleanup with authenticated same-key restart deletion', async () => {
+    const value = durable()
+    try {
+      expect((await value.manager.install(id)).installed).toBe(true)
+      expect(readdirSync(value.options.modelRootDir)).toEqual([id]); expect(readdirSync(value.options.inventoryRootDir)).toEqual([`${id}.committed`])
+      await value.manager.close(); expect(value.storage.isEncryptionAvailable()).toBe(true)
+      const entry = findTtsManifestEntry(id)!, original = structuredClone(entry); Object.assign(entry, value.synthetic)
+      let restarted: VoiceTtsModelManager
+      try { const inventory = new VoiceModelInventoryOwner(value.options); restarted = portable({ rootDir: value.options.modelRootDir, host: { downloads: 'enabled', inventory, assertCurrent() {}, beforeRequest() {} } }) }
+      finally { Object.assign(entry, original) }
+      try { await restarted.remove(id); expect(readdirSync(value.options.modelRootDir)).toEqual([]); expect(readdirSync(value.options.inventoryRootDir)).toEqual([]) }
+      finally { await restarted.close() }
+    } finally { await value.manager.close(); value.storage.dispose() }
+  })
+  it('keeps model shutdown blocked by an unacknowledged actual inventory handle close', async () => {
+    let rejectClose = true, captured = false
+    const value = durable((async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args)
+      if (!captured && String(args[0]).endsWith('.tmp')) { captured = true; const close = handle.close.bind(handle); handle.close = async () => { if (rejectClose) throw new Error('Raw close not acknowledged'); await close() } }
+      return handle
+    }) as typeof open)
+    try {
+      await expect(value.manager.install(id)).rejects.toThrow('Raw close not acknowledged'); expect(value.inventory.inflightCount).toBeGreaterThan(0)
+      await expect(value.manager.close()).rejects.toThrow('VOICE_TTS_MODELS_SHUTDOWN_INCOMPLETE'); expect(value.storage.isEncryptionAvailable()).toBe(true)
+      rejectClose = false; await value.manager.close(); expect(value.inventory.inflightCount).toBe(0)
+      expect(readdirSync(value.options.modelRootDir).some(name => name.includes('.stage-'))).toBe(true)
+      expect(readdirSync(value.options.modelRootDir).some(name => name.endsWith('.install-lock'))).toBe(false)
+    } finally { rejectClose = false; await value.manager.close(); value.storage.dispose() }
+  })
   it('publishes a checksummed contained tree and removes only its own exact inventory', async () => {
     const manager = portable()
     try {
@@ -85,7 +132,7 @@ describe('portable local synthesis model ownership', () => {
   })
   it('refuses unavailable downloads and unknown removals before filesystem/network effects', async () => {
     const fetcher = vi.fn<typeof fetch>(), path = join(root, 'not-created')
-    const manager = portable({ rootDir: path, fetchImpl: fetcher, host: { downloads: 'disabled', assertCurrent() {}, beforeRequest() { throw new Error('Unexpected request') } } })
+    const manager = portable({ rootDir: path, fetchImpl: fetcher, host: { downloads: 'disabled', inventory: 'memory-only-fixture', assertCurrent() {}, beforeRequest() { throw new Error('Unexpected request') } } })
     try { await expect(manager.install(id)).rejects.toThrow('VOICE_TTS_DOWNLOAD_UNAVAILABLE'); await expect(manager.remove('../unrelated')).rejects.toThrow('Unknown voice model'); expect(fetcher).not.toHaveBeenCalled(); expect(existsSync(path)).toBe(false) }
     finally { await manager.close() }
   })
