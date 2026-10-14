@@ -1,3 +1,4 @@
+import { createTestDb } from '../../test/helpers/db-test-helper'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { AgentManager, AgentShutdownIncompleteError, AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS, withStartupDeadline } from './agent-manager'
@@ -929,12 +930,16 @@ describe('AgentManager worktree setup', () => {
 })
 
 describe('AgentManager OS notifications', () => {
+  const notificationDatabases: Array<ReturnType<typeof createTestDb>> = []
+  const notificationManagers: AgentManager[] = []
   beforeEach(() => {
     vi.clearAllMocks()
     notificationInstances.length = 0
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const manager of notificationManagers.splice(0)) { await manager.stopAllSessions(); await manager.stopServer() }
+    for (const database of notificationDatabases.splice(0)) database.rawDb.close()
     vi.useRealTimers()
   })
 
@@ -947,9 +952,22 @@ describe('AgentManager OS notifications', () => {
     opts: { isFocused: boolean },
     mockDb: ConstructorParameters<typeof AgentManager>[0] = createMockDb({ coding_agent: 'claude-code' })
   ) {
+    // Exercise the bounded projection and durable admission with real SQLite;
+    // the adapter/window remain controlled Electron fixtures.
+    const database = createTestDb(); notificationDatabases.push(database)
+    const agent = database.db.createAgent({ name: 'Notification fixture' })!
+    database.rawDb.prepare('UPDATE agents SET id=? WHERE id=?').run('agent-1', agent.id)
+    const records = new Map<string, NonNullable<ReturnType<typeof mockDb.getTask>>>()
+    for (const id of ['task-1', 'parent-1', 'subtask-1']) { const record = mockDb.getTask(id); if (record) records.set(record.id, record) }
+    for (const record of records.values()) {
+      const saved = database.db.createTask({ title: record.title, status: record.status ?? TaskStatus.NotStarted })!
+      database.rawDb.prepare('UPDATE tasks SET id=? WHERE id=?').run(record.id, saved.id)
+    }
+    for (const record of records.values()) if (record.parent_task_id) database.rawDb.prepare('UPDATE tasks SET parent_task_id=? WHERE id=?').run(record.parent_task_id, record.id)
+    Object.assign(mockDb, { db: database.rawDb, setSetting: database.db.setSetting.bind(database.db) })
     const fake = new FakeAdapter()
     installFakeAdapter(fake)
-    const mgr = new AgentManager(mockDb)
+    const mgr = new AgentManager(mockDb); notificationManagers.push(mgr)
     const mockWindow = {
       isDestroyed: vi.fn(() => false),
       isFocused: vi.fn(() => opts.isFocused),

@@ -6119,6 +6119,7 @@
     "src/shared/menu-styles.ts",
     "src/shared/mobile-codecs.ts",
     "src/shared/native-clipboard-codecs.ts",
+    "src/shared/native-notification-codecs.ts",
     "src/shared/native-services-codecs.ts",
     "src/shared/pr-readiness.ts",
     "src/shared/production-agent-codecs.ts",
@@ -14434,7 +14435,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 878,
+    "files": 879,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

@@ -122,6 +122,10 @@ pub struct ProductionArtifactClipboardHost {
     pub invoke: Arc<dyn Fn(Value, String, String, String) -> HostFuture<Value> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
 }
+pub struct ProductionNotificationHost {
+    pub invoke: Arc<dyn Fn(String, String, bool, String) -> HostFuture<bool> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionNativeHost {
     pub workspace_file: Option<ProductionWorkspaceHost>,
     pub attachment_file: Option<ProductionAttachmentHost>,
@@ -129,11 +133,55 @@ pub struct ProductionNativeHost {
     pub artifact_clipboard: Option<ProductionArtifactClipboardHost>,
     pub event_sink: Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>,
     pub open_external: Option<Arc<dyn Fn(String) -> HostFuture<()> + Send + Sync>>,
-    pub notification: Option<Arc<dyn Fn(String, String) -> HostFuture<bool> + Send + Sync>>,
+    pub notification: Option<ProductionNotificationHost>,
     pub ui_snapshot: Option<Arc<dyn Fn(String) -> HostFuture<Value> + Send + Sync>>,
     pub ui_command: Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
     pub installer_progress:
         Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
+}
+fn notification_text(value: &Value, maximum: usize, multiline: bool, empty: bool) -> bool {
+    value.as_str().is_some_and(|text| {
+        (empty || !text.is_empty())
+            && text.len() <= maximum
+            && !text.chars().any(|c| {
+                c == '\u{007f}'
+                    || c <= '\u{001f}' && !(multiline && matches!(c, '\t' | '\r' | '\n'))
+            })
+    })
+}
+async fn notification_callback(
+    host: &ProductionNativeHost,
+    capability: &HostCapability,
+    epoch: String,
+    operation: &str,
+    payload: &Value,
+) -> Result<Value, EngineError> {
+    if *capability != HostCapability::Host
+        || !matches!(
+            operation,
+            "host.notification.show" | "host.notification.status"
+        )
+    {
+        return Err(EngineError::new("UNKNOWN_OPERATION"));
+    }
+    if !contracts::object(payload, &["title", "body"], &[])
+        || !notification_text(&payload["title"], 160, false, false)
+        || !notification_text(&payload["body"], 2048, true, true)
+    {
+        return Err(EngineError::new("INVALID_ARGUMENTS"));
+    }
+    let shown = (host
+        .notification
+        .as_ref()
+        .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?
+        .invoke)(
+        payload["title"].as_str().unwrap().to_owned(),
+        payload["body"].as_str().unwrap().to_owned(),
+        operation == "host.notification.status",
+        epoch,
+    )
+    .await?;
+    Ok(json!({"shown":shown}))
 }
 fn ui_host_matches(capability: &HostCapability, host: &ProductionNativeHost) -> bool {
     match capability {
@@ -680,6 +728,8 @@ impl ProductionEngine {
                 && host.notification.is_none())
             || (launch.descriptor.capabilities.workspace_files == HostCapability::Host
                 && host.workspace_file.is_none())
+            || (launch.descriptor.capabilities.notifications == HostCapability::Unsupported
+                && host.notification.is_some())
             || !ui_host_matches(&launch.descriptor.capabilities.ui, &host)
             || !attachment_host_matches(&launch.descriptor.capabilities.attachment_files, &host)
             || !attachment_download_host_matches(
@@ -1417,6 +1467,9 @@ impl ProductionEngine {
                 if let Some(files) = &self.0.host.attachment_download {
                     (files.close)().await?;
                 }
+                if let Some(notifications) = &self.0.host.notification {
+                    (notifications.close)().await?;
+                }
                 if let Some(files) = &self.0.host.artifact_clipboard {
                     (files.close)().await?;
                 }
@@ -1478,26 +1531,30 @@ impl ProductionEngine {
                 .await?;
                 Ok(json!({"opened":true}))
             }
-            "host.notification.show" => {
-                if self.0.descriptor.capabilities.notifications != HostCapability::Host
-                    || !contracts::object(payload, &["title", "body"], &[])
-                    || !contracts::text(&payload["title"], 160)
-                    || payload["title"] == ""
-                    || !contracts::text(&payload["body"], 2048)
+            "host.notification.show" | "host.notification.status" => {
+                if self.0.closed.load(Ordering::SeqCst)
+                    || self.0.stopping.load(Ordering::SeqCst)
+                    || !self.0.ready.load(Ordering::SeqCst)
+                    || !self.0.prepared.load(Ordering::SeqCst)
                 {
-                    return Err(EngineError::new("INVALID_ARGUMENTS"));
+                    return Err(EngineError::new("DISCONNECTED"));
                 }
-                let shown = self
-                    .0
-                    .host
-                    .notification
-                    .as_ref()
-                    .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?(
-                    payload["title"].as_str().unwrap().to_owned(),
-                    payload["body"].as_str().unwrap().to_owned(),
+                let epoch = self.epoch();
+                let result = notification_callback(
+                    &self.0.host,
+                    &self.0.descriptor.capabilities.notifications,
+                    epoch.clone(),
+                    operation,
+                    payload,
                 )
                 .await?;
-                Ok(json!({"shown":shown}))
+                if epoch != self.epoch() {
+                    return Err(EngineError::new("STALE_EPOCH"));
+                }
+                if self.0.closed.load(Ordering::SeqCst) || self.0.stopping.load(Ordering::SeqCst) {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                Ok(result)
             }
             _ => Err(EngineError::new("UNKNOWN_OPERATION")),
         }
@@ -2386,6 +2443,86 @@ mod tests {
                 managed_task_mcp: OptionalCapability::Disabled,
             },
         }
+    }
+    #[tokio::test]
+    async fn notification_callbacks_derive_inactive_policy_from_exact_private_operation_only() {
+        let flags = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = flags.clone();
+        let mut host = ui_host();
+        host.notification = Some(ProductionNotificationHost {
+            invoke: Arc::new(move |title, body, inactive, epoch| {
+                assert_eq!(title, "Review");
+                assert_eq!(body, "");
+                assert_eq!(epoch, "epoch-fixture");
+                captured.lock().unwrap().push(inactive);
+                Box::pin(async { Ok(true) })
+            }),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        for operation in ["host.notification.show", "host.notification.status"] {
+            assert_eq!(
+                notification_callback(
+                    &host,
+                    &HostCapability::Host,
+                    "epoch-fixture".into(),
+                    operation,
+                    &json!({"title":"Review","body":""})
+                )
+                .await
+                .unwrap(),
+                json!({"shown":true})
+            );
+        }
+        assert_eq!(*flags.lock().unwrap(), vec![false, true]);
+        for operation in ["notifications:show", "host.notification.fake"] {
+            assert_eq!(
+                notification_callback(
+                    &host,
+                    &HostCapability::Host,
+                    "epoch-fixture".into(),
+                    operation,
+                    &json!({"title":"Review","body":""})
+                )
+                .await
+                .unwrap_err()
+                .code,
+                "UNKNOWN_OPERATION"
+            );
+        }
+        assert_eq!(
+            notification_callback(
+                &host,
+                &HostCapability::Unsupported,
+                "epoch-fixture".into(),
+                "host.notification.show",
+                &json!({"title":"Review","body":""})
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "UNKNOWN_OPERATION"
+        );
+        for value in [
+            json!({"title":"Review","body":"","inactive":false}),
+            json!({"title":"Review","body":"","icon":"/private"}),
+            json!({"title":"é".repeat(81),"body":""}),
+            json!({"title":"Review","body":"\u{001b}[31m"}),
+        ] {
+            assert_eq!(
+                notification_callback(
+                    &host,
+                    &HostCapability::Host,
+                    "epoch-fixture".into(),
+                    "host.notification.status",
+                    &value
+                )
+                .await
+                .unwrap_err()
+                .code,
+                "INVALID_ARGUMENTS"
+            );
+        }
+        assert_eq!(flags.lock().unwrap().len(), 2);
     }
     #[tokio::test]
     async fn artifact_clipboard_requires_its_own_host_ui_and_exact_result() {

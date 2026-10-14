@@ -6,6 +6,22 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The notification continuation restores local Linux OS alerts through an owned
+session-bus connection and captured notification server. Agent status alerts
+check the actual main window's focus; optional refusal does not stop durable
+work. Fixed click actions reopen the current trusted app window. Direct display
+and permission routes require current document authority. Native callbacks,
+notification IDs and subscriptions drain before owner release.
+
+The finite surface has 226 service commands, six direct native commands and
+30 events. See [native notification ownership](native-notification-bindings.md).
+Permission results describe server availability; they do not prove visible
+presentation under do-not-disturb settings. Installed notifications, clicks,
+other platforms and full migration acceptance remain open. Hosted voice stays
+deferred; Electron remains the shipping application.
+
+The preceding artifact clipboard continuation retains its tested revision:
+
 The artifact clipboard continuation binds the retained Copy file action to a
 Linux file URI clipboard owner. Source holds the authorized regular-file FD
 through actual handoff. A separate private capability and current physical

@@ -283,7 +283,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 229 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 232 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -292,7 +292,7 @@ it('binds the 229 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(229)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(232)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -972,4 +972,36 @@ it('binds artifact file copy to the current document and fences hydration withou
   expect(f.invoke).toHaveBeenCalledTimes(before)
   f.results.set('artifacts:copyFile', { mode: 'file', filePath: '/private' })
   await expect(desktopApi.artifacts.copyFile('task_1', 'report.md')).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('uses exact native notification arguments and current document while keeping permission reads available for hydration', async () => {
+  const f = fixture(true); releases.push(installDesktopHost(f.host)); f.results.set('app:getNotificationPermission', 'granted'); f.results.set('app:requestNotificationPermission', 'denied')
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(await desktopApi.app.getNotificationPermission()).toBe('granted')
+  expect(await desktopApi.app.requestNotificationPermission()).toBe('denied')
+  await desktopApi.notifications.show('Review ready', 'Task ready\nReview')
+  expect(f.invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'notifications:show', payload: { title: 'Review ready', body: 'Task ready\nReview' }, engineEpoch: 'engine-1', uiLease: 'document-1' })
+  const before = f.invoke.mock.calls.length
+  await expect(desktopApi.notifications.show('x'.repeat(161), '')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' }); expect(f.invoke).toHaveBeenCalledTimes(before)
+  f.results.set('app:getNotificationPermission', { status: 'granted', server: ':1.0' })
+  await expect(desktopApi.app.getNotificationPermission()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+it('refuses notification permission and display effects without physical document authority', async () => {
+  const f = fixture(); releases.push(installDesktopHost(f.host)); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const before = f.invoke.mock.calls.length
+  await expect(desktopApi.app.getNotificationPermission()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(desktopApi.app.requestNotificationPermission()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(desktopApi.notifications.show('Review', '')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke).toHaveBeenCalledTimes(before)
+})
+
+it('hydrates permission availability through the captured document while fencing permission requests and display', async () => {
+  const f = fixture(true); f.results.set('app:getNotificationPermission', 'granted'); let observed: unknown
+  f.host.setRehydrator(async () => {
+    observed = await f.host.api.app.getNotificationPermission()
+    await expect(f.host.api.app.requestNotificationPermission()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    await expect(f.host.api.notifications.show('Review', '')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  })
+  await f.host.reconnect(); expect(observed).toBe('granted')
+  expect(f.invoke.mock.calls.filter(([command]) => command === 'desktop_invoke')).toEqual([['desktop_invoke', { operation: 'app:getNotificationPermission', payload: {}, engineEpoch: 'engine-1', uiLease: 'document-1' }]])
 })

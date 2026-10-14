@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import type { ProductionService as ProductionServiceType, SealedProductionServiceHost } from './production-service'
+import type { ProductionService as ProductionServiceType, SealedProductionServiceHost, ProductionPrivateCallbacks } from './production-service'
 let ProductionService: typeof import('./production-service').ProductionService
 let sealProductionServiceHost: typeof import('./production-service').sealProductionServiceHost
 beforeEach(async () => {
@@ -26,6 +26,8 @@ import type { ChatProvider, ChatProviderEvent } from '../main/chat/providers/typ
 import { makeTask } from '../../test/helpers/task-fixtures'
 import { acquireProfileLock } from '../main/platform/profile-lock'
 import { PRODUCTION_RESOURCE_PINS, verifyProductionResources } from './production-stdio'
+import { SessionStatus } from '../shared/constants'
+import { HOST_OPERATION_SCHEMAS } from '../shared/host-services'
 import { WORKSPACE_NATIVE_CALLBACK_SCHEMAS } from '../shared/workspace-native-callbacks'
 
 const roots: string[] = [], services: ProductionServiceType[] = [], hosts: ServicePeer[] = [], release: Array<() => void> = []
@@ -45,7 +47,11 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false) {
+  let privateCallbacks: ProductionPrivateCallbacks | null = null
+  let notificationAcknowledgement: Promise<void> | null = null
+  let notificationResult: 'shown' | 'denied' | 'error' | 'malformed' | 'timeout' = 'shown'
+  const notificationCalls: Array<{ operation: string; payload: JsonValue }> = []
   let uiLease: string | null = 'document_fixture_1'
   let uiAcknowledgement: Promise<void> | null = null
   let attachmentAcknowledgement: Promise<void> | null = null
@@ -55,6 +61,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   const acceptedUi: JsonValue[] = [], installationProgress: JsonValue[] = []
   const root = mkdtempSync(join(tmpdir(), '21x-private-production-')); roots.push(root)
   const launch = descriptor(root); mkdirSync(launch.paths.resourceRoot)
+  if (notifications) launch.capabilities.notifications = 'host'
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   if (ui) launch.capabilities.ui = 'host'
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
@@ -102,6 +109,18 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     const id = badDrain ? 'foreign_launch_001' : launch.launchId; badDrain = false
     return { launchId: id, acknowledged: true }
   } }
+  if (notifications) for (const operation of ['host.notification.show', 'host.notification.status'] as const) schemas[operation] = {
+    validatePayload: HOST_OPERATION_SCHEMAS[operation].validateRequest,
+    validateResult: HOST_OPERATION_SCHEMAS[operation].validateResult,
+    handle: async payload => {
+      notificationCalls.push({ operation, payload: structuredClone(payload) })
+      await notificationAcknowledgement
+      if (notificationResult === 'timeout') throw new ServiceProtocolError('TIMEOUT')
+      if (notificationResult === 'error') throw new ServiceProtocolError('INVALID_REQUEST')
+      if (notificationResult === 'malformed') return { shown: 'wrong' }
+      return { shown: notificationResult === 'shown' }
+    }
+  }
   if (workspaceFiles) for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) schemas[operation] = { ...schema, handle: async payload => {
     nativeCalls.push(operation); fileReceipts.push((payload as { receipt: JsonValue }).receipt)
     await fileAcknowledgement; return {}
@@ -159,16 +178,16 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   const service = new ProductionService(sealProductionServiceHost({ descriptor: launch, authority,
     caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' }, unbridgedOwnerEvent: vi.fn(),
     boundaries: { ...(installation ? { agentInstallation: { nodeExecutable: selectedNode, homeDir: root, environment: {}, npmCliPath: fixtureNpm } } : {}), cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider },
-    constructBootstrap: callbacks => ({ profileId: launch.profileId, paths: launch.paths,
+    constructBootstrap: callbacks => { privateCallbacks = callbacks; return ({ profileId: launch.profileId, paths: launch.paths,
       credentials: { mode: 'create', store: { create: async (id, key) => { keys.set(id, Buffer.from(key)) }, load: async id => Buffer.from(keys.get(id)!) } },
       connectors: { kind: 'disabled', reason: 'Controlled fixture has no packaged connectors' }, managedTaskMcp: { disabled: true },
-      native: { agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, configuredMcp: 'disabled' },
+      native: { agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: notifications ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, configuredMcp: 'disabled' },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, emit: callbacks.emitOwnerEvent,
         ...(ui ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         ...(attachmentOpening ? { openAttachment: callbacks.openAttachment } : {}),
         ...(attachmentDownloading ? { downloadAttachment: callbacks.downloadAttachment } : {}),
         ...(artifactClipboard ? { copyArtifact: callbacks.copyArtifact } : {}),
-        openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } })
+        openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } }) }
   }), { write: async bytes => { deliver(host, bytes) } }); services.push(service)
   const initialize = async (): Promise<void> => {
     const ping = await host.request('engine.ping', {})
@@ -176,6 +195,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     await host.request('engine.initialize', { protocolVersion: 1, launchId: launch.launchId })
   }
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
+    notificationCalls, privateCallbacks: () => privateCallbacks!, holdNotificationAcknowledgement: (raw: Promise<void> | null) => { notificationAcknowledgement = raw }, setNotificationResult: (value: typeof notificationResult) => { notificationResult = value },
     attachmentReceipts, attachmentAuthorizations, denyWrites: () => { grantWrites = false }, holdAttachmentAcknowledgement: (raw: Promise<void>) => { attachmentAcknowledgement = raw },
     installationProgress, acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
     fileReceipts, holdFileAcknowledgement: (raw: Promise<void>) => { fileAcknowledgement = raw },
@@ -523,8 +543,63 @@ describe('private artifact clipboard handoff', () => {
     const cancelled = expect(raw).rejects.toMatchObject({ code: 'CANCELLED' })
     await vi.waitFor(() => expect(f.fileReceipts).toHaveLength(1)); abort.abort(); await cancelled
     expect(() => acquireProfileLock(f.launch.paths.profileRoot)).toThrow('PROFILE_DUPLICATE_OWNER')
+    await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED'); expect(f.service.getReadyServices()).toBeNull()
     let closed = false; const closing = f.service.close().then(() => { closed = true })
     await new Promise(resolve => setTimeout(resolve, 20)); expect(closed).toBe(false)
     gate.finish(); await closing
+  })
+})
+
+
+describe('private native notification bridge around actual production ownership', () => {
+  it('has no status callback or host notification operation without the captured capability', async () => {
+    const f = fixture(); await f.initialize()
+    expect(f.privateCallbacks().notifyStatus).toBeUndefined()
+    expect(() => f.privateCallbacks().notify('Optional unsupported update', 'No native effect')).not.toThrow()
+    expect(f.service.getReadyServices()!.agents).toBeDefined()
+    await expect(f.service.peer.request('host.notification.status', { title: 'Agent finished', body: 'A task is ready for review' })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    expect(f.notificationCalls).toEqual([]); expect(f.service.getReadyServices()).not.toBeNull()
+    for (const operation of ['host.notification.show', 'host.notification.status']) expect(Object.hasOwn(PRODUCTION_COMMAND_CODECS, operation)).toBe(false)
+  })
+  it('routes actual Manager status through the independent callback and preserves its captured descriptor scope', async () => {
+    const f = fixture(false, false, false, false, false, false, true); await f.initialize()
+    const db = f.service.getReadyServices()!.db, task = db.createTask({ title: 'Review the output' })!
+    const callback = f.privateCallbacks().notifyStatus!; expect(typeof callback).toBe('function')
+    f.launch.capabilities.notifications = 'unsupported'
+    callback('Agent finished', 'A task is ready for review')
+    await vi.waitFor(() => expect(f.notificationCalls).toHaveLength(1))
+    await f.host.drain()
+    expect(f.notificationCalls).toEqual([{ operation: 'host.notification.status', payload: { title: 'Agent finished', body: 'A task is ready for review' } }])
+    // Use the actual production AgentManager host rather than a result facade.
+    const manager = f.service.getReadyServices()!.agents, agent = db.createAgent({ name: 'Notification task owner' })!
+    const publisher = manager as unknown as { sendToRenderer(channel: string, payload: unknown): void }
+    const status = { sessionId: 'native_notification_session', agentId: agent.id, taskId: task.id }
+    publisher.sendToRenderer('agent:status', { ...status, status: SessionStatus.WORKING })
+    publisher.sendToRenderer('agent:status', { ...status, status: SessionStatus.WAITING_APPROVAL })
+    f.privateCallbacks().notify('Human notification', 'General native messages remain unconditional')
+    await vi.waitFor(() => expect(f.notificationCalls).toHaveLength(3)); await f.host.drain()
+    expect(f.notificationCalls.slice(1)).toEqual([
+      { operation: 'host.notification.status', payload: { title: 'Agent needs approval', body: '"Review the output" is waiting for your approval' } },
+      { operation: 'host.notification.show', payload: { title: 'Human notification', body: 'General native messages remain unconditional' } }
+    ])
+    expect(f.service.getReadyServices()).not.toBeNull()
+  })
+  it.each(['denied', 'error', 'malformed', 'timeout'] as const)('keeps the singleton usable after optional native %s without retry or private public-command exposure', async result => {
+    const f = fixture(false, false, false, false, false, false, true); await f.initialize(); f.setNotificationResult(result)
+    f.privateCallbacks().notifyStatus!('Agent finished', 'A task is ready for review'); f.privateCallbacks().notify('General update', 'No automatic replay')
+    await vi.waitFor(() => expect(f.notificationCalls).toHaveLength(2)); await f.host.drain(); await Promise.resolve(); await Promise.resolve()
+    expect(f.notificationCalls).toHaveLength(2); expect(f.service.getReadyServices()).not.toBeNull()
+    const tasks = await f.host.request('db:getTasks', {})
+    expect(isRecord(tasks)).toBe(true); expect(f.service.owner.snapshot().phase).toBe('ready')
+  })
+  it('retains concurrent raw native callbacks through shutdown and suppresses new late publications', async () => {
+    const f = fixture(false, false, false, false, false, false, true); await f.initialize(); const gate = deferred(); release.push(gate.finish); f.holdNotificationAcknowledgement(gate.promise)
+    f.privateCallbacks().notifyStatus!('Agent finished', 'Held status'); f.privateCallbacks().notify('General update', 'Held general update')
+    await vi.waitFor(() => expect(f.notificationCalls).toHaveLength(2))
+    await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED'); expect(f.service.getReadyServices()).toBeNull()
+    let closed = false; const closing = f.service.close().then(() => { closed = true })
+    await Promise.resolve(); expect(closed).toBe(false)
+    f.privateCallbacks().notifyStatus!('Agent finished', 'Retired scope'); f.privateCallbacks().notify('General update', 'Retired scope')
+    expect(f.notificationCalls).toHaveLength(2); gate.finish(); await closing; expect(closed).toBe(true); expect(f.notificationCalls).toHaveLength(2)
   })
 })

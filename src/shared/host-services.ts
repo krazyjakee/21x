@@ -1,4 +1,5 @@
 import { hasExactKeys, isRecord, isJsonValue, type JsonValue } from './service-protocol'
+import { isNativeNotificationPayload } from './native-notification-codecs'
 import type { DesktopEventMap } from './desktop-operations'
 
 export const HOST_CALLBACK_VERSION = 1 as const
@@ -23,6 +24,7 @@ export interface HostCommandMap {
   'host.shell.openExternal': { request: { url: string }; result: { opened: true } }
   'host.shell.revealFile': { request: { path: string }; result: { revealed: true } }
   'host.notification.show': { request: { title: string; body: string }; result: { shown: boolean } }
+  'host.notification.status': { request: { title: string; body: string }; result: { shown: boolean } }
   'host.voice.permission.get': { request: null; result: { status: MicrophonePermission } }
   'host.voice.permission.request': { request: null; result: { status: MicrophonePermission } }
   'host.shortcut.set': { request: { accelerator: string | null }; result: { registered: boolean } }
@@ -102,7 +104,8 @@ export const HOST_OPERATION_SCHEMAS: { [K in keyof HostCommandMap]: { validateRe
   },
   'host.shell.openExternal': { validateRequest: value => isRecord(value) && hasExactKeys(value, ['url']) && isExternalHostUrl(value.url), validateResult: trueResult('opened') },
   'host.shell.revealFile': { validateRequest: value => isRecord(value) && hasExactKeys(value, ['path']) && isAbsoluteHostPath(value.path), validateResult: trueResult('revealed') },
-  'host.notification.show': { validateRequest: value => isRecord(value) && hasExactKeys(value, ['title', 'body']) && bounded(value.title, 160) && bounded(value.body, 2048, true), validateResult: booleanResult('shown') },
+  'host.notification.show': { validateRequest: isNativeNotificationPayload, validateResult: booleanResult('shown') },
+  'host.notification.status': { validateRequest: isNativeNotificationPayload, validateResult: booleanResult('shown') },
   'host.voice.permission.get': { validateRequest: value => value === null, validateResult: permissionResult },
   'host.voice.permission.request': { validateRequest: value => value === null, validateResult: permissionResult },
   'host.shortcut.set': { validateRequest: value => isRecord(value) && hasExactKeys(value, ['accelerator']) && (value.accelerator === null || bounded(value.accelerator, 128)), validateResult: booleanResult('registered') },

@@ -8,6 +8,9 @@ pub const OPERATIONS: &[&str] = &[
     "shell:openExternal",
     "app:getVersion",
     "chatImages:readClipboard",
+    "notifications:show",
+    "app:getNotificationPermission",
+    "app:requestNotificationPermission",
 ];
 pub const MAX_URL_BYTES: usize = 8192;
 pub const MAX_NATIVE_WORK: usize = 4;
@@ -65,6 +68,23 @@ pub fn external_url(value: &str, callback: bool) -> bool {
         !callback && url.scheme() == "mailto" && !url.path().is_empty()
     }
 }
+pub fn notification_text(value: &Value, maximum: usize, multiline: bool, empty: bool) -> bool {
+    value.as_str().is_some_and(|text| {
+        (empty || !text.is_empty())
+            && text.len() <= maximum
+            && !text.chars().any(|c| {
+                c == '\u{007f}'
+                    || c <= '\u{001f}' && !(multiline && matches!(c, '\t' | '\r' | '\n'))
+            })
+    })
+}
+pub fn notification_payload(value: &Value) -> bool {
+    value
+        .as_object()
+        .is_some_and(|map| map.len() == 2 && map.contains_key("title") && map.contains_key("body"))
+        && notification_text(&value["title"], 160, false, false)
+        && notification_text(&value["body"], 2048, true, true)
+}
 pub fn request(operation: &str, value: &Value) -> bool {
     let Some(map) = value.as_object() else {
         return false;
@@ -77,7 +97,11 @@ pub fn request(operation: &str, value: &Value) -> bool {
                     .and_then(Value::as_str)
                     .is_some_and(|url| external_url(url, false))
         }
-        "app:getVersion" | "chatImages:readClipboard" => map.is_empty(),
+        "notifications:show" => notification_payload(value),
+        "app:getVersion"
+        | "chatImages:readClipboard"
+        | "app:getNotificationPermission"
+        | "app:requestNotificationPermission" => map.is_empty(),
         _ => false,
     }
 }
@@ -223,6 +247,65 @@ impl NativeWorkOwner {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn actual_typescript_native_notification_requests_match_finite_policy() {
+        let Some(path) = std::env::var_os("TWENTYONEX_NATIVE_NOTIFICATION_CORPUS") else {
+            return;
+        };
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .expect("open native notification corpus")
+            .take(65537)
+            .read_to_end(&mut bytes)
+            .expect("read native notification corpus");
+        assert!(bytes.len() <= 65536);
+        let value: Value = serde_json::from_slice(&bytes).expect("native notification corpus JSON");
+        assert_eq!(value["version"], 1);
+        let rows = value["requests"].as_array().unwrap();
+        assert_eq!(rows.len(), 11);
+        for row in rows {
+            let operation = row["operation"].as_str().unwrap();
+            assert_eq!(
+                request(operation, &row["payload"]),
+                row["valid"].as_bool().unwrap(),
+                "{operation}"
+            );
+        }
+    }
+    #[test]
+    fn notification_requests_are_finite_bounded_and_do_not_grant_actions_or_paths() {
+        for op in [
+            "app:getNotificationPermission",
+            "app:requestNotificationPermission",
+        ] {
+            assert!(request(op, &json!({})));
+            assert!(!request(op, &json!({"status":"granted"})));
+        }
+        assert!(request(
+            "notifications:show",
+            &json!({"title":"é".repeat(80),"body":"😀".repeat(512)})
+        ));
+        assert!(request(
+            "notifications:show",
+            &json!({"title":"Review","body":"\tLine1\r\nLine2"})
+        ));
+        for value in [
+            json!({"title":"é".repeat(81),"body":""}),
+            json!({"title":"Review","body":"😀".repeat(513)}),
+            json!({"title":"Review","body":"\u{001b}[31m"}),
+            json!({"title":"Review\n","body":""}),
+            json!({"title":"Review","body":"","action":"private"}),
+            json!({"title":"Review","body":"","icon":"/private"}),
+            json!({"title":"Review","body":"","uiLease":"forged"}),
+        ] {
+            assert!(!request("notifications:show", &value));
+        }
+        assert!(!request(
+            "host.notification.status",
+            &json!({"title":"Review","body":""})
+        ));
+    }
     #[test]
     fn urls_and_native_shapes_are_finite() {
         for url in [

@@ -289,11 +289,27 @@ export function notifyStatusTransition(
 
   try {
     if (notifications.kind !== 'native' || !notifications.isSupported()) return
-    const task = taskId ? db.getTask(taskId) : undefined
-    const taskTitle = task?.title
+    // Bound the exact title prefix before JS; unrelated credentials/large
+    // serialized task fields must never be materialized for a status toast.
+    const idValid = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id)
+    const task = idValid(taskId) ? db.db.prepare(`SELECT
+      CASE WHEN typeof(title)='text' THEN substr(CAST(title AS BLOB),1,1604) ELSE NULL END AS title_prefix,
+      CASE WHEN typeof(title)='text' THEN length(CAST(title AS BLOB)) ELSE 0 END AS title_bytes,
+      CASE WHEN typeof(parent_task_id)='text' AND length(CAST(parent_task_id AS BLOB))<=128 THEN parent_task_id ELSE NULL END AS parent_task_id
+      FROM tasks WHERE id=?`).get(taskId) as { title_prefix: Uint8Array | null; title_bytes: number; parent_task_id: string | null } | undefined : undefined
+    const decoded = task?.title_prefix instanceof Uint8Array ? Buffer.from(task.title_prefix).toString('utf8') : ''
+    // A byte-prefix boundary may split UTF8; decoding emits a fixed safe
+    // replacement. Controls are normalized, valid short titles stay exact.
+    const safe = decoded.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    const characters = Array.from(safe), clipped = characters.length > 400 || (task?.title_bytes ?? 0) > 1604
+    const taskTitle = characters.slice(0, 400).join('') + (clipped ? '…' : '')
 
-    // Subtasks of an already-completed parent are noise.
-    if (task?.parent_task_id && db.getTask(task.parent_task_id)?.status === TaskStatus.Completed) return
+    // Subtasks of an already-completed parent are noise. Only a bounded
+    // completion scalar is needed, not the parent's private configuration.
+    if (idValid(task?.parent_task_id)) {
+      const parent = db.db.prepare("SELECT CASE WHEN status=? THEN 1 ELSE 0 END AS completed FROM tasks WHERE id=?").get(TaskStatus.Completed, task.parent_task_id) as { completed: number } | undefined
+      if (parent?.completed === 1) return
+    }
 
     const needsApproval = status === SessionStatus.WAITING_APPROVAL
     const title = needsApproval ? 'Agent needs approval' : 'Agent finished'
@@ -309,7 +325,8 @@ export function notifyStatusTransition(
         win.focus()
       }
     } })
-  } catch (err) {
-    console.error('[AgentManager] Failed to show OS notification:', err)
+  } catch {
+    // Optional native/DB refusal must not leak a private provider/task value.
+    console.error('[AgentManager] Failed to show OS notification')
   }
 }

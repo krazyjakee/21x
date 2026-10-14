@@ -74,3 +74,15 @@ it('retires an accepted artifact copy result during replacement bootstrap withou
   finishCopy({ engineEpoch: 'engine-1', result: { defined: true, value: { mode: 'file' } } }); await failure
   expect(invoke.mock.calls.filter(([command]) => command === 'desktop_invoke')).toHaveLength(1)
 })
+
+it('stamps notification document authority and rejects an old show acknowledgement after reload without replay', async () => {
+  let finishShow!: (value: unknown) => void
+  const raw = new Promise(resolve => { finishShow = resolve })
+  const invoke = vi.fn().mockResolvedValueOnce({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document:1' }).mockReturnValueOnce(raw)
+    .mockResolvedValue({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document:2' })
+  const native = { core: { invoke }, event: { listen: vi.fn() } } as unknown as TauriDesktopApi; await getTauriEngineEpoch(native)
+  const pending = createTauriDesktopTransport(native).invoke('notifications:show', { title: 'Review', body: '' }, { engineEpoch: 'engine-1', signal: new AbortController().signal })
+  const refused = expect(pending).rejects.toMatchObject({ code: 'STALE_EPOCH' }); await getTauriEngineEpoch(native)
+  finishShow({ engineEpoch: 'engine-1', result: { defined: false } }); await refused
+  expect(invoke.mock.calls.filter(([command]) => command === 'desktop_invoke')).toEqual([['desktop_invoke', { operation: 'notifications:show', payload: { title: 'Review', body: '' }, engineEpoch: 'engine-1', uiLease: 'document:1' }]])
+})

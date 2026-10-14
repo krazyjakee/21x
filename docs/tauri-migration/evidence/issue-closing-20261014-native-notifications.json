@@ -1,0 +1,380 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    212,
+    214,
+    215
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "86383a774b1dc5fa13e3199772b640027b12b212",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/implementation-status.md": "ccac80bc862b2ebec7713e5b4c423a58f82a77c62c640a5cb5aea532c97edcf1",
+      "docs/tauri-migration/inventory.json": "3ae7c07535ecf31a5818ad4684ce9f9f54cbf92f5686f5295826fa137f6eea2d",
+      "docs/tauri-migration/native-notification-bindings.md": "8bd58d78278e5b96113e846d042d53df5483bb205472412af493c09ffc79bf45",
+      "scripts/native-notification-contracts-proof.test.ts": "5b571a5cddc5ae4a02a7d3864e6f07544399edfcded3f4cf676698f2109def48",
+      "src-tauri/engine/src/production.rs": "a69d378deb72879cbd487c4121555350b18bc20951420a1dc2cb7ac47ebfaddb",
+      "src-tauri/src/native_notifications.rs": "fbabbac28f2ae438de59a5a0c0092e2764061e3f52f7531667c3b04f414f3629",
+      "src-tauri/src/native_services.rs": "cc4684683d9cb495c09a1c25992f65822b7b72855b8c04ad844e926e8b0bbbe3",
+      "src-tauri/src/production_host.rs": "5e8b052e873a6eb482b078bddeeebe3b7fb59ecfbafa39c53e9431f2d127ed74",
+      "src/main/agent-manager.test.ts": "4635c6227fbd0ba54bcd330df90a95c199a10e3b0fa5419b2aa1034368da0ab0",
+      "src/main/agent-manager/transcript-events-core.test.ts": "09ae37a2db53ab02b912d64b680ba887e43a5bd460d6f7b89c94747ae8d7a9b5",
+      "src/main/agent-manager/transcript-events-core.ts": "de2744767c8d37789ca56b6cd4ee4999724f1cf1bd0569d8b1b09f7530b16b30",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "edda54de3d99181a81bfda9c46b782cf9c111d9795c11e994269e696f5a159a2",
+      "src/renderer/src/lib/native-desktop-host.ts": "8025d0604d9902186277f4e6465d94ee71f1fbce79ef064616c55b1f3c50360c",
+      "src/renderer/src/lib/tauri-desktop-transport.test.ts": "bfcdbbd1b02897244299c7449282825a95901ddaaab962a1eb3dde97befb22ea",
+      "src/renderer/src/lib/tauri-desktop-transport.ts": "6e814901feb0fb60cc21f50b19d5b3c6a024c7f5a0b289955286e1d808ae913d",
+      "src/service/production-service.test.ts": "6b990cdeeb458e1904ad3952c12035eed2423772bc33fd118028bf8570b74d31",
+      "src/service/production-service.ts": "d62a56de72328fa220b0d678535ce7505bb8f2442da6433021e58b775fe06212",
+      "src/shared/host-services.test.ts": "7208dbba2a9def30872112991ec9f2a90eb01c560a969d42c25dd3c4e45b4854",
+      "src/shared/host-services.ts": "b9e4463d78037f200cafa7054575d7a6ad0cbc64aee8c685493e2a9cb194af0d",
+      "src/shared/native-notification-codecs.test.ts": "a087bad5c294a30564507d9146973e81372b0a57a8e979344bea58b3a8aab203",
+      "src/shared/native-notification-codecs.ts": "3f1248a10c558251f8aeb2eb4f50c8f785a34938ba73500b54dca101095d8190",
+      "vitest.tauri.config.ts": "e24a0086f145d675d9e849671d818b21170730943b7cc8438046f3cc2dbd536b"
+    },
+    "frozenInputs": 21,
+    "finalImplementationHashesRevalidated": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Local Linux native notifications and inactive-only actual AgentManager status alerts, bound to captured engine/window/server ownership. Shipping application remains Electron.",
+  "bindings": {
+    "finiteServiceCommandContracts": 226,
+    "separateNativeServiceCommands": 6,
+    "facadeCommandBindings": 232,
+    "events": 30,
+    "newCommands": 3,
+    "newEvents": 0,
+    "publicOperations": [
+      "notifications:show",
+      "app:getNotificationPermission",
+      "app:requestNotificationPermission"
+    ],
+    "privateCallbacks": [
+      "host.notification.show",
+      "host.notification.status"
+    ],
+    "capability": "notifications",
+    "titleByteCap": 160,
+    "bodyByteCap": 2048,
+    "statusTitleCharacters": 400,
+    "storedTitlePrefixBytes": 1604,
+    "ownedNotificationCapacity": 64,
+    "subscriptions": 2,
+    "nativeWaiterBudgetMs": 5000
+  },
+  "implemented": [
+    "Public notification/permission payloads are exact finite DTOs; they carry no app/action/icon/URL/path or caller-selected policy. Current physical main document and captured engine gate native ingress and final delivery.",
+    "Permission get can participate in hydration through an already-captured document; permission request and display remain fenced until hydration. Replacement document checks reject retired results without replay.",
+    "The Source launch capability selects the actual AgentManager native notification host. Private general/status operations remain outside the public command map. Actual manager transition detection emits status requests; native derives inactive-only policy from that operation and checks real main focus.",
+    "Bounded SQL reads title-prefix bytes and parent completion scalars without full task or credential/large JSON getters. Exact valid short text, fallback and completed-parent suppression persist; malformed UTF8/control text is normalized and clipped output is marked.",
+    "Optional native refusal, malformed reply, deadline or absence do not disconnect the durable service or retry an uncertain notification. Raw callbacks remain retained by actual owner cleanup; transport disconnection still performs its normal teardown.",
+    "Linux async GIO obtains the session connection and exact unique notification server. Requests target only that server; raw variant byte bounds precede Rust server/action string copies. Fixed application/action/hints and escaped text grant no content-driven action dispatcher.",
+    "Native owns bounded notification IDs and two signal subscriptions. Fixed clicks require original engine epoch, exact connection/server/owned ID and trusted current main window, then reopen/focus the app. Generic notifications remain unconditional; status notifications refuse while main is focused.",
+    "Accepted IDs are recorded before late caller checks. Public timeout/drop revokes future effects without releasing real GIO callback captures. Independent cleanup works after normal work admission closes, joins actual replies/subscription retirement and closes only captured-server owned IDs.",
+    "Only structured InvalidId/NameHasNoOwner/ServiceUnknown absence acknowledges retirement; other cleanup failures retain ownership for explicit retry. A changed daemon is unavailable rather than a redirect of old authority."
+  ],
+  "artifact": {
+    "buildIdentity": "production-ce2c98e8628dd1423e907eddaade25d1",
+    "resourceManifestSha256": "792d2fbf7e7efce7f433e71322edd466c5e75e4718758fc6d11e4d0c912eeb35",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "dependencyManifestsUnchanged": true,
+    "packageAndRuntimePinsUnchanged": true,
+    "cargoVersionsAndChecksumsUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 226,
+    "actualTypeScriptRequests": 468,
+    "sha256": "c93199f656ee3468d74d7073c29b061a256541c3551ac483ae1698d4168bc7e9",
+    "nativeParity": "Actual finite TypeScript request corpus accepted by native golden-request test"
+  },
+  "tests": {
+    "app": {
+      "passed": 7063,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "cb6b3fa84764d89f75d080a98a9e9b4410153ca73e5db52cfb9cb6df56ce279b",
+      "logSha256": "ea84bd171122a667f3e320c508755eb0dca569571108bbca574d7c150223e76b"
+    },
+    "standalone": {
+      "passed": 3595,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "68a112ba484d715c6a5ce0321df85f6010e4802b0ce7d9f676baefe207022386",
+      "logSha256": "cc00e8aea81665663b7ce4def914a1c52620c04d76e69f33c1978a7d9144699f"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "7c2edf174c01b548beff4b96ac4ffb02eacbd0be5b2d19e0bf5c6353c0dd72d2",
+      "logSha256": "78594e586bccbd2db663aa1685cbe907a6f42ba2216b6678a6b0be4c085b1f47"
+    },
+    "focused": {
+      "passed": 199,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "3b36cc90a0e8f7f1520070168365f0837cc85cc45bde7d0e7049681a9cdd432b",
+      "logSha256": "0ea83762092a6f8ea94a2e395bf0570b28cb1a322483368f64da88679fb07c35"
+    },
+    "corpus-export": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "0c2ffa83f675e633f2f0c24a36ab1ba4b02b76777608ba17e58088dd94996421",
+      "logSha256": "eb00d144195a1f94bfea733d5aa8ed240b0657f567734826557ac78391de4c3e"
+    },
+    "native-notification-export": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "d3f23d7f2332675fefbc61f503d85d6a0a006c52b28172a96a1e27eb09f2b568",
+      "logSha256": "e02c251ccea79abba136e8e2ebaba64e83f117abc2f43dea23a1c482461ace66"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 28.522,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.703,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 22.35,
+      "logSha256": "2920575e929081ee87765450b2973b9563cf0050660d516e7d07ca0d9b3ec8d8"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.633,
+      "logSha256": "14e64b9bc8c96a2fe707c9b3710c1caf756824cda41148732f8ebfa29d7eebc1"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.715,
+      "logSha256": "7a019eabc3e03013c778e0db3e4336e4c7516b48497a9243c8649cf2d3bc846c"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.095,
+      "logSha256": "e1fdba1fc8333d8803d9c824d55ca40b786d2c28c2e2685c52f4437356cacd9c"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.381,
+      "logSha256": "4acbc169032d3b05b8520dd0d0d8c2d6feca1258580817c7ffeb0e994bb4acd2"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.319,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.645,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.457,
+      "logSha256": "61831fb1471b622b344e613a112746b0deabcf5948497c5b09392082b642f3f5"
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.471,
+      "logSha256": "85c9f880885dac60777b2518abf71fc09f427eb2becbe71ae56d7cf80cf8ae94"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.711,
+      "logSha256": "91b6fad889010bc7b5a10c9b712b2cc2a969dcae4fa27d09764025d1f805b8e8"
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch28-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.399,
+      "logSha256": "1a2c2802e72e2de4a371269fdc2b3e3d43db28ca31a7b635e0aee4e515c5ca2e"
+    },
+    "native-notification-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_NATIVE_NOTIFICATION_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch28-native-notification-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-tauri-feasibility",
+        "--features",
+        "production-service",
+        "production_host::native_services::tests::actual_typescript_native_notification_requests_match_finite_policy",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.322,
+      "logSha256": "6a9cfd2adf2cdaadd783c9ebfc523549736867b28b39ebf409f90c9cff3ac444"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.048,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "nativeNotificationCorpus": {
+    "actualTypeScriptRequests": 11,
+    "sha256": "492a2370126f87603e5d7f61be751cc86e6d7cf17401edcab2cb4a996bc49fed",
+    "nativeParity": "Actual TypeScript encoded requests/rejections accepted by native request policy test"
+  },
+  "validationCorrections": [
+    "Typed the notification mock, JSON argument return and malformed fixture arrays for strict TypeScript.",
+    "Healthy peer tests now use normal drain rather than the terminal-only handler drain API; native refusal remains nonfatal without weakening runtime checks.",
+    "Legacy Electron notification session fixtures now use real in-memory SQLite for bounded metadata and durable admission, retaining controlled adapter/window and all wording/suppression/click assertions.",
+    "Final native review added raw GVariant/error byte bounds and structured expired-ID cleanup tests before complete final validation."
+  ],
+  "remainingAcceptance": [
+    "Actual installed GTK/GIO notification delivery, do-not-disturb presentation and click behavior have not been exercised. Display-free policy/raw callback/real-SQLite fixtures prove only their stated scope.",
+    "Permission granted describes captured notification-server availability, not OS presentation or user attention. Missing/changed daemon reports unavailable; a new native owner is required to bind a replacement server.",
+    "GIO receives OS data before Rust validation. App/Rust decoding bounds do not establish a hard memory cap within the OS/GIO transport. A notification accepted before a lost reply may remain visible; unknown outcomes are not replayed.",
+    "Non-Linux notifications, remaining native window/tray/shortcut/voice/OAuth behavior, full backend/platform/release/cutover and G0-G5 acceptance remain open.",
+    "Hosted voice remains deferred by user decision. Issues#202/#208/#212/#214/#215 retain their complete acceptance criteria."
+  ]
+}

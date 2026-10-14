@@ -15,7 +15,8 @@ use twentyonex_engine::{
     production::{
         DelegatedCgroup, HostCapability, OptionalCapability, ProductionAttachmentHost,
         ProductionCapabilities, ProductionDescriptor, ProductionEngine, ProductionNativeHost,
-        ProductionPaths, ProductionWorkspaceHost, ProfileIntent, TrustedProductionLaunch,
+        ProductionNotificationHost, ProductionPaths, ProductionWorkspaceHost, ProfileIntent,
+        TrustedProductionLaunch,
     },
     production_attachment_files::{NativeAttachmentFileOwner, NativeAttachmentReceipt},
     production_files::{NativeWorkspaceFileOwner, NativeWorkspaceReceipt},
@@ -24,6 +25,9 @@ use twentyonex_engine::{
 #[path = "native_services.rs"]
 pub(crate) mod native_services;
 use native_services::NativeWorkOwner;
+#[path = "native_notifications.rs"]
+pub(crate) mod native_notifications;
+use native_notifications::{NativeNotificationOwner, Scope as NotificationScope};
 #[path = "native_artifact_clipboard.rs"]
 pub(crate) mod native_artifact_clipboard;
 #[path = "native_attachment_download.rs"]
@@ -39,6 +43,7 @@ struct ProductionState {
     failure: Option<EngineError>,
     native_work: NativeWorkOwner,
     ui: NativeUiOwner,
+    notifications: NativeNotificationOwner,
 }
 
 fn trusted_origin(url: &tauri::Url) -> bool {
@@ -391,6 +396,53 @@ async fn desktop_invoke(
         }
         return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
     }
+    if matches!(
+        operation.as_str(),
+        "notifications:show"
+            | "app:getNotificationPermission"
+            | "app:requestNotificationPermission"
+    ) {
+        if !native_services::request(&operation, &payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        let app = window.app_handle().clone();
+        available_engine(&app, Some(&engine_epoch))?;
+        let (captured_window, captured_ui, captured_epoch, captured_lease) = (
+            window.clone(),
+            state.ui.clone(),
+            engine_epoch.clone(),
+            lease.clone(),
+        );
+        let current: NotificationScope = Arc::new(move || {
+            authorize(&captured_window)?;
+            available_engine(captured_window.app_handle(), Some(&captured_epoch))?;
+            captured_ui.assert_publish(&captured_window, &captured_epoch, &captured_lease)
+        });
+        let result = if operation == "notifications:show" {
+            state
+                .notifications
+                .show(
+                    payload["title"].as_str().unwrap().to_owned(),
+                    payload["body"].as_str().unwrap().to_owned(),
+                    false,
+                    current,
+                )
+                .await?;
+            json!({"defined":false})
+        } else {
+            let permission = state.notifications.permission(current).await?;
+            if permission != "granted" && permission != "denied" {
+                return Err(EngineError::new("INVALID_RESULT"));
+            }
+            json!({"defined":true,"value":permission})
+        };
+        authorize(&window)?;
+        available_engine(&app, Some(&engine_epoch))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
+    }
     if ui_lease.is_some() {
         return Err(EngineError::new("INVALID_ARGUMENTS"));
     }
@@ -437,6 +489,7 @@ async fn start(
     app: &tauri::AppHandle,
     native_work: NativeWorkOwner,
     ui: NativeUiOwner,
+    notifications: NativeNotificationOwner,
 ) -> Result<ProductionEngine, EngineError> {
     // Developer/native provisioning only. Never accept a scope path via IPC;
     // absence of a real delegated scope prevents Node/key/profile startup.
@@ -547,7 +600,11 @@ async fn start(
                 HostCapability::Unsupported
             },
             external_urls: HostCapability::Host,
-            notifications: HostCapability::Unsupported,
+            notifications: if cfg!(target_os = "linux") {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             energy: HostCapability::Unsupported,
             ui: HostCapability::Host,
             voice: HostCapability::Unsupported,
@@ -572,6 +629,32 @@ async fn start(
         ui.clone(),
         descriptor.paths.workspace_root.clone(),
     )?;
+    let notification = if cfg!(target_os = "linux") {
+        let owner = notifications.clone();
+        let closing = notifications.clone();
+        let callback_app = app.clone();
+        let callback_work = native_work.clone();
+        Some(ProductionNotificationHost {
+            invoke: Arc::new(move |title, body, inactive, epoch| {
+                let (owner, app, work) =
+                    (owner.clone(), callback_app.clone(), callback_work.clone());
+                Box::pin(async move {
+                    let current: NotificationScope = Arc::new(move || {
+                        work.assert_open()?;
+                        available_engine(&app, Some(&epoch))?;
+                        Ok(())
+                    });
+                    owner.show(title, body, inactive, current).await
+                })
+            }),
+            close: Arc::new(move || {
+                let owner = closing.clone();
+                Box::pin(async move { owner.close().await })
+            }),
+        })
+    } else {
+        None
+    };
     let ui_snapshot = ui.snapshot_callback(app.clone(), native_work.clone());
     let ui_command = ui.command_callback(app.clone(), native_work.clone());
     let installer_progress = ui.installer_progress_callback(app.clone(), native_work.clone());
@@ -607,7 +690,7 @@ async fn start(
                     open_external(app, work, window, engine.epoch().to_owned(), url, true).await
                 })
             })),
-            notification: None,
+            notification,
             ui_snapshot: Some(ui_snapshot),
             ui_command: Some(ui_command),
             installer_progress: Some(installer_progress),
@@ -629,10 +712,13 @@ pub fn run() {
         .setup(|app| {
             let native_work = NativeWorkOwner::default();
             let ui = NativeUiOwner::default();
+            let notifications = NativeNotificationOwner::new(app.handle(), native_work.clone())
+                .map_err(|_| std::io::Error::other("PRODUCTION_NOTIFICATION_UNAVAILABLE"))?;
             let started = tauri::async_runtime::block_on(start(
                 app.handle(),
                 native_work.clone(),
                 ui.clone(),
+                notifications.clone(),
             ));
             let state = match started {
                 Ok(engine) => ProductionState {
@@ -640,12 +726,14 @@ pub fn run() {
                     failure: None,
                     native_work: native_work.clone(),
                     ui: ui.clone(),
+                    notifications: notifications.clone(),
                 },
                 Err(error) => ProductionState {
                     engine: None,
                     failure: Some(error),
                     native_work,
                     ui: ui.clone(),
+                    notifications: notifications.clone(),
                 },
             };
             app.manage(state);
@@ -711,6 +799,7 @@ pub fn run() {
             }
             let engine = state.engine.clone();
             let native_work = state.native_work.clone();
+            let notifications = state.notifications.clone();
             let handle = handle.clone();
             let quitting = quitting.clone();
             tauri::async_runtime::spawn(async move {
@@ -733,6 +822,11 @@ pub fn run() {
                             return;
                         }
                     }
+                }
+                if notifications.close().await.is_err() {
+                    eprintln!("PRODUCTION_NOTIFICATION_DRAIN_BLOCKED");
+                    quitting.store(0, Ordering::SeqCst);
+                    return;
                 }
                 quitting.store(2, Ordering::SeqCst);
                 handle.exit(code);
