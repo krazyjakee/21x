@@ -1,3 +1,7 @@
+import { HEARTBEAT_CODECS, HEARTBEAT_EVENT_CODECS } from '../shared/heartbeat-codecs'
+import { WORKTREE_RUNTIME_CODECS, WORKTREE_RUNTIME_EVENT_CODECS } from '../shared/worktree-runtime-codecs'
+import { HeartbeatBackend } from './heartbeat-backend'
+import { WorktreeRuntimeBackend } from './worktree-runtime-backend'
 import { TaskGroupBackend } from './task-group-backend'
 import { TASK_GROUP_CODECS } from '../shared/task-group-codecs'
 import { ProjectRuntimeBackend } from './project-runtime-backend'
@@ -83,9 +87,9 @@ export interface ProductionDesktopBindingOptions {
 export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
-  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS }
+  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS }
 
 /** Validate actual wire payload, including explicit binary envelopes. */
 export function validateProductionEventWire(operation: string, payload: unknown): boolean {
@@ -125,6 +129,8 @@ export class ProductionDesktopBindings {
   private readonly groups: TaskGroupBackend
   private readonly projectRuntime: ProjectRuntimeBackend
   private readonly workspaceFiles: WorkspaceFileBackend
+  private readonly heartbeat: HeartbeatBackend
+  private readonly worktreeRuntime: WorktreeRuntimeBackend
   private readonly epoch: string
   private constructor(private readonly owner: ProductionOwner, private readonly services: Awaited<ReturnType<ProductionOwner['start']>>, private readonly options: ProductionDesktopBindingOptions) {
     const lease = owner.getDatabaseBindingLease()
@@ -221,10 +227,15 @@ export class ProductionDesktopBindings {
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask, canAccessProject: dynamicAuthority.canAccessProject })
     this.groups = new TaskGroupBackend({ ...owner.getTaskGroupBindingLease(), engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority })
     this.projectRuntime = new ProjectRuntimeBackend({ ...owner.getProjectRuntimeBindingLease(), engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority })
+    this.heartbeat = new HeartbeatBackend({ ...owner.getHeartbeatBindingLease(), engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority })
+    this.worktreeRuntime = new WorktreeRuntimeBackend({ ...owner.getWorktreeRuntimeBindingLease(), engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
+      // The domain owner resolves and rechecks exact saved task/project bindings,
+      // including established task repos outside the project's picker catalogue.
+      canAccessRepository: (projectId, _fullName, caller, access) => dynamicAuthority.canAccessProject(projectId, caller, access) })
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown()
+      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
       void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close(), this.sessionContext.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close()]).then(() => undefined))
+    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close()]).then(() => undefined))
   }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
@@ -276,6 +287,16 @@ export class ProductionDesktopBindings {
     if (operation === 'terminal:data' || operation === 'terminal:exit')
       return this.terminals.canReadEvent(operation, TERMINAL_EVENT_CODECS[operation].decodePayload(payload), caller) ? payload : undefined
     if (!isRecord(payload)) return undefined
+    if (operation === 'worktree:progress' || Object.hasOwn(HEARTBEAT_EVENT_CODECS, operation)) {
+      if (typeof payload.taskId !== 'string' || !authority.canAccessTask(payload.taskId, caller, 'read')) return undefined
+      const task = this.services.db.db.prepare('SELECT project_id FROM tasks WHERE id=?').get(payload.taskId) as { project_id: string } | undefined
+      return task && authority.canAccessProject(task.project_id, caller, 'read') ? payload : undefined
+    }
+    if (operation === 'workspace:cleanup-progress' || operation === 'workspace:cleanup-complete') {
+      if (!authority.canManageGlobalConfiguration(caller, 'read')) return undefined
+      const projects = this.services.db.db.prepare('SELECT id FROM projects ORDER BY id LIMIT 129').all() as { id: string }[]
+      return projects.length <= 128 && projects.every(project => authority.canAccessProject(project.id, caller, 'read')) ? payload : undefined
+    }
     if (operation === 'agent:startQueueChanged') {
       const queue = (payload.queue as JsonValue[]).filter(row => isRecord(row) && taskAllowed(row.taskId) && typeof row.agentId === 'string' &&
         authority.canAccessAgent(row.agentId, caller, 'read') && typeof row.projectId === 'string' && authority.canAccessProject(row.projectId, caller, 'read'))
@@ -300,7 +321,7 @@ export class ProductionDesktopBindings {
     const schemas = { ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
       ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
       ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller), ...this.mcp.operationSchemas(caller), ...this.sources.operationSchemas(caller),
-      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller) }
+      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller), ...this.heartbeat.operationSchemas(caller), ...this.worktreeRuntime.operationSchemas(caller) }
     return Object.fromEntries(Object.entries(schemas).map(([operation, schema]) => [operation, {
       ...schema, handle: (payload: JsonValue, signal: AbortSignal) => this.invoke(operation, payload, caller, signal)
     }]))
@@ -315,6 +336,8 @@ export class ProductionDesktopBindings {
       signal.addEventListener('abort', abort, { once: true }); ownerSignal.addEventListener('abort', abort, { once: true })
       if (signal.aborted || ownerSignal.aborted) abort()
       try {
+        if (Object.hasOwn(HEARTBEAT_CODECS, operation)) return await this.heartbeat.registry.invoke(operation, payload, caller, combined.signal)
+        if (Object.hasOwn(WORKTREE_RUNTIME_CODECS, operation)) return await this.worktreeRuntime.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(TASK_GROUP_CODECS, operation)) return await this.groups.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(PROJECT_RUNTIME_CODECS, operation)) return await this.projectRuntime.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(WORKSPACE_FILE_CODECS, operation)) return await this.workspaceFiles.registry.invoke(operation, payload, caller, combined.signal)

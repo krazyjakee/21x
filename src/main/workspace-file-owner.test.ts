@@ -28,6 +28,22 @@ async function realHandle(path: string, flags: number): Promise<WorkspaceFileHan
 }
 
 describe('WorkspaceFileOwner actual captured filesystem', () => {
+  it('previews actual worktree bytes without decoding binary files or reading oversized content', async () => {
+    const reads = vi.fn(), owner = make({ fs: { open: async (path, flags) => {
+      const handle = await realHandle(path, flags)
+      return { ...handle, read: (...args: Parameters<WorkspaceFileHandle['read']>) => { reads(); return handle.read(...args) } }
+    } } })
+    await writeFile(file, Buffer.from([65, 0, 66]))
+    expect(await owner.readFilePreview('task-one', file, 32, controls())).toEqual({ content: '', size: 3, binary: true, truncated: false })
+    expect(await owner.readTextFile('task-one', file, controls())).toEqual({ content: 'A\u0000B', size: 3 })
+    reads.mockClear(); await writeFile(file, Buffer.alloc(33, 65))
+    expect(await owner.readFilePreview('task-one', file, 32, controls())).toEqual({ content: '', size: 33, binary: false, truncated: true })
+    expect(reads).not.toHaveBeenCalled()
+    await writeFile(file, 'Bounded preview')
+    expect(await owner.readFilePreview('task-one', file, 32, controls())).toEqual({ content: 'Bounded preview', size: 15, binary: false, truncated: false })
+    expect(await owner.readFilePreview('task-one', join(workspace, 'missing'), 32, controls())).toBeNull()
+    expect(owner.inflightCount).toBe(0)
+  })
   it('reads a real bounded prefix of oversized memory while preserving public preview semantics', async () => {
     const bytes = WORKSPACE_FILE_LIMITS.textBytes + 500, calls: number[] = []
     await writeFile(file, Buffer.alloc(bytes, 65))

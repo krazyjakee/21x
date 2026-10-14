@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, statSync, rmSync } from 'fs'
-import { join } from 'path'
+import { existsSync, readdirSync, statSync, rmSync, lstatSync, realpathSync, opendirSync, type Dir, type BigIntStats } from 'fs'
+import { isAbsolute, join } from 'path'
 import type { DatabaseManager } from './database'
 import type { WorktreeManager } from './worktree-manager'
 import { TaskStatus } from '../shared/constants'
@@ -42,6 +42,45 @@ export interface WorkspaceCleanupHost {
   workspacesRoot: string
   listWorkspaceDirs(): string[] | null
   emit?(channel: 'workspace:cleanup-progress' | 'workspace:cleanup-complete', data: unknown): void
+  /** Captured native/service policy; scheduled passes cannot fall back to the
+   * legacy ambient process observer when this explicit policy is selected. */
+  portablePolicy?: WorkspaceCleanupRequestControls
+}
+
+export interface WorkspaceCleanupRequestControls {
+  beforeEffect(): void
+  signal?: AbortSignal
+  store: Pick<DatabaseManager, 'getTasks' | 'getSetting'>
+  assertIdleWorkspace?(taskId: string, absolutePath: string): Promise<void>
+  getRepoGroups?(taskId: string): ReadonlyArray<{ org: string; repos: { fullName: string }[] }>
+  runMutation?<T>(taskIds: string[], effect: () => Promise<T>): Promise<T>
+}
+
+/** Actual SQL scalar reader for trusted portable cleanup policy. No unrelated
+ * task JSON, credentials, process tools or filesystem effects are loaded. */
+export function createBoundedWorkspaceCleanupStore(db: DatabaseManager, beforeEffect: () => void): Pick<DatabaseManager, 'getTasks' | 'getSetting'> {
+  return Object.freeze({
+    getSetting(key: string): string | undefined {
+      beforeEffect()
+      const stats = db.db.prepare('SELECT typeof(value) AS type,length(CAST(value AS BLOB)) AS bytes FROM settings WHERE key=?').get(key) as { type: string; bytes: number } | undefined
+      if (!stats) return undefined
+      if (stats.type !== 'text' || stats.bytes > 4096) throw new Error('WORKSPACE_CLEANUP_DATA_LIMIT')
+      return (db.db.prepare('SELECT value FROM settings WHERE key=?').get(key) as { value: string }).value
+    },
+    getTasks(): ReturnType<DatabaseManager['getTasks']> {
+      beforeEffect()
+      const fields = { id: 128, title: 1024, project_id: 128, role: 32, group_id: 128, agent_id: 128, source_id: 128, status: 64, repos: 65536, updated_at: 64 }
+      const sizes = Object.entries(fields).map(([field, max]) => ({ length: `COALESCE(length(CAST(${field} AS BLOB)),0)`, max }))
+      const stats = db.db.prepare(`SELECT COUNT(*) AS count,COALESCE(MAX(${sizes.map(value => `(${value.length}>${value.max})`).join(' OR ')}),0) AS oversized,COALESCE(SUM(${sizes.map(value => value.length).join('+')}),0) AS total FROM tasks`).get() as { count: number; oversized: number; total: number }
+      if (stats.count > 4096 || stats.oversized || stats.total >= 890000) throw new Error('WORKSPACE_CLEANUP_DATA_LIMIT')
+      return (db.db.prepare('SELECT id,title,project_id,role,group_id,agent_id,source_id,status,repos,updated_at FROM tasks ORDER BY id').all() as Array<Record<string, unknown>>).map(row => {
+        let repos: unknown
+        try { repos = JSON.parse(row.repos as string) } catch { throw new Error('WORKSPACE_CLEANUP_DATA_INVALID') }
+        if (typeof row.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(row.id) || !Array.isArray(repos) || repos.length > 128 || repos.some(value => typeof value !== 'string' || Buffer.byteLength(value) > 512) || typeof row.title !== 'string' || Buffer.byteLength(row.title) > 1024 || typeof row.updated_at !== 'string' || Buffer.byteLength(row.updated_at) > 64 || !['task','captain','task_group'].includes(row.role as string)) throw new Error('WORKSPACE_CLEANUP_DATA_INVALID')
+        return { ...row, repos } as unknown as ReturnType<DatabaseManager['getTasks']>[number]
+      })
+    }
+  })
 }
 
 export interface WorkspaceCleanupOperations {
@@ -58,6 +97,8 @@ export class WorkspaceCleanupSchedulerCore {
   private closing = false
   private activeRun: Promise<unknown> | null = null
   private isRunning = false
+  private readonly portablePolicy?: WorkspaceCleanupRequestControls
+  private readonly directories = new Set<Dir>()
 
   /** Check every hour, but only actually clean once per day */
   private readonly CHECK_INTERVAL = 60 * 60 * 1000 // 1 hour
@@ -75,6 +116,16 @@ export class WorkspaceCleanupSchedulerCore {
   ) {
     this.dbManager = dbManager
     this.worktreeManager = worktreeManager
+    this.portablePolicy = host.portablePolicy ? this.captureControls(host.portablePolicy) : undefined
+  }
+
+  private captureControls(controls: WorkspaceCleanupRequestControls): WorkspaceCleanupRequestControls {
+    if (!controls || typeof controls.beforeEffect !== 'function' || !controls.store || typeof controls.store.getTasks !== 'function' || typeof controls.store.getSetting !== 'function') throw new Error('WORKSPACE_CLEANUP_POLICY_INVALID')
+    return Object.freeze({ ...controls, store: Object.freeze({ getTasks: controls.store.getTasks.bind(controls.store), getSetting: controls.store.getSetting.bind(controls.store) }) })
+  }
+
+  assertOwners(db: DatabaseManager, worktrees: WorktreeManager, workspaceRoot: string): void {
+    if (this.closing || this.dbManager !== db || this.worktreeManager !== worktrees || this.host.workspacesRoot !== workspaceRoot) throw new Error('WORKSPACE_CLEANUP_OWNER_MISMATCH')
   }
 
   start(): void {
@@ -115,12 +166,18 @@ export class WorkspaceCleanupSchedulerCore {
       throw new RangeError('Workspace cleanup shutdown deadline must be an integer from 1 to 3000 ms')
     }
     this.shutdown()
-    if (!this.activeRun) return
+    if (!this.activeRun) {
+      for (const directory of [...this.directories]) { directory.closeSync(); this.directories.delete(directory) }
+      return
+    }
     let timer: ReturnType<typeof setTimeout> | undefined
     const expired = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('WORKSPACE_CLEANUP_SHUTDOWN_INCOMPLETE')), timeoutMs)
     })
-    try { await Promise.race([this.activeRun.then(() => {}, () => {}), expired]) }
+    try {
+      await Promise.race([this.activeRun.then(() => {}, () => {}), expired])
+      for (const directory of [...this.directories]) { directory.closeSync(); this.directories.delete(directory) }
+    }
     finally { if (timer) clearTimeout(timer) }
   }
 
@@ -139,12 +196,14 @@ export class WorkspaceCleanupSchedulerCore {
    * plus the number of idle node_modules directories pruned.
    * Rejects if a cleanup is already in progress (prevents concurrent runs).
    */
-  async runNow(): Promise<CleanupResult> {
+  async runNow(controls?: WorkspaceCleanupRequestControls): Promise<CleanupResult> {
     if (this.closing) throw new Error('WORKSPACE_CLEANUP_CLOSED')
+    if (this.directories.size) throw new Error('WORKSPACE_CLEANUP_DIRECTORY_CLOSE_UNACKNOWLEDGED')
     if (this.isRunning) {
       return { cleaned: 0, errors: ['Cleanup is already in progress'], nodeModulesCleaned: 0 }
     }
-    return this.own(() => this.executeManual())
+    const selected = controls ? this.captureControls({ ...this.portablePolicy, ...controls, assertIdleWorkspace: controls.assertIdleWorkspace ?? this.portablePolicy?.assertIdleWorkspace }) : this.portablePolicy
+    return this.own(() => selected ? this.executePortable(selected) : this.executeManual())
   }
 
   private async executeManual(): Promise<CleanupResult> {
@@ -173,6 +232,18 @@ export class WorkspaceCleanupSchedulerCore {
 
   private async executeScheduled(): Promise<void> {
     if (this.closing) return
+    if (this.portablePolicy) {
+      // The captured portable planner is the only scheduled path. It cannot
+      // retry through ambient process scans after a refused owned pass.
+      try {
+        this.portablePolicy.beforeEffect()
+        const whole = this.portablePolicy.store.getSetting('workspace_autocleanup_enabled') === 'true'
+        const deps = this.portablePolicy.store.getSetting(NODE_MODULES_GC_ENABLED_KEY) !== 'false'
+        if (!whole && !deps) return
+        await this.executePortable(this.portablePolicy, whole)
+      } catch { /* explicit unavailable/cancelled work is retained by activeRun */ }
+      return
+    }
     try {
       // Idle node_modules pruning has its own flag and schedule: it is safe for
       // every task status (only regenerable deps go), so it runs whether or not
@@ -213,6 +284,80 @@ export class WorkspaceCleanupSchedulerCore {
     } catch (err) {
       console.error('[WorkspaceCleanup] Error in runCleanup:', err)
     }
+  }
+
+  private async executePortable(controls: WorkspaceCleanupRequestControls, removeCompleted = true): Promise<CleanupResult> {
+    let active = true
+    const current = (): void => {
+      if (!active) throw new Error('WORKSPACE_CLEANUP_REQUEST_EXPIRED')
+      if (this.closing || controls.signal?.aborted) throw new Error('WORKSPACE_CLEANUP_CANCELLED')
+      this.portablePolicy?.beforeEffect(); controls.beforeEffect()
+    }
+    const root = this.host.workspacesRoot
+    const same = (a: BigIntStats, b: BigIntStats): boolean => a.dev === b.dev && a.ino === b.ino && b.isDirectory() && !b.isSymbolicLink()
+    const physical = (path: string): BigIntStats => { current(); const info = lstatSync(path, { bigint: true }); if (!info.isDirectory() || info.isSymbolicLink() || realpathSync(path) !== path) throw new Error('WORKSPACE_CLEANUP_PATH_REFUSED'); return info }
+    const scan = (path: string): Array<{ name: string; directory: boolean }> => {
+      const before = physical(path), handle = opendirSync(path); this.directories.add(handle); const entries: Array<{ name: string; directory: boolean }> = []
+      try {
+        for (;;) { current(); const entry = handle.readSync(); if (!entry) break; if (++scanned > 8192 || Buffer.byteLength(join(path, entry.name)) > 4096) throw new Error('WORKSPACE_CLEANUP_SCAN_LIMIT'); entries.push({ name: entry.name, directory: entry.isDirectory() && !entry.isSymbolicLink() }) }
+      } finally { handle.closeSync(); this.directories.delete(handle) }
+      if (!same(before, physical(path))) throw new Error('WORKSPACE_CLEANUP_PATH_CHANGED')
+      return entries
+    }
+    let scanned = 0
+    try {
+      current()
+      if (!isAbsolute(root) || realpathSync(root) !== root) throw new Error('WORKSPACE_CLEANUP_PATH_REFUSED')
+      const rootIdentity = physical(root), allTasks = controls.store.getTasks({ includeCoordinators: true })
+      if (allTasks.length > 4096) throw new Error('WORKSPACE_CLEANUP_DATA_LIMIT')
+      const tasks = new Map(allTasks.map(task => [task.id, task])), snapshot = JSON.stringify(allTasks)
+      const rawDays = controls.store.getSetting('workspace_autocleanup_days'), parsedDays = Number.parseInt(rawDays ?? '', 10), days = Number.isFinite(parsedDays) && parsedDays >= 1 ? parsedDays : this.DEFAULT_RETENTION_DAYS
+      const cutoff = Date.now() - days * 86400000, selected: Array<{ task: typeof allTasks[number]; path: string; identity: BigIntStats }> = []
+      const rawDepsEnabled = controls.store.getSetting(NODE_MODULES_GC_ENABLED_KEY), rawDepsDays = controls.store.getSetting(NODE_MODULES_GC_DAYS_KEY), depsEnabled = rawDepsEnabled !== 'false', depsDays = Number.parseInt(rawDepsDays ?? '', 10) || DEFAULT_NODE_MODULES_GC_DAYS
+      const checkSnapshot = (): void => { current(); if (JSON.stringify(controls.store.getTasks({ includeCoordinators: true })) !== snapshot || controls.store.getSetting('workspace_autocleanup_days') !== rawDays || controls.store.getSetting(NODE_MODULES_GC_ENABLED_KEY) !== rawDepsEnabled || controls.store.getSetting(NODE_MODULES_GC_DAYS_KEY) !== rawDepsDays || !same(rootIdentity, physical(root))) throw new Error('WORKSPACE_CLEANUP_SCOPE_CHANGED') }
+      const findUnsupportedDeps = (path: string, depth = 0): void => {
+        if (depth > 64) throw new Error('WORKSPACE_CLEANUP_SCAN_LIMIT')
+        for (const entry of scan(path)) {
+          if (!entry.directory || entry.name === '.git') continue
+          const child = join(path, entry.name)
+          if (entry.name === 'node_modules') { if (physical(child).mtimeMs < Date.now() - Math.max(1, depsDays) * 86400000) throw new Error('WORKSPACE_CLEANUP_NODE_MODULES_UNAVAILABLE'); continue }
+          findUnsupportedDeps(child, depth + 1)
+        }
+      }
+      for (const entry of scan(root)) {
+        if (!entry.directory) continue
+        const path = join(root, entry.name), identity = physical(path), task = tasks.get(entry.name)
+        if (!task) { if (identity.mtimeMs < cutoff) throw new Error('WORKSPACE_CLEANUP_ORPHAN_REFUSED'); continue }
+        if (depsEnabled) findUnsupportedDeps(path)
+        if (!removeCompleted || task.status !== TaskStatus.Completed || new Date(task.updated_at).getTime() >= cutoff) continue
+        if (task.role !== 'task' || task.group_id || !/^[A-Za-z0-9_-]{1,128}$/.test(task.id)) throw new Error('WORKSPACE_CLEANUP_SCOPE_UNSUPPORTED')
+        selected.push({ task, path, identity })
+      }
+      checkSnapshot()
+      if (selected.length > 128) throw new Error('WORKSPACE_CLEANUP_DATA_LIMIT')
+      if (!selected.length) return { cleaned: 0, errors: [], nodeModulesCleaned: 0 }
+      if (!controls.assertIdleWorkspace || !controls.runMutation) throw new Error('WORKSPACE_CLEANUP_PROCESS_AUTHORITY_UNAVAILABLE')
+      const assertIdle = controls.assertIdleWorkspace
+      return await controls.runMutation(selected.map(value => value.task.id), async () => {
+        checkSnapshot()
+        // Validate ALL accepted process observations before the first removal.
+        for (const value of selected) { await assertIdle(value.task.id, value.path); checkSnapshot(); if (!same(value.identity, physical(value.path))) throw new Error('WORKSPACE_CLEANUP_PATH_CHANGED') }
+        this.sendToRenderer('workspace:cleanup-progress', { phase: 'starting', current: 0, total: selected.length })
+        let cleaned = 0
+        for (const value of selected) {
+          checkSnapshot(); if (!same(value.identity, physical(value.path))) throw new Error('WORKSPACE_CLEANUP_PATH_CHANGED')
+          const groups = controls.getRepoGroups?.(value.task.id) ?? []
+          if (value.task.repos.length && !groups.length) throw new Error('WORKSPACE_CLEANUP_REPOSITORY_AUTHORITY_UNAVAILABLE')
+          await this.worktreeManager.withRequestGuard(async () => {
+            for (const group of groups) { checkSnapshot(); await this.worktreeManager.cleanupTaskWorkspace(value.task.id, group.repos, group.org, false) }
+            checkSnapshot(); await this.worktreeManager.cleanupTaskWorkspace(value.task.id, [], '', true)
+          }, checkSnapshot, controls.signal)
+          checkSnapshot(); if (existsSync(value.path)) throw new Error('WORKSPACE_CLEANUP_REMOVE_UNACKNOWLEDGED'); cleaned++
+        }
+        this.sendToRenderer('workspace:cleanup-progress', { phase: 'done', current: cleaned, total: selected.length, cleaned, nodeModulesCleaned: 0, errors: [] })
+        return { cleaned, errors: [], nodeModulesCleaned: 0 }
+      })
+    } finally { active = false }
   }
 
   private async doCleanup(reportProgress: boolean): Promise<{ cleaned: number; errors: string[] }> {

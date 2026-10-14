@@ -3,8 +3,24 @@
 use serde_json::Value;
 #[path = "production_project_groups.rs"]
 mod project_groups;
+#[path = "production_workspace_runtime.rs"]
+mod workspace_runtime;
 
 pub const COMMANDS: &[&str] = &[
+    "heartbeat:enable",
+    "heartbeat:disable",
+    "heartbeat:runNow",
+    "heartbeat:getLogs",
+    "heartbeat:getStatus",
+    "heartbeat:updateInterval",
+    "heartbeat:readFile",
+    "heartbeat:writeFile",
+    "worktree:setup",
+    "worktree:changes",
+    "worktree:files",
+    "worktree:readFile",
+    "worktree:cleanup",
+    "workspace:runCleanupNow",
     "taskGroups:list",
     "taskGroups:get",
     "taskGroups:history",
@@ -206,6 +222,11 @@ pub const COMMANDS: &[&str] = &[
     "taskSource:reassign",
 ];
 pub const EVENTS: &[&str] = &[
+    "heartbeat:alert",
+    "heartbeat:disabled",
+    "worktree:progress",
+    "workspace:cleanup-progress",
+    "workspace:cleanup-complete",
     "voice:status",
     "voice:runtimeProgress",
     "voice:tts:status",
@@ -3166,6 +3187,9 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if workspace_runtime::COMMANDS.contains(&operation) {
+        return workspace_runtime::request(operation, value);
+    }
     if project_groups::COMMANDS.contains(&operation) {
         return project_groups::request(operation, value);
     }
@@ -3301,6 +3325,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if workspace_runtime::COMMANDS.contains(&operation) {
+        return workspace_runtime::result(operation, value);
+    }
     if project_groups::COMMANDS.contains(&operation) {
         return project_groups::result(operation, value);
     }
@@ -3610,6 +3637,9 @@ fn transcript_page_request(value: &Value) -> bool {
             || value["after"].as_u64() <= value["watermark"].as_u64())
 }
 pub fn valid_event(operation: &str, value: &Value) -> bool {
+    if workspace_runtime::EVENTS.contains(&operation) {
+        return workspace_runtime::event(operation, value);
+    }
     if !EVENTS.contains(&operation) || !bounded_bytes(value, 1024 * 1024) {
         return false;
     }
@@ -4141,7 +4171,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 23);
+        assert_eq!(EVENTS.len(), 28);
         let requests = [
             ("mobile:getInfo", json!({})),
             (
@@ -4976,7 +5006,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 199);
+        assert_eq!(COMMANDS.len(), 213);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

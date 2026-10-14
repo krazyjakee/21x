@@ -5,6 +5,7 @@ import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { AgentManager, AGENT_SESSION_START_TIMEOUT_MS } from './agent-manager-core'
 import type { AgentManagerHost } from './agent-manager/host'
+import { DeliveryStore } from './sessions/delivery-store'
 import { SessionStatusType } from './adapters/coding-agent-adapter'
 vi.mock('./agent-manager/workspace-docs', async original => ({ ...await original<typeof import('./agent-manager/workspace-docs')>(), writeSkillFiles: vi.fn(async () => undefined) }))
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
@@ -41,6 +42,25 @@ it('blocks session creation after a delayed accepted adapter initialization lose
   expect(f.adapter.checkHealth).not.toHaveBeenCalled(); expect(f.adapter.createSession).not.toHaveBeenCalled(); expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
   expect(f.db.getTask(f.taskId)?.session_id).toBeNull()
   expect(f.manager.getStartRecoveryState(f.taskId)?.state).toBe('cancelled')
+})
+it('carries heartbeat admission authority through delayed initialization without sending after revocation', async () => {
+  const f = fixture(), gate = deferred<void>(), entered = deferred<void>(); finishers.push(() => gate.resolve())
+  f.adapter.initialize.mockImplementation(async () => { entered.resolve(); await gate.promise })
+  const admission = f.manager.withHeartbeatRequestGuard(() => f.manager.sendHeartbeatViaCaptain(f.agent.id, f.members[0].id, 'Check the current task'), f.beforeEffect, f.controller.signal)
+  const rejected = expect(admission).rejects.toBe(f.authorityError)
+  await entered.promise; f.revoke(); gate.resolve(); await rejected
+  expect(f.adapter.createSession).not.toHaveBeenCalled(); expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
+  expect(f.manager.findSessionByTaskId(`heartbeat-${f.members[0].id}`)).toBeUndefined()
+})
+it('allows accepted heartbeat monitoring to run outside a completed caller guard', async () => {
+  const f = fixture(), gate = deferred<void>(); finishers.push(() => gate.resolve())
+  let detached!: Promise<string>, inherited!: Promise<string>
+  await f.manager.withHeartbeatRequestGuard(async () => {
+    detached = f.manager.detachedHeartbeatWork(async () => { await gate.promise; return f.manager.withHeartbeatRequestGuard(async () => 'owned monitoring', () => {}, new AbortController().signal) })
+    inherited = (async () => { await gate.promise; return f.manager.withHeartbeatRequestGuard(async () => 'expired caller', f.beforeEffect, f.controller.signal) })()
+  }, f.beforeEffect, f.controller.signal)
+  const refused = expect(inherited).rejects.toMatchObject({ code: 'CANCELLED' })
+  gate.resolve(); expect(await detached).toBe('owned monitoring'); await refused
 })
 it('holds a cancelled request until accepted native creation and acknowledged teardown both settle', async () => {
   const f = fixture(), created = deferred<string>(), entered = deferred<void>(), destroyed = deferred<void>(), destroying = deferred<void>()
@@ -115,4 +135,28 @@ it('keeps task-addressable ownership and Stop pending beyond a public SDK startu
   created.resolve('late-group-native'); await destroying.promise; expect(stopped).not.toHaveBeenCalled()
   destroyed.resolve(); await rejected; await stop
   expect(f.adapter.sendPrompt).not.toHaveBeenCalled(); expect(f.manager.hasTaskStartOwnership(f.taskId)).toBe(false)
+})
+
+it('never replays abandoned or expired heartbeat intents while acknowledging accepted receipts', async () => {
+  const f = fixture(), taskId = f.members[0].id, deliveries = new DeliveryStore(f.db)
+  const enqueue = (id: string) => deliveries.enqueue({ idempotencyKey: id, kind: 'agent_message', taskId, agentId: f.agent.id,
+    payload: JSON.stringify({ sessionId: 'old-heartbeat', message: 'Old instructions', taskId: `heartbeat-${taskId}`, agentId: f.agent.id }) }).record
+  const pending = enqueue('pending-heartbeat'), expired = enqueue('expired-heartbeat'), accepted = enqueue('accepted-heartbeat')
+  deliveries.claim(expired.id, 'retired-process', 1)
+  deliveries.claim(accepted.id, 'retired-process', 1000); deliveries.accept(accepted.id, 'retired-process', 'old-heartbeat')
+  await vi.advanceTimersByTimeAsync(2)
+  await Reflect.get(f.manager, 'recoverAgentMessages').call(f.manager)
+  expect(deliveries.get(pending.id)?.state).toBe('cancelled'); expect(deliveries.get(expired.id)?.state).toBe('cancelled')
+  expect(deliveries.get(accepted.id)?.state).toBe('acknowledged')
+  expect(f.adapter.createSession).not.toHaveBeenCalled(); expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
+})
+it('records an uncertain heartbeat send against its actual task and never retries the old check', async () => {
+  const f = fixture(), taskId = f.members[0].id
+  f.adapter.sendPrompt.mockRejectedValueOnce(new Error('Controlled acceptance uncertainty'))
+  await expect(f.manager.withHeartbeatRequestGuard(() => f.manager.sendHeartbeatViaCaptain(f.agent.id, taskId, 'Current check'),
+    f.beforeEffect, f.controller.signal)).rejects.toThrow('Controlled acceptance uncertainty')
+  expect(f.db.db.prepare('SELECT task_id,state FROM delivery_outbox WHERE kind=?').all('agent_message')).toEqual([{ task_id: taskId, state: 'cancelled' }])
+  await Reflect.get(f.manager, 'recoverAgentMessages').call(f.manager)
+  expect(f.adapter.sendPrompt).toHaveBeenCalledOnce()
+  await f.manager.cleanupHeartbeatSession(taskId, true)
 })

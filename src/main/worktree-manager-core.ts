@@ -3,7 +3,8 @@ import { OwnedOperationLifetime } from './owned-operation-lifetime'
 import { execFile, type ExecFileOptions } from 'child_process'
 import { promisify } from 'util'
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, type BigIntStats } from 'fs'
-import { readdir } from 'fs/promises'
+import { readdir, opendir } from 'fs/promises'
+import type { Dir } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep, win32 } from 'path'
 import type { ForgejoManager } from './forgejo-manager'
 
@@ -53,6 +54,12 @@ const MAX_TASK_FILE_PREVIEW_BYTES = 512 * 1024
 const GIT_OPTS = { maxBuffer: 64 * 1024 * 1024 }
 /** Parallel `git diff --no-index` processes when rendering untracked files. */
 const UNTRACKED_DIFF_CONCURRENCY = 8
+export const WORKTREE_PORTABLE_LIMITS = Object.freeze({ stdoutBytes: 128 * 1024, aggregateBytes: 512 * 1024, diffBytes: 128 * 1024, files: 4096, entries: 8192, depth: 64 })
+export interface WorktreeRequestOptions {
+  limits?: typeof WORKTREE_PORTABLE_LIMITS
+  beforeRemoteRequest?(repo: string, address: string): void | Promise<void>
+}
+interface WorktreeRequestState { pending: Set<Promise<unknown>>; limits?: typeof WORKTREE_PORTABLE_LIMITS; budget: { bytes: number; entries: number }; options: WorktreeRequestOptions }
 
 /** Like Promise.all over `items.map(fn)`, with at most `limit` in flight. */
 async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -64,7 +71,9 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
       results[index] = await fn(items[index])
     }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, worker))
+  const failed = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+  if (failed) throw failed.reason
   return results
 }
 
@@ -79,14 +88,20 @@ export interface WorktreeHost {
   emitProgress(data: { taskId: string; repo: string; step: string; done: boolean; error?: string }): void
   bindWindow?(window: { isDestroyed(): boolean; webContents: { send(channel: string, ...args: unknown[]): void } }): void
   /** Trusted captured process owner; absent only for the legacy host. */
-  exec?(program: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions): Promise<{ stdout: string; stderr: string }>
+  exec?(program: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions & { allowDiffExitOne?: true }): Promise<{ stdout: string; stderr: string }>
   assertPath?(path: string): void
   onTaskWorkspaceRemoved?(taskId: string, identity: { dev: string; ino: string }): void
+  onWorktreeRemoved?(path: string, identity: { dev: string; ino: string }): void
+  portableLimits?: typeof WORKTREE_PORTABLE_LIMITS
 }
 
 export class WorktreeManager {
   private readonly lifetime = new OwnedOperationLifetime()
   private readonly requestGuard = new AsyncLocalStorage<(() => void) | undefined>()
+  private readonly requestState = new AsyncLocalStorage<WorktreeRequestState | undefined>()
+  private readonly progressTask = new AsyncLocalStorage<string>()
+  private readonly directories = new Set<Dir>()
+  private readonly failedDirectories = new Set<Dir>()
   constructor(private readonly host: WorktreeHost) {
     for (const path of [host.reposRoot, host.workspaceRoot]) {
       if (!isAbsolute(path) || path.includes('\0')) throw new Error('WORKTREE_PATH_INVALID')
@@ -100,7 +115,61 @@ export class WorktreeManager {
   }
 
   shutdown(): void { this.lifetime.stop() }
-  close(timeoutMs = 3000): Promise<void> { return this.lifetime.close(timeoutMs) }
+  async close(timeoutMs = 3000): Promise<void> {
+    await this.lifetime.close(timeoutMs)
+    for (const directory of [...this.directories]) { await directory.close(); this.directories.delete(directory); this.failedDirectories.delete(directory) }
+    if (this.directories.size) throw new Error('WORKTREE_DIRECTORY_DRAIN_INCOMPLETE')
+  }
+
+  assertOwners(reposRoot: string, workspaceRoot: string, forgejo: ForgejoManager): void {
+    this.lifetime.assertOpen()
+    if (this.failedDirectories.size) throw new Error('WORKTREE_DIRECTORY_CLOSE_UNACKNOWLEDGED')
+    if (this.host.reposRoot !== reposRoot || this.host.workspaceRoot !== workspaceRoot || this.forgejoManager !== forgejo || !this.host.exec || !this.host.assertPath) throw new Error('WORKTREE_OWNER_MISMATCH')
+  }
+
+  withRequestGuard<T>(effect: () => T | Promise<T>, beforeEffect: () => void, signal?: AbortSignal, options: WorktreeRequestOptions = {}): Promise<T> {
+    const parent = this.requestGuard.getStore(), inherited = this.requestState.getStore()
+    let active = true
+    const guard = (): void => { if (!active) throw new Error('WORKTREE_REQUEST_EXPIRED'); parent?.(); beforeEffect(); if (signal?.aborted) throw new Error('WORKTREE_CANCELLED') }
+    const state: WorktreeRequestState = { pending: new Set(), limits: options.limits ?? inherited?.limits ?? this.host.portableLimits, budget: inherited?.budget ?? { bytes: 0, entries: 0 }, options: Object.freeze({ ...inherited?.options, ...options }) }
+    const raw = this.requestGuard.run(guard, () => this.requestState.run(state, () => this.lifetime.run(async () => {
+      try {
+        this.assertRequestCurrent(); let value!: T, failed = false, failure: unknown
+        try { value = await effect() } catch (cause) { failed = true; failure = cause }
+        while (state.pending.size) await Promise.allSettled([...state.pending])
+        this.assertRequestCurrent()
+        if (failed) throw failure
+        return value
+      } finally { active = false }
+    })))
+    // Register the nested wrapper outside its own ALS state. The parent owns
+    // that scope, while each scope joins only its own actual children.
+    if (inherited) { inherited.pending.add(raw); void raw.then(() => inherited.pending.delete(raw), () => inherited.pending.delete(raw)) }
+    return raw
+  }
+
+  private ownRaw<T>(raw: Promise<T>): Promise<T> {
+    const state = this.requestState.getStore()
+    if (state) { state.pending.add(raw); void raw.then(() => state.pending.delete(raw), () => state.pending.delete(raw)) }
+    return raw
+  }
+  private runOwned<T>(effect: () => Promise<T>): Promise<T> {
+    return !this.requestState.getStore() && this.host.portableLimits
+      ? this.withRequestGuard(effect, () => { this.host.assertPath?.(this.host.workspaceRoot) }, undefined, { limits: this.host.portableLimits })
+      : this.lifetime.run(effect)
+  }
+  private limits(): typeof WORKTREE_PORTABLE_LIMITS | undefined { return this.requestState.getStore()?.limits ?? this.host.portableLimits }
+  private fallback(cause?: unknown): void {
+    this.assertRequestCurrent()
+    if (this.limits() && cause instanceof Error && cause.name === 'ServiceProtocolError') throw cause
+    if (this.limits() && cause instanceof Error && /^(?:WORKTREE_(?:OUTPUT|FILES|SCAN|DEPTH|DIRECTORY|PATH|REF|CLONE|OWNER|CANCELLED)|GIT_PROVIDER_(?:OUTPUT|CANCELLED|CLOSED|DRAIN|TIMEOUT|CWD))/.test(cause.message)) throw cause
+  }
+  private boundedText(value: string): string {
+    const limits = this.limits(), state = this.requestState.getStore(), bytes = Buffer.byteLength(value)
+    if (limits && bytes > limits.stdoutBytes) throw new Error('WORKTREE_OUTPUT_LIMIT')
+    if (state && limits) { state.budget.bytes += bytes; if (state.budget.bytes > limits.aggregateBytes) throw new Error('WORKTREE_OUTPUT_LIMIT') }
+    return value
+  }
 
   setForgejoManager(manager: ForgejoManager): void {
     this.forgejoManager = manager
@@ -108,17 +177,23 @@ export class WorktreeManager {
 
   private sendProgress(taskId: string, repo: string, step: string, done: boolean, error?: string): void {
     this.assertRequestCurrent()
-    this.host.emitProgress({ taskId, repo, step, done, error })
+    this.host.emitProgress({ taskId: taskId || this.progressTask.getStore() || '', repo, step, done, error: error === undefined ? undefined : this.limits() ? 'The worktree operation could not be completed.' : error })
   }
 
-  private assertRequestCurrent(): void { this.lifetime.assertOpen(); this.requestGuard.getStore()?.() }
+  private assertRequestCurrent(): void {
+    this.lifetime.assertOpen(); this.requestGuard.getStore()?.()
+    if (this.failedDirectories.size) throw new Error('WORKTREE_DIRECTORY_CLOSE_UNACKNOWLEDGED')
+    const state = this.requestState.getStore()
+    if (state?.limits && state.budget.bytes > state.limits.aggregateBytes) throw new Error('WORKTREE_OUTPUT_LIMIT')
+  }
 
-  private async execOwned(file: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions = {}): Promise<{ stdout: string; stderr: string }> {
+  private async execOwned(file: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions & { allowDiffExitOne?: true } = {}): Promise<{ stdout: string; stderr: string }> {
     this.assertRequestCurrent()
-    const result = this.host.exec ? await this.host.exec(file, args, { ...options, cwd: options.cwd ?? this.host.reposRoot })
-      : await execFileAsync(file, args, options).then(({ stdout, stderr }) => ({ stdout: stdout.toString(), stderr: stderr.toString() }))
+    const limits = this.limits(), boundedOptions = limits ? { ...options, maxBuffer: Math.min(options.maxBuffer ?? limits.stdoutBytes, limits.stdoutBytes) } : options
+    const result = await this.ownRaw(this.host.exec ? this.host.exec(file, args, { ...boundedOptions, cwd: options.cwd ?? this.host.reposRoot })
+      : execFileAsync(file, args, boundedOptions).then(({ stdout, stderr }) => ({ stdout: stdout.toString(), stderr: stderr.toString() })))
     this.assertRequestCurrent()
-    return result
+    return { stdout: this.boundedText(result.stdout), stderr: this.boundedText(result.stderr) }
   }
 
   private bareClonePath(org: string, repoName: string): string {
@@ -155,6 +230,24 @@ export class WorktreeManager {
       const expected = `https://github.com/${repo.fullName}.git`
       if (repo.cloneUrl !== expected) throw new Error('WORKTREE_CLONE_SCOPE_INVALID')
     }
+  }
+
+  private portableCloneAddress(repo: WorktreeRepo, provider?: string): string {
+    const address = repo.cloneUrl || ((!provider || provider === 'github') ? `https://github.com/${repo.fullName}.git` : '')
+    try {
+      const url = new URL(address)
+      if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.href !== address) throw new Error()
+    } catch { throw new Error('WORKTREE_CLONE_SCOPE_INVALID') }
+    return address
+  }
+
+  private async authorizeRemote(repo: string, address: string): Promise<void> {
+    this.assertRequestCurrent()
+    if (!this.limits()) return
+    const beforeRemote = this.requestState.getStore()?.options.beforeRemoteRequest
+    if (!beforeRemote) throw new Error('WORKTREE_REMOTE_SCOPE_UNAVAILABLE')
+    await this.ownRaw(Promise.resolve(beforeRemote(repo, address)))
+    this.assertRequestCurrent()
   }
 
   /** Read one selected file on demand while keeping renderer-provided paths
@@ -196,6 +289,22 @@ export class WorktreeManager {
     }
   }
 
+  /** The portable bridge supplies its actual captured descriptor reader. No
+   * renderer path/root/primitive can replace this trusted internal callback. */
+  readTaskFileOwned(taskId: string, repoFullName: string | null, filePath: string, reader: (absolutePath: string) => Promise<TaskFileContent | null>): Promise<TaskFileContent | null> {
+    return this.runOwned(async () => {
+      this.assertRequestCurrent()
+      if (!filePath || filePath.includes('\0') || isAbsolute(filePath) || win32.isAbsolute(filePath)) return null
+      const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '')
+      if (normalized.split('/').some(segment => !segment || segment === '.' || segment === '..')) return null
+      const taskRoot = this.taskDirectory(taskId), repo = repoFullName?.split('/').pop()
+      if (repoFullName && (!repo || !this.validSegment(repo))) return null
+      const root = repo ? join(taskRoot, repo) : taskRoot, candidate = resolve(root, normalized)
+      if (!isWithinRoot(root, candidate)) return null
+      const value = await this.ownRaw(reader(candidate)); this.assertRequestCurrent(); return value
+    })
+  }
+
   async setupWorkspaceForTask(
     taskId: string,
     repos: WorktreeRepo[],
@@ -204,12 +313,12 @@ export class WorktreeManager {
     beforeEffect?: () => void
   ): Promise<string> {
     const parent = this.requestGuard.getStore()
-    return this.requestGuard.run(beforeEffect ? () => { parent?.(); beforeEffect() } : parent, () => this.lifetime.run(async () => {
+    return this.progressTask.run(taskId, () => this.requestGuard.run(beforeEffect ? () => { parent?.(); beforeEffect() } : parent, () => this.runOwned(async () => {
       this.assertRequestCurrent()
       const result = await this.performSetupWorkspaceForTask(taskId, repos, org, provider)
       this.assertRequestCurrent()
       return result
-    }))
+    })))
   }
 
   private async performSetupWorkspaceForTask(
@@ -220,6 +329,9 @@ export class WorktreeManager {
   ): Promise<string> {
     const taskDir = this.taskDirectory(taskId)
     for (const repo of repos) this.assertRepo(org, repo, provider)
+    // Resolve only captured provider metadata before the first directory or
+    // network effect. Portable GitLab/Forgejo have no guessed host fallback.
+    if (this.limits()) for (const repo of repos) await this.authorizeRemote(repo.fullName, this.portableCloneAddress(repo, provider))
     console.log(`[WorktreeManager] Setting up workspace for task ${taskId}`)
     console.log(`[WorktreeManager]   Task directory: ${taskDir}`)
     console.log(`[WorktreeManager]   Organization: ${org}`)
@@ -234,12 +346,13 @@ export class WorktreeManager {
       try {
         console.log(`[WorktreeManager] Processing repo: ${repo.fullName}`)
         await this.ensureBareClone(org, repoName, repo.fullName, provider, repo.cloneUrl)
-        await this.fetchBareClone(org, repoName)
+        await this.fetchBareClone(org, repoName, repo, provider)
         await this.createWorktree(taskId, org, repoName, repo.defaultBranch)
         this.sendProgress(taskId, repoName, 'done', true)
       } catch (error: unknown) {
+        this.fallback(error)
         const errMsg = (error as Error).message
-        console.error(`[WorktreeManager] Error setting up ${repo.fullName}:`, errMsg)
+        if (!this.limits()) console.error(`[WorktreeManager] Error setting up ${repo.fullName}:`, errMsg)
         this.sendProgress(taskId, repoName, 'error', true, errMsg)
         throw error
       }
@@ -271,10 +384,10 @@ export class WorktreeManager {
 
     if (provider === 'forgejo') {
       if (!this.forgejoManager) throw new Error('Forgejo support is not initialized')
-      await this.forgejoManager.cloneBare(fullName, barePath, cloneUrl)
+      await this.ownRaw(this.forgejoManager.cloneBare(fullName, barePath, cloneUrl)); this.assertRequestCurrent()
     } else if (provider === 'gitlab') {
       console.log(`[WorktreeManager]   Executing: glab repo clone ${fullName} ${barePath} -- --bare`)
-      await this.execOwned('glab', ['repo', 'clone', fullName, barePath, '--', '--bare'], {
+      await this.execOwned('glab', ['repo', 'clone', this.limits() ? cloneUrl! : fullName, barePath, '--', '--bare'], {
         timeout: 300000
       })
       // glab bare clone doesn't set fetch refspec — without it, `git fetch origin`
@@ -294,8 +407,14 @@ export class WorktreeManager {
     console.log(`[WorktreeManager]   Bare clone created successfully`)
   }
 
-  private async fetchBareClone(org: string, repoName: string): Promise<void> {
+  private async fetchBareClone(org: string, repoName: string, repo: WorktreeRepo, provider?: string): Promise<void> {
     const barePath = this.bareClonePath(org, repoName)
+    if (this.limits()) {
+      const expected = this.portableCloneAddress(repo, provider)
+      const { stdout } = await this.execOwned('git', ['remote', 'get-url', '--all', 'origin'], { cwd: barePath })
+      if (stdout.trim() !== expected || stdout.trim().includes('\n') || stdout.trim().includes('\r')) throw new Error('WORKTREE_CLONE_SCOPE_INVALID')
+      await this.authorizeRemote(repo.fullName, expected)
+    }
     console.log(`[WorktreeManager]   Fetching latest from origin`)
     console.log(`[WorktreeManager]   Executing: git fetch origin`)
     console.log(`[WorktreeManager]   CWD: ${barePath}`)
@@ -318,7 +437,8 @@ export class WorktreeManager {
       try {
         await this.execOwned('git', ['rev-parse', '--verify', ref], { cwd: barePath })
         return ref
-      } catch {
+      } catch (error) {
+        this.fallback(error)
         // try next
       }
     }
@@ -366,6 +486,7 @@ export class WorktreeManager {
         return
       }
     } catch (err: unknown) {
+      this.fallback(err)
       console.log(`[WorktreeManager]   Error checking for existing branch:`, (err as Error).message)
       // ignore — fall through to create new branch
     }
@@ -389,9 +510,11 @@ export class WorktreeManager {
       console.log(`[WorktreeManager]   Worktree created successfully`)
     } catch (err: unknown) {
       const execErr = err as { message: string; stdout?: string; stderr?: string }
-      console.error(`[WorktreeManager]   Failed to create worktree:`, execErr.message)
-      if (execErr.stdout) console.error(`[WorktreeManager]   stdout:`, execErr.stdout)
-      if (execErr.stderr) console.error(`[WorktreeManager]   stderr:`, execErr.stderr)
+      if (!this.limits()) {
+        console.error(`[WorktreeManager]   Failed to create worktree:`, execErr.message)
+        if (execErr.stdout) console.error(`[WorktreeManager]   stdout:`, execErr.stdout)
+        if (execErr.stderr) console.error(`[WorktreeManager]   stderr:`, execErr.stderr)
+      }
       throw err
     }
   }
@@ -402,7 +525,7 @@ export class WorktreeManager {
     org: string,
     removeTaskDir = true
   ): Promise<void> {
-    return this.lifetime.run(() => this.performCleanupTaskWorkspace(taskId, repos, org, removeTaskDir))
+    return this.runOwned(() => this.performCleanupTaskWorkspace(taskId, repos, org, removeTaskDir))
   }
 
   private async performCleanupTaskWorkspace(
@@ -424,7 +547,8 @@ export class WorktreeManager {
           await this.execOwned('git', ['worktree', 'remove', wtPath, '--force'], {
             cwd: barePath
           })
-        } catch {
+        } catch (error) {
+          this.fallback(error)
           // If git worktree remove fails, remove directory manually
           if (existsSync(wtPath)) {
             this.assertRequestCurrent()
@@ -437,6 +561,9 @@ export class WorktreeManager {
         this.assertRemoval(wtPath, worktreeIdentity)
         rmSync(wtPath, { recursive: true, force: true })
       }
+      this.assertRequestCurrent()
+      if (worktreeIdentity && !existsSync(wtPath)) this.host.onWorktreeRemoved?.(wtPath, { dev: worktreeIdentity.dev.toString(), ino: worktreeIdentity.ino.toString() })
+      else if (worktreeIdentity && this.limits() && existsSync(wtPath)) throw new Error('WORKTREE_DIRECTORY_REMOVE_UNACKNOWLEDGED')
     }
 
     // Remove task directory if requested (skip when session is still active)
@@ -447,8 +574,10 @@ export class WorktreeManager {
           this.assertRemoval(taskDir, taskIdentity)
           rmSync(taskDir, { recursive: true, force: true })
           if (taskIdentity) this.host.onTaskWorkspaceRemoved?.(taskId, { dev: taskIdentity.dev.toString(), ino: taskIdentity.ino.toString() })
-        } catch {
-          // Ignore
+        } catch (error) {
+          this.fallback(error)
+          if (this.limits()) throw error
+          // Preserve legacy best-effort removal, but scoped failures refuse.
         }
       }
     }
@@ -465,7 +594,7 @@ export class WorktreeManager {
     taskId: string,
     repos: { fullName: string }[]
   ): Promise<TaskChangesResult[]> {
-    return this.lifetime.run(() => this.performGetTaskChanges(taskId, repos))
+    return this.runOwned(() => this.performGetTaskChanges(taskId, repos))
   }
 
   private async performGetTaskChanges(
@@ -474,8 +603,8 @@ export class WorktreeManager {
   ): Promise<TaskChangesResult[]> {
     // Repos are independent worktrees, so inspect them concurrently.
     const [workspaceFiles, results] = await Promise.all([
-      this.listNonRepositoryWorkspaceFiles(taskId, repos),
-      Promise.all(repos.map((repo) => this.getRepoChanges(taskId, repo)))
+      this.ownRaw(this.listNonRepositoryWorkspaceFiles(taskId, repos)),
+      Promise.all(repos.map((repo) => this.ownRaw(this.getRepoChanges(taskId, repo))))
     ])
     return [{ repo: 'Task workspace', diff: '', allFiles: workspaceFiles, workspace: true }, ...results]
   }
@@ -504,14 +633,14 @@ export class WorktreeManager {
           { cwd: wtPath, ...GIT_OPTS }
         )
         baseRef = stdout.trim() // e.g. "origin/main"
-      } catch { /* origin/HEAD not set */ }
+      } catch (error) { this.fallback(error) /* origin/HEAD not set */ }
       if (!baseRef) {
         for (const cand of ['origin/main', 'origin/master', 'main', 'master']) {
           try {
             await this.execOwned('git', ['rev-parse', '--verify', '--quiet', cand], { cwd: wtPath, ...GIT_OPTS })
             baseRef = cand
             break
-          } catch { /* not this candidate */ }
+          } catch (error) { this.fallback(error) /* not this candidate */ }
         }
       }
 
@@ -523,7 +652,7 @@ export class WorktreeManager {
           const { stdout } = await this.execOwned('git', ['merge-base', 'HEAD', baseRef], { cwd: wtPath, ...GIT_OPTS })
           const mergeBase = stdout.trim()
           if (mergeBase) against = mergeBase
-        } catch { /* keep HEAD */ }
+        } catch (error) { this.fallback(error) /* keep HEAD */ }
       }
 
       // `git diff <against>` compares that commit to the WORKING TREE, so the
@@ -531,11 +660,13 @@ export class WorktreeManager {
       let tracked = ''
       try {
         const { stdout } = await this.execOwned(
-          'git', ['-c', 'core.quotepath=false', 'diff', '--no-color', against],
+          'git', ['-c', 'core.quotepath=false', 'diff', '--no-color', ...(this.limits() ? ['--no-ext-diff', '--no-textconv'] : []), against],
           { cwd: wtPath, ...GIT_OPTS }
         )
         tracked = stdout
       } catch (e) {
+        this.fallback(e)
+        if (this.limits()) throw e
         const err = e as { stdout?: string }
         tracked = err.stdout ?? ''
       }
@@ -548,14 +679,14 @@ export class WorktreeManager {
         const { stdout } = await this.execOwned('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wtPath, ...GIT_OPTS })
         const b = stdout.trim()
         branch = b && b !== 'HEAD' ? b : undefined
-      } catch { /* detached HEAD */ }
+      } catch (error) { this.fallback(error) /* detached HEAD */ }
 
       let pushed = false
       if (branch) {
         try {
           await this.execOwned('git', ['rev-parse', '--verify', '--quiet', `origin/${branch}`], { cwd: wtPath, ...GIT_OPTS })
           pushed = true
-        } catch { /* branch not on remote yet */ }
+        } catch (error) { this.fallback(error) /* branch not on remote yet */ }
       }
 
       // Best-effort PR/MR lookup for the branch checked out in this worktree.
@@ -573,11 +704,14 @@ export class WorktreeManager {
         try {
           const { stdout } = await this.execOwned('git', ['remote', 'get-url', 'origin'], { cwd: wtPath, ...GIT_OPTS })
           remoteUrl = stdout.trim()
+          const beforeRemote = this.requestState.getStore()?.options.beforeRemoteRequest
+          if (this.limits() && !beforeRemote) throw new Error('WORKTREE_REMOTE_SCOPE_UNAVAILABLE')
+          if (beforeRemote) { await this.ownRaw(Promise.resolve(beforeRemote(repo.fullName, remoteUrl))); this.assertRequestCurrent() }
           const url = remoteUrl.toLowerCase()
           if (url.includes('gitlab')) provider = 'gitlab'
           else if (url.includes('github')) provider = 'github'
           else if (this.forgejoManager && await this.forgejoManager.isForgejoUrl(remoteUrl)) provider = 'forgejo'
-        } catch { /* ignore */ }
+        } catch (error) { this.fallback(error); provider = 'other' /* ignore */ }
 
         try {
           if (provider === 'github') {
@@ -613,7 +747,7 @@ export class WorktreeManager {
             const pr = await this.forgejoManager.getBranchPullRequest(remoteUrl, branch)
             if (pr) { prNumber = pr.number; prUrl = pr.url; prState = pr.state; prTitle = pr.title; ciStatus = pr.ciStatus }
           }
-        } catch { /* no PR/MR, or CLI unavailable */ }
+        } catch (error) { this.fallback(error) /* no PR/MR, or CLI unavailable */ }
       }
       // A resolved PR implies the branch is pushed, even if the local
       // origin/<branch> tracking ref is missing/stale.
@@ -621,9 +755,11 @@ export class WorktreeManager {
 
       console.log(`[WorktreeManager] getTaskChanges ${repo.fullName}: branch=${branch ?? '(detached)'} pushed=${pushed} pr=${prNumber ?? 'none'} ci=${ciStatus ?? 'n/a'}`)
 
+      if (this.limits() && Buffer.byteLength(tracked) + Buffer.byteLength(untracked) > this.limits()!.diffBytes) throw new Error('WORKTREE_OUTPUT_LIMIT')
       return { repo: repo.fullName, diff: tracked + untracked, allFiles, branch, pushed, prNumber, prUrl, prState, prTitle, ciStatus }
     } catch (e) {
-      return { repo: repo.fullName, diff: '', error: (e as Error).message }
+      this.fallback(e)
+      return { repo: repo.fullName, diff: '', error: this.limits() ? 'The worktree operation could not be completed.' : (e as Error).message }
     }
   }
 
@@ -637,43 +773,48 @@ export class WorktreeManager {
         { cwd: wtPath, ...GIT_OPTS }
       )
       files = stdout.split('\0').filter(Boolean)
-    } catch {
+      if (this.limits() && files.length > this.limits()!.files) throw new Error('WORKTREE_FILES_LIMIT')
+    } catch (error) {
+      this.fallback(error)
       return ''
     }
     const patches = await mapWithConcurrency(files, UNTRACKED_DIFF_CONCURRENCY, async (file) => {
       try {
-        await this.execOwned(
-          'git', ['diff', '--no-color', '--no-index', '--', '/dev/null', file],
-          { cwd: wtPath, ...GIT_OPTS }
+        const result = await this.execOwned(
+          'git', ['diff', '--no-color', ...(this.limits() ? ['--no-ext-diff', '--no-textconv'] : []), '--no-index', '--', '/dev/null', file],
+          { cwd: wtPath, ...GIT_OPTS, ...(this.limits() && this.host.exec ? { allowDiffExitOne: true as const } : {}) }
         )
-        return ''
+        return this.limits() && this.host.exec ? result.stdout : ''
       } catch (e) {
+        this.fallback(e)
         // --no-index exits 1 when files differ; the patch is on stdout.
         return (e as { stdout?: string }).stdout ?? ''
       }
     })
+    if (this.limits() && patches.reduce((bytes, patch) => bytes + Buffer.byteLength(patch), 0) > this.limits()!.diffBytes) throw new Error('WORKTREE_OUTPUT_LIMIT')
     return patches.join('')
   }
 
   /** Fast inventory used to render All files before the more expensive diff,
    * branch, pull-request, and CI discovery completes. */
   async getTaskFiles(taskId: string, repos: { fullName: string }[]): Promise<TaskFileInventoryResult[]> {
-    return this.lifetime.run(() => this.performGetTaskFiles(taskId, repos))
+    return this.runOwned(() => this.performGetTaskFiles(taskId, repos))
   }
 
   private async performGetTaskFiles(taskId: string, repos: { fullName: string }[]): Promise<TaskFileInventoryResult[]> {
     const [workspaceFiles, results] = await Promise.all([
-      this.listNonRepositoryWorkspaceFiles(taskId, repos),
-      Promise.all(repos.map(async (repo): Promise<TaskFileInventoryResult> => {
+      this.ownRaw(this.listNonRepositoryWorkspaceFiles(taskId, repos)),
+      Promise.all(repos.map((repo) => this.ownRaw((async (): Promise<TaskFileInventoryResult> => {
         const repoName = repo.fullName.split('/').pop() || repo.fullName
         const wtPath = this.worktreePath(taskId, repoName)
         if (!existsSync(wtPath)) return { repo: repo.fullName, allFiles: [], noWorktree: true, path: wtPath }
         try {
           return { repo: repo.fullName, allFiles: await this.listRepositoryFiles(wtPath) }
         } catch (error) {
-          return { repo: repo.fullName, allFiles: [], error: error instanceof Error ? error.message : String(error) }
+          this.fallback(error)
+          return { repo: repo.fullName, allFiles: [], error: this.limits() ? 'The worktree operation could not be completed.' : error instanceof Error ? error.message : String(error) }
         }
-      }))
+      })())))
     ])
     return [{ repo: 'Task workspace', allFiles: workspaceFiles, workspace: true }, ...results]
   }
@@ -684,8 +825,12 @@ export class WorktreeManager {
         'git', ['-c', 'core.quotepath=false', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
         { cwd: wtPath, ...GIT_OPTS }
       )
-      return [...new Set(stdout.split('\0').filter(Boolean))].sort((left, right) => left.localeCompare(right))
-    } catch {
+      const entries = stdout.split('\0').filter(Boolean)
+      if (this.limits() && entries.length > this.limits()!.files) throw new Error('WORKTREE_FILES_LIMIT')
+      return [...new Set(entries)].sort((left, right) => left.localeCompare(right))
+    } catch (error) {
+      this.fallback(error)
+      if (this.limits()) throw error
       return []
     }
   }
@@ -701,9 +846,29 @@ export class WorktreeManager {
       let entries
       try {
         this.directory(directory)
-        entries = await readdir(directory, { withFileTypes: true })
+        if (this.limits()) {
+          if (relativeDirectory.split('/').filter(Boolean).length > this.limits()!.depth) throw new Error('WORKTREE_DEPTH_LIMIT')
+          const handle = await this.ownRaw(opendir(directory)); this.directories.add(handle)
+          entries = []
+          try {
+            this.directory(directory)
+            for (;;) {
+              this.assertRequestCurrent(); const entry = await this.ownRaw(handle.read()); this.directory(directory)
+              if (!entry) break
+              const state = this.requestState.getStore()
+              if (state) { if (++state.budget.entries > this.limits()!.entries) throw new Error('WORKTREE_SCAN_LIMIT') }
+              else if (entries.length >= this.limits()!.entries) throw new Error('WORKTREE_SCAN_LIMIT')
+              entries.push(entry)
+            }
+          } finally {
+            try { await this.ownRaw(handle.close()); this.directories.delete(handle) }
+            catch (cause) { this.failedDirectories.add(handle); throw cause }
+          }
+        } else entries = await this.ownRaw(readdir(directory, { withFileTypes: true }))
         this.directory(directory)
-      } catch {
+      } catch (error) {
+        this.fallback(error)
+        if (this.limits()) throw error
         return
       }
 
@@ -713,7 +878,10 @@ export class WorktreeManager {
         if (!relativeDirectory && entry.name === '.opencode') continue
         const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name
         if (entry.isDirectory()) await visit(join(directory, entry.name), relativePath)
-        else if (entry.isFile() || entry.isSymbolicLink()) files.push(relativePath)
+        else if (entry.isFile() || entry.isSymbolicLink()) {
+          if (this.limits() && files.length >= this.limits()!.files) throw new Error('WORKTREE_FILES_LIMIT')
+          files.push(relativePath)
+        }
       }
     }
 

@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { ChildProcess, ExecFileOptions, ExecFileException, execFile as ExecFile } from 'node:child_process'
 import { lstat, realpath } from 'node:fs/promises'
-import { delimiter, isAbsolute, normalize, relative, sep } from 'node:path'
+import { lstatSync, realpathSync } from 'node:fs'
+import { delimiter, dirname, isAbsolute, normalize, relative, sep } from 'node:path'
 
 export const GIT_PROVIDER_PROCESS_LIMITS = Object.freeze({ children: 4, queued: 32, args: 64, argumentBytes: 524288, argsBytes: 1048576, outputBytes: 10485760, worktreeOutputBytes: 67108864, commandMs: 60000, worktreeMs: 300000 })
 export const GIT_PROVIDER_ENV_KEYS = Object.freeze(['PATH','HOME','USERPROFILE','USER','LOGNAME','TMPDIR','TEMP','TMP','SystemRoot','WINDIR','COMSPEC','PATHEXT','APPDATA','LOCALAPPDATA','XDG_CONFIG_HOME','GH_CONFIG_DIR','GLAB_CONFIG_DIR','TEA_CONFIG_DIR','GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN','GITHUB_ENTERPRISE_TOKEN','GITLAB_TOKEN','GITLAB_ACCESS_TOKEN','GITLAB_HOST','SSH_AUTH_SOCK'] as const)
@@ -24,16 +25,20 @@ export interface GitProviderProcessOwnerOptions {
   fixture?: { executables: Readonly<Partial<Record<GitProviderProgram | 'git', { file: string; prefix: readonly string[] }>>> }
 }
 export interface GitProviderExecOptions { maxBuffer?: number; timeout?: number; allowNonzero?: boolean }
-export interface GitWorktreeExecOptions { cwd?: string; timeout?: number; maxBuffer?: number; env?: { GIT_TERMINAL_PROMPT?: '0' } }
+export interface GitWorktreeExecOptions { cwd?: string; timeout?: number; maxBuffer?: number; env?: { GIT_TERMINAL_PROMPT?: '0' }; allowDiffExitOne?: true }
 export interface GitProviderExecResult { stdout: string; stderr: string }
 export interface GitProviderManagerHost { process: GitProviderProcessOwner; assertCurrent?(): void }
-type Scope = { pending: Set<Promise<unknown>>; guards: Array<() => void>; signals: AbortSignal[] }
-type RootReceipt = { path: string; dev: number; ino: number }
+type Scope = { pending: Set<Promise<unknown>>; guards: Array<() => void>; signals: AbortSignal[]; active: boolean; depth: number }
+type RootReceipt = { path: string; dev: bigint; ino: bigint }
 type Child = { process: ChildProcess; stop(): void }
 type Job = { run(): Promise<void>; reject(error: unknown): void }
 function error(code: GitProviderProcessCode): GitProviderProcessError { return new GitProviderProcessError(code) }
 function validPath(value: unknown): value is string { return typeof value === 'string' && isAbsolute(value) && Buffer.byteLength(value, 'utf8') <= 4096 && !/[\u0000-\u001f\u007f]/.test(value) }
 function inside(root: string, target: string): boolean { const part = relative(root, target); return !isAbsolute(part) && part !== '..' && !part.startsWith(`..${sep}`) }
+function diffFile(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= 4096 && !/^(?:[\\/]|[A-Za-z]:)/.test(value) && !/[\u0000-\u001f\u007f]/.test(value) &&
+    value.replace(/\\/g, '/').split('/').every(part => part.length > 0 && part !== '.' && part !== '..')
+}
 
 /** One captured app-owned CLI boundary. Requests cannot choose programs, env,
  * auth tokens or cwd. Callback delivery and actual child/pipe close are
@@ -56,6 +61,7 @@ export class GitProviderProcessOwner {
   private readonly children = new Set<Child>()
   private readonly queue: Job[] = []
   private readonly scopes = new AsyncLocalStorage<Scope | undefined>()
+  private readonly requests = new Set<Scope>()
   private readonly roots = new Map<string, RootReceipt>()
   constructor(options: GitProviderProcessOwnerOptions) {
     if (!options || typeof options.execFile !== 'function' || typeof options.assertCurrent !== 'function' || !validPath(options.home) || !validPath(options.cwd) ||
@@ -99,6 +105,7 @@ export class GitProviderProcessOwner {
   assertCurrent(): void {
     this.assertOpen(); this.ownerCurrent()
     const scope = this.scopes.getStore()
+    if (scope && !scope.active) throw error('GIT_PROVIDER_CANCELLED')
     for (const signal of scope?.signals ?? []) if (signal.aborted) throw error('GIT_PROVIDER_CANCELLED')
     for (const guard of scope?.guards ?? []) guard()
   }
@@ -113,17 +120,22 @@ export class GitProviderProcessOwner {
   withRequestGuard<T>(effect: () => T | Promise<T>, beforeEffect: () => void, signal?: AbortSignal): Promise<T> {
     try { this.assertCurrent(); if (signal?.aborted) throw error('GIT_PROVIDER_CANCELLED'); beforeEffect() } catch (cause) { return Promise.reject(cause) }
     const parent = this.scopes.getStore()
-    const scope: Scope = { pending: parent?.pending ?? new Set(), guards: [...parent?.guards ?? [], beforeEffect], signals: [...parent?.signals ?? [], ...signal ? [signal] : []] }
+    const depth = (parent?.depth ?? 0) + 1
+    if (this.requests.size >= 64 || depth > 8) return Promise.reject(error('GIT_PROVIDER_BUSY'))
+    const scope: Scope = { pending: new Set(), guards: [...parent?.guards ?? [], ...parent ? [() => { if (!parent.active) throw error('GIT_PROVIDER_CANCELLED') }] : [], beforeEffect], signals: [...parent?.signals ?? [], ...signal ? [signal] : []], active: true, depth }
+    this.requests.add(scope)
     const raw = this.scopes.run(scope, async () => {
-      let value: T | undefined, failure: unknown, failed = false
-      try { this.assertCurrent(); value = await effect() } catch (cause) { failure = cause; failed = true }
-      if (!parent) while (scope.pending.size) await Promise.allSettled([...scope.pending])
-      this.assertCurrent()
-      if (failed) throw failure
-      return value as T
+      try {
+        let value: T | undefined, failure: unknown, failed = false
+        try { this.assertCurrent(); value = await effect() } catch (cause) { failure = cause; failed = true }
+        while (scope.pending.size) await Promise.allSettled([...scope.pending])
+        this.assertCurrent()
+        if (failed) throw failure
+        return value as T
+      } finally { scope.active = false; this.requests.delete(scope) }
     })
-    // The outer guard must never wait on itself. Nested scopes belong to the
-    // outer pending set but perform their own join only at the outer boundary.
+    // Registered outside its own ALS context: each scope joins its children,
+    // and a parent retains the nested scope without a self-wait cycle.
     return this.retain(raw)
   }
   exec(program: GitProviderProgram, args: readonly string[], opts: GitProviderExecOptions = {}): Promise<GitProviderExecResult> {
@@ -132,11 +144,27 @@ export class GitProviderProcessOwner {
     return this.execute(program, args, opts, this.cwd, false)
   }
   execWorktree(program: GitWorktreeProgram, args: readonly string[], opts: GitWorktreeExecOptions = {}): Promise<GitProviderExecResult> {
+    if (opts.allowDiffExitOne && !(program === 'git' && args.length === 8 && args[0] === 'diff' && args[1] === '--no-color' && args[2] === '--no-ext-diff' && args[3] === '--no-textconv' && args[4] === '--no-index' && args[5] === '--' && args[6] === '/dev/null' && diffFile(args[7]))) return Promise.reject(error('GIT_PROVIDER_INVALID_OPTIONS'))
     if (!['git','gh','glab'].includes(program) || !validPath(opts.cwd ?? this.cwd) || !this.worktreeRoots.some(root => inside(root, normalize(opts.cwd ?? this.cwd))) ||
       opts.env && Object.entries(opts.env).some(([key, value]) => key !== 'GIT_TERMINAL_PROMPT' || value !== '0')) return Promise.reject(error('GIT_PROVIDER_CWD_REFUSED'))
     return this.execute(program, args, opts, normalize(opts.cwd ?? this.cwd), true)
   }
-  private execute(program: GitProviderProgram | 'git', args: readonly string[], opts: GitProviderExecOptions, cwd: string, worktree: boolean): Promise<GitProviderExecResult> {
+  /** Only an acknowledged physical worktree cleanup may retire cached cwd receipts. */
+  retireWorktreeDirectory(path: string, expected: { dev: string; ino: string }): void {
+    this.assertCurrent()
+    if (!validPath(path) || normalize(path) !== path || !this.worktreeRoots.some(root => root !== path && inside(root, path)) || !expected ||
+      [expected.dev, expected.ino].some(value => typeof value !== 'string' || !/^(?:0|[1-9][0-9]{0,19})$/.test(value) || BigInt(value) > 18446744073709551615n)) throw error('GIT_PROVIDER_CWD_REFUSED')
+    const remembered = this.roots.get(path)
+    if (remembered && (remembered.dev.toString() !== expected.dev || remembered.ino.toString() !== expected.ino)) throw error('GIT_PROVIDER_CWD_REFUSED')
+    try {
+      const actual = lstatSync(path, { bigint: true })
+      if (!actual.isDirectory() || actual.isSymbolicLink() || actual.dev.toString() !== expected.dev || actual.ino.toString() !== expected.ino) throw error('GIT_PROVIDER_CWD_REFUSED')
+    } catch (cause) { if ((cause as NodeJS.ErrnoException)?.code !== 'ENOENT') throw cause }
+    const parent = this.roots.get(dirname(path)), actualParent = lstatSync(dirname(path), { bigint: true })
+    if (!actualParent.isDirectory() || actualParent.isSymbolicLink() || realpathSync(dirname(path)) !== dirname(path) || parent && (parent.dev !== actualParent.dev || parent.ino !== actualParent.ino)) throw error('GIT_PROVIDER_CWD_REFUSED')
+    for (const cached of this.roots.keys()) if (inside(path, cached)) this.roots.delete(cached)
+  }
+  private execute(program: GitProviderProgram | 'git', args: readonly string[], opts: GitProviderExecOptions & Pick<GitWorktreeExecOptions, 'allowDiffExitOne'>, cwd: string, worktree: boolean): Promise<GitProviderExecResult> {
     try {
       this.assertCurrent()
       if (!Array.isArray(args) || args.length > GIT_PROVIDER_PROCESS_LIMITS.args || args.some(value => typeof value !== 'string' || value.includes('\0') || Buffer.byteLength(value, 'utf8') > GIT_PROVIDER_PROCESS_LIMITS.argumentBytes) || args.reduce((size, value) => size + Buffer.byteLength(value, 'utf8'), 0) > GIT_PROVIDER_PROCESS_LIMITS.argsBytes ||
@@ -153,12 +181,13 @@ export class GitProviderProcessOwner {
     })))
   }
   private async checkDirectory(path: string): Promise<void> {
-    const info = await lstat(path).catch(() => { throw error('GIT_PROVIDER_CWD_REFUSED') })
+    const info = await lstat(path, { bigint: true }).catch(() => { throw error('GIT_PROVIDER_CWD_REFUSED') })
     if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) throw error('GIT_PROVIDER_CWD_REFUSED')
-    const current = await lstat(path).catch(() => { throw error('GIT_PROVIDER_CWD_REFUSED') })
+    const current = await lstat(path, { bigint: true }).catch(() => { throw error('GIT_PROVIDER_CWD_REFUSED') })
     if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== info.dev || current.ino !== info.ino) throw error('GIT_PROVIDER_CWD_REFUSED')
     const receipt = this.roots.get(path)
     if (receipt && (receipt.dev !== info.dev || receipt.ino !== info.ino)) throw error('GIT_PROVIDER_CWD_REFUSED')
+    if (!receipt && this.roots.size >= 4096) throw error('GIT_PROVIDER_BUSY')
     this.roots.set(path, { path, dev: info.dev, ino: info.ino })
   }
   private schedule<T>(effect: () => Promise<T>): Promise<T> {
@@ -174,7 +203,7 @@ export class GitProviderProcessOwner {
     }
   }
   private finished(raw: Promise<unknown>): void { this.jobs.delete(raw); this.active--; this.pump() }
-  private process(program: GitProviderProgram | 'git', args: string[], opts: GitProviderExecOptions, cwd: string, worktree: boolean): Promise<GitProviderExecResult> {
+  private process(program: GitProviderProgram | 'git', args: string[], opts: GitProviderExecOptions & Pick<GitWorktreeExecOptions, 'allowDiffExitOne'>, cwd: string, worktree: boolean): Promise<GitProviderExecResult> {
     return new Promise((resolve, reject) => {
       let child: ChildProcess | undefined, callbackDone = false, childClosed = false, stdoutClosed = true, stderrClosed = true, failure: GitProviderProcessError | undefined
       let stdout = '', stderr = '', stopped = false, bytes = 0, escalation: ReturnType<typeof setTimeout> | undefined
@@ -200,8 +229,9 @@ export class GitProviderProcessOwner {
         const outBytes = typeof out === 'string' ? Buffer.byteLength(out, 'utf8') : out?.length ?? 0
         const errBytes = typeof err === 'string' ? Buffer.byteLength(err, 'utf8') : err?.length ?? 0
         if (outBytes + errBytes > limit) failure ??= error('GIT_PROVIDER_OUTPUT_LIMIT')
-        if (cause && !(opts.allowNonzero && typeof cause.code === 'number')) failure ??= error(cause.code === 'ENOENT' ? 'GIT_PROVIDER_CLI_MISSING' : cause.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'GIT_PROVIDER_OUTPUT_LIMIT' : 'GIT_PROVIDER_COMMAND_FAILED')
-        if (!failure) { stdout = String(out ?? ''); stderr = String(err ?? '') }
+        const expectedDiff = opts.allowDiffExitOne && cause?.code === 1 && !cause.killed && !cause.signal
+        if (cause && !(opts.allowNonzero && typeof cause.code === 'number') && !expectedDiff) failure ??= error(cause.code === 'ENOENT' ? 'GIT_PROVIDER_CLI_MISSING' : cause.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'GIT_PROVIDER_OUTPUT_LIMIT' : 'GIT_PROVIDER_COMMAND_FAILED')
+        if (!failure) { stdout = String(out ?? ''); stderr = expectedDiff ? '' : String(err ?? '') }
         finish()
       }
       const target = this.executables?.executables[program]
@@ -223,7 +253,7 @@ export class GitProviderProcessOwner {
       }
       child.stdin?.on('error', failed); child.stdin?.end()
       child.once('close', code => {
-        if (code !== undefined && code !== 0 && !(opts.allowNonzero && typeof code === 'number')) failure ??= error('GIT_PROVIDER_COMMAND_FAILED')
+        if (code !== undefined && code !== 0 && !(opts.allowNonzero && typeof code === 'number') && !(opts.allowDiffExitOne && code === 1 && !child?.killed && !child?.signalCode)) failure ??= error('GIT_PROVIDER_COMMAND_FAILED')
         childClosed = true; finish()
       })
       for (const signal of signals) { signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort() }

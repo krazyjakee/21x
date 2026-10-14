@@ -1,3 +1,5 @@
+import { HEARTBEAT_CODECS } from '../src/shared/heartbeat-codecs'
+import { WORKTREE_RUNTIME_CODECS } from '../src/shared/worktree-runtime-codecs'
 import { TASK_GROUP_CODECS } from '../src/shared/task-group-codecs'
 import { PROJECT_RUNTIME_CODECS } from '../src/shared/project-runtime-codecs'
 import { VOICE_MANAGEMENT_CODECS } from '../src/shared/voice-management-codecs'
@@ -29,7 +31,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -39,6 +41,8 @@ const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }
 
 /** One explicit valid API argument tuple for every finite production command. */
 export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
+  'heartbeat:enable': [task, 30], 'heartbeat:disable': [task], 'heartbeat:runNow': [task], 'heartbeat:getLogs': [task, 20], 'heartbeat:getStatus': [task], 'heartbeat:updateInterval': [task, 60], 'heartbeat:readFile': [task], 'heartbeat:writeFile': [task, '# Local heartbeat\nCheck the task status.'],
+  'worktree:setup': [task, [{ fullName: 'fixture/repo', defaultBranch: 'main' }], 'fixture', 'github'], 'worktree:changes': [task, [{ fullName: 'fixture/repo' }]], 'worktree:files': [task, [{ fullName: 'fixture/repo' }]], 'worktree:readFile': [task, 'fixture/repo', 'README.md'], 'worktree:cleanup': [task, [{ fullName: 'fixture/repo' }], 'fixture', true], 'workspace:runCleanupNow': [],
   'taskGroups:list': [project, true], 'taskGroups:get': ['group_fixture'], 'taskGroups:history': [task],
   'taskGroups:create': [{ title: 'Fixture batch', task_ids: [task, 'task_second'], agent_id: agent }],
   'taskGroups:add': ['group_fixture', ['task_third']], 'taskGroups:remove': ['group_fixture', task], 'taskGroups:dissolve': ['group_fixture'],
@@ -120,6 +124,14 @@ type Variant = { operation: string; case: string; args: unknown[] }
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'taskGroups:create', case: 'unicode-trimmed-title', args: [{ title: '\uFEFF🌱\uFEFF', task_ids: [task, 'task_second'] }] },
   { operation: 'taskGroups:review', case: 'max-escaped-feedback', args: [{ group_id: 'group_fixture', action: 'send_back', message: '\u0001'.repeat(4000), task_ids: [task] }] },
+  { operation: 'heartbeat:enable', case: 'default-heartbeat-interval', args: [task] },
+  { operation: 'heartbeat:getLogs', case: 'default-heartbeat-log-limit', args: [task] },
+  { operation: 'heartbeat:writeFile', case: 'empty-heartbeat-file', args: [task, ''] },
+  { operation: 'heartbeat:writeFile', case: 'maximum-escaped-heartbeat-file', args: [task, '\u0001'.repeat(128 * 1024)] },
+  { operation: 'heartbeat:updateInterval', case: 'maximum-heartbeat-interval', args: [task, 525600] },
+  { operation: 'worktree:setup', case: 'empty-task-workspace', args: [task, [], '', 'github'] },
+  { operation: 'worktree:cleanup', case: 'omitted-remove-task-dir', args: [task, [], ''] },
+  { operation: 'worktree:readFile', case: 'task-root-preview', args: [task, null, './docs/README.md'] },
   { operation: 'taskGroups:list', case: 'omitted-dissolved-filter', args: [project] },
   { operation: 'taskGroups:review', case: 'omitted-review-members', args: [{ group_id: 'group_fixture', action: 'approve' }] },
   { operation: 'project:getStatusHistory', case: 'omitted-history-query', args: [project] },
@@ -236,7 +248,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 199 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 213 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

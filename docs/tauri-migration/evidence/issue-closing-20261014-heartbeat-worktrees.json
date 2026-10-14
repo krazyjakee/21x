@@ -1,0 +1,433 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    210,
+    212
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "f7e1c6825214667eee9155753896c1ef09f260c3",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/event-forwarding-review.json": "fb1d409932158d44f1fa6b10c0df46c1d17184bf9865b077e1fd69842e8e722e",
+      "docs/tauri-migration/heartbeat-bindings.md": "078889545469d8a02380ddffaafe56ff44634d8454949cddddcb5501bf502cdb",
+      "docs/tauri-migration/implementation-status.md": "fe2386ad531f0a0668c0574d9ff59355b86621c44373fcf7c681430d5c885cc3",
+      "docs/tauri-migration/inventory.json": "d8092c734acea667beccc23618a2020ca98bacc81df437a603f759085b375e26",
+      "docs/tauri-migration/operations.json": "dbe88a5a93cda24365751c07b22083459c1a34270eaedb9f5c773c001bf6ea0b",
+      "docs/tauri-migration/worktree-runtime-bindings.md": "33ba1ef01eb649e6ca2a3a1630c0e52030f91b4b3188505bb7a77a0da64abcba",
+      "scripts/production-contracts-proof.test.ts": "1279ab0f65900e03b7c9b70513925baf75b43a8394222415d83567d0d7ae03f1",
+      "scripts/production-contracts-proof.ts": "8d624999a56bce81b4b2a33b32836cac20ce74bf4c2abcaa42e399afcae18f3a",
+      "src-tauri/engine/src/production_contracts.rs": "1708f53e5edbf88a371db0c942c7ce6e50d44e03e6ee157b8f93920d1ec5cafd",
+      "src-tauri/engine/src/production_project_groups.rs": "ef6a676837119ddb693594fd8b2c8b95d743caeffbd7119543bedc3e2d78f083",
+      "src-tauri/engine/src/production_workspace_runtime.rs": "d423ab42e1df27845647945d8a56eb8856e76a81f72173849230f6a37676df69",
+      "src/main/agent-manager-core.ts": "ddd5748aae61b5ee17e2d459535def60ccfff1051f1374ba7a4aafd524357580",
+      "src/main/agent-manager-task-group-request.test.ts": "6a416a81622e7d2d61324b23884d2edc5ce9aeafdd57baef1c7a04428ef65354",
+      "src/main/git-provider-process-owner.test.ts": "7c8a53d5b3e60f6abac3dbe74666183ef27c570183ef866b1dd1d42944d0efeb",
+      "src/main/git-provider-process-owner.ts": "6566fb0bf2267f724e51300baeb98a7e7b4a2778a8606df06d9cecf6f1d4a69c",
+      "src/main/heartbeat-file-owner.test.ts": "f6227773151a4c4c1b60d7d83bc308fa9461610a9b6a25384e34da35b7d0c75a",
+      "src/main/heartbeat-file-owner.ts": "68e9f5f4cf1f9c23b2e8734bc713df03877a379d2b9edeed832fdbaa6221a428",
+      "src/main/heartbeat-preflight-owned.test.ts": "d194de39c23ebd20b57e81bc7fe630a82be8484f36736f6694f2d23e0ebdb527",
+      "src/main/heartbeat-preflight.ts": "071e60b1b82a6dca475a98ba45b15053923cc6547b10bd5bfbda05cb0cbd9803",
+      "src/main/heartbeat-scheduler-core.ts": "caa02839de2ef8ea34adf6b0f040a6f33cf551484fc5456a863f4c14a981e174",
+      "src/main/workspace-cleanup-scheduler-core.ts": "080972ca139bdfe1a310db8fcda66c79ba4859cd0f5123c06ee8a8b8c18fa4d1",
+      "src/main/workspace-cleanup-scheduler-runtime.test.ts": "f284aa954a2594bd36c006015687bdd91476d17ecdb395218b74b4881fd27e86",
+      "src/main/workspace-file-owner.test.ts": "c37555e6a1be605ab94a09be2858821e8b7b0097da0df39d0be108b982f6313c",
+      "src/main/workspace-file-owner.ts": "f3446e9671f7eab22ef290aff050dd3070be8e61afdc6f76038b0c6a12942eb8",
+      "src/main/worktree-manager-core.ts": "4d196b03f6c868c3127b31b40ff99916ed8719ff60824730ec03a1e80bfa931e",
+      "src/main/worktree-manager-runtime.test.ts": "59a4e6871d0cdac757d1c4c8867e5244b378cfcf4821acb50b168faf6b86bb68",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "ae14dbf69652a65fa1c788fcda58559bfe04d455dd2ca269c8e07f24a45de3ba",
+      "src/renderer/src/lib/native-desktop-host.ts": "5ca34c8a412c4d3a9f1e26c9e681e7362d006054f9d1a620d05bd8bfc1a77bae",
+      "src/service/heartbeat-backend.test.ts": "0c70ef31b9543cfcdaea5b27c0ff5aefac39b66822b27245c9876576471f374b",
+      "src/service/heartbeat-backend.ts": "c312636c92b018d828a97413ab6659c7ab9a657f74137ec3544ece57964ba75e",
+      "src/service/production-desktop-bindings.test.ts": "390264da0b5d2bc79e3d5b06bea508d3738fcb5ff5804313cacc903ec69b47be",
+      "src/service/production-desktop-bindings.ts": "ca0d4c80f671542b3f2e251a5137c21f5435f05bf39bb8ef385da6be1eec73fa",
+      "src/service/production-git-provider-owner.ts": "cc738a87f7b66e0e4349e659283c87f7f9bf9c3eb398e86952df1246db439580",
+      "src/service/production-owner.ts": "4cbdc866c2bb64ddb7ee237f971c399c3d4117be1fbfeed705e1e2e128778ac4",
+      "src/service/worktree-runtime-backend.test.ts": "6c96a708460af582fbc372c1a55eb76eec0101f2de1dd7e53f0dcec0aeb82012",
+      "src/service/worktree-runtime-backend.ts": "b95168e0f2bbda666653b3393ab68f246fa704ba832724a761bc0a1606274557",
+      "src/shared/desktop-event-forwarding.ts": "162a1e46c34aad0d0ee22c8508f827e78a5ae0219fd203e18353f23117a67150",
+      "src/shared/heartbeat-codecs.test.ts": "7ca79111e3c8aa3c20c50929d8ad5e1a7c368f78a973b79e1d755b2525c36f46",
+      "src/shared/heartbeat-codecs.ts": "7db7cc0b18c3569fa5387b688c76a10409bf97db30231f5ab599cd22ee85da43",
+      "src/shared/worktree-runtime-codecs.test.ts": "83a762e08ca6ec0fad6a80267e234675f324806db73d6645d2203d8f924cf909",
+      "src/shared/worktree-runtime-codecs.ts": "1e21f2e0b172838260f843b39e5d2bf7c0342fac1b3c9c255ff3c095f6db5583",
+      "vitest.tauri.config.ts": "7a866d27e114f6b243930fc6ed05227b0986b9170b20a48cd63535d1aef78c2d"
+    }
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Eight retained heartbeat controls and six worktree/cleanup controls through actual protected-profile scheduler, manager, filesystem and CLI owners; Electron remains the shipping application.",
+  "bindings": {
+    "finiteServiceCommandContracts": 213,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 215,
+    "events": 28,
+    "newCommands": 14,
+    "newEvents": 5
+  },
+  "implemented": [
+    "Actual singleton heartbeat/worktree leases retain the same SQLite, AgentManager, scheduler, captured filesystem roots, source synchronization and Git provider process owner. The heartbeat file owner is registered for immediate shutdown/raw drain before protected profile release.",
+    "Heartbeat grants cover current task/project/group scopes, selected/default/fallback agents and referenced skills, secrets, MCP/source/connector/resource bindings. Bounded SQL metadata precedes stored JSON/getters. Application task/resource snapshots and separate exact file instructions are rechecked through admission, preflight, monitoring and forwarding. Accepted monitoring detaches from settled RPC authority while raw sends and exact cleanup remain owned.",
+    "Heartbeat files use bounded physical-root/task receipts, no-follow/nonblocking descriptors, stable inode/size/link/time comparisons and exclusive verified/fsynced private temp publication. Unknown or changed data is retained; FD-close failures block publication and protected profile release until explicit retry.",
+    "Heartbeat durable delivery uses the actual task foreign key with an exact dedicated-session alias. Post-send scope checks prevent stale polling restart. Abandoned/expired/uncertain heartbeat intents cannot be replayed; accepted receipts only acknowledge. Tests cover genuine SQLite acknowledgements, reassignment, changed instructions, delayed initialization, ignored cancellation and failed cleanup retry.",
+    "Owned preflight runs the existing algorithm through finite bounded gh commands and current application authority, with canonical timestamps and bounded URL/commit references. Uncertain provider checks remain inconclusive; raw callbacks stay retained.",
+    "Worktree setup/cleanup uses actual manager task lifecycle and source mutation leases, saved scoped repository metadata and captured git managers. Portable file scanning/diffs have per-request byte/depth/entry budgets and retained handles; preview reads preserve binary and explicit truncation semantics through the same descriptor owner.",
+    "Git accepts exit one only for the exact trusted untracked diff command, while retaining child/callback/stream close receipts and suppressing diagnostics. Native portable diff disables external diff and text conversion. Matching physical cwd/workspace receipts retire only after acknowledged removal, allowing legitimate recreation.",
+    "Manual and automatic cleanup use the same bounded strict planner. Empty passes truthfully return zero; production has no captured process-observation authority, so nonempty automatic/manual planner removals are unavailable before effects. Orphan deletion and dependency pruning remain unavailable.",
+    "Five finite event codecs and fourteen command codecs are bound through actual owner dispatch, the explicit desktop facade and native contracts. Native proof consumes 428 actual TypeScript requests and fourteen actual singleton responses without caller-supplied grants."
+  ],
+  "artifact": {
+    "buildIdentity": "production-91c0b25c9766f0c2db114da2a3eee730",
+    "resourceManifestSha256": "5279d8b319f8487a258e35a93b15e41fa69c46cfb066610c8642c8eb68272dc2",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "cargoLockUnchanged": true,
+    "packageAndRuntimePinsUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 213,
+    "requests": 428,
+    "sha256": "4a963df1d3a21145134b0062b1191f2a85f933ecff791a04b273263332224de3"
+  },
+  "actualDomainResponses": {
+    "operations": 14,
+    "responses": 14,
+    "sha256": "b7840d227a6e7af31ec593bac116393f7a7e384c31d55b2cffd1df8bea2c100b",
+    "scope": "Actual protected-profile singleton, SQLite/domain/filesystem owners, with controlled adapter/native/provider boundaries; no live model or installed production WebView claim"
+  },
+  "tests": {
+    "app": {
+      "passed": 6767,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "c513f20f96eea921308052984d38fe377ce792d625c038a02dfbcf819dccb14a",
+      "logSha256": "51d122b9fd4c36a7a2e275bd5037a91d9ecb2e8d9a607ce2181b2578b6bbeba4"
+    },
+    "standalone": {
+      "passed": 3271,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "e628807aa34201ac3f70142d07ae31210fc1eb89a7e741ac8cfe65b5f48e65cf",
+      "logSha256": "8529d1b979f478caa79251ecd66d75332f3733deeeb07b5b00e2c3b702ca0a60"
+    },
+    "focused": {
+      "passed": 394,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "fb2bad8bb58a5ad08ecd85237222b18b477cdc71ce92899ae45f46f0d786fd93",
+      "logSha256": "beabfd12a45412db467c4696af72110269e68dc29ca22cc8f3089885d21ca5fb"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "cce53d54ff932fdc39f4fea829fb4021cc02f2b49c35cce983f2be5699abfd58",
+      "logSha256": "f5d6e99a239b008ea5b424a1197452f709df7c5905f17103dedebc319692a265"
+    },
+    "corpus-export": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "8eb2bde84fc2813990b12f5858debaa08102ffc55c181562f1324740ff0535ae",
+      "logSha256": "11cdaa6ea8f7e2bf5b4afd3ae1ecdb9b6d1b1cd9a7006743fbee22bf08c3555e"
+    },
+    "results-export": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 23,
+      "success": true,
+      "reportSha256": "37ef2a9eddc7da88ac14cbee5cd661196b855bf91398891ab448c85a75031421",
+      "logSha256": "75a30dbb7ec50edbed660f06cff1927e12b605a05cd400b1dd0a0323d9fa9c60"
+    }
+  },
+  "filteredResultExportTests": "23 tests excluded by the exact singleton export filter; separate from optional installed inference tests",
+  "standaloneOptionalInstalledInference": [
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "VoiceWorkerClient with the installed runtime loads the real recogniser, so the config shape cannot drift",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "Parakeet v3 with the installed runtime loads the offline recogniser and transcribes a complete turn",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "a single-shot turn reports a final and never a segment, so dictation cannot send by itself",
+      "reason": "requires an installed local recognition runtime/model"
+    }
+  ],
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 48.447,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 18.694,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 24.521,
+      "logSha256": "90d8eba0c12a9413d91abb6bc078fca151ddad1ad95f8b818edb8d14ec23b8e2"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 19.273,
+      "logSha256": "6e5677fcd6fb47f72fab9f65c2604a440fcdb022ecbb25a71e15ef849d6dd47c"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.715,
+      "logSha256": "16c92735fa079e455cf5390d26b2c0ff40aebfae772d28724bd413f7b6125e31"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.999,
+      "logSha256": "2d555bee44c996ce41a9431502e803b9c09983d0ad83f9ac7dd24609eeb42f38"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.511,
+      "logSha256": "20d86896a75bc3fec2563a06a711def6054d01b6dab01d1f6baa8fad86d8544e"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.402,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.618,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.388,
+      "logSha256": "ee3365aaa2015dbc1b1fef266b345f8ae7fe27294a0bff663fed0e5fa7912201",
+      "passed": 43,
+      "failed": 0,
+      "ignored": 4
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 5.176,
+      "logSha256": "ad26a58917c122182057a0a2c40450db4b67719c4f59b8492939085d83dfdd84"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 4.397,
+      "logSha256": "41d7e74f5a9f9d5cb8bbe910150112f876362fd64ed6560cc7ff73c98de3f746",
+      "passed": 6,
+      "failed": 0
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch20-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.536,
+      "logSha256": "63e353b4429764624e24afec5d8fe8d184a417aea08f53d5e3a211e366b65585"
+    },
+    "native-results": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_WORKSPACE_RUNTIME_RESULTS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch20-domain-results.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::workspace_runtime::tests::actual_owned_results_have_finite_outer_dtos",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.428,
+      "logSha256": "32e9a29e05951aa989b84e06ce06a4633524285853378fa600ca67f1d48f1e1e"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.075,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "retainedInitialChecks": {
+    "third-focused": {
+      "passed": 391,
+      "failed": 1,
+      "skipped": 0,
+      "success": false,
+      "reportSha256": "11e501a2968b76a2462005917db74941eab7f0c7640153fe3dfe4b1a05f94cda",
+      "logSha256": "7ebacc7a7ed155d58bc208e82d4c661c189a7f534b741f1d38a3f4435edf9bc9"
+    },
+    "initial-app": {
+      "passed": 6764,
+      "failed": 1,
+      "skipped": 30,
+      "success": false,
+      "reportSha256": "5a34b980840ee237377384652fdb3d448f1f4ad8602fe535e539e826b3da57f5",
+      "logSha256": "5006cc529c6bcc770a3fc56546d2eb63768b66ebc99a6a3c95ef2dae8a4c6d28"
+    },
+    "initial-standalone": {
+      "passed": 3271,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "757af9aa90dc774ab1a1eae018a07ad8ec8e719059e10bdd20543c98835a6347",
+      "logSha256": "52ee8028e0ba0862e3439d9c409d83bfdfc599aca0e745b253abed9560242399"
+    }
+  },
+  "validationCorrections": [
+    "Initial parser/compiler failures concerned a fixture bracket, never-returning helper narrowing, typed event/command decoder association, fixture mock typing and unused declarations. Exact projections and rejection assertions remain enforced.",
+    "Initial focused failures exposed the stale 199-command corpus count, public error assertions, the new facade worktree event and normal Git exit-one child close. Corpus/native/facade counts now reflect 213 actual service operations, and exact diff child-close handling is implemented.",
+    "Actual heartbeat setup exposed the virtual-task durable foreign key violation. The actual task alias fix is validated with real durable acknowledged/cancelled records; fresh recovery regressions prove no replay for pending, expired, or uncertain checks.",
+    "Guarded heartbeat tests perform thousands of bounded checks and exceeded their former generic five-second budget. Specific accepted-monitoring/cleanup tests have 20-second budgets and the actual singleton stale-instruction case has 30 seconds; their exact cancellation, ownership, acknowledgement and no-send/no-replay assertions remain unchanged. Measured focused accepted-monitoring case was 8.630 seconds and the singleton stale-instruction case 9.591 seconds. No performance acceptance or latency budget is claimed.",
+    "Temporary tracing was removed. The owner no longer duplicates instruction-file reads inside its database/resource fingerprint; the scheduler independently retains and checks exact instructions at each effect.",
+    "Post-send authority is rechecked before polling can restart. Failure after actual acceptance retains cleanup, cancels the durable intent and never replays it. Reviewed dynamic event source positions were refreshed after inspection without changing their allowed names or ownership.",
+    "Final full application/standalone/focused checks, fresh staged service proofs, actual response export and native schemas passed after the final corrections."
+  ],
+  "remainingAcceptance": [
+    "#202/#208 full retained/native parity, installed crash/resource/containment/redistribution acceptance and live cutover/Electron retirement remain open.",
+    "#210/#212 installed real-provider/background/recovery and all supported targets remain open. Production process observation for nonempty strict cleanup, orphan cleanup and dependency pruning are still unavailable.",
+    "Node path receipts retain cooperative pathname race limits; no atomic cross-platform native containment claim is made. Accepted native/provider effects cannot be retracted after a denied guard.",
+    "No actual model session, external source completion, interactive native clipboard/picker, signed production installation, macOS/Windows installed run or performance budget is claimed. Hosted voice #92 remains deferred by the user.",
+    "Thirty application optional cases, three standalone installed-recognition cases and four engine platform/runtime cases remain explicitly skipped/ignored rather than accepted."
+  ]
+}

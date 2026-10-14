@@ -6,6 +6,33 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The heartbeat/worktree continuation binds eight heartbeat controls and six
+worktree/cleanup controls to the captured production owners. Heartbeat files use
+fixed physical workspace identities and retained descriptors; admitted checks
+continue under application ownership after the requesting call ends. Immutable
+task/resource bindings fence reassignment during monitoring and forwarding.
+Periodic preflight uses the captured, bounded GitHub CLI owner.
+
+Worktree mutations borrow the actual task/source lifecycle leases. File previews
+use retained descriptor reads, binary detection and explicit truncation at the
+portable 128 KiB cap. The exact untracked-file diff command accepts Git's normal
+exit-one receipt without forwarding diagnostics. Acknowledged physical cleanup
+retires only its matching file/process directory identities.
+
+Manual and automatic portable cleanup share a bounded planner. Empty passes
+return actual zero counts. Removing completed workspaces requires a captured
+process-observation authority, which production does not yet have; that work is
+explicitly unavailable before removal. Orphan deletion and dependency pruning
+also remain unavailable. The finite surface has 213 service commands, two direct
+native commands and 28 events. The shipping application remains Electron; installed
+native, live-provider, full background and migration acceptance remain open.
+Hosted voice remains deferred by user decision. See
+[heartbeat bindings](heartbeat-bindings.md) and
+[worktree bindings](worktree-runtime-bindings.md) and the
+[verification record](evidence/issue-closing-20261014-heartbeat-worktrees.json).
+
+The preceding project/group continuation retains its tested revision:
+
 The project/group continuation binds nine retained task-group controls and ten
 project status, history, Captain memory, limits and concurrency controls to their
 actual protected-profile owners. Narrow bounded scalar projections reuse the

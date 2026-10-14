@@ -36,7 +36,7 @@
           "channelExpression": "channel",
           "column": 52,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6672,
+          "line": 6706,
           "method": "send",
           "target": "reviewed-event-wrapper"
         }
@@ -73,7 +73,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6677,
+          "line": 6711,
           "method": "send",
           "target": "reviewed-event-wrapper"
         }
@@ -124,7 +124,7 @@
           "channelExpression": "channel",
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6708,
+          "line": 6742,
           "method": "send",
           "target": "reviewed-event-wrapper"
         }
@@ -955,7 +955,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 2658,
+          "line": 2674,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -963,7 +963,7 @@
         {
           "column": 11,
           "file": "src/main/agent-manager-core.ts",
-          "line": 3040,
+          "line": 3056,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1002,7 +1002,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 1501,
+          "line": 1517,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1010,7 +1010,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 1510,
+          "line": 1526,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1018,7 +1018,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 1941,
+          "line": 1957,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1026,7 +1026,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6049,
+          "line": 6082,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1034,7 +1034,7 @@
         {
           "column": 11,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6213,
+          "line": 6247,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1042,7 +1042,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6241,
+          "line": 6275,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1050,7 +1050,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6288,
+          "line": 6322,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1081,7 +1081,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 2321,
+          "line": 2337,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1089,7 +1089,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 4309,
+          "line": 4332,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1120,7 +1120,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5283,
+          "line": 5306,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1165,7 +1165,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5268,
+          "line": 5291,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1173,7 +1173,7 @@
         {
           "column": 11,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5444,
+          "line": 5467,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1226,7 +1226,7 @@
         {
           "column": 79,
           "file": "src/main/agent-manager-core.ts",
-          "line": 1487,
+          "line": 1503,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1234,7 +1234,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 2442,
+          "line": 2458,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -1242,7 +1242,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 2451,
+          "line": 2467,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -2761,7 +2761,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6667,
+          "line": 6701,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -5795,7 +5795,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5074,
+          "line": 5097,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -10869,7 +10869,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5075,
+          "line": 5098,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -10877,7 +10877,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5284,
+          "line": 5307,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -12966,7 +12966,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 4458,
+          "line": 4481,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13066,7 +13066,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 1891,
+          "line": 1907,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13074,7 +13074,7 @@
         {
           "column": 11,
           "file": "src/main/agent-manager-core.ts",
-          "line": 2108,
+          "line": 2124,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13082,7 +13082,7 @@
         {
           "column": 13,
           "file": "src/main/agent-manager-core.ts",
-          "line": 3020,
+          "line": 3036,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13090,7 +13090,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 3107,
+          "line": 3123,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13098,7 +13098,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 3142,
+          "line": 3158,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13106,7 +13106,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 3578,
+          "line": 3594,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13114,7 +13114,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 3705,
+          "line": 3721,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13122,7 +13122,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 3844,
+          "line": 3860,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13130,7 +13130,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 4369,
+          "line": 4392,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13138,7 +13138,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 4445,
+          "line": 4468,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13146,7 +13146,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 4460,
+          "line": 4483,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13154,7 +13154,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 4495,
+          "line": 4518,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13162,7 +13162,7 @@
         {
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 4687,
+          "line": 4710,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -14888,7 +14888,7 @@
         {
           "column": 16,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6649,
+          "line": 6683,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -14896,7 +14896,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 6657,
+          "line": 6691,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -19388,7 +19388,7 @@
         "producerOwner": "agent-manager-host",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 6672,
+      "line": 6706,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -19427,7 +19427,7 @@
         "producerOwner": "agent-manager",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 6677,
+      "line": 6711,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -19464,7 +19464,7 @@
         "producerOwner": "agent-manager",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 6708,
+      "line": 6742,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",

@@ -825,6 +825,14 @@ export class AgentManager extends EventEmitter {
 
   private async recoverAgentMessages(): Promise<void> {
     for (const record of this.deliveries.listRecoverable('agent_message')) {
+      // A heartbeat observes one captured task/instruction generation. Recovery
+      // can acknowledge an accepted delivery but cannot create a new check from
+      // an abandoned intent after its scheduler/request lifetime ended.
+      if (record.state !== 'accepted' && !this.deliveryFlights.has(record.id) && record.taskId) {
+        let heartbeat = false
+        try { heartbeat = JSON.parse(record.payload).taskId === `heartbeat-${record.taskId}` } catch { /* normal malformed-delivery handling below */ }
+        if (heartbeat) { this.deliveries.terminal(record.id, 'cancelled', 'Heartbeat checks are not replayed; run a new check against current instructions.'); continue }
+      }
       const task = record.taskId ? this.db.getTask(record.taskId) : undefined
       const recovery = record.taskId ? this.startQueue.get(record.taskId) : null
       const exclusion = record.state === 'accepted' ? null
@@ -1199,6 +1207,14 @@ export class AgentManager extends EventEmitter {
   withTaskGroupRequestGuard<T>(effect: () => Promise<T>, beforeEffect: () => void, signal: AbortSignal): Promise<T> {
     return this.ownShutdownWork(this.taskGroupRequests.run(effect, beforeEffect, signal))
   }
+
+  /** Heartbeat admission carries the same retained authority as task starts. */
+  withHeartbeatRequestGuard<T>(effect: () => Promise<T>, beforeEffect: () => void, signal: AbortSignal): Promise<T> {
+    return this.withTaskGroupRequestGuard(effect, beforeEffect, signal)
+  }
+
+  /** Accepted heartbeat monitoring belongs to the application, after admission. */
+  detachedHeartbeatWork<T>(effect: () => T): T { return this.taskGroupRequests.detached(effect) }
 
   /** A definition/review lease blocks new dispatches while source effects or
    * acknowledged idle teardown finish. Shutdown joins this work before SQLite. */
@@ -3876,18 +3892,22 @@ export class AgentManager extends EventEmitter {
    * Uses the real task's workspace dir so the agent has repo context for gh commands.
    */
   async sendHeartbeatViaCaptain(agentId: string, taskId: string, heartbeatPrompt: string): Promise<string> {
+    this.taskGroupRequests.assertCurrent()
     const heartbeatTaskId = `heartbeat-${taskId}`
 
     let sessionId = this.findSessionByTaskId(heartbeatTaskId)?.sessionId
     if (!sessionId) {
       // The real task's workspace dir gives the agent repo context.
       const workspaceDir = this.db.getWorkspaceDir(taskId)
+      this.taskGroupRequests.assertCurrent()
       console.log(`[AgentManager] Heartbeat: creating heartbeat session for task ${taskId}`)
       sessionId = await this.startSessionNow(agentId, heartbeatTaskId, workspaceDir, true /* skipInitialPrompt */)
+      this.taskGroupRequests.assertCurrent()
     }
 
     console.log(`[AgentManager] Heartbeat: sending check via heartbeat session ${sessionId} for task ${taskId}`)
-    const result = await this.sendMessage(sessionId, heartbeatPrompt, heartbeatTaskId, agentId)
+    const result = await this.sendMessage(sessionId, heartbeatPrompt, heartbeatTaskId, agentId, undefined, undefined, taskId)
+    this.taskGroupRequests.assertCurrent()
     return result.newSessionId || sessionId
   }
 
@@ -3896,6 +3916,7 @@ export class AgentManager extends EventEmitter {
    * Only called when captain detected something that needs the task agent to act on.
    */
   async startHeartbeatSession(agentId: string, taskId: string, heartbeatPrompt: string): Promise<string> {
+    this.taskGroupRequests.assertCurrent()
     const task = this.db.getTask(taskId)
     let sessionId = task?.session_id
 
@@ -3903,11 +3924,13 @@ export class AgentManager extends EventEmitter {
       console.log(`[AgentManager] Heartbeat: no session for task ${taskId}, creating new session`)
       // Heartbeat follow-ups act on work already under way; they bypass admission.
       sessionId = await this.startSessionNow(agentId, taskId, undefined, true /* skipInitialPrompt */)
+      this.taskGroupRequests.assertCurrent()
     }
 
     console.log(`[AgentManager] Heartbeat: forwarding action to task session ${sessionId} for task ${taskId}`)
     // sendMessage resumes a dead session, sends the prompt and starts polling.
     const result = await this.sendMessage(sessionId, heartbeatPrompt, taskId, agentId)
+    this.taskGroupRequests.assertCurrent()
     return result.newSessionId || sessionId
   }
 
@@ -3922,10 +3945,10 @@ export class AgentManager extends EventEmitter {
    * Remove a heartbeat session from memory after the check completes.
    * Prevents heartbeat-{taskId} sessions from accumulating indefinitely.
    */
-  async cleanupHeartbeatSession(taskId: string): Promise<void> {
+  async cleanupHeartbeatSession(taskId: string, requireAcknowledgement = false): Promise<void> {
     const found = this.findSessionByTaskId(`heartbeat-${taskId}`)
     if (!found) return
-    await this.stopSession(found.sessionId, false)
+    await this.stopSession(found.sessionId, false, requireAcknowledgement)
     console.log(`[AgentManager] Cleaned up heartbeat session ${found.sessionId} for task ${taskId}`)
   }
 
@@ -5501,7 +5524,8 @@ export class AgentManager extends EventEmitter {
     taskId?: string,
     agentId?: string,
     attachments?: MessageAttachmentRef[],
-    deliveryId = `agent-message:${randomUUID()}`
+    deliveryId = `agent-message:${randomUUID()}`,
+    heartbeatOwnerTaskId?: string
   ): Promise<{ newSessionId?: string }> {
     this.taskGroupRequests.assertCurrent()
     if (taskId) {
@@ -5527,11 +5551,16 @@ export class AgentManager extends EventEmitter {
     if (owner && taskId && owner.taskId !== taskId) throw new Error('Session belongs to a different task.')
     const targetTaskId = taskId ?? owner?.taskId
     const targetAgentId = agentId ?? owner?.agentId
+    // Dedicated heartbeat sessions have virtual runtime IDs, while the durable
+    // delivery belongs to their actual task row. No RPC argument exposes this
+    // alias, and it cannot redirect another session's task ownership.
+    if (heartbeatOwnerTaskId !== undefined && (targetTaskId !== `heartbeat-${heartbeatOwnerTaskId}` || owner?.taskId !== targetTaskId ||
+      !this.db.db.prepare('SELECT 1 FROM tasks WHERE id=?').get(heartbeatOwnerTaskId))) throw new Error('Heartbeat delivery belongs to a different task.')
     const record = this.db.db.transaction(() => {
       const { record } = this.deliveries.enqueue({
         idempotencyKey: deliveryId,
         kind: 'agent_message',
-        taskId: targetTaskId ?? null,
+        taskId: heartbeatOwnerTaskId ?? targetTaskId ?? null,
         agentId: targetAgentId ?? null,
         payload: JSON.stringify({ sessionId, message, taskId: targetTaskId, agentId: targetAgentId, attachments: attachments ?? [] })
       })
@@ -5586,8 +5615,10 @@ export class AgentManager extends EventEmitter {
       agentId?: string
       attachments?: MessageAttachmentRef[]
     }
+    let heartbeatDelivery = false
     try {
       payload = JSON.parse(claimed.payload) as typeof payload
+      heartbeatDelivery = !!claimed.taskId && payload.taskId === `heartbeat-${claimed.taskId}`
       this.taskGroupRequests.assertCurrent()
       const result = await withStartupDeadline(this.ownShutdownWork(this.sendMessageNow(
         payload.sessionId,
@@ -5605,6 +5636,8 @@ export class AgentManager extends EventEmitter {
       const detail = error instanceof Error ? error.message : String(error)
       if (!this.taskGroupRequests.isCurrent()) {
         this.deliveries.terminal(claimed.id, 'cancelled', 'Request authority was withdrawn; this intent will not be replayed.')
+      } else if (heartbeatDelivery) {
+        this.deliveries.terminal(claimed.id, 'cancelled', 'Heartbeat acceptance is uncertain; this check will not be replayed.')
       } else if (detail.startsWith('Message handoff timed out')) {
         this.deliveries.terminal(claimed.id, 'timed_out', `${detail}; backend acceptance is unknown. Inspect the conversation before retrying.`)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-timeout-${claimed.id}`,
@@ -6080,6 +6113,7 @@ export class AgentManager extends EventEmitter {
       return this.sendTrackedPrompt(session, sessionId, promptText, sessionConfig)
     }
     await serializeTaskSend(this, session.taskId, send)
+    this.taskGroupRequests.assertCurrent()
     // Stop may destroy the session while adapter acceptance is in flight.
     // The accepted call may finish, but it must not re-register polling or
     // otherwise revive the runtime after the explicit Stop boundary.

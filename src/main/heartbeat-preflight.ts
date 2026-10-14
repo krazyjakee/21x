@@ -3,12 +3,38 @@
  * so a heartbeat with nothing new can skip the LLM session entirely.
  */
 import { execFileAsync } from './find-executable'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
 const GH_TIMEOUT_MS = 15_000
 
 type GitHubUrl = { owner: string; repo: string; type: 'pull' | 'issue'; number: number }
 
 type PreflightResult = 'no_changes' | 'changes_detected' | 'inconclusive'
+export interface HeartbeatPreflightHost {
+  execute(args: string[]): Promise<{ stdout: string; stderr: string }>
+  beforeEffect(): void
+}
+const ownedPreflight = new AsyncLocalStorage<{ host: HeartbeatPreflightHost; active: boolean }>()
+function assertPreflightCurrent(): void {
+  const scope = ownedPreflight.getStore()
+  if (!scope) return
+  if (!scope.active) throw new Error('HEARTBEAT_PREFLIGHT_CLOSED')
+  scope.host.beforeEffect()
+}
+/** The production scheduler supplies its captured CLI owner, never RPC arguments. */
+export function runOwnedPreflightChecks(content: string, lastCheck: string | null | undefined, host: HeartbeatPreflightHost): Promise<PreflightResult> {
+  const scope = { host: Object.freeze({ execute: host.execute, beforeEffect: host.beforeEffect }), active: true }
+  return ownedPreflight.run(scope, async () => {
+    try {
+      assertPreflightCurrent()
+      const urls = extractGitHubUrls(content)
+      if (Buffer.byteLength(content) > 131072 || urls.length > 32 || urls.some(url => !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$/.test(url.owner) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$/.test(url.repo) || [url.owner, url.repo].some(part => part.includes('..')) || !Number.isSafeInteger(url.number) || url.number < 1) || lastCheck && !Number.isFinite(Date.parse(lastCheck))) return 'inconclusive'
+      const normalized = lastCheck ? new Date(lastCheck).toISOString() : lastCheck
+      const result = await runPreflightChecks(content, normalized); assertPreflightCurrent(); return result
+    }
+    finally { scope.active = false }
+  })
+}
 
 type PrState = { mergeable: boolean | null; mergeable_state?: string | null }
 
@@ -34,8 +60,13 @@ const INFORMATIONAL_HEADING_PATTERN = /\b(status|findings?|notes?|context|histor
 const ACTIONABLE_HEADING_PATTERN = /\b(checks?|checklist|monitor(ing)?|verify|watch|todo|tasks?|instructions?)\b/i
 
 async function ghApi(path: string, jq: string): Promise<string> {
-  const { stdout } = await execFileAsync('gh', ['api', path, '--jq', jq], { timeout: GH_TIMEOUT_MS })
-  return stdout.trim()
+  assertPreflightCurrent()
+  const host = ownedPreflight.getStore()?.host, args = ['api', path, '--jq', jq]
+  if (host && !/^repos\/[A-Za-z0-9][A-Za-z0-9_.-]{0,255}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,255}\/(?:(?:pulls|issues)\/[1-9][0-9]*(?:\/(?:comments|reviews))?|commits\/[a-fA-F0-9]{40,64}\/(?:check-runs|status))$/.test(path)) throw new Error('HEARTBEAT_PREFLIGHT_REFUSED')
+  try {
+    const { stdout } = await (host ? host.execute(args) : execFileAsync('gh', args, { timeout: GH_TIMEOUT_MS }))
+    assertPreflightCurrent(); return stdout.trim()
+  } catch (cause) { assertPreflightCurrent(); throw cause }
 }
 
 async function ghCount(path: string, jq: string): Promise<number> {
@@ -71,6 +102,7 @@ export async function runPreflightChecks(heartbeatContent: string, lastCheck: st
         return 'changes_detected'
       }
     } catch {
+      assertPreflightCurrent()
       return 'inconclusive'
     }
   }
@@ -84,6 +116,7 @@ export async function runPreflightChecks(heartbeatContent: string, lastCheck: st
     try {
       if (await checkGitHubUrlForChanges(url, lastCheck)) return 'changes_detected'
     } catch {
+      assertPreflightCurrent()
       return 'inconclusive'
     }
   }
@@ -169,7 +202,9 @@ export async function hasFailedCheckRuns(owner: string, repo: string, sha: strin
       '[.statuses[] | select(.state == "failure" or .state == "error")] | length'
     )
     return failedStatuses > 0
-  } catch {
+  } catch (cause) {
+    assertPreflightCurrent()
+    if (ownedPreflight.getStore()) throw cause
     return false
   }
 }
@@ -210,7 +245,8 @@ async function checkGitHubUrlForChanges(url: GitHubUrl, lastCheck: string): Prom
     if (hasMergeConflicts(prState)) return true
     return !!prState.head_sha && await hasFailedCheckRuns(url.owner, url.repo, prState.head_sha)
   } catch (err) {
-    console.warn(`[HeartbeatScheduler] Pre-flight check failed for ${url.owner}/${url.repo}#${url.number}:`, err)
+    assertPreflightCurrent()
+    console.warn(`[HeartbeatScheduler] Pre-flight check failed for ${url.owner}/${url.repo}#${url.number}:`, ownedPreflight.getStore() ? 'Owned provider check failed.' : err)
     throw err
   }
 }

@@ -15,7 +15,7 @@ import type { ProductionCredentialMutation } from '../shared/production-credenti
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { McpProbeService } from '../main/agent-manager/mcp-probe-service'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync, statSync } from 'node:fs'
@@ -30,7 +30,7 @@ import type { AgentManagerHost } from '../main/agent-manager/host'
 import { createAdapter, isCodexAppServerAdapter } from '../main/agent-manager/adapter-factory'
 import { createChatProviderFromSettings } from '../main/chat/provider-factory'
 import { OAuthManager } from '../main/oauth/oauth-manager-core'
-import { WorktreeManager } from '../main/worktree-manager-core'
+import { WorktreeManager, WORKTREE_PORTABLE_LIMITS } from '../main/worktree-manager-core'
 import { GitHubManager } from '../main/github-manager'
 import { GitLabManager } from '../main/gitlab-manager'
 import { ForgejoManager } from '../main/forgejo-manager'
@@ -51,9 +51,12 @@ import { createPackagedConnectorTransport, validateConnectorResources } from '..
 import { SyncManager } from '../main/sync-manager'
 import { TaskGroupService } from '../main/task-groups/service'
 import { HeartbeatSchedulerCore } from '../main/heartbeat-scheduler-core'
+import { HeartbeatFileOwner, type HeartbeatFileOwnerOptions } from '../main/heartbeat-file-owner'
+import { assertHeartbeatTaskEffects, captureHeartbeatTaskEffects, type HeartbeatTaskAuthority } from './heartbeat-backend'
+import { runOwnedPreflightChecks } from '../main/heartbeat-preflight'
 import { RecurrenceSchedulerCore } from '../main/recurrence-scheduler-core'
 import { TaskAutomationScheduler } from '../main/task-automation-scheduler'
-import { WorkspaceCleanupSchedulerCore } from '../main/workspace-cleanup-scheduler-core'
+import { WorkspaceCleanupSchedulerCore, createBoundedWorkspaceCleanupStore } from '../main/workspace-cleanup-scheduler-core'
 import { CaptainWaker } from '../main/captain-waker'
 import { ScheduledCoordination, type BriefingSpeech } from '../main/scheduled-coordination-core'
 import { OverdueNotifier } from '../main/overdue-notifier'
@@ -128,10 +131,12 @@ export interface ProductionOwnerExternalBoundaries {
   agentDetection?: PortableAgentDetectionOwner
   gitProviderProcess?: (options: GitProviderProcessOwnerOptions) => GitProviderProcessOwner
   workspaceFiles?: (options: WorkspaceFileOwnerOptions) => WorkspaceFileOwner
+  heartbeatFiles?: (options: HeartbeatFileOwnerOptions) => HeartbeatFileOwner
 }
 
 export interface ProductionServices {
   workspaceFiles: WorkspaceFileOwner
+  heartbeatFiles: HeartbeatFileOwner
   github: GitHubManager
   gitlab: GitLabManager
   forgejo: ForgejoManager
@@ -343,6 +348,36 @@ export class ProductionOwner {
         if (this.services !== services || services.db !== database || services.agents !== manager || services.workspaceFiles !== files ||
           owners.database !== database || owners.manager !== manager || owners.files !== files || owners.workspaceRoot !== workspaceRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
         files.assertOwners(workspaceRoot)
+      } }
+  }
+
+  getHeartbeatBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!, { db: database, agents: manager, heartbeat, heartbeatFiles: files } = services, workspaceRoot = this.bootstrap.paths.workspaceRoot
+    return { database, manager, heartbeat, files, workspaceRoot,
+      assertHeartbeatOwners: (owners: { database: DatabaseManager; manager: AgentManager; heartbeat: HeartbeatSchedulerCore; files: HeartbeatFileOwner; workspaceRoot: string }): void => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || services.db !== database || services.agents !== manager || services.heartbeat !== heartbeat || services.heartbeatFiles !== files ||
+          owners.database !== database || owners.manager !== manager || owners.heartbeat !== heartbeat || owners.files !== files || owners.workspaceRoot !== workspaceRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        files.assertOwners(workspaceRoot); heartbeat.assertOwners({ database, manager, files, workspaceRoot })
+      } }
+  }
+
+  getWorktreeRuntimeBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!, { db: database, agents: manager, sync, registry: plugins, oauth, worktrees, gitProviderProcess: processOwner, github, gitlab, forgejo, cleanup, workspaceFiles: files } = services
+    const workspaceRoot = this.bootstrap.paths.workspaceRoot, reposRoot = this.bootstrap.paths.reposRoot
+    return { database, manager, sync, worktrees, processOwner, github, gitlab, forgejo, cleanup, files, workspaceRoot, reposRoot,
+      beforeWorkspaceMutation: (taskIds: readonly string[]): void => {
+        this.getDatabaseBindingLease()
+        if (files.inflightCount || services.heartbeatFiles.inflightCount || taskIds.some(id => services.heartbeat.hasTaskOwnership(id))) throw new ProductionOwnerError('WORKSPACE_BUSY')
+      },
+      assertWorktreeRuntimeOwners: (owners: { database: DatabaseManager; manager: AgentManager; sync: SyncManager; worktrees: WorktreeManager; processOwner: GitProviderProcessOwner; github: GitHubManager; gitlab: GitLabManager; forgejo: ForgejoManager; cleanup: WorkspaceCleanupSchedulerCore; files: WorkspaceFileOwner; workspaceRoot: string; reposRoot: string }): void => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || services.db !== database || services.agents !== manager || services.sync !== sync || services.worktrees !== worktrees || services.gitProviderProcess !== processOwner || services.github !== github || services.gitlab !== gitlab || services.forgejo !== forgejo || services.cleanup !== cleanup || services.workspaceFiles !== files ||
+          owners.database !== database || owners.manager !== manager || owners.sync !== sync || owners.worktrees !== worktrees || owners.processOwner !== processOwner || owners.github !== github || owners.gitlab !== gitlab || owners.forgejo !== forgejo || owners.cleanup !== cleanup || owners.files !== files || owners.workspaceRoot !== workspaceRoot || owners.reposRoot !== reposRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        if (services.registry !== plugins || services.oauth !== oauth) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        sync.assertOwners(database, plugins, oauth); files.assertOwners(workspaceRoot); worktrees.assertOwners(reposRoot, workspaceRoot, forgejo); processOwner.assertOpen(); github.assertOwners(processOwner); gitlab.assertOwners(processOwner); forgejo.assertOwners(processOwner)
       } }
   }
 
@@ -573,8 +608,10 @@ export class ProductionOwner {
     const { github, gitlab, forgejo, processOwner: gitProviderProcess } = gitProviders
     this.register('git-provider-process', () => gitProviderProcess.stop(), () => gitProviderProcess.close())
     const worktrees = new WorktreeManager({ reposRoot: this.bootstrap.paths.reposRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot,
+      portableLimits: WORKTREE_PORTABLE_LIMITS,
       exec: gitProviders.exec, assertPath: gitProviders.assertPath,
-      onTaskWorkspaceRemoved: (id, identity) => workspaceFiles.retireWorkspace(id, identity), emitProgress: data => this.emit('worktree:progress', data) })
+      onWorktreeRemoved: (path, identity) => gitProviderProcess.retireWorktreeDirectory(path, identity),
+      onTaskWorkspaceRemoved: (id, identity) => { workspaceFiles.retireWorkspace(id, identity); heartbeatFiles.retireWorkspace(id, identity); gitProviderProcess.retireWorktreeDirectory(join(this.bootstrap.paths.workspaceRoot, id), identity) }, emitProgress: data => this.emit('worktree:progress', data) })
     worktrees.setForgejoManager(forgejo)
     agents.setManagers(github, worktrees, gitlab, forgejo)
     this.register('worktrees', () => worktrees.shutdown(), () => worktrees.close())
@@ -588,6 +625,11 @@ export class ProductionOwner {
     if (!(workspaceFiles instanceof WorkspaceFileOwner)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
     workspaceFiles.assertOwners(this.bootstrap.paths.workspaceRoot)
     this.register('workspace-files', () => workspaceFiles.shutdown(), () => workspaceFiles.close())
+    const heartbeatFileOptions: HeartbeatFileOwnerOptions = { workspaceRoot: this.bootstrap.paths.workspaceRoot, assertCurrent: fileOptions.assertCurrent }
+    const heartbeatFiles = this.boundaries.heartbeatFiles ? this.boundaries.heartbeatFiles(heartbeatFileOptions) : new HeartbeatFileOwner(heartbeatFileOptions)
+    if (!(heartbeatFiles instanceof HeartbeatFileOwner)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    heartbeatFiles.assertOwners(this.bootstrap.paths.workspaceRoot)
+    this.register('heartbeat-files', () => heartbeatFiles.shutdown(), () => heartbeatFiles.close())
     const oauth = new OAuthManager(db, { openExternal: url => native.openExternal(url), notify: (title, body) => this.notify(title, body) })
     agents.setOAuthManager(oauth)
     this.register('oauth', () => oauth.destroy(), () => oauth.close())
@@ -662,7 +704,27 @@ export class ProductionOwner {
     this.removeReportBridge = installCommanderReportBridge({ service: commander, store: commanderStore, deliveries: captainDelivery.store, getProject: id => db.getProject(id) })
     const plugins = new ClaudePluginManager(db, join(profileRoot, 'plugins'))
     this.register('plugins', () => plugins.shutdown(), () => plugins.close())
-    const heartbeat = new HeartbeatSchedulerCore(db, agents)
+    const heartbeatAuthority: HeartbeatTaskAuthority = Object.freeze({ database: db, manager: agents,
+      assertAvailable: () => { fileOptions.assertCurrent(); if (!db.db.open || this.services && (this.services.db !== db || this.services.agents !== agents)) throw new ProductionOwnerError('SERVICE_OWNER_LOST') },
+      canAccessTask: () => true, canAccessProject: () => true, canAccessAgent: () => true,
+      canAccessSkill: () => true, canAccessSecret: () => true, canAccessMcpServer: () => true,
+      canAccessSource: () => true, canAccessConnector: () => true })
+    const heartbeatCaller = Object.freeze({ principal: 'trusted-desktop-main' as const, engineEpoch: this.epoch, webviewId: 'heartbeat-owner', origin: 'app://heartbeat-owner' })
+    const captureHeartbeatBinding = (taskId: string): string => {
+      const binding = captureHeartbeatTaskEffects(heartbeatAuthority, taskId, heartbeatCaller)
+      // The scheduler separately captures and rechecks the exact instructions
+      // through this same file owner before every admitted/background effect.
+      return createHash('sha256').update(binding).digest('hex')
+    }
+    const heartbeat = new HeartbeatSchedulerCore(db, agents, { fileOwner: heartbeatFiles,
+      beforeTaskEffect: taskId => assertHeartbeatTaskEffects(heartbeatAuthority, taskId, heartbeatCaller),
+      captureTaskBinding: captureHeartbeatBinding,
+      preflightTask: (taskId, content, lastCheck) => {
+        const initial = captureHeartbeatTaskEffects(heartbeatAuthority, taskId, heartbeatCaller)
+        const beforeEffect = (): void => { if (captureHeartbeatTaskEffects(heartbeatAuthority, taskId, heartbeatCaller) !== initial) throw new ProductionOwnerError('HEARTBEAT_TASK_CHANGED') }
+        return gitProviderProcess.withRequestGuard(() => runOwnedPreflightChecks(content, lastCheck, {
+          beforeEffect, execute: args => gitProviderProcess.exec('gh', args, { timeout: 15000, maxBuffer: 128 * 1024 }) }), beforeEffect, this.abort.signal)
+      } })
     heartbeat.setEventHost({ emit: (channel, data) => this.emit(channel, data), notify: (title, body) => this.notify(title, body) })
     const recurrence = new RecurrenceSchedulerCore(db, undefined, { emit: (channel, data) => this.emit(channel, data) })
     const automation = new TaskAutomationScheduler(db, agents)
@@ -673,6 +735,7 @@ export class ProductionOwner {
     const coordination = new ScheduledCoordination({ db, agents, getCommander: () => commanderService, createProvider: () => provider(db), notify: (title, body) => this.notify(title, body),
       getSpeech: () => native.speech?.get() ?? null, canPlayAudio: () => native.speech?.canPlayAudio() ?? false })
     const cleanup = new WorkspaceCleanupSchedulerCore(db, worktrees, { workspacesRoot: this.bootstrap.paths.workspaceRoot,
+      portablePolicy: { beforeEffect: fileOptions.assertCurrent, signal: this.abort.signal, store: createBoundedWorkspaceCleanupStore(db, fileOptions.assertCurrent) },
       listWorkspaceDirs: () => readdirSync(this.bootstrap.paths.workspaceRoot, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.isSymbolicLink()).map(entry => entry.name),
       emit: (channel, data) => this.emit(channel, data) })
     for (const [name, scheduler] of [['heartbeat', heartbeat], ['recurrence', recurrence], ['automation', automation], ['wakeups', wakeups], ['coordination', coordination], ['cleanup', cleanup]] as const) {
@@ -698,7 +761,7 @@ export class ProductionOwner {
         this.lock!.assertHeld()
       }, notify: (channel, payload) => this.emit(channel, payload) }) : null
     if (voice) this.register('voice', () => voice.shutdown(), () => voice.close())
-    this.services = { workspaceFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    this.services = { workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)

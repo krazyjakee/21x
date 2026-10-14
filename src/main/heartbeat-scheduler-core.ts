@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { HeartbeatFileOwner } from './heartbeat-file-owner'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import { join } from 'path'
@@ -32,6 +34,16 @@ export interface HeartbeatEventHost {
   notify?(title: string, body: string): void
 }
 
+export interface HeartbeatSchedulerOptions {
+  preflight?: typeof runPreflightChecks
+  preflightTask?(taskId: string, content: string, lastCheck: string | null | undefined): Promise<'no_changes' | 'changes_detected' | 'inconclusive'>
+  fileOwner?: HeartbeatFileOwner
+  /** Application authority, independent of a completed RPC caller. */
+  beforeTaskEffect?(taskId: string): void
+  captureTaskBinding?(taskId: string): string
+}
+interface RequestScope { active: boolean; beforeEffect(): void; signal: AbortSignal; children: Set<Promise<unknown>>; parent?: RequestScope }
+function truncateText(text: string, max: number): string { const truncated = text.substring(0, max); return /[\uD800-\uDBFF]$/.test(truncated) ? truncated.slice(0, -1) : truncated }
 export class HeartbeatSchedulerCore {
   private dbManager: DatabaseManager
   private agentManager: AgentManager
@@ -57,10 +69,82 @@ export class HeartbeatSchedulerCore {
   /** How long a delivery id suppresses an identical repeat delivery. */
   private readonly DELIVERY_DEDUPE_WINDOW_MS = 6 * 60 * 60_000
 
-  constructor(dbManager: DatabaseManager, agentManager: AgentManager, private readonly options: { preflight?: typeof runPreflightChecks } = {}) {
+  private readonly options: Readonly<HeartbeatSchedulerOptions>
+  private readonly requestScopes = new AsyncLocalStorage<RequestScope>()
+  private readonly taskBindings = new WeakMap<TaskRecord, string>()
+  private readonly instructionBindings = new WeakMap<TaskRecord, string | null>()
+  private readonly lifetime = new AbortController()
+  private readonly failedCleanups = new Set<string>()
+  private readonly cleanups = new Map<string, Promise<void>>()
+  constructor(dbManager: DatabaseManager, agentManager: AgentManager, options: HeartbeatSchedulerOptions = {}) {
     this.dbManager = dbManager
     this.agentManager = agentManager
+    this.options = Object.freeze({ ...options })
+    if (options.fileOwner && (!options.beforeTaskEffect || !options.captureTaskBinding || typeof agentManager.withHeartbeatRequestGuard !== 'function' || typeof agentManager.detachedHeartbeatWork !== 'function')) throw new Error('HEARTBEAT_OWNER_UNAVAILABLE')
   }
+  assertOwners(owners: { database: DatabaseManager; manager: AgentManager; files: HeartbeatFileOwner; workspaceRoot: string }): void {
+    if (this.closing || owners.database !== this.dbManager || owners.manager !== this.agentManager || owners.files !== this.options.fileOwner || !this.options.beforeTaskEffect) throw new Error('HEARTBEAT_OWNER_UNAVAILABLE')
+    owners.files.assertOwners(owners.workspaceRoot)
+  }
+  get inflightCount(): number { return this.work.size + this.failedCleanups.size + this.cleanups.size }
+  /** Trusted cleanup coordination; this is not a renderer command or grant. */
+  hasTaskOwnership(taskId: string): boolean { return this.inProgress.has(taskId) || this.failedCleanups.has(taskId) || this.cleanups.has(taskId) }
+  private current(taskId?: string, effect = false): void {
+    if (this.closing) throw new Error('HEARTBEAT_SCHEDULER_CLOSED')
+    for (let scope = this.requestScopes.getStore(); scope; scope = scope.parent) {
+      if (!scope.active || scope.signal.aborted) throw new Error('HEARTBEAT_REQUEST_CANCELLED')
+      scope.beforeEffect()
+    }
+    if (taskId && effect) this.options.beforeTaskEffect?.(taskId)
+  }
+  async withRequestGuard<T>(effect: () => Promise<T>, beforeEffect: () => void, signal: AbortSignal): Promise<T> {
+    this.current(); if (signal.aborted) throw new Error('HEARTBEAT_REQUEST_CANCELLED'); beforeEffect()
+    const scope: RequestScope = { active: true, beforeEffect, signal, children: new Set(), parent: this.requestScopes.getStore() }
+    return await this.requestScopes.run(scope, async () => {
+      try { const result = await effect(); this.current(); return result }
+      finally { while (scope.children.size) await Promise.allSettled([...scope.children]); scope.active = false }
+    })
+  }
+  private detached<T>(effect: () => T): T {
+    return this.requestScopes.run(undefined as unknown as RequestScope, () => typeof this.agentManager.detachedHeartbeatWork === 'function' ? this.agentManager.detachedHeartbeatWork(effect) : effect())
+  }
+  private cleanup(taskId: string, retry = false): Promise<void> {
+    const pending = this.cleanups.get(taskId); if (pending) return pending
+    if (!retry && this.failedCleanups.has(taskId)) return Promise.reject(new Error('HEARTBEAT_CLEANUP_INCOMPLETE'))
+    const raw = this.detached(async () => {
+      try { await this.agentManager.cleanupHeartbeatSession(taskId, !!this.options.fileOwner); this.failedCleanups.delete(taskId) }
+      catch (cause) { if (this.options.fileOwner) this.failedCleanups.add(taskId); throw cause }
+    })
+    this.cleanups.set(taskId, raw)
+    void raw.finally(() => this.cleanups.delete(taskId)).catch(() => {})
+    return raw
+  }
+  private async finishHeartbeat(taskId: string, retry = false): Promise<void> {
+    await this.cleanup(taskId, retry)
+    this.inProgress.delete(taskId); this.loggedInProgress.delete(taskId)
+  }
+  private setting(key: string): string | undefined {
+    this.current()
+    if (this.options.fileOwner) {
+      const row = this.dbManager.db.prepare('SELECT length(CAST(value AS BLOB)) AS bytes FROM settings WHERE key=?').get(key) as { bytes: number } | undefined
+      if (row && (!Number.isSafeInteger(row.bytes) || row.bytes > (key === 'heartbeat_global_instructions' ? 65536 : 128))) throw new Error('HEARTBEAT_STORED_LIMIT')
+    }
+    return this.dbManager.getSetting(key)
+  }
+  private errorMessage(error: unknown): string { return this.options.fileOwner ? 'Heartbeat check failed.' : error instanceof Error ? error.message : String(error) }
+  private rememberTask(task: TaskRecord): void {
+    if (this.options.captureTaskBinding) { this.taskBindings.set(task, this.options.captureTaskBinding(task.id)); this.instructionBindings.set(task, this.readHeartbeatFile(task.id)) }
+  }
+  private currentTask(task: TaskRecord): void {
+    this.current(task.id, true)
+    if (this.options.captureTaskBinding && this.taskBindings.get(task) !== this.options.captureTaskBinding(task.id)) throw new Error('HEARTBEAT_TASK_CHANGED')
+    if (this.options.fileOwner && this.instructionBindings.get(task) !== this.readHeartbeatFile(task.id)) throw new Error('HEARTBEAT_INSTRUCTIONS_CHANGED')
+  }
+  private taskRequest<T>(task: TaskRecord, effect: () => Promise<T>): Promise<T> {
+    this.currentTask(task)
+    return this.options.fileOwner ? this.agentManager.withHeartbeatRequestGuard(effect, () => this.currentTask(task), this.lifetime.signal) : effect()
+  }
+  private fileCurrent(taskId: string): void { this.current(taskId, !this.requestScopes.getStore()) }
 
   start(): void {
     if (this.closing) throw new Error('HEARTBEAT_SCHEDULER_CLOSED')
@@ -90,12 +174,14 @@ export class HeartbeatSchedulerCore {
   private own<T>(operation: () => Promise<T>): Promise<T> {
     const work = Promise.resolve().then(operation)
     this.work.add(work)
-    void work.finally(() => this.work.delete(work)).catch(() => {})
+    const scope = this.requestScopes.getStore(); scope?.children.add(work)
+    void work.finally(() => { this.work.delete(work); scope?.children.delete(work) }).catch(() => {})
     return work
   }
 
   shutdown(): void {
     this.closing = true
+    this.lifetime.abort()
     this.stop()
     for (const cancel of [...this.cancelWaits]) cancel()
   }
@@ -105,12 +191,14 @@ export class HeartbeatSchedulerCore {
       throw new RangeError('Heartbeat shutdown deadline must be an integer from 1 to 3000 ms')
     }
     this.shutdown()
-    if (!this.work.size) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const expired = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('HEARTBEAT_SHUTDOWN_INCOMPLETE')), timeoutMs)
     })
-    try { await Promise.race([Promise.allSettled([...this.work]), expired]) }
+    try { await Promise.race([(async () => {
+      while (this.work.size || this.cleanups.size) await Promise.allSettled([...this.work, ...this.cleanups.values()])
+      for (const taskId of [...this.failedCleanups]) await this.finishHeartbeat(taskId, true)
+    })(), expired]) }
     finally { if (timer) clearTimeout(timer) }
   }
 
@@ -120,8 +208,9 @@ export class HeartbeatSchedulerCore {
    * Enable heartbeat for a task. Sets next check time based on interval.
    */
   enableHeartbeat(taskId: string, intervalMinutes?: number): void {
-    if (this.closing) throw new Error('HEARTBEAT_SCHEDULER_CLOSED')
+    this.current(taskId, true)
     const interval = intervalMinutes ?? this.getDefaultInterval()
+    if (this.options.fileOwner && (!Number.isSafeInteger(interval) || interval < 1 || interval > 525600)) throw new Error('HEARTBEAT_INVALID_INTERVAL')
     const now = new Date()
     const nextCheck = new Date(now.getTime() + interval * 60_000)
 
@@ -147,7 +236,7 @@ export class HeartbeatSchedulerCore {
    * Disable heartbeat for a task.
    */
   disableHeartbeat(taskId: string): void {
-    if (this.closing) throw new Error('HEARTBEAT_SCHEDULER_CLOSED')
+    this.current(taskId, true)
     this.dbManager.updateTask(taskId, {
       heartbeat_enabled: false,
       heartbeat_next_check_at: null
@@ -176,11 +265,13 @@ export class HeartbeatSchedulerCore {
 
   private async executeRunNow(taskId: string): Promise<'sent' | 'no_file' | 'no_agent' | 'in_progress' | 'error'> {
     if (this.closing) return 'error'
+    this.current(taskId, true)
     const task = this.dbManager.getTask(taskId)
     if (!task) {
       console.warn(`[HeartbeatScheduler] runNow: task ${taskId} not found`)
       return 'error'
     }
+    this.rememberTask(task)
 
     // A manual run must never race a scheduled run. Two concurrent runs share one
     // captain session, so both would read the same reply and forward it twice.
@@ -204,27 +295,32 @@ export class HeartbeatSchedulerCore {
     try {
       // Phase 1: Send check to captain (skips preflight since user requested it)
       const checkPrompt = this.buildHeartbeatPrompt(task, heartbeatContent)
-      const captainSessionId = await this.agentManager.sendHeartbeatViaCaptain(agentId, task.id, checkPrompt)
+      this.currentTask(task)
+      const captainSessionId = await this.taskRequest(task, () => this.agentManager.sendHeartbeatViaCaptain(agentId, task.id, checkPrompt))
 
       if (this.closing) {
-        this.inProgress.delete(taskId)
-        await this.agentManager.cleanupHeartbeatSession(taskId)
+        await this.finishHeartbeat(taskId)
         return 'error'
       }
 
-      // IPC returns promptly, but the raw background operation remains owned.
-      void this.own(() => this.processRunNowResult(captainSessionId, task, agentId).catch((err) => {
-        if (this.closing) return
-        const message = err instanceof Error ? err.message : String(err)
+      this.currentTask(task)
+      // Detach only after accepted send; monitoring remains application-owned.
+      this.detached(() => { void this.own(() => this.processRunNowResult(captainSessionId, task, agentId).catch((err) => {
+        try { this.currentTask(task) } catch { return }
+        const message = this.errorMessage(err)
         console.error(`[HeartbeatScheduler] runNow background error for task ${taskId}:`, message)
         this.logResult(taskId, HeartbeatStatus.Error, message)
-      }))
+      })) })
 
       return 'sent'
     } catch (err) {
-      this.inProgress.delete(taskId)
-      this.loggedInProgress.delete(taskId)
-      const message = err instanceof Error ? err.message : String(err)
+      // A failed final guard cannot prove that the backend did not accept the
+      // send. Keep the task busy until the exact session cleanup acknowledges.
+      if (this.options.fileOwner) {
+        await this.finishHeartbeat(taskId)
+        try { this.currentTask(task) } catch { throw err }
+      } else { this.inProgress.delete(taskId); this.loggedInProgress.delete(taskId) }
+      const message = this.errorMessage(err)
       console.error(`[HeartbeatScheduler] runNow error for task ${taskId}:`, message)
       this.logResult(taskId, HeartbeatStatus.Error, message)
       return 'error'
@@ -235,7 +331,8 @@ export class HeartbeatSchedulerCore {
    * Get the heartbeat.md file path for a task.
    */
   getHeartbeatFilePath(taskId: string): string {
-    if (this.closing) throw new Error('HEARTBEAT_SCHEDULER_CLOSED')
+    this.current(taskId)
+    if (this.options.fileOwner) return this.options.fileOwner.getPath(taskId, () => this.fileCurrent(taskId))
     const workspaceDir = this.dbManager.getWorkspaceDir(taskId)
     return join(workspaceDir, 'heartbeat.md')
   }
@@ -244,6 +341,7 @@ export class HeartbeatSchedulerCore {
    * Check if a heartbeat.md file exists for a task.
    */
   hasHeartbeatFile(taskId: string): boolean {
+    if (this.options.fileOwner) return this.options.fileOwner.hasFile(taskId, () => this.fileCurrent(taskId))
     return existsSync(this.getHeartbeatFilePath(taskId))
   }
 
@@ -251,6 +349,10 @@ export class HeartbeatSchedulerCore {
    * Read the heartbeat.md content for a task.
    */
   readHeartbeatFile(taskId: string): string | null {
+    if (this.options.fileOwner) {
+      const content = this.options.fileOwner.readFile(taskId, () => this.fileCurrent(taskId))?.trim()
+      return !content || /^(#[^\n]*\n?\s*)*$/.test(content) ? null : content
+    }
     const filePath = this.getHeartbeatFilePath(taskId)
     if (!existsSync(filePath)) return null
     try {
@@ -268,14 +370,14 @@ export class HeartbeatSchedulerCore {
    * Creates the file if it doesn't exist. Ensures the workspace directory exists.
    */
   writeHeartbeatFile(taskId: string, content: string): void {
+    this.current(taskId, true)
     const filePath = this.getHeartbeatFilePath(taskId)
     const dir = dirname(filePath)
     const previousContent = this.readHeartbeatFile(taskId)
     const normalizedContent = content.trim()
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
-    }
-    writeFileSync(filePath, content, 'utf-8')
+    if (this.options.fileOwner) this.options.fileOwner.writeFile(taskId, content, () => this.current(taskId, true))
+    else { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); writeFileSync(filePath, content, 'utf-8') }
+    this.current(taskId, true)
     console.log(`[HeartbeatScheduler] Wrote heartbeat.md for task ${taskId} (${content.length} chars)`)
 
     if ((previousContent ?? '') !== normalizedContent) {
@@ -307,12 +409,17 @@ export class HeartbeatSchedulerCore {
   private async executeTick(): Promise<void> {
     if (this.closing) return
     try {
-      const globalEnabled = this.dbManager.getSetting('heartbeat_enabled_global')
+      const globalEnabled = this.setting('heartbeat_enabled_global')
       if (globalEnabled === 'false') return
 
       if (!this.isWithinActiveHours()) return
 
-      const dueTasks = this.dbManager.getHeartbeatDueTasks()
+      const dueTasks = this.options.fileOwner
+        ? (this.dbManager.db.prepare(`SELECT id FROM tasks WHERE heartbeat_enabled=1 AND heartbeat_next_check_at IS NOT NULL AND heartbeat_next_check_at<=? AND status!='completed' AND (parent_task_id IS NULL OR NOT EXISTS (SELECT 1 FROM tasks p WHERE p.id=tasks.parent_task_id AND p.status='completed')) ORDER BY heartbeat_next_check_at ASC LIMIT 128`).all(new Date().toISOString()) as Array<{ id: string }>).flatMap(row => {
+          try { this.current(row.id, true); const task = this.dbManager.getTask(row.id); return task ? [task] : [] }
+          catch { console.error('[HeartbeatScheduler] Task heartbeat scope unavailable'); return [] }
+        })
+        : this.dbManager.getHeartbeatDueTasks()
 
       if (dueTasks.length === 0) return
 
@@ -333,6 +440,7 @@ export class HeartbeatSchedulerCore {
       // Process sequentially to avoid overloading agent quotas
       for (const task of actionableTasks) {
         if (this.closing) return
+        this.current(task.id, true)
         // Skip if task has a live agent session (user is actively working)
         if (this.agentManager.hasActiveSessionForTask(task.id)) {
           console.log(`[HeartbeatScheduler] Skipping task ${task.id} — active agent session in progress`)
@@ -371,11 +479,11 @@ export class HeartbeatSchedulerCore {
         try {
           await this.runHeartbeat(task)
         } catch (err) {
-          console.error(`[HeartbeatScheduler] Error running heartbeat for task ${task.id}:`, err)
+          console.error(`[HeartbeatScheduler] Error running heartbeat for task ${task.id}:`, this.errorMessage(err))
         }
       }
     } catch (err) {
-      console.error('[HeartbeatScheduler] Error in checkHeartbeats:', err)
+      console.error('[HeartbeatScheduler] Error in checkHeartbeats:', this.errorMessage(err))
     }
   }
 
@@ -394,6 +502,13 @@ export class HeartbeatSchedulerCore {
 
   private async executeHeartbeat(task: TaskRecord): Promise<void> {
     if (this.closing) return
+    this.current(task.id, true)
+    if (this.options.fileOwner) {
+      const current = this.dbManager.getTask(task.id)
+      if (!current) return
+      task = current
+    }
+    this.rememberTask(task)
     const heartbeatContent = this.readHeartbeatFile(task.id)
     if (!heartbeatContent) {
       this.advanceNextCheck(task)
@@ -406,8 +521,9 @@ export class HeartbeatSchedulerCore {
       console.log(`[HeartbeatScheduler] Running heartbeat for task "${task.title}" (${task.id})`)
 
       // Phase 1: Pre-flight checks (cheap, no LLM)
-      const preflightResult = await (this.options.preflight ?? runPreflightChecks)(heartbeatContent, task.heartbeat_last_check_at)
+      const preflightResult = await (this.options.preflightTask ? this.options.preflightTask(task.id, heartbeatContent, task.heartbeat_last_check_at) : (this.options.preflight ?? runPreflightChecks)(heartbeatContent, task.heartbeat_last_check_at))
       if (this.closing) return
+      this.currentTask(task)
       if (preflightResult === 'no_changes') {
         console.log(`[HeartbeatScheduler] Pre-flight: no changes for task "${task.title}", skipping LLM`)
         this.logResult(task.id, HeartbeatStatus.Ok, 'Pre-flight: no changes detected (LLM skipped)')
@@ -425,10 +541,12 @@ export class HeartbeatSchedulerCore {
 
       // Phase 2: Send check to captain session (doesn't pollute task context)
       const checkPrompt = this.buildHeartbeatPrompt(task, heartbeatContent)
-      const captainSessionId = await this.agentManager.sendHeartbeatViaCaptain(agentId, task.id, checkPrompt)
+      const captainSessionId = await this.taskRequest(task, () => this.agentManager.sendHeartbeatViaCaptain(agentId, task.id, checkPrompt))
       if (this.closing) return
+      this.currentTask(task)
       const captainResult = await this.waitForSessionResult(captainSessionId, task.id)
       if (this.closing) return
+      this.currentTask(task)
 
       // Phase 3: Evaluate captain result
       const classification = this.classifyCaptainResult(captainResult)
@@ -445,6 +563,7 @@ export class HeartbeatSchedulerCore {
         console.log(`[HeartbeatScheduler] Action needed for task "${task.title}", forwarding to task agent`)
         const taskSessionId = await this.forwardFindings(task, captainResult, agentId)
         if (this.closing) return
+        this.currentTask(task)
         if (!taskSessionId) {
           // Duplicate — no agent turn was created, so there is nothing to wait for.
           this.advanceNextCheck(task, false)
@@ -452,22 +571,20 @@ export class HeartbeatSchedulerCore {
         }
         const taskResult = await this.waitForSessionResult(taskSessionId, task.id, task.id)
         if (this.closing) return
+        this.currentTask(task)
         this.handleResult(task, taskSessionId, taskResult)
       }
     } catch (err) {
       if (this.closing) return
-      const message = err instanceof Error ? err.message : String(err)
+      try { this.currentTask(task) } catch { return }
+      const message = this.errorMessage(err)
       console.error(`[HeartbeatScheduler] Heartbeat error for task ${task.id}:`, message)
       this.logResult(task.id, HeartbeatStatus.Error, message)
 
       this.checkConsecutiveErrors(task.id)
       this.advanceNextCheck(task)
     } finally {
-      try { await this.agentManager.cleanupHeartbeatSession(task.id) }
-      finally {
-        this.inProgress.delete(task.id)
-        this.loggedInProgress.delete(task.id)
-      }
+      await this.finishHeartbeat(task.id)
     }
   }
 
@@ -477,8 +594,10 @@ export class HeartbeatSchedulerCore {
   private async processRunNowResult(captainSessionId: string, task: TaskRecord, agentId: string): Promise<void> {
     try {
       if (this.closing) return
+      this.currentTask(task)
       const captainResult = await this.waitForSessionResult(captainSessionId, task.id)
       if (this.closing) return
+      this.currentTask(task)
       const classification = this.classifyCaptainResult(captainResult)
 
       if (classification === 'action') {
@@ -492,11 +611,7 @@ export class HeartbeatSchedulerCore {
         this.advanceNextCheck(task, classification === 'ok')
       }
     } finally {
-      try { await this.agentManager.cleanupHeartbeatSession(task.id) }
-      finally {
-        this.inProgress.delete(task.id)
-        this.loggedInProgress.delete(task.id)
-      }
+      await this.finishHeartbeat(task.id)
     }
   }
 
@@ -505,7 +620,7 @@ export class HeartbeatSchedulerCore {
    * Captain evaluates the status — it doesn't make changes.
    */
   private buildHeartbeatPrompt(task: TaskRecord, heartbeatContent: string): string {
-    const globalInstructions = this.dbManager.getSetting('heartbeat_global_instructions') || ''
+    const globalInstructions = this.setting('heartbeat_global_instructions') || ''
     const lastCheck = task.heartbeat_last_check_at
     const hasGitHubPullLink = extractGitHubUrls(heartbeatContent).some(url => url.type === 'pull')
 
@@ -564,6 +679,7 @@ export class HeartbeatSchedulerCore {
    */
   private async forwardFindings(task: TaskRecord, findings: string, agentId: string): Promise<string | null> {
     if (this.closing) return null
+    this.currentTask(task)
     const now = Date.now()
     this.pruneDeliveredFindings(now)
 
@@ -580,7 +696,11 @@ export class HeartbeatSchedulerCore {
     emitTaskEvent(this.dbManager, 'heartbeat_finding', task.id, findings)
 
     const actionPrompt = this.buildActionPrompt(task, findings, deliveryId)
-    return await this.agentManager.startHeartbeatSession(agentId, task.id, actionPrompt)
+    this.currentTask(task)
+    const sessionId = await this.taskRequest(task, () => this.agentManager.startHeartbeatSession(agentId, task.id, actionPrompt))
+    if (this.closing) return null
+    this.currentTask(task)
+    return sessionId
   }
 
   /** Drop delivery ids older than the dedupe window so the map cannot grow forever. */
@@ -634,6 +754,7 @@ export class HeartbeatSchedulerCore {
       }
 
       const timer = setInterval(() => {
+        try { this.current(taskId, true) } catch (error) { cleanup(); reject(error); return }
         // Try to find the session by ID first
         let session = this.agentManager.getSession(currentSessionId)
 
@@ -669,6 +790,7 @@ export class HeartbeatSchedulerCore {
           const lastMessage = this.agentManager.getLastAssistantMessage(currentSessionId)
           if (lastMessage) {
             cleanup()
+            if (this.options.fileOwner && (typeof lastMessage !== 'string' || Buffer.byteLength(lastMessage) > 128 * 1024 || Buffer.from(lastMessage).toString('utf8') !== lastMessage || lastMessage.includes('\0'))) { reject(new Error('HEARTBEAT_RESULT_LIMIT')); return }
             resolve(lastMessage)
             return
           }
@@ -716,7 +838,7 @@ export class HeartbeatSchedulerCore {
       .trim()
 
     if (normalized.length > 0) {
-      return normalized.substring(0, 500)
+      return truncateText(normalized, 500)
     }
 
     if (status === HeartbeatStatus.Ok) {
@@ -735,16 +857,17 @@ export class HeartbeatSchedulerCore {
    */
   private notifyAttentionNeeded(task: TaskRecord, summary: string): void {
     if (this.closing) return
+    this.currentTask(task)
     try {
-      this.host?.notify?.(`Heartbeat Alert: ${task.title}`, summary.substring(0, 200))
+      this.host?.notify?.(`Heartbeat Alert: ${task.title}`, truncateText(summary, 200))
     } catch (err) {
-      console.error('[HeartbeatScheduler] Failed to show notification:', err)
+      console.error('[HeartbeatScheduler] Failed to show notification:', this.errorMessage(err))
     }
 
     this.sendToRenderer('heartbeat:alert', {
       taskId: task.id,
       title: task.title,
-      summary: summary.substring(0, 500)
+      summary: truncateText(summary, 500)
     })
 
     // Also trigger a task refresh so UI shows the alert
@@ -756,11 +879,12 @@ export class HeartbeatSchedulerCore {
    */
   private logResult(taskId: string, status: HeartbeatStatus, summary?: string, sessionId?: string): void {
     if (this.closing) return
+    this.current(taskId, true)
     this.dbManager.createHeartbeatLog({
       task_id: taskId,
       status,
-      summary: summary ?? null,
-      session_id: sessionId ?? null
+      summary: summary === undefined ? null : this.options.fileOwner ? status === HeartbeatStatus.Error ? 'Heartbeat check failed.' : truncateText(summary, 4000) : summary,
+      session_id: sessionId === undefined ? null : this.options.fileOwner ? truncateText(sessionId, 512) : sessionId
     })
   }
 
@@ -773,6 +897,7 @@ export class HeartbeatSchedulerCore {
    */
   private advanceNextCheck(task: TaskRecord, isOk?: boolean): void {
     if (this.closing) return
+    this.currentTask(task)
     const baseInterval = task.heartbeat_interval_minutes ?? this.getDefaultInterval()
     let effectiveInterval = baseInterval
 
@@ -803,7 +928,10 @@ export class HeartbeatSchedulerCore {
    * Count consecutive OK results from most recent logs.
    */
   private countConsecutiveOks(taskId: string): number {
-    const logs = this.dbManager.getHeartbeatLogs(taskId, 10)
+    this.current(taskId, true)
+    const logs = this.options.fileOwner
+      ? this.dbManager.db.prepare('SELECT status FROM heartbeat_logs WHERE task_id=? ORDER BY created_at DESC LIMIT 10').all(taskId) as Array<{ status: string }>
+      : this.dbManager.getHeartbeatLogs(taskId, 10)
     let count = 0
     for (const log of logs) {
       if (log.status === HeartbeatStatus.Ok) count++
@@ -817,6 +945,7 @@ export class HeartbeatSchedulerCore {
    */
   private checkConsecutiveErrors(taskId: string): void {
     if (this.closing) return
+    this.current(taskId, true)
     const consecutiveErrors = this.dbManager.getHeartbeatConsecutiveErrors(taskId)
 
     if (consecutiveErrors >= this.MAX_CONSECUTIVE_ERRORS) {
@@ -843,7 +972,9 @@ export class HeartbeatSchedulerCore {
 
   /** Heartbeats run on the task's own agent, else the default agent. */
   private resolveAgentId(task: TaskRecord): string | null {
+    this.current(task.id, true)
     if (task.agent_id) return task.agent_id
+    if (this.options.fileOwner) return (this.dbManager.db.prepare('SELECT id FROM agents ORDER BY is_default DESC,created_at ASC,id ASC LIMIT 1').get() as { id: string } | undefined)?.id ?? null
     const agents = this.dbManager.getAgents()
     const defaultAgent = agents.find(a => a.is_default)
     return defaultAgent?.id ?? agents[0]?.id ?? null
@@ -853,8 +984,8 @@ export class HeartbeatSchedulerCore {
    * Check if current time is within configured active hours.
    */
   private isWithinActiveHours(): boolean {
-    const start = this.dbManager.getSetting('heartbeat_active_hours_start')
-    const end = this.dbManager.getSetting('heartbeat_active_hours_end')
+    const start = this.setting('heartbeat_active_hours_start')
+    const end = this.setting('heartbeat_active_hours_end')
 
     // No active hours configured → always active
     if (!start || !end) return true
@@ -877,11 +1008,11 @@ export class HeartbeatSchedulerCore {
   }
 
   private getDefaultInterval(): number {
-    const setting = this.dbManager.getSetting('heartbeat_default_interval')
+    const setting = this.setting('heartbeat_default_interval')
     return setting ? parseInt(setting, 10) : HEARTBEAT_DEFAULTS.intervalMinutes
   }
 
   private sendToRenderer(channel: Parameters<HeartbeatEventHost['emit']>[0], data: unknown): void {
-    if (!this.closing) this.host?.emit(channel, data)
+    if (!this.closing) { this.current(); if (data && typeof data === 'object' && 'taskId' in data) this.current(String(data.taskId), true); this.host?.emit(channel, data) }
   }
 }

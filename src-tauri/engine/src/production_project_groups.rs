@@ -212,7 +212,7 @@ fn group(v: &Value) -> bool {
 }
 // Native outer task projection rejects private fields. The service and renderer
 // additionally validate every existing lifecycle field and date semantic.
-fn task(v: &Value) -> bool {
+pub(super) fn task(v: &Value) -> bool {
     let required = &[
         "title",
         "description",

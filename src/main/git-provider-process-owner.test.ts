@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, type ChildProcess, type ExecFileException, type ExecFileOptions } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, mkdir, realpath, rm, writeFile, readFile, symlink, rename } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, writeFile, readFile, symlink, rename, lstat } from 'node:fs/promises'
 import { delimiter, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { GitProviderProcessOwner, GIT_PROVIDER_PROCESS_LIMITS, type GitProviderProcessOwnerOptions } from './git-provider-process-owner'
@@ -24,6 +24,8 @@ beforeEach(async () => {
 if(mode==='hold'){process.on('SIGTERM',()=>{});process.stdout.write('ready');setInterval(()=>{},1000)}
 else if(mode==='delay'){process.stdout.write('done');setTimeout(()=>process.exit(0),200)}
 else if(mode==='fail'){process.stderr.write(process.env.GH_TOKEN||'fixed fixture failure');process.exitCode=1}
+else if(mode==='diff-one'){process.stdout.write('diff --git a/new.txt b/new.txt\\n+Actual local addition');process.stderr.write('fixture-private-diagnostic');process.exitCode=1}
+else if(mode==='diff-two'){process.stdout.write('discard failed output');process.exitCode=2}
 else if(mode==='overflow'){process.stdout.write('x'.repeat(200000))}
 else if(mode==='path'){process.stdout.write(JSON.stringify({path:process.env.PATH??null}))}
 else if(mode==='gh-pages'){const page=Number(new URL('https://fixture.invalid'+args.at(-1)).searchParams.get('page'));process.stdout.write(JSON.stringify(Array.from({length:page===1?100:1},(_,i)=>({number:(page-1)*100+i+1,title:'Fixture issue',pull_request:page===1&&i===0?{}:undefined}))))}
@@ -63,6 +65,43 @@ async function ready(): Promise<ChildProcess> {
 }
 
 describe.skipIf(!node)('captured actual CLI process owner (fixed synthetic Node programs)', () => {
+  it('revokes inherited callbacks after a nested request completes and joins each actual child receipt', async () => {
+    const owner = make({ gh: 'delay' }), gate = deferred<void>()
+    let inherited!: Promise<unknown>, accepted!: Promise<unknown>, nestedFinished = false
+    await owner.withRequestGuard(async () => {
+      await owner.withRequestGuard(async () => {
+        accepted = owner.exec('gh', ['--version'])
+        inherited = (async () => { await gate.promise; return owner.exec('gh', ['--version']) })()
+      }, () => {})
+      nestedFinished = true; expect(owner.childCount).toBe(0); expect(await accepted).toEqual({ stdout: 'done', stderr: '' })
+    }, () => {})
+    expect(nestedFinished).toBe(true)
+    const refused = expect(inherited).rejects.toMatchObject({ code: 'GIT_PROVIDER_CANCELLED' })
+    gate.resolve(); await refused; expect(children).toHaveLength(1)
+  })
+  it('retires only the known physical task directory after cleanup and permits legitimate recreation', async () => {
+    const workspace = join(root, 'workspaces', 'task-one'), repo = join(workspace, 'repo'), owner = make()
+    await mkdir(workspace); await mkdir(repo)
+    const physical = await lstat(workspace, { bigint: true }), receipt = { dev: physical.dev.toString(), ino: physical.ino.toString() }
+    await owner.execWorktree('git', ['status'], { cwd: workspace }); await owner.execWorktree('git', ['status'], { cwd: repo })
+    expect(() => owner.retireWorktreeDirectory(workspace, { ...receipt, ino: '0' })).toThrow('CWD_REFUSED')
+    await rename(workspace, join(root, 'workspaces', 'old-task'))
+    owner.retireWorktreeDirectory(workspace, receipt)
+    await mkdir(workspace); await mkdir(repo)
+    expect((await owner.execWorktree('git', ['status'], { cwd: repo })).stdout).toBe('[]')
+    expect(() => owner.retireWorktreeDirectory(workspace, receipt)).toThrow('CWD_REFUSED')
+  })
+  it('accepts only the exact untracked diff exit-one receipt and discards its diagnostics', async () => {
+    const owner = make({ git: 'diff-one' }), args = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', '--', '/dev/null', 'new.txt']
+    const options = { cwd: join(root, 'workspaces'), allowDiffExitOne: true as const }
+    expect(await owner.execWorktree('git', args, options)).toEqual({ stdout: 'diff --git a/new.txt b/new.txt\n+Actual local addition', stderr: '' })
+    expect(owner.childCount).toBe(0); expect(children[0].stdout?.closed).toBe(true); expect(children[0].stderr?.closed).toBe(true)
+    await expect(owner.execWorktree('git', ['status'], options)).rejects.toMatchObject({ code: 'GIT_PROVIDER_INVALID_OPTIONS' })
+    await expect(owner.execWorktree('gh', args, options)).rejects.toMatchObject({ code: 'GIT_PROVIDER_INVALID_OPTIONS' })
+    for (const file of ['/etc/passwd', '../outside', 'C:\\outside', 'safe/../outside']) await expect(owner.execWorktree('git', [...args.slice(0, -1), file], options)).rejects.toMatchObject({ code: 'GIT_PROVIDER_INVALID_OPTIONS' })
+    await expect(owner.execWorktree('git', args, { cwd: options.cwd })).rejects.toMatchObject({ code: 'GIT_PROVIDER_COMMAND_FAILED' })
+    await expect(make({ git: 'diff-two' }).execWorktree('git', args, options)).rejects.toMatchObject({ code: 'GIT_PROVIDER_COMMAND_FAILED' })
+  })
   it('preserves private provider env only for its actual child, with approved roots and no parent mutation', async () => {
     const parentPath = process.env.PATH
     const owner = make({ gh: 'env' }, { environment: { GH_TOKEN: 'fixture-private-provider', PATH: root, HOME: '/incorrect-host-home' } })

@@ -65,6 +65,41 @@ it('routes project reads during hydration and fences real group, pin and pause w
   expect(await f.host.api.concurrency.pin('project_fixture', 'agent_fixture', null)).toEqual({ success: true })
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'concurrency:pin', payload: { projectId: 'project_fixture', agentId: 'agent_fixture', level: null }, engineEpoch: 'engine-1' })
 })
+it('routes heartbeat and worktree reads while fencing admission, file writes and cleanup until hydration completes', async () => {
+  const f = fixture(); await f.host.reconnect()
+  f.results.set('heartbeat:getStatus', { enabled: false, intervalMinutes: null, lastCheckAt: null, nextCheckAt: null, hasHeartbeatFile: true })
+  f.results.set('heartbeat:readFile', '# Check local work')
+  f.results.set('worktree:files', [])
+  f.results.set('worktree:readFile', { content: '', size: 200000, binary: false, truncated: true })
+  f.results.set('heartbeat:writeFile', true); f.results.set('heartbeat:runNow', 'no_file')
+  f.results.set('workspace:runCleanupNow', { cleaned: 0, errors: [], nodeModulesCleaned: 0 })
+  const gate = deferred<void>(); f.host.setRehydrator(() => gate.promise); const recovery = f.host.rehydrate()
+  expect(await f.host.api.heartbeat.readFile('task_fixture')).toBe('# Check local work')
+  expect(await f.host.api.heartbeat.getStatus('task_fixture')).toMatchObject({ enabled: false, hasHeartbeatFile: true })
+  expect(await f.host.api.worktree.files('task_fixture', [])).toEqual([])
+  expect(await f.host.api.worktree.readFile('task_fixture', null, 'large.txt')).toMatchObject({ truncated: true, size: 200000 })
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.heartbeat.runNow('task_fixture')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.heartbeat.writeFile('task_fixture', '# New check')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.worktree.cleanup('task_fixture', [], '')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.worktree.runCleanupNow()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  gate.resolve(); await recovery
+  expect(await f.host.api.heartbeat.writeFile('task_fixture', '# New check')).toBe(true)
+  expect(await f.host.api.heartbeat.runNow('task_fixture')).toBe('no_file')
+  expect(await f.host.api.worktree.runCleanupNow()).toEqual({ cleaned: 0, errors: [], nodeModulesCleaned: 0 })
+  const progress = vi.fn(); f.host.api.onWorktreeProgress(progress)
+  f.emit('worktree:progress', { taskId: 'task_fixture', repo: 'fixture/repo', step: 'done', done: true })
+  expect(progress).toHaveBeenCalledWith({ taskId: 'task_fixture', repo: 'fixture/repo', step: 'done', done: true })
+  const cleanup = vi.fn(); f.host.api.onWorkspaceCleanupProgress(cleanup)
+  f.emit('workspace:cleanup-progress', { phase: 'done', current: 0, total: 0, cleaned: 0, errors: [] })
+  expect(cleanup).toHaveBeenCalledOnce()
+  const alert = vi.fn(), disabled = vi.fn(); f.host.api.onHeartbeatAlert(alert); f.host.api.onHeartbeatDisabled(disabled)
+  f.emit('heartbeat:alert', { taskId: 'task_fixture', title: 'Local task', summary: 'Review the new result 🌱' })
+  f.emit('heartbeat:disabled', { taskId: 'task_fixture', reason: '3 consecutive errors' })
+  expect(alert).toHaveBeenCalledWith({ taskId: 'task_fixture', title: 'Local task', summary: 'Review the new result 🌱' })
+  expect(disabled).toHaveBeenCalledOnce()
+})
 it('uses exact codecs and trusted host metadata; missing binary/file bindings never reach native or Electron', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
@@ -133,7 +168,7 @@ it('fences writes until durable recovery finishes and never replays a mutation i
 it('keeps native subscriptions across reconnect, releases old owners, and emits only local recovery invalidation', async () => {
   const f = fixture(), callback = vi.fn(), refreshed = vi.fn()
   const off = f.host.api.onTaskDeleted(callback), offRefresh = f.host.api.onTasksRefresh(refreshed)
-  expect(f.host.api.onWorktreeProgress).toBeUndefined()
+  expect(typeof f.host.api.onWorktreeProgress).toBe('function')
   f.host.setRehydrator(async () => {}); await f.host.reconnect(); expect(refreshed).toHaveBeenCalledOnce()
   f.emit('task:deleted', { taskId: 'task-1' }); expect(callback).toHaveBeenCalledWith({ taskId: 'task-1' })
   f.changeEpoch(); await f.host.reconnect(); expect(f.unlisten).toHaveBeenCalledOnce(); expect(refreshed).toHaveBeenCalledTimes(2)
@@ -176,7 +211,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 178 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 215 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -185,7 +220,7 @@ it('binds the 178 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(201)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(215)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)

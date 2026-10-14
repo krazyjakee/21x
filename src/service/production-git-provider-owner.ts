@@ -84,7 +84,8 @@ export function createProductionGitProviderOwner(input: {
     if (typeof cwd !== 'string') throw new Error('WORKTREE_PATH_UNAUTHORIZED')
     directories.assertPath(cwd)
     return processOwner.execWorktree(program, args, { cwd: realpathSync(cwd),
-      ...(options.timeout !== undefined ? { timeout: options.timeout } : {}), ...(options.maxBuffer !== undefined ? { maxBuffer: options.maxBuffer } : {}) })
+      ...(options.timeout !== undefined ? { timeout: options.timeout } : {}), ...(options.maxBuffer !== undefined ? { maxBuffer: options.maxBuffer } : {}),
+      ...('allowDiffExitOne' in options && options.allowDiffExitOne === true ? { allowDiffExitOne: true as const } : {}) })
   }
   return { github, gitlab, forgejo, processOwner, exec, assertPath: (path: string) => directories.assertPath(path) }
 }

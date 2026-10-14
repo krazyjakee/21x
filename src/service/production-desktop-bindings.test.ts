@@ -33,6 +33,7 @@ import { PROJECT_RUNTIME_CODECS } from '../shared/project-runtime-codecs'
 import { open as openFile } from 'node:fs/promises'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
+function deferred<T = void>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 let ownerModule: typeof import('./production-owner')
 let bindingModule: typeof import('./production-desktop-bindings')
 beforeEach(async () => {
@@ -106,6 +107,57 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('keeps a changed heartbeat file and refuses stale findings after the actual prompt was admitted', async () => {
+    const f = await fixture(), db = f.services.db, task = db.createTask({ title: 'Update local checks while sending' })!, agent = db.getAgents()[0]
+    db.updateTask(task.id, { agent_id: agent.id })
+    await f.backend.invoke('heartbeat:writeFile', { taskId: task.id, content: '# Checks\nCheck the previous instructions.' }, f.caller, f.signal)
+    const adapter = f.boundaries.createAdapter(), gate = deferred<void>(), entered = deferred<void>()
+    finishers.push(() => gate.resolve())
+    adapter.sendPrompt.mockImplementation(async () => { entered.resolve(); await gate.promise })
+    const request = f.backend.invoke('heartbeat:runNow', { taskId: task.id }, f.caller, f.signal).catch(cause => cause)
+    await vi.waitFor(() => expect(adapter.sendPrompt).toHaveBeenCalledOnce(), { timeout: 20000, interval: 20 })
+    await expect(f.backend.invoke('worktree:cleanup', { taskId: task.id, repos: [], org: '' }, f.caller, f.signal)).rejects.toThrow()
+    await f.backend.invoke('heartbeat:writeFile', { taskId: task.id, content: '# Checks\nCheck the updated instructions.' }, f.caller, f.signal)
+    gate.resolve(); expect(await request).toMatchObject({ code: 'INTERNAL_ERROR' })
+    expect(adapter.sendPrompt).toHaveBeenCalledOnce(); expect(adapter.destroySession).toHaveBeenCalledOnce()
+    expect(db.db.prepare('SELECT task_id,state FROM delivery_outbox WHERE kind=?').all('agent_message')).toEqual([{ task_id: task.id, state: 'cancelled' }])
+    expect(await f.backend.invoke('heartbeat:readFile', { taskId: task.id }, f.caller, f.signal)).toEqual({ defined: true, value: '# Checks\nCheck the updated instructions.' })
+    expect(f.services.heartbeat.hasTaskOwnership(task.id)).toBe(false)
+  }, 30000)
+  it('exports actual heartbeat and worktree responses through captured singleton owners', async () => {
+    const f = await fixture(), db = f.services.db, project = db.getDefaultProject()!
+    const task = db.createTask({ title: 'Actual local controls', project_id: project.id })!
+    const heartbeatLease = f.owner.getHeartbeatBindingLease(), worktreeLease = f.owner.getWorktreeRuntimeBindingLease()
+    expect(heartbeatLease.heartbeat).toBe(f.services.heartbeat); expect(heartbeatLease.files).toBe(f.services.heartbeatFiles)
+    expect(worktreeLease.worktrees).toBe(f.services.worktrees); expect(worktreeLease.processOwner).toBe(f.services.gitProviderProcess)
+    heartbeatLease.assertHeartbeatOwners(heartbeatLease); worktreeLease.assertWorktreeRuntimeOwners(worktreeLease)
+    const responses: Array<{ operation: string; wire: unknown }> = []
+    const invoke = async (operation: string, payload: Parameters<typeof f.backend.invoke>[1]) => {
+      const wire = await f.backend.invoke(operation, payload, f.caller, f.signal)
+      responses.push({ operation, wire }); return (wire as { value: unknown }).value
+    }
+    const workspace = await invoke('worktree:setup', { taskId: task.id, repos: [], org: '', provider: 'github' }) as string
+    expect(workspace).toBe(join(f.bootstrap.paths.workspaceRoot, task.id))
+    writeFileSync(join(workspace, 'README.md'), 'Actual retained local preview 🌱')
+    expect(await invoke('worktree:readFile', { taskId: task.id, repoFullName: null, filePath: 'README.md' })).toMatchObject({ content: 'Actual retained local preview 🌱', binary: false, truncated: false })
+    await invoke('worktree:files', { taskId: task.id, repos: [] })
+    await invoke('worktree:changes', { taskId: task.id, repos: [] })
+    expect(await invoke('heartbeat:writeFile', { taskId: task.id, content: '# Local checks\nCheck this task.' })).toBe(true)
+    expect(await invoke('heartbeat:readFile', { taskId: task.id })).toContain('Check this task.')
+    await invoke('heartbeat:enable', { taskId: task.id, intervalMinutes: 30 })
+    expect(await invoke('heartbeat:getStatus', { taskId: task.id })).toMatchObject({ enabled: true, intervalMinutes: 30, hasHeartbeatFile: true })
+    expect(await invoke('heartbeat:getLogs', { taskId: task.id, limit: 20 })).toEqual([])
+    await invoke('heartbeat:updateInterval', { taskId: task.id, intervalMinutes: 60 })
+    await invoke('heartbeat:disable', { taskId: task.id })
+    await f.backend.invoke('heartbeat:writeFile', { taskId: task.id, content: '' }, f.caller, f.signal)
+    expect(await invoke('heartbeat:runNow', { taskId: task.id })).toBe('no_file')
+    await invoke('worktree:cleanup', { taskId: task.id, repos: [], org: '', removeTaskDir: true })
+    expect(existsSync(workspace)).toBe(false)
+    expect(await invoke('workspace:runCleanupNow', {})).toEqual({ cleaned: 0, errors: [], nodeModulesCleaned: 0 })
+    expect(new Set(responses.map(row => row.operation)).size).toBe(14)
+    const output = process.env.TWENTYONEX_WORKSPACE_RUNTIME_RESULTS_OUT
+    if (output) writeFileSync(output, JSON.stringify({ version: 1, responses }))
+  })
   it('exports actual group and project responses through their captured singleton owners', async () => {
     const f = await fixture(), db = f.services.db, agent = db.getAgents()[0], project = db.getDefaultProject()!
     const task = db.createTask({ title: 'First group member', project_id: project.id })!
@@ -332,7 +384,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
 
   it('pairs against the actual mobile HTTP owner and sends a phone start through shared admission', async () => {
     const f = await fixture(undefined, false, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(169)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(183)
     const lease = f.owner.getMobileBindingLease()!
     expect(lease.deps.db).toBe(f.services.db); expect(lease.deps.agentManager).toBe(f.services.agents)
     expect(lease.deps.taskOwners?.automation).toBe(f.services.automation)
@@ -367,7 +419,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(166)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(180)
     const lease = f.owner.getConnectorBindingLease()!
     const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
     const id = (ensured as { value: { instanceId: string } }).value.instanceId
@@ -479,7 +531,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(159)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(173)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)
