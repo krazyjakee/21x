@@ -7,6 +7,8 @@ import { TaskWorkspaceScopeReader } from './task-workspace-scope'
 import { TASK_ATTACHMENT_CODECS, TASK_ATTACHMENT_OPERATIONS, TASK_ATTACHMENT_LIMITS, taskAttachmentRecords, type TaskAttachmentCodec, type TaskAttachmentOperation } from '../shared/task-attachment-codecs'
 import type { DesktopCommandMap } from '../shared/desktop-operations'
 import { isDatabaseId } from '../shared/database-desktop-codecs'
+import { isUiLeaseId } from '../shared/ui-desktop-codecs'
+import { isAttachmentPathReceipt, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import { ServiceProtocolError, isJsonValue, type JsonValue } from '../shared/service-protocol'
 import { DesktopOperationRegistry, type DesktopCallerContext } from './transport/desktop-registry'
 import type { OperationSchema } from './transport/peer'
@@ -22,8 +24,10 @@ export interface TaskAttachmentBackendOptions extends TaskAttachmentOwners {
   canAccessAgent(id: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   runAttachmentMutation?<T>(taskIds: string[], effect: () => Promise<T>): Promise<T>
   onTaskUpdated(taskId: string, attachments: FileAttachmentRecord[]): void
+  openAttachment?(receipt: AttachmentPathReceipt, caller: DesktopCallerContext, signal: AbortSignal): Promise<void>
 }
-/** Two actual attachment effects; no picker, arbitrary path or native viewer. */
+/** Exact saved attachment effects. Native open is an optional real host
+ * callback; no picker, arbitrary path or active WebView preview is granted. */
 export class TaskAttachmentBackend {
   readonly registry: DesktopOperationRegistry
   private readonly owners: TaskAttachmentOwners
@@ -31,13 +35,16 @@ export class TaskAttachmentBackend {
   private readonly controllers = new Set<AbortController>()
   private closing = false
   private mutationBusy = false
+  private readonly openAttachment: TaskAttachmentBackendOptions['openAttachment']
   constructor(private readonly options: TaskAttachmentBackendOptions) {
     this.owners = Object.freeze({ database: options.database, manager: options.manager, files: options.files, attachmentRoot: options.attachmentRoot })
-    if (!(options.manager instanceof AgentManager) || !(options.files instanceof TaskAttachmentFileOwner) || typeof options.onTaskUpdated !== 'function') throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    this.openAttachment = options.openAttachment
+    if (!(options.manager instanceof AgentManager) || !(options.files instanceof TaskAttachmentFileOwner) || typeof options.onTaskUpdated !== 'function' || this.openAttachment !== undefined && typeof this.openAttachment !== 'function') throw new ServiceProtocolError('INVALID_ARGUMENTS')
     this.available(); this.registry = new DesktopOperationRegistry({ owner: 'service', engineEpoch: options.engineEpoch, isTrustedDesktop: options.isTrustedDesktop })
-    for (const operation of TASK_ATTACHMENT_OPERATIONS) this.bind(operation)
+    for (const operation of this.operations()) this.bind(operation)
   }
   get inflightCount(): number { return this.flights.size }
+  private operations(): readonly TaskAttachmentOperation[] { return this.openAttachment ? TASK_ATTACHMENT_OPERATIONS : TASK_ATTACHMENT_OPERATIONS.filter(operation => operation !== 'attachments:open') }
   shutdown(): void { this.closing = true; for (const controller of this.controllers) controller.abort() }
   async close(timeoutMs = 2000): Promise<void> {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) throw new RangeError('Invalid attachment backend close deadline')
@@ -45,7 +52,7 @@ export class TaskAttachmentBackend {
     try { await Promise.race([Promise.allSettled([...this.flights]), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ServiceProtocolError('TIMEOUT')), timeoutMs) })]) } finally { if (timer) clearTimeout(timer) }
   }
   operationSchemas(caller: DesktopCallerContext): Record<string, OperationSchema> {
-    return Object.fromEntries(TASK_ATTACHMENT_OPERATIONS.map(operation => [operation, { validatePayload: (value: unknown) => { try { return isJsonValue(value) && TASK_ATTACHMENT_CODECS[operation].validateArguments(TASK_ATTACHMENT_CODECS[operation].decodeArguments(value)) } catch { return false } }, validateResult: TASK_ATTACHMENT_CODECS[operation].validateWireResult, handle: (value: JsonValue, signal: AbortSignal) => this.registry.invoke(operation, value, caller, signal) }]))
+    return Object.fromEntries(this.operations().map(operation => [operation, { validatePayload: (value: unknown) => { try { return isJsonValue(value) && TASK_ATTACHMENT_CODECS[operation].validateArguments(TASK_ATTACHMENT_CODECS[operation].decodeArguments(value)) } catch { return false } }, validateResult: TASK_ATTACHMENT_CODECS[operation].validateWireResult, handle: (value: JsonValue, signal: AbortSignal) => this.registry.invoke(operation, value, caller, signal) }]))
   }
   private available(signal?: AbortSignal): void {
     if (signal?.aborted) throw new ServiceProtocolError('CANCELLED')
@@ -58,12 +65,13 @@ export class TaskAttachmentBackend {
   }
   private async execute<K extends TaskAttachmentOperation>(operation: K, args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal): Promise<DesktopCommandMap[K]['result']> {
     const { database, manager, files } = this.owners, db = database.db, taskId = args[0] as string
+    const mutation = operation !== 'attachments:open'
     let active = true
-    const current = (): void => { if (!active) throw new ServiceProtocolError('CANCELLED'); this.authorize(caller, signal) }
+    const current = (): void => { if (!active) throw new ServiceProtocolError('CANCELLED'); this.authorize(caller, signal); if (!mutation && !isUiLeaseId(caller.uiLeaseId)) throw new ServiceProtocolError('INVALID_REQUEST') }
     const readIds = new Set<string>(), projects = new Set<string>(), agents = new Set<string>()
     let selectedProject: string | undefined
     const taskGrant = (id: string, write = false): boolean => { current(); if (!isDatabaseId(id) || !this.options.canAccessTask(id, caller, 'read') || write && !this.options.canAccessTask(id, caller, 'write')) throw new ServiceProtocolError('INVALID_REQUEST'); readIds.add(id); return true }
-    const projectGrant = (id: string): boolean => { current(); if (!isDatabaseId(id)) throw new ServiceProtocolError('INVALID_REQUEST'); selectedProject ??= id; if (!this.options.canAccessProject(id, caller, 'read') || id === selectedProject && !this.options.canAccessProject(id, caller, 'write')) throw new ServiceProtocolError('INVALID_REQUEST'); projects.add(id); return true }
+    const projectGrant = (id: string): boolean => { current(); if (!isDatabaseId(id)) throw new ServiceProtocolError('INVALID_REQUEST'); selectedProject ??= id; if (!this.options.canAccessProject(id, caller, 'read') || mutation && id === selectedProject && !this.options.canAccessProject(id, caller, 'write')) throw new ServiceProtocolError('INVALID_REQUEST'); projects.add(id); return true }
     const scopeReader = new TaskWorkspaceScopeReader({ database, assertAvailable: current, canAccessTask: id => taskGrant(id), canAccessProject: id => projectGrant(id) })
     // Bound group scalar materialization before the shared scope reader parses
     // repositories. No unrelated task/agent credential getter is used here.
@@ -87,15 +95,42 @@ export class TaskAttachmentBackend {
       return { raw, records: records as FileAttachmentRecord[] }
     }
     try {
-      current(); taskGrant(taskId, true); preflight(); const initialScope = scopeReader.capture(taskId, caller), scopeText = JSON.stringify(initialScope), initial = metadata(); let expectedMetadata = initial.raw
+      current(); taskGrant(taskId, mutation); preflight(); const initialScope = scopeReader.capture(taskId, caller), scopeText = JSON.stringify(initialScope), initial = metadata(); let expectedMetadata = initial.raw
       if (Buffer.byteLength(scopeText) + Buffer.byteLength(initial.raw) >= TASK_ATTACHMENT_LIMITS.wireBytes) throw new ServiceProtocolError('FRAME_TOO_LARGE')
       const relevant = db.prepare(relevantSql).all(...relevantParams) as Array<{ id: string; project_id: string; agent_id: string | null }>
       for (const task of relevant) { taskGrant(task.id); projectGrant(task.project_id); if (task.agent_id) { if (!isDatabaseId(task.agent_id) || !this.options.canAccessAgent(task.agent_id, caller, 'read')) throw new ServiceProtocolError('INVALID_REQUEST'); agents.add(task.agent_id) } }
       const relevantText = JSON.stringify(relevant)
+      // A group may retain an assigned agent independently of its task rows.
+      // Capture only the bounded ownership scalar; do not load its credentials.
+      const groupAgent = (): string | null => {
+        if (mutation || initialScope.group === null) return null
+        const id = (initialScope.group as { id: string }).id
+        const row = db.prepare('SELECT CASE WHEN agent_id IS NULL THEN 1 WHEN typeof(agent_id)=\'text\' AND length(CAST(agent_id AS BLOB))<=128 THEN 1 ELSE 0 END AS valid FROM task_groups WHERE id=?').get(id) as { valid: number } | undefined
+        if (!row || row.valid !== 1) throw new ServiceProtocolError('INVALID_REQUEST')
+        const agent = (db.prepare('SELECT agent_id FROM task_groups WHERE id=?').get(id) as { agent_id: string | null }).agent_id
+        if (agent !== null && (!isDatabaseId(agent) || !this.options.canAccessAgent(agent, caller, 'read'))) throw new ServiceProtocolError('INVALID_REQUEST')
+        return agent
+      }
+      const initialGroupAgent = groupAgent()
       let preflightRows = (): void => {}
       const beforeEffect = (): void => {
-        current(); taskGrant(taskId, true); for (const id of readIds) taskGrant(id); for (const id of projects) projectGrant(id); for (const id of agents) if (!this.options.canAccessAgent(id, caller, 'read')) throw new ServiceProtocolError('INVALID_REQUEST')
-        preflight(); preflightRows(); if (JSON.stringify(scopeReader.capture(taskId, caller)) !== scopeText || JSON.stringify(db.prepare(relevantSql).all(...relevantParams)) !== relevantText || metadata().raw !== expectedMetadata) throw new ServiceProtocolError('INVALID_REQUEST')
+        current(); taskGrant(taskId, mutation); for (const id of readIds) taskGrant(id); for (const id of projects) projectGrant(id); for (const id of agents) if (!this.options.canAccessAgent(id, caller, 'read')) throw new ServiceProtocolError('INVALID_REQUEST')
+        preflight(); preflightRows(); if (JSON.stringify(scopeReader.capture(taskId, caller)) !== scopeText || JSON.stringify(db.prepare(relevantSql).all(...relevantParams)) !== relevantText || metadata().raw !== expectedMetadata || groupAgent() !== initialGroupAgent) throw new ServiceProtocolError('INVALID_REQUEST')
+      }
+      if (readIds.size > 128) throw new ServiceProtocolError('FRAME_TOO_LARGE')
+      if (!mutation) {
+        const selected = initial.records.find(record => record.id === args[1])
+        if (!selected || !this.openAttachment) throw new ServiceProtocolError('INVALID_REQUEST')
+        if (Buffer.byteLength(scopeText) + Buffer.byteLength(initial.raw) + Buffer.byteLength(relevantText) >= TASK_ATTACHMENT_LIMITS.wireBytes) throw new ServiceProtocolError('FRAME_TOO_LARGE')
+        beforeEffect()
+        await files.open(taskId, selected, { beforeEffect, signal }, async receipt => {
+          beforeEffect()
+          if (!isAttachmentPathReceipt(receipt) || receipt.taskId !== taskId || receipt.attachmentId !== selected.id || receipt.filename !== selected.filename || receipt.target.size !== String(selected.size) || receipt.attachmentRoot !== this.owners.attachmentRoot) throw new ServiceProtocolError('INVALID_RESULT')
+          await this.openAttachment!(receipt, caller, signal)
+          beforeEffect()
+        })
+        beforeEffect()
+        return undefined as DesktopCommandMap[K]['result']
       }
       // Bound every actual schema column before a legacy full task getter can
       // materialize it. Schema metadata is iterated with a finite column cap.
@@ -116,7 +151,6 @@ export class TaskAttachmentBackend {
         if (db.prepare(`SELECT 1 FROM agents WHERE id=? AND (${agentColumns.map(bytes => `${bytes}>131072`).join(' OR ')} OR ${agentColumns.join('+')}>=890000)`).get(id)) throw new ServiceProtocolError('FRAME_TOO_LARGE')
       } }
       preflightRows()
-      if (readIds.size > 128) throw new ServiceProtocolError('FRAME_TOO_LARGE')
       if (operation === 'chatImages:saveToTask' && initial.records.length + (args[1] as unknown[]).length > TASK_ATTACHMENT_LIMITS.records) throw new ServiceProtocolError('FRAME_TOO_LARGE')
       const effect = async (): Promise<unknown> => {
         beforeEffect()
@@ -161,9 +195,10 @@ export class TaskAttachmentBackend {
   private bind<K extends TaskAttachmentOperation>(operation: K): void {
     const codec = TASK_ATTACHMENT_CODECS[operation] as TaskAttachmentCodec<K>
     this.registry.bindCommand(operation, { decodeRequest: value => codec.decodeArguments(structuredClone(value)), validateArguments: codec.validateArguments, authorize: (_args, caller) => { this.authorize(caller); return true }, invoke: (args, caller, signal) => {
-      if (this.mutationBusy || this.flights.size >= TASK_ATTACHMENT_LIMITS.requests) throw new ServiceProtocolError('BACKPRESSURE')
-      this.mutationBusy = true; const controller = new AbortController(), abort = (): void => controller.abort(); this.controllers.add(controller); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
-      const raw = this.execute(operation, args, Object.freeze({ ...caller }), controller.signal).finally(() => { this.mutationBusy = false; this.controllers.delete(controller); signal.removeEventListener('abort', abort) })
+      const mutation = operation !== 'attachments:open'
+      if (this.mutationBusy || this.flights.size >= TASK_ATTACHMENT_LIMITS.requests || mutation && this.flights.size > 0) throw new ServiceProtocolError('BACKPRESSURE')
+      if (mutation) this.mutationBusy = true; const controller = new AbortController(), abort = (): void => controller.abort(); this.controllers.add(controller); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
+      const raw = this.execute(operation, args, Object.freeze({ ...caller }), controller.signal).finally(() => { if (mutation) this.mutationBusy = false; this.controllers.delete(controller); signal.removeEventListener('abort', abort) })
       this.flights.add(raw); void raw.then(() => this.flights.delete(raw), () => this.flights.delete(raw)); return raw
     }, validateResult: codec.validateResult, encodeResult: codec.encodeResult })
   }

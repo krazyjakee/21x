@@ -282,7 +282,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 225 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 226 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -291,7 +291,7 @@ it('binds the 225 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(225)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(226)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -898,4 +898,30 @@ it('does not let a late bootstrap response replace a newer document or dispose i
   expect(commands).toHaveBeenCalledOnce()
   await f.host.api.ui.publishState(publishedUi)
   expect(f.invoke.mock.calls.at(-1)?.[1]).toMatchObject({ engineEpoch: 'engine-1', uiLease: 'document-1' })
+})
+
+
+it('opens saved attachments with the current native document receipt and refuses absent or invalid authority before invocation', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  await expect(f.host.api.attachments.open('task_fixture', attachmentId)).resolves.toBeUndefined()
+  expect(f.invoke.mock.calls.at(-1)?.[1]).toEqual({ operation: 'attachments:open', payload: { taskId: 'task_fixture', attachmentId }, engineEpoch: 'engine-1', uiLease: 'document-1' })
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.attachments.open('task_fixture', '../private-file')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.changeUiLease(); await f.host.reconnect()
+  await f.host.api.attachments.open('task_fixture', attachmentId)
+  expect(f.invoke.mock.calls.at(-1)?.[1]).toMatchObject({ uiLease: 'document-2' })
+  const absent = fixture(); absent.host.setRehydrator(async () => {}); await absent.host.reconnect()
+  const calls = absent.invoke.mock.calls.length
+  await expect(absent.host.api.attachments.open('task_fixture', attachmentId)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(absent.invoke.mock.calls.length).toBe(calls)
+})
+it('joins an accepted attachment open after disconnect without replaying it into a replacement document', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const held = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => args?.operation === 'attachments:open' ? held.promise : original(command, args))
+  const work = f.host.api.attachments.open('task_fixture', attachmentId), failure = expect(work).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); f.changeUiLease(); await f.host.reconnect(); await failure
+  held.resolve({ engineEpoch: 'engine-1', result: { defined: false } })
+  expect(f.invoke.mock.calls.filter(([, args]) => args?.operation === 'attachments:open')).toHaveLength(1)
 })

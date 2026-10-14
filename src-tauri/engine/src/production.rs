@@ -71,6 +71,8 @@ pub enum OptionalCapability {
 pub struct ProductionCapabilities {
     #[serde(default = "unsupported_host_capability")]
     pub workspace_files: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
+    pub attachment_files: HostCapability,
     pub external_urls: HostCapability,
     pub notifications: HostCapability,
     pub energy: HostCapability,
@@ -101,8 +103,13 @@ pub struct ProductionWorkspaceHost {
     pub invoke: Arc<dyn Fn(bool, Value) -> HostFuture<()> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
 }
+pub struct ProductionAttachmentHost {
+    pub invoke: Arc<dyn Fn(Value, String, String) -> HostFuture<()> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionNativeHost {
     pub workspace_file: Option<ProductionWorkspaceHost>,
+    pub attachment_file: Option<ProductionAttachmentHost>,
     pub event_sink: Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>,
     pub open_external: Option<Arc<dyn Fn(String) -> HostFuture<()> + Send + Sync>>,
     pub notification: Option<Arc<dyn Fn(String, String) -> HostFuture<bool> + Send + Sync>>,
@@ -186,6 +193,34 @@ async fn ui_callback(
     };
     Ok(result)
 }
+fn attachment_host_matches(capability: &HostCapability, host: &ProductionNativeHost) -> bool {
+    match capability {
+        HostCapability::Host => {
+            host.attachment_file.is_some() && ui_host_matches(&HostCapability::Host, host)
+        }
+        HostCapability::Unsupported => host.attachment_file.is_none(),
+    }
+}
+async fn attachment_callback(
+    host: &ProductionNativeHost,
+    capability: &HostCapability,
+    epoch: String,
+    payload: &Value,
+) -> Result<Value, EngineError> {
+    if *capability != HostCapability::Host || !attachment_host_matches(capability, host) {
+        return Err(EngineError::new("UNKNOWN_OPERATION"));
+    }
+    if !crate::production_attachment_files::callback_request(payload) {
+        return Err(EngineError::new("INVALID_ARGUMENTS"));
+    }
+    (host.attachment_file.as_ref().unwrap().invoke)(
+        payload["receipt"].clone(),
+        payload["leaseId"].as_str().unwrap().to_owned(),
+        epoch,
+    )
+    .await?;
+    Ok(json!({}))
+}
 /// Obtained by the trusted host, never deserialize this lease from an RPC.
 pub struct TrustedProductionLaunch {
     pub descriptor: ProductionDescriptor,
@@ -242,6 +277,8 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || !digest(&value.resource_manifest_sha256)
         || capabilities.energy != HostCapability::Unsupported
         || capabilities.voice != HostCapability::Unsupported
+        || capabilities.attachment_files == HostCapability::Host
+            && capabilities.ui != HostCapability::Host
         || [
             &value.paths.profile_root,
             &value.paths.workspace_root,
@@ -554,6 +591,7 @@ impl ProductionEngine {
             || (launch.descriptor.capabilities.workspace_files == HostCapability::Host
                 && host.workspace_file.is_none())
             || !ui_host_matches(&launch.descriptor.capabilities.ui, &host)
+            || !attachment_host_matches(&launch.descriptor.capabilities.attachment_files, &host)
         {
             return Err(problem(
                 "INVALID_ARGUMENTS",
@@ -660,6 +698,48 @@ impl ProductionEngine {
             return Err(EngineError::new("DISCONNECTED"));
         }
         let result = self.request("engine.agent.install", payload).await?;
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        Ok(result)
+    }
+    /// Current-document ingress stamps this private operation; public callers
+    /// may select saved IDs only, never an arbitrary path or callback receipt.
+    pub async fn open_attachment(
+        &self,
+        epoch: &str,
+        payload: Value,
+        lease_id: &str,
+    ) -> Result<Value, EngineError> {
+        if !crate::production_attachment_files::request(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let payload = json!({"taskId":payload["taskId"],"attachmentId":payload["attachmentId"],"leaseId":lease_id});
+        if !crate::production_attachment_files::private_request(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.attachment_files != HostCapability::Host
+            || self.0.descriptor.capabilities.ui != HostCapability::Host
+            || !attachment_host_matches(&HostCapability::Host, &self.0.host)
+        {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        let result = self.request("engine.attachment.open", payload).await?;
         if epoch != self.epoch() {
             return Err(EngineError::new("STALE_EPOCH"));
         }
@@ -819,7 +899,9 @@ impl ProductionEngine {
                                 && result["nodeVersion"] == "v22.23.2"
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
-                        "engine.ui.publish" => crate::production_ui_contracts::void_result(result),
+                        "engine.ui.publish" | "engine.attachment.open" => {
+                            crate::production_ui_contracts::void_result(result)
+                        }
                         "engine.agent.install" => contracts::agent_installer::result(result),
                         operation => contracts::valid_result(operation, result),
                     };
@@ -996,6 +1078,30 @@ impl ProductionEngine {
                 }
                 Ok(result)
             }
+            "host.attachment.open" => {
+                if self.0.closed.load(Ordering::SeqCst)
+                    || self.0.stopping.load(Ordering::SeqCst)
+                    || !self.0.ready.load(Ordering::SeqCst)
+                    || !self.0.prepared.load(Ordering::SeqCst)
+                {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                let epoch = self.epoch();
+                let result = attachment_callback(
+                    &self.0.host,
+                    &self.0.descriptor.capabilities.attachment_files,
+                    epoch.clone(),
+                    payload,
+                )
+                .await?;
+                if epoch != self.epoch() {
+                    return Err(EngineError::new("STALE_EPOCH"));
+                }
+                if self.0.closed.load(Ordering::SeqCst) || self.0.stopping.load(Ordering::SeqCst) {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                Ok(result)
+            }
             "host.production.prepare" => {
                 if !contracts::object(payload, &["launchId", "resourceManifestSha256"], &[])
                     || payload["launchId"] != self.0.descriptor.launch_id
@@ -1033,6 +1139,9 @@ impl ProductionEngine {
                     )
                 })?;
                 if let Some(files) = &self.0.host.workspace_file {
+                    (files.close)().await?;
+                }
+                if let Some(files) = &self.0.host.attachment_file {
                     (files.close)().await?;
                 }
                 #[cfg(target_os = "linux")]
@@ -1986,6 +2095,7 @@ mod tests {
             },
             capabilities: ProductionCapabilities {
                 workspace_files: HostCapability::Unsupported,
+                attachment_files: HostCapability::Unsupported,
                 external_urls: HostCapability::Unsupported,
                 notifications: HostCapability::Unsupported,
                 energy: HostCapability::Unsupported,
@@ -2023,6 +2133,7 @@ mod tests {
     fn ui_host() -> ProductionNativeHost {
         ProductionNativeHost {
             workspace_file: None,
+            attachment_file: None,
             event_sink: Arc::new(|_| Ok(())),
             open_external: None,
             notification: None,
@@ -2396,6 +2507,224 @@ mod tests {
         )
         .await
         .is_err());
+    }
+    #[cfg(target_os = "linux")]
+    fn attachment_fixture() -> (Temporary, Value) {
+        use std::os::unix::fs::MetadataExt;
+        let temporary = Temporary::new();
+        let root = std::fs::canonicalize(&temporary.0)
+            .unwrap()
+            .join("attachments");
+        let task = root.join("task_1");
+        let attachment_id = "61f07006-c85b-438e-83a7-497c77b0dcae";
+        std::fs::create_dir_all(&task).unwrap();
+        let target = task.join(format!("{attachment_id}-public.txt"));
+        std::fs::write(&target, b"public").unwrap();
+        let identity = |path: &Path| {
+            let metadata = std::fs::symlink_metadata(path).unwrap();
+            json!({"path":path.to_str().unwrap(),"dev":metadata.dev().to_string(),"ino":metadata.ino().to_string(),"kind":if metadata.is_dir(){"directory"}else{"file"},"size":metadata.size().to_string(),"nlink":metadata.nlink().to_string()})
+        };
+        let receipt = json!({"version":1,"taskId":"task_1","attachmentId":attachment_id,"filename":"public.txt","attachmentRoot":root.to_str().unwrap(),"path":target.to_str().unwrap(),"root":identity(&root),"ancestors":[identity(&task)],"target":identity(&target)});
+        (temporary, json!({"receipt":receipt,"leaseId":"ui:1"}))
+    }
+    #[test]
+    fn attachment_capability_defaults_unsupported_and_requires_both_actual_host_owners() {
+        let temporary = Temporary::new();
+        let mut value = descriptor(&temporary.0);
+        value.capabilities.attachment_files = HostCapability::Host;
+        assert!(descriptor_bytes(&value).is_err());
+        value.capabilities.ui = HostCapability::Host;
+        assert!(descriptor_bytes(&value).is_ok());
+        let mut wire = serde_json::to_value(&value).unwrap();
+        wire["capabilities"]
+            .as_object_mut()
+            .unwrap()
+            .remove("attachmentFiles");
+        let decoded: ProductionDescriptor = serde_json::from_value(wire).unwrap();
+        assert_eq!(
+            decoded.capabilities.attachment_files,
+            HostCapability::Unsupported
+        );
+        let mut host = ui_host();
+        assert!(attachment_host_matches(&HostCapability::Unsupported, &host));
+        host.attachment_file = Some(ProductionAttachmentHost {
+            invoke: Arc::new(|_, _, _| Box::pin(async { Ok(()) })),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        assert!(!attachment_host_matches(&HostCapability::Host, &host));
+        assert!(!attachment_host_matches(
+            &HostCapability::Unsupported,
+            &host
+        ));
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        assert!(attachment_host_matches(&HostCapability::Host, &host));
+    }
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn attachment_callbacks_require_exact_receipt_lease_and_actual_host_before_effects() {
+        let (_temporary, payload) = attachment_fixture();
+        let mut host = ui_host();
+        assert_eq!(
+            attachment_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                &payload
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "UNKNOWN_OPERATION"
+        );
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        let calls = Arc::new(AtomicU64::new(0));
+        let count = calls.clone();
+        host.attachment_file = Some(ProductionAttachmentHost {
+            invoke: Arc::new(move |receipt, lease, epoch| {
+                count.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(lease, "ui:1");
+                assert_eq!(epoch, "epoch-fixture");
+                Box::pin(async move {
+                    let owner =
+                        crate::production_attachment_files::NativeAttachmentFileOwner::open(
+                            PathBuf::from(receipt["attachmentRoot"].as_str().unwrap()),
+                        )?;
+                    let decoded =
+                        crate::production_attachment_files::NativeAttachmentReceipt::from_value(
+                            &receipt,
+                        )?;
+                    owner.validate(&decoded)?.recheck()?;
+                    Ok(())
+                })
+            }),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        assert_eq!(
+            attachment_callback(
+                &host,
+                &HostCapability::Unsupported,
+                "epoch-fixture".into(),
+                &payload
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "UNKNOWN_OPERATION"
+        );
+        let mut bad = payload.clone();
+        bad["receipt"]["target"]["nlink"] = json!("2");
+        assert_eq!(
+            attachment_callback(&host, &HostCapability::Host, "epoch-fixture".into(), &bad)
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_ARGUMENTS"
+        );
+        bad = payload.clone();
+        bad["leaseId"] = json!("../foreign");
+        assert_eq!(
+            attachment_callback(&host, &HostCapability::Host, "epoch-fixture".into(), &bad)
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_ARGUMENTS"
+        );
+        bad = payload.clone();
+        bad["caller"] = json!("main");
+        assert_eq!(
+            attachment_callback(&host, &HostCapability::Host, "epoch-fixture".into(), &bad)
+                .await
+                .unwrap_err()
+                .code,
+            "INVALID_ARGUMENTS"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            attachment_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                &payload
+            )
+            .await
+            .unwrap(),
+            json!({})
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn attachment_callback_keeps_actual_handles_until_delayed_effect_acknowledgement() {
+        let (_temporary, payload) = attachment_fixture();
+        let mut host = ui_host();
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let entered = Arc::new(Mutex::new(Some(entered_tx)));
+        let release = Arc::new(Mutex::new(Some(release_rx)));
+        host.attachment_file = Some(ProductionAttachmentHost {
+            invoke: Arc::new(move |receipt, _, _| {
+                let entered = entered.lock().unwrap().take().unwrap();
+                let release = release.lock().unwrap().take().unwrap();
+                Box::pin(async move {
+                    let owner =
+                        crate::production_attachment_files::NativeAttachmentFileOwner::open(
+                            PathBuf::from(receipt["attachmentRoot"].as_str().unwrap()),
+                        )?;
+                    let decoded =
+                        crate::production_attachment_files::NativeAttachmentReceipt::from_value(
+                            &receipt,
+                        )?;
+                    let guard = owner.validate(&decoded)?;
+                    drop(owner);
+                    let _ = entered.send(());
+                    release.await.unwrap();
+                    guard.recheck()?;
+                    Ok(())
+                })
+            }),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        let completed = Arc::new(AtomicBool::new(false));
+        let finished = completed.clone();
+        let raw = tokio::spawn(async move {
+            let answer = attachment_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                &payload,
+            )
+            .await;
+            assert_eq!(answer.unwrap(), json!({}));
+            finished.store(true, Ordering::SeqCst);
+        });
+        entered_rx.await.unwrap();
+        assert!(!completed.load(Ordering::SeqCst));
+        drop(raw);
+        assert!(!completed.load(Ordering::SeqCst));
+        release_tx.send(()).unwrap();
+        timeout(Duration::from_secs(1), async {
+            while !completed.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
     #[test]
     fn native_request_identity_is_scoped_and_monotonic_decimal() {

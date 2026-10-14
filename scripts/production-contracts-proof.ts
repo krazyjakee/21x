@@ -48,6 +48,7 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'cliMcp:snapshot': [], 'cliMcp:upsert': [{ name: 'fixture', targets: ['codex'], definition: { transport: 'stdio', command: 'fixture-mcp', args: [], env: {} } }],
   'cliMcp:remove': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64) }], 'cliMcp:setEnabled': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64), enabled: true }],
   'cliMcp:setToolEnabled': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64), tool: 'fixture_tool', enabled: true }], 'cliMcp:probe': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64) }],
+  'attachments:open': [task, '12345678-1234-4234-9234-123456789abc'],
   'chatImages:saveToTask': [task, [image]], 'attachments:remove': [task, '00000000-0000-4000-8000-000000000001'],
   'heartbeat:enable': [task, 30], 'heartbeat:disable': [task], 'heartbeat:runNow': [task], 'heartbeat:getLogs': [task, 20], 'heartbeat:getStatus': [task], 'heartbeat:updateInterval': [task, 60], 'heartbeat:readFile': [task], 'heartbeat:writeFile': [task, '# Local heartbeat\nCheck the task status.'],
   'worktree:setup': [task, [{ fullName: 'fixture/repo', defaultBranch: 'main' }], 'fixture', 'github'], 'worktree:changes': [task, [{ fullName: 'fixture/repo' }]], 'worktree:files': [task, [{ fullName: 'fixture/repo' }]], 'worktree:readFile': [task, 'fixture/repo', 'README.md'], 'worktree:cleanup': [task, [{ fullName: 'fixture/repo' }], 'fixture', true], 'workspace:runCleanupNow': [],
@@ -149,6 +150,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'chatImages:saveToTask', case: 'attachment-five-total-512k', args: [task, [104857, 104857, 104857, 104857, 104860].map((size, i) => boundedPng(size, `fixture-${i}.png`))] },
   { operation: 'chatImages:saveToTask', case: 'attachment-raw-name-sanitization', args: [task, ['../unsafe\0.png', 'CON.png', 'folder\\fixture.png', 'report\u202E.png', ''].map(name => ({ ...image, name }))] },
   { operation: 'chatImages:saveToTask', case: 'attachment-empty-images', args: [task, []] },
+  { operation: 'attachments:open', case: 'attachment-open-uppercase-version-five-uuid', args: ['t'.repeat(128), 'ABCDEFAB-CDEF-5ABC-ABCD-ABCDEFABCDEF'] },
   { operation: 'attachments:remove', case: 'attachment-uppercase-version-five-uuid', args: ['t'.repeat(128), 'ABCDEFAB-CDEF-5ABC-ABCD-ABCDEFABCDEF'] },
   { operation: 'taskGroups:create', case: 'unicode-trimmed-title', args: [{ title: '\uFEFF🌱\uFEFF', task_ids: [task, 'task_second'] }] },
   { operation: 'taskGroups:review', case: 'max-escaped-feedback', args: [{ group_id: 'group_fixture', action: 'send_back', message: '\u0001'.repeat(4000), task_ids: [task] }] },
@@ -277,7 +279,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 223 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 224 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

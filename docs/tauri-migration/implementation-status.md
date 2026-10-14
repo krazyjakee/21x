@@ -6,6 +6,21 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The attachment opening continuation resolves the exact saved file through the
+production task/group scope and a separate native attachment-root descriptor.
+Read grants suffice while the task agent is active. The service retains its
+file descriptor through native acknowledgement; current document, root, task,
+file and metadata bindings are rechecked before and after effects. Namespace
+deletion and profile release remain fenced by raw file/callback ownership.
+
+The finite surface has 224 service commands, two direct native commands and
+30 events. See [attachment opening](attachment-opening-bindings.md).
+Linux native callbacks use the existing pinned system opener. Installed OS
+launch, other platform file authority, pick/save/download/viewer workflows and
+complete migration acceptance remain open. Hosted voice remains deferred.
+
+The preceding installation continuation retains its tested revision:
+
 The installation continuation adds five fixed, profile-owned npm CLI plans using
 selected standalone Node and a captured npm entry. Actual package metadata,
 physical executable receipts and detection must agree before success. Backend

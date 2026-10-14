@@ -26,6 +26,8 @@ mod process_tree;
 #[cfg(feature = "production-service")]
 pub mod production;
 #[cfg(feature = "production-service")]
+pub mod production_attachment_files;
+#[cfg(feature = "production-service")]
 pub mod production_files;
 #[cfg(feature = "production-service")]
 pub mod production_ui_contracts;

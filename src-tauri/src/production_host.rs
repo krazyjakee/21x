@@ -13,10 +13,11 @@ use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 use twentyonex_engine::{
     production::{
-        DelegatedCgroup, HostCapability, OptionalCapability, ProductionCapabilities,
-        ProductionDescriptor, ProductionEngine, ProductionNativeHost, ProductionPaths,
-        ProductionWorkspaceHost, ProfileIntent, TrustedProductionLaunch,
+        DelegatedCgroup, HostCapability, OptionalCapability, ProductionAttachmentHost,
+        ProductionCapabilities, ProductionDescriptor, ProductionEngine, ProductionNativeHost,
+        ProductionPaths, ProductionWorkspaceHost, ProfileIntent, TrustedProductionLaunch,
     },
+    production_attachment_files::{NativeAttachmentFileOwner, NativeAttachmentReceipt},
     production_files::{NativeWorkspaceFileOwner, NativeWorkspaceReceipt},
     EngineError,
 };
@@ -189,6 +190,99 @@ fn workspace_file_host(
         }))
     }
 }
+fn attachment_file_host(
+    app: &tauri::AppHandle,
+    work: NativeWorkOwner,
+    ui: NativeUiOwner,
+    descriptor: &ProductionDescriptor,
+) -> Result<Option<ProductionAttachmentHost>, EngineError> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, work, ui, descriptor);
+        return Ok(None);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&descriptor.paths.attachment_root)
+            .map_err(|_| {
+                unavailable(
+                    "PRODUCTION_NATIVE_FILE_AUTHORITY_UNAVAILABLE",
+                    "production-native-attachment-root",
+                )
+            })?;
+        let owner = NativeAttachmentFileOwner::open(descriptor.paths.attachment_root.clone())
+            .map_err(|_| {
+                unavailable(
+                    "PRODUCTION_NATIVE_FILE_AUTHORITY_UNAVAILABLE",
+                    "production-native-attachment-owner",
+                )
+            })?;
+        let slot = Arc::new(std::sync::Mutex::new(Some(Arc::new(owner))));
+        let invocation_slot = slot.clone();
+        let app = app.clone();
+        Ok(Some(ProductionAttachmentHost {
+            invoke: Arc::new(move |receipt, lease, epoch| {
+                let (app, work, ui, slot) = (
+                    app.clone(),
+                    work.clone(),
+                    ui.clone(),
+                    invocation_slot.clone(),
+                );
+                Box::pin(async move {
+                    let window = app
+                        .get_webview_window("main")
+                        .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                    ui.assert_publish(&window, &epoch, &lease)?;
+                    work.run(move || {
+                        // Keep the accepted physical document, lease and epoch;
+                        // do not resolve a newer window after entering raw work.
+                        ui.assert_publish(&window, &epoch, &lease)?;
+                        let owner = slot
+                            .lock()
+                            .map_err(|_| EngineError::new("DISCONNECTED"))?
+                            .as_ref()
+                            .cloned()
+                            .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                        let receipt = NativeAttachmentReceipt::from_value(&receipt)
+                            .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                        let guard = owner
+                            .validate(&receipt)
+                            .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                        guard
+                            .recheck()
+                            .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                        let result = app
+                            .opener()
+                            .open_path(guard.path().to_string_lossy().into_owned(), None::<&str>);
+                        // All exact metadata-only handles survive the actual
+                        // opener invocation. External applications own later reads.
+                        guard
+                            .recheck()
+                            .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                        ui.assert_publish(&window, &epoch, &lease)?;
+                        result.map_err(|_| EngineError::new("INTERNAL_ERROR"))
+                    })
+                    .await
+                })
+            }),
+            close: Arc::new(move || {
+                let slot = slot.clone();
+                Box::pin(async move {
+                    // Native callback drain joins accepted raw effects first.
+                    let owned = slot
+                        .lock()
+                        .map_err(|_| EngineError::new("DISCONNECTED"))?
+                        .take();
+                    drop(owned);
+                    Ok(())
+                })
+            }),
+        }))
+    }
+}
 #[tauri::command]
 fn engine_status(
     window: WebviewWindow,
@@ -231,7 +325,7 @@ async fn desktop_invoke(
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
     if matches!(
         operation.as_str(),
-        "ui:publishState" | "agent-installer:install"
+        "ui:publishState" | "agent-installer:install" | "attachments:open"
     ) {
         if !twentyonex_engine::production::contracts::valid_request(&operation, &payload) {
             return Err(EngineError::new("INVALID_ARGUMENTS"));
@@ -244,8 +338,12 @@ async fn desktop_invoke(
             engine
                 .publish_ui(&engine_epoch, payload["state"].clone(), &lease)
                 .await?
-        } else {
+        } else if operation == "agent-installer:install" {
             engine.install_agent(&engine_epoch, payload, &lease).await?
+        } else {
+            engine
+                .open_attachment(&engine_epoch, payload, &lease)
+                .await?
         };
         authorize(&window)?;
         available_engine(window.app_handle(), Some(&engine_epoch))?;
@@ -392,6 +490,11 @@ async fn start(
             } else {
                 HostCapability::Unsupported
             },
+            attachment_files: if cfg!(target_os = "linux") {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             external_urls: HostCapability::Host,
             notifications: HostCapability::Unsupported,
             energy: HostCapability::Unsupported,
@@ -405,6 +508,7 @@ async fn start(
     let handle = app.clone();
     let external_app = app.clone();
     let workspace_file = workspace_file_host(app, native_work.clone(), &descriptor)?;
+    let attachment_file = attachment_file_host(app, native_work.clone(), ui.clone(), &descriptor)?;
     let ui_snapshot = ui.snapshot_callback(app.clone(), native_work.clone());
     let ui_command = ui.command_callback(app.clone(), native_work.clone());
     let installer_progress = ui.installer_progress_callback(app.clone(), native_work.clone());
@@ -415,6 +519,7 @@ async fn start(
         },
         ProductionNativeHost {
             workspace_file,
+            attachment_file,
             event_sink: Arc::new(move |frame| {
                 handle
                     .emit_to(

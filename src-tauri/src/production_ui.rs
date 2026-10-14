@@ -697,6 +697,86 @@ mod tests {
         assert_ne!(INSTALLER_PROGRESS_EVENT, COMMAND_EVENT);
         assert_ne!(INSTALLER_PROGRESS_EVENT, "desktop:event");
     }
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn attachment_raw_open_receipt_holds_descriptors_and_drain_after_public_abort_and_reload()
+    {
+        use std::{
+            fs,
+            os::unix::fs::MetadataExt,
+            path::Path,
+            sync::atomic::{AtomicU64, Ordering},
+        };
+        use twentyonex_engine::production_attachment_files::{
+            NativeAttachmentFileOwner, NativeAttachmentReceipt,
+        };
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "21x-native-attachment-drain-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&base).unwrap();
+        let base = fs::canonicalize(base).unwrap();
+        let root = base.join("attachments");
+        let task = root.join("task_1");
+        fs::create_dir_all(&task).unwrap();
+        let id = "61f07006-c85b-438e-83a7-497c77b0dcae";
+        let path = task.join(format!("{id}-public.txt"));
+        fs::write(&path, b"public").unwrap();
+        let identity = |path: &Path| {
+            let m = fs::symlink_metadata(path).unwrap();
+            json!({"path":path.to_str().unwrap(),"dev":m.dev().to_string(),"ino":m.ino().to_string(),"kind":if m.is_dir(){"directory"}else{"file"},"size":m.size().to_string(),"nlink":m.nlink().to_string()})
+        };
+        let receipt=NativeAttachmentReceipt::from_value(&json!({"version":1,"taskId":"task_1","attachmentId":id,"filename":"public.txt","attachmentRoot":root.to_str().unwrap(),"path":path.to_str().unwrap(),"root":identity(&root),"ancestors":[identity(&task)],"target":identity(&path)})).unwrap();
+        let owner = NativeAttachmentFileOwner::open(root).unwrap();
+        let guard = owner.validate(&receipt).unwrap();
+        drop(owner);
+        let (mut document, ticket) = ready();
+        let lease = document.activate("physical-A", "epoch", true).unwrap();
+        let document = Arc::new(Mutex::new(document));
+        let captured = document.clone();
+        let work = NativeWorkOwner::default();
+        let raw = work.clone();
+        let effects = Arc::new(AtomicU64::new(0));
+        let accepted = effects.clone();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let public = tokio::spawn(async move {
+            raw.run(move || {
+                let _ = entered.send(());
+                held.recv().unwrap();
+                guard.recheck()?;
+                let document = captured.lock().unwrap();
+                if document
+                    .current("physical-A", "epoch", Some(&lease), true)
+                    .is_none()
+                {
+                    return Err(EngineError::new("STALE_EPOCH"));
+                }
+                // Controlled OS boundary: revoked documents never reach it.
+                accepted.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+            .await
+        });
+        started.await.unwrap();
+        public.abort();
+        assert_eq!(work.active().unwrap(), 1);
+        document.lock().unwrap().navigation(ticket).unwrap();
+        let drain_owner = work.clone();
+        let drain = tokio::spawn(async move { drain_owner.drain().await });
+        tokio::task::yield_now().await;
+        assert!(!drain.is_finished());
+        release.send(()).unwrap();
+        drain.await.unwrap().unwrap();
+        assert_eq!(work.active().unwrap(), 0);
+        assert_eq!(effects.load(Ordering::SeqCst), 0);
+        assert_eq!(fs::read(&path).unwrap(), b"public");
+        fs::remove_dir_all(base).unwrap();
+    }
     #[tokio::test]
     async fn callback_rechecks_document_after_queued_raw_work_and_never_claims_applied() {
         let (mut document, ticket) = ready();

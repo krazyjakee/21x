@@ -44,9 +44,9 @@ export function createTauriDesktopTransport(native: TauriDesktopApi): DesktopTra
       try {
         // Paths, native identity and caller authority never originate in renderer arguments.
         const document = uiDocuments.get(native)
-        if ((operation === 'ui:publishState' || operation === 'agent-installer:install') && (!document || document.engineEpoch !== engineEpoch)) throw new ServiceProtocolError('DISCONNECTED')
+        if ((operation === 'ui:publishState' || operation === 'agent-installer:install' || operation === 'attachments:open') && (!document || document.engineEpoch !== engineEpoch)) throw new ServiceProtocolError('DISCONNECTED')
         return await native.core.invoke('desktop_invoke', { operation, payload, engineEpoch,
-          ...((operation === 'ui:publishState' || operation === 'agent-installer:install') ? { uiLease: document!.leaseId } : {}) })
+          ...((operation === 'ui:publishState' || operation === 'agent-installer:install' || operation === 'attachments:open') ? { uiLease: document!.leaseId } : {}) })
       } catch (error) { throw nativeError(error) }
     },
     async listen(receive) {

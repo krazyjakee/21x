@@ -5,6 +5,7 @@ use serde_json::Value;
 pub mod agent_installer;
 #[path = "production_cli_attachments.rs"]
 mod cli_attachments;
+pub(crate) use cli_attachments::{filename as attachment_filename, uuid as attachment_uuid};
 #[path = "production_project_groups.rs"]
 mod project_groups;
 #[path = "production_workspace_runtime.rs"]
@@ -20,6 +21,7 @@ pub const COMMANDS: &[&str] = &[
     "cliMcp:probe",
     "chatImages:saveToTask",
     "attachments:remove",
+    "attachments:open",
     "heartbeat:enable",
     "heartbeat:disable",
     "heartbeat:runNow",
@@ -3203,6 +3205,9 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if operation == "attachments:open" {
+        return crate::production_attachment_files::request(value);
+    }
     if operation == agent_installer::OPERATION {
         return agent_installer::request(value);
     }
@@ -3350,6 +3355,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if operation == "attachments:open" {
+        return crate::production_ui_contracts::void_result(value);
+    }
     if operation == agent_installer::OPERATION {
         return agent_installer::result(value);
     }
@@ -5046,7 +5054,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 223);
+        assert_eq!(COMMANDS.len(), 224);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

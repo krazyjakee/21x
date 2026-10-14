@@ -1,3 +1,5 @@
+import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isPrivateAttachmentOpen } from '../shared/attachment-native-callbacks'
+import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
 import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { UI_NATIVE_CALLBACK_SCHEMAS, isPrivateUiPublication, isPrivateAgentInstallation } from '../shared/ui-native-callbacks'
 import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
@@ -16,7 +18,7 @@ beforeEach(async () => {
 import { PRODUCTION_COMMAND_CODECS, PRODUCTION_EVENT_CODECS, validateProductionEventWire, type ProductionDesktopBindingOptions } from './production-desktop-bindings'
 import { PRODUCTION_HOST_SCHEMAS, type ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { ServicePeer, type OperationSchema } from './transport/peer'
-import { hasExactKeys, isBootstrapResult, isRecord, type JsonValue } from '../shared/service-protocol'
+import { hasExactKeys, isBootstrapResult, isRecord, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
 import type { CodingAgentAdapter } from '../main/adapters/coding-agent-adapter'
 import type { ChatProvider, ChatProviderEvent } from '../main/chat/providers/types'
 import { makeTask } from '../../test/helpers/task-fixtures'
@@ -41,14 +43,18 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false) {
   let uiLease: string | null = 'document_fixture_1'
   let uiAcknowledgement: Promise<void> | null = null
+  let attachmentAcknowledgement: Promise<void> | null = null
+  const attachmentReceipts: JsonValue[] = []
+  let grantWrites = true
   const acceptedUi: JsonValue[] = [], installationProgress: JsonValue[] = []
   const root = mkdtempSync(join(tmpdir(), '21x-private-production-')); roots.push(root)
   const launch = descriptor(root); mkdirSync(launch.paths.resourceRoot)
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   if (ui) launch.capabilities.ui = 'host'
+  if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
   const selectedNode = process.env.TAURI_NODE_RUNTIME ?? join(process.cwd(), 'src-tauri', 'resources', 'node', process.platform === 'win32' ? 'node.exe' : 'node')
   const fixtureNpm = join(root, 'npm-cli.js')
   if (installation) writeFileSync(fixtureNpm, `const fs=require('node:fs'),p=require('node:path');const prefix=process.argv[process.argv.indexOf('--prefix')+1];const pkg=p.join(prefix,'lib','node_modules','opencode-ai');fs.mkdirSync(pkg,{recursive:true});fs.mkdirSync(p.join(prefix,'bin'),{recursive:true});fs.writeFileSync(p.join(pkg,'package.json'),JSON.stringify({name:'opencode-ai',version:'1.0.0',bin:{opencode:'index.js'}}));fs.writeFileSync(p.join(pkg,'index.js'), '#!'+process.execPath+${JSON.stringify("\nconsole.log('1.0.0')\n")});fs.chmodSync(p.join(pkg,'index.js'),0o700);fs.symlinkSync(p.join(pkg,'index.js'),p.join(prefix,'bin','opencode'));`)
@@ -63,8 +69,8 @@ function fixture(workspaceFiles = false, ui = false, installation = false) {
     abortPrompt: vi.fn(async () => {}), destroySession: vi.fn(async () => {}), checkHealth: vi.fn(async () => ({ available: true })) }
   const provider: ChatProvider = { id: 'controlled', model: 'controlled', async *stream(): AsyncGenerator<ChatProviderEvent> { yield { type: 'message_end', stopReason: 'end_turn' } } }
   const check = (): boolean => permitted
-  const authority: ProductionDesktopBindingOptions['authority'] = { isTrustedDesktop: check, canAccessTask: check, canAccessSource: check,
-    canAccessProject: check, canAccessAgent: check, canAccessSession: check, canAccessGlobalCommander: check,
+  const authority: ProductionDesktopBindingOptions['authority'] = { isTrustedDesktop: check, canAccessTask: (_id, _caller, access) => permitted && (access === 'read' || grantWrites), canAccessSource: check,
+    canAccessProject: (_id, _caller, access) => permitted && (access === 'read' || grantWrites), canAccessAgent: (_id, _caller, access) => permitted && (access === 'read' || grantWrites), canAccessSession: check, canAccessGlobalCommander: check,
     canManageGlobalConfiguration: check, canQueryBackend: check, canCreateProject: check, canEditSettings: check,
     canAccessGlobalSkills: check, canChangeSkillScope: check, canReorderProjects: check, canReadSetting: check, canWriteSetting: check, canAccessSecret: check,
     canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessTerminal: check, canAccessMcpServer: check, canAccessCli: check,
@@ -95,6 +101,14 @@ function fixture(workspaceFiles = false, ui = false, installation = false) {
     nativeCalls.push(operation); fileReceipts.push((payload as { receipt: JsonValue }).receipt)
     await fileAcknowledgement; return {}
   } }
+  schemas['engine.attachment.open'] = { validatePayload: isPrivateAttachmentOpen, validateResult: TASK_ATTACHMENT_CODECS['attachments:open'].validateWireResult }
+  if (attachmentOpening) schemas['host.attachment.open'] = { ...ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.open'], handle: async payload => {
+    if (!isRecord(payload) || !uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    attachmentReceipts.push(structuredClone(payload.receipt))
+    await attachmentAcknowledgement
+    if (!uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    return {}
+  } }
   schemas['engine.agent.install'] = { validatePayload: isPrivateAgentInstallation, validateResult: AGENT_INSTALLER_CODECS['agent-installer:install'].validateWireResult }
   schemas['engine.ui.publish'] = { validatePayload: isPrivateUiPublication, validateResult: UI_DESKTOP_CODECS['ui:publishState'].validateWireResult }
   if (ui) {
@@ -124,6 +138,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false) {
       native: { agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, configuredMcp: 'disabled' },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, emit: callbacks.emitOwnerEvent,
         ...(ui ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
+        ...(attachmentOpening ? { openAttachment: callbacks.openAttachment } : {}),
         openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } })
   }), { write: async bytes => { deliver(host, bytes) } }); services.push(service)
   const initialize = async (): Promise<void> => {
@@ -132,6 +147,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false) {
     await host.request('engine.initialize', { protocolVersion: 1, launchId: launch.launchId })
   }
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
+    attachmentReceipts, denyWrites: () => { grantWrites = false }, holdAttachmentAcknowledgement: (raw: Promise<void>) => { attachmentAcknowledgement = raw },
     installationProgress, acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
     fileReceipts, holdFileAcknowledgement: (raw: Promise<void>) => { fileAcknowledgement = raw },
     holdPreparation: (raw: Promise<void>) => { preparation = raw } }
@@ -358,3 +374,61 @@ it.skipIf(process.platform === 'win32')('installs a controlled real package thro
   expect(services.agentInstallation!.childCount).toBe(0)
   expect(existsSync(join(f.launch.paths.profileRoot, 'agent-cli', 'lib', 'node_modules', 'opencode-ai', 'index.js'))).toBe(true)
 })
+
+
+function savedAttachment(f: ReturnType<typeof fixture>, bytes = 2 * 1024 * 1024) {
+  const services = f.service.getReadyServices()!, task = services.db.createTask(makeTask())!
+  const attachment = { id: '12345678-1234-4234-9234-123456789abc', filename: 'report.bin', size: bytes, mime_type: 'application/octet-stream', added_at: '2026-10-14T00:00:00Z' }
+  const directory = join(f.launch.paths.attachmentRoot, task.id); mkdirSync(directory)
+  const path = join(directory, attachment.id + '-' + attachment.filename); writeFileSync(path, Buffer.alloc(bytes, 7))
+  services.db.updateTask(task.id, { attachments: [attachment] })
+  return { services, task, attachment, path }
+}
+it('opens real saved attachment metadata through the private document ingress while its task agent is active under read grants', async () => {
+  const f = fixture(false, true, false, true); await f.initialize()
+  const { services, task, attachment, path } = savedAttachment(f)
+  const agent = services.db.getAgents()[0]; services.db.updateAgent(agent.id, { config: { coding_agent: 'pi' } }); services.db.updateTask(task.id, { agent_id: agent.id })
+  await f.host.request('agentSession:start', { agentId: agent.id, taskId: task.id })
+  expect(services.agents.hasTaskStartOwnership(task.id)).toBe(true)
+  f.denyWrites()
+  const getterTraces: string[] = [], actualTask = services.db.getTask.bind(services.db), actualAgent = services.db.getAgent.bind(services.db)
+  vi.spyOn(services.db, 'getTask').mockImplementation(id => { getterTraces.push(new Error().stack!); return actualTask(id) })
+  vi.spyOn(services.db, 'getAgent').mockImplementation(id => { getterTraces.push(new Error().stack!); return actualAgent(id) })
+  const nativeGate = deferred(); release.push(nativeGate.finish); f.holdAttachmentAcknowledgement(nativeGate.promise)
+  await expect(f.host.request('attachments:open', { taskId: task.id, attachmentId: attachment.id })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  await expect(f.host.request('engine.attachment.open', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1', path: '/foreign' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  const opening = f.host.request('engine.attachment.open', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' })
+  await vi.waitFor(() => expect(f.attachmentReceipts).toHaveLength(1))
+  // A real live agent continues to poll while the native file callback owns
+  // its descriptor. Those application-owned reads have separate authority.
+  await vi.waitFor(() => expect(getterTraces.some(trace => trace.includes('agent-manager-core.ts'))).toBe(true), { timeout: 5000 })
+  nativeGate.finish(); await expect(opening).resolves.toEqual({ defined: false })
+  expect(getterTraces.filter(trace => /task-attachment|task-workspace-scope|getTaskAttachmentBindingLease/.test(trace))).toEqual([])
+  expect(getterTraces.every(trace => trace.includes('agent-manager-core.ts'))).toBe(true)
+  expect(f.attachmentReceipts).toEqual([expect.objectContaining({ attachmentRoot: f.launch.paths.attachmentRoot, path, taskId: task.id, attachmentId: attachment.id, filename: attachment.filename, target: expect.objectContaining({ size: String(attachment.size), nlink: '1', kind: 'file' }) })])
+  expect(services.taskAttachmentFiles.inflightCount).toBe(0)
+  expect(readFileSync(path).length).toBe(attachment.size)
+  expect(services.db.db.prepare('SELECT attachments FROM tasks WHERE id=?').get(task.id)).toEqual({ attachments: JSON.stringify([attachment]) })
+  expect(f.adapter.abortPrompt).not.toHaveBeenCalled(); expect(f.adapter.destroySession).not.toHaveBeenCalled()
+}, 15000)
+it('retains the exact attachment callback and FD after cancel, refusing namespace deletion and profile release until acknowledgement', async () => {
+  const f = fixture(false, true, false, true); await f.initialize()
+  const { services, task, attachment, path } = savedAttachment(f, 12), gate = deferred(); release.push(gate.finish); f.holdAttachmentAcknowledgement(gate.promise)
+  const abort = new AbortController(), work = f.host.request('engine.attachment.open', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' }, { signal: abort.signal })
+  const failed = expect(work).rejects.toMatchObject({ code: 'CANCELLED' })
+  await vi.waitFor(() => expect(f.attachmentReceipts).toHaveLength(1))
+  expect(services.taskAttachmentFiles.inflightCount).toBeGreaterThan(0)
+  await expect(f.host.request('db:deleteTask', { id: task.id })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  expect(existsSync(path)).toBe(true)
+  abort.abort(); await failed
+  await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+  expect(services.db.db.open).toBe(true); expect(f.nativeCalls).not.toContain('drain')
+  gate.finish(); await f.service.close()
+  expect(services.db.db.open).toBe(false); expect(f.attachmentReceipts).toHaveLength(1); expect(existsSync(path)).toBe(true)
+}, 15000)
+it('refuses native attachment effects when the captured launch does not advertise the callback', async () => {
+  const f = fixture(false, true); await f.initialize()
+  const { task, attachment, path } = savedAttachment(f, 12)
+  await expect(f.host.request('engine.attachment.open', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+  expect(f.attachmentReceipts).toEqual([]); expect(existsSync(path)).toBe(true)
+}, 15000)

@@ -1,8 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { link, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TaskAttachmentFileOwner, type TaskAttachmentFileHandle, type TaskAttachmentFilePrimitives } from './task-attachment-file-owner'
+import { isAttachmentPathReceipt, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
+import { ServiceProtocolError } from '../shared/service-protocol'
 
 const metadata = { id: '61f07006-c85b-438e-83a7-497c77b0dcae', filename: '写真.png', size: 12, mime_type: 'image/png', added_at: '2026-10-14T00:00:00.000Z' }
 const bytes = Buffer.from('iVBORw0KGgoAAQID', 'base64')
@@ -70,5 +72,84 @@ describe('actual attachment-root publication and raw lifetime', () => {
     owner = create({ open: async (name, flags, mode) => { const fd = await actualHandle(name, flags, mode); return { ...fd, read: async (b,o,l,p) => { entered.release(); await gate.promise; return fd.read(b,o,l,p) } } } })
     const pending = owner.remove('task-1', metadata, controls()), failure = pending.catch(error => error); await entered.promise; await writeFile(path, Buffer.alloc(bytes.length, 7)); await utimes(path, new Date(), new Date(Date.now() + 5000)); gate.release()
     expect((await failure).code).toBe('ATTACHMENT_PATH_CHANGED'); expect(await readFile(path)).toEqual(Buffer.alloc(bytes.length, 7))
+  })
+})
+
+async function savedAttachment(size = metadata.size) {
+  const taskId='task-open',directory=join(attachmentRoot,taskId),path=join(directory,`${metadata.id}-${metadata.filename}`)
+  await mkdir(directory);const fd=await open(path,'wx');try{await fd.truncate(size)}finally{await fd.close()}
+  return {taskId,path,attachment:{...metadata,size}}
+}
+describe('actual native attachment-opening FD lifetime',()=>{
+  it('opens files larger than image publication without reading contents and holds FD through acknowledgement',async()=>{
+    const saved=await savedAttachment(2*1024*1024),gate=held(),entered=held();releases.push(gate.release)
+    let closed=false
+    const read=vi.fn(async()=>{throw new Error('Opening must not read bytes')})
+    owner=create({open:async(path,flags,mode)=>{const fd=await actualHandle(path,flags,mode);return{...fd,read,close:async()=>{await fd.close();closed=true}}}})
+    const invoke=vi.fn(async(receipt:AttachmentPathReceipt)=>{expect(isAttachmentPathReceipt(receipt)).toBe(true);expect(receipt).toMatchObject({taskId:saved.taskId,attachmentId:metadata.id,filename:metadata.filename,attachmentRoot,path:saved.path,target:{size:String(saved.attachment.size),nlink:'1',kind:'file'}});expect(receipt.ancestors).toHaveLength(1);expect(receipt.ancestors[0].path).toBe(join(attachmentRoot,saved.taskId));expect(closed).toBe(false);entered.release();await gate.promise})
+    const pending=owner.open(saved.taskId,saved.attachment,controls(),invoke);await entered.promise
+    expect(closed).toBe(false);expect(owner.inflightCount).toBeGreaterThan(0);expect(read).not.toHaveBeenCalled()
+    gate.release();expect(await pending).toBeUndefined();expect(closed).toBe(true);expect(invoke).toHaveBeenCalledTimes(1);expect(read).not.toHaveBeenCalled()
+  })
+  it('denies missing/incorrect metadata, linked files and oversized opening without native effects',async()=>{
+    const invoke=vi.fn(async()=>{})
+    await expect(owner.open('missing-task',metadata,controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_PATH_REFUSED'})
+    const saved=await savedAttachment()
+    await expect(owner.open(saved.taskId,{...metadata,size:metadata.size+1},controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_PATH_REFUSED'})
+    await expect(owner.open(saved.taskId,{...metadata,filename:'../foreign'},controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_INVALID_ARGUMENTS'})
+    await expect(owner.open(saved.taskId,{...metadata,size:64*1024*1024+1},controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_CAPACITY'})
+    await link(saved.path,join(root,'outside-link'))
+    await expect(owner.open(saved.taskId,metadata,controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_PATH_REFUSED'});await rm(join(root,'outside-link'))
+    await rename(saved.path,saved.path+'.kept');await symlink(saved.path+'.kept',saved.path)
+    await expect(owner.open(saved.taskId,metadata,controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_PATH_REFUSED'})
+    expect(invoke).not.toHaveBeenCalled();expect((await readFile(saved.path+'.kept')).length).toBe(metadata.size)
+  })
+  it('captures a late accepted FD before cancellation and joins its real close',async()=>{
+    const saved=await savedAttachment(),gate=held(),entered=held();releases.push(gate.release);let closed=false
+    owner=create({open:async(path,flags,mode)=>{const fd=await actualHandle(path,flags,mode);entered.release();await gate.promise;return{...fd,close:async()=>{await fd.close();closed=true}}}})
+    const controller=new AbortController(),invoke=vi.fn(async()=>{}),pending=owner.open(saved.taskId,metadata,controls(controller.signal),invoke),failure=pending.catch(error=>error)
+    await entered.promise;controller.abort();await expect(owner.close(5)).rejects.toMatchObject({code:'ATTACHMENT_DRAIN_INCOMPLETE'})
+    expect(closed).toBe(false);gate.release();expect((await failure).code).toMatch(/ATTACHMENT_(CLOSED|CANCELLED)/);await owner.close();expect(closed).toBe(true);expect(invoke).not.toHaveBeenCalled()
+  })
+  it('retains ignored native cancellation and never replays an uncertain accepted open',async()=>{
+    const saved=await savedAttachment(),gate=held(),entered=held();releases.push(gate.release);let closed=false
+    owner=create({open:async(path,flags,mode)=>{const fd=await actualHandle(path,flags,mode);return{...fd,close:async()=>{await fd.close();closed=true}}}})
+    const controller=new AbortController(),invoke=vi.fn(async()=>{entered.release();await gate.promise}),pending=owner.open(saved.taskId,metadata,controls(controller.signal),invoke),failure=pending.catch(error=>error)
+    await entered.promise;controller.abort();await expect(owner.close(5)).rejects.toMatchObject({code:'ATTACHMENT_DRAIN_INCOMPLETE'});expect(closed).toBe(false)
+    gate.release();expect((await failure).code).toMatch(/ATTACHMENT_(CLOSED|CANCELLED)/);await owner.close();expect(closed).toBe(true);expect(invoke).toHaveBeenCalledTimes(1)
+    expect((await readFile(saved.path)).length).toBe(metadata.size)
+  })
+  it('rechecks revoked guards on every primitive and after native work while still closing the FD',async()=>{
+    const saved=await savedAttachment();let allowed=false,closed=false
+    owner=create({open:async(path,flags,mode)=>{const fd=await actualHandle(path,flags,mode);return{...fd,close:async()=>{await fd.close();closed=true}}}})
+    const guarded={signal:new AbortController().signal,beforeEffect:()=>{if(!allowed)throw new ServiceProtocolError('INVALID_REQUEST')}}
+    const invoke=vi.fn(async()=>{allowed=false})
+    await expect(owner.open(saved.taskId,metadata,guarded,invoke)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(invoke).not.toHaveBeenCalled()
+    allowed=true;await expect(owner.open(saved.taskId,metadata,guarded,invoke)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(invoke).toHaveBeenCalledTimes(1);expect(closed).toBe(true)
+  })
+  it('preserves replaced files/task directories and freezes the exact saved metadata during native waits',async()=>{
+    const saved=await savedAttachment(),input={...metadata},gate=held(),entered=held();releases.push(gate.release)
+    const invoke=vi.fn(async(receipt:AttachmentPathReceipt)=>{expect(receipt.filename).toBe(metadata.filename);entered.release();await gate.promise})
+    const pending=owner.open(saved.taskId,input,controls(),invoke),failure=pending.catch(error=>error);input.filename='unrelated.txt';await entered.promise
+    await rename(saved.path,saved.path+'.original');await writeFile(saved.path,Buffer.alloc(metadata.size,9));gate.release()
+    expect((await failure).code).toBe('ATTACHMENT_PATH_CHANGED');expect(await readFile(saved.path)).toEqual(Buffer.alloc(metadata.size,9));expect((await readFile(saved.path+'.original')).length).toBe(metadata.size)
+    const taskPath=join(attachmentRoot,saved.taskId);await rename(taskPath,taskPath+'.retained');await mkdir(taskPath);await writeFile(saved.path,Buffer.alloc(metadata.size))
+    await expect(owner.open(saved.taskId,metadata,controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_PATH_CHANGED'});expect(invoke).toHaveBeenCalledTimes(1)
+  })
+  it('retains a failed descriptor close after native acknowledgement until explicit retry',async()=>{
+    const saved=await savedAttachment();let refuse=true,closes=0
+    owner=create({open:async(path,flags,mode)=>{const fd=await actualHandle(path,flags,mode);return{...fd,close:async()=>{closes++;if(refuse)throw new Error('Controlled close refusal');await fd.close()}}}})
+    const invoke=vi.fn(async()=>{})
+    await expect(owner.open(saved.taskId,metadata,controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_CLOSE_FAILED'});expect(owner.inflightCount).toBeGreaterThan(0);expect(invoke).toHaveBeenCalledTimes(1)
+    await expect(owner.open(saved.taskId,metadata,controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_BUSY'})
+    await expect(owner.close()).rejects.toMatchObject({code:'ATTACHMENT_CLOSE_FAILED'});refuse=false;await owner.close();expect(owner.inflightCount).toBe(0);expect(closes).toBe(3);expect((await readFile(saved.path)).length).toBe(metadata.size)
+  })
+  it('refuses a replaced captured root and preserves its original registered bytes',async()=>{
+    const saved=await savedAttachment(),invoke=vi.fn(async()=>{})
+    await owner.open(saved.taskId,metadata,controls(),invoke)
+    await rename(attachmentRoot,attachmentRoot+'.retained');await mkdir(attachmentRoot)
+    await expect(owner.open(saved.taskId,metadata,controls(),invoke)).rejects.toMatchObject({code:'ATTACHMENT_PATH_CHANGED'})
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect((await readFile(join(attachmentRoot+'.retained',saved.taskId,`${metadata.id}-${metadata.filename}`))).length).toBe(metadata.size)
   })
 })

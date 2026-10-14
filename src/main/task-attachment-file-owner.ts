@@ -5,6 +5,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, normalize } from 'node:path'
 import type { FileAttachmentRecord } from './database/types'
 import { TASK_ATTACHMENT_LIMITS, taskAttachmentFilename, taskAttachmentId, taskAttachmentRecord } from '../shared/task-attachment-codecs'
+import { isAttachmentPathReceipt, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
+import type { WorkspacePathIdentity } from '../shared/workspace-native-callbacks'
+export type { AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 
 export interface TaskAttachmentFileControls { beforeEffect(): void; signal: AbortSignal }
 export interface TaskAttachmentFileHandle {
@@ -129,6 +132,63 @@ export class TaskAttachmentFileOwner {
     const out = Buffer.alloc(size); let read = 0
     while (read < size) { this.profile(); const result = await fd.read(out, read, Math.min(65536, size - read), read); if (!Number.isSafeInteger(result.bytesRead) || result.bytesRead < 1 || result.bytesRead > size - read) fail('ATTACHMENT_PATH_CHANGED'); read += result.bytesRead }
     return out
+  }
+  private async verifyOpeningDirectory(proof: DirectoryProof | null, controls: TaskAttachmentFileControls): Promise<void> {
+    for (const root of this.roots) {
+      const current = await this.step(controls, () => this.fs.lstat(root.path))
+      if (!current.isDirectory() || current.isSymbolicLink() || !sameNode(root.info,current)) fail('ATTACHMENT_PATH_CHANGED')
+    }
+    if (await this.step(controls, () => this.fs.realpath(this.root)) !== this.root) fail('ATTACHMENT_PATH_CHANGED')
+    if (proof) {
+      const current = await this.step(controls, () => this.fs.lstat(proof.path))
+      if (!current.isDirectory() || current.isSymbolicLink() || !sameNode(proof.info,current) || await this.step(controls, () => this.fs.realpath(proof.path)) !== proof.path) fail('ATTACHMENT_PATH_CHANGED')
+    }
+  }
+  private openingFile(info: BigIntStats, size: number): void {
+    if (info.size > BigInt(TASK_ATTACHMENT_LIMITS.openBytes)) fail('ATTACHMENT_CAPACITY')
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || info.size < 0n || info.size !== BigInt(size)) fail('ATTACHMENT_PATH_REFUSED')
+  }
+  /** No contents are read. The actual no-follow FD remains retained across
+   * the complete native acknowledgement, including ignored cancellation. */
+  open(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls, invoke: (receipt: AttachmentPathReceipt) => Promise<void>): Promise<void> {
+    if (!taskAttachmentRecord(attachment) || typeof invoke !== 'function') return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
+    if (attachment.size > TASK_ATTACHMENT_LIMITS.openBytes) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_CAPACITY'))
+    const metadata = Object.freeze({ ...attachment })
+    return this.run(taskId,controls,async guard => {
+      await this.verifyOpeningDirectory(null,guard)
+      const directory = join(this.root,taskId)
+      let info: BigIntStats
+      try { info = await this.step(guard, () => this.fs.lstat(directory)) } catch (error) { if (missing(error)) fail('ATTACHMENT_PATH_REFUSED'); throw error }
+      if (!info.isDirectory() || info.isSymbolicLink() || await this.step(guard, () => this.fs.realpath(directory)) !== directory) fail('ATTACHMENT_PATH_REFUSED')
+      const known = this.tasks.get(taskId)
+      if (known && !sameNode(known,info)) fail('ATTACHMENT_PATH_CHANGED')
+      if (!known && this.tasks.size >= 4096) fail('ATTACHMENT_CAPACITY')
+      this.tasks.set(taskId,info)
+      const proof = { taskId,path:directory,info }, path = join(directory,`${metadata.id}-${metadata.filename}`)
+      await this.verifyOpeningDirectory(proof,guard)
+      let before: BigIntStats
+      try { before = await this.step(guard, () => this.fs.lstat(path)) } catch (error) { if (missing(error)) fail('ATTACHMENT_PATH_REFUSED'); throw error }
+      this.openingFile(before,metadata.size)
+      const handle = await this.openOwned(path,constants.O_RDONLY,guard)
+      try {
+        this.current(guard)
+        const opened = await this.step(guard, () => handle.fd.stat()); this.openingFile(opened,metadata.size)
+        if (!sameBytes(before,opened)) fail('ATTACHMENT_PATH_CHANGED')
+        await this.verifyOpeningDirectory(proof,guard)
+        const named = await this.step(guard, () => this.fs.lstat(path)); this.openingFile(named,metadata.size)
+        if (!sameBytes(before,named)) fail('ATTACHMENT_PATH_CHANGED')
+        const identity = (path: string, info: BigIntStats): WorkspacePathIdentity => ({ path,dev:info.dev.toString(),ino:info.ino.toString(),kind:info.isDirectory() ? 'directory' : 'file',size:info.size.toString(),nlink:info.nlink.toString() })
+        const rootInfo = await this.step(guard, () => this.fs.lstat(this.root)), taskInfo = await this.step(guard, () => this.fs.lstat(proof.path))
+        if (!sameNode(rootInfo,this.roots[this.roots.length-1].info) || !sameNode(taskInfo,proof.info)) fail('ATTACHMENT_PATH_CHANGED')
+        const receipt: AttachmentPathReceipt = { version:1,taskId,attachmentId:metadata.id,filename:metadata.filename,attachmentRoot:this.root,path,root:identity(this.root,rootInfo),ancestors:[identity(proof.path,taskInfo)],target:identity(path,opened) }
+        if (!isAttachmentPathReceipt(receipt)) fail('ATTACHMENT_PATH_REFUSED')
+        this.current(guard); await invoke(structuredClone(receipt)); this.current(guard)
+        await this.verifyOpeningDirectory(proof,guard)
+        const afterFd = await this.step(guard, () => handle.fd.stat()), after = await this.step(guard, () => this.fs.lstat(path))
+        this.openingFile(afterFd,metadata.size); this.openingFile(after,metadata.size)
+        if (!sameBytes(before,afterFd) || !sameBytes(before,after)) fail('ATTACHMENT_PATH_CHANGED')
+      } finally { await this.closeHandle(handle) }
+    })
   }
   /** Receipts are owner-produced opaque objects, never accepted over RPC. */
   write(taskId: string, attachment: FileAttachmentRecord, rawBytes: Buffer, controls: TaskAttachmentFileControls): Promise<object> {

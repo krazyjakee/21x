@@ -261,7 +261,7 @@ fn upsert(v: &Value) -> bool {
 fn utf8(v: &Value, max: usize) -> bool {
     v.as_str().is_some_and(|s| s.len() <= max)
 }
-fn uuid(v: &Value) -> bool {
+pub(crate) fn uuid(v: &Value) -> bool {
     v.as_str().is_some_and(|s| {
         let b = s.as_bytes();
         b.len() == 36
@@ -276,7 +276,7 @@ fn uuid(v: &Value) -> bool {
             && matches!(b[19].to_ascii_lowercase(), b'8' | b'9' | b'a' | b'b')
     })
 }
-fn filename(v: &Value) -> bool {
+pub(crate) fn filename(v: &Value) -> bool {
     utf8(v, 216)
         && v.as_str().is_some_and(|s| {
             if s.is_empty()
