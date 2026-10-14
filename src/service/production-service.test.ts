@@ -1,3 +1,5 @@
+import { UI_NATIVE_CALLBACK_SCHEMAS, isPrivateUiPublication } from '../shared/ui-native-callbacks'
+import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -38,10 +40,14 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false) {
+function fixture(workspaceFiles = false, ui = false) {
+  let uiLease: string | null = 'document_fixture_1'
+  let uiAcknowledgement: Promise<void> | null = null
+  const acceptedUi: JsonValue[] = []
   const root = mkdtempSync(join(tmpdir(), '21x-private-production-')); roots.push(root)
   const launch = descriptor(root); mkdirSync(launch.paths.resourceRoot)
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
+  if (ui) launch.capabilities.ui = 'host'
   let permitted = true, badDrain = false, preparation: Promise<void> | null = null
   const nativeCalls: string[] = [], wireEvents: Array<{ operation: string; payload: JsonValue }> = []
   const keys = new Map<string, Buffer>()
@@ -84,6 +90,16 @@ function fixture(workspaceFiles = false) {
     nativeCalls.push(operation); fileReceipts.push((payload as { receipt: JsonValue }).receipt)
     await fileAcknowledgement; return {}
   } }
+  schemas['engine.ui.publish'] = { validatePayload: isPrivateUiPublication, validateResult: UI_DESKTOP_CODECS['ui:publishState'].validateWireResult }
+  if (ui) {
+    schemas['host.ui.snapshot'] = { ...UI_NATIVE_CALLBACK_SCHEMAS['host.ui.snapshot'], handle: (): JsonValue => uiLease ? { available: true, leaseId: uiLease } : { available: false } }
+    schemas['host.ui.command'] = { ...UI_NATIVE_CALLBACK_SCHEMAS['host.ui.command'], handle: async (payload): Promise<JsonValue> => {
+      nativeCalls.push('host.ui.command')
+      await uiAcknowledgement
+      if (!isRecord(payload) || payload.leaseId !== uiLease || !uiLease) return { ok: false, detail: 'No current document' }
+      acceptedUi.push(structuredClone(payload.command)); return { ok: true, leaseId: uiLease }
+    } }
+  }
   const deliver = (peer: ServicePeer, bytes: Uint8Array): void => { for (let offset = 0; offset < bytes.length; offset += 79) peer.receive(bytes.subarray(offset, offset + 79)) }
   const host = new ServicePeer({ role: 'host', engineEpoch: null, operations: schemas,
     eventSchemas: Object.fromEntries(Object.keys(PRODUCTION_EVENT_CODECS).map(operation => [operation, (value: unknown) => validateProductionEventWire(operation, value)])),
@@ -97,6 +113,7 @@ function fixture(workspaceFiles = false) {
       connectors: { kind: 'disabled', reason: 'Controlled fixture has no packaged connectors' }, managedTaskMcp: { disabled: true },
       native: { agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, configuredMcp: 'disabled' },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, emit: callbacks.emitOwnerEvent,
+        ...(ui ? { ui: callbacks.ui } : {}),
         openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } })
   }), { write: async bytes => { deliver(host, bytes) } }); services.push(service)
   const initialize = async (): Promise<void> => {
@@ -105,6 +122,7 @@ function fixture(workspaceFiles = false) {
     await host.request('engine.initialize', { protocolVersion: 1, launchId: launch.launchId })
   }
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
+    acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
     fileReceipts, holdFileAcknowledgement: (raw: Promise<void>) => { fileAcknowledgement = raw },
     holdPreparation: (raw: Promise<void>) => { preparation = raw } }
 }
@@ -273,5 +291,46 @@ describe('production resource gate before engine loading', () => {
     await expect(verifyProductionResources(f.launch, { ...f.runtime, executable: process.execPath })).rejects.toThrow('RUNTIME_IDENTITY_INVALID')
     const path = join(f.resources, 'service/PRODUCTION_RESOURCE_MANIFEST.json'); writeFileSync(path, readFileSync(path, 'utf8') + '\n')
     await expect(verifyProductionResources(f.launch, f.runtime)).rejects.toThrow('RESOURCE_MANIFEST_CHANGED')
+  })
+})
+
+describe('private native document publication into the actual production singleton', () => {
+  const state = (projectId: string) => ({ view: 'commander', projectId, modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } })
+  it('rejects public lease injection and stamps private native ingress before reading actual UI state', async () => {
+    const f = fixture(false, true); await f.initialize()
+    const services = f.service.getReadyServices()!, snapshot = state(services.db.getDefaultProject()!.id)
+    await expect(f.host.request('ui:publishState', { state: snapshot })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(f.host.request('ui:publishState', { state: snapshot, leaseId: 'document_fixture_1' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+    expect(await f.host.request('engine.ui.publish', { state: snapshot, leaseId: 'document_fixture_1' })).toEqual({ defined: false })
+    expect(await services.ui!.snapshot()).toMatchObject({ available: true, ...snapshot })
+    const api = await import('../main/task-api-server-core'), apiBase = `http://127.0.0.1:${api.getTaskApiPort()}`
+    const read = () => fetch(apiBase + '/get_ui_state', { method: 'POST', headers: { Authorization: 'Bearer ' + api.getTaskApiToken(), 'Content-Type': 'application/json' }, body: '{}' })
+    expect((await fetch(apiBase + '/get_ui_state')).status).toBe(401)
+    expect((await fetch(apiBase + '/get_ui_state', { headers: { Authorization: 'Bearer wrong' } })).status).toBe(401)
+    expect(await (await read()).json()).toMatchObject({ available: true, ...snapshot })
+    expect(await services.ui!.send({ kind: 'navigate', view: 'tasks' })).toEqual({ success: true, command: 'navigate', accepted: true })
+    expect(f.acceptedUi).toEqual([{ kind: 'navigate', view: 'tasks' }])
+    f.changeUiLease('document_fixture_2')
+    expect(await services.ui!.snapshot()).toEqual({ available: false })
+    await expect(f.host.request('engine.ui.publish', { state: snapshot, leaseId: 'document_fixture_1' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(await f.host.request('engine.ui.publish', { state: snapshot, leaseId: 'document_fixture_2' })).toEqual({ defined: false })
+    f.changeUiLease(null); expect(await services.ui!.snapshot()).toEqual({ available: false })
+    expect(await (await read()).json()).toEqual({ available: false })
+    expect(await services.ui!.send({ kind: 'navigate', view: 'tasks' })).toHaveProperty('error')
+    expect(f.acceptedUi).toHaveLength(1)
+  })
+  it('retains an outstanding native acknowledgement and refuses a retired lease result', async () => {
+    const f = fixture(false, true); await f.initialize()
+    const services = f.service.getReadyServices()!, snapshot = state(services.db.getDefaultProject()!.id)
+    await f.host.request('engine.ui.publish', { state: snapshot, leaseId: 'document_fixture_1' })
+    const gate = deferred(); release.push(gate.finish); f.holdUiAcknowledgement(gate.promise)
+    const send = services.ui!.send({ kind: 'navigate', view: 'tasks' })
+    await vi.waitFor(() => expect(f.nativeCalls).toContain('host.ui.command'))
+    await expect(f.service.owner.close(15)).rejects.toMatchObject({ code: 'OWNER_DRAIN_BLOCKED' })
+    expect(f.service.owner.snapshot().owned).toBe(true)
+    f.changeUiLease('document_fixture_2'); gate.finish()
+    await expect(send).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(f.acceptedUi).toEqual([])
+    await f.service.owner.close(); expect(f.service.owner.snapshot().owned).toBe(false)
   })
 })

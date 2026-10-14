@@ -1,4 +1,4 @@
-import { desktopApi, desktopSupports } from '@/lib/desktop-api'
+import { desktopApi, desktopSupports, getDesktopHost } from '@/lib/desktop-api'
 import { useEffect } from 'react'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
@@ -13,7 +13,7 @@ export const UI_PUBLISH_THROTTLE_MS = 250
  * Lets an agent read the screen and drive it. Mount it once.
  *
  * Reading: the window pushes what it is showing whenever it changes, so a tool
- * call is answered from a cache and never waits for the renderer. It is
+ * call reads a cache after checking the native document lease. It is
  * throttled, because asking often must not be able to make the window busy.
  *
  * Driving: one command arrives per action and is applied to the stores. The
@@ -30,7 +30,7 @@ export function useUiRemoteControl(): void {
     const publishNow = (): void => {
       pending = false
       if (timer) clearTimeout(timer)
-      void desktopApi.ui.publishState({ ...collectUiState() })
+      void desktopApi.ui.publishState({ ...collectUiState() }).catch(() => { /* Native availability is checked again on the next current-state publication. */ })
       timer = setTimeout(() => {
         timer = null
         if (!pending) return
@@ -49,6 +49,14 @@ export function useUiRemoteControl(): void {
     }
 
     publish()
+    const host = getDesktopHost()
+    let readyEpoch: string | null = null
+    const offConnection = host.kind === 'tauri' ? host.subscribeConnection(() => {
+      const hydrated = !('hydrationPending' in host) || host.hydrationPending === false
+      const epoch = host.connection.status === 'ready' && hydrated ? host.connection.engineEpoch : null
+      if (epoch && epoch !== readyEpoch) { readyEpoch = epoch; publishNow() }
+      if (!epoch) readyEpoch = null
+    }) : undefined
     const offUi = useUIStore.subscribe(publish)
     const offTasks = useTaskStore.subscribe(publish)
     const offAgents = useAgentStore.subscribe(publish)
@@ -67,6 +75,7 @@ export function useUiRemoteControl(): void {
 
     return () => {
       if (timer) clearTimeout(timer)
+      offConnection?.()
       offUi()
       offTasks()
       offAgents()

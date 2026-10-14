@@ -1,5 +1,5 @@
-import { expect, it } from 'vitest'
-import { productionBootstrapMessage } from './tauri-desktop-transport'
+import { expect, it, vi } from 'vitest'
+import { productionBootstrapMessage, getTauriEngineEpoch, getTauriUiDocument, createTauriDesktopTransport, type TauriDesktopApi } from './tauri-desktop-transport'
 
 it('projects only known startup failures into fixed redacted provisioning guidance', () => {
   const status = (code: string, phase: string) => ({ protocolVersion: 1, production: true, available: false, startupFailure: { code, phase, path: '/private/profile', error: 'private credential detail' } })
@@ -13,4 +13,25 @@ it('projects only known startup failures into fixed redacted provisioning guidan
   expect(productionBootstrapMessage(status('PRODUCTION_CONTAINMENT_UNAVAILABLE', '/private/profile'))).toBeNull()
   expect(productionBootstrapMessage({ ...status('PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-delegation-missing'), production: false })).toBeNull()
   expect(JSON.stringify(productionBootstrapMessage(status('PROFILE_IN_USE', 'profile-lock')))).not.toContain('private')
+})
+
+it('waits for native page completion before capturing a private publication receipt', async () => {
+  vi.useFakeTimers()
+  try {
+    const invoke = vi.fn().mockResolvedValueOnce({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiSupported: true })
+      .mockResolvedValueOnce({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiSupported: true, uiLeaseId: 'document:1' })
+      .mockResolvedValue({ engineEpoch: 'engine-1', result: { defined: false } })
+    const native = { core: { invoke }, event: { listen: vi.fn() } } as unknown as TauriDesktopApi
+    const status = getTauriEngineEpoch(native)
+    await vi.advanceTimersByTimeAsync(25)
+    expect(await status).toBe('engine-1'); expect(getTauriUiDocument(native)).toEqual({ engineEpoch: 'engine-1', leaseId: 'document:1' })
+    const transport = createTauriDesktopTransport(native)
+    await transport.invoke('ui:publishState', { state: {} }, { engineEpoch: 'engine-1', signal: new AbortController().signal })
+    expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'ui:publishState', payload: { state: {} }, engineEpoch: 'engine-1', uiLease: 'document:1' })
+    await transport.invoke('project:getAll', {}, { engineEpoch: 'engine-1', signal: new AbortController().signal })
+    expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'project:getAll', payload: {}, engineEpoch: 'engine-1' })
+    invoke.mockResolvedValue({ available: true, protocolVersion: 1, engineEpoch: 'engine-2' })
+    expect(await getTauriEngineEpoch(native)).toBe('engine-2'); expect(getTauriUiDocument(native)).toBeUndefined()
+    await expect(transport.invoke('ui:publishState', { state: {} }, { engineEpoch: 'engine-2', signal: new AbortController().signal })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  } finally { vi.useRealTimers() }
 })

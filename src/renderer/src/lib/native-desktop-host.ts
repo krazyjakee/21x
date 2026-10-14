@@ -1,3 +1,5 @@
+import { UI_DESKTOP_CODECS, UI_DESKTOP_EVENT_CODECS, isUiCommand, isUiLeaseId } from '@shared/ui-desktop-codecs'
+import type { UiCommand } from '@shared/ui-commands'
 import { CLI_MCP_CODECS } from '@shared/cli-mcp-codecs'
 import { TASK_ATTACHMENT_CODECS } from '@shared/task-attachment-codecs'
 import { HEARTBEAT_CODECS, HEARTBEAT_EVENT_CODECS } from '@shared/heartbeat-codecs'
@@ -29,17 +31,18 @@ import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_EVENT_CODECS } from '@share
 import { AGENT_COMMAND_CODECS, AGENT_EVENT_CODECS } from '@shared/agent-desktop-codecs'
 import { AGENT_CONFIGURATION_CODECS, AGENT_CONFIGURATION_EVENT_CODECS } from '@shared/agent-configuration-codecs'
 import type { DesktopCommandMap, DesktopEventMap } from '@shared/desktop-operations'
-import { isRecord, ServiceProtocolError } from '@shared/service-protocol'
+import { hasExactKeys, isRecord, ServiceProtocolError } from '@shared/service-protocol'
 import { DesktopClient, type DesktopClientState } from './desktop-client'
-import { createTauriDesktopTransport, getTauriEngineEpoch, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
+import { createTauriDesktopTransport, getTauriEngineEpoch, getTauriUiDocument, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS }
-const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS,
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
+const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
 /** Explicit binding is separate from codec validation and native/service authorization. */
 export const NATIVE_COMMAND_BINDINGS = {
+  'ui:publishState': 'ui.publishState',
   'cliMcp:snapshot': 'cliMcp.snapshot', 'cliMcp:upsert': 'cliMcp.upsert', 'cliMcp:remove': 'cliMcp.remove', 'cliMcp:setEnabled': 'cliMcp.setEnabled', 'cliMcp:setToolEnabled': 'cliMcp.setToolEnabled', 'cliMcp:probe': 'cliMcp.probe',
   'chatImages:saveToTask': 'chatImages.saveToTask', 'attachments:remove': 'attachments.remove',
   'heartbeat:enable': 'heartbeat.enable', 'heartbeat:disable': 'heartbeat.disable', 'heartbeat:runNow': 'heartbeat.runNow', 'heartbeat:getLogs': 'heartbeat.getLogs', 'heartbeat:getStatus': 'heartbeat.getStatus', 'heartbeat:updateInterval': 'heartbeat.updateInterval', 'heartbeat:readFile': 'heartbeat.readFile', 'heartbeat:writeFile': 'heartbeat.writeFile',
@@ -117,6 +120,7 @@ export const NATIVE_COMMAND_BINDINGS = {
   'mobile:setCustomUrl': 'mobile.setCustomUrl', 'mobile:clearCustomUrl': 'mobile.clearCustomUrl', 'mobile:getPendingPin': 'mobile.getPendingPin', 'mobile:getSessions': 'mobile.getSessions', 'mobile:revokeSession': 'mobile.revokeSession', 'mobile:revokeAllSessions': 'mobile.revokeAllSessions'
 } as const satisfies Record<keyof typeof commands, ApiPath<DesktopApi>>
 export const NATIVE_EVENT_BINDINGS = {
+  'ui:command': 'ui.onCommand',
   'heartbeat:alert': 'onHeartbeatAlert', 'heartbeat:disabled': 'onHeartbeatDisabled',
   'worktree:progress': 'onWorktreeProgress', 'workspace:cleanup-progress': 'onWorkspaceCleanupProgress',
   'voice:status': 'voice.onStatus', 'voice:runtimeProgress': 'voice.onRuntimeProgress',
@@ -148,6 +152,9 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
   const observers = new Set<() => void>(), refreshes = new Set<() => void>()
   let state: Readonly<DesktopClientState> = { status: 'disconnected', engineEpoch: null }
   let hydrationPending = true, rehydrate: (() => Promise<void>) | undefined, disposed = false
+  const uiObservers = new Set<(command: UiCommand) => void>()
+  let uiCleanup: (() => void) | undefined
+  let uiConnectGeneration = 0
   let generation = 0
   let hydrationGeneration = 0, recoveryFailed = false
   let unavailableCapability: string | null = null
@@ -203,6 +210,9 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
       refreshes.add(listener); let released = false
       return () => { if (!released) { released = true; refreshes.delete(listener); nativeCleanup() } }
     }
+    if (path === 'ui.onCommand') return (listener: (command: UiCommand) => void) => {
+      uiObservers.add(listener); return () => { uiObservers.delete(listener) }
+    }
     const event = eventPaths.get(path)
     if (event) return (listener: (payload: DesktopEventMap[NonNullable<typeof event>]) => void) => client.subscribe(event, listener)
     if (path.split('.').at(-1)?.startsWith('on')) return undefined
@@ -251,14 +261,29 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
       unavailableCapability = null
       bootstrapFailure = null
       hydrationPending = true; recoveryFailed = false; notify()
+      uiCleanup?.(); uiCleanup = undefined
+      const attempt = ++uiConnectGeneration
       let epoch: string
       try { epoch = await getTauriEngineEpoch(native) }
       catch (error) { bootstrapFailure = error instanceof NativeBootstrapUnavailableError ? error.explanation : null; client.disconnect('DISCONNECTED'); notify(); throw error }
+      const document = getTauriUiDocument(native)
+      if (document) {
+        // Native UI intent has its own document lifetime, independent of the
+        // service event sequence. A replacement document cannot accept it.
+        const cleanup = await native.event.listen<unknown>('desktop:ui-command', event => {
+          const value = event.payload, current = getTauriUiDocument(native)
+          if (disposed || hydrationPending || state.status !== 'ready' || !current || current !== document || !isRecord(value) || !hasExactKeys(value, ['engineEpoch', 'leaseId', 'command']) ||
+            value.engineEpoch !== current.engineEpoch || !isUiLeaseId(value.leaseId) || value.leaseId !== current.leaseId || !isUiCommand(value.command)) return
+          for (const observer of [...uiObservers]) { try { observer(structuredClone(value.command)) } catch { /* Consumers do not own native delivery. */ } }
+        }, { target: { kind: 'WebviewWindow', label: 'main' } })
+        if (disposed || attempt !== uiConnectGeneration) { cleanup(); throw new ServiceProtocolError('DISCONNECTED') }
+        uiCleanup = cleanup
+      }
       await client.connect(epoch)
       // Reads during hydration are allowed; mutation/approval is fenced until
       // all retained durable owners have settled against this trusted epoch.
       if (rehydrate) await hydrate()
     },
-    dispose() { if (disposed) return; disposed = true; client.dispose(); observers.clear(); refreshes.clear() }
+    dispose() { if (disposed) return; disposed = true; uiConnectGeneration++; uiCleanup?.(); uiCleanup = undefined; uiObservers.clear(); client.dispose(); observers.clear(); refreshes.clear() }
   }
 }

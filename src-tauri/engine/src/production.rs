@@ -96,6 +96,58 @@ pub struct ProductionNativeHost {
     pub event_sink: Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>,
     pub open_external: Option<Arc<dyn Fn(String) -> HostFuture<()> + Send + Sync>>,
     pub notification: Option<Arc<dyn Fn(String, String) -> HostFuture<bool> + Send + Sync>>,
+    pub ui_snapshot: Option<Arc<dyn Fn(String) -> HostFuture<Value> + Send + Sync>>,
+    pub ui_command: Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
+}
+fn ui_host_matches(capability: &HostCapability, host: &ProductionNativeHost) -> bool {
+    match capability {
+        HostCapability::Host => host.ui_snapshot.is_some() && host.ui_command.is_some(),
+        HostCapability::Unsupported => host.ui_snapshot.is_none() && host.ui_command.is_none(),
+    }
+}
+async fn ui_callback(
+    host: &ProductionNativeHost,
+    capability: &HostCapability,
+    epoch: String,
+    operation: &str,
+    payload: &Value,
+) -> Result<Value, EngineError> {
+    use crate::production_ui_contracts as ui;
+    // An unsupported descriptor never probes the callbacks.
+    if *capability != HostCapability::Host || !ui_host_matches(capability, host) {
+        return Err(EngineError::new("UNKNOWN_OPERATION"));
+    }
+    let result = match operation {
+        "host.ui.snapshot" => {
+            if !ui::snapshot_request(payload) {
+                return Err(EngineError::new("INVALID_ARGUMENTS"));
+            }
+            let result = host.ui_snapshot.as_ref().unwrap()(epoch).await?;
+            if !ui::snapshot_result(&result) {
+                return Err(EngineError::new("INVALID_RESULT"));
+            }
+            result
+        }
+        "host.ui.command" => {
+            if !ui::command_request(payload) {
+                return Err(EngineError::new("INVALID_ARGUMENTS"));
+            }
+            let result = host.ui_command.as_ref().unwrap()(
+                payload["command"].clone(),
+                payload["leaseId"].as_str().unwrap().to_owned(),
+                epoch,
+            )
+            .await?;
+            if !ui::command_result(&result)
+                || result["ok"] == true && result["leaseId"] != payload["leaseId"]
+            {
+                return Err(EngineError::new("INVALID_RESULT"));
+            }
+            result
+        }
+        _ => return Err(EngineError::new("UNKNOWN_OPERATION")),
+    };
+    Ok(result)
 }
 /// Obtained by the trusted host, never deserialize this lease from an RPC.
 pub struct TrustedProductionLaunch {
@@ -152,7 +204,6 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || !token(&value.build_identity, 1, 128, true)
         || !digest(&value.resource_manifest_sha256)
         || capabilities.energy != HostCapability::Unsupported
-        || capabilities.ui != HostCapability::Unsupported
         || capabilities.voice != HostCapability::Unsupported
         || [
             &value.paths.profile_root,
@@ -465,6 +516,7 @@ impl ProductionEngine {
                 && host.notification.is_none())
             || (launch.descriptor.capabilities.workspace_files == HostCapability::Host
                 && host.workspace_file.is_none())
+            || !ui_host_matches(&launch.descriptor.capabilities.ui, &host)
         {
             return Err(problem(
                 "INVALID_ARGUMENTS",
@@ -514,6 +566,32 @@ impl ProductionEngine {
             return Err(EngineError::new("DISCONNECTED"));
         }
         self.request(operation, payload).await
+    }
+    /// Trusted native publication carries the window owner's lease. This is
+    /// private engine traffic, never a new public operation or payload grant.
+    pub async fn publish_ui(
+        &self,
+        epoch: &str,
+        state: Value,
+        lease_id: &str,
+    ) -> Result<Value, EngineError> {
+        let payload = json!({"state":state,"leaseId":lease_id});
+        if !crate::production_ui_contracts::private_publish_request(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.ui != HostCapability::Host {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        self.request("engine.ui.publish", payload).await
     }
     async fn write(&self, frame: &Value) -> Result<(), EngineError> {
         let mut bytes =
@@ -660,6 +738,7 @@ impl ProductionEngine {
                                 && result["nodeVersion"] == "v22.23.2"
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
+                        "engine.ui.publish" => crate::production_ui_contracts::void_result(result),
                         operation => contracts::valid_result(operation, result),
                     };
                     if !valid {
@@ -810,6 +889,23 @@ impl ProductionEngine {
         let payload = &frame["payload"];
         let operation = frame["operation"].as_str().unwrap_or("");
         match operation {
+            "host.ui.snapshot" | "host.ui.command" => {
+                if self.0.closed.load(Ordering::SeqCst)
+                    || self.0.stopping.load(Ordering::SeqCst)
+                    || !self.0.prepared.load(Ordering::SeqCst)
+                    || operation == "host.ui.command" && !self.0.ready.load(Ordering::SeqCst)
+                {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                ui_callback(
+                    &self.0.host,
+                    &self.0.descriptor.capabilities.ui,
+                    self.epoch(),
+                    operation,
+                    payload,
+                )
+                .await
+            }
             "host.production.prepare" => {
                 if !contracts::object(payload, &["launchId", "resourceManifestSha256"], &[])
                     || payload["launchId"] != self.0.descriptor.launch_id
@@ -1833,6 +1929,196 @@ mod tests {
         bad = value;
         bad.paths.workspace_root = PathBuf::from("relative");
         assert!(descriptor_bytes(&bad).is_err());
+    }
+    fn ui_host() -> ProductionNativeHost {
+        ProductionNativeHost {
+            workspace_file: None,
+            event_sink: Arc::new(|_| Ok(())),
+            open_external: None,
+            notification: None,
+            ui_snapshot: None,
+            ui_command: None,
+        }
+    }
+    #[test]
+    fn ui_descriptor_requires_both_owned_callbacks_and_unsupported_has_none() {
+        let root = Temporary::new();
+        let mut descriptor = descriptor(&root.0);
+        descriptor.capabilities.ui = HostCapability::Host;
+        assert!(descriptor_bytes(&descriptor).is_ok());
+        let mut host = ui_host();
+        assert!(!ui_host_matches(&HostCapability::Host, &host));
+        assert!(ui_host_matches(&HostCapability::Unsupported, &host));
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        assert!(!ui_host_matches(&HostCapability::Host, &host));
+        assert!(!ui_host_matches(&HostCapability::Unsupported, &host));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        assert!(ui_host_matches(&HostCapability::Host, &host));
+    }
+    #[tokio::test]
+    async fn unsupported_ui_never_probes_native_callbacks_and_exact_results_are_required() {
+        let probes = Arc::new(AtomicU64::new(0));
+        let count = probes.clone();
+        let mut host = ui_host();
+        host.ui_snapshot = Some(Arc::new(move |epoch| {
+            count.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                assert_eq!(epoch, "epoch-fixture");
+                Ok(json!({"available":true,"leaseId":"lease:1"}))
+            })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Unsupported,
+                "epoch-fixture".into(),
+                "host.ui.snapshot",
+                &json!({})
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "UNKNOWN_OPERATION"
+        );
+        assert_eq!(probes.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.snapshot",
+                &json!({"caller":"main"})
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INVALID_ARGUMENTS"
+        );
+        assert_eq!(probes.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.snapshot",
+                &json!({})
+            )
+            .await
+            .unwrap()["leaseId"],
+            "lease:1"
+        );
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":true,"leaseId":"lease:1","window":"foreign"})) })
+        }));
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.snapshot",
+                &json!({})
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INVALID_RESULT"
+        );
+    }
+    #[tokio::test]
+    async fn ui_commands_keep_exact_epoch_and_lease_and_wait_for_real_callback_completion() {
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let entered = Arc::new(Mutex::new(Some(entered_tx)));
+        let finish = Arc::new(Mutex::new(Some(finish_rx)));
+        let calls = Arc::new(AtomicU64::new(0));
+        let mut host = ui_host();
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        let call_count = calls.clone();
+        host.ui_command = Some(Arc::new(move |command, lease, epoch| {
+            call_count.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(command, json!({"kind":"close_task_panel","taskId":"task"}));
+            assert_eq!(lease, "lease:1");
+            assert_eq!(epoch, "epoch-fixture");
+            let entered = entered.lock().unwrap().take().unwrap();
+            let finish = finish.lock().unwrap().take().unwrap();
+            Box::pin(async move {
+                let _ = entered.send(());
+                finish.await.unwrap();
+                Ok(json!({"ok":true,"leaseId":lease}))
+            })
+        }));
+        let bad = json!({"command":{"kind":"close_task_panel","taskId":"task","window":"main"},"leaseId":"lease:1"});
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.command",
+                &bad
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INVALID_ARGUMENTS"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        // Private ingress owns a spawned raw callback independently of its
+        // public request future; dropping its waiter cannot cancel that task.
+        let completed = Arc::new(AtomicBool::new(false));
+        let finished = completed.clone();
+        let work = tokio::spawn(async move {
+            let answer = ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.command",
+                &json!({"command":{"kind":"close_task_panel","taskId":"task"},"leaseId":"lease:1"}),
+            )
+            .await;
+            assert_eq!(answer.unwrap(), json!({"ok":true,"leaseId":"lease:1"}));
+            finished.store(true, Ordering::SeqCst);
+        });
+        entered_rx.await.unwrap();
+        assert!(!completed.load(Ordering::SeqCst));
+        drop(work);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        finish_tx.send(()).unwrap();
+        timeout(Duration::from_secs(1), async {
+            while !completed.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let mut foreign = ui_host();
+        foreign.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        foreign.ui_command = Some(Arc::new(|_, _, _| {
+            Box::pin(async { Ok(json!({"ok":true,"leaseId":"foreign"})) })
+        }));
+        assert_eq!(
+            ui_callback(
+                &foreign,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.command",
+                &json!({"command":{"kind":"close_task_panel","taskId":"task"},"leaseId":"lease:1"})
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INVALID_RESULT"
+        );
     }
     #[test]
     fn native_request_identity_is_scoped_and_monotonic_decimal() {

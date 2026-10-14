@@ -1,0 +1,345 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    209,
+    213,
+    215
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "b0260f920dc347ecc1818418b865fa50daab9e20",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/implementation-status.md": "26ce07e07c6e0cde15dfc8e04dd772dc69f1d0fbe8009bc850b1cad81c40d1c8",
+      "docs/tauri-migration/inventory.json": "174f97aefb4a013c7a0b25324987af436e2392b28122e0fd5c61f3a4e39e35d4",
+      "docs/tauri-migration/operations.json": "98dd6d569d61a5a908d9cd03544e3a86098801105e367122cd786d733f7f4bf9",
+      "docs/tauri-migration/ui-state-bindings.md": "a56798a16f321f84b1bbb7ef1bf6180c8b29cf71cbdd27f4d4c13b6bb651f769",
+      "scripts/production-contracts-proof.test.ts": "141b404d3993a0b4d93166552760b7bb11f91a8be1f50973749bee1020150688",
+      "scripts/production-contracts-proof.ts": "29e7c78b7e724332a55b21c7887858eb7b750c27eae295cd713495548438d241",
+      "src-tauri/Cargo.lock": "b09d362f3515f4fbca1165e7e8f21b321f291daa958d6c6bd37776e7fcdfac4d",
+      "src-tauri/Cargo.toml": "e72cb41ae3a10f527504adfe462707a011f7437b182f3267eb3c09bd79150d7f",
+      "src-tauri/engine/src/lib.rs": "3183430e776ca8fec4cb2629addade7536769e11d0182f00eb6115279f725ae5",
+      "src-tauri/engine/src/production.rs": "b2563fa83d4a3ae40c927cfc222ff83fb8638f288039f8ef5290c05433e4dea7",
+      "src-tauri/engine/src/production_contracts.rs": "e37474ea3f23bfb6db97f006f5427bdb1bc6a4d2276085f0345f4a1540d14b7f",
+      "src-tauri/engine/src/production_ui_contracts.rs": "820d97f1c92525e5d04973a6d3979f656401cc5de94c3a7efd707f463e50ba2c",
+      "src-tauri/src/production_host.rs": "c50669f7f0ffd35f0c90cc3b75ed6d0a280e59cb6a821ab9d9ca2e7622fa5a4c",
+      "src-tauri/src/production_ui.rs": "faef3dcb855dfef0e0d326f7f7960cbac9794980d19cc862dd9ba73b159b1c28",
+      "src/main/commander/project-tools.ts": "a0df400fc64565da5e8e81c49108bd8ba208a2e075f5941fbfc091c866bad656",
+      "src/main/production-ui-owner.test.ts": "c1876c7b77f1a7b149bbbe57bda96b4db877f6a9274e5702c91751896fe03680",
+      "src/main/production-ui-owner.ts": "311ce54a90259fb2d4c92ddee9da11b5b61f4afff1fc4dc7ada35a30b34a7d51",
+      "src/main/task-api-ui-tools.test.ts": "f75223de82954a37c665b10adeba8d10d1f3814f0c253003de74c97659efe388",
+      "src/main/task-api/state.ts": "04784fbc1c121115c2b3cd1fcc5c2c3a141e5f15c5c7fb01dd2202a7ef77f57e",
+      "src/main/task-api/ui-routes.ts": "d801bfa29a0c2150c1f33fe30d2193c5a71f9d3dabf20d8375f7ae376b500d63",
+      "src/renderer/src/hooks/use-ui-remote-control.ts": "10ec302f9a07d8405df52c858e278b422437e33956103b23b4e96b23396ae641",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "40473f2565c9ae9590fb8fab9c5ab6c52b6ba3b511782fd8d24541cd073889e6",
+      "src/renderer/src/lib/native-desktop-host.ts": "53cce67e620edac39657ec0f9fc46ade1151c4f78e3a1d4e69f8ee0eb1283859",
+      "src/renderer/src/lib/tauri-desktop-transport.test.ts": "95a42dc1d6994bf9587d322377e66c6311778c6b56fdac163d7790510017abf2",
+      "src/renderer/src/lib/tauri-desktop-transport.ts": "797e6863e8d344abad8315ed9f5e5564238271ef0cff127fd0dae9be6669daee",
+      "src/service/production-desktop-bindings.ts": "87d087cc11ec549182a87c35890738e59dcbcb6f2cc59ed7aedbd3bbe8a2fb25",
+      "src/service/production-owner.ts": "b1c2321e97cabef9e9a0350c56213df8a749fa5b488177c4e8f9019cd873aff3",
+      "src/service/production-service.test.ts": "3dc0e20e744596b07d427cd6d5bd7ea3f640b946a722ce3ccb153c5e059099be",
+      "src/service/production-service.ts": "146f22384396d6dc279c9af6a0630582efe94fb8faa3465d0fe920cd8fdd3629",
+      "src/service/transport/desktop-registry.ts": "f6cc34c624a3d477aca03a44300de6605ca9003a07d9f1a7f626deccbde02136",
+      "src/service/ui-state-backend.test.ts": "29ba5f2fba8a576ccba4d5f604e2554d941ecc544a0fae7f977a8a5a26f59142",
+      "src/service/ui-state-backend.ts": "143cb63b7c94292463d9d165ae9940d3023d676e86217fd32b2d5126ea2270df",
+      "src/shared/production-bootstrap.ts": "8bd82e88c726de9a9cc9171c3747b7521ad4b19cd996d228623cf986c476003d",
+      "src/shared/ui-desktop-codecs.test.ts": "e7fd306d03e8c8c8d99cb068cc6586faa2167a6f9651ef2774d233fd0c568070",
+      "src/shared/ui-desktop-codecs.ts": "0f6bd656205ac716feaa581333391262da9ee89dfba5035179a6673663639bf0",
+      "src/shared/ui-native-callbacks.test.ts": "461b673fd11f18595f3a2a1d0a689fbe85070db60f25eb65fc8c773cbd747fdd",
+      "src/shared/ui-native-callbacks.ts": "40c3b71bff6cb0d89aa3d2bc1d58f92eeffd5d58dc1049431786358e8ed4c132"
+    },
+    "frozenRuntimeAndTestFiles": 33,
+    "frozenSourcesUnchangedThroughFinalSuites": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Actual production UI cache/native callbacks, document-bound private ingress and separate renderer UI intent delivery; shipping application remains Electron.",
+  "bindings": {
+    "finiteServiceCommandContracts": 222,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 224,
+    "events": 29,
+    "newCommands": 1,
+    "newEvents": 1,
+    "privatePublication": "engine.ui.publish (not public desktop ingress)"
+  },
+  "implemented": [
+    "Actual ProductionUiOwner borrows the protected database and AgentManager, is registered in the real Task API, and retains native snapshot/send flights until raw completion before profile release.",
+    "Native main window ownership captures actual raw OS handle, distinct native attachment ticket, document generation and current engine epoch. Trusted completed visible documents alone activate an opaque receipt; navigation, destruction, exhaustion and shutdown fence it. Overlapping page loads conservatively remain unavailable.",
+    "Public state payload has no lease or caller grant. Tauri renderer transport captures bootstrap receipt separately; private native ingress checks physical identity/lease and stamps only the sealed engine.ui.publish request. Direct public Source publication and added authority fields refuse.",
+    "Each cache read/send refreshes actual native availability and current scalar DB refs; no stale global uiState success. Renderer native intent uses dedicated desktop:ui-command envelope, exact current epoch/receipt and separate lifecycle subscriptions rather than inventing a service event sequence.",
+    "Task API checks signed project/task/artifact/parent scopes and current agent/nonce before and after waits. Canvas-derived commands retain their observed document receipt. Accepted transport never claims renderer application; retired/uncertain commands are not replayed.",
+    "Finite codecs cap titles, task/panel counts, coordinates, dimensions, Unicode and total UTF8 JSON. SQL scalar bounds precede reference materialization and do not parse unrelated stored credentials/config/descriptions. Commander switch-project awaits actual owned native acceptance.",
+    "Actual protected-profile singleton/private pipe and loopback authenticated task API tests prove current publication, wrong/missing token denial, lease retirement and raw acknowledgement drain. Rust complements Source validators and consumes the actual TypeScript corpus."
+  ],
+  "artifact": {
+    "buildIdentity": "production-706082a80625e0dbb2cddf9c497c0f71",
+    "resourceManifestSha256": "1abf1d5ebf6430d66d67b7d4266b4aa00954434e129d1fe0a3b3bea9caf19695",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "cargoPackageVersionsAndChecksumsUnchanged": true,
+    "cargoDependencyEdge": "Production feature now directly declares already locked raw-window-handle 0.6.2 for exact physical window identity",
+    "packageAndRuntimePinsUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 222,
+    "requests": 448,
+    "sha256": "d436c6c64d21546e5682ffce392064d2c89fa7c692c3ee105520782ff2e2fc1a"
+  },
+  "tests": {
+    "app": {
+      "passed": 6883,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "89f07a0af762f2e10316fc43ca697cdad5a4fa51020813747451ec6fa0d4674d",
+      "logSha256": "cce5a77d9762be925577329570356b2ea9f7e717641bec2a163b83ed1057818a"
+    },
+    "standalone": {
+      "passed": 3415,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "76f994e4ab53d8f8641117c0766c7db5e61eaddfc0dbb06fcccaaadf336efcd8",
+      "logSha256": "2481e2aca2ef14df095dfca2adb5442d3e706e6507a49ae89f73d3a2a3ba5c77"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "14fd2f54589bfce673908eced3b61955e7368596671e2c09a0c35dae25adac68",
+      "logSha256": "d05a13936054ec78f0e8eab8f75d644dfa67c3e79596b97367ca56e15501fc74"
+    },
+    "focused": {
+      "passed": 204,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "ae7031d004fcd7e70333cc84df7002a6cde522dda618029f5f5d20f2a94810f6",
+      "logSha256": "82b9e0e523b334c57ca5c7ea2afcbb10d2608d0bec8ea7b5aa4bba0f0837ded9"
+    },
+    "corpus-export": {
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "8baf2d16b392835c3fe17a1a0d9607fab5853b0ec0e5b38f1b61d141599620b9",
+      "logSha256": "34ca6d508db7eaab2faff3be5b53eb76d06d83ad4d0fe5449af9b1a65e1f648d"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 30.535,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 35.774,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 22.989,
+      "logSha256": "3a9cc64dbcd7d31e1f7a2d03e52b22b10a04fa5065979cd1cb914b668443a39f"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.988,
+      "logSha256": "a40ca7bc779fa1cbc1f22cb00d48563ca8a0f04691ec3e695f47478ed67297bf"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.72,
+      "logSha256": "55d16beff37d33e54c8794882e805299b903f509ffc074de8339d0eaf7f548d3"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.037,
+      "logSha256": "5a543852fc6b27583ff5a9f8b04a68703c8920d6f311c0f4340ed1d43976eb4a"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.536,
+      "logSha256": "00842b6f56b45e1cf33ad948628b7a2661c2c458df1ce544a849c891318072d9"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.381,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.578,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.898,
+      "logSha256": "3fad464d219362e2b19ece3f1e2170853edde30a5c78379c2508dcce72bcd9b7",
+      "passed": 53,
+      "failed": 0,
+      "ignored": 4
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.967,
+      "logSha256": "7e29590e794ff94f0e072719a7a625beed6de4f761d827a37e649ac36015f903"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 4.081,
+      "logSha256": "cfbcbb081760b1fe9f3e68045391e0f023a452333221b08c31027337e093ca66",
+      "passed": 13,
+      "failed": 0
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch22-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.551,
+      "logSha256": "067f5af292ea9052024c4ff9f42136118355799065717217085ddcb631da7e0a"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.07,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "validationCorrections": [
+    "Browser-pure callback types no longer import main-process types through the shared graph; exact JSON handlers supply contextual finite JsonValue results.",
+    "Native raw handle trait is imported directly through its already locked crate, because the Tauri wry re-export is Android-only. No Cargo package version/checksum, resource/runtime pin or OS plugin changed.",
+    "Drain regression now waits actual host command callback admission before starting shutdown; it no longer confuses an initial snapshot flight with an admitted emission.",
+    "Initial diagnostic failures are preserved locally and excluded from acceptance; final full suites run with unchanged frozen runtime/test sources."
+  ],
+  "remainingAcceptance": [
+    "#202/#208/#209/#213/#215 remain open for full retained parity, actual installed interactive production UI, tray/window/platform services, all-supported-target crash/cutover and complete migration acceptance.",
+    "No actual graphical click/key or installed production WebView delivery, macOS/Windows native runtime, live model/OAuth/source effects, signed release, live-profile cutover or Electron retirement is claimed.",
+    "Overlapping ambiguous native page-load sequences require a later unambiguous load. Native acknowledgements establish emit transport acceptance only; renderer application has no acknowledgement protocol.",
+    "Hosted voice #92 remains deferred by user decision. Thirty optional app cases, three standalone installed-recognition cases and four engine runtime/platform cases remain explicitly skipped/ignored."
+  ]
+}

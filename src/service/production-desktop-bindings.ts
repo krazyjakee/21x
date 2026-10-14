@@ -1,3 +1,5 @@
+import { UiStateBackend } from './ui-state-backend'
+import { UI_DESKTOP_CODECS, UI_DESKTOP_EVENT_CODECS } from '../shared/ui-desktop-codecs'
 import { CliMcpBackend } from './cli-mcp-backend'
 import { TaskAttachmentBackend } from './task-attachment-backend'
 import { CLI_MCP_CODECS } from '../shared/cli-mcp-codecs'
@@ -93,9 +95,9 @@ export interface ProductionDesktopBindingOptions {
 export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
-  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS }
+  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS }
 
 /** Validate actual wire payload, including explicit binary envelopes. */
 export function validateProductionEventWire(operation: string, payload: unknown): boolean {
@@ -137,6 +139,7 @@ export class ProductionDesktopBindings {
   private readonly workspaceFiles: WorkspaceFileBackend
   private readonly heartbeat: HeartbeatBackend
   private readonly cliMcp: CliMcpBackend
+  private readonly ui: UiStateBackend | null
   private readonly taskAttachments: TaskAttachmentBackend
   private readonly worktreeRuntime: WorktreeRuntimeBackend
   private readonly epoch: string
@@ -271,10 +274,14 @@ export class ProductionDesktopBindings {
       // The domain owner resolves and rechecks exact saved task/project bindings,
       // including established task repos outside the project's picker catalogue.
       canAccessRepository: (projectId, _fullName, caller, access) => dynamicAuthority.canAccessProject(projectId, caller, access) })
+    const uiLease = owner.getUiBindingLease()
+    this.ui = uiLease ? new UiStateBackend({ ...uiLease, engineEpoch: this.epoch, assertAvailable: available,
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canPublishUi: dynamicAuthority.isTrustedDesktop,
+      canAccessProject: dynamicAuthority.canAccessProject, canAccessTask: dynamicAuthority.canAccessTask, canAccessAgent: dynamicAuthority.canAccessAgent }) : null
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
+      this.closed = true; this.ui?.shutdown(); this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
       void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close(), this.sessionContext.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close()]).then(() => undefined))
+    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close(), this.ui?.close()]).then(() => undefined))
   }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
@@ -360,7 +367,7 @@ export class ProductionDesktopBindings {
     const schemas = { ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
       ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
       ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller), ...this.mcp.operationSchemas(caller), ...this.sources.operationSchemas(caller),
-      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller), ...this.heartbeat.operationSchemas(caller), ...this.worktreeRuntime.operationSchemas(caller), ...this.cliMcp.operationSchemas(caller), ...this.taskAttachments.operationSchemas(caller) }
+      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller), ...this.heartbeat.operationSchemas(caller), ...this.worktreeRuntime.operationSchemas(caller), ...this.cliMcp.operationSchemas(caller), ...this.taskAttachments.operationSchemas(caller), ...this.ui?.operationSchemas(caller) }
     return Object.fromEntries(Object.entries(schemas).map(([operation, schema]) => [operation, {
       ...schema, handle: (payload: JsonValue, signal: AbortSignal) => this.invoke(operation, payload, caller, signal)
     }]))
@@ -375,6 +382,10 @@ export class ProductionDesktopBindings {
       signal.addEventListener('abort', abort, { once: true }); ownerSignal.addEventListener('abort', abort, { once: true })
       if (signal.aborted || ownerSignal.aborted) abort()
       try {
+        if (Object.hasOwn(UI_DESKTOP_CODECS, operation)) {
+          if (!this.ui) throw new ServiceProtocolError('UNKNOWN_OPERATION')
+          return await this.ui.registry.invoke(operation, payload, caller, combined.signal)
+        }
         if (Object.hasOwn(CLI_MCP_CODECS, operation)) return await this.cliMcp.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(TASK_ATTACHMENT_CODECS, operation)) return await this.taskAttachments.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(HEARTBEAT_CODECS, operation)) return await this.heartbeat.registry.invoke(operation, payload, caller, combined.signal)

@@ -12,10 +12,10 @@ import { MOBILE_EVENTS, MOBILE_EVENT_CODECS } from '../src/shared/mobile-codecs'
 import { sanitizeChatImageName, base64ByteLength } from '../src/shared/chat-images'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 221 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 222 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(221)
+    expect(corpus.operations).toHaveLength(222)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -245,6 +245,6 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(221)
+    expect(corpus.operations).toHaveLength(222)
   })
 })

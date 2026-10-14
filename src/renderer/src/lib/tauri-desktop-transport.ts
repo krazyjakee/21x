@@ -1,3 +1,4 @@
+import { isUiLeaseId } from '@shared/ui-desktop-codecs'
 import {
   SERVICE_ERROR_MESSAGES, ServiceProtocolError, isRecord, type ServiceErrorCode
 } from '@shared/service-protocol'
@@ -9,6 +10,9 @@ export interface TauriDesktopApi {
   event: { listen: <T>(event: string, callback: (event: { payload: T }) => void,
     options: { target: { kind: 'WebviewWindow'; label: 'main' } }) => Promise<() => void> }
 }
+
+const uiDocuments = new WeakMap<TauriDesktopApi, Readonly<{ engineEpoch: string; leaseId: string }>>()
+export function getTauriUiDocument(native: TauriDesktopApi): Readonly<{ engineEpoch: string; leaseId: string }> | undefined { return uiDocuments.get(native) }
 
 /** Fixed product wording only; native diagnostics, paths and credentials are
  * never part of the renderer's bootstrap failure. */
@@ -38,7 +42,10 @@ export function createTauriDesktopTransport(native: TauriDesktopApi): DesktopTra
       if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
       try {
         // Paths, native identity and caller authority never originate in renderer arguments.
-        return await native.core.invoke('desktop_invoke', { operation, payload, engineEpoch })
+        const document = uiDocuments.get(native)
+        if (operation === 'ui:publishState' && (!document || document.engineEpoch !== engineEpoch)) throw new ServiceProtocolError('DISCONNECTED')
+        return await native.core.invoke('desktop_invoke', { operation, payload, engineEpoch,
+          ...(operation === 'ui:publishState' ? { uiLease: document!.leaseId } : {}) })
       } catch (error) { throw nativeError(error) }
     },
     async listen(receive) {
@@ -52,8 +59,15 @@ export function createTauriDesktopTransport(native: TauriDesktopApi): DesktopTra
 
 /** Bootstrap metadata is read from the native-owned engine, before installing the client listener. */
 export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<string> {
+  uiDocuments.delete(native)
   let status: unknown
-  try { status = await native.core.invoke('engine_status') }
+  try {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      status = await native.core.invoke('engine_status')
+      if (!isRecord(status) || status.available !== true || status.uiSupported !== true || isUiLeaseId(status.uiLeaseId)) break
+      await new Promise<void>(resolve => setTimeout(resolve, 25))
+    }
+  }
   catch (error) { throw nativeError(error) }
   const failure = productionBootstrapMessage(status)
   if (failure) throw new NativeBootstrapUnavailableError(failure)
@@ -61,6 +75,7 @@ export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<stri
     typeof status.engineEpoch !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(status.engineEpoch)) {
     throw new ServiceProtocolError('DISCONNECTED')
   }
+  if (isUiLeaseId(status.uiLeaseId)) uiDocuments.set(native, Object.freeze({ engineEpoch: status.engineEpoch, leaseId: status.uiLeaseId }))
   return status.engineEpoch
 }
 

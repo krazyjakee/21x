@@ -5,6 +5,7 @@
 import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
 import type { TaskGroupService } from '../task-groups/service'
+import type { ProductionUiOwner } from '../production-ui-owner'
 
 type TaskApiAgentController = Pick<
   AgentManager,
@@ -31,6 +32,11 @@ export let transcriptProvider: TranscriptProvider | null = null
 export let agentController: TaskApiAgentController | null = null
 export let taskGroupService: TaskGroupService | null = null
 export function setTaskApiTaskGroupService(service: TaskGroupService | null): void { taskGroupService = service }
+export let taskApiUiOwner: ProductionUiOwner | null = null
+export function setTaskApiUiOwner(owner: ProductionUiOwner | null): void { taskApiUiOwner = owner }
+export function assertTaskApiUiOwner(owner: ProductionUiOwner): void {
+  if (taskApiUiOwner !== owner) throw new Error('The task API UI owner changed')
+}
 
 /**
  * What the renderer is showing. It is pushed on change and cached here, so a

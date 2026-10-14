@@ -75,7 +75,7 @@ export interface ProjectToolOptions {
   context: ProjectToolContext
   agents?: CommanderAgents | null
   /** Pushes a command to the desktop window; absent when no window can be reached. */
-  sendUiCommand?: (command: UiCommand) => { ok: true } | { ok: false; detail: string }
+  sendUiCommand?: (command: UiCommand) => { ok: true } | { ok: false; detail: string } | Promise<{ ok: true } | { ok: false; detail: string }>
   onProjectChanged?: (projectId: string, kind: ProjectChangeKind) => void
   /** A delegation that could not reach its Captain after `ask_captain` returned. */
   onDeliveryFailed?: (dispatch: AskCaptainDispatch, error: unknown) => void
@@ -492,7 +492,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         const project = resolveProject(db, input.project)
         if (project.archived) throw new Error(`Project "${project.name}" is archived and cannot be shown. Restore it first.`)
         if (!options.sendUiCommand) throw new Error('No 21x window is open.')
-        const sent = options.sendUiCommand({ kind: 'switch_project', projectId: project.id })
+        const sent = await options.sendUiCommand({ kind: 'switch_project', projectId: project.id })
         if (!sent.ok) throw new Error(sent.detail)
         return result({ status: 'ok', project_id: project.id, project_name: clip(project.name, MAX_NAME_CHARS) })
       }

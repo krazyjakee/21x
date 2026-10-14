@@ -6,6 +6,23 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The UI continuation binds passive state publication and the seven retained UI
+intents to the actual production service and native main document. Physical
+window attachment, document generation, engine epoch and visibility gate each
+publication and native delivery. Reload/destruction revokes old receipts;
+missing or hidden windows report unavailable while application services continue.
+The renderer stamps native bootstrap authority separately from state arguments
+and rejects retired document events. Task API responses distinguish accepted
+transport from renderer application and enforce signed task/project scope.
+
+The finite surface now has 222 service commands, two direct native commands and
+29 events. See [UI ownership](ui-state-bindings.md) and the
+[verification record](evidence/issue-closing-20261014-ui-state.json). Actual installed
+production UI interaction, platform controls, all-platform acceptance and the
+remaining migration work are still open. Hosted voice remains deferred.
+
+The preceding CLI/attachment continuation retains its tested revision:
+
 The CLI/attachment continuation binds six CLI MCP configuration controls and
 two task image/file controls to the captured production owners. Constructor
 paths and environment references stay outside RPC. Bounded descriptor reads,

@@ -14,20 +14,26 @@ import type { ServiceEvent } from '@shared/service-protocol'
 const hosts: NativeDesktopHost[] = [], releases: Array<() => void> = []
 afterEach(() => { for (const release of releases.splice(0)) release(); for (const host of hosts.splice(0)) host.dispose() })
 function deferred<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(done => { resolve = done }), resolve: (value: T) => resolve(value) } }
-function fixture() {
+function fixture(ui = false) {
+  let uiLease = 'document-1'
+  const uiReceivers = new Set<(event: { payload: unknown }) => void>(), uiHistory: Array<(event: { payload: unknown }) => void> = []
   let epoch = 'engine-1', sequence = 0
   const receivers = new Set<(event: { payload: unknown }) => void>(), history: Array<(event: { payload: unknown }) => void> = []
   const results = new Map<string, unknown>([['settings:get', 'dark'], ['settings:getAll', {}], ['db:getTasks', []], ['project:getAll', []], ['agent:getAll', []], ['agentSession:getTranscriptSnapshot', []], ['agentSession:getTranscriptDelta', { parts: [], maxRev: 0 }], ['agentSession:approve', { success: true }]])
   const unlisten = vi.fn()
   const invoke = vi.fn(async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
-    if (command === 'engine_status') return { available: true, protocolVersion: 1, engineEpoch: epoch }
+    if (command === 'engine_status') return { available: true, protocolVersion: 1, engineEpoch: epoch, ...(ui ? { uiLeaseId: uiLease } : {}) }
     const result = results.get(String(args?.operation))
     return { engineEpoch: epoch, result: result === undefined ? { defined: false } : { defined: true, value: result } }
   })
-  const listen = vi.fn(async (_name: string, receive: (event: { payload: unknown }) => void) => { receivers.add(receive); history.push(receive); return () => { receivers.delete(receive); unlisten() } })
+  const listen = vi.fn(async (_name: string, receive: (event: { payload: unknown }) => void) => {
+    if (_name === 'desktop:ui-command') { uiReceivers.add(receive); uiHistory.push(receive); return () => { uiReceivers.delete(receive); unlisten() } }
+    receivers.add(receive); history.push(receive); return () => { receivers.delete(receive); unlisten() } })
   const host = createNativeDesktopHost({ core: { invoke }, event: { listen } } as unknown as TauriDesktopApi); hosts.push(host)
   const emit = (operation: ServiceEvent['operation'], payload: ServiceEvent['payload']) => { const event = { protocolVersion: 1, kind: 'event', operation, payload, engineEpoch: epoch, sequence: ++sequence }; for (const receive of [...receivers]) receive({ payload: event }) }
-  return { host, invoke, listen, unlisten, results, history, emit, changeEpoch: () => { epoch = 'engine-2'; sequence = 0 } }
+  return { host, invoke, listen, unlisten, results, history, emit, uiHistory,
+    emitUi: (value: unknown) => { for (const receive of [...uiReceivers]) receive({ payload: value }) },
+    changeUiLease: () => { uiLease = 'document-2' }, changeEpoch: () => { epoch = 'engine-2'; sequence = 0 } }
 }
 function mcpRow() {
   return { id: 'mcp.fixture:one', name: 'Fixture MCP', type: 'local', command: 'fixture-mcp', args: [], url: '', headers: { Authorization: MCP_SECRET_SET_MARKER }, environment: { FIXTURE_TOKEN: MCP_SECRET_SET_MARKER }, tools: [], oauth_metadata: { client_secret: MCP_SECRET_SET_MARKER }, source: 'user', created_at: '2026-10-14', updated_at: '2026-10-14' }
@@ -273,7 +279,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 223 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 224 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -282,7 +288,7 @@ it('binds the 223 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(223)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(224)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -828,4 +834,35 @@ it('rejects raw Tea errors and private pull request author fields on the wire', 
   await expect(f.host.api.forgejo.checkCli()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
   f.results.set('github:fetchPullRequestDetails', { ...gitPullRequest(), author: { login: 'fixture', token: 'private' } })
   await expect(f.host.api.github.fetchPullRequestDetails('https://github.com/fixture/repo/pull/42')).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+const publishedUi = { view: 'commander', projectId: 'project_fixture', modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } }
+it('captures native document authority separately from published state and filters retired UI intents', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const received = vi.fn(), cleanup = f.host.api.ui.onCommand(received)
+  await f.host.api.ui.publishState(publishedUi)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'ui:publishState', payload: { state: publishedUi }, engineEpoch: 'engine-1', uiLease: 'document-1' })
+  const intent = { engineEpoch: 'engine-1', leaseId: 'document-1', command: { kind: 'navigate', view: 'tasks' } }
+  f.emitUi(intent); expect(received).toHaveBeenCalledTimes(1)
+  for (const invalid of [{ ...intent, leaseId: 'foreign' }, { ...intent, engineEpoch: 'foreign' }, { ...intent, authority: '*' }, { ...intent, command: { kind: 'navigate', view: 'commander' } }]) f.emitUi(invalid)
+  expect(received).toHaveBeenCalledTimes(1)
+  const retired = f.uiHistory[0]; f.changeUiLease(); await f.host.reconnect()
+  retired({ payload: intent }); f.emitUi(intent); expect(received).toHaveBeenCalledTimes(1)
+  f.emitUi({ ...intent, leaseId: 'document-2' }); expect(received).toHaveBeenCalledTimes(2)
+  await f.host.api.ui.publishState(publishedUi)
+  expect(f.invoke.mock.calls.at(-1)?.[1]).toMatchObject({ uiLease: 'document-2' })
+  cleanup(); f.emitUi({ ...intent, leaseId: 'document-2' }); expect(received).toHaveBeenCalledTimes(2)
+})
+it('does not publish UI state without native document authority or replay an old publication', async () => {
+  const absent = fixture(); absent.host.setRehydrator(async () => {}); await absent.host.reconnect()
+  const count = absent.invoke.mock.calls.length
+  await expect(absent.host.api.ui.publishState(publishedUi)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(absent.invoke.mock.calls.length).toBe(count)
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const pending = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => args?.operation === 'ui:publishState' ? pending.promise : original(command, args))
+  const old = f.host.api.ui.publishState(publishedUi), rejected = expect(old).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); f.changeUiLease(); await f.host.reconnect(); await rejected
+  pending.resolve({ engineEpoch: 'engine-1', result: { defined: false } })
+  expect(f.invoke.mock.calls.filter(([, args]) => args?.operation === 'ui:publishState')).toHaveLength(1)
 })

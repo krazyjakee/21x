@@ -17,7 +17,7 @@ export interface ProductionLaunchDescriptor {
     externalUrls: 'host' | 'unsupported'
     notifications: 'host' | 'unsupported'
     energy: 'unsupported'
-    ui: 'unsupported'
+    ui: 'host' | 'unsupported'
     voice: 'unsupported'
     configuredMcp: 'enabled' | 'disabled'
     connectors: 'enabled' | 'disabled'
@@ -36,7 +36,7 @@ export function isProductionLaunchDescriptor(value: unknown): value is Productio
     isRecord(value.paths) && hasExactKeys(value.paths, ['profileRoot', 'workspaceRoot', 'attachmentRoot', 'reposRoot', 'resourceRoot', 'tempRoot']) && Object.values(value.paths).every(isAbsoluteHostPath) &&
     isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp'], ['workspaceFiles']) &&
     (capabilities.workspaceFiles === undefined || choice(capabilities.workspaceFiles, ['host', 'unsupported'])) &&
-    ['externalUrls', 'notifications'].every(key => choice(capabilities[key], ['host', 'unsupported'])) && ['energy', 'ui', 'voice'].every(key => capabilities[key] === 'unsupported') &&
+    ['externalUrls', 'notifications', 'ui'].every(key => choice(capabilities[key], ['host', 'unsupported'])) && ['energy', 'voice'].every(key => capabilities[key] === 'unsupported') &&
     ['configuredMcp', 'connectors', 'managedTaskMcp'].every(key => choice(capabilities[key], ['enabled', 'disabled']))
 }
 export function isProductionInitialize(value: unknown): value is { protocolVersion: 1; launchId: string } {

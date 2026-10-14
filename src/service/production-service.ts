@@ -1,3 +1,6 @@
+import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
+import { UI_NATIVE_CALLBACK_SCHEMAS, isNativeUiSnapshot, isNativeUiAcknowledgement, isPrivateUiPublication } from '../shared/ui-native-callbacks'
+import type { ProductionUiNativeHost } from '../main/production-ui-owner'
 import type { ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { isProductionLaunchDescriptor, isProductionInitialize, PRODUCTION_HOST_SCHEMAS } from '../shared/production-bootstrap'
 import { HOST_OPERATION_SCHEMAS } from '../shared/host-services'
@@ -11,6 +14,7 @@ import type { DesktopCallerContext } from './transport/desktop-registry'
 import { ServicePeer, type OperationSchema } from './transport/peer'
 
 export interface ProductionPrivateCallbacks {
+  ui: ProductionUiNativeHost
   prepare(signal: AbortSignal): Promise<void>
   drain(): Promise<{ acknowledged: true }>
   openExternal(url: string): Promise<void>
@@ -64,6 +68,22 @@ export class ProductionService {
     if (!sealed.has(host)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const construction = host.construction, descriptor = construction.descriptor
     const callbacks: ProductionPrivateCallbacks = {
+      ui: {
+        snapshot: async () => {
+          if (descriptor.capabilities.ui !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
+          const result = await this.retain(this.peer.request('host.ui.snapshot', {}))
+          if (!isNativeUiSnapshot(result)) throw new ServiceProtocolError('INVALID_RESULT')
+          return result
+        },
+        send: async (command, leaseId, signal) => {
+          if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
+          if (descriptor.capabilities.ui !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
+          // Keep the actual host callback owned even if the requester cancels.
+          const result = await this.retain(this.peer.request('host.ui.command', { command: command as unknown as JsonValue, leaseId }))
+          if (!isNativeUiAcknowledgement(result)) throw new ServiceProtocolError('INVALID_RESULT')
+          return result
+        }
+      },
       prepare: async signal => {
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
         const result = await this.peer.request('host.production.prepare', { launchId: descriptor.launchId, resourceManifestSha256: descriptor.resourceManifestSha256 })
@@ -105,6 +125,8 @@ export class ProductionService {
     const bootstrap = construction.constructBootstrap(callbacks)
     if (bootstrap.profileId !== descriptor.profileId || Object.entries(descriptor.paths).some(([key, value]) => bootstrap.paths[key as keyof typeof bootstrap.paths] !== value) ||
       bootstrap.credentials.mode !== (descriptor.profileIntent === 'create-new' ? 'create' : 'load')) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    const nativeUi = bootstrap.native.ui
+    if (descriptor.capabilities.ui === 'host' ? !nativeUi || typeof nativeUi.snapshot !== 'function' || typeof nativeUi.send !== 'function' : nativeUi !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     this.owner = new ProductionOwner(bootstrap, construction.boundaries)
     this.caller = { ...construction.caller, engineEpoch: this.owner.snapshot().epoch }
     const result = { protocolVersion: SERVICE_PROTOCOL_VERSION, engineEpoch: this.caller.engineEpoch, nodeVersion: process.version }
@@ -119,6 +141,15 @@ export class ProductionService {
         return this.retain(this.bindings.invoke(operation, payload, this.caller, signal))
       }
     }]))
+    // Public invocation cannot manufacture a document lease. Only the native
+    // window owner forwards this private request after checking physical identity.
+    operations['ui:publishState'].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
+    operations['engine.ui.publish'] = { validatePayload: isPrivateUiPublication,
+      validateResult: UI_DESKTOP_CODECS['ui:publishState'].validateWireResult,
+      handle: (payload, signal) => {
+        if (!this.initialized || this.closing || !this.bindings || !isRecord(payload) || typeof payload.leaseId !== 'string') throw new ServiceProtocolError('DISCONNECTED')
+        return this.retain(this.bindings.invoke('ui:publishState', { state: payload.state }, { ...this.caller, uiLeaseId: payload.leaseId }, signal))
+      } }
     operations['engine.ping'] = { validatePayload: empty, validateResult: isBootstrapResult, handle: () => { this.pinged = true; return result } }
     operations['engine.initialize'] = { validatePayload: isProductionInitialize, validateResult: isBootstrapResult, handle: async (payload, signal) => {
       if (!this.pinged || this.initialized || this.initializing || this.closing || !isProductionInitialize(payload) || payload.launchId !== descriptor.launchId || signal.aborted) throw new ServiceProtocolError('INVALID_REQUEST')
@@ -162,6 +193,7 @@ export class ProductionService {
     if (descriptor.capabilities.externalUrls === 'host') operations['host.shell.openExternal'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateResult }
     if (descriptor.capabilities.workspaceFiles === 'host') for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.notifications === 'host') operations['host.notification.show'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.notification.show'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.notification.show'].validateResult }
+    if (descriptor.capabilities.ui === 'host') for (const [operation, schema] of Object.entries(UI_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     this.peer = new ServicePeer({ role: 'service', engineEpoch: this.caller.engineEpoch, operations,
       eventSchemas: Object.fromEntries(Object.keys(PRODUCTION_EVENT_CODECS).map(operation => [operation, (value: unknown) => validateProductionEventWire(operation, value)])),
       write: transport.write, onDisconnect: error => {
@@ -272,6 +304,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         ...(descriptor.capabilities.workspaceFiles === 'host' ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}),
         // Browser opening alone does not register or own OAuth deep-link callbacks.
         oauthBrowser: 'unavailable',
+        ...(descriptor.capabilities.ui === 'host' ? { ui: callbacks.ui } : {}),
         notify: callbacks.notify, emit: callbacks.emitOwnerEvent,
         sendUiCommand: () => ({ ok: false, detail: 'Private production launch has no reviewed UI command callback' }) }
     }) })

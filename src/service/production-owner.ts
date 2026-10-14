@@ -1,3 +1,4 @@
+import { ProductionUiOwner, assertUiStateReferences, assertUiCommandReferences, type ProductionUiNativeHost } from '../main/production-ui-owner'
 import { CliMcpConfigManager } from '../main/cli-mcp-config/core'
 import { CliMcpFileOwner, type CliMcpFileOwnerOptions } from '../main/cli-mcp-config/portable-file-owner'
 import { TaskAttachmentFileOwner, type TaskAttachmentFileOwnerOptions } from '../main/task-attachment-file-owner'
@@ -75,7 +76,7 @@ import { installCommanderReportBridge } from '../main/commander/report-tools'
 import { configureCaptainGithubTools, recoverIssueWriteOutcomes } from '../main/captain-github-tools'
 import { setCoordinatorCallHandler } from '../main/mcp-servers/task-management-core'
 import { startTaskApiServer, stopTaskApiServer, closeTaskApiServer, waitForTaskApiServer, getTaskApiPort, getTaskApiToken } from '../main/task-api-server-core'
-import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiTaskGroupService, setTaskApiUiState, setTranscriptProvider } from '../main/task-api/state'
+import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiTaskGroupService, setTaskApiUiState, setTaskApiUiOwner, assertTaskApiUiOwner, setTranscriptProvider } from '../main/task-api/state'
 import { buildTaskMcpUrl } from '../main/task-mcp-endpoint'
 import { setTaskAutomationTrigger, setTaskSchedulers } from '../main/task-updates'
 import type { UiCommand } from '../shared/ui-commands'
@@ -117,6 +118,7 @@ export interface ProductionOwnerBootstrap {
     oauthBrowser?: 'available' | 'unavailable'
     notify(title: string, body: string): void
     emit(channel: string, data: unknown): void
+    ui?: ProductionUiNativeHost
     sendUiCommand(command: UiCommand): { ok: true } | { ok: false; detail: string }
     /** Join only this launch's supervised children. Failure retains the lease. */
     drainOwnedProcesses(): Promise<{ acknowledged: true }>
@@ -141,6 +143,7 @@ export interface ProductionOwnerExternalBoundaries {
 }
 
 export interface ProductionServices {
+  ui: ProductionUiOwner | null
   cliMcp: CliMcpConfigManager
   cliMcpFiles: CliMcpFileOwner
   taskAttachmentFiles: TaskAttachmentFileOwner
@@ -410,6 +413,17 @@ export class ProductionOwner {
         if (services.registry !== plugins || services.oauth !== oauth) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
         sync.assertOwners(database, plugins, oauth); files.assertOwners(workspaceRoot); worktrees.assertOwners(reposRoot, workspaceRoot, forgejo); processOwner.assertOpen(); github.assertOwners(processOwner); gitlab.assertOwners(processOwner); forgejo.assertOwners(processOwner)
       } }
+  }
+
+  getUiBindingLease(): { ui: ProductionUiOwner; database: DatabaseManager; manager: AgentManager; assertUiOwners(owners: { ui: ProductionUiOwner; database: DatabaseManager; manager: AgentManager }): void } | null {
+    this.getDatabaseBindingLease()
+    const services = this.services!, ui = services.ui
+    if (!ui) return null
+    return { ui, database: services.db, manager: services.agents, assertUiOwners: owners => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services || owners.ui !== ui || owners.database !== services.db || owners.manager !== services.agents) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      assertTaskApiUiOwner(ui); ui.assertOwners(owners)
+    } }
   }
 
   getIntegrationBindingLease(): { secretStorage: AuthenticatedSecretStorage; configuredMcp: 'enabled' | 'disabled'; oauthBrowser: 'available' | 'unavailable'; assertOwners(owners: {
@@ -696,6 +710,13 @@ export class ProductionOwner {
     if (!(taskAttachmentFiles instanceof TaskAttachmentFileOwner)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
     taskAttachmentFiles.assertOwners(this.bootstrap.paths.attachmentRoot)
     this.register('task-attachment-files', () => taskAttachmentFiles.shutdown(), () => taskAttachmentFiles.close())
+    const uiGrants = Object.freeze({ canAccessProject: () => true, canAccessTask: () => true, canAccessAgent: () => true })
+    const ui = native.ui ? new ProductionUiOwner({ database: db, manager: agents, native: native.ui,
+      assertCurrent: fileOptions.assertCurrent,
+      beforeState: state => db.db.transaction(() => assertUiStateReferences(db, state, uiGrants))(),
+      beforeCommand: command => db.db.transaction(() => assertUiCommandReferences(db, command, uiGrants))() }) : null
+    setTaskApiUiOwner(ui)
+    if (ui) this.register('ui', () => ui.shutdown(), () => ui.close())
     const registry = new PluginRegistry()
     for (const plugin of [new LinearPlugin(), new HubSpotPlugin(), new GitHubIssuesPlugin(github), new ForgejoIssuesPlugin(forgejo), new NotionPlugin(), new YouTrackPlugin()]) registry.register(plugin)
     if (this.bootstrap.connectors.kind === 'enabled') {
@@ -748,7 +769,11 @@ export class ProductionOwner {
     } })
     this.register('captain-delivery', () => captainDelivery.shutdown(), () => captainDelivery.close())
     commander = new CommanderService({ store: commanderStore, createProvider: () => provider(db), emit: event => this.emit('commander:event', event),
-      getTools: context => [...createCommanderProjectTools({ db, context, agents, delivery: captainDelivery, sendUiCommand: command => native.sendUiCommand(command),
+      getTools: context => [...createCommanderProjectTools({ db, context, agents, delivery: captainDelivery, sendUiCommand: async command => {
+        if (!ui) return native.sendUiCommand(command)
+        const result = await ui.send(command)
+        return 'error' in result ? { ok: false as const, detail: result.error } : { ok: true as const }
+      },
         onProjectChanged: (projectId, kind) => this.emit('project:changed', { projectId, kind }) }),
         ...createCommanderSkillTools({ db, context, onSkillChanged: (skillId, kind) => this.emit('skills:changed', { skillId, kind }) })] })
     const commanderService = commander
@@ -813,7 +838,7 @@ export class ProductionOwner {
         this.lock!.assertHeld()
       }, notify: (channel, payload) => this.emit(channel, payload) }) : null
     if (voice) this.register('voice', () => voice.shutdown(), () => voice.close())
-    this.services = { cliMcp, cliMcpFiles, taskAttachmentFiles, workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    this.services = { ui, cliMcp, cliMcpFiles, taskAttachmentFiles, workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)
@@ -907,7 +932,7 @@ export class ProductionOwner {
     // A different owner must never be cleared by an obsolete teardown.
     if (processRegistry[registryKey] !== this.identity && this.phase !== 'new') throw new ProductionOwnerError('SERVICE_OWNER_LOST')
     if (this.apiOwned) {
-      setTaskApiAgentController(null); setTaskApiTaskGroupService(null); setTaskApiNotifier(null); setTranscriptProvider(null); setTaskApiUiState(null)
+      setTaskApiAgentController(null); setTaskApiTaskGroupService(null); setTaskApiNotifier(null); setTranscriptProvider(null); setTaskApiUiState(null); setTaskApiUiOwner(null)
       setTaskSchedulers({ recurrence: null, heartbeat: null }); setTaskAutomationTrigger(null)
       configureCaptainGithubTools(null); setCoordinatorCallHandler(null)
       this.apiOwned = false

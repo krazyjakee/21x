@@ -23,11 +23,15 @@ use twentyonex_engine::{
 #[path = "native_services.rs"]
 pub(crate) mod native_services;
 use native_services::NativeWorkOwner;
+#[path = "production_ui.rs"]
+pub(crate) mod production_ui;
+use production_ui::NativeUiOwner;
 
 struct ProductionState {
     engine: Option<ProductionEngine>,
     failure: Option<EngineError>,
     native_work: NativeWorkOwner,
+    ui: NativeUiOwner,
 }
 
 fn trusted_origin(url: &tauri::Url) -> bool {
@@ -196,6 +200,12 @@ fn engine_status(
         snapshot["protocolVersion"] = json!(1);
         snapshot["available"] =
             json!(snapshot["available"] == true && state.native_work.assert_open().is_ok());
+        snapshot["uiSupported"] = json!(true);
+        if snapshot["available"] == true {
+            if let Some(lease) = state.ui.activate(&window, &engine.epoch()) {
+                snapshot["uiLeaseId"] = json!(lease);
+            }
+        }
         return Ok(snapshot);
     }
     Ok(
@@ -211,6 +221,7 @@ async fn desktop_invoke(
     engine_epoch: String,
     operation: String,
     payload: Value,
+    ui_lease: Option<String>,
 ) -> Result<Value, EngineError> {
     authorize(&window)?;
     state.native_work.assert_open()?;
@@ -218,6 +229,22 @@ async fn desktop_invoke(
         .engine
         .as_ref()
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+    if operation == "ui:publishState" {
+        if !twentyonex_engine::production_ui_contracts::publish_request(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        // The lease is captured at native ingress, never reacquired after an
+        // await. Source receives it only through the private pipe operation.
+        let result = engine
+            .publish_ui(&engine_epoch, payload["state"].clone(), &lease)
+            .await?;
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
+    }
+    if ui_lease.is_some() {
+        return Err(EngineError::new("INVALID_ARGUMENTS"));
+    }
     if native_services::OPERATIONS.contains(&operation.as_str()) {
         if !native_services::request(&operation, &payload) {
             return Err(EngineError::new("INVALID_ARGUMENTS"));
@@ -260,6 +287,7 @@ fn unavailable(code: &'static str, phase: &'static str) -> EngineError {
 async fn start(
     app: &tauri::AppHandle,
     native_work: NativeWorkOwner,
+    ui: NativeUiOwner,
 ) -> Result<ProductionEngine, EngineError> {
     // Developer/native provisioning only. Never accept a scope path via IPC;
     // absence of a real delegated scope prevents Node/key/profile startup.
@@ -357,7 +385,7 @@ async fn start(
             external_urls: HostCapability::Host,
             notifications: HostCapability::Unsupported,
             energy: HostCapability::Unsupported,
-            ui: HostCapability::Unsupported,
+            ui: HostCapability::Host,
             voice: HostCapability::Unsupported,
             configured_mcp: OptionalCapability::Disabled,
             connectors: OptionalCapability::Disabled,
@@ -367,6 +395,8 @@ async fn start(
     let handle = app.clone();
     let external_app = app.clone();
     let workspace_file = workspace_file_host(app, native_work.clone(), &descriptor)?;
+    let ui_snapshot = ui.snapshot_callback(app.clone(), native_work.clone());
+    let ui_command = ui.command_callback(app.clone(), native_work.clone());
     ProductionEngine::start(
         TrustedProductionLaunch {
             descriptor,
@@ -397,6 +427,8 @@ async fn start(
                 })
             })),
             notification: None,
+            ui_snapshot: Some(ui_snapshot),
+            ui_command: Some(ui_command),
         },
     )
     .await
@@ -414,32 +446,63 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![engine_status, desktop_invoke])
         .setup(|app| {
             let native_work = NativeWorkOwner::default();
-            let started = tauri::async_runtime::block_on(start(app.handle(), native_work.clone()));
+            let ui = NativeUiOwner::default();
+            let started = tauri::async_runtime::block_on(start(
+                app.handle(),
+                native_work.clone(),
+                ui.clone(),
+            ));
             let state = match started {
                 Ok(engine) => ProductionState {
                     engine: Some(engine),
                     failure: None,
                     native_work: native_work.clone(),
+                    ui: ui.clone(),
                 },
                 Err(error) => ProductionState {
                     engine: None,
                     failure: Some(error),
                     native_work,
+                    ui: ui.clone(),
                 },
             };
             app.manage(state);
-            tauri::WebviewWindowBuilder::new(
+            let ticket = ui
+                .reserve_window()
+                .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
+            let navigation_ui = ui.clone();
+            let page_ui = ui.clone();
+            let window = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::App("index.html".into()),
             )
             .title("21x Production Preview")
             .inner_size(1280.0, 850.0)
-            .on_navigation(trusted_origin)
+            .on_navigation(move |url| {
+                if !trusted_origin(url) {
+                    return false;
+                }
+                navigation_ui.navigation(ticket).is_ok()
+            })
+            .on_page_load(move |window, payload| match payload.event() {
+                tauri::webview::PageLoadEvent::Started => {
+                    let _ = page_ui.page_started(ticket, &window);
+                }
+                tauri::webview::PageLoadEvent::Finished => {
+                    if trusted_origin(payload.url()) {
+                        let _ = page_ui.page_finished(ticket, &window);
+                    }
+                }
+            })
             .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
             .on_download(|_, _| false)
             .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
             .build()?;
+            ui.attach_window(ticket, &window)
+                .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
+            ui.watch_destroy(ticket, &window)
+                .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -459,7 +522,7 @@ pub fn run() {
             let state = handle.state::<ProductionState>();
             // Fence synchronously before another native command/callback can
             // reserve work; failed drains never allow application exit.
-            if state.native_work.close().is_err() {
+            if state.ui.close().is_err() || state.native_work.close().is_err() {
                 eprintln!("PRODUCTION_NATIVE_WORK_DRAIN_BLOCKED");
                 quitting.store(0, Ordering::SeqCst);
                 return;

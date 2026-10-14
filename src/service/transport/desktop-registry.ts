@@ -6,6 +6,8 @@ export interface DesktopCallerContext {
   /** Obtained from the native host/private pipe; never taken from request arguments. */
   principal: 'trusted-desktop-main' | 'service' | 'native-host'
   engineEpoch: string
+  /** Stamped only by private native document ingress. */
+  uiLeaseId?: string
   webviewId?: string
   origin?: string
 }

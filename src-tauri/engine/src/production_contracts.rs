@@ -9,6 +9,7 @@ mod project_groups;
 mod workspace_runtime;
 
 pub const COMMANDS: &[&str] = &[
+    "ui:publishState",
     "cliMcp:snapshot",
     "cliMcp:upsert",
     "cliMcp:remove",
@@ -232,6 +233,7 @@ pub const COMMANDS: &[&str] = &[
     "taskSource:reassign",
 ];
 pub const EVENTS: &[&str] = &[
+    "ui:command",
     "heartbeat:alert",
     "heartbeat:disabled",
     "worktree:progress",
@@ -3197,6 +3199,9 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if operation == "ui:publishState" {
+        return crate::production_ui_contracts::publish_request(value);
+    }
     if cli_attachments::COMMANDS.contains(&operation) {
         return cli_attachments::request(operation, value);
     }
@@ -3338,6 +3343,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if operation == "ui:publishState" {
+        return crate::production_ui_contracts::void_result(value);
+    }
     if cli_attachments::COMMANDS.contains(&operation) {
         return cli_attachments::result(operation, value);
     }
@@ -3653,6 +3661,9 @@ fn transcript_page_request(value: &Value) -> bool {
             || value["after"].as_u64() <= value["watermark"].as_u64())
 }
 pub fn valid_event(operation: &str, value: &Value) -> bool {
+    if operation == "ui:command" {
+        return crate::production_ui_contracts::command(value);
+    }
     if workspace_runtime::EVENTS.contains(&operation) {
         return workspace_runtime::event(operation, value);
     }
@@ -4187,7 +4198,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 28);
+        assert_eq!(EVENTS.len(), 29);
         let requests = [
             ("mobile:getInfo", json!({})),
             (
@@ -5022,7 +5033,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 221);
+        assert_eq!(COMMANDS.len(), 222);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})
