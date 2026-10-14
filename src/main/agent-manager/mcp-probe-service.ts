@@ -21,6 +21,7 @@ export interface McpServerProbeResult {
   toolCount?: number
   tools?: McpToolSummary[]
 }
+export interface McpProbeReceipt<T> { result: Promise<T>; closed: Promise<void> }
 export interface McpProbeHost {
   spawn(command: string, args: string[], options: SpawnOptionsWithoutStdio): ChildProcessWithoutNullStreams
   fetch: typeof fetch
@@ -41,15 +42,22 @@ export class McpProbeService {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new RangeError('Invalid MCP probe deadline')
   }
   get isClosed(): boolean { return this.closing }
+  get pendingCount(): number { return this.work.size }
 
-  probe(input: McpServerProbeInput): Promise<McpServerProbeResult> {
-    if (this.closing) return Promise.reject(new Error('MCP_PROBE_SERVICE_CLOSED'))
-    if (this.work.size >= 16) return Promise.resolve(failed('Too many active MCP probes'))
+  probe(input: McpServerProbeInput, signal?: AbortSignal): Promise<McpServerProbeResult> { return this.probeOwned(input, signal).result }
+  probeOwned(input: McpServerProbeInput, signal?: AbortSignal): McpProbeReceipt<McpServerProbeResult> {
+    if (this.closing) return { result: Promise.reject(new Error('MCP_PROBE_SERVICE_CLOSED')), closed: Promise.resolve() }
+    if (this.work.size >= 16) return { result: Promise.resolve(failed('Too many active MCP probes')), closed: Promise.resolve() }
     const controller = new AbortController()
+    const cancel = (): void => { controller.abort() }
+    signal?.addEventListener('abort', cancel, { once: true })
+    if (signal?.aborted) controller.abort()
     this.controllers.add(controller)
     let resolve!: (value: McpServerProbeResult) => void
     const result = new Promise<McpServerProbeResult>(done => { resolve = done })
-    controller.signal.addEventListener('abort', () => resolve(failed(this.closing ? 'MCP probe cancelled' : 'MCP probe timed out')), { once: true })
+    const aborted = (): void => resolve(failed(this.closing || signal?.aborted ? 'MCP probe cancelled' : 'MCP probe timed out'))
+    controller.signal.addEventListener('abort', aborted, { once: true })
+    if (controller.signal.aborted) aborted()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
     const raw = Promise.resolve().then(async () => {
       if (controller.signal.aborted) return
@@ -62,11 +70,39 @@ export class McpProbeService {
       resolve(failed('MCP probe failed'))
     }).then(() => {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', cancel)
       this.controllers.delete(controller)
       this.work.delete(raw)
     })
     this.work.add(raw)
-    return result
+    return { result, closed: raw }
+  }
+
+  /** Unauthenticated auth probe, retaining response cleanup even after cancellation. */
+  probeForAuth(url: string, signal?: AbortSignal): Promise<{ requiresAuth: boolean }> {
+    if (this.closing) return Promise.reject(new Error('MCP_PROBE_SERVICE_CLOSED'))
+    if (this.work.size >= 16) return Promise.reject(new Error('MCP_PROBE_CAPACITY'))
+    const controller = new AbortController()
+    const cancel = (): void => { controller.abort() }
+    signal?.addEventListener('abort', cancel, { once: true })
+    if (signal?.aborted) controller.abort()
+    this.controllers.add(controller)
+    const timer = setTimeout(cancel, this.timeoutMs)
+    const raw = Promise.resolve().then(async () => {
+      const target = new URL(url)
+      if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password) throw new Error('MCP_AUTH_PROBE_FAILED')
+      controller.signal.throwIfAborted()
+      const response = await this.host.fetch(target.href, { method: 'GET', redirect: 'error', signal: controller.signal })
+      try { controller.signal.throwIfAborted() } finally { await response.body?.cancel() }
+      controller.signal.throwIfAborted()
+      return { requiresAuth: response.status === 401 }
+    }).finally(() => {
+      clearTimeout(timer); signal?.removeEventListener('abort', cancel)
+      this.controllers.delete(controller); this.work.delete(retained)
+    })
+    const retained = raw.then(() => undefined, () => undefined)
+    this.work.add(retained)
+    return raw
   }
 
   shutdown(): void {

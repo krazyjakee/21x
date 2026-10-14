@@ -32,6 +32,21 @@ function native() {
 }
 
 describe('credential setting format contract', () => {
+  it('encrypts authenticated record values and refuses wrong-provider or unknown record envelopes', async () => {
+    const provider = native(), codec = await configured(provider)
+    const plaintext = ' \uFEFFrecord-secret-雪 '
+    const value = codec.encryptRecordCredential(plaintext)
+    expect(value.startsWith('21x-record-credential:v1:21x-credential:21x.aes256gcm.v1:')).toBe(true)
+    expect(value).not.toContain(plaintext)
+    expect(codec.decryptRecordCredential(value)).toBe(plaintext)
+    expect(codec.decryptRecordCredential('legacy plaintext')).toBe('legacy plaintext')
+    expect(() => codec.decryptRecordCredential('21x-record-credential:v2:any')).toThrow('CREDENTIAL_SETTING_FORMAT_INVALID')
+    expect(() => codec.decryptRecordCredential('21x-record-credential:v1:plaintext')).toThrow('CREDENTIAL_SETTING_FORMAT_INVALID')
+    const registry = await import('./secret-storage')
+    registry.releaseSecretStorage(provider); registry.configureSecretStorage(legacy())
+    expect(codec.encryptRecordCredential(plaintext)).toBe(plaintext)
+    expect(() => codec.decryptRecordCredential(value)).toThrow('CREDENTIAL_SETTING_FORMAT_INVALID')
+  })
   it('declares stable formats while preserving old three-method providers and legacy bytes', async () => {
     const provider = legacy()
     const codec = await configured(provider)

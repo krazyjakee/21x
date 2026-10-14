@@ -1,5 +1,5 @@
 import type { DatabaseManager, TaskRecord } from './database'
-import type { PluginRegistry } from './plugins/registry'
+import { PluginRegistry } from './plugins/registry'
 import type { OAuthManager } from './oauth/oauth-manager'
 import type { PluginContext, PluginSyncResult, ActionResult } from './plugins/types'
 import type { SourceUser, ReassignResult } from '../shared/types'
@@ -13,21 +13,67 @@ export interface SyncResult {
   errors: string[]
 }
 
+export interface SourceLifecycleOwner {
+  runSourceWork<T>(sourceId: string, work: () => Promise<T>): Promise<T>
+}
+
 export class SyncManager {
   private closing = false
   private readonly pendingWork = new Set<Promise<unknown>>()
+  private readonly sourceTails = new Map<string, Promise<unknown>>()
+  private readonly sourceMutations = new Set<string>()
   constructor(
     private db: DatabaseManager,
     private pluginRegistry: PluginRegistry,
     private oauthManager?: OAuthManager
-  ) {}
+  ) {
+    const bridge = (pluginRegistry instanceof PluginRegistry ? pluginRegistry.get('connector-bridge') : undefined) as (import('./plugins/types').TaskSourcePlugin & {
+      bindSourceLifecycle?(owner: SourceLifecycleOwner): void
+    }) | undefined
+    bridge?.bindSourceLifecycle?.(this)
+  }
+
+  /** Exact borrowed owners, also used by the production boundary before work. */
+  assertOwners(db: DatabaseManager, plugins: PluginRegistry, oauth?: OAuthManager): void {
+    if (this.db !== db || this.pluginRegistry !== plugins || arguments.length >= 3 && this.oauthManager !== oauth) throw new Error('Task source owners do not match')
+  }
+
+  runSourceWork<T>(sourceId: string, work: () => Promise<T>): Promise<T> {
+    if (this.closing) return Promise.reject(new SyncManagerClosedError())
+    if (this.sourceMutations.has(sourceId)) return Promise.reject(new SourceMutationBusyError())
+    return this.enqueueSource(sourceId, work)
+  }
+
+  /** Fence new manual/background jobs immediately; drain previously accepted
+   * jobs before a source edit. A failed/cancelled edit never replays a job. */
+  runSourceMutation<T>(sourceId: string, mutation: () => T | Promise<T>): Promise<T> {
+    if (this.closing) return Promise.reject(new SyncManagerClosedError())
+    if (this.sourceMutations.has(sourceId)) return Promise.reject(new SourceMutationBusyError())
+    this.sourceMutations.add(sourceId)
+    const work = this.enqueueSource(sourceId, async () => mutation())
+    void work.then(() => this.sourceMutations.delete(sourceId), () => this.sourceMutations.delete(sourceId))
+    return work
+  }
+
+  private enqueueSource<T>(sourceId: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.sourceTails.get(sourceId)
+    const run = this.runOwned(async () => {
+      if (previous) await previous.catch(() => undefined)
+      if (this.closing) throw new SyncManagerClosedError()
+      return work()
+    })
+    this.sourceTails.set(sourceId, run)
+    const settled = (): void => { if (this.sourceTails.get(sourceId) === run) this.sourceTails.delete(sourceId) }
+    void run.then(settled, settled)
+    return run
+  }
 
   private buildContext(sourceId?: string): PluginContext {
     return { db: this.db, oauthManager: this.oauthManager, sourceId }
   }
 
-  importTasks(sourceId: string): Promise<SyncResult> {
-    return this.runOwned(() => this.importTasksInternal(sourceId))
+  importTasks(sourceId: string, beforeEffect?: () => void): Promise<SyncResult> {
+    return this.runSourceWork(sourceId, () => { beforeEffect?.(); return this.importTasksInternal(sourceId) })
   }
 
   private async importTasksInternal(sourceId: string): Promise<SyncResult> {
@@ -36,19 +82,19 @@ export class SyncManager {
     const source = this.db.getTaskSource(sourceId)
     if (!source) {
       result.errors.push('Task source not found')
-      console.error('[sync] Task source not found:', sourceId)
+      console.error('[sync] Source lookup failed')
       return result
     }
 
     const plugin = this.pluginRegistry.get(source.plugin_id)
     if (!plugin) {
-      result.errors.push(`Plugin "${source.plugin_id}" not found`)
-      console.error('[sync] Plugin not found:', source.plugin_id)
+      result.errors.push('Task source plugin unavailable')
+      console.error('[sync] Source plugin unavailable')
       return result
     }
 
     const ctx = this.buildContext(sourceId)
-    console.log('[sync] Importing from:', source.name)
+    console.log('[sync] Source import started')
 
     const config = this.getConfig(source)
     const startedAt = new Date().toISOString()
@@ -58,10 +104,12 @@ export class SyncManager {
       result.imported = pluginResult.imported
       result.updated = pluginResult.updated
       result.errors = pluginResult.errors
-      console.log('[sync] Result:', { imported: result.imported, updated: result.updated, errors: result.errors })
+      console.log('[sync] Source import result:', { imported: result.imported, updated: result.updated, errorCount: result.errors.length })
 
-      this.db.updateTaskSourceLastSynced(sourceId)
-      console.log('[sync] Updated last_synced_at for source:', sourceId)
+      if (result.errors.length === 0) {
+        this.db.updateTaskSourceLastSynced(sourceId)
+        console.log('[sync] Source sync checkpoint persisted')
+      }
 
       // Project events (#57): each task this run created wakes the project's
       // Captain. Plugins do not report ids, so the rows are found by source
@@ -72,17 +120,24 @@ export class SyncManager {
           emitTaskEvent(this.db, 'task_synced', task.id, undefined, { unassigned: !task.agent_id })
         }
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Import failed'
-      result.errors.push(msg)
-      console.error('[sync] Import error:', err)
+    } catch {
+      result.errors.push('Source import failed')
+      console.error('[sync] Source import failed')
     }
 
     return result
   }
 
-  exportTaskUpdate(taskId: string, changedFields: Record<string, unknown>): Promise<void> {
-    return this.runOwned(() => this.exportTaskUpdateInternal(taskId, changedFields))
+  exportTaskUpdate(taskId: string, changedFields: Record<string, unknown>, beforeEffect?: () => void): Promise<void> {
+    return this.runOwned(async () => {
+      const sourceId = this.db.getTask(taskId)?.source_id
+      if (!sourceId) { beforeEffect?.(); return this.exportTaskUpdateInternal(taskId, changedFields) }
+      return this.runSourceWork(sourceId, () => {
+        beforeEffect?.()
+        if (this.db.getTask(taskId)?.source_id !== sourceId) throw new SourceMutationBusyError()
+        return this.exportTaskUpdateInternal(taskId, changedFields)
+      })
+    })
   }
 
   private async exportTaskUpdateInternal(taskId: string, changedFields: Record<string, unknown>): Promise<void> {
@@ -114,7 +169,7 @@ export class SyncManager {
     sourceId: string,
     origin: 'task-source-action' | 'task-group' = 'task-source-action'
   ): Promise<ActionResult> {
-    return this.runOwned(() => this.executeActionInternal(actionId, task, input, sourceId, origin))
+    return this.runSourceWork(sourceId, () => this.executeActionInternal(actionId, task, input, sourceId, origin))
   }
 
   private async executeActionInternal(
@@ -150,8 +205,8 @@ export class SyncManager {
     return result
   }
 
-  getSourceUsers(sourceId: string): Promise<SourceUser[]> {
-    return this.runOwned(() => this.getSourceUsersInternal(sourceId))
+  getSourceUsers(sourceId: string, beforeEffect?: () => void): Promise<SourceUser[]> {
+    return this.runSourceWork(sourceId, () => { beforeEffect?.(); return this.getSourceUsersInternal(sourceId) })
   }
 
   private async getSourceUsersInternal(sourceId: string): Promise<SourceUser[]> {
@@ -169,15 +224,26 @@ export class SyncManager {
   reassignTask(
     taskId: string,
     userIds: string[],
-    assigneeDisplay: string
+    assigneeDisplay: string,
+    beforeEffect?: () => void,
+    beforeLocalCommit?: () => void
   ): Promise<ReassignResult> {
-    return this.runOwned(() => this.reassignTaskInternal(taskId, userIds, assigneeDisplay))
+    return this.runOwned(async () => {
+      const sourceId = this.db.getTask(taskId)?.source_id
+      if (!sourceId) { beforeEffect?.(); return this.reassignTaskInternal(taskId, userIds, assigneeDisplay, beforeLocalCommit) }
+      return this.runSourceWork(sourceId, () => {
+        beforeEffect?.()
+        if (this.db.getTask(taskId)?.source_id !== sourceId) throw new SourceMutationBusyError()
+        return this.reassignTaskInternal(taskId, userIds, assigneeDisplay, beforeLocalCommit)
+      })
+    })
   }
 
   private async reassignTaskInternal(
     taskId: string,
     userIds: string[],
-    assigneeDisplay: string
+    assigneeDisplay: string,
+    beforeLocalCommit?: () => void
   ): Promise<ReassignResult> {
     const task = this.db.getTask(taskId)
     if (!task?.source_id || !task.external_id) {
@@ -197,6 +263,7 @@ export class SyncManager {
 
     const result = await plugin.reassignTask(task, userIds, config, ctx)
     if (result.success) {
+      beforeLocalCommit?.()
       this.db.updateTask(taskId, { assignee: assigneeDisplay })
     }
     return result
@@ -238,6 +305,11 @@ export class SyncManager {
 export class SyncManagerClosedError extends Error {
   readonly code = 'SOURCE_SYNC_CLOSED'
   constructor() { super('Source sync is shutting down'); this.name = 'SyncManagerClosedError' }
+}
+
+export class SourceMutationBusyError extends Error {
+  readonly code = 'SOURCE_MUTATION_BUSY'
+  constructor() { super('Task source configuration is changing; retry after it finishes'); this.name = 'SourceMutationBusyError' }
 }
 
 export class SyncManagerShutdownIncompleteError extends Error {

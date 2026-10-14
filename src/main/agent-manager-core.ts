@@ -1285,18 +1285,49 @@ export class AgentManager extends EventEmitter {
   /** Scope derivation is shared by authorization and the actual mutation. A
    * cached global backend refresh may affect every agent using that backend. */
   getProductionCredentialAffectedAgents(input: ProductionCredentialMutation): string[] {
-    if (input.kind !== 'secret') return []
+    if (input.kind !== 'secret' && input.kind !== 'mcp-server') return []
     const agents = this.db.getAgents()
-    const referenced = agents.filter(agent => agent.config.secret_ids?.includes(input.secretId))
+    const referenced = agents.filter(agent => input.kind === 'secret'
+      ? agent.config.secret_ids?.includes(input.secretId)
+      : agent.config.mcp_servers?.some(entry => (typeof entry === 'string' ? entry : entry.serverId) === input.serverId))
     const shared = new Set(referenced.map(getAgentProvider).filter(type => !!this.adapters.get(type)?.notifyConfigChanged))
     return agents.filter(agent => referenced.some(row => row.id === agent.id) || shared.has(getAgentProvider(agent))).map(agent => agent.id).sort()
+  }
+
+  getMcpConfigurationAffectedAgents(serverId: string): string[] {
+    return this.getProductionCredentialAffectedAgents({ kind: 'mcp-server', serverId })
+  }
+
+  /** Include implicit Captains and accepted start/session ownership, whose task
+   * rows may not have agent_id. Authorization uses the same owners as Stop. */
+  getAgentConfigurationProjectIds(agentId: string): string[] {
+    const projects = new Set((this.db.db.prepare(`SELECT DISTINCT project_id AS id FROM tasks WHERE agent_id=? UNION
+      SELECT id FROM projects WHERE default_agent_id=? OR captain_agent_id=?`).all(agentId, agentId, agentId) as Array<{ id: string }>).map(row => row.id))
+    const agents = this.db.getAgents()
+    const projectRows = this.db.db.prepare('SELECT id, captain_agent_id, default_agent_id FROM projects').all() as
+      Array<{ id: string; captain_agent_id: string | null; default_agent_id: string | null }>
+    for (const project of projectRows) if (resolveCaptainAgentId({ getAgents: () => agents }, project) === agentId) projects.add(project.id)
+    const tasks = new Set([
+      ...[...this.sessions.values()].filter(session => session.agentId === agentId).map(session => session.taskId),
+      ...[...this.admittedStarts.entries()].filter(([, id]) => id === agentId).map(([id]) => id),
+      ...this.startQueue.active().filter(row => row.agentId === agentId).map(row => row.taskId),
+      ...[...this.sessionStarts.keys()].filter(taskId => (this.admittedStarts.get(taskId) ?? this.db.getTask(taskId)?.agent_id
+        ?? this.db.getSetting(coordinatorSessionAgentKey(taskId))) === agentId)
+    ])
+    for (const id of tasks) { const task = this.db.getTask(id); if (task) projects.add(task.project_id) }
+    return [...projects].sort()
+  }
+
+  runMcpConfigurationMutation<T>(serverId: string, mutation: () => T | Promise<T>): Promise<T> {
+    return this.runProductionCredentialMutation({ kind: 'mcp-server', serverId }, mutation)
   }
 
   runProductionCredentialMutation<T>(input: ProductionCredentialMutation, mutation: () => T | Promise<T>): Promise<T> {
     if (this.shuttingDown || this.productionCredentialMutation || this.agentConfigurationMutations.size || this.backendConfigurationMutations.size)
       return Promise.reject(new Error('The credential lifecycle is unavailable. Retry after current changes finish.'))
-    if (!input || !['provider-key', 'secret', 'default-agent'].includes(input.kind) || typeof mutation !== 'function' ||
+    if (!input || !['provider-key', 'secret', 'mcp-server', 'default-agent'].includes(input.kind) || typeof mutation !== 'function' ||
       input.kind === 'secret' && (typeof input.secretId !== 'string' || !input.secretId) ||
+      input.kind === 'mcp-server' && (typeof input.serverId !== 'string' || !input.serverId) ||
       input.kind === 'provider-key' && !['openai_api_key', 'anthropic_api_key'].includes(input.key))
       return Promise.reject(new Error('Invalid credential mutation.'))
     const ids = new Set(this.getProductionCredentialAffectedAgents(input))

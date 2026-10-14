@@ -1,4 +1,5 @@
 import type { DatabaseManager, TaskRecord } from '../database'
+import type { SourceLifecycleOwner } from '../sync-manager'
 import { TaskStatus } from '../../shared/constants'
 import {
   CONNECTOR_BRIDGE_PLUGIN_ID,
@@ -59,8 +60,24 @@ export class ConnectorBridgeCore implements TaskSourcePlugin {
   private readonly ownedSchedulers = new Set<BridgeScheduler>()
   private scheduler: BridgeScheduler | null = null
   private closing = false
+  private sourceLifecycle: SourceLifecycleOwner | null = null
 
   constructor(private readonly options: ConnectorBridgeCoreOptions) {}
+
+  /** Install before polling starts. Scheduled work shares source mutation
+   * admission/drain with manual import/export while retaining manual:false. */
+  bindSourceLifecycle(owner: SourceLifecycleOwner): void {
+    if (this.sourceLifecycle === owner) return
+    // Legacy Electron startup installs the timer immediately before the sync
+    // owner in the same call stack. Its deferred first pass can still bind;
+    // an already accepted engine job cannot be retroactively claimed.
+    if (this.sourceLifecycle || this.closing || [...this.ownedEngines].some(engine => engine.store.listInstances().some(instance => engine.isBusy(instance.id)))) throw new Error('Connector source lifecycle owner is unavailable')
+    this.sourceLifecycle = owner
+  }
+
+  assertSourceLifecycle(owner: SourceLifecycleOwner): void {
+    if (this.sourceLifecycle !== owner) throw new Error('Connector source lifecycle owner does not match')
+  }
 
   engineFor(db: DatabaseManager): ConnectorBridgeEngine {
     if (this.closing) throw new ConnectorBridgeClosedError()
@@ -144,11 +161,15 @@ export class ConnectorBridgeCore implements TaskSourcePlugin {
       isBusy: (id) => engine.isBusy(id),
       tickMs,
       runSource: async (sourceId) => {
-        const source = db.getTaskSource(sourceId)
-        if (!source) return
-        const result = await engine.sync(sourceId, { ...source.config }, { db, sourceId }, { manual: false })
-        db.updateTaskSourceLastSynced(sourceId)
-        await onSynced?.(sourceId, result)
+        const run = async (): Promise<void> => {
+          const source = db.getTaskSource(sourceId)
+          if (!source) return
+          const result = await engine.sync(sourceId, { ...source.config }, { db, sourceId }, { manual: false })
+          if (result.errors.length === 0) db.updateTaskSourceLastSynced(sourceId)
+          await onSynced?.(sourceId, result)
+        }
+        if (this.sourceLifecycle) await this.sourceLifecycle.runSourceWork(sourceId, run)
+        else await run()
       }
     })
     this.ownedSchedulers.add(this.scheduler)

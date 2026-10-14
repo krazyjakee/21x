@@ -17,7 +17,7 @@ afterEach(async () => {
   vi.useRealTimers(); vi.restoreAllMocks()
 })
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
-function fixture(withSecrets = false) {
+function fixture(withSecrets = false, withMcp = false) {
   const db = createPortableTestDb()
   const agent = db.createAgent({ name: 'Configuration owner', config: { coding_agent: 'codex', model: 'old-model', max_parallel_sessions: 1 } })!
   const project = db.createProject({ name: 'Configuration fixture', default_agent_id: agent.id })!
@@ -27,12 +27,33 @@ function fixture(withSecrets = false) {
   const host: AgentManagerHost = { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' },
     secrets: broker ? { kind: 'broker', getPort: () => broker.port, register: (token, id, ids) => broker.register(token, id, ids),
       unregister: token => broker.unregister(token), writeShellWrapper: () => writeSecretShellWrapper(directory) } : { kind: 'unsupported' },
-    configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' }, createAdapter: () => adapter, isCodexAppServerAdapter: () => true }
+    configuredMcp: withMcp ? 'enabled' : 'disabled', managedTaskMcp: { kind: 'disabled' }, createAdapter: () => adapter, isCodexAppServerAdapter: () => true }
   const manager = new AgentManager(db, host)
   resources.push({ db, manager, directory, broker }); return { db, manager, adapter, agent, project, tasks }
 }
 
 describe('actual AgentManager configuration ownership', () => {
+  it('derives MCP references including shared refresh users and joins their exact Stop before changing the server', async () => {
+    const h = fixture(false, true)
+    const server = h.db.createMcpServer({ name: 'Controlled MCP', command: 'controlled' })!
+    h.db.updateAgent(h.agent.id, { config: { ...h.agent.config, mcp_servers: [{ serverId: server.id, enabledTools: ['retained-tool'] }] } })
+    const shared = h.db.createAgent({ name: 'Shared backend', config: { coding_agent: 'codex' } })!
+    const unrelated = h.db.createAgent({ name: 'Other backend', config: { coding_agent: 'pi' } })!
+    await h.manager.startTask(h.tasks[0].id)
+    expect(h.manager.getMcpConfigurationAffectedAgents(server.id)).toEqual([h.agent.id, shared.id].sort())
+    const entered = deferred(), stopped = deferred(), mutation = vi.fn(() => h.db.updateMcpServer(server.id, { command: 'replacement' }))
+    h.adapter.destroySession.mockImplementationOnce(async () => { entered.resolve(); await stopped.promise })
+    const changing = h.manager.runMcpConfigurationMutation(server.id, mutation)
+    try {
+      await entered.promise
+      expect(mutation).not.toHaveBeenCalled(); expect(h.db.getMcpServer(server.id)?.command).toBe('controlled')
+      await expect(h.manager.startTask(h.tasks[1].id)).rejects.toThrow('configuration is being updated')
+      await expect(h.manager.runAgentConfigurationMutation(shared.id, 'update', () => undefined, { name: 'Race' })).rejects.toThrow('credential change')
+      expect(h.manager.getMcpConfigurationAffectedAgents(server.id)).not.toContain(unrelated.id)
+    } finally { stopped.resolve(); await changing }
+    expect(mutation).toHaveBeenCalledOnce(); expect(h.adapter.notifyConfigChanged).toHaveBeenCalledOnce()
+    expect(h.db.getMcpServer(server.id)?.command).toBe('replacement')
+  })
   it('fences group changes and the old Captain owner while an actual secret Stop remains unacknowledged', async () => {
     const h = fixture(true)
     const secret = h.db.createSecret({ name: 'Controlled secret', description: '', env_var_name: 'CONTROLLED_TOKEN', value: 'controlled' })!

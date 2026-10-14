@@ -31,8 +31,8 @@ export interface AgentConfigurationCodec<K extends AgentConfigurationOperation> 
   validateWireResult(value: unknown): boolean
 }
 
-/** Legacy key storage is unchanged. Only saved-key markers cross this boundary;
- * no credential writes are supported without an encrypted agent-key owner. */
+/** Only saved-key markers cross the result boundary. The production owner
+ * alone accepts credential writes and encrypts their persisted representation. */
 export function projectMaskedAgent(value: unknown): JsonValue {
   const projected = projectPublicAgent(value)
   if (!isRecord(projected) || !isRecord(projected.config) || !isRecord(value) || !isRecord(value.config)) return fail('INVALID_RESULT')
@@ -58,14 +58,26 @@ function isMaskedAgent(value: unknown): boolean {
 }
 function crud<K extends CrudOperation>(operation: K): AgentConfigurationCodec<K> {
   const base = CONFIGURATION_COMMAND_CODECS[operation]
+  const keyIndex = operation === 'agent:create' ? 0 : operation === 'agent:update' ? 1 : -1
+  const stripKeys = (args: unknown[]): unknown[] => args.map((item, index) => {
+    if (index !== keyIndex || !isRecord(item) || !isRecord(item.config)) return item
+    const config = Object.fromEntries(Object.entries(item.config).filter(([key]) => key !== 'api_keys'))
+    return { ...item, config }
+  })
   const validateArguments = (args: unknown): boolean => {
-    if (!base.validateArguments(args)) return false
     if (!Array.isArray(args)) return false
+    if (!base.validateArguments(stripKeys(args))) return false
     const data = operation === 'agent:create' ? args[0] : operation === 'agent:update' ? args[1] : undefined
     if (!isRecord(data)) return true
     if (data.server_url !== undefined && !isAgentConfigurationServerUrl(data.server_url)) return false
     if (isRecord(data.config)) for (const key of ['concurrency_cap', 'max_parallel_sessions']) {
       if (data.config[key] !== undefined && Number(data.config[key]) > MAX_HARD_CAP) return false
+    }
+    if (isRecord(data.config) && data.config.api_keys !== undefined) {
+      const keys = data.config.api_keys
+      if (!isRecord(keys) || !hasExactKeys(keys, [], ['openai', 'anthropic', 'cursor']) ||
+        Object.values(keys).some(value => value !== undefined && (typeof value !== 'string' || /[\u0000-\u001f\u007f]/.test(value) ||
+          new TextEncoder().encode(value).byteLength > 16_384))) return false
     }
     return true
   }
@@ -74,8 +86,29 @@ function crud<K extends CrudOperation>(operation: K): AgentConfigurationCodec<K>
       : operation === 'agent:delete' ? typeof value === 'boolean' : isMaskedAgent(value))
   return {
     validateArguments,
-    encodeArguments(args) { if (!validateArguments(args)) return fail('INVALID_ARGUMENTS'); return base.encodeArguments(args as never) },
-    decodeArguments(payload) { const args = base.decodeArguments(payload); if (!validateArguments(args)) return fail('INVALID_ARGUMENTS'); return args as DesktopCommandMap[K]['apiArguments'] },
+    encodeArguments(args) {
+      if (!validateArguments(args)) return fail('INVALID_ARGUMENTS')
+      const payload = base.encodeArguments(stripKeys(args) as never)
+      const data = (args as unknown[])[keyIndex]
+      if (isRecord(data) && isRecord(data.config) && data.config.api_keys !== undefined && isRecord(payload) && isRecord(payload.data) && isRecord(payload.data.config))
+        payload.data.config.api_keys = Object.fromEntries(Object.entries(data.config.api_keys as Record<string, unknown>).filter(([, value]) => value !== undefined)) as JsonValue
+      return payload
+    },
+    decodeArguments(payload) {
+      let keys: unknown
+      let sanitized = payload
+      if (isRecord(payload) && isRecord(payload.data) && isRecord(payload.data.config)) {
+        const { api_keys, ...config } = payload.data.config; keys = api_keys
+        sanitized = { ...payload, data: { ...payload.data, config } }
+      }
+      const args = base.decodeArguments(sanitized) as unknown[]
+      if (keys !== undefined && keyIndex >= 0 && isRecord(args[keyIndex])) {
+        const data = args[keyIndex] as Record<string, unknown>
+        args[keyIndex] = { ...data, config: { ...(data.config as object), api_keys: keys } }
+      }
+      if (!validateArguments(args)) return fail('INVALID_ARGUMENTS')
+      return args as DesktopCommandMap[K]['apiArguments']
+    },
     encodeResult(value) {
       if (value === undefined) { if (!validateResult(value)) return fail('INVALID_RESULT'); return { defined: false } }
       const projected = operation === 'agent:delete' ? value : operation === 'agent:getAll'

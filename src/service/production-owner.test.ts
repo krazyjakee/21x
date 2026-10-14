@@ -225,6 +225,8 @@ describe('actual production application owner', () => {
     const f = await fixture()
     const services = await f.owner.start()
     services.db.setSetting('openai_api_key', 'synthetic-api-key')
+    const agent = services.db.createAgent({ name: 'Protected reopen', config: { api_keys: { openai: 'synthetic-agent-key' } } })!
+    const mcp = services.db.createMcpServer({ name: 'Protected reopen MCP', headers: { Authorization: 'Bearer synthetic-mcp-key' }, environment: { CONTROLLED_TOKEN: 'synthetic-env' } })!
     const task = services.db.createTask(makeTask())!
     const { DeliveryStore } = await import('../main/sessions/delivery-store')
     const deliveries = new DeliveryStore(services.db)
@@ -236,10 +238,33 @@ describe('actual production application owner', () => {
     owners.push(next)
     const reopened = await next.start()
     expect(reopened.db.getSetting('openai_api_key')).toBe('synthetic-api-key')
+    expect(reopened.db.getAgent(agent.id)?.config.api_keys?.openai).toBe('synthetic-agent-key')
+    expect(reopened.db.getMcpServer(mcp.id)).toMatchObject({ headers: { Authorization: 'Bearer synthetic-mcp-key' }, environment: { CONTROLLED_TOKEN: 'synthetic-env' } })
     expect(['accepted', 'acknowledged']).toContain(new DeliveryStore(reopened.db).getByKey('accepted-fixture')?.state)
     expect(f.adapter.createSession).not.toHaveBeenCalled()
     expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
     await next.close()
+  })
+
+  it.each(['agent', 'mcp-header', 'mcp-environment', 'mcp-client-secret', 'task-source'])('rejects a plaintext %s credential before profile migration and preserves its bytes', async kind => {
+    const f = await fixture(), services = await f.owner.start()
+    const agent = services.db.createAgent({ name: 'Legacy plaintext' })!
+    const mcp = services.db.createMcpServer({ name: 'Legacy MCP' })!
+    const source = services.db.createTaskSource({ name: 'Legacy source', plugin_id: 'notion', mcp_server_id: null })!
+    await f.owner.close()
+    const path = join(f.bootstrap.paths.profileRoot, '21x.db'), raw = new SQLite(path)
+    if (kind === 'agent') raw.prepare('UPDATE agents SET config=? WHERE id=?').run(JSON.stringify({ api_keys: { openai: 'synthetic-legacy-credential' } }), agent.id)
+    else if (kind === 'task-source') raw.prepare('UPDATE task_sources SET config=? WHERE id=?').run(JSON.stringify({ api_token: 'synthetic-legacy-credential' }), source.id)
+    else {
+      const column = kind === 'mcp-header' ? 'headers' : kind === 'mcp-environment' ? 'environment' : 'oauth_metadata'
+      raw.prepare(`UPDATE mcp_servers SET ${column}=? WHERE id=?`).run(JSON.stringify(kind === 'mcp-client-secret' ? { client_secret: 'synthetic-legacy-credential' } : { TOKEN: 'synthetic-legacy-credential' }), mcp.id)
+    }
+    raw.close(); const before = readFileSync(path)
+    const next = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, f.boundaries)
+    owners.push(next)
+    await expect(next.start()).rejects.toThrow('PROFILE_CREDENTIAL_FORMAT_INCOMPATIBLE')
+    expect(readFileSync(path)).toEqual(before); expect(f.store.create).toHaveBeenCalledOnce()
+    expect(next.snapshot().owned).toBe(false)
   })
 
   it('reports unavailable store and incompatible credential profiles without creating replacement credentials', async () => {

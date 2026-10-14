@@ -13,6 +13,8 @@ import { CodingAgentType } from '../renderer/src/types'
 import type { ChatProvider } from '../main/chat/providers/types'
 import { PRODUCTION_SETTINGS_CODECS } from '../shared/production-settings-codecs'
 import { COMMANDER_COMMAND_CODECS } from '../shared/commander-desktop-codecs'
+import { MCP_CODECS } from '../shared/mcp-codecs'
+import { TASK_SOURCE_CODECS } from '../shared/task-source-codecs'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
 let ownerModule: typeof import('./production-owner')
@@ -57,6 +59,9 @@ async function fixture(providerOverride?: ChatProvider) {
     canCreateProject: trusted, canEditSettings: trusted, canAccessGlobalSkills: trusted, canChangeSkillScope: trusted, canReorderProjects: trusted,
     canReadSetting: (_key, value) => trusted(value), canWriteSetting: (_key, value) => trusted(value),
     canAccessSecret: (_id, value) => trusted(value), canCreateSecret: trusted,
+    canAccessMcpServer: (_id, value) => trusted(value),
+    canUseTransport: (_input, value) => trusted(value), canUseEnvironmentName: (_name, value) => trusted(value),
+    canAccessConnector: (_id, value) => trusted(value), canUseSourcePlugin: (_id, value) => trusted(value),
     canUseSecretEnvironment: (_name, value) => trusted(value), canReadEnvironment: (_key, value) => trusted(value),
     canAccessTerminal: (_id, value) => trusted(value), resolveTerminalDirectory: (_id, value) => trusted(value)
       ? { cwd: bootstrap.paths.workspaceRoot, root: bootstrap.paths.workspaceRoot } : null },
@@ -66,6 +71,34 @@ async function fixture(providerOverride?: ChatProvider) {
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('binds protected agent, MCP and source records to the same actual singleton without enabling missing transports', async () => {
+    const f = await fixture(), { db } = f.services
+    const agent = await f.backend.invoke('agent:create', AGENT_CONFIGURATION_CODECS['agent:create'].encodeArguments([
+      { name: 'Protected actual agent', config: { api_keys: { openai: 'synthetic-agent-secret' } } }
+    ]), f.caller, f.signal)
+    expect(agent).toMatchObject({ defined: true, value: { config: { api_keys: { openai: '__21x_api_key_set__' } } } })
+    const mcp = await f.backend.invoke('mcp:create', MCP_CODECS['mcp:create'].encodeArguments([
+      { name: 'Protected actual MCP', type: 'remote', url: 'https://example.test/mcp', headers: { Authorization: 'Bearer synthetic-mcp-secret' } }
+    ]), f.caller, f.signal)
+    expect(mcp).toMatchObject({ defined: true, value: { headers: { Authorization: '__21x_mcp_secret_set__' } } })
+    const source = await f.backend.invoke('taskSource:create', TASK_SOURCE_CODECS['taskSource:create'].encodeArguments([
+      { name: 'Protected actual source', plugin_id: 'notion', mcp_server_id: null, config: { api_token: 'synthetic-source-secret', data_source_id: 'data-one' } }
+    ]), f.caller, f.signal)
+    expect(source).toMatchObject({ defined: true, value: { config: { api_token: '__21x_api_key_set__', data_source_id: 'data-one' } } })
+    const stored = JSON.stringify({
+      agents: db.db.prepare('SELECT config FROM agents').all(), mcp: db.db.prepare('SELECT headers FROM mcp_servers').all(),
+      sources: db.db.prepare('SELECT config FROM task_sources').all()
+    })
+    expect(stored).not.toMatch(/synthetic-agent-secret|synthetic-mcp-secret|synthetic-source-secret/)
+    expect(stored).toContain('21x-record-credential:v1:')
+    await expect(f.backend.invoke('mcp:testConnection', MCP_CODECS['mcp:testConnection'].encodeArguments([
+      { name: 'Missing configured transport', type: 'remote', url: 'https://example.test/mcp' }
+    ]), f.caller, f.signal)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    expect(f.services.mcpProbes.pendingCount).toBe(0)
+    const sources = await f.backend.invoke('taskSource:getAll', TASK_SOURCE_CODECS['taskSource:getAll'].encodeArguments([]), f.caller, f.signal)
+    expect(sources).toMatchObject({ defined: true, value: [{ config: { api_token: '__21x_api_key_set__' } }] })
+    expect(JSON.stringify(sources)).not.toContain('synthetic-source-secret')
+  })
   it('fences actual conversation and briefing owners before changing a global key and joins ignored cancellation', async () => {
     let finish!: () => void, entered!: () => void, calls = 0
     const gate = new Promise<void>(resolve => { finish = resolve })
@@ -97,7 +130,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(86)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(104)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

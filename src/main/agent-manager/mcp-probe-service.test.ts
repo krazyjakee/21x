@@ -176,6 +176,34 @@ describe('portable MCP probe ownership', () => {
     expect(await owner.probe(remote)).toEqual({ status: 'failed', error: 'MCP initialize protocol error' })
   })
 
+  it('separates external cancellation from the exact raw child-close receipt', async () => {
+    const child = fakeChild(), spawn = vi.fn(() => child), owner = own({ spawn })
+    const controller = new AbortController(), receipt = owner.probeOwned({ name: 'fixture', command: 'fixture' }, controller.signal)
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce())
+    controller.abort()
+    expect(await receipt.result).toEqual({ status: 'failed', error: 'MCP probe cancelled' })
+    const closed = vi.fn(); void receipt.closed.then(closed)
+    await Promise.resolve(); expect(closed).not.toHaveBeenCalled(); expect(owner.pendingCount).toBe(1)
+    child.emit('close', 1); await receipt.closed
+    expect(closed).toHaveBeenCalledOnce(); expect(owner.pendingCount).toBe(0)
+    const cancelled = new AbortController(); cancelled.abort()
+    const beforeSpawn = spawn.mock.calls.length
+    expect((await owner.probe({ name: 'late', command: 'fixture' }, cancelled.signal)).status).toBe('failed')
+    expect(spawn).toHaveBeenCalledTimes(beforeSpawn)
+  })
+
+  it('retains auth response cleanup and requests a non-following HTTP transport', async () => {
+    const cleanup = deferred<void>(), cancel = vi.fn(() => cleanup.promise)
+    const http = vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream({ cancel }), { status: 401 }))
+    const owner = own({ fetch: http }), result = owner.probeForAuth(remote.url)
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+    expect(http.mock.calls[0][1]).toMatchObject({ method: 'GET', redirect: 'error' })
+    await expect(owner.close(5)).rejects.toThrow('MCP_PROBE_SHUTDOWN_INCOMPLETE')
+    const cancelled = expect(result).rejects.toBeDefined()
+    cleanup.resolve(); await cancelled; await owner.close()
+    expect(http).toHaveBeenCalledOnce()
+  })
+
   it('fences queued work before host access and refuses invalid shutdown bounds', async () => {
     const http = vi.fn<typeof fetch>(), spawn = vi.fn(), owner = own({ fetch: http, spawn })
     await expect(owner.close(0)).rejects.toThrow(RangeError)

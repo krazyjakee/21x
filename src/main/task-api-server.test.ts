@@ -75,6 +75,16 @@ describe('explicit artifact workpiece routes', () => {
 })
 
 describe('authentication', () => {
+  it('keeps agent credentials out of the authenticated task API while preserving owner access', async () => {
+    const agent = db.createAgent(makeAgent({ name: 'Protected agent', config: { coding_agent: 'codex', model: 'public-model', api_keys: { openai: 'synthetic-private-key' } } }))!
+    const port = await startTaskApiServer(db)
+    const response = await fetch(`http://127.0.0.1:${port}/list_agents`, { method: 'POST', headers: { Authorization: `Bearer ${getTaskApiToken()}` } })
+    expect(response.status).toBe(200)
+    const listed = await response.json() as Array<{ id: string; config: Record<string, unknown> }>
+    expect(listed.find(value => value.id === agent.id)?.config).toMatchObject({ coding_agent: 'codex', model: 'public-model' })
+    expect(JSON.stringify(listed)).not.toMatch(/api_keys|synthetic-private-key/)
+    expect(db.getAgent(agent.id)?.config.api_keys?.openai).toBe('synthetic-private-key')
+  })
   it.each([
     ['no credentials', {}],
     ['a wrong bearer token', { Authorization: 'Bearer wrong' }],

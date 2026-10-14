@@ -133,9 +133,8 @@ export class ProductionSettingsBackend {
   }
   private agentAllowed(agent: AgentRecord, caller: DesktopCallerContext): boolean {
     if (!this.options.canAccessAgent(agent.id, caller, 'write')) return false
-    const projects = this.options.database.db.prepare(`SELECT DISTINCT project_id AS id FROM tasks WHERE agent_id=? UNION SELECT id FROM projects WHERE default_agent_id=? OR captain_agent_id=?`)
-      .all(agent.id, agent.id, agent.id) as Array<{ id: string }>
-    return projects.every(project => !!this.options.database.getProject(project.id) && this.options.canAccessProject(project.id, caller, 'write'))
+    return this.options.manager.getAgentConfigurationProjectIds(agent.id).every(id =>
+      !!this.options.database.getProject(id) && this.options.canAccessProject(id, caller, 'write'))
   }
   private secretAllowed(id: string, caller: DesktopCallerContext, access: 'read' | 'write' | 'delete', data?: UpdateSecretData): boolean {
     if (!this.options.canManageGlobalConfiguration(caller, access === 'read' ? 'read' : 'write') || !this.options.canAccessSecret(id, caller, access)) return false

@@ -3,13 +3,16 @@ import { createRequire } from 'node:module'
 import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-service-core'
 import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
+import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import { McpProbeService } from '../main/agent-manager/mcp-probe-service'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { DatabaseManager, type DatabaseRuntimeOptions } from '../main/database/manager'
-import { decryptSettingValue } from '../main/database/serializers'
+import { decryptSettingValue, decryptRecordCredential } from '../main/database/serializers'
 import { acquireProfileLock, type ProfileLock } from '../main/platform/profile-lock'
 import { initializeProtectedSecretStorage, type AuthenticatedSecretStorage, type ProtectedApplicationKeyStore } from '../main/platform/authenticated-secret-storage'
 import { configureSecretStorage, releaseSecretStorage } from '../main/platform/secret-storage'
@@ -86,6 +89,8 @@ export interface ProductionOwnerBootstrap {
     /** PATH/native supervision readiness, before any adapter or scheduler starts. */
     prepareRuntime(signal: AbortSignal): Promise<void>
     openExternal(url: string): Promise<void> | void
+    /** Trusted capability, separate from merely having an erroring callback. */
+    oauthBrowser?: 'available' | 'unavailable'
     notify(title: string, body: string): void
     emit(channel: string, data: unknown): void
     sendUiCommand(command: UiCommand): { ok: true } | { ok: false; detail: string }
@@ -126,6 +131,7 @@ export interface ProductionServices {
   cleanup: WorkspaceCleanupSchedulerCore
   reminders: OverdueNotifier
   terminals: TerminalServiceCore
+  mcpProbes: McpProbeService
 }
 
 // Task API, secret storage, report bridge and task lifecycle hooks are process
@@ -247,6 +253,25 @@ export class ProductionOwner {
         owners.automation !== services.automation || owners.coordination !== services.coordination || owners.cleanup !== services.cleanup)
         throw new ProductionOwnerError('SERVICE_OWNER_LOST')
     } }
+  }
+
+  getIntegrationBindingLease(): { secretStorage: AuthenticatedSecretStorage; configuredMcp: 'enabled' | 'disabled'; oauthBrowser: 'available' | 'unavailable'; assertOwners(owners: {
+    database: DatabaseManager; manager?: AgentManager; sync?: SyncManager; plugins?: PluginRegistry; probes?: McpProbeService; secretStorage?: unknown; oauth?: OAuthManager;
+    recurrence?: RecurrenceSchedulerCore; heartbeat?: HeartbeatSchedulerCore; automation?: TaskAutomationScheduler
+  }): void } {
+    this.getDatabaseBindingLease()
+    const services = this.services!, storage = this.storage!
+    return { secretStorage: storage, configuredMcp: this.bootstrap.native.agents.configuredMcp,
+      oauthBrowser: this.bootstrap.native.oauthBrowser ?? 'unavailable', assertOwners: owners => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || this.storage !== storage || owners.database !== services.db ||
+          owners.manager !== undefined && owners.manager !== services.agents || owners.sync !== undefined && owners.sync !== services.sync ||
+          owners.plugins !== undefined && owners.plugins !== services.registry || owners.probes !== undefined && owners.probes !== services.mcpProbes ||
+          owners.secretStorage !== undefined && owners.secretStorage !== storage || owners.oauth !== undefined && owners.oauth !== services.oauth ||
+          owners.recurrence !== undefined && owners.recurrence !== services.recurrence || owners.heartbeat !== undefined && owners.heartbeat !== services.heartbeat ||
+          owners.automation !== undefined && owners.automation !== services.automation)
+          throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      } }
   }
 
   runCredentialMutation<T>(input: ProductionCredentialMutation, mutation: () => T | Promise<T>): Promise<T> {
@@ -384,6 +409,17 @@ export class ProductionOwner {
     const oauth = new OAuthManager(db, { openExternal: url => native.openExternal(url), notify: (title, body) => this.notify(title, body) })
     agents.setOAuthManager(oauth)
     this.register('oauth', () => oauth.destroy(), () => oauth.close())
+    const mcpProbes = new McpProbeService({
+      spawn: (command, args, options) => spawn(command, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] }),
+      fetch: (input, init) => fetch(input, { ...init, redirect: 'error' }),
+      // Explicit user MCP variables are added by the probe only after domain
+      // authorization. No launch token, provider key or full parent env leaks.
+      environment: () => ({ PATH: process.env.PATH ?? '', HOME: profileRoot, USERPROFILE: profileRoot,
+        TMPDIR: this.bootstrap.paths.tempRoot, TEMP: this.bootstrap.paths.tempRoot,
+        ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec } : {}) }),
+      taskApiEnvironment: () => ({}), platform: process.platform
+    })
+    this.register('mcp-probes', () => mcpProbes.shutdown(), () => mcpProbes.close())
     const registry = new PluginRegistry()
     for (const plugin of [new LinearPlugin(), new HubSpotPlugin(), new GitHubIssuesPlugin(github), new ForgejoIssuesPlugin(forgejo), new NotionPlugin(), new YouTrackPlugin()]) registry.register(plugin)
     if (this.bootstrap.connectors.kind === 'enabled') {
@@ -456,7 +492,7 @@ export class ProductionOwner {
     }
     const reminders = new OverdueNotifier(() => this.emit('overdue:check', undefined))
     this.register('reminders', () => reminders.shutdown(), async () => { reminders.shutdown() })
-    this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals }
+    this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes }
     this.checkpoint('recovery')
     await agents.reconcileStartup()
     this.assertStarting()
@@ -584,6 +620,24 @@ function preflightProfile(path: string, storage: AuthenticatedSecretStorage): vo
     if (tables.has('settings')) for (const row of probe.prepare("SELECT value FROM settings WHERE key LIKE '%\\_api\\_key' ESCAPE '\\' AND value <> ''").all() as Array<{ value: string }>) {
       if (!row.value.startsWith('21x-credential:21x.aes256gcm.v1:')) throw new ProductionOwnerError('PROFILE_CREDENTIAL_FORMAT_INCOMPATIBLE')
       decryptSettingValue(row.value)
+    }
+    const recordCredential = (value: unknown): void => {
+      if (typeof value !== 'string' || value !== '' && !value.startsWith('21x-record-credential:v1:'))
+        throw new ProductionOwnerError('PROFILE_CREDENTIAL_FORMAT_INCOMPATIBLE')
+      decryptRecordCredential(value)
+    }
+    if (tables.has('agents')) for (const row of probe.prepare('SELECT config FROM agents').iterate() as Iterable<{ config: string }>) {
+      const config = JSON.parse(row.config)
+      if (config.api_keys !== undefined) for (const value of Object.values(config.api_keys)) recordCredential(value)
+    }
+    if (tables.has('mcp_servers')) for (const row of probe.prepare('SELECT headers, environment, oauth_metadata FROM mcp_servers').iterate() as Iterable<{ headers: string; environment: string; oauth_metadata: string }>) {
+      for (const values of [row.headers, row.environment]) for (const value of Object.values(JSON.parse(values || '{}'))) recordCredential(value)
+      const metadata = JSON.parse(row.oauth_metadata || '{}')
+      if (metadata.client_secret !== undefined) recordCredential(metadata.client_secret)
+    }
+    if (tables.has('task_sources')) for (const row of probe.prepare('SELECT config FROM task_sources').iterate() as Iterable<{ config: string }>) {
+      const config = JSON.parse(row.config || '{}')
+      for (const key of TASK_SOURCE_STORED_CREDENTIAL_FIELDS) if (config[key] !== undefined) recordCredential(config[key])
     }
     for (const [table, columns] of [['secrets', ['value']], ['oauth_tokens', ['access_token', 'refresh_token']], ['connector_instances', ['auth']]] as const) {
       if (!tables.has(table)) continue

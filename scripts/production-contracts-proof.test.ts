@@ -4,10 +4,10 @@ import { isRecord } from '../src/shared/service-protocol'
 import { PRODUCTION_COMMAND_CODECS } from '../src/service/production-desktop-bindings'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 86 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 104 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(86)
+    expect(corpus.operations).toHaveLength(104)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -34,10 +34,44 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
       expect(() => codec.decodeArguments({ ...(row.payload as Record<string, unknown>), authority: { namespace: '*' } } as never), `${row.operation}/${row.case}`).toThrow()
     }
   })
+  it('covers every source plugin and exact MCP credential/OAuth and source mutation shapes', () => {
+    const corpus = createProductionRequestCorpus()
+    const sources = corpus.requests.filter(row => row.operation === 'taskSource:create')
+    expect(new Set(sources.map(row => isRecord(row.payload) && isRecord(row.payload.data) ? row.payload.data.plugin_id : undefined))).toEqual(new Set(['linear', 'hubspot', 'github-issues', 'forgejo-issues', 'notion', 'youtrack', 'connector-bridge']))
+    expect(corpus.requests.find(row => row.case === 'empty-project-filter')?.payload).toEqual({ projectId: '' })
+    expect(corpus.requests.find(row => row.case === 'connector-fractional-poll-config')?.payload).toMatchObject({ data: { config: { poll_interval_minutes: 0.5 } } })
+    expect(corpus.requests.find(row => row.case === 'finite-source-credential-write')?.payload).toMatchObject({ data: { config: { api_token: 'synthetic\nfixture-credential' } } })
+    expect(corpus.requests.find(row => row.operation === 'mcp:submitManualClientId')?.payload).toEqual({ id: 'mcp.fixture:one', clientId: 'fixture-client-id' })
+    expect(corpus.requests.find(row => row.operation === 'taskSource:reassign' && row.case === 'baseline')?.payload).toEqual({ taskId: 'task_fixture', userIds: ['external:user-one', 'external:user-two'], assigneeDisplay: 'Fixture Users' })
+    expect(() => PROOF_COMMAND_CODECS['mcp:create'].encodeArguments([{ name: 'Fixture', oauth_metadata: { client_secret: 'foreign' } }] as never)).toThrow()
+    expect(() => PROOF_COMMAND_CODECS['taskSource:update'].encodeArguments(['source_fixture', { config: { command: 'arbitrary' } }])).toThrow()
+    expect(() => PROOF_COMMAND_CODECS['agent:update'].encodeArguments(['agent_fixture', { config: { api_keys: { foreign: 'synthetic' } } }] as never)).toThrow()
+  })
+  it('retains explicit outcomes and projects all credential-bearing DTOs before result transport', () => {
+    const mcp = { id: 'mcp.fixture:one', name: 'Fixture', type: 'local', command: 'fixture-mcp', args: [], url: '', headers: { Authorization: 'synthetic-private-header' }, environment: { FIXTURE_TOKEN: 'synthetic-private-env' }, tools: [], oauth_metadata: { client_secret: 'synthetic-private-client' }, source: 'user', created_at: '2026-10-14', updated_at: '2026-10-14' }
+    const mcpResult = PROOF_COMMAND_CODECS['mcp:create'].encodeResult(mcp)
+    expect(mcpResult).toMatchObject({ defined: true, value: { headers: { Authorization: '__21x_mcp_secret_set__' }, environment: { FIXTURE_TOKEN: '__21x_mcp_secret_set__' }, oauth_metadata: { client_secret: '__21x_mcp_secret_set__' } } })
+    expect(PROOF_COMMAND_CODECS['mcp:create'].validateWireResult(mcpResult)).toBe(true)
+    expect(PROOF_COMMAND_CODECS['mcp:create'].validateWireResult({ defined: true, value: mcp })).toBe(false)
+    expect(() => PROOF_COMMAND_CODECS['mcp:create'].encodeResult(undefined)).toThrow()
+    expect(PROOF_COMMAND_CODECS['mcp:update'].encodeResult(undefined)).toEqual({ defined: false })
+    const source = { id: 'source_fixture', mcp_server_id: null, name: 'Fixture', plugin_id: 'notion', config: { api_token: 'synthetic-private-token', data_source_id: 'external:database', hidden_internal: 'private' }, list_tool: 'legacy_list', list_tool_args: { secret: 'private' }, update_tool: 'legacy_update', update_tool_args: { secret: 'private' }, last_synced_at: null, enabled: false, project_id: 'project_fixture', created_at: '2026-10-14', updated_at: '2026-10-14' }
+    const result = PROOF_COMMAND_CODECS['taskSource:create'].encodeResult(source)
+    expect(result).toMatchObject({ defined: true, value: { config: { api_token: '__21x_api_key_set__', data_source_id: 'external:database' }, list_tool_args: {}, update_tool_args: {} } })
+    expect(JSON.stringify(result)).not.toContain('private')
+    expect(PROOF_COMMAND_CODECS['taskSource:create'].validateWireResult(result)).toBe(true)
+    expect(PROOF_COMMAND_CODECS['taskSource:create'].validateWireResult({ defined: true, value: source })).toBe(false)
+    expect(() => PROOF_COMMAND_CODECS['taskSource:create'].encodeResult(undefined)).toThrow()
+    expect(PROOF_COMMAND_CODECS['taskSource:update'].encodeResult(undefined)).toEqual({ defined: false })
+    expect(PROOF_COMMAND_CODECS['taskSource:exportUpdate'].encodeResult(undefined)).toEqual({ defined: false })
+    const sync = { source_id: 'source_fixture', imported: 0, updated: 1, errors: ['Explicit source refusal'] }
+    expect(PROOF_COMMAND_CODECS['taskSource:sync'].decodeResult(sync)).toEqual(sync)
+    expect(PROOF_COMMAND_CODECS['taskSource:reassign'].decodeResult({ success: false, error: 'Explicit source refusal' })).toEqual({ success: false, error: 'Explicit source refusal' })
+  })
   it('exports the validated corpus only when the coordinator selects an artifact path', async () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(86)
+    expect(corpus.operations).toHaveLength(104)
   })
 })

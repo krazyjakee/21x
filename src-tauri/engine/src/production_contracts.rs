@@ -89,6 +89,24 @@ pub const COMMANDS: &[&str] = &[
     "terminal:kill",
     "terminal:getCwd",
     "terminal:getBuffer",
+    "mcp:getAll",
+    "mcp:create",
+    "mcp:update",
+    "mcp:delete",
+    "mcp:testConnection",
+    "mcp:startOAuthFlow",
+    "mcp:getOAuthStatus",
+    "mcp:revokeOAuthToken",
+    "mcp:probeForAuth",
+    "mcp:submitManualClientId",
+    "taskSource:getAll",
+    "taskSource:create",
+    "taskSource:update",
+    "taskSource:delete",
+    "taskSource:sync",
+    "taskSource:exportUpdate",
+    "taskSource:getUsers",
+    "taskSource:reassign",
 ];
 pub const EVENTS: &[&str] = &[
     "task:created",
@@ -170,6 +188,643 @@ fn bounded_bytes(value: &Value, maximum: usize) -> bool {
 }
 pub fn valid_bounded(value: &Value) -> bool {
     bounded_bytes(value, 900_000)
+}
+const MCP_COMMANDS: &[&str] = &[
+    "mcp:getAll",
+    "mcp:create",
+    "mcp:update",
+    "mcp:delete",
+    "mcp:testConnection",
+    "mcp:startOAuthFlow",
+    "mcp:getOAuthStatus",
+    "mcp:revokeOAuthToken",
+    "mcp:probeForAuth",
+    "mcp:submitManualClientId",
+];
+const SOURCE_COMMANDS: &[&str] = &[
+    "taskSource:getAll",
+    "taskSource:create",
+    "taskSource:update",
+    "taskSource:delete",
+    "taskSource:sync",
+    "taskSource:exportUpdate",
+    "taskSource:getUsers",
+    "taskSource:reassign",
+];
+const SOURCE_PLUGINS: &[&str] = &[
+    "linear",
+    "hubspot",
+    "github-issues",
+    "forgejo-issues",
+    "notion",
+    "youtrack",
+    "connector-bridge",
+];
+fn clean_text(value: &Value, limit: usize) -> bool {
+    text(value, limit)
+        && value
+            .as_str()
+            .is_some_and(|s| !s.chars().any(|c| c <= '\u{001f}' || c == '\u{007f}'))
+}
+fn mcp_text(value: &Value, limit: usize) -> bool {
+    clean_text(value, limit) && value.as_str().is_some_and(|s| s.len() <= limit)
+}
+fn named(value: &Value, limit: usize) -> bool {
+    clean_text(value, limit) && value.as_str().is_some_and(|s| !s.trim().is_empty())
+}
+fn mcp_id(value: &Value) -> bool {
+    mcp_text(value, 128)
+        && value.as_str().is_some_and(|s| {
+            s.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+                && s.bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b':' | b'-'))
+        })
+}
+fn host_url(value: &Value, byte_limit: bool) -> bool {
+    (if byte_limit {
+        mcp_text(value, 4096)
+    } else {
+        clean_text(value, 4096)
+    }) && value.as_str().is_some_and(|s| {
+        url::Url::parse(s).is_ok_and(|u| {
+            matches!(u.scheme(), "http" | "https")
+                && u.host_str().is_some()
+                && u.username().is_empty()
+                && u.password().is_none()
+                && u.query().is_none()
+                && u.fragment().is_none()
+        })
+    })
+}
+fn mcp_dictionary(value: &Value, environment: bool, masked: bool) -> bool {
+    value.as_object().is_some_and(|map| {
+        map.len() <= 64
+            && map.iter().all(|(key, entry)| {
+                let valid_key = if environment {
+                    key.as_bytes()
+                        .first()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_')
+                        && key.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+                } else {
+                    !key.is_empty()
+                        && key
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+.^_`|~-".contains(&c))
+                };
+                key.len() <= 256
+                    && valid_key
+                    && !["__proto__", "prototype", "constructor"].contains(&key.as_str())
+                    && mcp_text(entry, 8192)
+                    && (!masked || entry == "" || entry == "__21x_mcp_secret_set__")
+            })
+    })
+}
+fn mcp_data(value: &Value, create: bool, probe: bool) -> bool {
+    let mut optional = vec!["type", "command", "args", "url", "headers", "environment"];
+    if !create {
+        optional.push("name");
+    }
+    if probe {
+        optional.push("id");
+    }
+    object(value, if create { &["name"] } else { &[] }, &optional)
+        && bounded_bytes(value, 128 * 1024)
+        && value.as_object().is_some_and(|map| {
+            map.iter().all(|(key, entry)| match key.as_str() {
+                "name" => {
+                    mcp_text(entry, 256) && entry.as_str().is_some_and(|s| !s.trim().is_empty())
+                }
+                "type" => entry == "local" || entry == "remote",
+                "command" => mcp_text(entry, 4096),
+                "args" => entry.as_array().is_some_and(|items| {
+                    items.len() <= 128 && items.iter().all(|item| mcp_text(item, 8192))
+                }),
+                "url" => entry == "" || host_url(entry, true),
+                "headers" => mcp_dictionary(entry, false, false),
+                "environment" => mcp_dictionary(entry, true, false),
+                "id" => probe && mcp_id(entry),
+                _ => false,
+            })
+        })
+}
+fn mcp_tools(value: &Value) -> bool {
+    value.as_array().is_some_and(|items| {
+        items.len() <= 256
+            && items.iter().all(|item| {
+                object(item, &["name", "description"], &[])
+                    && mcp_text(&item["name"], 256)
+                    && item["name"].as_str().is_some_and(|s| !s.is_empty())
+                    && text(&item["description"], 8192)
+                    && item["description"]
+                        .as_str()
+                        .is_some_and(|s| s.len() <= 8192)
+            })
+    })
+}
+fn mcp_metadata(value: &Value) -> bool {
+    object(
+        value,
+        &[],
+        &[
+            "resource_url",
+            "authorization_server_url",
+            "authorization_endpoint",
+            "token_endpoint",
+            "registration_endpoint",
+            "revocation_endpoint",
+            "scopes",
+            "code_challenge_methods_supported",
+            "client_id",
+            "client_secret",
+            "registration_method",
+            "discovered_at",
+        ],
+    ) && value.as_object().is_some_and(|map| {
+        map.iter().all(|(key, entry)| match key.as_str() {
+            "client_secret" => entry == "" || entry == "__21x_mcp_secret_set__",
+            "code_challenge_methods_supported" => entry.as_array().is_some_and(|items| {
+                items.len() <= 16 && items.iter().all(|item| mcp_text(item, 64))
+            }),
+            _ => mcp_text(
+                entry,
+                if key.ends_with("_url") || key.ends_with("_endpoint") {
+                    4096
+                } else {
+                    8192
+                },
+            ),
+        })
+    })
+}
+fn mcp_row(value: &Value) -> bool {
+    let fields = [
+        "name",
+        "type",
+        "command",
+        "args",
+        "url",
+        "headers",
+        "environment",
+    ];
+    let data = Value::Object(
+        fields
+            .iter()
+            .map(|key| ((*key).to_owned(), value[*key].clone()))
+            .collect(),
+    );
+    object(
+        value,
+        &[
+            "id",
+            "name",
+            "type",
+            "command",
+            "args",
+            "url",
+            "headers",
+            "environment",
+            "tools",
+            "oauth_metadata",
+            "source",
+            "created_at",
+            "updated_at",
+        ],
+        &[],
+    ) && mcp_id(&value["id"])
+        && mcp_data(&data, true, false)
+        && mcp_tools(&value["tools"])
+        && mcp_metadata(&value["oauth_metadata"])
+        && mcp_dictionary(&value["headers"], false, true)
+        && mcp_dictionary(&value["environment"], true, true)
+        && (value["source"] == "user" || value["source"] == "plugin")
+        && mcp_text(&value["created_at"], 32)
+        && mcp_text(&value["updated_at"], 32)
+}
+fn mcp_request(operation: &str, value: &Value) -> bool {
+    match operation {
+        "mcp:getAll" => object(value, &[], &[]),
+        "mcp:create" | "mcp:testConnection" => {
+            object(value, &["data"], &[])
+                && mcp_data(&value["data"], true, operation == "mcp:testConnection")
+        }
+        "mcp:update" => {
+            object(value, &["id", "data"], &[])
+                && mcp_id(&value["id"])
+                && mcp_data(&value["data"], false, false)
+        }
+        "mcp:probeForAuth" => object(value, &["url"], &[]) && host_url(&value["url"], true),
+        "mcp:submitManualClientId" => {
+            object(value, &["id", "clientId"], &[])
+                && mcp_id(&value["id"])
+                && mcp_text(&value["clientId"], 1024)
+                && value["clientId"].as_str().is_some_and(|s| !s.is_empty())
+        }
+        _ => object(value, &["id"], &[]) && mcp_id(&value["id"]),
+    }
+}
+fn mcp_result(operation: &str, value: &Value) -> bool {
+    match operation {
+        "mcp:getAll" => value
+            .as_array()
+            .is_some_and(|items| items.len() <= 128 && items.iter().all(mcp_row)),
+        "mcp:create" | "mcp:update" => mcp_row(value),
+        "mcp:delete" => value.is_boolean(),
+        "mcp:startOAuthFlow" | "mcp:submitManualClientId" => {
+            object(value, &[], &["needsManualClientId"])
+                && value
+                    .get("needsManualClientId")
+                    .is_none_or(Value::is_boolean)
+        }
+        "mcp:getOAuthStatus" => {
+            object(value, &["connected"], &["expiresAt"])
+                && value["connected"].is_boolean()
+                && value
+                    .get("expiresAt")
+                    .is_none_or(|entry| mcp_text(entry, 32))
+        }
+        "mcp:probeForAuth" => {
+            object(value, &["requiresAuth"], &[]) && value["requiresAuth"].is_boolean()
+        }
+        "mcp:testConnection" => {
+            object(value, &["status"], &["error", "toolCount", "tools"])
+                && (value["status"] == "connected" || value["status"] == "failed")
+                && value
+                    .get("error")
+                    .is_none_or(|entry| entry == "MCP probe failed")
+                && value
+                    .get("toolCount")
+                    .is_none_or(|entry| entry.as_u64().is_some_and(|n| n <= 256))
+                && value.get("tools").is_none_or(mcp_tools)
+        }
+        _ => false,
+    }
+}
+fn source_strings(value: &Value, maximum: usize) -> bool {
+    value.as_array().is_some_and(|items| {
+        items.len() <= maximum && items.iter().all(|item| clean_text(item, 512))
+    })
+}
+fn source_plugin(value: &Value) -> bool {
+    value.as_str().is_some_and(|s| SOURCE_PLUGINS.contains(&s))
+}
+fn stored_plugin(value: &Value) -> bool {
+    value.as_str().is_some_and(|s| {
+        !s.is_empty()
+            && s.len() <= 128
+            && s.as_bytes()[0].is_ascii_alphanumeric()
+            && s.bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+    })
+}
+fn source_interval(value: &Value) -> bool {
+    let within = |n: f64| n.is_finite() && (0.0..=525_600.0).contains(&n);
+    if let Some(n) = value.as_f64() {
+        return within(n);
+    }
+    let Some(s) = value.as_str() else {
+        return false;
+    };
+    if s.is_empty() {
+        return true;
+    }
+    let (whole, fraction) = s.split_once('.').map_or((s, None), |(a, b)| (a, Some(b)));
+    let decimal = whole == "0"
+        || whole
+            .as_bytes()
+            .first()
+            .is_some_and(|c| (b'1'..=b'9').contains(c))
+            && whole.bytes().all(|c| c.is_ascii_digit());
+    decimal
+        && fraction.is_none_or(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()))
+        && s.parse::<f64>().is_ok_and(within)
+}
+fn source_config(plugin: &str, value: &Value, input: bool) -> bool {
+    let (public, secret): (&[&str], &[&str]) = match plugin {
+        "linear" => (
+            &[
+                "_setup_link",
+                "redirect_uri",
+                "client_id",
+                "scope",
+                "assignee_id",
+            ],
+            &["client_secret"],
+        ),
+        "hubspot" => (
+            &[
+                "auth_type",
+                "_oauth_setup_link",
+                "client_id",
+                "pipeline_id",
+                "owner_id",
+            ],
+            &["client_secret", "access_token"],
+        ),
+        "github-issues" => (&["owner", "repo", "state", "assignee", "labels"], &[]),
+        "forgejo-issues" => (
+            &["login", "owner", "repo", "state", "assignee", "labels"],
+            &[],
+        ),
+        "notion" => (
+            &[
+                "data_source_id",
+                "filters",
+                "next_statuses",
+                "completion_status",
+            ],
+            &["api_token"],
+        ),
+        "youtrack" => (
+            &[
+                "server_url",
+                "project",
+                "assignee",
+                "state",
+                "priority",
+                "issue_type",
+                "custom_query",
+            ],
+            &["api_token"],
+        ),
+        "connector-bridge" => (
+            &[
+                "piece_name",
+                "connector_instance_id",
+                "props",
+                "poll_interval_minutes",
+            ],
+            &[],
+        ),
+        _ => return false,
+    };
+    bounded_bytes(value, 512_000)
+        && value.as_object().is_some_and(|map| {
+            map.len() <= 32
+                && map.iter().all(|(key, entry)| {
+                    if secret.contains(&key.as_str()) {
+                        return entry == "__21x_api_key_set__"
+                            || input
+                                && entry
+                                    .as_str()
+                                    .is_some_and(|s| s.len() <= 16_384 && !s.contains('\0'));
+                    }
+                    if !public.contains(&key.as_str()) {
+                        return false;
+                    }
+                    match key.as_str() {
+                        "server_url" | "_setup_link" | "_oauth_setup_link" => {
+                            entry == "" || host_url(entry, false)
+                        }
+                        "redirect_uri" => {
+                            entry == ""
+                                || entry == "twentyonex://oauth/callback"
+                                || entry == "nuanu://oauth/callback"
+                        }
+                        "auth_type" => entry == "" || entry == "oauth" || entry == "private_app",
+                        "state" if plugin == "github-issues" || plugin == "forgejo-issues" => {
+                            entry == "" || entry == "open" || entry == "closed" || entry == "all"
+                        }
+                        "poll_interval_minutes" => source_interval(entry),
+                        "connector_instance_id" => entry == "" || id(entry),
+                        "piece_name" => {
+                            entry == ""
+                                || entry == "@activepieces/piece-trello"
+                                || entry == "@activepieces/piece-todoist"
+                        }
+                        "props" => {
+                            object(entry, &[], &["board_id", "filter_query"])
+                                && entry.as_object().is_some_and(|map| {
+                                    map.values().all(|item| clean_text(item, 4096))
+                                })
+                        }
+                        "filters" => entry.as_array().is_some_and(|items| {
+                            items.len() <= 64
+                                && items.iter().all(|item| {
+                                    object(item, &["property", "type", "values"], &[])
+                                        && named(&item["property"], 512)
+                                        && named(&item["type"], 512)
+                                        && source_strings(&item["values"], 128)
+                                })
+                        }),
+                        "next_statuses" => source_strings(entry, 128) || clean_text(entry, 4096),
+                        "assignee" | "state" | "priority" | "issue_type"
+                            if plugin == "youtrack" =>
+                        {
+                            source_strings(entry, 128) || clean_text(entry, 4096)
+                        }
+                        _ => clean_text(entry, 4096),
+                    }
+                })
+        })
+}
+fn source_input(value: &Value, create: bool) -> bool {
+    object(
+        value,
+        if create {
+            &["mcp_server_id", "name", "plugin_id"]
+        } else {
+            &[]
+        },
+        if create {
+            &[
+                "project_id",
+                "config",
+                "list_tool",
+                "list_tool_args",
+                "update_tool",
+                "update_tool_args",
+            ]
+        } else {
+            &[
+                "name",
+                "plugin_id",
+                "config",
+                "mcp_server_id",
+                "list_tool",
+                "list_tool_args",
+                "update_tool",
+                "update_tool_args",
+                "enabled",
+            ]
+        },
+    ) && bounded_bytes(value, 512_000)
+        && value.as_object().is_some_and(|map| {
+            map.iter().all(|(key, entry)| match key.as_str() {
+                "name" => named(entry, 512),
+                "plugin_id" => source_plugin(entry),
+                "mcp_server_id" => (create && entry.is_null()) || id(entry),
+                "project_id" => id(entry),
+                "enabled" => entry.is_boolean(),
+                "config" => match value.get("plugin_id") {
+                    Some(plugin) => plugin
+                        .as_str()
+                        .is_some_and(|s| source_config(s, entry, true)),
+                    None => SOURCE_PLUGINS
+                        .iter()
+                        .any(|plugin| source_config(plugin, entry, true)),
+                },
+                "list_tool_args" | "update_tool_args" => object(entry, &[], &[]),
+                "list_tool" | "update_tool" => entry == "",
+                _ => false,
+            })
+        })
+}
+fn source_row(value: &Value) -> bool {
+    object(
+        value,
+        &[
+            "id",
+            "mcp_server_id",
+            "name",
+            "plugin_id",
+            "config",
+            "list_tool",
+            "list_tool_args",
+            "update_tool",
+            "update_tool_args",
+            "last_synced_at",
+            "enabled",
+            "project_id",
+            "created_at",
+            "updated_at",
+        ],
+        &[],
+    ) && id(&value["id"])
+        && (value["mcp_server_id"].is_null() || id(&value["mcp_server_id"]))
+        && named(&value["name"], 512)
+        && stored_plugin(&value["plugin_id"])
+        && value["plugin_id"].as_str().is_some_and(|plugin| {
+            if SOURCE_PLUGINS.contains(&plugin) {
+                source_config(plugin, &value["config"], false)
+            } else {
+                object(&value["config"], &[], &[])
+            }
+        })
+        && clean_text(&value["list_tool"], 256)
+        && object(&value["list_tool_args"], &[], &[])
+        && clean_text(&value["update_tool"], 256)
+        && object(&value["update_tool_args"], &[], &[])
+        && (value["last_synced_at"].is_null() || clean_text(&value["last_synced_at"], 128))
+        && value["enabled"].is_boolean()
+        && id(&value["project_id"])
+        && clean_text(&value["created_at"], 128)
+        && clean_text(&value["updated_at"], 128)
+        && bounded_bytes(value, 512_000)
+}
+fn source_export(value: &Value) -> bool {
+    object(
+        value,
+        &[],
+        &[
+            "title",
+            "description",
+            "status",
+            "priority",
+            "assignee",
+            "due_date",
+            "labels",
+            "complete_at_source",
+        ],
+    ) && bounded_bytes(value, 512_000)
+        && value.as_object().is_some_and(|map| {
+            !map.is_empty()
+                && map.iter().all(|(key, entry)| match key.as_str() {
+                    "status" => entry.as_str().is_some_and(|s| {
+                        [
+                            "not_started",
+                            "triaging",
+                            "agent_working",
+                            "ready_for_review",
+                            "agent_learning",
+                            "completed",
+                        ]
+                        .contains(&s)
+                    }),
+                    "priority" => entry
+                        .as_str()
+                        .is_some_and(|s| ["low", "medium", "high", "urgent"].contains(&s)),
+                    "labels" => source_strings(entry, 128),
+                    "complete_at_source" => entry.is_null() || entry.is_boolean(),
+                    "due_date" => entry.is_null() || clean_text(entry, 128),
+                    "description" => text(entry, 65_536),
+                    _ => text(entry, 4096),
+                })
+        })
+}
+fn source_request(operation: &str, value: &Value) -> bool {
+    match operation {
+        "taskSource:getAll" => {
+            object(value, &[], &["projectId"])
+                && value
+                    .get("projectId")
+                    .is_none_or(|entry| entry == "" || id(entry))
+        }
+        "taskSource:create" => object(value, &["data"], &[]) && source_input(&value["data"], true),
+        "taskSource:update" => {
+            object(value, &["id", "data"], &[])
+                && id(&value["id"])
+                && source_input(&value["data"], false)
+        }
+        "taskSource:delete" => object(value, &["id"], &[]) && id(&value["id"]),
+        "taskSource:sync" | "taskSource:getUsers" => {
+            object(value, &["sourceId"], &[]) && id(&value["sourceId"])
+        }
+        "taskSource:exportUpdate" => {
+            object(value, &["taskId", "fields"], &[])
+                && id(&value["taskId"])
+                && source_export(&value["fields"])
+        }
+        "taskSource:reassign" => {
+            object(value, &["taskId", "userIds", "assigneeDisplay"], &[])
+                && id(&value["taskId"])
+                && source_strings(&value["userIds"], 100)
+                && value["userIds"].as_array().is_some_and(|items| {
+                    items.iter().all(|entry| named(entry, 512))
+                        && items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<std::collections::HashSet<_>>()
+                            .len()
+                            == items.len()
+                })
+                && clean_text(&value["assigneeDisplay"], 4096)
+        }
+        _ => false,
+    }
+}
+fn source_result(operation: &str, value: &Value) -> bool {
+    match operation {
+        "taskSource:getAll" => value
+            .as_array()
+            .is_some_and(|items| items.len() <= 256 && items.iter().all(source_row)),
+        "taskSource:create" | "taskSource:update" => source_row(value),
+        "taskSource:delete" => value.is_boolean(),
+        "taskSource:sync" => {
+            object(value, &["source_id", "imported", "updated", "errors"], &[])
+                && id(&value["source_id"])
+                && ["imported", "updated"]
+                    .iter()
+                    .all(|key| value[*key].as_u64().is_some_and(|n| n <= 1_000_000))
+                && source_strings(&value["errors"], 128)
+        }
+        "taskSource:getUsers" => value.as_array().is_some_and(|items| {
+            items.len() <= 512
+                && items.iter().all(|item| {
+                    object(item, &["id", "email", "name"], &[])
+                        && named(&item["id"], 512)
+                        && clean_text(&item["email"], 512)
+                        && clean_text(&item["name"], 512)
+                })
+        }),
+        "taskSource:reassign" => {
+            object(value, &["success"], &["error"])
+                && value["success"].is_boolean()
+                && value
+                    .get("error")
+                    .is_none_or(|entry| clean_text(entry, 4096))
+        }
+        _ => false,
+    }
 }
 fn fields(operation: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
     Some(match operation {
@@ -367,9 +1022,69 @@ fn data_fields(operation: &str, value: &Value) -> bool {
                     "fallback_agent_ids",
                     "max_parallel_sessions",
                     "concurrency_cap",
+                    "api_keys",
                 ],
-            )
+            ) && config
+                .get("api_keys")
+                .is_none_or(|keys| agent_keys(keys, false))
         })
+}
+fn agent_keys(value: &Value, masked: bool) -> bool {
+    object(value, &[], &["openai", "anthropic", "cursor"])
+        && value.as_object().is_some_and(|map| {
+            map.values().all(|key| {
+                if masked {
+                    key == "__21x_api_key_set__"
+                } else {
+                    key.as_str().is_some_and(|s| {
+                        s.len() <= 16384 && !s.chars().any(|c| c <= '\u{001f}' || c == '\u{007f}')
+                    })
+                }
+            })
+        })
+}
+fn masked_agent(value: &Value) -> bool {
+    object(
+        value,
+        &[
+            "id",
+            "name",
+            "server_url",
+            "config",
+            "is_default",
+            "created_at",
+            "updated_at",
+        ],
+        &[],
+    ) && id(&value["id"])
+        && text(&value["name"], 512)
+        && text(&value["server_url"], 4096)
+        && value["is_default"].is_boolean()
+        && text(&value["created_at"], 128)
+        && text(&value["updated_at"], 128)
+        && object(
+            &value["config"],
+            &[],
+            &[
+                "coding_agent",
+                "model",
+                "reasoning_effort",
+                "auth_method",
+                "permission_mode",
+                "sandbox_mode",
+                "system_prompt",
+                "mcp_servers",
+                "skill_ids",
+                "secret_ids",
+                "fallback_agent_ids",
+                "max_parallel_sessions",
+                "concurrency_cap",
+                "api_keys",
+            ],
+        )
+        && value["config"]
+            .get("api_keys")
+            .is_none_or(|keys| agent_keys(keys, true))
 }
 fn image(value: &Value) -> bool {
     if !object(
@@ -415,6 +1130,12 @@ pub fn images(value: &Value) -> bool {
         })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if MCP_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 1024 * 1024) && mcp_request(operation, value);
+    }
+    if SOURCE_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 512000) && source_request(operation, value);
+    }
     let Some((required, optional)) = fields(operation) else {
         return false;
     };
@@ -496,6 +1217,29 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if MCP_COMMANDS.contains(&operation) || SOURCE_COMMANDS.contains(&operation) {
+        if !bounded_bytes(value, 1024 * 1024) || !object(value, &["defined"], &["value"]) {
+            return false;
+        }
+        if value["defined"] == false {
+            return value.get("value").is_none()
+                && matches!(
+                    operation,
+                    "mcp:update"
+                        | "mcp:revokeOAuthToken"
+                        | "taskSource:update"
+                        | "taskSource:exportUpdate"
+                );
+        }
+        if value["defined"] != true || value.get("value").is_none() {
+            return false;
+        }
+        return if MCP_COMMANDS.contains(&operation) {
+            bounded_bytes(&value["value"], 768 * 1024) && mcp_result(operation, &value["value"])
+        } else {
+            bounded_bytes(&value["value"], 512000) && source_result(operation, &value["value"])
+        };
+    }
     if !COMMANDS.contains(&operation)
         || !bounded_bytes(value, 1024 * 1024)
         || !object(value, &["defined"], &["value"])
@@ -604,11 +1348,14 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
                     result["version"] == 1 && self::image(&image)
                 }
         }
+        "agent:getAll" => result
+            .as_array()
+            .is_some_and(|items| items.len() <= 128 && items.iter().all(masked_agent)),
+        "agent:create" | "agent:update" => masked_agent(result),
         "db:getTasks"
         | "db:getSubtasks"
         | "project:getAll"
         | "skills:getAll"
-        | "agent:getAll"
         | "projectRepo:list"
         | "projectResource:list"
         | "commander:listSessions"
@@ -948,9 +1695,235 @@ fn commander_event(value: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn mcp_contracts_scope_crud_probes_and_live_oauth_requests() {
+        let requests = [
+            ("mcp:getAll", json!({})),
+            (
+                "mcp:create",
+                json!({"data":{"name":"Fixture","command":"fixture-mcp","args":["--probe"],"headers":{"Authorization":"synthetic"},"environment":{"FIXTURE_TOKEN":"synthetic"}}}),
+            ),
+            (
+                "mcp:update",
+                json!({"id":"mcp.fixture:one","data":{"url":"https://mcp.example.test/api","type":"remote"}}),
+            ),
+            ("mcp:delete", json!({"id":"mcp.fixture:one"})),
+            (
+                "mcp:testConnection",
+                json!({"data":{"id":"mcp.fixture:one","name":"Fixture"}}),
+            ),
+            ("mcp:startOAuthFlow", json!({"id":"mcp.fixture:one"})),
+            ("mcp:getOAuthStatus", json!({"id":"mcp.fixture:one"})),
+            ("mcp:revokeOAuthToken", json!({"id":"mcp.fixture:one"})),
+            (
+                "mcp:probeForAuth",
+                json!({"url":"https://mcp.example.test/api"}),
+            ),
+            (
+                "mcp:submitManualClientId",
+                json!({"id":"mcp.fixture:one","clientId":"fixture-client"}),
+            ),
+        ];
+        for (operation, mut request) in requests {
+            assert!(valid_request(operation, &request), "{operation}");
+            request["authority"] = json!({"namespace":"*"});
+            assert!(!valid_request(operation, &request), "{operation}");
+        }
+        for data in [
+            json!({"name":"Fixture","source":"plugin"}),
+            json!({"name":"Fixture","oauth_metadata":{"client_secret":"synthetic"}}),
+            json!({"name":"Fixture","headers":{"constructor":"synthetic"}}),
+            json!({"name":"Fixture","environment":{"bad-key":"synthetic"}}),
+            json!({"name":"Fixture","url":"https://user:pass@example.test/api"}),
+            json!({"name":"Fixture","command":"bad\ncommand"}),
+        ] {
+            assert!(!valid_request("mcp:create", &json!({"data":data})));
+        }
+        assert!(!valid_request(
+            "mcp:startOAuthFlow",
+            &json!({"id":"mcp.fixture:one","url":"https://foreign.example.test"})
+        ));
+        let mut row = json!({"id":"mcp.fixture:one","name":"Fixture","type":"local","command":"fixture-mcp","args":[],"url":"","headers":{"Authorization":"__21x_mcp_secret_set__"},"environment":{"FIXTURE_TOKEN":"__21x_mcp_secret_set__"},"tools":[{"name":"fixture_tool","description":"Description"}],"oauth_metadata":{"client_secret":"__21x_mcp_secret_set__"},"source":"user","created_at":"2026-10-14","updated_at":"2026-10-14"});
+        assert!(valid_result(
+            "mcp:getAll",
+            &json!({"defined":true,"value":[row.clone()]})
+        ));
+        for field in ["headers", "environment", "oauth_metadata"] {
+            let key = match field {
+                "headers" => "Authorization",
+                "environment" => "FIXTURE_TOKEN",
+                _ => "client_secret",
+            };
+            let mut leaked = row.clone();
+            leaked[field][key] = json!("synthetic-private-value");
+            assert!(!valid_result(
+                "mcp:update",
+                &json!({"defined":true,"value":leaked})
+            ));
+        }
+        row["extra"] = json!("unexpected");
+        assert!(!valid_result(
+            "mcp:create",
+            &json!({"defined":true,"value":row})
+        ));
+        assert!(!valid_result("mcp:create", &json!({"defined":false})));
+        assert!(valid_result("mcp:update", &json!({"defined":false})));
+        assert!(valid_result(
+            "mcp:revokeOAuthToken",
+            &json!({"defined":false})
+        ));
+        assert!(!valid_result("mcp:getAll", &json!({"defined":false})));
+        assert!(valid_result(
+            "mcp:testConnection",
+            &json!({"defined":true,"value":{"status":"failed","error":"MCP probe failed"}})
+        ));
+        assert!(valid_result(
+            "mcp:testConnection",
+            &json!({"defined":true,"value":{"status":"connected","tools":[{"name":"lookup","description":"Read items\nReturn a bounded page."}]}})
+        ));
+        assert!(!valid_result(
+            "mcp:testConnection",
+            &json!({"defined":true,"value":{"status":"failed","error":"private command details"}})
+        ));
+        assert!(valid_result(
+            "mcp:startOAuthFlow",
+            &json!({"defined":true,"value":{"needsManualClientId":true}})
+        ));
+        assert!(!valid_result(
+            "mcp:startOAuthFlow",
+            &json!({"defined":true,"value":{"pid":1234}})
+        ));
+    }
+
+    #[test]
+    fn task_sources_accept_only_plugin_inputs_and_masked_metadata_outputs() {
+        let requests = [
+            ("taskSource:getAll", json!({"projectId":""})),
+            (
+                "taskSource:create",
+                json!({"data":{"name":"Fixture","mcp_server_id":null,"plugin_id":"notion","config":{"api_token":"synthetic\ncredential","filters":[{"property":"Status","type":"select","values":["Open"]}],"next_statuses":["Done"]}}}),
+            ),
+            (
+                "taskSource:update",
+                json!({"id":"source_fixture","data":{"config":{"api_token":"__21x_api_key_set__","server_url":"https://youtrack.example.test"}}}),
+            ),
+            ("taskSource:delete", json!({"id":"source_fixture"})),
+            ("taskSource:sync", json!({"sourceId":"source_fixture"})),
+            (
+                "taskSource:exportUpdate",
+                json!({"taskId":"task_fixture","fields":{"description":"Multiline\ncontext","priority":"urgent","complete_at_source":null}}),
+            ),
+            ("taskSource:getUsers", json!({"sourceId":"source_fixture"})),
+            (
+                "taskSource:reassign",
+                json!({"taskId":"task_fixture","userIds":["external:user"],"assigneeDisplay":"Fixture"}),
+            ),
+        ];
+        for (operation, mut request) in requests {
+            assert!(valid_request(operation, &request), "{operation}");
+            request["workspaceDir"] = json!("/foreign/path");
+            assert!(!valid_request(operation, &request), "{operation}");
+        }
+        for data in [
+            json!({"name":"Fixture","mcp_server_id":null,"plugin_id":"unknown-plugin"}),
+            json!({"name":"Fixture","mcp_server_id":null,"plugin_id":"notion","config":{"command":"arbitrary"}}),
+            json!({"name":"Fixture","mcp_server_id":null,"plugin_id":"notion","list_tool_args":{"path":"/foreign/path"}}),
+            json!({"name":"Fixture","mcp_server_id":null,"plugin_id":"notion","config":{"api_token":"bad\0value"}}),
+            json!({"name":"Fixture","mcp_server_id":null,"plugin_id":"notion","config":{"api_token":"x".repeat(16_385)}}),
+        ] {
+            assert!(!valid_request("taskSource:create", &json!({"data":data})));
+        }
+        assert!(valid_request(
+            "taskSource:update",
+            &json!({"id":"source_fixture","data":{"config":{"api_token":"x".repeat(16_384)}}})
+        ));
+        assert!(valid_request(
+            "taskSource:create",
+            &json!({"data":{"name":"Fixture","mcp_server_id":null,"plugin_id":"connector-bridge","config":{"piece_name":"@activepieces/piece-trello","props":{"board_id":"external-board"},"poll_interval_minutes":0.5}}})
+        ));
+        for interval in [
+            json!(15),
+            json!("15"),
+            json!(0),
+            json!("0"),
+            json!(""),
+            json!(0.5),
+            json!("0.5"),
+        ] {
+            assert!(valid_request(
+                "taskSource:update",
+                &json!({"id":"source_fixture","data":{"plugin_id":"connector-bridge","config":{"poll_interval_minutes":interval}}})
+            ));
+        }
+        for interval in [
+            json!("arbitrary"),
+            json!("-1"),
+            json!("Infinity"),
+            json!("+1"),
+            json!("0x10"),
+            json!("1e1"),
+            json!(" 1"),
+        ] {
+            assert!(!valid_request(
+                "taskSource:update",
+                &json!({"id":"source_fixture","data":{"plugin_id":"connector-bridge","config":{"poll_interval_minutes":interval}}})
+            ));
+        }
+        assert!(!valid_request(
+            "taskSource:update",
+            &json!({"id":"source_fixture","data":{"mcp_server_id":null}})
+        ));
+        assert!(!valid_request(
+            "taskSource:reassign",
+            &json!({"taskId":"task_fixture","userIds":["same","same"],"assigneeDisplay":""})
+        ));
+        let mut row = json!({"id":"source_fixture","mcp_server_id":null,"name":"Fixture","plugin_id":"notion","config":{"api_token":"__21x_api_key_set__"},"list_tool":"legacy_list","list_tool_args":{},"update_tool":"legacy_update","update_tool_args":{},"last_synced_at":null,"enabled":false,"project_id":"project_fixture","created_at":"2026-10-14","updated_at":"2026-10-14"});
+        assert!(valid_result(
+            "taskSource:getAll",
+            &json!({"defined":true,"value":[row.clone()]})
+        ));
+        row["config"]["api_token"] = json!("synthetic-private-value");
+        assert!(!valid_result(
+            "taskSource:create",
+            &json!({"defined":true,"value":row.clone()})
+        ));
+        row["plugin_id"] = json!("uninstalled.plugin");
+        row["config"] = json!({});
+        assert!(valid_result(
+            "taskSource:update",
+            &json!({"defined":true,"value":row.clone()})
+        ));
+        row["config"] = json!({"internal":"private"});
+        assert!(!valid_result(
+            "taskSource:update",
+            &json!({"defined":true,"value":row})
+        ));
+        assert!(valid_result(
+            "taskSource:exportUpdate",
+            &json!({"defined":false})
+        ));
+        assert!(!valid_result(
+            "taskSource:create",
+            &json!({"defined":false})
+        ));
+        assert!(!valid_result("taskSource:sync", &json!({"defined":false})));
+        assert!(valid_result(
+            "taskSource:sync",
+            &json!({"defined":true,"value":{"source_id":"source_fixture","imported":1,"updated":2,"errors":["Explicit source failure"]}})
+        ));
+        assert!(valid_result(
+            "taskSource:getUsers",
+            &json!({"defined":true,"value":[{"id":"external:user","name":"Fixture","email":"fixture@example.test"}]})
+        ));
+        assert!(!valid_result(
+            "taskSource:reassign",
+            &json!({"defined":true,"value":{"success":true,"token":"private"}})
+        ));
+    }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 86);
+        assert_eq!(COMMANDS.len(), 104);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})
@@ -1023,6 +1996,39 @@ mod tests {
         assert!(!valid_result(
             "secrets:create",
             &json!({"defined":true,"value":private})
+        ));
+    }
+    #[test]
+    fn agent_key_inputs_have_finite_vendors_and_outputs_only_keep_markers() {
+        assert!(valid_request(
+            "agent:update",
+            &json!({"id":"agent_fixture","data":{"config":{"api_keys":{"openai":"synthetic fixture key","anthropic":"","cursor":"__21x_api_key_set__"}}}})
+        ));
+        assert!(valid_request(
+            "agent:create",
+            &json!({"data":{"name":"Fixture","config":{"api_keys":{"openai":"x".repeat(16384)}}}})
+        ));
+        for keys in [
+            json!({"unknown":"value"}),
+            json!({"openai":{"value":"injected"}}),
+            json!({"openai":"bad\nheader"}),
+            json!({"openai":"x".repeat(16385)}),
+            json!({"openai":"💬".repeat(4097)}),
+        ] {
+            assert!(!valid_request(
+                "agent:update",
+                &json!({"id":"agent_fixture","data":{"config":{"api_keys":keys}}})
+            ));
+        }
+        let mut agent = json!({"id":"agent_fixture","name":"Fixture","server_url":"http://localhost:4096","config":{"coding_agent":"pi","api_keys":{"openai":"__21x_api_key_set__"}},"is_default":false,"created_at":"fixture","updated_at":"fixture"});
+        assert!(valid_result(
+            "agent:getAll",
+            &json!({"defined":true,"value":[agent.clone()]})
+        ));
+        agent["config"]["api_keys"]["openai"] = json!("private stored key");
+        assert!(!valid_result(
+            "agent:update",
+            &json!({"defined":true,"value":agent})
         ));
     }
     #[test]

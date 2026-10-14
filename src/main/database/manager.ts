@@ -58,7 +58,11 @@ import {
   isApiKeySetting,
   isEncryptedSettingValue,
   normalizePreferredModel,
-  parseJsonArray
+  parseJsonArray,
+  serializeAgentConfig,
+  mapRecordCredentials,
+  serializeMcpOAuthMetadata,
+  mapTaskSourceCredentials
 } from './serializers'
 import type {
   AgentRecord, AgentRow, CreateAgentData, UpdateAgentData,
@@ -1051,7 +1055,7 @@ export class DatabaseManager {
       id,
       data.name,
       data.server_url ?? 'http://localhost:4096',
-      JSON.stringify(withDefaultHardCap(data.config)),
+      serializeAgentConfig(withDefaultHardCap(data.config)),
       data.is_default ? 1 : 0,
       now,
       now
@@ -1074,7 +1078,8 @@ export class DatabaseManager {
     }
     if (data.config !== undefined) {
       setClauses.push('config = ?')
-      values.push(JSON.stringify(data.config))
+      const old = this.prepare('SELECT config FROM agents WHERE id=?').get(id) as { config: string } | undefined
+      values.push(serializeAgentConfig(data.config, old ? JSON.parse(old.config) : undefined))
     }
     if (data.is_default !== undefined) {
       setClauses.push('is_default = ?')
@@ -1129,9 +1134,9 @@ export class DatabaseManager {
       data.command ?? '',
       JSON.stringify(data.args ?? []),
       data.url ?? null,
-      JSON.stringify(data.headers ?? {}),
-      JSON.stringify(data.environment ?? {}),
-      JSON.stringify(data.oauth_metadata ?? {}),
+      JSON.stringify(mapRecordCredentials(data.headers ?? {}, true)),
+      JSON.stringify(mapRecordCredentials(data.environment ?? {}, true)),
+      serializeMcpOAuthMetadata(data.oauth_metadata ?? {}),
       source,
       now,
       now
@@ -1142,15 +1147,17 @@ export class DatabaseManager {
   updateMcpServer(id: string, data: UpdateMcpServerData): McpServerRecord | undefined {
     const setClauses: string[] = []
     const values: (string | null)[] = []
+    const stored = this.prepare('SELECT headers, environment, oauth_metadata FROM mcp_servers WHERE id=?').get(id) as
+      { headers: string; environment: string; oauth_metadata: string } | undefined
 
     if (data.name !== undefined) { setClauses.push('name = ?'); values.push(data.name) }
     if (data.type !== undefined) { setClauses.push('type = ?'); values.push(data.type) }
     if (data.command !== undefined) { setClauses.push('command = ?'); values.push(data.command) }
     if (data.args !== undefined) { setClauses.push('args = ?'); values.push(JSON.stringify(data.args)) }
     if (data.url !== undefined) { setClauses.push('url = ?'); values.push(data.url || null) }
-    if (data.headers !== undefined) { setClauses.push('headers = ?'); values.push(JSON.stringify(data.headers)) }
-    if (data.environment !== undefined) { setClauses.push('environment = ?'); values.push(JSON.stringify(data.environment)) }
-    if (data.oauth_metadata !== undefined) { setClauses.push('oauth_metadata = ?'); values.push(JSON.stringify(data.oauth_metadata)) }
+    if (data.headers !== undefined) { setClauses.push('headers = ?'); values.push(JSON.stringify(mapRecordCredentials(data.headers, true, stored ? JSON.parse(stored.headers || '{}') : undefined))) }
+    if (data.environment !== undefined) { setClauses.push('environment = ?'); values.push(JSON.stringify(mapRecordCredentials(data.environment, true, stored ? JSON.parse(stored.environment || '{}') : undefined))) }
+    if (data.oauth_metadata !== undefined) { setClauses.push('oauth_metadata = ?'); values.push(serializeMcpOAuthMetadata(data.oauth_metadata, stored ? JSON.parse(stored.oauth_metadata || '{}') : undefined)) }
     if (data.source !== undefined) { setClauses.push('source = ?'); values.push(data.source) }
 
     if (setClauses.length === 0) return this.getMcpServer(id)
@@ -2091,7 +2098,7 @@ export class DatabaseManager {
       data.mcp_server_id,
       data.name,
       data.plugin_id,
-      JSON.stringify(data.config ?? {}),
+      JSON.stringify(mapTaskSourceCredentials(data.config ?? {}, true)),
       data.list_tool ?? '',
       JSON.stringify(data.list_tool_args ?? {}),
       data.update_tool ?? '',
@@ -2115,7 +2122,8 @@ export class DatabaseManager {
       const mergedConfig = existing ? { ...existing.config, ...data.config } : data.config
 
       setClauses.push('config = ?')
-      values.push(JSON.stringify(mergedConfig))
+      const stored = this.prepare('SELECT config FROM task_sources WHERE id=?').get(id) as { config: string } | undefined
+      values.push(JSON.stringify(mapTaskSourceCredentials(mergedConfig, true, stored ? JSON.parse(stored.config || '{}') : undefined)))
       // Reset last_synced_at when config changes (filters changed, need fresh sync)
       setClauses.push('last_synced_at = ?')
       values.push(null)

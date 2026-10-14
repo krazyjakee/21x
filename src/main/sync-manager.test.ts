@@ -70,7 +70,7 @@ describe('SyncManager', () => {
       ;(registry.get as unknown as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
 
       const result = await syncManager.importTasks('src-1')
-      expect(result.errors).toContain('Plugin "missing" not found')
+      expect(result.errors).toContain('Task source plugin unavailable')
     })
 
     it('delegates to plugin.importTasks', async () => {
@@ -104,7 +104,8 @@ describe('SyncManager', () => {
       ;(registry.get as unknown as ReturnType<typeof vi.fn>).mockReturnValue(plugin)
 
       const result = await syncManager.importTasks('src-1')
-      expect(result.errors).toContain('Network error')
+      expect(result.errors).toContain('Source import failed')
+      expect(result.errors).not.toContain('Network error')
     })
   })
 

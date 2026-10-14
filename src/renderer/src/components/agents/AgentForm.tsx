@@ -1,4 +1,4 @@
-import { desktopApi } from '@/lib/desktop-api'
+import { desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, ChevronRight, Plus, X, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
@@ -290,14 +290,14 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
         api_keys: {
           // Only persist the OpenAI key when Codex is in api_key mode
           openai: (codingAgent === CodingAgentType.CODEX && authMethod === 'api_key')
-            ? (openaiApiKey.trim() || undefined)
+            ? (getDesktopHost().kind === 'tauri' ? openaiApiKey : openaiApiKey.trim() || undefined)
             : undefined,
           // Only save anthropic key when in api_key mode
           anthropic: (codingAgent === CodingAgentType.CLAUDE_CODE && authMethod === 'api_key')
-            ? (anthropicApiKey.trim() || undefined)
+            ? (getDesktopHost().kind === 'tauri' ? anthropicApiKey : anthropicApiKey.trim() || undefined)
             : undefined,
           cursor: (codingAgent === CodingAgentType.CURSOR && authMethod === 'api_key')
-            ? (cursorApiKey.trim() || undefined)
+            ? (getDesktopHost().kind === 'tauri' ? cursorApiKey : cursorApiKey.trim() || undefined)
             : undefined
         }
       }

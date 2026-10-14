@@ -786,13 +786,12 @@ app.whenReady().then(async () => {
   pluginRegistry.register(new YouTrackPlugin())
   connectorBridgePlugin = new ConnectorBridgePlugin()
   pluginRegistry.register(connectorBridgePlugin)
+  syncManager = new SyncManager(db, pluginRegistry, oauthManager)
+  agentManager.setSyncManager(syncManager)
   connectorBridgePlugin.startPolling({
     db,
     onSynced: () => { guardedIpcSend(mainWindow?.webContents, 'tasks:refresh') }
   })
-
-  syncManager = new SyncManager(db, pluginRegistry, oauthManager)
-  agentManager.setSyncManager(syncManager)
   const taskGroups = new TaskGroupService(db, agentManager, syncManager, (channel, data) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (channel === 'task:updated') guardedIpcSend(mainWindow.webContents, 'task:updated', data)

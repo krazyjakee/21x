@@ -2,9 +2,11 @@ import type { DatabaseManager } from '../main/database/manager'
 import type { CreateAgentData, UpdateAgentData, AgentConfigRecord } from '../main/database/types'
 import type { AgentManager } from '../main/agent-manager-core'
 import { DEFAULT_SERVER_URL } from '../main/adapters/opencode-server'
+import { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
+import { getSecretStorage } from '../main/platform/secret-storage'
 import { flattenProviderModels, rememberBackendModels } from '../main/agent-manager/skill-model'
 import { AGENT_CONFIGURATION_CODECS, AGENT_CONFIGURATION_OPERATIONS, AGENT_CONFIGURATION_EVENT_CODECS,
-  isAgentConfigurationBackendType, isAgentConfigurationServerUrl, type AgentConfigurationCodec, type AgentConfigurationOperation, type AgentConfigurationBackendType } from '../shared/agent-configuration-codecs'
+  isAgentConfigurationBackendType, isAgentConfigurationServerUrl, AGENT_API_KEY_SET_MARKER, type AgentConfigurationCodec, type AgentConfigurationOperation, type AgentConfigurationBackendType } from '../shared/agent-configuration-codecs'
 import type { DesktopCommandMap } from '../shared/desktop-operations'
 import { isJsonValue, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
 import { DesktopOperationRegistry, type DesktopCallerContext } from './transport/desktop-registry'
@@ -14,12 +16,17 @@ type Access = 'read' | 'write'
 export interface AgentConfigurationBackendOptions {
   database: DatabaseManager
   manager: AgentManager
+  /** Captured actual protected provider; omitted hosts cannot accept keys. */
+  credentialStorage?: AuthenticatedSecretStorage
   engineEpoch: string
   assertAvailable(): void
   isTrustedDesktop(caller: DesktopCallerContext): boolean
   canAccessAgent(agentId: string, caller: DesktopCallerContext, access: Access | 'delete'): boolean
   canManageGlobalConfiguration(caller: DesktopCallerContext, access: Access): boolean
   canAccessProject(projectId: string, caller: DesktopCallerContext, access: Access): boolean
+  canAccessMcpServer(id: string, caller: DesktopCallerContext, access: Access): boolean
+  canAccessSecret(id: string, caller: DesktopCallerContext, access: Access): boolean
+  canAccessGlobalSkills(caller: DesktopCallerContext, access: Access): boolean
   canQueryBackend(backend: AgentConfigurationBackendType, serverUrl: string | undefined, caller: DesktopCallerContext): boolean
   emit(operation: 'tasks:refresh', payload: JsonValue): void
   onFatalEvent(error: ServiceProtocolError): void
@@ -66,25 +73,43 @@ export class AgentConfigurationBackend {
     return flight
   }
   private referencedProjects(agentId: string): string[] {
-    const db = this.options.database.db
-    return (db.prepare(`SELECT DISTINCT project_id AS id FROM tasks WHERE agent_id=? UNION
-      SELECT id FROM projects WHERE default_agent_id=? OR captain_agent_id=?`).all(agentId, agentId, agentId) as Array<{ id: string }>).map(row => row.id)
+    return this.options.manager.getAgentConfigurationProjectIds(agentId)
   }
   private agentAllowed(id: string, caller: DesktopCallerContext, access: Access | 'delete'): boolean {
-    return this.options.canManageGlobalConfiguration(caller, access === 'read' ? 'read' : 'write') && this.options.canAccessAgent(id, caller, access) &&
+    return this.options.canManageGlobalConfiguration(caller, 'read') && this.options.canManageGlobalConfiguration(caller, access === 'read' ? 'read' : 'write') &&
+      this.options.canAccessAgent(id, caller, 'read') && this.options.canAccessAgent(id, caller, access) &&
       this.referencedProjects(id).every(project => this.options.canAccessProject(project, caller, access === 'read' ? 'read' : 'write'))
   }
   private configAllowed(config: AgentConfigRecord | undefined, caller: DesktopCallerContext, id?: string): boolean {
     if (!config) return true
     const db = this.options.database
+    if (config.api_keys !== undefined) {
+      try {
+        if (!(this.options.credentialStorage instanceof AuthenticatedSecretStorage) || getSecretStorage() !== this.options.credentialStorage || !this.options.credentialStorage.isEncryptionAvailable()) return false
+      } catch { return false }
+      const saved = id ? db.getAgent(id)?.config.api_keys : undefined
+      if (Object.entries(config.api_keys).some(([vendor, value]) => value === AGENT_API_KEY_SET_MARKER && !saved?.[vendor as keyof typeof saved])) return false
+    }
     if ((config.fallback_agent_ids ?? []).some(fallback => fallback === id || !db.getAgent(fallback) || !this.agentAllowed(fallback, caller, 'read'))) return false
     if ((config.skill_ids ?? []).some(skillId => {
       const skill = db.getSkill(skillId)
-      return !skill || skill.project_id !== null && !this.options.canAccessProject(skill.project_id, caller, 'read')
+      return !skill || (skill.project_id === null ? !this.options.canAccessGlobalSkills(caller, 'read') : !this.options.canAccessProject(skill.project_id, caller, 'read'))
     })) return false
-    if ((config.mcp_servers ?? []).some(entry => !db.getMcpServer(typeof entry === 'string' ? entry : entry.serverId))) return false
-    if ((config.secret_ids ?? []).some(secretId => !db.getSecrets().some(secret => secret.id === secretId))) return false
+    if ((config.mcp_servers ?? []).some(entry => {
+      const serverId = typeof entry === 'string' ? entry : entry.serverId
+      return !this.options.canAccessMcpServer(serverId, caller, 'read') || !db.getMcpServer(serverId)
+    })) return false
+    if ((config.secret_ids ?? []).some(secretId => !this.options.canAccessSecret(secretId, caller, 'read') || !db.getSecrets().some(secret => secret.id === secretId))) return false
     return true
+  }
+  private resolveConfig(config: AgentConfigRecord | undefined, saved?: AgentConfigRecord): AgentConfigRecord | undefined {
+    if (!config) return undefined
+    const keys = { ...saved?.api_keys }
+    for (const [vendor, value] of Object.entries(config.api_keys ?? {})) {
+      if (value !== AGENT_API_KEY_SET_MARKER) keys[vendor as keyof typeof keys] = value
+    }
+    const publicConfig = { ...config }; delete publicConfig.api_keys
+    return { ...publicConfig, ...(Object.keys(keys).length || saved?.api_keys !== undefined ? { api_keys: keys } : {}) }
   }
   private endpointAllowed(data: CreateAgentData | UpdateAgentData, caller: DesktopCallerContext, id?: string): boolean {
     const previous = id === undefined ? undefined : this.options.database.getAgent(id)
@@ -117,7 +142,7 @@ export class AgentConfigurationBackend {
     effect: (args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal) => unknown | Promise<unknown>): void {
     const codec = AGENT_CONFIGURATION_CODECS[operation] as AgentConfigurationCodec<K>
     this.registry.bindCommand(operation, {
-      decodeRequest: codec.decodeArguments, validateArguments: codec.validateArguments,
+      decodeRequest: payload => codec.decodeArguments(structuredClone(payload)), validateArguments: codec.validateArguments,
       authorize: (args, caller) => { this.available(); return authorize(args, caller) },
       invoke: (args, caller, signal) => this.retain((async () => {
         this.available()
@@ -127,6 +152,8 @@ export class AgentConfigurationBackend {
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
         this.available()
         if ((operation.startsWith('agentConfig:') || operation === 'agent:getAll') && !authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
+        if ((operation === 'agent:create' || operation === 'agent:update') && !this.options.canManageGlobalConfiguration(caller, 'read')) throw new ServiceProtocolError('INVALID_REQUEST')
+        if (operation === 'agent:update' && !this.agentAllowed(args[0] as string, caller, 'read')) throw new ServiceProtocolError('INVALID_REQUEST')
         const encoded = codec.encodeResult(result)
         return codec.decodeResult(encoded.defined ? encoded.value : undefined)
       })()),
@@ -136,12 +163,12 @@ export class AgentConfigurationBackend {
   private bindCommands(): void {
     const { database: db, manager } = this.options
     this.bind('agent:getAll', (_args, caller) => this.options.canManageGlobalConfiguration(caller, 'read'), (_args, caller) => db.getAgents().filter(agent => this.agentAllowed(agent.id, caller, 'read')))
-    this.bind('agent:create', ([data], caller) => this.options.canManageGlobalConfiguration(caller, 'write') && this.configAllowed(data.config, caller) && this.endpointAllowed(data, caller), ([data], caller, signal) => {
+    this.bind('agent:create', ([data], caller) => this.options.canManageGlobalConfiguration(caller, 'read') && this.options.canManageGlobalConfiguration(caller, 'write') && this.configAllowed(data.config, caller) && this.endpointAllowed(data, caller), ([data], caller, signal) => {
       const result = db.db.transaction(() => {
         this.available()
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
-        if (!this.options.canManageGlobalConfiguration(caller, 'write') || !this.configAllowed(data.config, caller) || !this.endpointAllowed(data, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
-        const created = db.createAgent(data as CreateAgentData)
+        if (!this.options.canManageGlobalConfiguration(caller, 'read') || !this.options.canManageGlobalConfiguration(caller, 'write') || !this.configAllowed(data.config, caller) || !this.endpointAllowed(data, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
+        const created = db.createAgent({ ...data, ...(data.config ? { config: this.resolveConfig(data.config) } : {}) } as CreateAgentData)
         const projected = AGENT_CONFIGURATION_CODECS['agent:create'].encodeResult(created)
         return AGENT_CONFIGURATION_CODECS['agent:create'].decodeResult(projected.defined ? projected.value : undefined)
       })()
@@ -152,7 +179,7 @@ export class AgentConfigurationBackend {
       const original = db.getAgent(id)
       if (!original) return undefined
       const changes = { ...data } as UpdateAgentData
-      if (changes.config) changes.config = { ...changes.config, ...(original.config.api_keys === undefined ? {} : { api_keys: original.config.api_keys }) }
+      if (changes.config) changes.config = this.resolveConfig(changes.config, original.config)
       let accepted = false
       try {
         return await manager.runAgentConfigurationMutation(id, 'update', () => {
@@ -163,7 +190,7 @@ export class AgentConfigurationBackend {
             const previous = db.getAgent(id)
             if (!previous) return undefined
             const update = { ...data } as UpdateAgentData
-            if (update.config) update.config = { ...update.config, ...(previous.config.api_keys === undefined ? {} : { api_keys: previous.config.api_keys }) }
+            if (update.config) update.config = this.resolveConfig(update.config, previous.config)
             const updated = db.updateAgent(id, update)
             const projected = AGENT_CONFIGURATION_CODECS['agent:update'].encodeResult(updated)
             return AGENT_CONFIGURATION_CODECS['agent:update'].decodeResult(projected.defined ? projected.value : undefined)

@@ -217,7 +217,13 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
     canAccessSecret: (_id, caller) => trusted(caller), canCreateSecret: trusted,
     canUseSecretEnvironment: (_name, caller) => trusted(caller), canReadEnvironment: (_key, caller) => trusted(caller),
     canAccessTerminal: (_id, caller) => trusted(caller), resolveTerminalDirectory: (_id, caller) => trusted(caller)
-      ? { cwd: descriptor.paths.workspaceRoot, root: descriptor.paths.workspaceRoot } : null
+      ? { cwd: descriptor.paths.workspaceRoot, root: descriptor.paths.workspaceRoot } : null,
+    canAccessMcpServer: (_id, caller) => trusted(caller),
+    canUseTransport: (_input, caller) => trusted(caller) && descriptor.capabilities.configuredMcp === 'enabled',
+    canUseEnvironmentName: (_name, caller) => trusted(caller),
+    canAccessConnector: (_id, caller) => trusted(caller) && descriptor.capabilities.connectors === 'enabled',
+    canUseSourcePlugin: (id, caller) => trusted(caller) && !!service.getReadyServices()?.registry.get(id) &&
+      (id !== 'connector-bridge' || descriptor.capabilities.connectors === 'enabled')
   }
   const host = sealProductionServiceHost({ descriptor, authority, caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' },
     unbridgedOwnerEvent: () => { process.stderr.write('PRODUCTION_NATIVE_EVENT_UNSUPPORTED\n') },
@@ -228,6 +234,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         command: resources.node, args: [resources.taskMcp], environment: {}, tools: listToolsForScope(FULL_ACCESS_SCOPE).map(tool => ({ name: tool.name, description: tool.description ?? '' })) },
       native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: descriptor.capabilities.configuredMcp },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, openExternal: callbacks.openExternal,
+        oauthBrowser: descriptor.capabilities.externalUrls === 'host' ? 'available' : 'unavailable',
         notify: callbacks.notify, emit: callbacks.emitOwnerEvent,
         sendUiCommand: () => ({ ok: false, detail: 'Private production launch has no reviewed UI command callback' }) }
     }) })

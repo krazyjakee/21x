@@ -4,6 +4,8 @@ import { PRODUCTION_AGENT_EVENT_CODECS } from '@shared/production-agent-events'
 import { COMMANDER_COMMAND_CODECS, COMMANDER_EVENT_CODECS } from '@shared/commander-desktop-codecs'
 import { PRODUCTION_SETTINGS_CODECS } from '@shared/production-settings-codecs'
 import { TERMINAL_COMMAND_CODECS, TERMINAL_EVENT_CODECS } from '@shared/terminal-desktop-codecs'
+import { MCP_CODECS } from '@shared/mcp-codecs'
+import { TASK_SOURCE_CODECS } from '@shared/task-source-codecs'
 import type { DesktopApi } from '@shared/desktop-api'
 import { DATABASE_COMMAND_CODECS, DATABASE_EVENT_CODECS } from '@shared/database-desktop-codecs'
 import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_EVENT_CODECS } from '@shared/configuration-desktop-codecs'
@@ -15,7 +17,7 @@ import { DesktopClient, type DesktopClientState } from './desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS }
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS }
 const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
@@ -45,7 +47,12 @@ export const NATIVE_COMMAND_BINDINGS = {
   'chat:start': 'chat.start', 'chat:cancel': 'chat.cancel',
   'secrets:getAll': 'secrets.getAll', 'secrets:create': 'secrets.create', 'secrets:update': 'secrets.update', 'secrets:delete': 'secrets.delete', 'env:get': 'env.get',
   'terminal:create': 'terminal.create', 'terminal:write': 'terminal.write', 'terminal:resize': 'terminal.resize',
-  'terminal:kill': 'terminal.kill', 'terminal:getCwd': 'terminal.getCwd', 'terminal:getBuffer': 'terminal.getBuffer'
+  'terminal:kill': 'terminal.kill', 'terminal:getCwd': 'terminal.getCwd', 'terminal:getBuffer': 'terminal.getBuffer',
+  'mcp:getAll': 'mcpServers.getAll', 'mcp:create': 'mcpServers.create', 'mcp:update': 'mcpServers.update', 'mcp:delete': 'mcpServers.delete',
+  'mcp:testConnection': 'mcpServers.testConnection', 'mcp:startOAuthFlow': 'mcpServers.startOAuthFlow', 'mcp:getOAuthStatus': 'mcpServers.getOAuthStatus',
+  'mcp:revokeOAuthToken': 'mcpServers.revokeOAuthToken', 'mcp:probeForAuth': 'mcpServers.probeForAuth', 'mcp:submitManualClientId': 'mcpServers.submitManualClientId',
+  'taskSource:getAll': 'taskSources.getAll', 'taskSource:create': 'taskSources.create', 'taskSource:update': 'taskSources.update', 'taskSource:delete': 'taskSources.delete',
+  'taskSource:sync': 'taskSources.sync', 'taskSource:exportUpdate': 'taskSources.exportUpdate', 'taskSource:getUsers': 'taskSources.getUsers', 'taskSource:reassign': 'taskSources.reassign'
 } as const satisfies Record<keyof typeof commands, ApiPath<DesktopApi>>
 export const NATIVE_EVENT_BINDINGS = {
   'task:created': 'onTaskCreated', 'task:updated': 'onTaskUpdated', 'task:deleted': 'onTaskDeleted', 'project:changed': 'projects.onChanged', 'transcript:changed': 'onTranscriptChanged',
@@ -56,7 +63,8 @@ export const NATIVE_EVENT_BINDINGS = {
 } as const satisfies Partial<Record<keyof typeof events, ApiPath<DesktopApi>>>
 const reads = new Set<keyof typeof commands>(['db:getTasks', 'db:getTask', 'project:getAll', 'project:get', 'project:getDefault', 'settings:get', 'settings:getAll', 'agent:getAll', 'skills:getAll', 'projectRepo:list', 'projectResource:list', 'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage', 'agentConfig:getProviders', 'agentConfig:listModels', 'db:getSubtasks', 'tasks:getCoordinatorTaskId', 'agent:getStartQueue',
   'agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'captainRuntime:get', 'commander:listSessions',
-  'commander:listMessages', 'commander:getImage', 'commander:getActivity', 'secrets:getAll', 'env:get', 'terminal:getCwd', 'terminal:getBuffer'])
+  'commander:listMessages', 'commander:getImage', 'commander:getActivity', 'secrets:getAll', 'env:get', 'terminal:getCwd', 'terminal:getBuffer',
+  'mcp:getAll', 'mcp:getOAuthStatus', 'mcp:probeForAuth', 'taskSource:getAll', 'taskSource:getUsers'])
 
 export interface NativeDesktopHost extends DesktopHost {
   reconnect: () => Promise<void>

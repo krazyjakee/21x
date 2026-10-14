@@ -504,7 +504,10 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
       return updateTask(db, params)
 
     case '/list_agents':
-      return db.getAgents()
+      return db.getAgents().map(agent => {
+        const config = { ...agent.config }; delete config.api_keys
+        return { ...agent, config }
+      })
 
     case '/find_similar_tasks':
       return findSimilarTasks(db, params)

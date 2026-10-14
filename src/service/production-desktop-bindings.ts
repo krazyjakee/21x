@@ -3,6 +3,10 @@ import { ProductionAgentBackend } from './production-agent-backend'
 import { CommanderBackend } from './commander-backend'
 import { TerminalBackend, type TerminalDirectoryAuthority } from './terminal-backend'
 import { ProductionSettingsBackend, type ProductionSettingsBackendOptions } from './production-settings-backend'
+import { McpBackend, type McpBackendOptions } from './mcp-backend'
+import { TaskSourceBackend, type TaskSourceBackendOptions } from './task-source-backend'
+import { MCP_CODECS } from '../shared/mcp-codecs'
+import { TASK_SOURCE_CODECS } from '../shared/task-source-codecs'
 import { PRODUCTION_SETTINGS_CODECS } from '../shared/production-settings-codecs'
 import { TERMINAL_COMMAND_CODECS, TERMINAL_EVENT_CODECS } from '../shared/terminal-desktop-codecs'
 import { encodeDurableTranscriptEvent } from './transcript-events'
@@ -34,7 +38,9 @@ type Authority = Pick<AgentConfigurationBackendOptions, 'isTrustedDesktop' | 'ca
   canReorderProjects(caller: DesktopCallerContext): boolean
   canAccessTerminal(id: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   resolveTerminalDirectory(id: string, caller: DesktopCallerContext): TerminalDirectoryAuthority | null
-} & Pick<ProductionSettingsBackendOptions, 'canReadSetting' | 'canWriteSetting' | 'canAccessSecret' | 'canCreateSecret' | 'canUseSecretEnvironment' | 'canReadEnvironment'>
+  canAccessMcpServer(id: string, caller: DesktopCallerContext, access: 'read' | 'write' | 'delete'): boolean
+} & Pick<ProductionSettingsBackendOptions, 'canReadSetting' | 'canWriteSetting' | 'canAccessSecret' | 'canCreateSecret' | 'canUseSecretEnvironment' | 'canReadEnvironment'> &
+  Pick<McpBackendOptions, 'canUseTransport' | 'canUseEnvironmentName'> & Pick<TaskSourceBackendOptions, 'canAccessConnector' | 'canUseSourcePlugin'>
 export interface ProductionDesktopBindingOptions {
   authority: Authority
   emit(operation: string, payload: JsonValue, recipient?: DesktopCallerContext): void
@@ -45,7 +51,7 @@ export interface ProductionDesktopBindingOptions {
 export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
   ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS }
 
@@ -73,6 +79,8 @@ export class ProductionDesktopBindings {
   private readonly commander: CommanderBackend
   private readonly settings: ProductionSettingsBackend
   private readonly terminals: TerminalBackend
+  private readonly mcp: McpBackend
+  private readonly sources: TaskSourceBackend
   private readonly epoch: string
   private constructor(private readonly owner: ProductionOwner, private readonly services: Awaited<ReturnType<ProductionOwner['start']>>, private readonly options: ProductionDesktopBindingOptions) {
     const lease = owner.getDatabaseBindingLease()
@@ -101,7 +109,7 @@ export class ProductionDesktopBindings {
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessProject: dynamicAuthority.canAccessProject,
       canAccessGlobalSkills: dynamicAuthority.canAccessGlobalSkills, canChangeSkillScope: dynamicAuthority.canChangeSkillScope,
       canReorderProjects: dynamicAuthority.canReorderProjects, emit: options.emit })
-    this.agents = new AgentConfigurationBackend({ database: services.db, manager: services.agents, engineEpoch: this.epoch,
+    this.agents = new AgentConfigurationBackend({ database: services.db, manager: services.agents, credentialStorage: owner.getSettingsBindingLease().secretStorage, engineEpoch: this.epoch,
       assertAvailable: available, ...dynamicAuthority, emit: options.emit, onFatalEvent: options.fatal })
     this.tasks = new TaskLifecycleBackend({ database: services.db, manager: services.agents, registry: services.registry,
       sync: services.sync, recurrence: services.recurrence, heartbeat: services.heartbeat, automation: services.automation,
@@ -123,10 +131,22 @@ export class ProductionDesktopBindings {
       // Unlike boolean policy checks this callback returns a trusted directory.
       resolveDirectory: (id, caller) => authority.resolveTerminalDirectory(id, caller),
       emit: options.emit, onFatalEvent: options.fatal })
+    const integration = owner.getIntegrationBindingLease()
+    this.mcp = new McpBackend({ database: services.db, manager: services.agents, sync: services.sync, probes: services.mcpProbes,
+      secretStorage: integration.secretStorage, configuredMcp: integration.configuredMcp,
+      oauth: { kind: integration.oauthBrowser, manager: services.oauth },
+      assertMcpOwners: owners => integration.assertOwners({ ...owners, oauth: owners.oauth.manager }),
+      engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
+      canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration, canAccessServer: dynamicAuthority.canAccessMcpServer,
+      emit: options.emit, onFatalEvent: options.fatal })
+    this.sources = new TaskSourceBackend({ database: services.db, manager: services.agents, sync: services.sync, plugins: services.registry,
+      oauth: services.oauth, secretStorage: integration.secretStorage, recurrence: services.recurrence, heartbeat: services.heartbeat, automation: services.automation,
+      assertOwners: integration.assertOwners, engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
+      emit: options.emit, onFatalEvent: options.fatal })
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown()
-      void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close()]).then(() => undefined))
+      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown()
+      void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close()]).catch(() => { /* Registered drain retains raw work. */ })
+    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close()]).then(() => undefined))
   }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
@@ -194,7 +214,7 @@ export class ProductionDesktopBindings {
   operationSchemas(caller: DesktopCallerContext): Record<string, OperationSchema> {
     const schemas = { ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
       ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
-      ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller) }
+      ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller), ...this.mcp.operationSchemas(caller), ...this.sources.operationSchemas(caller) }
     return Object.fromEntries(Object.entries(schemas).map(([operation, schema]) => [operation, {
       ...schema, handle: (payload: JsonValue, signal: AbortSignal) => this.invoke(operation, payload, caller, signal)
     }]))
@@ -209,6 +229,8 @@ export class ProductionDesktopBindings {
       signal.addEventListener('abort', abort, { once: true }); ownerSignal.addEventListener('abort', abort, { once: true })
       if (signal.aborted || ownerSignal.aborted) abort()
       try {
+        if (Object.hasOwn(MCP_CODECS, operation)) return await this.mcp.registry.invoke(operation, payload, caller, combined.signal)
+        if (Object.hasOwn(TASK_SOURCE_CODECS, operation)) return await this.sources.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(PRODUCTION_SETTINGS_CODECS, operation)) return await this.settings.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(TERMINAL_COMMAND_CODECS, operation)) return await this.terminals.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(TASK_LIFECYCLE_CODECS, operation)) return await this.tasks.registry.invoke(operation, payload, caller, combined.signal)

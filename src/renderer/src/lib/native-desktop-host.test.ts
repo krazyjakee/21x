@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { TauriDesktopApi } from './tauri-desktop-transport'
 import { createNativeDesktopHost, NATIVE_COMMAND_BINDINGS, type NativeDesktopHost } from './native-desktop-host'
 import { PRODUCTION_API_KEY_SET_MARKER } from '@shared/production-settings-codecs'
+import { MCP_SECRET_SET_MARKER } from '@shared/mcp-codecs'
 import { desktopApi, installDesktopHost } from './desktop-api'
 import type { ServiceEvent } from '@shared/service-protocol'
 const hosts: NativeDesktopHost[] = [], releases: Array<() => void> = []
@@ -21,6 +22,12 @@ function fixture() {
   const host = createNativeDesktopHost({ core: { invoke }, event: { listen } } as unknown as TauriDesktopApi); hosts.push(host)
   const emit = (operation: ServiceEvent['operation'], payload: ServiceEvent['payload']) => { const event = { protocolVersion: 1, kind: 'event', operation, payload, engineEpoch: epoch, sequence: ++sequence }; for (const receive of [...receivers]) receive({ payload: event }) }
   return { host, invoke, listen, unlisten, results, history, emit, changeEpoch: () => { epoch = 'engine-2'; sequence = 0 } }
+}
+function mcpRow() {
+  return { id: 'mcp.fixture:one', name: 'Fixture MCP', type: 'local', command: 'fixture-mcp', args: [], url: '', headers: { Authorization: MCP_SECRET_SET_MARKER }, environment: { FIXTURE_TOKEN: MCP_SECRET_SET_MARKER }, tools: [], oauth_metadata: { client_secret: MCP_SECRET_SET_MARKER }, source: 'user', created_at: '2026-10-14', updated_at: '2026-10-14' }
+}
+function sourceRow() {
+  return { id: 'source_fixture', mcp_server_id: null, name: 'Fixture Notion', plugin_id: 'notion', config: { api_token: PRODUCTION_API_KEY_SET_MARKER }, list_tool: 'legacy_list', list_tool_args: {}, update_tool: 'legacy_update', update_tool_args: {}, last_synced_at: null, enabled: false, project_id: 'project_fixture', created_at: '2026-10-14', updated_at: '2026-10-14' }
 }
 it('uses exact codecs and trusted host metadata; missing binary/file bindings never reach native or Electron', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
@@ -96,7 +103,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 86 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 104 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -105,7 +112,7 @@ it('binds the 86 finite production commands including settings effects, secret m
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(86)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(104)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -162,4 +169,114 @@ it('shows a fixed bootstrap failure, disconnects an earlier client and keeps mut
   expect(f.invoke.mock.calls.length).toBe(before + 1)
   expect(f.unlisten).toHaveBeenCalledOnce()
   expect(f.host.bootstrapFailure).not.toContain('/private/profile')
+})
+
+it('binds finite MCP CRUD, scoped OAuth and probes to their actual wire schemas', async () => {
+  const f = fixture(), row = mcpRow()
+  f.results.set('mcp:getAll', [row]); f.results.set('mcp:create', row); f.results.set('mcp:update', row); f.results.set('mcp:delete', true)
+  f.results.set('mcp:testConnection', { status: 'connected', toolCount: 1, tools: [{ name: 'fixture_tool', description: 'Fixture tool' }] })
+  f.results.set('mcp:startOAuthFlow', { needsManualClientId: true }); f.results.set('mcp:getOAuthStatus', { connected: true, expiresAt: '2026-10-15' })
+  f.results.set('mcp:probeForAuth', { requiresAuth: true }); f.results.set('mcp:submitManualClientId', {})
+  await f.host.reconnect()
+  expect(await f.host.api.mcpServers.getAll()).toEqual([row])
+  expect(await f.host.api.mcpServers.getOAuthStatus(row.id)).toEqual({ connected: true, expiresAt: '2026-10-15' })
+  expect(await f.host.api.mcpServers.probeForAuth('https://mcp.example.test/api')).toEqual({ requiresAuth: true })
+  await expect(f.host.api.mcpServers.testConnection({ name: 'Fixture' })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.mcpServers.startOAuthFlow(row.id)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  const data = { name: 'Fixture MCP', type: 'remote' as const, url: 'https://mcp.example.test/api', headers: { Authorization: 'synthetic-user-input' } }
+  expect(await f.host.api.mcpServers.create(data)).toEqual(row)
+  expect(await f.host.api.mcpServers.update(row.id, { headers: { Authorization: MCP_SECRET_SET_MARKER } })).toEqual(row)
+  expect(await f.host.api.mcpServers.testConnection({ id: row.id, name: row.name })).toMatchObject({ status: 'connected', toolCount: 1 })
+  expect(await f.host.api.mcpServers.startOAuthFlow(row.id)).toEqual({ needsManualClientId: true })
+  expect(await f.host.api.mcpServers.submitManualClientId(row.id, 'fixture-client')).toEqual({})
+  await f.host.api.mcpServers.revokeOAuthToken(row.id)
+  expect(await f.host.api.mcpServers.delete(row.id)).toBe(true)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'mcp:create', payload: { data }, engineEpoch: 'engine-1' })
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'mcp:submitManualClientId', payload: { id: row.id, clientId: 'fixture-client' }, engineEpoch: 'engine-1' })
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.mcpServers.update(row.id, { oauth_metadata: { client_secret: 'foreign' } } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.mcpServers.create({ name: 'Fixture', source: 'plugin' } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.mcpServers.probeForAuth('https://user:pass@mcp.example.test')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  expect(f.host.supports('cliMcp.upsert')).toBe(false)
+})
+
+it('binds project source metadata, sync, export and users while fencing mutations during recovery', async () => {
+  const f = fixture(), row = sourceRow(), sync = { source_id: row.id, imported: 2, updated: 1, errors: ['Explicit import failure'] }
+  const users = [{ id: 'external:user', name: 'Fixture User', email: 'fixture@example.test' }]
+  f.results.set('taskSource:getAll', [row]); f.results.set('taskSource:create', row); f.results.set('taskSource:update', row)
+  f.results.set('taskSource:delete', true); f.results.set('taskSource:sync', sync); f.results.set('taskSource:getUsers', users); f.results.set('taskSource:reassign', { success: false, error: 'Explicit source refusal' })
+  await f.host.reconnect()
+  expect(await f.host.api.taskSources.getAll('project_fixture')).toEqual([row])
+  expect(await f.host.api.taskSources.getUsers(row.id)).toEqual(users)
+  await expect(f.host.api.taskSources.sync(row.id)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.taskSources.exportUpdate('task_fixture', { status: 'completed' })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  const data = { name: row.name, mcp_server_id: null, plugin_id: row.plugin_id, project_id: row.project_id, config: { api_token: 'synthetic\nfixture-input', data_source_id: 'external:database' } }
+  expect(await f.host.api.taskSources.create(data)).toEqual(row)
+  expect(await f.host.api.taskSources.update(row.id, { enabled: false, config: { api_token: PRODUCTION_API_KEY_SET_MARKER } })).toEqual(row)
+  expect(await f.host.api.taskSources.sync(row.id)).toEqual(sync)
+  await f.host.api.taskSources.exportUpdate('task_fixture', { status: 'completed', priority: 'urgent', description: 'Multiline\ncontext' })
+  expect(await f.host.api.taskSources.reassign('task_fixture', ['external:user'], 'Fixture User')).toEqual({ success: false, error: 'Explicit source refusal' })
+  expect(await f.host.api.taskSources.delete(row.id)).toBe(true)
+  f.results.delete('taskSource:update'); expect(await f.host.api.taskSources.update(row.id, { name: 'Missing source' })).toBeUndefined()
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'taskSource:create', payload: { data }, engineEpoch: 'engine-1' })
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'taskSource:reassign', payload: { taskId: 'task_fixture', userIds: ['external:user'], assigneeDisplay: 'Fixture User' }, engineEpoch: 'engine-1' })
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.taskSources.update(row.id, { project_id: 'foreign_project' } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.taskSources.create({ name: 'Fixture', mcp_server_id: null, plugin_id: 'unknown-plugin' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.taskSources.update(row.id, { list_tool_args: { command: 'foreign' } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.taskSources.reassign('task_fixture', ['same', 'same'], '')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+})
+
+it('does not repeat an accepted source sync when its result is lost across native epochs', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const pending = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === 'taskSource:sync' ? pending.promise : original(command, args))
+  const syncing = f.host.api.taskSources.sync('source_fixture'), rejected = expect(syncing).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); await f.host.reconnect(); await rejected
+  pending.resolve({ engineEpoch: 'engine-1', result: { defined: true, value: { source_id: 'source_fixture', imported: 1, updated: 0, errors: [] } } }); await Promise.resolve()
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'taskSource:sync')).toHaveLength(1)
+})
+
+it('retains source task invalidations across epochs without granting new event namespaces', async () => {
+  const f = fixture(), deleted = vi.fn(), refresh = vi.fn()
+  const offDeleted = f.host.api.onTaskDeleted(deleted), offRefresh = f.host.api.onTasksRefresh(refresh)
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  f.emit('task:deleted', { taskId: 'imported_task' }); f.emit('tasks:refresh', {})
+  expect(deleted).toHaveBeenCalledExactlyOnceWith({ taskId: 'imported_task' })
+  expect(refresh).toHaveBeenCalledTimes(2)
+  f.changeEpoch(); await f.host.reconnect()
+  f.history[0]?.({ payload: { protocolVersion: 1, kind: 'event', operation: 'task:deleted', payload: { taskId: 'retired_import' }, engineEpoch: 'engine-1', sequence: 3 } })
+  expect(deleted).toHaveBeenCalledOnce()
+  f.emit('task:deleted', { taskId: 'current_import' }); expect(deleted).toHaveBeenCalledTimes(2)
+  expect(f.host.supports('mcpServers.onCredentials')).toBe(false)
+  offDeleted(); offRefresh()
+})
+
+it('retains unavailable source metadata while refusing credential or legacy private payload results', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  f.results.set('taskSource:getAll', [{ ...sourceRow(), plugin_id: 'uninstalled.plugin', config: {} }])
+  expect(await f.host.api.taskSources.getAll()).toMatchObject([{ plugin_id: 'uninstalled.plugin', config: {} }])
+  f.results.set('taskSource:getAll', [{ ...sourceRow(), config: { api_token: 'synthetic-private-stored-value' } }])
+  await expect(f.host.api.taskSources.getAll()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.set('mcp:getAll', [{ ...mcpRow(), headers: { Authorization: 'synthetic-private-stored-value' } }])
+  await expect(f.host.api.mcpServers.getAll()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.delete('taskSource:create')
+  await expect(f.host.api.taskSources.create({ name: 'Fixture', mcp_server_id: null, plugin_id: 'notion' })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('admits finite agent key writes while masking configuration results and denying injected vendors', async () => {
+  const f = fixture(), row = { id: 'agent_fixture', name: 'Fixture', server_url: 'http://localhost:4096', config: { coding_agent: 'pi', api_keys: { openai: PRODUCTION_API_KEY_SET_MARKER } }, is_default: false, created_at: '2026-10-14', updated_at: '2026-10-14' }
+  f.results.set('agent:update', row); f.results.set('agent:getAll', [row]); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const config = { api_keys: { openai: 'synthetic-input', anthropic: '', cursor: PRODUCTION_API_KEY_SET_MARKER } }
+  expect(await f.host.api.agents.update(row.id, { config })).toEqual(row)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'agent:update', payload: { id: row.id, data: { config } }, engineEpoch: 'engine-1' })
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.agents.update(row.id, { config: { api_keys: { foreign: 'value' } } } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.results.set('agent:getAll', [{ ...row, config: { api_keys: { openai: 'synthetic-private-stored-value' } } }])
+  await expect(f.host.api.agents.getAll()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })

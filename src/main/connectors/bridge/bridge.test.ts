@@ -573,7 +573,8 @@ describe('plugin shutdown', () => {
       held.resolve([])
       await retry
       expect(onSynced).toHaveBeenCalledOnce()
-      expect(recorded).toHaveBeenCalledWith(sourceId)
+      expect(onSynced.mock.calls[0][1].errors.length).toBeGreaterThan(0)
+      expect(recorded).not.toHaveBeenCalled()
     } finally {
       held.resolve([])
       await plugin.close()

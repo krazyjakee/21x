@@ -7,6 +7,7 @@ import {
 } from '../platform/secret-storage'
 import { TASK_ROLE_TASK, isHiddenUserTaskRole, type TaskRole } from '../../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
+import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../../shared/task-source-credentials'
 import type {
   AgentConfigRecord, AgentRecord, AgentRow,
   FileAttachmentRecord,
@@ -115,6 +116,45 @@ export function decryptSettingValue(value: string): string {
   if (ciphertext.toString('base64') !== encoded) throw new CredentialSettingFormatError()
   try { return storage.decryptString(ciphertext) }
   catch { throw new CredentialSettingFormatError() }
+}
+
+/** Authenticated profiles encrypt these string fields without changing their
+ * in-memory DTOs. Electron keeps its existing stored representation. Reserved
+ * envelopes require the original provider; they never become plaintext keys. */
+const RECORD_CREDENTIAL_PREFIX = '21x-record-credential:v1:'
+export function encryptRecordCredential(value: string): string {
+  if (getSecretStorage().formatId !== AUTHENTICATED_SECRET_STORAGE_FORMAT) return value
+  return value === '' ? '' : RECORD_CREDENTIAL_PREFIX + encryptSettingValue(value)
+}
+export function decryptRecordCredential(value: string): string {
+  if (!value.startsWith('21x-record-credential:')) return value
+  if (!value.startsWith(RECORD_CREDENTIAL_PREFIX) || getSecretStorage().formatId !== AUTHENTICATED_SECRET_STORAGE_FORMAT)
+    throw new CredentialSettingFormatError()
+  const envelope = value.slice(RECORD_CREDENTIAL_PREFIX.length)
+  if (!envelope.startsWith(AUTHENTICATED_SETTING_PREFIX)) throw new CredentialSettingFormatError()
+  return decryptSettingValue(envelope)
+}
+export function mapRecordCredentials<T extends Record<string, string | undefined>>(values: T, encode: boolean, previous?: T): T {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === undefined ? undefined :
+    (encode ? previous?.[key]?.startsWith(RECORD_CREDENTIAL_PREFIX) && decryptRecordCredential(previous[key]!) === value
+      ? previous[key] : encryptRecordCredential(value) : decryptRecordCredential(value))])) as T
+}
+export function serializeAgentConfig(config: AgentConfigRecord, previous?: AgentConfigRecord): string {
+  return JSON.stringify({ ...config, ...(config.api_keys === undefined ? {} : { api_keys: mapRecordCredentials(config.api_keys, true, previous?.api_keys) }) })
+}
+export function serializeMcpOAuthMetadata(metadata: McpOAuthRegistration | Record<string, never>, previous?: McpOAuthRegistration | Record<string, never>): string {
+  return JSON.stringify({ ...metadata, ...('client_secret' in metadata && typeof metadata.client_secret === 'string'
+    ? mapRecordCredentials({ client_secret: metadata.client_secret }, true,
+      previous && typeof previous.client_secret === 'string' ? { client_secret: previous.client_secret } : undefined) : {}) })
+}
+export function mapTaskSourceCredentials(config: Record<string, unknown>, encode: boolean, previous?: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...config }
+  for (const key of TASK_SOURCE_STORED_CREDENTIAL_FIELDS) {
+    if (typeof config[key] !== 'string') continue
+    const old = previous && typeof previous[key] === 'string' ? { [key]: previous[key] as string } : undefined
+    Object.assign(result, mapRecordCredentials({ [key]: config[key] as string }, encode, old))
+  }
+  return result
 }
 
 export const UPDATABLE_COLUMNS = new Set([
@@ -230,7 +270,7 @@ export function deserializeTaskSource(row: TaskSourceRow): TaskSourceRecord {
   try {
     return {
       ...row,
-      config: JSON.parse(row.config || '{}') as Record<string, unknown>,
+      config: mapTaskSourceCredentials(JSON.parse(row.config || '{}') as Record<string, unknown>, false),
       list_tool_args: JSON.parse(row.list_tool_args) as Record<string, unknown>,
       update_tool_args: JSON.parse(row.update_tool_args) as Record<string, unknown>,
       enabled: row.enabled === 1,
@@ -239,11 +279,7 @@ export function deserializeTaskSource(row: TaskSourceRow): TaskSourceRecord {
   } catch (err) {
     console.error('[Database] Failed to deserialize task source:', {
       id: row.id,
-      name: row.name,
-      config: row.config,
-      list_tool_args: row.list_tool_args,
-      update_tool_args: row.update_tool_args,
-      error: err instanceof Error ? err.message : String(err)
+      code: 'TASK_SOURCE_RECORD_INVALID'
     })
     throw err
   }
@@ -256,18 +292,23 @@ export function deserializeMcpServer(row: McpServerRow): McpServerRecord {
     type: (row.type as 'local' | 'remote') || 'local',
     args: JSON.parse(row.args) as string[],
     url: row.url ?? '',
-    headers: JSON.parse(row.headers || '{}') as Record<string, string>,
-    environment: JSON.parse(row.environment || '{}') as Record<string, string>,
+    headers: mapRecordCredentials(JSON.parse(row.headers || '{}') as Record<string, string>, false),
+    environment: mapRecordCredentials(JSON.parse(row.environment || '{}') as Record<string, string>, false),
     tools: JSON.parse(row.tools || '[]') as McpServerToolRecord[],
-    oauth_metadata: JSON.parse(row.oauth_metadata || '{}') as McpOAuthRegistration | Record<string, never>,
+    oauth_metadata: (() => {
+      const metadata = JSON.parse(row.oauth_metadata || '{}') as McpOAuthRegistration | Record<string, never>
+      if ('client_secret' in metadata && typeof metadata.client_secret === 'string') metadata.client_secret = decryptRecordCredential(metadata.client_secret)
+      return metadata
+    })(),
     source
   }
 }
 
 export function deserializeAgent(row: AgentRow): AgentRecord {
+  const config = JSON.parse(row.config) as AgentConfigRecord
   return {
     ...row,
-    config: JSON.parse(row.config) as AgentConfigRecord,
+    config: { ...config, ...(config.api_keys === undefined ? {} : { api_keys: mapRecordCredentials(config.api_keys, false) }) },
     is_default: row.is_default === 1
   }
 }

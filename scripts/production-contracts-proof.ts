@@ -8,6 +8,8 @@ import { PRODUCTION_AGENT_CODECS } from '../src/shared/production-agent-codecs'
 import { COMMANDER_COMMAND_CODECS } from '../src/shared/commander-desktop-codecs'
 import { PRODUCTION_SETTINGS_CODECS, PRODUCTION_SETTINGS_KEYS, PRODUCTION_ENV_KEYS } from '../src/shared/production-settings-codecs'
 import { TERMINAL_COMMAND_CODECS } from '../src/shared/terminal-desktop-codecs'
+import { MCP_CODECS } from '../src/shared/mcp-codecs'
+import { TASK_SOURCE_CODECS } from '../src/shared/task-source-codecs'
 import type { JsonValue } from '../src/shared/service-protocol'
 
 // Preserve the production binding's override order; older diagnostic task,
@@ -15,7 +17,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 let deepOutput: JsonValue = 'fixture leaf'
@@ -58,11 +60,21 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'secrets:getAll': [], 'secrets:create': [{ name: 'Fixture metadata', description: 'Not a live credential', env_var_name: 'FIXTURE_PROOF_VALUE', value: 'synthetic-fixture-value' }],
   'secrets:update': ['secret_fixture', { description: 'Updated fixture metadata' }], 'secrets:delete': ['secret_fixture'], 'env:get': ['OPENAI_API_KEY'],
   'terminal:create': ['terminal:fixture', 80, 24, '/trusted-fixture/workspace'], 'terminal:write': ['terminal:fixture', '\u001b[31m\u0000'],
-  'terminal:resize': ['terminal:fixture', 120, 32], 'terminal:kill': ['terminal:fixture', 42], 'terminal:getCwd': ['terminal:fixture', 42], 'terminal:getBuffer': ['terminal:fixture', 500]
+  'terminal:resize': ['terminal:fixture', 120, 32], 'terminal:kill': ['terminal:fixture', 42], 'terminal:getCwd': ['terminal:fixture', 42], 'terminal:getBuffer': ['terminal:fixture', 500],
+  'mcp:getAll': [], 'mcp:create': [{ name: 'Fixture MCP', type: 'local', command: 'fixture-mcp', args: ['--fixture'], headers: { Authorization: 'synthetic-fixture-value' }, environment: { FIXTURE_VALUE: 'synthetic-fixture-value' } }],
+  'mcp:update': ['mcp.fixture:one', { name: 'Updated fixture MCP', type: 'remote', url: 'https://mcp.example.test/api' }],
+  'mcp:delete': ['mcp.fixture:one'], 'mcp:testConnection': [{ id: 'mcp.fixture:one', name: 'Fixture MCP', type: 'remote', url: 'https://mcp.example.test/api' }],
+  'mcp:startOAuthFlow': ['mcp.fixture:one'], 'mcp:getOAuthStatus': ['mcp.fixture:one'], 'mcp:revokeOAuthToken': ['mcp.fixture:one'],
+  'mcp:probeForAuth': ['https://mcp.example.test/api'], 'mcp:submitManualClientId': ['mcp.fixture:one', 'fixture-client-id'],
+  'taskSource:getAll': [project], 'taskSource:create': [{ name: 'Fixture issues', plugin_id: 'github-issues', mcp_server_id: null, project_id: project, config: { owner: 'fixture', repo: 'codec-proof', state: 'open', labels: 'proof' } }],
+  'taskSource:update': ['source_fixture', { name: 'Updated fixture source', enabled: false }], 'taskSource:delete': ['source_fixture'],
+  'taskSource:sync': ['source_fixture'], 'taskSource:exportUpdate': [task, { title: 'Fixture title', description: 'Multiline\nfixture context', status: 'ready_for_review', priority: 'urgent', assignee: 'Fixture User', due_date: null, labels: ['proof'], complete_at_source: false }],
+  'taskSource:getUsers': ['source_fixture'], 'taskSource:reassign': [task, ['external:user-one', 'external:user-two'], 'Fixture Users']
 }
 
 type Variant = { operation: string; case: string; args: unknown[] }
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  ...['15', '0', '', '0.5'].map(poll_interval_minutes => ({ operation: 'taskSource:update', case: `stored-bridge-interval-${poll_interval_minutes || 'default'}`, args: ['source_fixture', { plugin_id: 'connector-bridge', config: { poll_interval_minutes } }] })),
   { operation: 'agentSession:getTranscriptPage', case: 'snapshot-watermark-limit', args: [task, { version: 1, mode: 'snapshot', after: 10, watermark: 100, limit: 64 }] },
   { operation: 'agentSession:getTranscriptPage', case: 'delta-watermark-limit', args: [task, { version: 1, mode: 'delta', after: 10, watermark: 100, limit: 1 }] },
   { operation: 'agentSession:getTranscriptPage', case: 'delta-empty-watermark', args: [task, { version: 1, mode: 'delta', after: 0, watermark: 0 }] },
@@ -94,6 +106,22 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'db:updateTask', case: 'large-output-json-array', args: [task, { output_fields: [{ id: 'output_fixture', name: 'Array JSON', type: 'json', value: Array.from({ length: 5000 }, (_, index) => index) }] }] },
   { operation: 'db:updateTask', case: 'depth-40-output-json', args: [task, { output_fields: [{ id: 'output_fixture', name: 'Deep JSON', type: 'json', value: deepOutput }] }] },
   { operation: 'agent:update', case: 'frame-bounded-large-config', args: [agent, { config: largeConfig }] },
+  { operation: 'agent:create', case: 'finite-api-key-write', args: [{ name: 'Fixture key owner', config: { coding_agent: 'pi', api_keys: { openai: 'synthetic-fixture-key', anthropic: '', cursor: '__21x_api_key_set__' } } }] },
+  { operation: 'agent:update', case: 'finite-api-key-boundary', args: [agent, { config: { api_keys: { openai: 'x'.repeat(16384) } } }] },
+  { operation: 'mcp:update', case: 'masked-credential-preservation', args: ['mcp.fixture:one', { headers: { Authorization: '__21x_mcp_secret_set__', 'X-Empty': '' }, environment: { FIXTURE_TOKEN: '__21x_mcp_secret_set__' } }] },
+  { operation: 'mcp:testConnection', case: 'local-probe-without-saved-id', args: [{ name: 'Fixture probe', command: 'fixture-mcp', args: ['--probe'] }] },
+  { operation: 'taskSource:getAll', case: 'all-authorized-projects', args: [] },
+  { operation: 'taskSource:getAll', case: 'empty-project-filter', args: [''] },
+  { operation: 'taskSource:create', case: 'linear-marker-config', args: [{ name: 'Fixture Linear', mcp_server_id: 'server_fixture', plugin_id: 'linear', config: { _setup_link: 'https://linear.example.test/setup', redirect_uri: 'twentyonex://oauth/callback', client_id: 'fixture-client', client_secret: '__21x_api_key_set__', scope: 'read', assignee_id: 'fixture-user' }, list_tool: '', list_tool_args: {}, update_tool: '', update_tool_args: {} }] },
+  { operation: 'taskSource:create', case: 'hubspot-config', args: [{ name: 'Fixture HubSpot', mcp_server_id: null, plugin_id: 'hubspot', config: { auth_type: 'private_app', _oauth_setup_link: 'https://hubspot.example.test/setup', client_id: 'fixture-client', pipeline_id: 'fixture-pipeline', owner_id: 'fixture-owner', client_secret: '__21x_api_key_set__', access_token: '__21x_api_key_set__' } }] },
+  { operation: 'taskSource:create', case: 'forgejo-config', args: [{ name: 'Fixture Forgejo', mcp_server_id: null, plugin_id: 'forgejo-issues', config: { login: 'fixture', owner: 'fixture', repo: 'proof', state: 'all', assignee: 'fixture-user', labels: '' } }] },
+  { operation: 'taskSource:create', case: 'notion-filter-config', args: [{ name: 'Fixture Notion', mcp_server_id: null, plugin_id: 'notion', config: { data_source_id: 'external:data-source', filters: [{ property: 'Status', type: 'select', values: ['Open'] }], next_statuses: ['In progress', 'Done'], completion_status: 'Done', api_token: '__21x_api_key_set__' } }] },
+  { operation: 'taskSource:create', case: 'youtrack-multiselect-config', args: [{ name: 'Fixture YouTrack', mcp_server_id: null, plugin_id: 'youtrack', config: { server_url: 'https://youtrack.example.test', project: 'PROOF', assignee: ['fixture-user'], state: ['Open'], priority: ['Major'], issue_type: ['Task'], custom_query: '', api_token: '__21x_api_key_set__' } }] },
+  { operation: 'taskSource:create', case: 'connector-fractional-poll-config', args: [{ name: 'Fixture connector', mcp_server_id: null, plugin_id: 'connector-bridge', config: { piece_name: '@activepieces/piece-trello', connector_instance_id: 'connector_fixture', props: { board_id: 'external-board', filter_query: '' }, poll_interval_minutes: 0.5 } }] },
+  { operation: 'taskSource:update', case: 'config-without-plugin', args: ['source_fixture', { config: { api_token: '__21x_api_key_set__', next_statuses: 'Done' } }] },
+  { operation: 'taskSource:update', case: 'finite-source-credential-write', args: ['source_fixture', { plugin_id: 'notion', config: { api_token: 'synthetic\nfixture-credential' } }] },
+  { operation: 'taskSource:update', case: 'finite-source-credential-boundary', args: ['source_fixture', { config: { api_token: 'x'.repeat(16384) } }] },
+  { operation: 'taskSource:reassign', case: 'clear-assignees', args: [task, [], ''] },
   { operation: 'chat:start', case: 'tool-history', args: [{ messages: [{ role: 'user', content: 'Fixture request' }, { role: 'assistant', content: '', toolCalls: [{ id: 'call_fixture', name: 'fixture_tool', input: { projectId: project } }] }, { role: 'tool', toolCallId: 'call_fixture', name: 'fixture_tool', content: 'Fixture result', isError: false }], maxToolCalls: 32 }] },
   ...PRODUCTION_SETTINGS_KEYS.map(key => ({ operation: 'settings:get', case: `setting-${key}`, args: [key] })),
   ...PRODUCTION_ENV_KEYS.map(key => ({ operation: 'env:get', case: `marker-${key}`, args: [key] })),
@@ -103,7 +131,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 86 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 104 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

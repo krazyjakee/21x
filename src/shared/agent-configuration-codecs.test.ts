@@ -3,15 +3,21 @@ import { AGENT_API_KEY_SET_MARKER, AGENT_CONFIGURATION_CODECS as codecs, AGENT_C
 
 const agent = { id: 'agent-one', name: 'Agent', server_url: 'http://localhost:4096', config: { coding_agent: 'codex', api_keys: { openai: 'private-value', anthropic: '' }, concurrency_cap: 2 }, is_default: false, created_at: 'created', updated_at: 'updated' }
 describe('agent configuration public codecs', () => {
-  it('masks saved keys while retaining vendor shape and rejects credential writes even when masked', () => {
+  it('masks result keys and strictly bounds the finite credential input', () => {
     const encoded = codecs['agent:getAll'].encodeResult([agent])
     expect(encoded).toMatchObject({ defined: true, value: [{ config: { api_keys: { openai: AGENT_API_KEY_SET_MARKER } } }] })
     expect(JSON.stringify(encoded)).not.toContain('private-value')
     expect(codecs['agent:getAll'].validateWireResult(encoded)).toBe(true)
     expect(codecs['agent:getAll'].validateResult([agent])).toBe(false)
     for (const value of ['new-key', AGENT_API_KEY_SET_MARKER]) {
-      expect(() => codecs['agent:update'].encodeArguments(['agent-one', { config: { api_keys: { openai: value } } }])).toThrow('arguments')
+      const args = ['agent-one', { config: { api_keys: { openai: value } } }] as Parameters<typeof codecs['agent:update']['encodeArguments']>[0]
+      expect(codecs['agent:update'].decodeArguments(codecs['agent:update'].encodeArguments(args))).toEqual(args)
     }
+    for (const value of ['bad\nkey', 'bad\0key', '界'.repeat(5462)])
+      expect(() => codecs['agent:update'].encodeArguments(['agent-one', { config: { api_keys: { openai: value } } }])).toThrow('arguments')
+    expect(() => codecs['agent:update'].decodeArguments({ id: 'agent-one', data: { config: { api_keys: { unknown: 'key' } } } })).toThrow('arguments')
+    expect(() => codecs['agent:update'].decodeArguments({ id: 'agent-one', data: { config: { api_keys: { openai: 42 } } } })).toThrow('arguments')
+    expect(codecs['agent:update'].encodeArguments(['agent-one', { config: { api_keys: { openai: '', anthropic: undefined, cursor: undefined } } }])).toEqual({ id: 'agent-one', data: { config: { api_keys: { openai: '' } } } })
   })
   it('retains missing update and explicit null backend result semantics', () => {
     expect(codecs['agent:update'].encodeResult(undefined)).toEqual({ defined: false })
