@@ -35,6 +35,8 @@ export interface TomlMcpDocument {
 
 class TomlValueParser {
   private pos = 0
+  private depth = 0
+  private tokens = 0
   constructor(private readonly text: string) {}
 
   parseAll(): TomlValue {
@@ -59,11 +61,11 @@ class TomlValueParser {
   }
 
   private parseValue(): TomlValue {
+    if (++this.tokens > 32768 || this.depth > 64) throw new Error('TOML value exceeds its structural limit')
     const ch = this.text[this.pos]
     if (ch === '"') return this.parseBasicString()
     if (ch === "'") return this.parseLiteralString()
-    if (ch === '[') return this.parseArray()
-    if (ch === '{') return this.parseInlineTable()
+    if (ch === '[' || ch === '{') { this.depth++; try { return ch === '[' ? this.parseArray() : this.parseInlineTable() } finally { this.depth-- } }
     if (this.text.startsWith('true', this.pos)) { this.pos += 4; return true }
     if (this.text.startsWith('false', this.pos)) { this.pos += 5; return false }
     const numMatch = /^[+-]?(?:0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|(?:\d[\d_]*)(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?|inf|nan)/.exec(this.text.slice(this.pos))
@@ -221,6 +223,7 @@ function unescapeBasic(body: string): string {
 }
 
 function setDotted(target: { [key: string]: TomlValue }, path: string[], value: TomlValue): void {
+  if (path.some(key => ['__proto__', 'constructor', 'prototype'].includes(key))) throw new Error('Unsupported TOML key')
   let cursor = target
   for (let i = 0; i < path.length - 1; i++) {
     const existing = cursor[path[i]]
@@ -363,10 +366,11 @@ function isBalanced(text: string): boolean {
  * inline tables under a plain `[mcp_servers]` header (`foo = { command = "x" }`)
  * are read too; on write they are moved into their own table.
  */
-export function parseTomlMcpDocument(content: string): TomlMcpDocument {
+export function parseTomlMcpDocument(content: string, preserveTrivia = false): TomlMcpDocument {
   const lines = content.split('\n')
   const servers = new Map<string, TomlMcpServerTable>()
   const spans = new Map<string, Array<[number, number]>>()
+  const seen = new Set<string>()
 
   const ensureServer = (name: string): TomlMcpServerTable => {
     let server = servers.get(name)
@@ -407,6 +411,7 @@ export function parseTomlMcpDocument(content: string): TomlMcpDocument {
         if (key.length >= 1 && value && typeof value === 'object' && !Array.isArray(value)) {
           const [name, ...rest] = key
           const server = ensureServer(name)
+          if (preserveTrivia) for (const source of body.slice(j, j + consumed)) { const comment = trailingComment(source); if (comment) server.rawLines.push({ path: rest, line: comment }) }
           if (rest.length === 0) Object.assign(server.values, value)
           else setDotted(server.values, rest, value)
           addSpan(name, start + 1 + j, start + 1 + j + consumed)
@@ -424,24 +429,42 @@ export function parseTomlMcpDocument(content: string): TomlMcpDocument {
     const name = header[1]
     const subPath = header.slice(2)
     const server = ensureServer(name)
+    if (preserveTrivia) { const comment = trailingComment(lines[start]); if (comment) server.rawLines.push({ path: subPath, line: comment }) }
     addSpan(name, start, end)
 
     for (let j = 0; j < body.length; j++) {
       const line = body[j]
       const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
+      if (!trimmed || trimmed.startsWith('#')) { if (preserveTrivia) server.rawLines.push({ path: subPath, line }); continue }
       const parsed = readAssignment(body, j)
       if (!parsed) {
         server.rawLines.push({ path: subPath, line })
         continue
       }
+      const key = JSON.stringify([name, ...subPath, ...parsed.key])
+      if (preserveTrivia && seen.has(key)) throw new Error('Ambiguous duplicate MCP TOML key')
+      seen.add(key)
       setDotted(server.values, [...subPath, ...parsed.key], parsed.value)
+      if (preserveTrivia) for (const source of body.slice(j, j + parsed.consumed)) { const comment = trailingComment(source); if (comment) server.rawLines.push({ path: subPath, line: comment }) }
       j += parsed.consumed - 1
     }
     i = end
   }
 
   return { lines, servers, spans }
+}
+
+function trailingComment(line: string): string | null {
+  let basic = false, literal = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (basic) { if (ch === '\\') i++; else if (ch === '"') basic = false }
+    else if (literal) { if (ch === "'") literal = false }
+    else if (ch === '"') basic = true
+    else if (ch === "'") literal = true
+    else if (ch === '#') return line.slice(i)
+  }
+  return null
 }
 
 /** Parses the assignment starting at `body[index]`, joining continuation lines for multi-line values. */

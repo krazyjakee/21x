@@ -56,7 +56,7 @@ function fixture(workspaceFiles = false) {
     canAccessProject: check, canAccessAgent: check, canAccessSession: check, canAccessGlobalCommander: check,
     canManageGlobalConfiguration: check, canQueryBackend: check, canCreateProject: check, canEditSettings: check,
     canAccessGlobalSkills: check, canChangeSkillScope: check, canReorderProjects: check, canReadSetting: check, canWriteSetting: check, canAccessSecret: check,
-    canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessTerminal: check, canAccessMcpServer: check,
+    canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessTerminal: check, canAccessMcpServer: check, canAccessCli: check,
     canUseTransport: check, canUseEnvironmentName: check, canAccessConnector: check, canUseSourcePlugin: check,
     canCreateInstance: check, canUsePiece: check, canBorrowSourceCredentials: check, canResolveUnsavedConfig: check,
     canManageMobile: check, canAccessMobileSession: check,
@@ -91,7 +91,7 @@ function fixture(workspaceFiles = false) {
   hosts.push(host)
   const service = new ProductionService(sealProductionServiceHost({ descriptor: launch, authority,
     caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' }, unbridgedOwnerEvent: vi.fn(),
-    boundaries: { createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider },
+    boundaries: { cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider },
     constructBootstrap: callbacks => ({ profileId: launch.profileId, paths: launch.paths,
       credentials: { mode: 'create', store: { create: async (id, key) => { keys.set(id, Buffer.from(key)) }, load: async id => Buffer.from(keys.get(id)!) } },
       connectors: { kind: 'disabled', reason: 'Controlled fixture has no packaged connectors' }, managedTaskMcp: { disabled: true },

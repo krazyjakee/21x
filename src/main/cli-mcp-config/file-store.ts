@@ -111,7 +111,23 @@ export function stripJsonComments(input: string): { text: string; hadComments: b
     i++
   }
   // Trailing commas before a closing bracket/brace.
-  const text = out.replace(/,(\s*[}\]])/g, '$1')
+  let text = '', quoted = false
+  for (let position = 0; position < out.length; position++) {
+    const char = out[position]
+    if (quoted) {
+      text += char
+      if (char === '\\') { if (position + 1 < out.length) text += out[++position] }
+      else if (char === '"') quoted = false
+      continue
+    }
+    if (char === '"') quoted = true
+    if (char === ',') {
+      let next = position + 1
+      while (next < out.length && /\s/.test(out[next])) next++
+      if (out[next] === '}' || out[next] === ']') continue
+    }
+    text += char
+  }
   return { text, hadComments: hadComments || text !== out }
 }
 
@@ -120,6 +136,8 @@ export interface JsonDocument {
   indent: string | number
   trailingNewline: boolean
   hadComments: boolean
+  originalJson?: string
+  originalText?: string
 }
 
 /** Parses a JSON/JSONC object document, keeping enough to write it back in the same style. */
@@ -128,7 +146,7 @@ export function parseJsonDocument(content: string): JsonDocument {
     return { value: {}, indent: 2, trailingNewline: true, hadComments: false }
   }
   const { text, hadComments } = stripJsonComments(content)
-  const parsed = JSON.parse(text)
+  const parsed = JSON.parse(text.trimStart())
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Expected a JSON object at the top level')
   }
@@ -136,7 +154,8 @@ export function parseJsonDocument(content: string): JsonDocument {
     value: parsed as Record<string, unknown>,
     indent: detectJsonIndent(content),
     trailingNewline: content.endsWith('\n'),
-    hadComments
+    hadComments,
+    originalJson: JSON.stringify(parsed), originalText: content
   }
 }
 

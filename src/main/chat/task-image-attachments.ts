@@ -17,6 +17,13 @@ export interface TaskImageStore {
   getAttachmentsDir(taskId: string): string
   updateTask(taskId: string, data: { attachments: FileAttachmentRecord[] }): unknown
 }
+/** Trusted portable file owner. These callbacks are never IPC payloads. */
+export interface TaskImageFileControls {
+  beforeEffect(): void
+  write(taskId: string, attachment: FileAttachmentRecord, bytes: Buffer): Promise<unknown>
+  rollback(receipt: unknown): Promise<void>
+  commit(receipt: unknown): void
+}
 
 /** `name.png`, or `name-2.png` … when the task already has an attachment called that. */
 export function uniqueAttachmentName(name: string, taken: Set<string>): string {
@@ -38,13 +45,14 @@ const pendingSaves = new WeakMap<TaskImageStore, Map<string, Promise<unknown>>>(
 export async function saveImagesAsTaskAttachments(
   db: TaskImageStore,
   taskId: string,
-  rawImages: unknown
+  rawImages: unknown,
+  controls?: TaskImageFileControls
 ): Promise<{ saved: FileAttachmentRecord[]; attachments: FileAttachmentRecord[] }> {
   const images = validateChatImageInputs(rawImages)
   const pending = pendingSaves.get(db) ?? new Map<string, Promise<unknown>>()
   pendingSaves.set(db, pending)
   const previous = pending.get(taskId) ?? Promise.resolve()
-  const operation = previous.catch(() => {}).then(() => saveValidatedImages(db, taskId, images))
+  const operation = previous.catch(() => {}).then(() => { controls?.beforeEffect(); return saveValidatedImages(db, taskId, images, controls) })
   pending.set(taskId, operation)
   try {
     return await operation
@@ -56,9 +64,11 @@ export async function saveImagesAsTaskAttachments(
 async function saveValidatedImages(
   db: TaskImageStore,
   taskId: string,
-  rawImages: unknown
+  rawImages: unknown,
+  controls?: TaskImageFileControls
 ): Promise<{ saved: FileAttachmentRecord[]; attachments: FileAttachmentRecord[] }> {
   if (typeof taskId !== 'string' || !taskId) throw new Error('taskId is required')
+  controls?.beforeEffect()
   const task = db.getTask(taskId)
   if (!task) throw new Error(`Task not found: ${taskId}`)
   const images = validateChatImageInputs(rawImages)
@@ -66,25 +76,43 @@ async function saveValidatedImages(
   const taken = new Set(existing.map((attachment) => attachment.filename))
   const saved: FileAttachmentRecord[] = []
   const written: string[] = []
+  const receipts: unknown[] = []
+  let committed = false
   try {
-    const dir = db.getAttachmentsDir(taskId)
+    const dir = controls ? undefined : db.getAttachmentsDir(taskId)
     for (const image of images) {
       const id = randomUUID()
       const filename = uniqueAttachmentName(image.name, taken)
       taken.add(filename)
-      const path = join(dir, `${id}-${filename}`)
-      // Include the in-progress file: a failed write can still have created it.
-      written.push(path)
-      await writeFile(path, Buffer.from(image.data, 'base64'), { mode: 0o600, flag: 'wx' })
-      saved.push({ id, filename, size: image.size, mime_type: image.mimeType, added_at: new Date().toISOString() })
+      const attachment = { id, filename, size: image.size, mime_type: image.mimeType, added_at: new Date().toISOString() }
+      controls?.beforeEffect()
+      if (controls) receipts.push(await controls.write(taskId, attachment, Buffer.from(image.data, 'base64')))
+      else {
+        const path = join(dir!, `${id}-${filename}`)
+        // Include the in-progress file: a failed write can still have created it.
+        written.push(path)
+        await writeFile(path, Buffer.from(image.data, 'base64'), { mode: 0o600, flag: 'wx' })
+      }
+      saved.push(attachment)
     }
     // Re-read: a regular attachment may have landed while the files were written.
+    controls?.beforeEffect()
     const current = db.getTask(taskId)
     if (!current) throw new Error('Task was removed')
     const attachments = [...(current.attachments ?? []), ...saved]
-    if (saved.length > 0) db.updateTask(taskId, { attachments })
+    if (saved.length > 0) { controls?.beforeEffect(); db.updateTask(taskId, { attachments }) }
+    committed = true
+    for (const receipt of receipts) controls?.commit(receipt)
     return { saved, attachments }
-  } catch {
+  } catch (error) {
+    if (controls) {
+      if (!committed) {
+        const outcomes = await Promise.allSettled(receipts.map(receipt => controls.rollback(receipt)))
+        const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+        if (failure) throw failure.reason
+      }
+      throw error
+    }
     await Promise.all(written.map((path) => rm(path, { force: true }).catch(() => {})))
     // Filesystem and database errors can expose local paths; keep them out of IPC.
     throw new Error("Couldn't save the images. Try again.")

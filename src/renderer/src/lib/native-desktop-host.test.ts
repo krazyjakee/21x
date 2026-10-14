@@ -8,6 +8,7 @@ import { MCP_SECRET_SET_MARKER } from '@shared/mcp-codecs'
 import { CONNECTOR_WRITE_ERROR, CONNECTOR_STORAGE_REMEDIATION, CONNECTOR_SYNC_ERROR } from '@shared/connector-codecs'
 import type { RolloverPolicy, SessionContextSnapshot } from '@shared/session-context'
 import { CLAUDE_PLUGIN_LOCAL_SOURCE } from '@shared/claude-plugin-codecs'
+import { CLI_IDS, CLI_LABELS, CLI_CAPABILITIES, MASKED_SECRET, type CliMcpSnapshot } from '@shared/cli-mcp-config'
 import { desktopApi, installDesktopHost } from './desktop-api'
 import type { ServiceEvent } from '@shared/service-protocol'
 const hosts: NativeDesktopHost[] = [], releases: Array<() => void> = []
@@ -44,6 +45,67 @@ function claudeInstalledRow() {
 function mobileInfo() {
   return { enabled: false, lanAccess: false, sessionIdleDays: 7, url: 'http://127.0.0.1:3210/pair?code=init.fixture:one', port: 3210, lanUrl: null, tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null }
 }
+function cliSnapshot(): CliMcpSnapshot {
+  return {
+    clis: CLI_IDS.map(cli => ({ cli, label: CLI_LABELS[cli], files: [{ path: `/approved/${cli}/config`, exists: true, role: 'servers' }], fingerprint: 'a'.repeat(64), capabilities: CLI_CAPABILITIES[cli], notes: [] })),
+    servers: [{ cli: 'codex', name: 'docs', definition: { transport: 'http', url: 'https://docs.example/mcp', headers: { Authorization: MASKED_SECRET } }, enabled: true, disabledTools: [], maskedKeys: { env: [], headers: ['Authorization'] }, issues: [] }],
+    loadedAt: '2026-10-14T00:00:00Z'
+  }
+}
+const attachmentId = '00000000-0000-4000-8000-000000000001'
+const attachmentImage = { name: '../unsafe\0.png', mimeType: 'image/png' as const, data: 'iVBORw0KGgoAAAAA' }
+const attachmentMetadata = { id: attachmentId, filename: 'unsafe.png', size: 12, mime_type: 'image/png', added_at: '2026-10-14T00:00:00Z' }
+const cliReference = { cli: 'codex' as const, name: 'docs', expectedFingerprint: 'a'.repeat(64) }
+const cliUpsert = { targets: ['codex' as const], name: 'docs', definition: { transport: 'http' as const, url: 'https://docs.example/mcp' } }
+const cliProbeReply = { status: 'connected' as const, checkedAt: '2026-10-14T00:00:00Z', toolCount: 1, tools: [{ name: 'search', description: 'Find project documentation.' }] }
+const cliMutations: Array<{ operation: string; invoke(host: NativeDesktopHost): Promise<unknown>; result: unknown }> = [
+  { operation: 'cliMcp:upsert', invoke: host => host.api.cliMcp.upsert(cliUpsert), result: { results: [{ cli: 'codex', ok: true, warnings: [] }], snapshot: cliSnapshot() } },
+  { operation: 'cliMcp:remove', invoke: host => host.api.cliMcp.remove(cliReference), result: { results: [{ cli: 'codex', ok: true, warnings: [] }], snapshot: cliSnapshot() } },
+  { operation: 'cliMcp:setEnabled', invoke: host => host.api.cliMcp.setEnabled({ ...cliReference, enabled: false }), result: { results: [{ cli: 'codex', ok: true, warnings: [] }], snapshot: cliSnapshot() } },
+  { operation: 'cliMcp:setToolEnabled', invoke: host => host.api.cliMcp.setToolEnabled({ ...cliReference, tool: 'search', enabled: false }), result: { results: [{ cli: 'codex', ok: true, warnings: [] }], snapshot: cliSnapshot() } },
+  { operation: 'cliMcp:probe', invoke: host => host.api.cliMcp.probe(cliReference), result: cliProbeReply },
+  { operation: 'chatImages:saveToTask', invoke: host => host.api.chatImages.saveToTask('task_fixture', [attachmentImage]), result: [attachmentMetadata] },
+  { operation: 'attachments:remove', invoke: host => host.api.attachments.remove('task_fixture', attachmentId), result: undefined }
+]
+it('hydrates CLI snapshots while fencing file mutations, probes and task image effects', async () => {
+  const f = fixture(); await f.host.reconnect()
+  const snapshot = cliSnapshot(); f.results.set('cliMcp:snapshot', snapshot)
+  for (const row of cliMutations) f.results.set(row.operation, row.result)
+  const gate = deferred<void>(); f.host.setRehydrator(() => gate.promise); const recovery = f.host.rehydrate()
+  expect(await f.host.api.cliMcp.snapshot()).toEqual(snapshot)
+  const before = f.invoke.mock.calls.length
+  for (const row of cliMutations) await expect(row.invoke(f.host)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  gate.resolve(); await recovery
+  for (const row of cliMutations) expect(await row.invoke(f.host)).toEqual(row.result)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'cliMcp:probe', payload: { ref: cliReference }, engineEpoch: 'engine-1' })
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'chatImages:saveToTask', payload: { taskId: 'task_fixture', images: [attachmentImage] }, engineEpoch: 'engine-1' })
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'attachments:remove', payload: { taskId: 'task_fixture', attachmentId }, engineEpoch: 'engine-1' })
+})
+it.each(cliMutations)('never replays accepted $operation after reconnect or exports its late result', async row => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const pending = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === row.operation ? pending.promise : original(command, args))
+  const mutation = row.invoke(f.host), rejected = expect(mutation).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); await f.host.reconnect(); await rejected
+  pending.resolve({ engineEpoch: 'engine-1', result: row.result === undefined ? { defined: false } : { defined: true, value: row.result } }); await Promise.resolve()
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === row.operation)).toHaveLength(1)
+})
+it('rejects malformed CLI and attachment results rather than forwarding private or ambiguous data', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  for (const snapshot of [{ ...cliSnapshot(), credentials: 'private' }, { ...cliSnapshot(), clis: [cliSnapshot().clis[0], cliSnapshot().clis[0], cliSnapshot().clis[2]] }]) {
+    f.results.set('cliMcp:snapshot', snapshot); await expect(f.host.api.cliMcp.snapshot()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  }
+  f.results.set('cliMcp:probe', { ...cliProbeReply, tools: [{ name: 'search', description: 'Public', environment: { PRIVATE: 'private' } }] })
+  await expect(f.host.api.cliMcp.probe(cliReference)).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.set('cliMcp:upsert', { results: [{ cli: 'codex', ok: true, warnings: [], config: 'private' }], snapshot: cliSnapshot() })
+  await expect(f.host.api.cliMcp.upsert(cliUpsert)).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  for (const records of [[{ ...attachmentMetadata, path: '/private/file' }], [{ ...attachmentMetadata, filename: '../unsafe.png' }], [{ ...attachmentMetadata, id: '00000000-0000-0000-8000-000000000001' }], [attachmentMetadata, attachmentMetadata], null]) {
+    f.results.set('chatImages:saveToTask', records); await expect(f.host.api.chatImages.saveToTask('task_fixture', [attachmentImage])).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  }
+  f.results.set('attachments:remove', true)
+  await expect(f.host.api.attachments.remove('task_fixture', attachmentId)).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
 it('routes project reads during hydration and fences real group, pin and pause writes without replay', async () => {
   const f = fixture(); await f.host.reconnect()
   f.results.set('taskGroups:list', [])
@@ -211,7 +273,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 215 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 223 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -220,7 +282,7 @@ it('binds the 215 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(215)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(223)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -307,7 +369,7 @@ it('binds finite MCP CRUD, scoped OAuth and probes to their actual wire schemas'
   await expect(f.host.api.mcpServers.create({ name: 'Fixture', source: 'plugin' } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   await expect(f.host.api.mcpServers.probeForAuth('https://user:pass@mcp.example.test')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   expect(f.invoke.mock.calls.length).toBe(before)
-  expect(f.host.supports('cliMcp.upsert')).toBe(false)
+  expect(f.host.supports('cliMcp.upsert')).toBe(true)
 })
 
 it('binds project source metadata, sync, export and users while fencing mutations during recovery', async () => {

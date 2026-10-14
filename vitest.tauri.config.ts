@@ -21,6 +21,9 @@ const resolveOptions = { alias: [
   { find: '@', replacement: join(root, 'src/renderer/src') }
 ] }
 const mainFiles = [
+  'src/main/agent-manager-cli-configuration.test.ts',
+  'src/main/task-attachment-file-owner.test.ts', 'src/main/chat/task-image-attachments.test.ts',
+  'src/main/cli-mcp-config/*.test.ts',
   'src/service/**/*.test.ts', 'src/main/agent-manager-configuration.test.ts',
   'src/main/agent-manager-scoped-approval.test.ts', 'src/main/adapters/shared/json-rpc-acknowledgement.test.ts',
   'src/main/platform/native-application-key-store.test.ts',

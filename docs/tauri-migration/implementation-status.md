@@ -1,10 +1,31 @@
 # Migration implementation status
 
-Updated 2026-10-13 with four-target installed diagnostic acceptance, the scheduler service matrix at `251685c`, hosted Verify at `aeb8951`, and local plugin manager ownership validation. **The shipping application still uses Electron, and G0–G5 remain open.** The [overall migration tracker, #193](https://github.com/krazyjakee/21x/issues/193), links nineteen open remaining-work issues (#205–#223); bounded diagnostic issue #204 is closed and #202 retains complete contract ownership. Completed scoped issues and successful fixtures establish the behavior they exercised; they do not establish a finished migration or authorize live cutover.
+Updated 2026-10-14 with four-target installed diagnostic acceptance, the scheduler service matrix at `251685c`, hosted Verify at `aeb8951`, and local plugin manager ownership validation. **The shipping application still uses Electron, and G0–G5 remain open.** The [overall migration tracker, #193](https://github.com/krazyjakee/21x/issues/193), links nineteen open remaining-work issues (#205–#223); bounded diagnostic issue #204 is closed and #202 retains complete contract ownership. Completed scoped issues and successful fixtures establish the behavior they exercised; they do not establish a finished migration or authorize live cutover.
 
 This page describes current work. Earlier batch notes and reports retain their original source revisions and limits; their former platform failures or unimplemented-agent statements are historical.
 
 ## Latest continuation
+
+The CLI/attachment continuation binds six CLI MCP configuration controls and
+two task image/file controls to the captured production owners. Constructor
+paths and environment references stay outside RPC. Bounded descriptor reads,
+verified publication receipts and exact configuration fingerprints preserve
+external edits; comments and unrelated settings survive supported edits. CLI
+mutations borrow the real manager's admission/configuration lease and refuse
+while the affected runtime is in use. Probe authority is rechecked before each
+protocol effect; actual child and HTTP cleanup remains owned through closure.
+
+Task image publication uses the captured attachment root and ordinary task
+metadata/event flow. Failed writes roll back only proven owned bytes. Accepted
+metadata and files survive later caller loss. Exact descriptor-close failures
+retain the profile until cleanup succeeds. The finite surface now has 221 service
+commands, two direct native commands and 28 events. Installed native UI, arbitrary
+file pickers/viewers, live providers, all-platform and complete migration
+acceptance remain open. Hosted voice remains deferred by user decision. See
+[CLI bindings](cli-mcp-bindings.md), [attachment bindings](task-attachment-bindings.md)
+and the [verification record](evidence/issue-closing-20261014-cli-attachments.json).
+
+The preceding heartbeat/worktree continuation retains its tested revision:
 
 The heartbeat/worktree continuation binds eight heartbeat controls and six
 worktree/cleanup controls to the captured production owners. Heartbeat files use

@@ -1,3 +1,5 @@
+import { CLI_MCP_CODECS } from '../src/shared/cli-mcp-codecs'
+import { TASK_ATTACHMENT_CODECS } from '../src/shared/task-attachment-codecs'
 import { HEARTBEAT_CODECS } from '../src/shared/heartbeat-codecs'
 import { WORKTREE_RUNTIME_CODECS } from '../src/shared/worktree-runtime-codecs'
 import { TASK_GROUP_CODECS } from '../src/shared/task-group-codecs'
@@ -31,7 +33,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -41,6 +43,10 @@ const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }
 
 /** One explicit valid API argument tuple for every finite production command. */
 export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
+  'cliMcp:snapshot': [], 'cliMcp:upsert': [{ name: 'fixture', targets: ['codex'], definition: { transport: 'stdio', command: 'fixture-mcp', args: [], env: {} } }],
+  'cliMcp:remove': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64) }], 'cliMcp:setEnabled': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64), enabled: true }],
+  'cliMcp:setToolEnabled': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64), tool: 'fixture_tool', enabled: true }], 'cliMcp:probe': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64) }],
+  'chatImages:saveToTask': [task, [image]], 'attachments:remove': [task, '00000000-0000-4000-8000-000000000001'],
   'heartbeat:enable': [task, 30], 'heartbeat:disable': [task], 'heartbeat:runNow': [task], 'heartbeat:getLogs': [task, 20], 'heartbeat:getStatus': [task], 'heartbeat:updateInterval': [task, 60], 'heartbeat:readFile': [task], 'heartbeat:writeFile': [task, '# Local heartbeat\nCheck the task status.'],
   'worktree:setup': [task, [{ fullName: 'fixture/repo', defaultBranch: 'main' }], 'fixture', 'github'], 'worktree:changes': [task, [{ fullName: 'fixture/repo' }]], 'worktree:files': [task, [{ fullName: 'fixture/repo' }]], 'worktree:readFile': [task, 'fixture/repo', 'README.md'], 'worktree:cleanup': [task, [{ fullName: 'fixture/repo' }], 'fixture', true], 'workspace:runCleanupNow': [],
   'taskGroups:list': [project, true], 'taskGroups:get': ['group_fixture'], 'taskGroups:history': [task],
@@ -121,7 +127,25 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
 }
 
 type Variant = { operation: string; case: string; args: unknown[] }
+function boundedPng(byteLength: number, name = 'fixture.png') {
+  const bytes = Buffer.alloc(byteLength)
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  return { name, mimeType: 'image/png', data: bytes.toString('base64') }
+}
+const cliBoundaryArgs = Array.from({ length: 128 }, (_, i) => i === 127 ? '🌱'.repeat(2048) : `argument_${i}`)
+const cliBoundaryEnvironment = Object.fromEntries(Array.from({ length: 128 }, (_, i) => [`FIXTURE_${i}`, i === 127 ? '🌱'.repeat(8192) : '${FIXTURE_SOURCE}']))
+const cliBoundaryHeaders = Object.fromEntries(Array.from({ length: 128 }, (_, i) => [`X-Fixture-${i}`, i === 127 ? '🌱'.repeat(8192) : 'fixture']))
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  { operation: 'cliMcp:upsert', case: 'cli-ecma-nonwhitespace-name-command', args: [{ name: '\u0085', targets: ['claude-code'], definition: { transport: 'stdio', command: '\u0085' } }] },
+  { operation: 'cliMcp:upsert', case: 'cli-utf16-args-env-boundaries', args: [{ name: '🌱'.repeat(64), previousName: 'previous', targets: ['claude-code', 'opencode', 'codex'], expectedFingerprints: { 'claude-code': 'a'.repeat(64), opencode: 'b'.repeat(64), codex: 'c'.repeat(64) }, definition: { transport: 'stdio', command: '🌱'.repeat(2048), args: cliBoundaryArgs, env: cliBoundaryEnvironment } }] },
+  { operation: 'cliMcp:upsert', case: 'cli-http-url-header-boundaries', args: [{ name: 'fixture', targets: ['opencode'], definition: { transport: 'http', url: 'https://fixture.example/' + 'x'.repeat(4096 - 'https://fixture.example/'.length), headers: cliBoundaryHeaders } }] },
+  { operation: 'cliMcp:upsert', case: 'cli-sse-empty-records', args: [{ name: 'fixture', targets: ['claude-code'], definition: { transport: 'sse', url: 'https://fixture.example/mcp', env: {}, headers: {} } }] },
+  { operation: 'cliMcp:setToolEnabled', case: 'cli-utf16-tool-boundary', args: [{ cli: 'opencode', name: '🌱'.repeat(64), tool: '🌱'.repeat(64), expectedFingerprint: 'a'.repeat(64), enabled: false }] },
+  { operation: 'chatImages:saveToTask', case: 'attachment-single-512k-plain-base64', args: [task, [boundedPng(512 * 1024)]] },
+  { operation: 'chatImages:saveToTask', case: 'attachment-five-total-512k', args: [task, [104857, 104857, 104857, 104857, 104860].map((size, i) => boundedPng(size, `fixture-${i}.png`))] },
+  { operation: 'chatImages:saveToTask', case: 'attachment-raw-name-sanitization', args: [task, ['../unsafe\0.png', 'CON.png', 'folder\\fixture.png', 'report\u202E.png', ''].map(name => ({ ...image, name }))] },
+  { operation: 'chatImages:saveToTask', case: 'attachment-empty-images', args: [task, []] },
+  { operation: 'attachments:remove', case: 'attachment-uppercase-version-five-uuid', args: ['t'.repeat(128), 'ABCDEFAB-CDEF-5ABC-ABCD-ABCDEFABCDEF'] },
   { operation: 'taskGroups:create', case: 'unicode-trimmed-title', args: [{ title: '\uFEFF🌱\uFEFF', task_ids: [task, 'task_second'] }] },
   { operation: 'taskGroups:review', case: 'max-escaped-feedback', args: [{ group_id: 'group_fixture', action: 'send_back', message: '\u0001'.repeat(4000), task_ids: [task] }] },
   { operation: 'heartbeat:enable', case: 'default-heartbeat-interval', args: [task] },
@@ -248,7 +272,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 213 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 221 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

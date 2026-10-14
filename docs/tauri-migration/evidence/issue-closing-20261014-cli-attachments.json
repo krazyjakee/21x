@@ -1,0 +1,405 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    213,
+    217
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "a3e29efa26488a1cc1deac062f49bfea3b6aaedd",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/cli-mcp-bindings.md": "bb172bc41877dd7977169ce7b3bffb0c47d3bac67a76ab4f15f26851884c211b",
+      "docs/tauri-migration/event-forwarding-review.json": "d8151d8ba85cd427dba92ecf432e487d40dd8a94deefe11ca2bb5e0120ea32f5",
+      "docs/tauri-migration/implementation-status.md": "54dfe5520744b112a0f9bf1df01b8376d5e159f579ec5aba15e6092da53123be",
+      "docs/tauri-migration/inventory.json": "fc7246e811814b45e9d5935e9894a26b3fb6a920eacc30a09d628857cdcb9ff9",
+      "docs/tauri-migration/operations.json": "fb90c2de6ee1d00734c79239afaeba617f690651f202cf8fadcbcbb2acbcc572",
+      "docs/tauri-migration/task-attachment-bindings.md": "dfcc26c60a08e0765c732677fa2be28fc3ae934cebcd2350a70ae5d573f58927",
+      "scripts/production-contracts-proof.test.ts": "206a52acb9db89352fc949f145b7eeb4bb523dcf1de10903e7f76edc08008ecd",
+      "scripts/production-contracts-proof.ts": "7e5fee4ec47fba73537420d460adda8c4a648b544740e7dfa34a8bf68d47704d",
+      "src-tauri/engine/src/production_cli_attachments.rs": "19aa3a977058cab931f00ea036dd986164d9c158f06f1882aeb74ad14cf6e0cf",
+      "src-tauri/engine/src/production_contracts.rs": "896cfc461cc86610ef65a61e284ef601e048e7d5840d728a264ccb9339736b9b",
+      "src/main/agent-manager-cli-configuration.test.ts": "317db306b09239d847cbe51ba7627f08cc367b83086fd85eb0fcbd57c7864a08",
+      "src/main/agent-manager-core.ts": "81962e5f00912af4dd1d759bd51867cd09a0eae51c71d455e690f21ebfa3ed28",
+      "src/main/agent-manager/mcp-probe-service.test.ts": "97e266baae18c20bd76e377ae15e390957963da63cd7d4b5fe3744fd99ec6c0b",
+      "src/main/agent-manager/mcp-probe-service.ts": "b1da451f5b9491a4e9772163973a5e5cc36cb387fadf6439e14b5e33888d48d0",
+      "src/main/chat/task-image-attachments.test.ts": "dbaacfa577e20f0308fa9f604e8ba0304598349193c63ae7ba03a4fb16417819",
+      "src/main/chat/task-image-attachments.ts": "27fe3ac8258793cbb5463c2a9dc4303bcf8d52b44ae41c8615296ba5df228522",
+      "src/main/cli-mcp-config/claude-code.ts": "72f353e1d9414297b976a49b348c6579d9e70bb03e5376ab94ad9477f37aa03e",
+      "src/main/cli-mcp-config/codex.ts": "110553ec881957b13973ebb17f82dd8bf0cb36165b585aa98d21f7f499e74710",
+      "src/main/cli-mcp-config/core.ts": "998a26f84a9497e52ebab1314b7bba9b35ee3e077aa84e69bbecc3bed7398fb8",
+      "src/main/cli-mcp-config/file-store.ts": "e4764b57af6e4f8f03155c8bbfff5a2180df9460f784f981f54ac89d58e11667",
+      "src/main/cli-mcp-config/index.ts": "70c3236e317a3e0ae5d750f1603c2801faa8616ffc104a1dae7b27a9674af41e",
+      "src/main/cli-mcp-config/jsonc-edit.ts": "52a4591d8ac79d226e32780cd0093db9958f5982fe6c03789a6b759b242e171f",
+      "src/main/cli-mcp-config/opencode.ts": "8e43c88c8ad2885c3cb7baddb377dc4e1dfe66ef05fec26aac6d78826b89056b",
+      "src/main/cli-mcp-config/portable-file-owner.test.ts": "f8059ec42276117cdfa706fbecf7fac482b3b2287b1befccc2cafd4b47d8c49d",
+      "src/main/cli-mcp-config/portable-file-owner.ts": "2643ad25f4430242f1e895912f4a3db28a48c2b6213a0ac541385705c8eb84aa",
+      "src/main/cli-mcp-config/secrets.ts": "e56bf6e1b84dfa2447a88d8787e3ed48d59f78f5c51caa3f13ab1ed368cb473e",
+      "src/main/cli-mcp-config/store.ts": "6c8b3731c4a96081f7493a582a12efe0d8421555bf633ede8bad8c5dc77c5b9b",
+      "src/main/cli-mcp-config/toml-mcp.ts": "bb58fc10ded021ebd0c5d7b517668bfa15d5f2dd8b7f8ef44a292aa11dae0e3d",
+      "src/main/oauth/local-oauth-server.test.ts": "1b5d666d421dc3671784ade9deb87453ba8d223f3bb50ebcf80ec9c53d1502fe",
+      "src/main/oauth/local-oauth-server.ts": "826d16578922c7ca661f4a194e91e34296ba66f474d8d7bbb478d5b0d77376d8",
+      "src/main/task-attachment-file-owner.test.ts": "f46c5f27025366caac1b5b39a645afa556d6952b118f7a89108239bec0028a8d",
+      "src/main/task-attachment-file-owner.ts": "8eb647cda17d8bcb8726310e64c56d4aede9f90baeb2fea53ce679547c2c5a84",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "cc854d162949be022b66a9fc00e692603955e5fe7ebddbf55dd552f5fbf44ad3",
+      "src/renderer/src/lib/native-desktop-host.ts": "84307733c73f8cb9f7584644032151deb4ab09116843920eac30c9ace1fb833b",
+      "src/service/cli-mcp-backend.test.ts": "4b2537ef44dc21835617e7a35359de4cf1eb296681a6606e5dff207278c2547b",
+      "src/service/cli-mcp-backend.ts": "042d5d9f0a2a786de554a967bc4ecaa51becb243cca373b283c8235c8955e6f8",
+      "src/service/production-desktop-bindings.test.ts": "96cb5837ce11621bf526df677b39c5e99e1997e1d9cc596dd7545d225a35a4f2",
+      "src/service/production-desktop-bindings.ts": "8d40d257a2ff7019cfac487f64ad4dec0dec38c52e2edb66e8bdfeb352c9c0d8",
+      "src/service/production-owner.test.ts": "38cd408e896741537f7a063724b4578a5a6085d2e64079581810d1f7b5e185f8",
+      "src/service/production-owner.ts": "089be96bb42f63eb2977c557207a15c6d797f72510a88f7fda8ffb360c35d7de",
+      "src/service/production-service.test.ts": "e1cc1c171aa514c9a1107222dd9d4266631791fef7f742517528950f77437808",
+      "src/service/production-service.ts": "64282018bb803881dc00102ac38b24aea628e2b77a9dadb040ed0deaa42010db",
+      "src/service/task-attachment-backend.test.ts": "8bb637141fb1db7c5d12bdab9a4871367911c77daf29401fc11eac81c008426a",
+      "src/service/task-attachment-backend.ts": "719167b17a75ece4b841d39311ffd903af0a2bc96a816cbd4a46f3edf0320ce2",
+      "src/service/task-lifecycle-backend.ts": "77e4c8f7a4c22a1fbd57c9215ffa551eb6daff0cee9e55b6ee7352984378e371",
+      "src/shared/cli-mcp-codecs.test.ts": "6c3e1f9322e491d261d6566fe37b30028c2d0fdd2186b589c9899ee9827cd62b",
+      "src/shared/cli-mcp-codecs.ts": "28214cfc6e48430c0094e8c5548b3a57a4af69767cc876b4290e8a9114f1a754",
+      "src/shared/desktop-event-forwarding.ts": "ffcafbc2f74cc8c6441093596c90ddf22ab41c78ee5946cac11a23ab046f47d5",
+      "src/shared/task-attachment-codecs.test.ts": "1fb19888b87e15ac9044a88b398056158c031fd45946258dbb9b0f87689ebee0",
+      "src/shared/task-attachment-codecs.ts": "ae04243aab324f5dcc227bff368074c2399d6032bd9e6dff71ebd810e1b3d47b",
+      "vitest.tauri.config.ts": "082618a5791f9744c1079799ae29b3337359dfad585755aa49c8c40d1c203755"
+    },
+    "frozenRuntimeAndTestFiles": 45,
+    "frozenSourcesUnchangedThroughFinalSuites": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Six retained CLI MCP controls and two task image/file controls through captured actual production owners; Electron remains the shipping application.",
+  "bindings": {
+    "finiteServiceCommandContracts": 221,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 223,
+    "events": 28,
+    "newCommands": 8,
+    "newEvents": 0
+  },
+  "implemented": [
+    "Captured host-neutral CLI manager, actual three CLI stores and physical file/probe owners are registered for shutdown and raw drain before profile release. Constructor-selected paths/environment and separate current CLI/read/write/probe/reference grants remain outside RPC.",
+    "CLI files have bounded actual no-follow FD reads, aggregate preflight, fresh physical/byte receipts, exclusive verified/fsynced publication, retained failed-close receipts, and conservative preservation of unknown bytes. Syntax edits retain comments/unknown sections and exact saved credential strings.",
+    "Actual AgentManager configuration/admission leases refuse affected live/cached sessions and queued/admitted/raw starts. Raw filesystem and real SDK refresh acknowledgements remain owned. Potentially published rejection leaves a failed-backend fence until explicit successful retry; cached adapters lacking a real refresh capability refuse before effects.",
+    "Probe grants, original environment source names, resolved actual transport input and configuration bindings are checked before each effect. Supplied stale MCP fingerprints refuse before contact. Portable probes use literal command vectors, no implicit task token or redirects, and join real child/HTTP cleanup without replay.",
+    "Portable snapshots mask configured credential values and private URL parameters; unsupported URL edits refuse before publication. Prototype names normalized by upsert are refused before borrowing the mutation lease. Missing markers cannot silently erase saved values.",
+    "Task images use captured attachment-root receipts and ordinary task metadata/event flow. Atomic no-replace publication follows actual fsync/FD close. Precommit failure rolls back only provably owned bytes; accepted DB/files survive late caller loss. Pending handles/retirement receipts fence ordinary task deletion and keep the protected profile until explicit cleanup retry.",
+    "Eight exact commands traverse actual singleton dispatch, explicit native facade and complementary Rust DTOs. The golden corpus contains 446 actual TypeScript requests; native validation also consumes eight actual singleton responses, including a loopback MCP handshake and physical persisted image bytes.",
+    "Local OAuth tests select finite isolated real listener ports and exercise cancelled startup, failed bind and acknowledged close without assuming port 3000 is free. The production default remains ports 3000 through 3010."
+  ],
+  "artifact": {
+    "buildIdentity": "production-739a0ea59746a277f668935714838678",
+    "resourceManifestSha256": "3ad4191cc68acc202033387960ea3e1f769dc163daaab7ebb470e29cdec267b1",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "cargoLockUnchanged": true,
+    "packageAndRuntimePinsUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 221,
+    "requests": 446,
+    "sha256": "d02227241e0ee227d69f27ce0455aacb62b33b28cbcc1e11a30d3190f9155795"
+  },
+  "actualDomainResponses": {
+    "operations": 8,
+    "responses": 8,
+    "sha256": "eb2549927b6c8aca22ab17da22a61634ed5912f6c41ae66d786143d3f3fe91fc",
+    "scope": "Actual protected-profile singleton, SQLite/file/domain owners and loopback MCP, with controlled adapter/native boundaries; no live model or installed production WebView claim"
+  },
+  "tests": {
+    "app": {
+      "passed": 6859,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "4658f2c5aa569a43ed193511e6aa568a1c9d4b15f923e0640bd6e9db2c2013f6",
+      "logSha256": "f46645fcd6722fc64c79a2c22b646da48be9f10bcecba7bcb79de5ff156fcbcc"
+    },
+    "standalone": {
+      "passed": 3401,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "cf5e40f1bb23f020dcfecf390a07e1a4a343a3cb3c6303100a084f15053085a6",
+      "logSha256": "c32d2a89c91e28e4971712775a97162578eaf6ce193b95eb751db7ef51764a30"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "af244ec2a599679c6412caf4cd5ecf4d61adea228b6f8652ca9a5bca9640e29e",
+      "logSha256": "8afe24ed2c33760d03b14536bd2aba7ecb71db9240bfb8ccdabeb88dfd8ffdd8"
+    },
+    "focused": {
+      "passed": 270,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "40a57919896b3a2f4093a801ca2bf9358bce417d1460c2f5b690554789602c56",
+      "logSha256": "5a8198c5703136108284e83ac94570a48223617f1bde513ffba1797489f3570b"
+    },
+    "cli-final": {
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "7188113655ef4e478b7fbb8c463390c0ea18df57bfe7d871e5492a93d44d5dd1",
+      "logSha256": "2eb87f9d927f67b07f9c17caae944172c54b02a1f81681adbcc88b99d4044a10"
+    },
+    "corpus-export": {
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "66ef924a486a31343f21ee968412ccf7107839a8f29ff89544a25d7da49b7df0",
+      "logSha256": "b2dc629d79562c62d0702f6ded55d7be18185745d4188752ef2ce6805c3f5518"
+    }
+  },
+  "filteredResultExportTests": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 26,
+    "success": true,
+    "reportSha256": "e576ae4f9ea4adaaafe6aaa99d83874edb1f2098a61b687c15f7bf39666f760e",
+    "logSha256": "270ee51527311399490e6b803c82d7df5e819c6d8834f4fb78fb13edbc25c201"
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 30.231,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.358,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 41.384,
+      "logSha256": "62195f558b27f281f605247381662c68e587809090b1ddbe195c7cffb821d18b"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 11.458,
+      "logSha256": "c33ced3adfba86f2bffcc3d7720f050a826a894664b9b4af0bcf4f93ad8586cb"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.749,
+      "logSha256": "1d2f04db9936908249ccfe59866aebd6a78b2e05e04a3ad0026c913e91e23a94"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.499,
+      "logSha256": "557152f3ff1a2ee9bc7e791607d5c89b4b0e1ef0a514009d01f3878a29a20f8e"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.478,
+      "logSha256": "7f1697efb4713f6b4234d7fba921ecdcfe63b16d42b0a83b38c6cb68743ed1b0"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.359,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.581,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.332,
+      "logSha256": "79a7dafd17002799e4dae993b93f63392e6dd6968173174c6baa81f6cea6b521",
+      "passed": 47,
+      "failed": 0,
+      "ignored": 4
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.12,
+      "logSha256": "99090049e1f398968164131a25f9949a7e98d6889628ef7622a9a1ad1c1a44ad"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.714,
+      "logSha256": "41d7e74f5a9f9d5cb8bbe910150112f876362fd64ed6560cc7ff73c98de3f746",
+      "passed": 6,
+      "failed": 0
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch21-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.403,
+      "logSha256": "461c91e9fbe79ac8dc3c868e38d2b5beba12b66b08335c96b48546f804983fe0"
+    },
+    "native-results": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_CLI_ATTACHMENTS_RESULTS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch21-domain-results.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::cli_attachments::tests::actual_owned_results_have_finite_outer_dtos",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.219,
+      "logSha256": "5539e45c0ec68bbdaa052b891c5e3762de89d1ec7c4e38c08bad2a9a95160680"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.068,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "validationCorrections": [
+    "Never-returning helper narrowing and verified generic DTO associations were corrected without loosening payload checks. Private diagnostics used during publication diagnosis were removed.",
+    "Shutdown retirement uses the still-owned profile lock after new work is fenced. Production deletion consults the actual attachment owner before accepted task namespace removal.",
+    "JSON syntax edits order coincident insertions correctly; trailing comma stripping never alters comma/brace text inside quoted values. Credential roundtrip tests assert the exact retained values.",
+    "Environment reference discovery uses an independent regex rather than inheriting shared lastIndex; alias source grants are exercised before resolution and contact.",
+    "Stale logical MCP fingerprints and normalized reserved upsert names reject before their respective effects. Unknown-section edits preceding admission retain the existing logical-fingerprint semantics while file publication still checks exact fresh bytes.",
+    "Full-suite fixed-port failures were corrected with real isolated listener fixtures and captured finite host port selection; production redirect defaults remain unchanged.",
+    "Checks run while final source edits were being integrated were retained for diagnosis and excluded from final acceptance. The final full app/standalone, private Node and focused suites ran against the unchanged frozen sources."
+  ],
+  "remainingAcceptance": [
+    "#202/#208/#213/#217 full retained/native parity, installed/historical cutover, live providers and source effects, signed production deployment and Electron retirement remain open.",
+    "Cached Claude Code/Codex adapters have no reviewed refresh acknowledgement; mutation is unavailable in that state. Cold adapters can apply before startup. Windows cmd/bat probes remain unavailable.",
+    "Node pathname receipts do not establish atomic cross-platform containment against same-user namespace races. Accepted effects cannot be retracted after caller loss. Arbitrary pickers, viewers, clipboard paths and large/chunked attachment workflows remain outside this bounded surface.",
+    "No actual model session, production installed WebView, live external OAuth/source write, macOS/Windows installed run or performance acceptance is claimed. Hosted voice #92 remains deferred by the user.",
+    "Thirty app optional cases, three standalone installed-recognition cases and four engine platform/runtime cases remain explicitly skipped/ignored."
+  ]
+}

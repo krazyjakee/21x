@@ -1,3 +1,7 @@
+import { open } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import { CLI_MCP_CODECS } from '../shared/cli-mcp-codecs'
+import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
 import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { VOICE_MANAGEMENT_CODECS } from '../shared/voice-management-codecs'
@@ -48,7 +52,7 @@ afterEach(async () => {
   for (const root of new Set(completed.map(value => value.root))) rmSync(root, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
-async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false, voice = false, gitProviderProcess?: ProductionOwnerExternalBoundaries['gitProviderProcess'], fileNative?: Pick<ProductionOwnerBootstrap['native'], 'openPath' | 'showItemInFolder'>, workspaceFiles?: ProductionOwnerExternalBoundaries['workspaceFiles']) {
+async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false, voice = false, gitProviderProcess?: ProductionOwnerExternalBoundaries['gitProviderProcess'], fileNative?: Pick<ProductionOwnerBootstrap['native'], 'openPath' | 'showItemInFolder'>, workspaceFiles?: ProductionOwnerExternalBoundaries['workspaceFiles'], configuredMcp = false, taskAttachmentFiles?: ProductionOwnerExternalBoundaries['taskAttachmentFiles']) {
   const { ProductionOwner } = ownerModule
   const { ProductionDesktopBindings } = bindingModule
   const root = mkdtempSync(join(tmpdir(), '21x-production-bindings-')), resourceRoot = join(root, 'resources')
@@ -66,12 +70,13 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
     ...(mobile ? { mobile: { distRoot: mobileRoot, port: 0 } } : {}),
     ...(voice ? { voice: { node: process.env.TAURI_NODE_RUNTIME ?? process.execPath, recognitionWorker: join(resourceRoot, 'voice-worker.cjs'), speechWorker: join(resourceRoot, 'voice-tts-worker.cjs') } } : {}),
     managedTaskMcp: { disabled: true }, connectors: connectors ? { kind: 'enabled' } : { kind: 'disabled', reason: 'No connector resources in this fixture.' },
-    native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: 'disabled' },
+    native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: configuredMcp ? 'enabled' : 'disabled' },
       prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }), ...fileNative }
   }
-  const boundaries = { createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end' as const, stopReason: 'end_turn' } } }),
+  const boundaries = { cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end' as const, stopReason: 'end_turn' } } }),
     ...(gitProviderProcess ? { gitProviderProcess } : {}),
     ...(workspaceFiles ? { workspaceFiles } : {}),
+    ...(taskAttachmentFiles ? { taskAttachmentFiles } : {}),
     ...(connectors ? { connectorTransport: () => { throw new Error('Credential form fixture must not create a worker') } } : {}) }
   const owner = new ProductionOwner(bootstrap, boundaries)
   owned.push({ owner, root }); const services = await owner.start(), epoch = owner.snapshot().epoch
@@ -86,6 +91,7 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
     canCreateProject: trusted, canEditSettings: trusted, canAccessGlobalSkills: trusted, canChangeSkillScope: trusted, canReorderProjects: trusted,
     canReadSetting: (_key, value) => trusted(value), canWriteSetting: (_key, value) => trusted(value),
     canAccessSecret: (_id, value) => trusted(value), canCreateSecret: trusted,
+    canAccessCli: (_cli, value) => trusted(value),
     canAccessMcpServer: (_id, value) => trusted(value),
     canUseTransport: (_input, value) => trusted(value), canUseEnvironmentName: (_name, value) => trusted(value),
     canAccessConnector: (_id, value) => trusted(value), canUseSourcePlugin: (_id, value) => trusted(value),
@@ -107,6 +113,88 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('exports actual CLI MCP and attachment responses through captured singleton owners', async () => {
+    const f = await fixture(undefined, false, false, false, undefined, undefined, undefined, true)
+    const cliLease = f.owner.getCliMcpBindingLease(), attachmentLease = f.owner.getTaskAttachmentBindingLease()
+    expect(cliLease.manager).toBe(f.services.cliMcp); expect(attachmentLease.files).toBe(f.services.taskAttachmentFiles)
+    cliLease.assertCliMcpOwners(cliLease); attachmentLease.assertTaskAttachmentOwners(attachmentLease)
+    const methods: string[] = []
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      const message = JSON.parse(Buffer.concat(chunks).toString()) as { method: string; id?: number }
+      methods.push(message.method)
+      response.setHeader('Content-Type', 'application/json')
+      if (message.id === undefined) { response.statusCode = 202; response.end(); return }
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: message.method === 'tools/list' ? { tools: [{ name: 'fixture_tool', description: 'Real loopback fixture' }] } : { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'fixture', version: '1' } } }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing loopback listener')
+      const responses: Array<{ operation: string; wire: unknown }> = []
+      const invoke = async (operation: string, payload: Parameters<typeof f.backend.invoke>[1]) => {
+        const wire = await f.backend.invoke(operation, payload, f.caller, f.signal)
+        const codec = Object.hasOwn(CLI_MCP_CODECS, operation) ? CLI_MCP_CODECS[operation as keyof typeof CLI_MCP_CODECS] : TASK_ATTACHMENT_CODECS[operation as keyof typeof TASK_ATTACHMENT_CODECS]
+        expect(codec.validateWireResult(wire)).toBe(true)
+        responses.push({ operation, wire }); return (wire as { value?: unknown }).value
+      }
+      await invoke('cliMcp:snapshot', {})
+      const mutation = await invoke('cliMcp:upsert', { request: { name: 'fixture', targets: ['codex'], definition: { transport: 'http', url: `http://127.0.0.1:${address.port}/mcp` } } }) as { results: { ok: boolean }[] }
+      expect(mutation.results).toMatchObject([{ ok: true }])
+      const config = join(f.root, '.codex', 'config.toml')
+      expect(readFileSync(config, 'utf8')).toContain('fixture')
+      expect(await invoke('cliMcp:probe', { ref: { cli: 'codex', name: 'fixture' } })).toMatchObject({ status: 'connected', toolCount: 1 })
+      expect(methods).toEqual(['initialize', 'notifications/initialized', 'tools/list'])
+      await invoke('cliMcp:setEnabled', { ref: { cli: 'codex', name: 'fixture', enabled: false } })
+      await invoke('cliMcp:setToolEnabled', { ref: { cli: 'codex', name: 'fixture', tool: 'fixture_tool', enabled: false } })
+      await invoke('cliMcp:remove', { ref: { cli: 'codex', name: 'fixture' } })
+      expect(readFileSync(config, 'utf8')).not.toContain('[mcp_servers.fixture]')
+      const task = f.services.db.createTask({ title: 'Actual attachment publication' })!
+      const ordinaryEvents = vi.spyOn(f.bootstrap.native, 'emit')
+      const records = await invoke('chatImages:saveToTask', { taskId: task.id, images: [{ name: 'proof.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }] }) as Array<{ id: string; filename: string }>
+      expect(records).toHaveLength(1)
+      const saved = join(f.bootstrap.paths.attachmentRoot, task.id, `${records[0].id}-${records[0].filename}`)
+      expect(readFileSync(saved)).toEqual(Buffer.from('iVBORw0KGgoAAAAA', 'base64'))
+      expect(f.services.db.getTask(task.id)!.attachments).toMatchObject(records)
+      expect(ordinaryEvents).toHaveBeenCalledWith('task:updated', { taskId: task.id, updates: { attachments: records } })
+      await invoke('attachments:remove', { taskId: task.id, attachmentId: records[0].id })
+      expect(existsSync(saved)).toBe(false)
+      expect(new Set(responses.map(row => row.operation)).size).toBe(8)
+      const output = process.env.TWENTYONEX_CLI_ATTACHMENTS_RESULTS_OUT
+      if (output) writeFileSync(output, JSON.stringify({ version: 1, responses }))
+    } finally { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) }
+  })
+  it('refuses task deletion while the actual attachment writer owns a pending descriptor', async () => {
+    const { TaskAttachmentFileOwner } = await import('../main/task-attachment-file-owner')
+    const gate = deferred<void>(), entered = deferred<void>(); finishers.push(() => gate.resolve())
+    const f = await fixture(undefined, false, false, false, undefined, undefined, undefined, false, options => new TaskAttachmentFileOwner({ ...options, fs: { open: async (path, flags, mode) => {
+      const fd = await open(path, flags, mode)
+      return { stat: () => fd.stat({ bigint: true }), read: (b,o,l,p) => fd.read(b,o,l,p), write: async (b,o,l,p) => { entered.resolve(); await gate.promise; return fd.write(b,o,l,p) }, sync: () => fd.sync(), close: () => fd.close() }
+    } } }))
+    const task = f.services.db.createTask({ title: 'Do not delete the pending attachment namespace' })!
+    const saving = f.backend.invoke('chatImages:saveToTask', { taskId: task.id, images: [{ name: 'proof.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }] }, f.caller, f.signal)
+    await entered.promise
+    await expect(f.backend.invoke('db:deleteTask', { id: task.id }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(f.services.db.getTask(task.id)).toBeDefined()
+    gate.resolve(); const saved = await saving as { value: Array<{ id: string; filename: string }> }
+    expect(readFileSync(join(f.bootstrap.paths.attachmentRoot, task.id, `${saved.value[0].id}-${saved.value[0].filename}`))).toEqual(Buffer.from('iVBORw0KGgoAAAAA', 'base64'))
+    expect(await f.backend.invoke('db:deleteTask', { id: task.id }, f.caller, f.signal)).toEqual({ defined: true, value: true })
+    expect(f.services.db.getTask(task.id)).toBeUndefined()
+  })
+  it('checks current CLI grants and stale MCP fingerprints before production edits', async () => {
+    const f = await fixture()
+    await f.backend.invoke('cliMcp:upsert', { request: { name: 'fixture', targets: ['codex'], definition: { transport: 'stdio', command: 'fixture-mcp' } } }, f.caller, f.signal)
+    const path = join(f.root, '.codex', 'config.toml'), previous = readFileSync(path, 'utf8')
+    const snapshot = await f.backend.invoke('cliMcp:snapshot', {}, f.caller, f.signal) as { value: { clis: Array<{ cli: string; fingerprint: string }> } }
+    const expectedFingerprint = snapshot.value.clis.find(row => row.cli === 'codex')!.fingerprint
+    writeFileSync(path, '# Preserve external edit\n' + previous.replace('fixture-mcp', 'edited-mcp'))
+    const result = await f.backend.invoke('cliMcp:remove', { ref: { cli: 'codex', name: 'fixture', expectedFingerprint } }, f.caller, f.signal) as { value: { results: Array<{ ok: boolean; conflict: unknown }> } }
+    expect(result.value.results).toMatchObject([{ ok: false, conflict: expect.any(Object) }])
+    expect(readFileSync(path, 'utf8')).toContain('# Preserve external edit')
+    f.options.authority.canAccessCli = () => false
+    await expect(f.backend.invoke('cliMcp:remove', { ref: { cli: 'codex', name: 'fixture' } }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(readFileSync(path, 'utf8')).toContain('fixture')
+  })
+
   it('keeps a changed heartbeat file and refuses stale findings after the actual prompt was admitted', async () => {
     const f = await fixture(), db = f.services.db, task = db.createTask({ title: 'Update local checks while sending' })!, agent = db.getAgents()[0]
     db.updateTask(task.id, { agent_id: agent.id })
@@ -384,7 +472,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
 
   it('pairs against the actual mobile HTTP owner and sends a phone start through shared admission', async () => {
     const f = await fixture(undefined, false, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(183)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(191)
     const lease = f.owner.getMobileBindingLease()!
     expect(lease.deps.db).toBe(f.services.db); expect(lease.deps.agentManager).toBe(f.services.agents)
     expect(lease.deps.taskOwners?.automation).toBe(f.services.automation)
@@ -419,7 +507,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(180)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(188)
     const lease = f.owner.getConnectorBindingLease()!
     const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
     const id = (ensured as { value: { instanceId: string } }).value.instanceId
@@ -531,7 +619,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(173)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(181)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

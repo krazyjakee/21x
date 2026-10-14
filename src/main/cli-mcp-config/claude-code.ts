@@ -1,3 +1,4 @@
+import type { CliMcpFileOwner } from './portable-file-owner'
 /**
  * Claude Code global MCP config.
  *
@@ -17,7 +18,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import type { CliId, McpServerDefinition, McpTransport } from '../../shared/cli-mcp-config'
 import { claudeServerPrefix, claudeToolIds, normalizeMcpName } from '../mcp-tool-limits'
-import { parseJsonDocument, readFileSnapshot, serializeJsonDocument, type FileSnapshot, type JsonDocument } from './file-store'
+import { parseJsonDocument, type FileSnapshot, type JsonDocument } from './file-store'
 import { BaseCliMcpStore, type CliFileRole, type CliMcpMutation, type CliStateBundle, type LoadedServer, type MutationOutcome } from './store'
 import { validateDefinition } from './validate'
 
@@ -29,6 +30,7 @@ interface ClaudeState {
 }
 
 export interface ClaudeCodeStoreOptions {
+  files?: CliMcpFileOwner
   homeDir?: string
 }
 
@@ -56,10 +58,10 @@ export class ClaudeCodeMcpStore extends BaseCliMcpStore<ClaudeState> {
   private readonly settingsPath: string
 
   constructor(options: ClaudeCodeStoreOptions = {}) {
-    super()
+    super(options.files)
     const home = options.homeDir ?? homedir()
-    this.configPath = join(home, '.claude.json')
-    this.settingsPath = join(home, '.claude', 'settings.json')
+    this.configPath = options.files?.paths.claudeConfig ?? join(home, '.claude.json')
+    this.settingsPath = options.files?.paths.claudeSettings ?? join(home, '.claude', 'settings.json')
   }
 
   describeFiles(): CliFileRole[] {
@@ -70,12 +72,13 @@ export class ClaudeCodeMcpStore extends BaseCliMcpStore<ClaudeState> {
   }
 
   protected readFilesOnly(): FileSnapshot[] {
-    return [readFileSnapshot(this.configPath), readFileSnapshot(this.settingsPath)]
+    return [this.readSnapshot(this.configPath), this.readSnapshot(this.settingsPath)]
   }
 
   protected readState(): CliStateBundle<ClaudeState> {
     const files = this.readFilesOnly()
     const notes: string[] = []
+    this.parseJson(files[0].content); this.parseJson(files[1].content)
     const config = parseJsonDocument(files[0].content)
     const settings = parseJsonDocument(files[1].content)
     return { files, state: { config, settings, settingsExisted: files[1].exists }, notes }
@@ -158,9 +161,9 @@ export class ClaudeCodeMcpStore extends BaseCliMcpStore<ClaudeState> {
   }
 
   protected serialize(state: ClaudeState): Array<{ path: string; content: string }> {
-    const out = [{ path: this.configPath, content: serializeJsonDocument(state.config) }]
+    const out = [{ path: this.configPath, content: this.jsonText(state.config) }]
     if (state.settingsExisted || Object.keys(state.settings.value).length > 0) {
-      out.push({ path: this.settingsPath, content: serializeJsonDocument(state.settings) })
+      out.push({ path: this.settingsPath, content: this.jsonText(state.settings) })
     }
     return out
   }

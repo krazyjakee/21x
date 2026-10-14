@@ -11,6 +11,9 @@
  */
 
 import type { CliId, CliMcpApplyResult, McpServerDefinition } from '../../shared/cli-mcp-config'
+import type { CliMcpFileOwner } from './portable-file-owner'
+import { preserveJsonDocument, validatePortableJsonText } from './jsonc-edit'
+import { readFileSnapshot, serializeJsonDocument, type JsonDocument } from './file-store'
 import { combineFingerprints, hashContent, writeFileAtomic, type FileSnapshot } from './file-store'
 
 export type CliMcpMutation =
@@ -70,6 +73,12 @@ export interface CliMcpStore {
 }
 
 export abstract class BaseCliMcpStore<TState> implements CliMcpStore {
+  constructor(protected readonly fileOwner?: CliMcpFileOwner) {}
+  assertOwners(files: CliMcpFileOwner): void { if (files !== this.fileOwner) throw new Error('CLI_MCP_STORE_OWNER_LOST'); files.assertOwners(files.homeDir) }
+  protected readSnapshot(path: string): FileSnapshot { return this.fileOwner ? this.fileOwner.readSnapshot(path) : readFileSnapshot(path) }
+  protected parseJson(content: string): void { if (this.fileOwner) validatePortableJsonText(content) }
+  protected jsonText(doc: JsonDocument): string { return this.fileOwner ? preserveJsonDocument(doc, doc.originalText ?? '') : serializeJsonDocument(doc) }
+
   abstract readonly cli: CliId
 
   abstract describeFiles(): CliFileRole[]
@@ -98,7 +107,7 @@ export abstract class BaseCliMcpStore<TState> implements CliMcpStore {
         roles,
         fingerprint: combineFingerprints(files),
         servers: [],
-        error: error instanceof Error ? error.message : String(error),
+        error: this.fileOwner ? 'The CLI configuration could not be read.' : error instanceof Error ? error.message : String(error),
         notes: []
       }
     }
@@ -110,9 +119,10 @@ export abstract class BaseCliMcpStore<TState> implements CliMcpStore {
   ): CliMcpApplyResult {
     let bundle: CliStateBundle<TState>
     try {
+      this.fileOwner?.preflight()
       bundle = this.readState()
     } catch (error) {
-      return { cli: this.cli, ok: false, error: `Cannot read ${this.cli} config: ${error instanceof Error ? error.message : String(error)}`, warnings: [] }
+      return { cli: this.cli, ok: false, error: this.fileOwner ? 'The CLI configuration could not be read.' : `Cannot read ${this.cli} config: ${error instanceof Error ? error.message : String(error)}`, warnings: [] }
     }
 
     const fingerprint = this.fingerprintOf(bundle.state)
@@ -137,7 +147,13 @@ export abstract class BaseCliMcpStore<TState> implements CliMcpStore {
       servers: this.serversFrom(bundle.state),
       notes: bundle.notes
     }
-    const mutation = build(fresh)
+    let mutation: CliMcpMutation | { error: string }
+    try { mutation = build(fresh) }
+    catch (error) {
+      if (!this.fileOwner) throw error
+      this.fileOwner.current()
+      return { cli: this.cli, ok: false, error: 'The saved value cannot be safely retained for this change.', warnings: [] }
+    }
     if ('error' in mutation) return { cli: this.cli, ok: false, error: mutation.error, warnings: [] }
 
     try {
@@ -145,11 +161,15 @@ export abstract class BaseCliMcpStore<TState> implements CliMcpStore {
       const before = new Map(bundle.files.map((file) => [file.path, file.content]))
       for (const { path, content } of this.serialize(bundle.state)) {
         if (before.get(path) === content) continue
-        writeFileAtomic(path, content)
+        if (this.fileOwner) {
+          const original = bundle.files.find(file => file.path === path)
+          if (!original) throw new Error('CLI_MCP_FILE_INVALID')
+          this.fileOwner.writeAtomic(path, content, original)
+        } else writeFileAtomic(path, content)
       }
       return { cli: this.cli, ok: true, warnings: [...bundle.notes, ...outcome.warnings] }
     } catch (error) {
-      return { cli: this.cli, ok: false, error: error instanceof Error ? error.message : String(error), warnings: [] }
+      return { cli: this.cli, ok: false, error: this.fileOwner ? 'The CLI configuration change could not be published.' : error instanceof Error ? error.message : String(error), warnings: [] }
     }
   }
 

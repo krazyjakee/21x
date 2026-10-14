@@ -8,7 +8,7 @@ describe('LocalOAuthServer', () => {
   afterEach(async () => { await server?.close() })
 
   it('escapes the provider error text on the callback page', async () => {
-    server = new LocalOAuthServer()
+    server = new LocalOAuthServer({ ports: [0] })
     const redirectUri = await server.start()
     const callback = server.waitForCallback()
     callback.catch(() => {})
@@ -26,7 +26,7 @@ describe('LocalOAuthServer', () => {
   })
 
   it('resolves with the code and state from a successful callback', async () => {
-    server = new LocalOAuthServer()
+    server = new LocalOAuthServer({ ports: [0] })
     const redirectUri = await server.start()
     const callback = server.waitForCallback()
 
@@ -37,7 +37,7 @@ describe('LocalOAuthServer', () => {
   })
 
   it('rejects a pending callback and clears its deadline when stopped', async () => {
-    server = new LocalOAuthServer()
+    server = new LocalOAuthServer({ ports: [0] })
     await server.start()
     vi.useFakeTimers()
     try {
@@ -52,7 +52,7 @@ describe('LocalOAuthServer', () => {
   })
 
   it('joins a cancelled localhost startup without trying another port or leaving a listener', async () => {
-    server = new LocalOAuthServer()
+    server = new LocalOAuthServer({ ports: [0] })
     const started = server.start()
     const result = expect(started).rejects.toThrow('OAuth callback server stopped during startup')
     server.stop()
@@ -60,11 +60,15 @@ describe('LocalOAuthServer', () => {
     await server.close()
     // The same instance can bind normally after the cancelled start has joined.
     const redirectUri = await server.start()
-    expect(new URL(redirectUri).port).toBe('3000')
+    expect(Number(new URL(redirectUri).port)).toBeGreaterThan(0)
   })
 
   it('joins actual close before rebinding the callback port', async () => {
-    server = new LocalOAuthServer()
+    const probe = createServer()
+    await new Promise<void>((resolve, reject) => { probe.once('error', reject); probe.listen(0, 'localhost', resolve) })
+    const address = probe.address(); if (!address || typeof address === 'string') throw new Error('Missing fixture port')
+    await new Promise<void>(resolve => probe.close(() => resolve()))
+    server = new LocalOAuthServer({ ports: [address.port] })
     const first = await server.start()
     await server.close()
     const second = await server.start()
@@ -75,15 +79,18 @@ describe('LocalOAuthServer', () => {
     const occupied = createServer()
     await new Promise<void>((resolve, reject) => {
       occupied.once('error', reject)
-      occupied.listen(3000, 'localhost', resolve)
+      occupied.listen(0, 'localhost', resolve)
     })
     try {
-      server = new LocalOAuthServer()
+      const address = occupied.address(); if (!address || typeof address === 'string') throw new Error('Missing occupied fixture port')
+      server = new LocalOAuthServer({ ports: [address.port, 0] })
       const redirect = await server.start()
-      expect(new URL(redirect).port).toBe('3001')
+      expect(Number(new URL(redirect).port)).toBeGreaterThan(0)
+      expect(Number(new URL(redirect).port)).not.toBe(address.port)
       await server.close()
       const restarted = await server.start()
-      expect(restarted).toBe(redirect)
+      expect(Number(new URL(restarted).port)).toBeGreaterThan(0)
+      expect(Number(new URL(restarted).port)).not.toBe(address.port)
       await server.close()
     } finally { await new Promise<void>(resolve => occupied.close(() => resolve())) }
   })

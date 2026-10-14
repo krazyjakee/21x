@@ -22,6 +22,8 @@ export interface McpServerProbeResult {
   tools?: McpToolSummary[]
 }
 export interface McpProbeReceipt<T> { result: Promise<T>; closed: Promise<void> }
+/** Trusted request authority, never inferred from an RPC payload. */
+export interface McpProbeControls { beforeEffect(): void }
 export interface McpProbeHost {
   spawn(command: string, args: string[], options: SpawnOptionsWithoutStdio): ChildProcessWithoutNullStreams
   fetch: typeof fetch
@@ -45,25 +47,41 @@ export class McpProbeService {
   get pendingCount(): number { return this.work.size }
 
   probe(input: McpServerProbeInput, signal?: AbortSignal): Promise<McpServerProbeResult> { return this.probeOwned(input, signal).result }
-  probeOwned(input: McpServerProbeInput, signal?: AbortSignal): McpProbeReceipt<McpServerProbeResult> {
+  probeOwned(input: McpServerProbeInput, signal?: AbortSignal, controls?: McpProbeControls): McpProbeReceipt<McpServerProbeResult> {
     if (this.closing) return { result: Promise.reject(new Error('MCP_PROBE_SERVICE_CLOSED')), closed: Promise.resolve() }
     if (this.work.size >= 16) return { result: Promise.resolve(failed('Too many active MCP probes')), closed: Promise.resolve() }
     const controller = new AbortController()
+    let authorityLost = false
+    const current = (): void => {
+      controller.signal.throwIfAborted()
+      try { controls?.beforeEffect() } catch (cause) { authorityLost = true; controller.abort(); throw cause }
+      controller.signal.throwIfAborted()
+    }
+    // A caller cannot change the selected transport after admission.
+    if (controls) {
+      const selected = { ...input, args: input.args ? [...input.args] : undefined,
+        headers: input.headers ? Object.freeze({ ...input.headers }) : undefined,
+        environment: input.environment ? Object.freeze({ ...input.environment }) : undefined }
+      if (selected.args) Object.freeze(selected.args)
+      input = Object.freeze(selected)
+    }
     const cancel = (): void => { controller.abort() }
     signal?.addEventListener('abort', cancel, { once: true })
     if (signal?.aborted) controller.abort()
     this.controllers.add(controller)
     let resolve!: (value: McpServerProbeResult) => void
     const result = new Promise<McpServerProbeResult>(done => { resolve = done })
-    const aborted = (): void => resolve(failed(this.closing || signal?.aborted ? 'MCP probe cancelled' : 'MCP probe timed out'))
+    const aborted = (): void => resolve(failed(this.closing || signal?.aborted || authorityLost ? 'MCP probe cancelled' : 'MCP probe timed out'))
     controller.signal.addEventListener('abort', aborted, { once: true })
     if (controller.signal.aborted) aborted()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
     const raw = Promise.resolve().then(async () => {
       if (controller.signal.aborted) return
+      current()
       const answer = input.type === 'remote'
-        ? await this.remote(input, controller.signal)
-        : await this.local(input, controller.signal)
+        ? await this.remote(input, controller.signal, current, !!controls)
+        : await this.local(input, controller.signal, current, !!controls)
+      current()
       if (!controller.signal.aborted) resolve(answer)
     }).catch(() => {
       // SDK, process and fetch errors can reflect env/header values or URLs.
@@ -120,14 +138,16 @@ export class McpProbeService {
     finally { if (timer) clearTimeout(timer) }
   }
 
-  private local(input: McpServerProbeInput, signal: AbortSignal): Promise<McpServerProbeResult> {
+  private local(input: McpServerProbeInput, signal: AbortSignal, current: () => void, portable: boolean): Promise<McpServerProbeResult> {
     if (!input.command) return Promise.resolve(failed('No command specified'))
-    signal.throwIfAborted()
+    current()
     const needsShell = /^(npx|uvx|bunx)\b/.test(input.command) || (this.host.platform === 'win32' && /\.(cmd|bat)$/i.test(input.command))
+    if (portable && this.host.platform === 'win32' && /\.(cmd|bat)$/i.test(input.command)) return Promise.resolve(failed('MCP shell-script probes are unavailable in this host'))
+    const environment = { ...this.host.environment(), npm_config_yes: 'true', ...input.environment,
+      ...(!portable && input.name === 'task-management' ? this.host.taskApiEnvironment() : {}) }
+    current()
     const proc = this.host.spawn(input.command, input.args ?? [], {
-      ...(needsShell ? { shell: true } : {}),
-      env: { ...this.host.environment(), npm_config_yes: 'true', ...input.environment,
-        ...(input.name === 'task-management' ? this.host.taskApiEnvironment() : {}) }
+      ...(needsShell && !portable ? { shell: true } : {}), env: environment
     })
     return new Promise(resolve => {
       let answer: McpServerProbeResult | undefined
@@ -153,11 +173,12 @@ export class McpProbeService {
       })
       const send = (message: Record<string, unknown>): void => {
         if (answer || signal.aborted) return
-        try { proc.stdin.write(JSON.stringify(message) + '\n', error => { if (error) finish(failed('MCP process pipe failed')) }) }
+        try { current(); proc.stdin.write(JSON.stringify(message) + '\n', error => { if (error) finish(failed('MCP process pipe failed')) }) }
         catch { finish(failed('MCP process pipe failed')) }
       }
       const handle = (message: McpRpcResponse): void => {
         if (answer || signal.aborted || !message || typeof message !== 'object') return
+        try { current() } catch { finish(failed('MCP probe cancelled')); return }
         const expected = phase === 'init' ? MCP_INITIALIZE_ID : MCP_TOOLS_LIST_ID
         if (message.id !== expected) return
         if (message.error) { finish(failed('MCP server returned a protocol error')); return }
@@ -172,6 +193,7 @@ export class McpProbeService {
       proc.stdout.setEncoding('utf8')
       proc.stdout.on('data', (chunk: string) => {
         if (answer || signal.aborted) return
+        try { current() } catch { finish(failed('MCP probe cancelled')); return }
         bytes += Buffer.byteLength(chunk)
         if (bytes > MAX_RESPONSE_BYTES) { finish(failed('MCP response exceeded its byte limit')); return }
         buffer += chunk
@@ -194,15 +216,16 @@ export class McpProbeService {
     })
   }
 
-  private async remote(input: McpServerProbeInput, signal: AbortSignal): Promise<McpServerProbeResult> {
+  private async remote(input: McpServerProbeInput, signal: AbortSignal, current: () => void, portable: boolean): Promise<McpServerProbeResult> {
     if (!input.url) return failed('No URL specified')
     const url = new URL(input.url)
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return failed('Invalid MCP HTTP URL')
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...input.headers }
     const post = async (message: Record<string, unknown>): Promise<Response> => {
-      signal.throwIfAborted()
-      const response = await this.host.fetch(url.href, { method: 'POST', headers, body: JSON.stringify(message), signal })
-      if (signal.aborted) { await response.body?.cancel(); signal.throwIfAborted() }
+      current()
+      const response = await this.host.fetch(url.href, { method: 'POST', headers, body: JSON.stringify(message), signal,
+        ...(portable ? { redirect: 'error' as const } : {}) })
+      try { current() } catch (cause) { await response.body?.cancel(); throw cause }
       return response
     }
     const initialized = await post(mcpInitializeRequest())
@@ -213,31 +236,36 @@ export class McpProbeService {
       await initialized.body?.cancel()
       return { status: 'connected' }
     }
-    const initData = await this.readJson(initialized, signal)
+    const initData = await this.readJson(initialized, current)
+    current()
     if (initData.id !== MCP_INITIALIZE_ID || initData.error || !initData.result) return failed('MCP initialize protocol error')
     const sessionId = initialized.headers.get('mcp-session-id')
     if (sessionId) headers['Mcp-Session-Id'] = sessionId
     const notified = await post(mcpInitializedNotification())
     await notified.body?.cancel()
+    current()
     if (!notified.ok) return failed(`MCP initialized notification HTTP ${notified.status}`)
     const listed = await post(mcpToolsListRequest())
     if (!listed.ok) { await listed.body?.cancel(); return failed(`MCP tools HTTP ${listed.status}`) }
-    const data = await this.readJson(listed, signal)
+    const data = await this.readJson(listed, current)
+    current()
     if (data.id !== MCP_TOOLS_LIST_ID || data.error || !data.result) return failed('MCP tools protocol error')
     const tools = summarizeMcpTools(data.result)
     return { status: 'connected', toolCount: tools.length, tools }
   }
 
-  private async readJson(response: Response, signal: AbortSignal): Promise<McpRpcResponse> {
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('Missing MCP response')
+  private async readJson(response: Response, current: () => void): Promise<McpRpcResponse> {
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
     const chunks: Uint8Array[] = []
     let size = 0
     try {
+      current()
+      reader = response.body?.getReader()
+      if (!reader) throw new Error('Missing MCP response')
       while (true) {
-        signal.throwIfAborted()
+        current()
         const { done, value } = await reader.read()
-        signal.throwIfAborted()
+        current()
         if (done) break
         size += value.length
         if (size > MAX_RESPONSE_BYTES) throw new Error('MCP response exceeded its byte limit')
@@ -245,7 +273,8 @@ export class McpProbeService {
       }
       return JSON.parse(Buffer.concat(chunks).toString('utf8')) as McpRpcResponse
     } finally {
-      try { await reader.cancel() } finally { reader.releaseLock() }
+      if (reader) { try { await reader.cancel() } finally { reader.releaseLock() } }
+      else await response.body?.cancel()
     }
   }
 }

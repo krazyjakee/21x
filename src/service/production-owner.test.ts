@@ -1,3 +1,4 @@
+import { open } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SQLite from 'better-sqlite3'
 import { linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync } from 'node:fs'
@@ -58,7 +59,7 @@ async function fixture(options: { prepare?: ProductionOwnerBootstrap['native']['
   }
   const { ProductionOwner } = ownerModule
   const provider: ChatProvider = options.provider ?? { id: 'fixture', model: 'fixture', async *stream(): AsyncGenerator<ChatProviderEvent> { yield { type: 'message_end', stopReason: 'end_turn' } } }
-  const boundaries = { createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider }
+  const boundaries = { cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider }
   const owner = new ProductionOwner(bootstrap, boundaries); owners.push(owner)
   return { owner, bootstrap, boundaries, store, root, adapter, emit, ProductionOwner }
 }
@@ -73,6 +74,27 @@ async function startTask(services: ProductionServices) {
 }
 
 describe('actual production application owner', () => {
+  it('retains the actual profile while a task attachment descriptor refuses close, then retries cleanup', async () => {
+    const f = await fixture(); await f.owner.close()
+    const { TaskAttachmentFileOwner } = await import('../main/task-attachment-file-owner')
+    const { acquireProfileLock } = await import('../main/platform/profile-lock')
+    let refuseClose = true
+    finishers.push(() => { refuseClose = false })
+    const owner = new f.ProductionOwner(f.bootstrap, { ...f.boundaries, taskAttachmentFiles: options => new TaskAttachmentFileOwner({ ...options, fs: { open: async (path, flags, mode) => {
+      const fd = await open(path, flags, mode)
+      return { stat: () => fd.stat({ bigint: true }), read: (b,o,l,p) => fd.read(b,o,l,p), write: (b,o,l,p) => fd.write(b,o,l,p), sync: () => fd.sync(), close: async () => { if (refuseClose) throw new Error('Controlled close refusal'); await fd.close() } }
+    } } }) }); owners.push(owner)
+    const services = await owner.start(), task = services.db.createTask({ title: 'Retain real attachment descriptor' })!
+    const attachment = { id: '00000000-0000-4000-8000-000000000001', filename: 'proof.png', size: 12, mime_type: 'image/png', added_at: '2026-10-14T00:00:00.000Z' }
+    await expect(services.taskAttachmentFiles.write(task.id, attachment, Buffer.from('iVBORw0KGgoAAAAA', 'base64'), { beforeEffect() {}, signal: new AbortController().signal })).rejects.toMatchObject({ code: 'ATTACHMENT_CLOSE_FAILED' })
+    await expect(owner.close()).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(owner.snapshot()).toMatchObject({ phase: 'blocked', owned: true })
+    expect(() => acquireProfileLock(f.bootstrap.paths.profileRoot)).toThrow('PROFILE_DUPLICATE_OWNER')
+    refuseClose = false; await owner.close()
+    expect(owner.snapshot()).toMatchObject({ phase: 'stopped', owned: false })
+    const lock = acquireProfileLock(f.bootstrap.paths.profileRoot); lock.release()
+  })
+
   it('starts the real background stack once without a window and preserves admission across attachment loss', async () => {
     const f = await fixture()
     const startup = f.owner.start()

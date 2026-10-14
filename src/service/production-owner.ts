@@ -1,3 +1,7 @@
+import { CliMcpConfigManager } from '../main/cli-mcp-config/core'
+import { CliMcpFileOwner, type CliMcpFileOwnerOptions } from '../main/cli-mcp-config/portable-file-owner'
+import { TaskAttachmentFileOwner, type TaskAttachmentFileOwnerOptions } from '../main/task-attachment-file-owner'
+import type { FileAttachmentRecord } from '../main/database/types'
 import { homedir, networkInterfaces } from 'node:os'
 import { PortableAgentDetectionOwner } from '../main/agent-installer/portable-detection'
 import { createProductionGitProviderOwner } from './production-git-provider-owner'
@@ -132,9 +136,14 @@ export interface ProductionOwnerExternalBoundaries {
   gitProviderProcess?: (options: GitProviderProcessOwnerOptions) => GitProviderProcessOwner
   workspaceFiles?: (options: WorkspaceFileOwnerOptions) => WorkspaceFileOwner
   heartbeatFiles?: (options: HeartbeatFileOwnerOptions) => HeartbeatFileOwner
+  cliMcp?: { homeDir: string; environment: NodeJS.ProcessEnv; files?: (options: CliMcpFileOwnerOptions) => CliMcpFileOwner }
+  taskAttachmentFiles?: (options: TaskAttachmentFileOwnerOptions) => TaskAttachmentFileOwner
 }
 
 export interface ProductionServices {
+  cliMcp: CliMcpConfigManager
+  cliMcpFiles: CliMcpFileOwner
+  taskAttachmentFiles: TaskAttachmentFileOwner
   workspaceFiles: WorkspaceFileOwner
   heartbeatFiles: HeartbeatFileOwner
   github: GitHubManager
@@ -324,6 +333,28 @@ export class ProductionOwner {
         this.getDatabaseBindingLease()
         if (this.services !== services || services.db !== database || services.workspaceFiles !== files || db !== database || owner !== files || root !== workspaceRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
         files.assertOwners(workspaceRoot)
+      } }
+  }
+
+  getCliMcpBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!, { cliMcp: manager, cliMcpFiles: files, mcpProbes: probes } = services
+    return { manager, files, probes, assertCliMcpOwners: (owners: { manager: CliMcpConfigManager; files: CliMcpFileOwner; probes: McpProbeService }): void => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services || services.cliMcp !== manager || services.cliMcpFiles !== files || services.mcpProbes !== probes || owners.manager !== manager || owners.files !== files || owners.probes !== probes) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      manager.assertOwners({ files, probes }); files.assertOwners(files.homeDir)
+    } }
+  }
+
+  getTaskAttachmentBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!, { db: database, agents: manager, taskAttachmentFiles: files } = services, attachmentRoot = this.bootstrap.paths.attachmentRoot
+    return { database, manager, files, attachmentRoot,
+      onTaskUpdated: (taskId: string, attachments: FileAttachmentRecord[]): void => { this.emit('task:updated', { taskId, updates: { attachments } }) },
+      assertTaskAttachmentOwners: (owners: { database: DatabaseManager; manager: AgentManager; files: TaskAttachmentFileOwner; attachmentRoot: string }): void => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || services.db !== database || services.agents !== manager || services.taskAttachmentFiles !== files || owners.database !== database || owners.manager !== manager || owners.files !== files || owners.attachmentRoot !== attachmentRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        files.assertOwners(attachmentRoot)
       } }
   }
 
@@ -633,17 +664,38 @@ export class ProductionOwner {
     const oauth = new OAuthManager(db, { openExternal: url => native.openExternal(url), notify: (title, body) => this.notify(title, body) })
     agents.setOAuthManager(oauth)
     this.register('oauth', () => oauth.destroy(), () => oauth.close())
+    const probeEnvironment = Object.freeze({ PATH: process.env.PATH ?? '', HOME: profileRoot, USERPROFILE: profileRoot,
+      TMPDIR: this.bootstrap.paths.tempRoot, TEMP: this.bootstrap.paths.tempRoot,
+      ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec } : {}) })
     const mcpProbes = new McpProbeService({
       spawn: (command, args, options) => spawn(command, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] }),
       fetch: (input, init) => fetch(input, { ...init, redirect: 'error' }),
       // Explicit user MCP variables are added by the probe only after domain
       // authorization. No launch token, provider key or full parent env leaks.
-      environment: () => ({ PATH: process.env.PATH ?? '', HOME: profileRoot, USERPROFILE: profileRoot,
-        TMPDIR: this.bootstrap.paths.tempRoot, TEMP: this.bootstrap.paths.tempRoot,
-        ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec } : {}) }),
+      environment: () => ({ ...probeEnvironment }),
       taskApiEnvironment: () => ({}), platform: process.platform
     })
     this.register('mcp-probes', () => mcpProbes.shutdown(), () => mcpProbes.close())
+    const cliBoundary = this.boundaries.cliMcp
+    const cliHome = cliBoundary?.homeDir ?? realpathSync(homedir())
+    const privateEnvironment = /^(?:TASK_API_|TASK_MCP_|TWENTYONEX_|21X_|SECRET_BROKER_|ELECTRON_|NODE_OPTIONS$|NODE_PATH$|LD_|DYLD_)/i
+    const cliEnvironment = Object.freeze(Object.fromEntries(Object.entries(cliBoundary?.environment ?? process.env).filter(([key]) => !privateEnvironment.test(key))))
+    const cliOptions: CliMcpFileOwnerOptions = { homeDir: cliHome, env: cliEnvironment, assertCurrent: fileOptions.assertCurrent }
+    const cliMcpFiles = cliBoundary?.files ? cliBoundary.files(cliOptions) : new CliMcpFileOwner(cliOptions)
+    if (!(cliMcpFiles instanceof CliMcpFileOwner)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    cliMcpFiles.assertOwners(cliHome)
+    this.register('cli-mcp-files', () => cliMcpFiles.shutdown(), () => cliMcpFiles.close())
+    const cliMcp = new CliMcpConfigManager({ files: cliMcpFiles, homeDir: cliHome, env: cliEnvironment, probeService: mcpProbes })
+    this.register('cli-mcp', () => cliMcp.shutdown(), () => cliMcp.close())
+    const attachmentOptions: TaskAttachmentFileOwnerOptions = { attachmentRoot: this.bootstrap.paths.attachmentRoot, assertCurrent: () => {
+      // Retirement retains this profile lease after new work is fenced.
+      if (!['starting', 'ready', 'stopping', 'blocked'].includes(this.phase) || processRegistry[registryKey] !== this.identity) throw new ProductionOwnerError('OWNER_CLOSING')
+      this.lock!.assertHeld()
+    } }
+    const taskAttachmentFiles = this.boundaries.taskAttachmentFiles ? this.boundaries.taskAttachmentFiles(attachmentOptions) : new TaskAttachmentFileOwner(attachmentOptions)
+    if (!(taskAttachmentFiles instanceof TaskAttachmentFileOwner)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    taskAttachmentFiles.assertOwners(this.bootstrap.paths.attachmentRoot)
+    this.register('task-attachment-files', () => taskAttachmentFiles.shutdown(), () => taskAttachmentFiles.close())
     const registry = new PluginRegistry()
     for (const plugin of [new LinearPlugin(), new HubSpotPlugin(), new GitHubIssuesPlugin(github), new ForgejoIssuesPlugin(forgejo), new NotionPlugin(), new YouTrackPlugin()]) registry.register(plugin)
     if (this.bootstrap.connectors.kind === 'enabled') {
@@ -761,7 +813,7 @@ export class ProductionOwner {
         this.lock!.assertHeld()
       }, notify: (channel, payload) => this.emit(channel, payload) }) : null
     if (voice) this.register('voice', () => voice.shutdown(), () => voice.close())
-    this.services = { workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    this.services = { cliMcp, cliMcpFiles, taskAttachmentFiles, workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)

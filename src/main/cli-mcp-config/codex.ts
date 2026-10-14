@@ -1,3 +1,4 @@
+import type { CliMcpFileOwner } from './portable-file-owner'
 /**
  * Codex global MCP config.
  *
@@ -20,7 +21,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import type { CliId, McpServerDefinition } from '../../shared/cli-mcp-config'
 import { isPureReference } from './secrets'
-import { readFileSnapshot, type FileSnapshot } from './file-store'
+import { type FileSnapshot } from './file-store'
 import { BaseCliMcpStore, type CliFileRole, type CliMcpMutation, type CliStateBundle, type LoadedServer, type MutationOutcome } from './store'
 import { parseTomlMcpDocument, removeTomlMcpServer, upsertTomlMcpServer, type TomlMcpDocument, type TomlMcpServerTable, type TomlValue } from './toml-mcp'
 import { validateDefinition, validateServerName } from './validate'
@@ -31,6 +32,7 @@ interface CodexState {
 }
 
 export interface CodexStoreOptions {
+  files?: CliMcpFileOwner
   homeDir?: string
   env?: NodeJS.ProcessEnv
 }
@@ -57,8 +59,8 @@ export class CodexMcpStore extends BaseCliMcpStore<CodexState> {
   private readonly configPath: string
 
   constructor(options: CodexStoreOptions = {}) {
-    super()
-    this.configPath = resolveCodexConfigPath(options.env ?? process.env, options.homeDir ?? homedir())
+    super(options.files)
+    this.configPath = options.files?.paths.codex ?? resolveCodexConfigPath(options.env ?? process.env, options.homeDir ?? homedir())
   }
 
   describeFiles(): CliFileRole[] {
@@ -66,12 +68,12 @@ export class CodexMcpStore extends BaseCliMcpStore<CodexState> {
   }
 
   protected readFilesOnly(): FileSnapshot[] {
-    return [readFileSnapshot(this.configPath)]
+    return [this.readSnapshot(this.configPath)]
   }
 
   protected readState(): CliStateBundle<CodexState> {
     const files = this.readFilesOnly()
-    const doc = parseTomlMcpDocument(files[0].content)
+    const doc = parseTomlMcpDocument(files[0].content, !!this.fileOwner)
     return { files, state: { content: files[0].content, doc }, notes: [] }
   }
 
@@ -97,7 +99,8 @@ export class CodexMcpStore extends BaseCliMcpStore<CodexState> {
         }
       }
       issues.push(...validateDefinition(definition))
-      if (table.rawLines.length > 0) issues.push(`${table.rawLines.length} line(s) in this table were not understood and are preserved verbatim.`)
+      const unsupported = table.rawLines.filter(raw => raw.line.trim() && !raw.line.trim().startsWith('#')).length
+      if (unsupported > 0) issues.push(`${unsupported} line(s) in this table were not understood and are preserved verbatim.`)
       servers.push({
         name: table.name,
         definition,
@@ -134,7 +137,7 @@ export class CodexMcpStore extends BaseCliMcpStore<CodexState> {
         let content = state.content
         if (mutation.previousName && mutation.previousName !== mutation.name && existing) {
           content = removeTomlMcpServer(doc, mutation.previousName)
-          state.doc = parseTomlMcpDocument(content)
+          state.doc = parseTomlMcpDocument(content, !!this.fileOwner)
         }
         state.content = upsertTomlMcpServer(state.doc, table)
         break
@@ -165,7 +168,7 @@ export class CodexMcpStore extends BaseCliMcpStore<CodexState> {
         break
       }
     }
-    state.doc = parseTomlMcpDocument(state.content)
+    state.doc = parseTomlMcpDocument(state.content, !!this.fileOwner)
     return { warnings }
   }
 

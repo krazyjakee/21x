@@ -1220,6 +1220,7 @@ export class AgentManager extends EventEmitter {
    * acknowledged idle teardown finish. Shutdown joins this work before SQLite. */
   async runTaskGroupMutation<T>(taskIds: string[], mutation: () => Promise<T>): Promise<T> {
     if (this.shuttingDown) throw new Error('The app is shutting down.')
+    if (this.productionAdmissionMutation) throw new Error('The agent configuration is being updated. Retry after it finishes.')
     if (!Array.isArray(taskIds) || !taskIds.length || taskIds.length > 32 || taskIds.some(id => typeof id !== 'string' || !id))
       throw new Error('Select valid task-group members.')
     const ids = [...new Set(taskIds)]
@@ -1240,6 +1241,7 @@ export class AgentManager extends EventEmitter {
    * The domain owner validates scope/references before entering this lease. */
   async runTaskLifecycleMutation<T>(taskIds: string[], mutation: () => Promise<T>): Promise<T> {
     if (this.shuttingDown) throw new Error('The app is shutting down.')
+    if (this.productionAdmissionMutation) throw new Error('The agent configuration is being updated. Retry after it finishes.')
     if (!Array.isArray(taskIds) || !taskIds.length || taskIds.length > 128 || taskIds.some(id => typeof id !== 'string' || !id) || typeof mutation !== 'function')
       throw new Error('Select valid tasks.')
     const ids = [...new Set(taskIds)]
@@ -1376,6 +1378,111 @@ export class AgentManager extends EventEmitter {
     ])
     for (const id of tasks) { const task = this.db.getTask(id); if (task) projects.add(task.project_id) }
     return [...projects].sort()
+  }
+
+  private cliConfigurationTargets(clis: readonly ('claude-code' | 'opencode' | 'codex')[]): Set<string> {
+    if (!Array.isArray(clis) || !clis.length || clis.length > 3 || clis.some(cli => !['claude-code', 'opencode', 'codex'].includes(cli)) || new Set(clis).size !== clis.length)
+      throw new Error('Select valid CLI configuration targets.')
+    return new Set(clis)
+  }
+
+  /** Scalars only: refuse an unbounded or malformed catalogue before JSON
+   * projection, agent decoding, or any credential-bearing manager getter. */
+  private cliConfigurationAgents(): Array<{ id: string; backend: string }> {
+    const bounds = this.db.db.prepare(`SELECT COUNT(*) AS count,
+      COALESCE(MAX(length(CAST(config AS BLOB))),0) AS field,
+      COALESCE(SUM(length(CAST(config AS BLOB))),0) AS bytes,
+      COALESCE(MAX(length(CAST(id AS BLOB))),0) AS id_bytes,
+      COALESCE(SUM(CASE WHEN typeof(config)!='text' OR typeof(id)!='text' THEN 1 ELSE 0 END),0) AS invalid
+      FROM agents`).get() as { count: number; field: number; bytes: number; id_bytes: number; invalid: number }
+    if (Object.values(bounds).some(value => !Number.isSafeInteger(value) || value < 0) || bounds.count > 128 || bounds.field > 128 * 1024 || bounds.bytes > 4 * 1024 * 1024 || bounds.id_bytes > 128 || bounds.invalid)
+      throw new Error('CLI agent metadata exceeds the supported bounds or requires reconciliation.')
+    if (this.db.db.prepare("SELECT 1 FROM agents WHERE NOT json_valid(config) LIMIT 1").get()
+      || this.db.db.prepare("SELECT 1 FROM agents WHERE json_type(config)!='object' LIMIT 1").get()
+      || this.db.db.prepare("SELECT 1 FROM agents WHERE (SELECT COUNT(*) FROM json_each(agents.config) WHERE key='coding_agent')>1 LIMIT 1").get())
+      throw new Error('CLI agent metadata requires reconciliation.')
+    const rows = this.db.db.prepare(`SELECT id, json_type(config,'$.coding_agent') AS kind,
+      CASE WHEN json_type(config,'$.coding_agent')='text' THEN json_extract(config,'$.coding_agent') ELSE NULL END AS backend
+      FROM agents ORDER BY id LIMIT 129`).all() as Array<{ id: string; kind: string | null; backend: string | null }>
+    return rows.map(row => {
+      if (typeof row.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(row.id) || row.kind !== null && row.kind !== 'text'
+        || row.kind === 'text' && (typeof row.backend !== 'string' || !['claude-code', 'opencode', 'codex', 'cursor', 'pi'].includes(row.backend)))
+        throw new Error('CLI agent metadata requires reconciliation.')
+      return { id: row.id, backend: row.kind === null ? CodingAgentType.OPENCODE : row.backend! }
+    })
+  }
+
+  getCliConfigurationAffectedAgents(clis: readonly ('claude-code' | 'opencode' | 'codex')[]): string[] {
+    const targets = this.cliConfigurationTargets(clis)
+    return this.cliConfigurationAgents().filter(agent => targets.has(agent.backend)).map(agent => agent.id)
+  }
+
+  /** Actual configuration effects never stop a session implicitly. All
+   * startup ownership must be settled before global CLI files are changed. */
+  runCliConfigurationMutation<T>(clis: readonly ('claude-code' | 'opencode' | 'codex')[], mutation: () => Promise<T>): Promise<T> {
+    this.taskGroupRequests.assertCurrent()
+    if (typeof mutation !== 'function') return Promise.reject(new Error('A CLI configuration mutation is required.'))
+    const targets = this.cliConfigurationTargets(clis)
+    if (this.shuttingDown || this.productionCredentialMutation || this.productionAdmissionMutation || this.agentConfigurationMutations.size || this.backendConfigurationMutations.size
+      || this.rawTaskStarts.size || this.sessionStarts.size || this.captainSwitches.size || this.taskGroupMutations.size || this.taskLifecycleMutations.size || this.sessionStops.size)
+      return Promise.reject(new Error('Wait for agent lifecycle work to finish before changing CLI configuration.'))
+    const agents = this.cliConfigurationAgents(), allIds = new Set(agents.map(agent => agent.id))
+    const ids = new Set(agents.filter(agent => targets.has(agent.backend)).map(agent => agent.id))
+    if ([...this.sessions.values()].some(session => ids.has(session.agentId) || !allIds.has(session.agentId))
+      || [...this.admittedStarts.values()].some(id => ids.has(id) || !allIds.has(id)))
+      return Promise.reject(new Error('Stop affected agent sessions and admitted starts before changing CLI configuration.'))
+    if ([...targets].some(backend => this.adapters.has(backend) && typeof this.adapters.get(backend)?.notifyConfigChanged !== 'function'))
+      return Promise.reject(new Error('A cached affected adapter cannot acknowledge configuration refresh. Restart before changing this CLI configuration.'))
+    // Read only bounded ownership scalars. Full queue getters also load saved
+    // workspace/error payloads and are intentionally excluded from preflight.
+    const queueBounds = this.db.db.prepare(`SELECT COUNT(*) AS count,
+      COALESCE(MAX(MAX(length(CAST(agent_id AS BLOB)),length(CAST(task_id AS BLOB)))),0) AS field,
+      COALESCE(SUM(CASE WHEN typeof(agent_id)!='text' OR typeof(task_id)!='text' THEN 1 ELSE 0 END),0) AS invalid
+      FROM agent_start_queue WHERE state IN ('queued','retrying','claimed','starting')`).get() as { count: number; field: number; invalid: number }
+    if (Object.values(queueBounds).some(value => !Number.isSafeInteger(value) || value < 0) || queueBounds.count > 128 || queueBounds.field > 128 || queueBounds.invalid)
+      return Promise.reject(new Error('CLI configuration start queue exceeds the supported bounds or requires reconciliation.'))
+    const queued = this.db.db.prepare("SELECT agent_id AS id,task_id AS taskId FROM agent_start_queue WHERE state IN ('queued','retrying','claimed','starting') LIMIT 129").all() as Array<{ id: string; taskId: string }>
+    if (queued.some(row => typeof row.taskId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(row.taskId))) return Promise.reject(new Error('CLI configuration start queue requires reconciliation.'))
+    if (queued.some(row => !allIds.has(row.id) || ids.has(row.id))) return Promise.reject(new Error('Remove affected queued starts before changing CLI configuration.'))
+    this.productionCredentialMutation = true
+    this.productionAdmissionMutation = true
+    for (const id of ids) this.agentConfigurationMutations.add(id)
+    for (const backend of targets) this.backendConfigurationMutations.add(backend)
+    return this.ownShutdownWork((async () => {
+      let effectStarted = false
+      try {
+        this.taskGroupRequests.assertCurrent()
+        if (this.shuttingDown) throw new Error('The app is shutting down.')
+        effectStarted = true
+        const result = await this.ownShutdownWork(mutation())
+        this.taskGroupRequests.assertCurrent()
+        if (this.shuttingDown) throw new Error('The app is shutting down.')
+        for (const backend of targets) {
+          this.taskGroupRequests.assertCurrent()
+          const adapter = this.adapters.get(backend)
+          if (adapter?.notifyConfigChanged) {
+            try {
+              await this.ownShutdownWork(adapter.notifyConfigChanged())
+              this.taskGroupRequests.assertCurrent()
+              if (this.shuttingDown) throw new Error('The app is shutting down.')
+            } catch (error) { this.failedBackendConfigurations.add(backend); throw error }
+          }
+        }
+        for (const backend of targets) this.failedBackendConfigurations.delete(backend)
+        return result
+      } catch (error) {
+        // Publication may precede rejection; there is no fabricated rollback.
+        // Even with an acknowledged file effect, a missing refresh is unsafe.
+        if (effectStarted) for (const backend of targets) this.failedBackendConfigurations.add(backend)
+        throw error
+      } finally {
+        this.productionCredentialMutation = false
+        this.productionAdmissionMutation = false
+        for (const id of ids) this.agentConfigurationMutations.delete(id)
+        for (const backend of targets) this.backendConfigurationMutations.delete(backend)
+        this.drainStartQueue(); this.scheduleProviderRecovery()
+      }
+    })())
   }
 
   runMcpConfigurationMutation<T>(serverId: string, mutation: () => T | Promise<T>): Promise<T> {
@@ -1754,6 +1861,7 @@ export class AgentManager extends EventEmitter {
     mayStart: () => boolean = () => !this.shuttingDown
   ): Promise<string> {
     this.taskGroupRequests.assertCurrent()
+    if (this.productionAdmissionMutation) throw new Error('Wait for CLI configuration changes before starting a session.')
     const agent = this.db.getAgent(agentId)!
     workspaceDir ||= this.db.getWorkspaceDir(taskId)
 
@@ -2931,6 +3039,7 @@ export class AgentManager extends EventEmitter {
     taskId: string,
     adapterSessionId: string
   ): Promise<string> {
+    if (this.productionAdmissionMutation) throw new Error('Wait for CLI configuration changes before resuming a session.')
     this.assertAgentConfigurationAvailable(agentId)
     const agent = this.db.getAgent(agentId)!
     const originalTask = this.db.getTask(taskId)
@@ -4252,6 +4361,7 @@ export class AgentManager extends EventEmitter {
    */
   async resumeSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
     this.taskGroupRequests.assertCurrent()
+    if (this.productionAdmissionMutation) throw new Error('Wait for CLI configuration changes before starting work.')
     const execution = this.taskGroupExecution(taskId)
     if (execution) {
       if (execution.session_id !== sessionId) throw new Error('The native session does not belong to this task group.')

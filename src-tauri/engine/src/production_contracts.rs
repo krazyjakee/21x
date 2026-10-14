@@ -1,12 +1,22 @@
 //! Finite production ingress/egress policy, independent of diagnostic grants.
 //! Native bounds/outer DTO checks complement the service's exact domain codecs.
 use serde_json::Value;
+#[path = "production_cli_attachments.rs"]
+mod cli_attachments;
 #[path = "production_project_groups.rs"]
 mod project_groups;
 #[path = "production_workspace_runtime.rs"]
 mod workspace_runtime;
 
 pub const COMMANDS: &[&str] = &[
+    "cliMcp:snapshot",
+    "cliMcp:upsert",
+    "cliMcp:remove",
+    "cliMcp:setEnabled",
+    "cliMcp:setToolEnabled",
+    "cliMcp:probe",
+    "chatImages:saveToTask",
+    "attachments:remove",
     "heartbeat:enable",
     "heartbeat:disable",
     "heartbeat:runNow",
@@ -3187,6 +3197,9 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if cli_attachments::COMMANDS.contains(&operation) {
+        return cli_attachments::request(operation, value);
+    }
     if workspace_runtime::COMMANDS.contains(&operation) {
         return workspace_runtime::request(operation, value);
     }
@@ -3325,6 +3338,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if cli_attachments::COMMANDS.contains(&operation) {
+        return cli_attachments::result(operation, value);
+    }
     if workspace_runtime::COMMANDS.contains(&operation) {
         return workspace_runtime::result(operation, value);
     }
@@ -5006,7 +5022,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 213);
+        assert_eq!(COMMANDS.len(), 221);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

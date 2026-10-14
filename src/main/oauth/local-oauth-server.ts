@@ -24,18 +24,27 @@ export class LocalOAuthServer {
   private generation = 0
   private readonly ownedServers = new Map<Server, Promise<void>>()
 
+  private readonly ports: readonly number[]
+
+  /** Trusted host/test selection. Default provider redirect ports stay stable. */
+  constructor(options: { ports?: readonly number[] } = {}) {
+    const ports = options.ports ?? Array.from({ length: 11 }, (_, index) => 3000 + index)
+    if (!Array.isArray(ports) || !ports.length || ports.length > 11 || new Set(ports).size !== ports.length || ports.some(port => !Number.isSafeInteger(port) || port < 0 || port > 65535)) throw new RangeError('Invalid OAuth callback ports')
+    this.ports = Object.freeze([...ports])
+  }
+
   /**
    * Start the local server and return the redirect URI
    */
   async start(): Promise<string> {
     if (this.server) throw new Error('OAuth callback server is already started')
     const generation = ++this.generation
-    // Try ports 3000-3010 until we find an available one
-    for (let port = 3000; port <= 3010; port++) {
+    // Try the captured finite host ports until an actual bind succeeds.
+    for (const port of this.ports) {
       try {
-        await this.startOnPort(port, generation)
-        this.port = port
-        return `http://localhost:${port}/callback`
+        const actualPort = await this.startOnPort(port, generation)
+        this.port = actualPort
+        return `http://localhost:${actualPort}/callback`
       } catch {
         if (generation !== this.generation) throw new Error('OAuth callback server stopped during startup')
         // Port in use, try next one
@@ -48,7 +57,7 @@ export class LocalOAuthServer {
   /**
    * Start server on a specific port
    */
-  private startOnPort(port: number, generation: number): Promise<void> {
+  private startOnPort(port: number, generation: number): Promise<number> {
     return new Promise((resolve, reject) => {
       const server = createServer(this.handleRequest.bind(this))
       this.server = server
@@ -74,8 +83,10 @@ export class LocalOAuthServer {
           server.close(() => reject(new Error('OAuth callback server stopped during startup')))
           return
         }
-        console.log(`[LocalOAuthServer] Listening on http://localhost:${port}/callback`)
-        resolve()
+        const address = server.address()
+        if (!address || typeof address === 'string') { server.close(() => reject(new Error('OAuth callback listener unavailable'))); return }
+        console.log(`[LocalOAuthServer] Listening on http://localhost:${address.port}/callback`)
+        resolve(address.port)
       })
     })
   }

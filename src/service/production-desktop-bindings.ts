@@ -1,3 +1,8 @@
+import { CliMcpBackend } from './cli-mcp-backend'
+import { TaskAttachmentBackend } from './task-attachment-backend'
+import { CLI_MCP_CODECS } from '../shared/cli-mcp-codecs'
+import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
+import type { CliId } from '../shared/cli-mcp-config'
 import { HEARTBEAT_CODECS, HEARTBEAT_EVENT_CODECS } from '../shared/heartbeat-codecs'
 import { WORKTREE_RUNTIME_CODECS, WORKTREE_RUNTIME_EVENT_CODECS } from '../shared/worktree-runtime-codecs'
 import { HeartbeatBackend } from './heartbeat-backend'
@@ -67,6 +72,7 @@ type Authority = Pick<AgentConfigurationBackendOptions, 'isTrustedDesktop' | 'ca
   canReorderProjects(caller: DesktopCallerContext): boolean
   canAccessTerminal(id: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   resolveTerminalDirectory(id: string, caller: DesktopCallerContext): TerminalDirectoryAuthority | null
+  canAccessCli(cli: CliId, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   canAccessMcpServer(id: string, caller: DesktopCallerContext, access: 'read' | 'write' | 'delete'): boolean
 } & Pick<ProductionSettingsBackendOptions, 'canReadSetting' | 'canWriteSetting' | 'canAccessSecret' | 'canCreateSecret' | 'canUseSecretEnvironment' | 'canReadEnvironment'> &
   Pick<McpBackendOptions, 'canUseTransport' | 'canUseEnvironmentName'> & Pick<TaskSourceBackendOptions, 'canAccessConnector'> &
@@ -87,7 +93,7 @@ export interface ProductionDesktopBindingOptions {
 export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
   ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS }
 
@@ -130,6 +136,8 @@ export class ProductionDesktopBindings {
   private readonly projectRuntime: ProjectRuntimeBackend
   private readonly workspaceFiles: WorkspaceFileBackend
   private readonly heartbeat: HeartbeatBackend
+  private readonly cliMcp: CliMcpBackend
+  private readonly taskAttachments: TaskAttachmentBackend
   private readonly worktreeRuntime: WorktreeRuntimeBackend
   private readonly epoch: string
   private constructor(private readonly owner: ProductionOwner, private readonly services: Awaited<ReturnType<ProductionOwner['start']>>, private readonly options: ProductionDesktopBindingOptions) {
@@ -152,7 +160,7 @@ export class ProductionDesktopBindings {
       canCreateProject: dynamicAuthority.canCreateProject, canEditSettings: dynamicAuthority.canEditSettings,
       canDeleteTask: (id, caller) => {
         const task = services.db.getTask(id)
-        return (!task || authority.canAccessProject(task.project_id, caller, 'write')) && !services.agents.hasTaskStartOwnership(id)
+        return (!task || authority.canAccessProject(task.project_id, caller, 'write')) && !services.agents.hasTaskStartOwnership(id) && services.taskAttachmentFiles.inflightCount === 0
       },
       emit: options.emit })
     this.content = new ConfigurationBackend({ database: services.db, engineEpoch: this.epoch, assertAvailable: available,
@@ -163,7 +171,11 @@ export class ProductionDesktopBindings {
       assertAvailable: available, ...dynamicAuthority, emit: options.emit, onFatalEvent: options.fatal })
     this.tasks = new TaskLifecycleBackend({ database: services.db, manager: services.agents, registry: services.registry,
       sync: services.sync, recurrence: services.recurrence, heartbeat: services.heartbeat, automation: services.automation,
-      engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority, emit: options.emit, onFatalEvent: options.fatal })
+      engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
+      beforeTaskDeletion: () => {
+        available(); const files = owner.getTaskAttachmentBindingLease(); files.assertTaskAttachmentOwners(files)
+        if (files.files.inflightCount) throw new ServiceProtocolError('INVALID_REQUEST')
+      }, emit: options.emit, onFatalEvent: options.fatal })
     this.lifecycle = new ProductionAgentBackend({ database: services.db, manager: services.agents,
       engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority })
     this.commander = new CommanderBackend({ database: services.db, store: services.commanderStore, commander: services.commander,
@@ -189,6 +201,33 @@ export class ProductionDesktopBindings {
       engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
       canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration, canAccessServer: dynamicAuthority.canAccessMcpServer,
       emit: options.emit, onFatalEvent: options.fatal })
+    const privateProbeEnvironment = /^(?:PATH|HOME|SHELL|BASH_ENV|ENV|IFS|CDPATH|PROMPT_COMMAND|NODE_OPTIONS|NODE_PATH|LD_.*|DYLD_.*|ELECTRON_.*|TASK_API_.*|TASK_MCP_.*|TWENTYONEX_.*|SECRET_BROKER_.*|21X_.*|GIT_CONFIG.*|GIT_ASKPASS|SSH_ASKPASS|CODEX_HOME|CODEX_CONFIG_HOME|PI_CODING_AGENT_DIR|CLAUDE_CONFIG_DIR)$/i
+    this.cliMcp = new CliMcpBackend({ ...owner.getCliMcpBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration,
+      canAccessCli: dynamicAuthority.canAccessCli,
+      canProbeCli: (ref, caller) => dynamicAuthority.canAccessCli(ref.cli, caller, 'read'),
+      canProbeServer: (input, caller) => integration.configuredMcp === 'enabled' && dynamicAuthority.canUseTransport(input, caller) &&
+        Object.keys(input.environment ?? {}).every(name => !privateProbeEnvironment.test(name) && dynamicAuthority.canUseEnvironmentName(name, caller)),
+      canUseEnvironmentReference: (name, caller) => !privateProbeEnvironment.test(name) && dynamicAuthority.canUseSecretEnvironment(name, caller),
+      runConfigurationMutation: async (targets, caller, beforeEffect, effect) => {
+        const capture = (): string => {
+          available(); beforeEffect()
+          const ids = services.agents.getCliConfigurationAffectedAgents(targets)
+          const projectBounds = services.db.db.prepare('SELECT COUNT(*) AS count,COALESCE(MAX(length(CAST(id AS BLOB))),0) AS field FROM projects').get() as { count: number; field: number }
+          if (projectBounds.count > 128 || projectBounds.field > 128) throw new ServiceProtocolError('FRAME_TOO_LARGE')
+          const projects = services.db.db.prepare('SELECT id FROM projects ORDER BY id LIMIT 128').all() as { id: string }[]
+          if (projects.length > 128 || projects.some(row => typeof row.id !== 'string' || Buffer.byteLength(row.id) > 128 || !dynamicAuthority.canAccessProject(row.id, caller, 'read') || !dynamicAuthority.canAccessProject(row.id, caller, 'write')) ||
+            ids.some(id => !dynamicAuthority.canAccessAgent(id, caller, 'read') || !dynamicAuthority.canAccessAgent(id, caller, 'write'))) throw new ServiceProtocolError('INVALID_REQUEST')
+          const agents = ids.map(id => services.db.db.prepare('SELECT id,config FROM agents WHERE id=?').get(id))
+          return JSON.stringify({ agents, projects })
+        }
+        const binding = capture()
+        const current = (): void => { if (capture() !== binding) throw new ServiceProtocolError('INVALID_REQUEST') }
+        return await services.agents.withTaskGroupRequestGuard(() => services.agents.runCliConfigurationMutation(targets, async () => { current(); const result = await effect(); current(); return result }), current, new AbortController().signal)
+      } })
+    this.taskAttachments = new TaskAttachmentBackend({ ...owner.getTaskAttachmentBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask,
+      canAccessProject: dynamicAuthority.canAccessProject, canAccessAgent: dynamicAuthority.canAccessAgent })
     this.sources = new TaskSourceBackend({ database: services.db, manager: services.agents, sync: services.sync, plugins: services.registry,
       oauth: services.oauth, secretStorage: integration.secretStorage, recurrence: services.recurrence, heartbeat: services.heartbeat, automation: services.automation,
       assertOwners: integration.assertOwners, engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
@@ -233,9 +272,9 @@ export class ProductionDesktopBindings {
       // including established task repos outside the project's picker catalogue.
       canAccessRepository: (projectId, _fullName, caller, access) => dynamicAuthority.canAccessProject(projectId, caller, access) })
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
+      this.closed = true; this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
       void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close(), this.sessionContext.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close()]).then(() => undefined))
+    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close()]).then(() => undefined))
   }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
@@ -321,7 +360,7 @@ export class ProductionDesktopBindings {
     const schemas = { ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
       ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
       ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller), ...this.mcp.operationSchemas(caller), ...this.sources.operationSchemas(caller),
-      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller), ...this.heartbeat.operationSchemas(caller), ...this.worktreeRuntime.operationSchemas(caller) }
+      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller), ...this.heartbeat.operationSchemas(caller), ...this.worktreeRuntime.operationSchemas(caller), ...this.cliMcp.operationSchemas(caller), ...this.taskAttachments.operationSchemas(caller) }
     return Object.fromEntries(Object.entries(schemas).map(([operation, schema]) => [operation, {
       ...schema, handle: (payload: JsonValue, signal: AbortSignal) => this.invoke(operation, payload, caller, signal)
     }]))
@@ -336,6 +375,8 @@ export class ProductionDesktopBindings {
       signal.addEventListener('abort', abort, { once: true }); ownerSignal.addEventListener('abort', abort, { once: true })
       if (signal.aborted || ownerSignal.aborted) abort()
       try {
+        if (Object.hasOwn(CLI_MCP_CODECS, operation)) return await this.cliMcp.registry.invoke(operation, payload, caller, combined.signal)
+        if (Object.hasOwn(TASK_ATTACHMENT_CODECS, operation)) return await this.taskAttachments.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(HEARTBEAT_CODECS, operation)) return await this.heartbeat.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(WORKTREE_RUNTIME_CODECS, operation)) return await this.worktreeRuntime.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(TASK_GROUP_CODECS, operation)) return await this.groups.registry.invoke(operation, payload, caller, combined.signal)

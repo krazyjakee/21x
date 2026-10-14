@@ -9,12 +9,13 @@ import { TASK_SOURCE_RESOLVER_KEYS } from '../src/shared/task-source-plugin-code
 import { CLAUDE_PLUGIN_LOCAL_SOURCE } from '../src/shared/claude-plugin-codecs'
 import { SESSION_CONTEXT_GENERATION_STATES, SESSION_CONTEXT_HANDOFF_STATES } from '../src/shared/session-context-codecs'
 import { MOBILE_EVENTS, MOBILE_EVENT_CODECS } from '../src/shared/mobile-codecs'
+import { sanitizeChatImageName, base64ByteLength } from '../src/shared/chat-images'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 213 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 221 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(213)
+    expect(corpus.operations).toHaveLength(221)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -40,6 +41,59 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
       const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]
       expect(() => codec.decodeArguments({ ...(row.payload as Record<string, unknown>), authority: { namespace: '*' } } as never), `${row.operation}/${row.case}`).toThrow()
     }
+  })
+  it('covers CLI UTF16 limits, finite maps and ECMA trim without exceeding the native envelope', () => {
+    const corpus = createProductionRequestCorpus(), rows = corpus.requests.filter(row => row.case.startsWith('cli-'))
+    expect(rows.map(row => row.case)).toEqual(['cli-ecma-nonwhitespace-name-command', 'cli-utf16-args-env-boundaries', 'cli-http-url-header-boundaries', 'cli-sse-empty-records', 'cli-utf16-tool-boundary'])
+    for (const row of rows) expect(Buffer.byteLength(JSON.stringify({ protocolVersion: 1, kind: 'request', id: 'fixture', engineEpoch: 'engine-fixture', operation: row.operation, payload: row.payload }))).toBeLessThan(900000)
+    expect(rows[0].payload).toMatchObject({ request: { name: '\u0085', definition: { command: '\u0085' } } })
+    const bounded = PROOF_COMMAND_CODECS['cliMcp:upsert'].decodeArguments(rows[1].payload)[0]
+    expect(bounded.targets).toEqual(['claude-code', 'opencode', 'codex'])
+    expect(bounded.name.length).toBe(128); expect(bounded.definition.command?.length).toBe(4096)
+    expect(bounded.definition.args).toHaveLength(128); expect(bounded.definition.args?.[127].length).toBe(4096)
+    expect(Object.keys(bounded.definition.env!)).toHaveLength(128); expect(bounded.definition.env?.FIXTURE_127.length).toBe(16384)
+    const remote = PROOF_COMMAND_CODECS['cliMcp:upsert'].decodeArguments(rows[2].payload)[0]
+    expect(remote.definition.url?.length).toBe(4096); expect(Object.keys(remote.definition.headers!)).toHaveLength(128)
+    expect(remote.definition.headers?.['X-Fixture-127'].length).toBe(16384)
+    const upsert = PROOF_COMMAND_CODECS['cliMcp:upsert']
+    for (const request of [
+      { ...bounded, name: bounded.name + 'x' },
+      { ...bounded, definition: { ...bounded.definition, command: bounded.definition.command + 'x' } },
+      { ...bounded, definition: { ...bounded.definition, args: [...bounded.definition.args!, 'overflow'] } },
+      { ...bounded, definition: { ...bounded.definition, env: { ...bounded.definition.env, EXTRA: 'overflow' } } },
+      { ...bounded, definition: { ...bounded.definition, env: { FIXTURE: '🌱'.repeat(8192) + 'x' } } },
+      { ...remote, definition: { ...remote.definition, headers: { ...remote.definition.headers, EXTRA: 'overflow' } } },
+      { ...remote, definition: { transport: 'http', url: 'https://fixture.example/mcp?token=private' } },
+      { ...bounded, name: '\uFEFF', definition: { transport: 'stdio', command: 'fixture' } },
+      { ...bounded, definition: { transport: 'stdio', command: '\uFEFF' } },
+      { ...bounded, name: '\ud800' }
+    ]) expect(() => upsert.encodeArguments([request] as never)).toThrow()
+    expect(() => PROOF_COMMAND_CODECS['cliMcp:setToolEnabled'].encodeArguments([{ cli: 'codex', name: 'fixture', tool: '🌱'.repeat(64) + 'x', enabled: true }])).toThrow()
+  })
+  it('covers plain-base64 image totals and raw name compatibility with exact metadata and undefined removal', () => {
+    const corpus = createProductionRequestCorpus(), rows = corpus.requests.filter(row => row.case.startsWith('attachment-'))
+    expect(rows.map(row => row.case)).toEqual(['attachment-single-512k-plain-base64', 'attachment-five-total-512k', 'attachment-raw-name-sanitization', 'attachment-empty-images', 'attachment-uppercase-version-five-uuid'])
+    const save = PROOF_COMMAND_CODECS['chatImages:saveToTask'], remove = PROOF_COMMAND_CODECS['attachments:remove']
+    for (const row of rows) expect(Buffer.byteLength(JSON.stringify({ protocolVersion: 1, kind: 'request', id: 'fixture', engineEpoch: 'engine-fixture', operation: row.operation, payload: row.payload }))).toBeLessThan(900000)
+    const [, single] = save.decodeArguments(rows[0].payload), [, five] = save.decodeArguments(rows[1].payload)
+    expect(single).toHaveLength(1); expect(base64ByteLength(single[0].data)).toBe(512 * 1024)
+    expect(typeof single[0].data).toBe('string'); expect(single[0].data.startsWith('data:')).toBe(false)
+    expect(five).toHaveLength(5); expect(five.reduce((total, image) => total + base64ByteLength(image.data), 0)).toBe(512 * 1024)
+    const [, rawNames] = save.decodeArguments(rows[2].payload)
+    expect(rawNames[0].name).toBe('../unsafe\0.png')
+    expect(rawNames.map(image => sanitizeChatImageName(image.name, image.mimeType))).toEqual(['unsafe.png', 'image-CON.png', 'fixture.png', 'report.png', 'image.png'])
+    expect(save.decodeArguments(rows[3].payload)).toEqual(['task_fixture', []])
+    expect(remove.decodeArguments(rows[4].payload)).toEqual(['t'.repeat(128), 'ABCDEFAB-CDEF-5ABC-ABCD-ABCDEFABCDEF'])
+    const tooLarge = Buffer.alloc(512 * 1024 + 1); tooLarge.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    for (const images of [[...rawNames, rawNames[0]], [{ ...single[0], data: tooLarge.toString('base64') }], [{ ...rawNames[0], data: 'data:image/png;base64,iVBORw0KGgoAAAAA' }], [{ ...rawNames[0], data: 'not-base64' }], [{ ...rawNames[0], name: '\ud800' }]]) expect(() => save.encodeArguments(['task_fixture', images])).toThrow()
+    for (const id of ['00000000-0000-0000-8000-000000000001', '00000000-0000-4000-7000-000000000001', '../file']) expect(() => remove.encodeArguments(['task_fixture', id])).toThrow()
+    const record = { id: '00000000-0000-4000-8000-000000000001', filename: 'unsafe.png', size: 12, mime_type: 'image/png', added_at: '2026-10-14T00:00:00Z' }
+    expect(save.encodeResult([record])).toEqual({ defined: true, value: [record] })
+    expect(save.validateWireResult({ defined: true, value: [{ ...record, path: '/private/file', data: 'private' }] })).toBe(false)
+    expect(save.validateWireResult({ defined: true, value: [{ ...record, filename: '../unsafe.png' }] })).toBe(false)
+    expect(save.validateWireResult({ defined: false })).toBe(false)
+    expect(remove.encodeResult(undefined)).toEqual({ defined: false }); expect(remove.decodeResult(undefined)).toBeUndefined()
+    for (const value of [{ defined: true, value: true }, { defined: false, value: null }]) expect(remove.validateWireResult(value)).toBe(false)
   })
   it('covers every source plugin and exact MCP credential/OAuth and source mutation shapes', () => {
     const corpus = createProductionRequestCorpus()
@@ -191,6 +245,6 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(213)
+    expect(corpus.operations).toHaveLength(221)
   })
 })

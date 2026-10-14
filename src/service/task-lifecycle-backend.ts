@@ -40,6 +40,7 @@ export interface TaskLifecycleBackendOptions {
   canAccessMcpServer?(id: string, caller: DesktopCallerContext, access: 'read'): boolean
   canAccessConnector?(id: string, caller: DesktopCallerContext, access: Access): boolean
   emit(operation: TaskLifecycleEvent, payload: JsonValue): void
+  beforeTaskDeletion?(taskIds: readonly string[]): void
   onFatalEvent(error: ServiceProtocolError): void
 }
 
@@ -302,6 +303,7 @@ export class TaskLifecycleBackend {
       if (!db.getTask(id)) return false
       const tasks = this.tree(id), ids = tasks.map(task => task.id)
       const affected = this.mutationRows(id).map(task => task.id)
+      this.options.beforeTaskDeletion?.(ids)
       let accepted = false
       try {
         return await manager.runTaskLifecycleMutation(affected, async () => {
@@ -316,7 +318,7 @@ export class TaskLifecycleBackend {
           while (pending.size) {
             const leaves = [...pending.values()].filter(task => ![...pending.values()].some(child => child.parent_task_id === task.id || child.recurrence_parent_id === task.id))
             if (!leaves.length) throw new ServiceProtocolError('INVALID_REQUEST')
-            for (const task of leaves) { db.deleteTask(task.id); pending.delete(task.id) }
+            for (const task of leaves) { this.options.beforeTaskDeletion?.([task.id]); db.deleteTask(task.id); pending.delete(task.id) }
           }
           accepted = true
           return true

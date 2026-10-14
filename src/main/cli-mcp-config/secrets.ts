@@ -25,7 +25,7 @@ export function isReference(value: string): boolean {
 /** The variable names referenced by a value (`Bearer ${A} ${B}` → [A, B]). */
 export function referenceNames(value: string): string[] {
   const names: string[] = []
-  for (const match of value.matchAll(REFERENCE_PATTERN)) names.push(match[1])
+  for (const match of value.matchAll(new RegExp(REFERENCE_PATTERN.source, 'g'))) names.push(match[1])
   return names
 }
 

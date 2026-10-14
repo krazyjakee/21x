@@ -1,3 +1,4 @@
+import type { CliMcpFileOwner } from './portable-file-owner'
 /**
  * OpenCode global MCP config.
  *
@@ -19,7 +20,7 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import type { CliId, McpServerDefinition } from '../../shared/cli-mcp-config'
 import { normalizeMcpName, opencodeToolId } from '../mcp-tool-limits'
-import { parseJsonDocument, readFileSnapshot, serializeJsonDocument, type FileSnapshot, type JsonDocument } from './file-store'
+import { parseJsonDocument, type FileSnapshot, type JsonDocument } from './file-store'
 import { BaseCliMcpStore, type CliFileRole, type CliMcpMutation, type CliStateBundle, type LoadedServer, type MutationOutcome } from './store'
 import { validateDefinition } from './validate'
 
@@ -28,6 +29,7 @@ interface OpencodeState {
 }
 
 export interface OpencodeStoreOptions {
+  files?: CliMcpFileOwner
   homeDir?: string
   env?: NodeJS.ProcessEnv
 }
@@ -75,8 +77,8 @@ export class OpencodeMcpStore extends BaseCliMcpStore<OpencodeState> {
   private readonly configPath: string
 
   constructor(options: OpencodeStoreOptions = {}) {
-    super()
-    this.configPath = resolveOpencodeConfigPath(options.env ?? process.env, options.homeDir ?? homedir())
+    super(options.files)
+    this.configPath = options.files?.paths.opencode ?? resolveOpencodeConfigPath(options.env ?? process.env, options.homeDir ?? homedir())
   }
 
   describeFiles(): CliFileRole[] {
@@ -84,14 +86,15 @@ export class OpencodeMcpStore extends BaseCliMcpStore<OpencodeState> {
   }
 
   protected readFilesOnly(): FileSnapshot[] {
-    return [readFileSnapshot(this.configPath)]
+    return [this.readSnapshot(this.configPath)]
   }
 
   protected readState(): CliStateBundle<OpencodeState> {
     const files = this.readFilesOnly()
+    this.parseJson(files[0].content)
     const doc = parseJsonDocument(files[0].content)
     const notes: string[] = []
-    if (doc.hadComments) notes.push(`${this.configPath} contains comments or trailing commas; they are dropped when 21x writes the file.`)
+    if (doc.hadComments && !this.fileOwner) notes.push(`${this.configPath} contains comments or trailing commas; they are dropped when 21x writes the file.`)
     return { files, state: { doc }, notes }
   }
 
@@ -212,7 +215,7 @@ export class OpencodeMcpStore extends BaseCliMcpStore<OpencodeState> {
   }
 
   protected serialize(state: OpencodeState): Array<{ path: string; content: string }> {
-    return [{ path: this.configPath, content: serializeJsonDocument(state.doc) }]
+    return [{ path: this.configPath, content: this.jsonText(state.doc) }]
   }
 
   private removeToolRules(doc: JsonDocument, serverName: string, matches: (id: string) => boolean): number {

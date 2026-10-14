@@ -30,6 +30,78 @@ const json = (id: number, result: unknown): Response => Response.json({ jsonrpc:
 const remote = { name: 'fixture', type: 'remote', url: 'http://127.0.0.1:1/fixture', headers: { Authorization: 'Bearer fixture-private' } }
 
 describe('portable MCP probe ownership', () => {
+  it('refuses retired authority before environment or spawn access', async () => {
+    const environment = vi.fn(() => ({})), spawn = vi.fn(), owner = own({ environment, spawn })
+    const receipt = owner.probeOwned({ name: 'fixture', command: 'fixture' }, undefined,
+      { beforeEffect: () => { throw new Error('Private caller authority was withdrawn') } })
+    expect(await receipt.result).toEqual({ status: 'failed', error: 'MCP probe cancelled' })
+    await receipt.closed
+    expect(environment).not.toHaveBeenCalled(); expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('fences stdio protocol writes after revocation and retains the exact child until close', async () => {
+    const child = fakeChild(), spawn = vi.fn(() => child), owner = own({ spawn })
+    const write = vi.spyOn(child.stdin, 'write'), closed = vi.fn()
+    let allowed = true
+    const receipt = owner.probeOwned({ name: 'fixture', command: 'fixture' }, undefined,
+      { beforeEffect: () => { if (!allowed) throw new Error('Revoked') } })
+    void receipt.closed.then(closed)
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce())
+    expect(write).toHaveBeenCalledOnce()
+    allowed = false
+    child.stdout.emit('data', JSON.stringify({ id: 1, result: {} }) + '\n')
+    expect(await receipt.result).toEqual({ status: 'failed', error: 'MCP probe cancelled' })
+    expect(write).toHaveBeenCalledOnce(); expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(closed).not.toHaveBeenCalled(); expect(owner.pendingCount).toBe(1)
+    child.emit('close', 1); await receipt.closed
+    expect(closed).toHaveBeenCalledOnce()
+  })
+
+  it('uses literal portable arguments and never injects task API credentials by a user server name', async () => {
+    const child = fakeChild(), spawn = vi.fn(() => child), taskApiEnvironment = vi.fn(() => ({ TASK_API_TOKEN: 'private-launch-token' }))
+    const owner = own({ spawn, taskApiEnvironment, environment: () => ({ PATH: '/fixture' }) })
+    const args = ['--fixture', 'literal; argument'], environment = { OWNED: 'fixture' }
+    const receipt = owner.probeOwned({ name: 'task-management', command: 'npx', args, environment }, undefined, { beforeEffect: () => {} })
+    args[1] = 'changed after admission'; environment.OWNED = 'changed'
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce())
+    expect(spawn).toHaveBeenCalledWith('npx', ['--fixture', 'literal; argument'], { env: { PATH: '/fixture', npm_config_yes: 'true', OWNED: 'fixture' } })
+    expect(taskApiEnvironment).not.toHaveBeenCalled()
+    child.emit('close', 1); await receipt.closed; await receipt.result
+  })
+
+  it('refuses portable Windows shell-script probes before host access', async () => {
+    const spawn = vi.fn(), environment = vi.fn(), owner = own({ spawn, environment, platform: 'win32' })
+    const receipt = owner.probeOwned({ name: 'fixture', command: 'fixture.cmd' }, undefined, { beforeEffect: () => {} })
+    expect(await receipt.result).toEqual({ status: 'failed', error: 'MCP shell-script probes are unavailable in this host' })
+    await receipt.closed; expect(spawn).not.toHaveBeenCalled(); expect(environment).not.toHaveBeenCalled()
+  })
+
+  it('joins late HTTP response cleanup after authority loss and never sends the next protocol request', async () => {
+    const response = deferred<Response>(), cleanup = deferred<void>(), cancel = vi.fn(() => cleanup.promise)
+    const http = vi.fn<typeof fetch>(() => response.promise), owner = own({ fetch: http })
+    let allowed = true
+    const receipt = owner.probeOwned(remote, undefined, { beforeEffect: () => { if (!allowed) throw new Error('Revoked') } })
+    await vi.waitFor(() => expect(http).toHaveBeenCalledOnce())
+    expect(http.mock.calls[0][1]).toMatchObject({ method: 'POST', redirect: 'error' })
+    allowed = false; response.resolve(new Response(new ReadableStream({ cancel })))
+    expect(await receipt.result).toEqual({ status: 'failed', error: 'MCP probe cancelled' })
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+    const closed = vi.fn(); void receipt.closed.then(closed)
+    await Promise.resolve(); expect(closed).not.toHaveBeenCalled()
+    cleanup.resolve(); await receipt.closed
+    expect(http).toHaveBeenCalledOnce()
+  })
+
+  it('fences protocol advancement when authority changes during response cleanup', async () => {
+    let allowed = true
+    const http = vi.fn<typeof fetch>().mockResolvedValueOnce(json(1, {}))
+      .mockResolvedValueOnce(new Response(new ReadableStream({ cancel: () => { allowed = false } })))
+    const owner = own({ fetch: http })
+    const receipt = owner.probeOwned(remote, undefined, { beforeEffect: () => { if (!allowed) throw new Error('Revoked') } })
+    expect(await receipt.result).toEqual({ status: 'failed', error: 'MCP probe cancelled' })
+    await receipt.closed; expect(http).toHaveBeenCalledTimes(2)
+  })
+
   it('runs an actual owning Node fixture and waits for native close after discovering tools', async () => {
     let pid = 0
     const owner = own({ spawn: (command, args, options) => {
