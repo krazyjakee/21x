@@ -19,6 +19,7 @@ import type { ChatProvider, ChatProviderEvent } from '../main/chat/providers/typ
 import { makeTask } from '../../test/helpers/task-fixtures'
 import { acquireProfileLock } from '../main/platform/profile-lock'
 import { PRODUCTION_RESOURCE_PINS, verifyProductionResources } from './production-stdio'
+import { WORKSPACE_NATIVE_CALLBACK_SCHEMAS } from '../shared/workspace-native-callbacks'
 
 const roots: string[] = [], services: ProductionServiceType[] = [], hosts: ServicePeer[] = [], release: Array<() => void> = []
 afterEach(async () => {
@@ -37,12 +38,15 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture() {
+function fixture(workspaceFiles = false) {
   const root = mkdtempSync(join(tmpdir(), '21x-private-production-')); roots.push(root)
   const launch = descriptor(root); mkdirSync(launch.paths.resourceRoot)
+  if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   let permitted = true, badDrain = false, preparation: Promise<void> | null = null
   const nativeCalls: string[] = [], wireEvents: Array<{ operation: string; payload: JsonValue }> = []
   const keys = new Map<string, Buffer>()
+  let fileAcknowledgement: Promise<void> | null = null
+  const fileReceipts: JsonValue[] = []
   const adapter = { initialize: vi.fn(async () => {}), createSession: vi.fn(async () => 'controlled_native'), resumeSession: vi.fn(async () => []),
     sendPrompt: vi.fn(async () => {}), getStatus: vi.fn(async () => ({ type: 'busy' })), pollMessages: vi.fn(async () => []),
     abortPrompt: vi.fn(async () => {}), destroySession: vi.fn(async () => {}), checkHealth: vi.fn(async () => ({ available: true })) }
@@ -76,6 +80,10 @@ function fixture() {
     const id = badDrain ? 'foreign_launch_001' : launch.launchId; badDrain = false
     return { launchId: id, acknowledged: true }
   } }
+  if (workspaceFiles) for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) schemas[operation] = { ...schema, handle: async payload => {
+    nativeCalls.push(operation); fileReceipts.push((payload as { receipt: JsonValue }).receipt)
+    await fileAcknowledgement; return {}
+  } }
   const deliver = (peer: ServicePeer, bytes: Uint8Array): void => { for (let offset = 0; offset < bytes.length; offset += 79) peer.receive(bytes.subarray(offset, offset + 79)) }
   const host = new ServicePeer({ role: 'host', engineEpoch: null, operations: schemas,
     eventSchemas: Object.fromEntries(Object.keys(PRODUCTION_EVENT_CODECS).map(operation => [operation, (value: unknown) => validateProductionEventWire(operation, value)])),
@@ -89,7 +97,7 @@ function fixture() {
       connectors: { kind: 'disabled', reason: 'Controlled fixture has no packaged connectors' }, managedTaskMcp: { disabled: true },
       native: { agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, configuredMcp: 'disabled' },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, emit: callbacks.emitOwnerEvent,
-        openExternal: callbacks.openExternal, notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } })
+        openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } })
   }), { write: async bytes => { deliver(host, bytes) } }); services.push(service)
   const initialize = async (): Promise<void> => {
     const ping = await host.request('engine.ping', {})
@@ -97,10 +105,38 @@ function fixture() {
     await host.request('engine.initialize', { protocolVersion: 1, launchId: launch.launchId })
   }
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
+    fileReceipts, holdFileAcknowledgement: (raw: Promise<void>) => { fileAcknowledgement = raw },
     holdPreparation: (raw: Promise<void>) => { preparation = raw } }
 }
 
 describe('actual private production peer', () => {
+  it('exchanges exact captured file receipts only with an advertised private native callback and retains late acknowledgement', async () => {
+    const f = fixture(true); await f.initialize()
+    const actual = f.service.getReadyServices()!, task = actual.db.createTask(makeTask())!
+    const directory = await f.host.request('tasks:getWorkspaceDir', { taskId: task.id }) as { value: string }
+    const path = join(directory.value, 'report.md'); writeFileSync(path, 'Private fixture report')
+    expect(await f.host.request('shell:readTextFile', { filePath: path })).toMatchObject({ defined: true, value: { content: 'Private fixture report' } })
+    expect(await f.host.request('shell:showItemInFolder', { filePath: path })).toEqual({ defined: false })
+    expect(f.fileReceipts).toEqual([expect.objectContaining({ version: 1, path, taskId: task.id, workspaceRoot: f.launch.paths.workspaceRoot })])
+    const gate = deferred(); release.push(gate.finish); f.holdFileAcknowledgement(gate.promise)
+    const abort = new AbortController(), work = f.host.request('shell:openPath', { filePath: path }, { signal: abort.signal })
+    const cancelled = expect(work).rejects.toMatchObject({ code: 'CANCELLED' })
+    await vi.waitFor(() => expect(f.nativeCalls).toContain('host.workspace.openPath'))
+    abort.abort(); await cancelled
+    await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(actual.db.db.open).toBe(true); expect(f.nativeCalls).not.toContain('drain')
+    gate.finish(); await f.service.close()
+    expect(actual.db.db.open).toBe(false); expect(f.nativeCalls.filter(op => op === 'host.workspace.openPath')).toHaveLength(1)
+    expect(f.nativeCalls.at(-1)).toBe('drain')
+  }, 15_000)
+  it('does not expose native file actions when the private descriptor has no file callback capability', async () => {
+    const f = fixture(); await f.initialize()
+    const task = f.service.getReadyServices()!.db.createTask(makeTask())!
+    const directory = await f.host.request('tasks:getWorkspaceDir', { taskId: task.id }) as { value: string }
+    await expect(f.host.request('shell:openPath', { filePath: directory.value })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    expect(f.fileReceipts).toEqual([])
+    expect(f.nativeCalls).toEqual(['prepare'])
+  }, 15_000)
   it('negotiates epoch before native initialization and binds the singleton database/admission owner', async () => {
     const f = fixture(); await f.initialize()
     const actual = f.service.getReadyServices()!

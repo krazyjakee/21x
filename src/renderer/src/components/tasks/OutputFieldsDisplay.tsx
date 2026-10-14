@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { FileOutput, CheckCircle2, FileText, FolderOpen, ExternalLink, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -248,6 +248,9 @@ const TEXT_EXTENSIONS = new Set(['.md', '.txt', '.json', '.csv', '.html', '.xml'
 
 function FileFieldPreview({ filePath, taskUpdatedAt }: { filePath: string; taskUpdatedAt?: string }) {
   const [preview, setPreview] = useState<string | null>(null)
+  const [previewDetail, setPreviewDetail] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const generation = useRef(0)
   const [expanded, setExpanded] = useState(false)
 
   const fileName = filePath.split('/').pop() || filePath
@@ -255,11 +258,22 @@ function FileFieldPreview({ filePath, taskUpdatedAt }: { filePath: string; taskU
   const isText = TEXT_EXTENSIONS.has(ext)
 
   useEffect(() => {
-    if (!isText) return
-    shellApi.readTextFile(filePath).then((result) => {
+    const mine = ++generation.current
+    setPreview(null); setPreviewDetail(null); setActionError(null)
+    if (isText) void shellApi.readTextFile(filePath).then((result) => {
+      if (mine !== generation.current) return
       if (result?.content) setPreview(result.content)
-    })
+      else if (result && result.size > 0) setPreviewDetail('This file is too large to preview. Open it to view its contents.')
+      else if (!result) setPreviewDetail('File preview is unavailable.')
+    }).catch(() => { if (mine === generation.current) setPreviewDetail('File preview is unavailable.') })
+    return () => { generation.current++ }
   }, [filePath, isText, taskUpdatedAt])  // Re-read when task is updated
+
+  const fileAction = (action: () => Promise<void>): void => {
+    const mine = generation.current
+    setActionError(null)
+    void Promise.resolve().then(action).catch(() => { if (mine === generation.current) setActionError('This file action is unavailable.') })
+  }
 
   return (
     <div className="rounded-md border overflow-hidden">
@@ -268,14 +282,15 @@ function FileFieldPreview({ filePath, taskUpdatedAt }: { filePath: string; taskU
         <span className="text-xs font-medium truncate flex-1">{fileName}</span>
         <div className="flex items-center gap-1 shrink-0">
           {preview && <CopyValueButton value={preview} label="Copy file preview" />}
-          <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => shellApi.openPath(filePath)}>
+          <Button variant="ghost" size="sm" className="h-6 px-1.5" aria-label="Open file" onClick={() => fileAction(() => shellApi.openPath(filePath))}>
             <ExternalLink className="h-3 w-3" />
           </Button>
-          <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => shellApi.showItemInFolder(filePath)}>
+          <Button variant="ghost" size="sm" className="h-6 px-1.5" aria-label="Show file in folder" onClick={() => fileAction(() => shellApi.showItemInFolder(filePath))}>
             <FolderOpen className="h-3 w-3" />
           </Button>
         </div>
       </div>
+      {(previewDetail || actionError) && <p className="border-t px-3 py-2 text-xs text-muted-foreground">{actionError ?? previewDetail}</p>}
       {preview && (
         <>
           <div className="border-t px-3 py-2 bg-muted/30">

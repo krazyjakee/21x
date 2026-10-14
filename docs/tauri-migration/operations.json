@@ -12264,7 +12264,7 @@
     {
       "caller": "trusted-desktop-main",
       "deadline": "30000ms default; cancellation advisory; no automatic mutation replay",
-      "destination": "native-host",
+      "destination": "service",
       "disposition": "retained",
       "input": {
         "convention": "legacy-preload-api-arguments; explicit codec required for IPC transformations",
@@ -12291,8 +12291,8 @@
       },
       "kind": "command",
       "name": "shell:openPath",
-      "nativeCallback": false,
-      "owner": "native-host",
+      "nativeCallback": true,
+      "owner": "service",
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
@@ -12376,7 +12376,7 @@
     {
       "caller": "trusted-desktop-main",
       "deadline": "30000ms default; cancellation advisory; no automatic mutation replay",
-      "destination": "native-host",
+      "destination": "service",
       "disposition": "retained",
       "input": {
         "convention": "legacy-preload-api-arguments; explicit codec required for IPC transformations",
@@ -12403,8 +12403,8 @@
       },
       "kind": "command",
       "name": "shell:showItemInFolder",
-      "nativeCallback": false,
-      "owner": "native-host",
+      "nativeCallback": true,
+      "owner": "service",
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {

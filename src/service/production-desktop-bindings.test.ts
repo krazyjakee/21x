@@ -27,6 +27,8 @@ import { CONNECTOR_CODECS } from '../shared/connector-codecs'
 import { GIT_PROVIDER_CODECS } from '../shared/git-provider-codecs'
 import { execFile, type ExecFileException } from 'node:child_process'
 import type { ProductionOwnerExternalBoundaries } from './production-owner'
+import { WORKSPACE_FILE_CODECS } from '../shared/workspace-file-codecs'
+import { open as openFile } from 'node:fs/promises'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
 let ownerModule: typeof import('./production-owner')
@@ -43,7 +45,7 @@ afterEach(async () => {
   for (const root of new Set(completed.map(value => value.root))) rmSync(root, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
-async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false, voice = false, gitProviderProcess?: ProductionOwnerExternalBoundaries['gitProviderProcess']) {
+async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false, voice = false, gitProviderProcess?: ProductionOwnerExternalBoundaries['gitProviderProcess'], fileNative?: Pick<ProductionOwnerBootstrap['native'], 'openPath' | 'showItemInFolder'>, workspaceFiles?: ProductionOwnerExternalBoundaries['workspaceFiles']) {
   const { ProductionOwner } = ownerModule
   const { ProductionDesktopBindings } = bindingModule
   const root = mkdtempSync(join(tmpdir(), '21x-production-bindings-')), resourceRoot = join(root, 'resources')
@@ -62,10 +64,11 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
     ...(voice ? { voice: { node: process.env.TAURI_NODE_RUNTIME ?? process.execPath, recognitionWorker: join(resourceRoot, 'voice-worker.cjs'), speechWorker: join(resourceRoot, 'voice-tts-worker.cjs') } } : {}),
     managedTaskMcp: { disabled: true }, connectors: connectors ? { kind: 'enabled' } : { kind: 'disabled', reason: 'No connector resources in this fixture.' },
     native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: 'disabled' },
-      prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }) }
+      prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }), ...fileNative }
   }
   const boundaries = { createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end' as const, stopReason: 'end_turn' } } }),
     ...(gitProviderProcess ? { gitProviderProcess } : {}),
+    ...(workspaceFiles ? { workspaceFiles } : {}),
     ...(connectors ? { connectorTransport: () => { throw new Error('Credential form fixture must not create a worker') } } : {}) }
   const owner = new ProductionOwner(bootstrap, boundaries)
   owned.push({ owner, root }); const services = await owner.start(), epoch = owner.snapshot().epoch
@@ -101,6 +104,63 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('uses actual task workspaces and transfers legitimate cleanup identity before workspace recreation', async () => {
+    const f = await fixture(), lease = f.owner.getWorkspaceFileBindingLease(), task = f.services.db.createTask({ title: 'Owned workspace report' })!
+    expect(lease.files).toBe(f.services.workspaceFiles); expect(lease.database).toBe(f.services.db); lease.assertWorkspaceFileOwners(lease.database, lease.files, lease.workspaceRoot)
+    const wire = await f.backend.invoke('tasks:getWorkspaceDir', { taskId: task.id }, f.caller, f.signal) as { value: string }
+    const directory = join(f.bootstrap.paths.workspaceRoot, task.id)
+    expect(wire).toEqual({ defined: true, value: directory })
+    const path = join(directory, 'report.md'); writeFileSync(path, 'Actual task report')
+    expect(await f.backend.invoke('shell:readTextFile', { filePath: path }, f.caller, f.signal)).toEqual({ defined: true, value: { content: 'Actual task report', size: 18 } })
+    expect(await f.backend.invoke('shell:readTextFile', { filePath: join(directory, 'missing.txt') }, f.caller, f.signal)).toEqual({ defined: true, value: null })
+    await expect(f.backend.invoke('shell:readTextFile', { filePath: join(f.bootstrap.paths.profileRoot, 'tasks.db') }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(f.backend.invoke('shell:openPath', { filePath: path }, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    const retire = vi.spyOn(lease.files, 'retireWorkspace')
+    await f.services.worktrees.cleanupTaskWorkspace(task.id, [], 'fixture')
+    expect(existsSync(directory)).toBe(false); expect(retire).toHaveBeenCalledWith(task.id, { dev: expect.any(String), ino: expect.any(String) })
+    expect(await f.backend.invoke('tasks:getWorkspaceDir', WORKSPACE_FILE_CODECS['tasks:getWorkspaceDir'].encodeArguments([task.id]), f.caller, f.signal)).toEqual({ defined: true, value: directory })
+    f.options.authority.canAccessTask = () => false
+    await expect(f.backend.invoke('tasks:getWorkspaceDir', { taskId: task.id }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await f.owner.close(); expect(f.services.db.db.open).toBe(false)
+  })
+
+  it('holds the protected singleton while the exact native file acknowledgement is delayed', async () => {
+    let finish!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => { finish = resolve }), started = new Promise<void>(resolve => { entered = resolve })
+    finishers.push(finish)
+    const receipts: unknown[] = []
+    const f = await fixture(undefined, false, false, false, undefined, { openPath: async (_path, receipt) => { receipts.push(receipt); entered(); await gate } })
+    const task = f.services.db.createTask({ title: 'Native file acknowledgement' })!
+    const wire = await f.backend.invoke('tasks:getWorkspaceDir', { taskId: task.id }, f.caller, f.signal) as { value: string }
+    const path = join(wire.value, 'report.md'); writeFileSync(path, 'Retain this file')
+    const work = f.backend.invoke('shell:openPath', { filePath: path }, f.caller, f.signal)
+    const result = expect(work).rejects.toMatchObject({ code: 'CANCELLED' })
+    await started
+    expect(receipts).toEqual([expect.objectContaining({ version: 1, taskId: task.id, path, workspaceRoot: f.bootstrap.paths.workspaceRoot, target: expect.objectContaining({ kind: 'file', nlink: '1' }) })])
+    await expect(f.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(f.services.db.db.open).toBe(true); expect(f.owner.snapshot().owned).toBe(true)
+    finish(); await result; await f.owner.close()
+    expect(f.services.db.db.open).toBe(false); expect(readFileSync(path, 'utf8')).toBe('Retain this file')
+  })
+
+  it('blocks key/database release while an actual workspace descriptor cannot close and retries that same handle', async () => {
+    const { WorkspaceFileOwner } = await import('../main/workspace-file-owner')
+    let failClose = true, closes = 0
+    finishers.push(() => { failClose = false })
+    const factory: NonNullable<ProductionOwnerExternalBoundaries['workspaceFiles']> = options => new WorkspaceFileOwner({ ...options, fs: { open: async (path, flags) => {
+      const handle = await openFile(path, flags)
+      return { stat: () => handle.stat({ bigint: true }), read: (buffer, offset, length, position) => handle.read(buffer, offset, length, position), close: async () => { closes++; if (failClose) throw new Error('controlled close refusal'); await handle.close() } }
+    } } })
+    const f = await fixture(undefined, false, false, false, undefined, undefined, factory), task = f.services.db.createTask({ title: 'Raw descriptor close' })!
+    const wire = await f.backend.invoke('tasks:getWorkspaceDir', { taskId: task.id }, f.caller, f.signal) as { value: string }
+    const path = join(wire.value, 'report.md'); writeFileSync(path, 'Actual retained FD')
+    await expect(f.backend.invoke('shell:readTextFile', { filePath: path }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    expect(f.services.workspaceFiles.inflightCount).toBe(1)
+    await expect(f.owner.close(20)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(f.services.db.db.open).toBe(true); expect(f.owner.snapshot().owned).toBe(true)
+    failClose = false; await f.owner.close()
+    expect(closes).toBeGreaterThan(1); expect(f.services.workspaceFiles.inflightCount).toBe(0); expect(f.services.db.db.open).toBe(false)
+  })
   it('borrows the same actual Git managers and retains a late CLI callback with the protected database lease', async () => {
     const { GitProviderProcessOwner } = await import('../main/git-provider-process-owner')
     const node = process.env.TAURI_NODE_RUNTIME ?? (!process.versions.electron ? process.execPath : ['/usr/bin/node', '/usr/local/bin/node'].find(existsSync))
@@ -227,7 +287,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
 
   it('pairs against the actual mobile HTTP owner and sends a phone start through shared admission', async () => {
     const f = await fixture(undefined, false, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(148)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(150)
     const lease = f.owner.getMobileBindingLease()!
     expect(lease.deps.db).toBe(f.services.db); expect(lease.deps.agentManager).toBe(f.services.agents)
     expect(lease.deps.taskOwners?.automation).toBe(f.services.automation)
@@ -262,7 +322,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(145)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(147)
     const lease = f.owner.getConnectorBindingLease()!
     const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
     const id = (ensured as { value: { instanceId: string } }).value.instanceId
@@ -374,7 +434,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(138)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(140)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

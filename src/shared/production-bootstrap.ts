@@ -13,6 +13,7 @@ export interface ProductionLaunchDescriptor {
   resourceManifestSha256: string
   paths: { profileRoot: string; workspaceRoot: string; attachmentRoot: string; reposRoot: string; resourceRoot: string; tempRoot: string }
   capabilities: {
+    workspaceFiles?: 'host' | 'unsupported'
     externalUrls: 'host' | 'unsupported'
     notifications: 'host' | 'unsupported'
     energy: 'unsupported'
@@ -33,7 +34,8 @@ export function isProductionLaunchDescriptor(value: unknown): value is Productio
     value.version === 1 && value.kind === 'production-private-launch' && isProductionLaunchId(value.launchId) && typeof value.profileId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value.profileId) &&
     choice(value.profileIntent, ['create-new', 'load-authenticated-copy']) && typeof value.buildIdentity === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value.buildIdentity) && isResourceDigest(value.resourceManifestSha256) &&
     isRecord(value.paths) && hasExactKeys(value.paths, ['profileRoot', 'workspaceRoot', 'attachmentRoot', 'reposRoot', 'resourceRoot', 'tempRoot']) && Object.values(value.paths).every(isAbsoluteHostPath) &&
-    isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp']) &&
+    isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp'], ['workspaceFiles']) &&
+    (capabilities.workspaceFiles === undefined || choice(capabilities.workspaceFiles, ['host', 'unsupported'])) &&
     ['externalUrls', 'notifications'].every(key => choice(capabilities[key], ['host', 'unsupported'])) && ['energy', 'ui', 'voice'].every(key => capabilities[key] === 'unsupported') &&
     ['configuredMcp', 'connectors', 'managedTaskMcp'].every(key => choice(capabilities[key], ['enabled', 'disabled']))
 }

@@ -15,8 +15,9 @@ use twentyonex_engine::{
     production::{
         DelegatedCgroup, HostCapability, OptionalCapability, ProductionCapabilities,
         ProductionDescriptor, ProductionEngine, ProductionNativeHost, ProductionPaths,
-        ProfileIntent, TrustedProductionLaunch,
+        ProductionWorkspaceHost, ProfileIntent, TrustedProductionLaunch,
     },
+    production_files::{NativeWorkspaceFileOwner, NativeWorkspaceReceipt},
     EngineError,
 };
 #[path = "native_services.rs"]
@@ -84,6 +85,105 @@ async fn open_external(
             .map_err(|_| EngineError::new("INTERNAL_ERROR"))
     })
     .await
+}
+
+fn workspace_file_host(
+    app: &tauri::AppHandle,
+    work: NativeWorkOwner,
+    descriptor: &ProductionDescriptor,
+) -> Result<Option<ProductionWorkspaceHost>, EngineError> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, work, descriptor);
+        return Ok(None);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        // Trusted isolated bootstrap path; there is no public picker/root grant.
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&descriptor.paths.workspace_root)
+            .map_err(|_| {
+                unavailable(
+                    "PRODUCTION_NATIVE_FILE_AUTHORITY_UNAVAILABLE",
+                    "production-native-file-root",
+                )
+            })?;
+        let owner = NativeWorkspaceFileOwner::open(descriptor.paths.workspace_root.clone())
+            .map_err(|_| {
+                unavailable(
+                    "PRODUCTION_NATIVE_FILE_AUTHORITY_UNAVAILABLE",
+                    "production-native-file-owner",
+                )
+            })?;
+        let slot = Arc::new(std::sync::Mutex::new(Some(Arc::new(owner))));
+        let invocation_slot = slot.clone();
+        let app = app.clone();
+        Ok(Some(ProductionWorkspaceHost {
+            invoke: Arc::new(move |reveal, receipt| {
+                let app = app.clone();
+                let work = work.clone();
+                let slot = invocation_slot.clone();
+                Box::pin(async move {
+                    let engine = available_engine(&app, None)?;
+                    let epoch = engine.epoch();
+                    let window = app
+                        .get_webview_window("main")
+                        .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                    authorize(&window)?;
+                    work.run(move || {
+                        authorize(&window)?;
+                        available_engine(&app, Some(&epoch))?;
+                        let owner = slot
+                            .lock()
+                            .map_err(|_| EngineError::new("DISCONNECTED"))?
+                            .as_ref()
+                            .cloned()
+                            .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                        let receipt = NativeWorkspaceReceipt::from_value(&receipt)
+                            .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                        let guard = owner
+                            .validate(&receipt)
+                            .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                        guard
+                            .recheck()
+                            .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                        let result = if reveal {
+                            app.opener().reveal_item_in_dir(guard.path())
+                        } else {
+                            app.opener().open_path(
+                                guard.path().to_string_lossy().into_owned(),
+                                None::<&str>,
+                            )
+                        };
+                        // Keep every exact metadata descriptor through the actual
+                        // native invocation. The external application owns its lifetime.
+                        guard
+                            .recheck()
+                            .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                        authorize(&window)?;
+                        available_engine(&app, Some(&epoch))?;
+                        result.map_err(|_| EngineError::new("INTERNAL_ERROR"))
+                    })
+                    .await
+                })
+            }),
+            close: Arc::new(move || {
+                let slot = slot.clone();
+                Box::pin(async move {
+                    // Engine drain joins every callback before releasing these
+                    // captured root/ancestor handles and acknowledging Node.
+                    let owned = slot
+                        .lock()
+                        .map_err(|_| EngineError::new("DISCONNECTED"))?
+                        .take();
+                    drop(owned);
+                    Ok(())
+                })
+            }),
+        }))
+    }
 }
 #[tauri::command]
 fn engine_status(
@@ -249,6 +349,11 @@ async fn start(
             resource_root: resources,
         },
         capabilities: ProductionCapabilities {
+            workspace_files: if cfg!(target_os = "linux") {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             external_urls: HostCapability::Host,
             notifications: HostCapability::Unsupported,
             energy: HostCapability::Unsupported,
@@ -261,12 +366,14 @@ async fn start(
     };
     let handle = app.clone();
     let external_app = app.clone();
+    let workspace_file = workspace_file_host(app, native_work.clone(), &descriptor)?;
     ProductionEngine::start(
         TrustedProductionLaunch {
             descriptor,
             containment,
         },
         ProductionNativeHost {
+            workspace_file,
             event_sink: Arc::new(move |frame| {
                 handle
                     .emit_to(

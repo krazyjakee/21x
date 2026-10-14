@@ -59,6 +59,8 @@ pub enum OptionalCapability {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductionCapabilities {
+    #[serde(default = "unsupported_host_capability")]
+    pub workspace_files: HostCapability,
     pub external_urls: HostCapability,
     pub notifications: HostCapability,
     pub energy: HostCapability,
@@ -67,6 +69,9 @@ pub struct ProductionCapabilities {
     pub configured_mcp: OptionalCapability,
     pub connectors: OptionalCapability,
     pub managed_task_mcp: OptionalCapability,
+}
+fn unsupported_host_capability() -> HostCapability {
+    HostCapability::Unsupported
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -82,7 +87,12 @@ pub struct ProductionDescriptor {
     pub capabilities: ProductionCapabilities,
 }
 pub type HostFuture<T> = Pin<Box<dyn Future<Output = Result<T, EngineError>> + Send>>;
+pub struct ProductionWorkspaceHost {
+    pub invoke: Arc<dyn Fn(bool, Value) -> HostFuture<()> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionNativeHost {
+    pub workspace_file: Option<ProductionWorkspaceHost>,
     pub event_sink: Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>,
     pub open_external: Option<Arc<dyn Fn(String) -> HostFuture<()> + Send + Sync>>,
     pub notification: Option<Arc<dyn Fn(String, String) -> HostFuture<bool> + Send + Sync>>,
@@ -453,6 +463,8 @@ impl ProductionEngine {
             && host.open_external.is_none())
             || (launch.descriptor.capabilities.notifications == HostCapability::Host
                 && host.notification.is_none())
+            || (launch.descriptor.capabilities.workspace_files == HostCapability::Host
+                && host.workspace_file.is_none())
         {
             return Err(problem(
                 "INVALID_ARGUMENTS",
@@ -834,12 +846,37 @@ impl ProductionEngine {
                         "production-native-callback-drain",
                     )
                 })?;
+                if let Some(files) = &self.0.host.workspace_file {
+                    (files.close)().await?;
+                }
                 #[cfg(target_os = "linux")]
                 self.0.scope.await_leader_only().await?;
                 #[cfg(not(target_os = "linux"))]
                 return Err(EngineError::new("PRODUCTION_CONTAINMENT_UNAVAILABLE"));
                 self.0.drained.store(true, Ordering::SeqCst);
                 Ok(json!({"launchId":self.0.descriptor.launch_id,"acknowledged":true}))
+            }
+            "host.workspace.openPath" | "host.workspace.showItemInFolder" => {
+                if self.0.descriptor.capabilities.workspace_files != HostCapability::Host {
+                    return Err(EngineError::new("UNKNOWN_OPERATION"));
+                }
+                if !contracts::object(payload, &["receipt"], &[]) {
+                    return Err(EngineError::new("INVALID_ARGUMENTS"));
+                }
+                crate::production_files::NativeWorkspaceReceipt::from_value(&payload["receipt"])
+                    .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
+                let files = self
+                    .0
+                    .host
+                    .workspace_file
+                    .as_ref()
+                    .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?;
+                (files.invoke)(
+                    operation == "host.workspace.showItemInFolder",
+                    payload["receipt"].clone(),
+                )
+                .await?;
+                Ok(json!({}))
             }
             "host.shell.openExternal" => {
                 if self.0.descriptor.capabilities.external_urls != HostCapability::Host
@@ -1762,6 +1799,7 @@ mod tests {
                 temp_root: root.join("temp"),
             },
             capabilities: ProductionCapabilities {
+                workspace_files: HostCapability::Unsupported,
                 external_urls: HostCapability::Unsupported,
                 notifications: HostCapability::Unsupported,
                 energy: HostCapability::Unsupported,

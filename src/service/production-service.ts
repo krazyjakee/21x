@@ -1,6 +1,7 @@
 import type { ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { isProductionLaunchDescriptor, isProductionInitialize, PRODUCTION_HOST_SCHEMAS } from '../shared/production-bootstrap'
 import { HOST_OPERATION_SCHEMAS } from '../shared/host-services'
+import { isWorkspacePathReceipt, WORKSPACE_NATIVE_CALLBACK_SCHEMAS, type WorkspacePathReceipt } from '../shared/workspace-native-callbacks'
 import { hasExactKeys, isBootstrapResult, isRecord, SERVICE_PROTOCOL_VERSION, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
 import { ProductionOwner, type ProductionOwnerBootstrap, type ProductionOwnerExternalBoundaries, type ProductionServices } from './production-owner'
 import { ProductionDesktopBindings, PRODUCTION_COMMAND_CODECS, PRODUCTION_EVENT_CODECS, validateProductionEventWire, type ProductionDesktopBindingOptions } from './production-desktop-bindings'
@@ -13,6 +14,8 @@ export interface ProductionPrivateCallbacks {
   prepare(signal: AbortSignal): Promise<void>
   drain(): Promise<{ acknowledged: true }>
   openExternal(url: string): Promise<void>
+  openPath(path: string, receipt: WorkspacePathReceipt): Promise<void>
+  showItemInFolder(path: string, receipt: WorkspacePathReceipt): Promise<void>
   notify(title: string, body: string): void
   emitOwnerEvent(operation: string, payload: unknown): void
 }
@@ -74,6 +77,16 @@ export class ProductionService {
       openExternal: async url => {
         if (descriptor.capabilities.externalUrls !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
         await this.peer.request('host.shell.openExternal', { url })
+      },
+      openPath: async (path, receipt) => {
+        if (descriptor.capabilities.workspaceFiles !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
+        if (!isWorkspacePathReceipt(receipt) || receipt.path !== path) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+        await this.peer.request('host.workspace.openPath', { receipt: structuredClone(receipt) as unknown as JsonValue })
+      },
+      showItemInFolder: async (path, receipt) => {
+        if (descriptor.capabilities.workspaceFiles !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
+        if (!isWorkspacePathReceipt(receipt) || receipt.path !== path) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+        await this.peer.request('host.workspace.showItemInFolder', { receipt: structuredClone(receipt) as unknown as JsonValue })
       },
       notify: (title, body) => {
         if (descriptor.capabilities.notifications !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
@@ -147,6 +160,7 @@ export class ProductionService {
       } }
     for (const [operation, schema] of Object.entries(PRODUCTION_HOST_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.externalUrls === 'host') operations['host.shell.openExternal'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateResult }
+    if (descriptor.capabilities.workspaceFiles === 'host') for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.notifications === 'host') operations['host.notification.show'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.notification.show'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.notification.show'].validateResult }
     this.peer = new ServicePeer({ role: 'service', engineEpoch: this.caller.engineEpoch, operations,
       eventSchemas: Object.fromEntries(Object.keys(PRODUCTION_EVENT_CODECS).map(operation => [operation, (value: unknown) => validateProductionEventWire(operation, value)])),
@@ -254,6 +268,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         command: resources.node, args: [resources.taskMcp], environment: {}, tools: listToolsForScope(FULL_ACCESS_SCOPE).map(tool => ({ name: tool.name, description: tool.description ?? '' })) },
       native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: descriptor.capabilities.configuredMcp },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, openExternal: callbacks.openExternal,
+        ...(descriptor.capabilities.workspaceFiles === 'host' ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}),
         // Browser opening alone does not register or own OAuth deep-link callbacks.
         oauthBrowser: 'unavailable',
         notify: callbacks.notify, emit: callbacks.emitOwnerEvent,

@@ -3,6 +3,10 @@
 use serde_json::Value;
 
 pub const COMMANDS: &[&str] = &[
+    "tasks:getWorkspaceDir",
+    "shell:readTextFile",
+    "shell:openPath",
+    "shell:showItemInFolder",
     "github:checkCli",
     "github:fetchOrgs",
     "github:fetchOrgRepos",
@@ -3116,7 +3120,38 @@ fn git_result(op: &str, v: &Value) -> bool {
     }
 }
 
+const WORKSPACE_FILE_COMMANDS: &[&str] = &[
+    "tasks:getWorkspaceDir",
+    "shell:readTextFile",
+    "shell:openPath",
+    "shell:showItemInFolder",
+];
+fn workspace_file_path(v: &Value) -> bool {
+    v.as_str().is_some_and(|s| {
+        if s.is_empty() || s.len() > 4096 || s.chars().any(|c| c <= '\u{001f}' || c == '\u{007f}') {
+            return false;
+        }
+        let b = s.as_bytes();
+        s.starts_with('/')
+            || b.len() >= 3
+                && b[0].is_ascii_alphabetic()
+                && b[1] == b':'
+                && matches!(b[2], b'/' | b'\\')
+            || s.strip_prefix("\\\\").is_some_and(|tail| {
+                let mut parts = tail.split(['/', '\\']);
+                parts.next().is_some_and(|p| !p.is_empty())
+                    && parts.next().is_some_and(|p| !p.is_empty())
+            })
+    })
+}
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if WORKSPACE_FILE_COMMANDS.contains(&operation) {
+        return if operation == "tasks:getWorkspaceDir" {
+            object(value, &["taskId"], &[]) && id(&value["taskId"])
+        } else {
+            object(value, &["filePath"], &[]) && workspace_file_path(&value["filePath"])
+        };
+    }
     if GIT_PROVIDER_COMMANDS.contains(&operation) {
         return bounded_bytes(value, 1024 * 1024) && git_request(operation, value);
     }
@@ -3242,6 +3277,28 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if WORKSPACE_FILE_COMMANDS.contains(&operation) {
+        if matches!(operation, "shell:openPath" | "shell:showItemInFolder") {
+            return object(value, &["defined"], &[]) && value["defined"] == false;
+        }
+        if !object(value, &["defined", "value"], &[])
+            || value["defined"] != true
+            || !bounded_bytes(value, 889_999)
+        {
+            return false;
+        }
+        let v = &value["value"];
+        return if operation == "tasks:getWorkspaceDir" {
+            workspace_file_path(v)
+        } else {
+            v.is_null()
+                || object(v, &["content", "size"], &[])
+                    && v["content"].as_str().is_some_and(|s| s.len() <= 131072)
+                    && v["size"].as_u64().is_some_and(|s| {
+                        s <= 9007199254740991 && (s <= 131072 || v["content"] == "")
+                    })
+        };
+    }
     if GIT_PROVIDER_COMMANDS.contains(&operation) {
         return if operation == "git:recordRepoProviders" {
             object(value, &["defined"], &[]) && value["defined"] == false
@@ -4892,7 +4949,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 176);
+        assert_eq!(COMMANDS.len(), 180);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})
@@ -4908,6 +4965,69 @@ mod tests {
         assert!(!valid_request(
             "db:updateTask",
             &json!({"id":"t","data":{"session_id":"foreign"}})
+        ));
+    }
+    #[test]
+    fn workspace_controls_are_exact_bounded_and_have_no_payload_path_grants() {
+        for (op, payload) in [
+            ("tasks:getWorkspaceDir", json!({"taskId":"task_fixture"})),
+            (
+                "shell:readTextFile",
+                json!({"filePath":"/workspace/task_fixture/報告.md"}),
+            ),
+            (
+                "shell:openPath",
+                json!({"filePath":"C:\\workspace\\task_fixture"}),
+            ),
+            (
+                "shell:showItemInFolder",
+                json!({"filePath":"\\\\server\\share\\task_fixture\\report.md"}),
+            ),
+        ] {
+            assert!(valid_request(op, &payload));
+            let mut extra = payload.clone();
+            extra["authority"] = json!({"root":"/private"});
+            assert!(!valid_request(op, &extra));
+        }
+        for bad in [
+            json!({"filePath":"relative"}),
+            json!({"filePath":"/private\u{0}file"}),
+            json!({"filePath":"/".to_owned()+ &"é".repeat(4096)}),
+        ] {
+            assert!(!valid_request("shell:readTextFile", &bad));
+        }
+        assert!(valid_result(
+            "shell:readTextFile",
+            &json!({"defined":true,"value":null})
+        ));
+        assert!(valid_result(
+            "shell:readTextFile",
+            &json!({"defined":true,"value":{"content":"","size":200000}})
+        ));
+        assert!(valid_result(
+            "shell:readTextFile",
+            &json!({"defined":true,"value":{"content":"\u{0}".repeat(131072),"size":131072}})
+        ));
+        assert!(!valid_result(
+            "shell:readTextFile",
+            &json!({"defined":true,"value":{"content":"é".repeat(131072),"size":131072}})
+        ));
+        assert!(!valid_result(
+            "shell:readTextFile",
+            &json!({"defined":true,"value":{"content":"x","size":200000}})
+        ));
+        assert!(!valid_result(
+            "shell:readTextFile",
+            &json!({"defined":true,"value":{"content":"x","size":9007199254740992u64}})
+        ));
+        assert!(valid_result("shell:openPath", &json!({"defined":false})));
+        assert!(!valid_result(
+            "shell:openPath",
+            &json!({"defined":true,"value":null})
+        ));
+        assert!(valid_result(
+            "tasks:getWorkspaceDir",
+            &json!({"defined":true,"value":"/workspace/task_fixture"})
         ));
     }
     #[test]

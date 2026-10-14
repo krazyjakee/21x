@@ -29,6 +29,7 @@ const mainFiles = [
   'src/main/tunnel-manager-core.test.ts',
   'src/main/oauth/oauth-manager-host.test.ts', 'src/main/worktree-manager-host.test.ts', 'src/main/platform/secret-storage.test.ts',
   'src/main/git-provider-process-owner.test.ts', 'src/main/github-manager.test.ts', 'src/main/gitlab-manager.test.ts', 'src/main/forgejo-manager.test.ts', 'src/main/worktree-directory-authority.test.ts',
+  'src/main/workspace-file-owner.test.ts',
   'test/tauri-runtime.test.ts', 'test/tauri-terminal-native.test.ts',
   'src/main/node-worker-runtime.test.ts',
   'src/main/voice/voice-session-manager-core.test.ts',

@@ -10,7 +10,7 @@ const nativeCommands = new Set([
   'app:getLoginItemSettings', 'app:getMinimizeToTray', 'app:getNotificationPermission', 'app:getVersion',
   'app:requestNotificationPermission', 'app:setLoginItemSettings', 'app:setMinimizeToTray', 'app:setTitleBarOverlay',
   'attachments:pick', 'chatImages:readClipboard', 'notifications:show',
-  'shell:openExternal', 'shell:openPath', 'shell:showItemInFolder',
+  'shell:openExternal',
   'updater:check', 'updater:download', 'updater:getVersion', 'updater:install',
   'voice:getPermission', 'voice:requestPermission', 'voice:pickModelDir'
 ])
@@ -20,6 +20,9 @@ const knownFamilies = new Set(['agent-installer', 'agent', 'agentConfig', 'agent
   'oauth', 'overdue', 'plugin', 'project', 'projectLimits', 'projectRepo', 'projectResource', 'secrets', 'settings',
   'sessionContext', 'shell', 'skills', 'task', 'taskGroups', 'taskSource', 'tasks', 'terminal', 'transcript', 'ui', 'updater', 'voice', 'workspace', 'worktree'])
 const callbackCommands = new Set(['artifacts:copyFile', 'attachments:open', 'attachments:download',
+  // Node admits only an actual current task workspace; native receives the
+  // captured path receipt rather than a caller-selected global filesystem grant.
+  'shell:openPath', 'shell:showItemInFolder',
   'oauth:startFlow', 'oauth:startLocalhostFlow', 'mcp:startOAuthFlow', 'connectors:oauthConnect',
   'voice:setShortcut', 'voice:startTurn', 'voice:tts:speak', 'voice:tts:preview'])
 const reviewedEventTypes = {

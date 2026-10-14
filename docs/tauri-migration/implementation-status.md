@@ -6,6 +6,26 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The workspace-file continuation binds four existing task workspace, text preview,
+open and reveal controls to the actual protected-profile owner. Task/project/group
+and repository/session scopes are shared with artifact reads and rechecked through
+raw I/O and native acknowledgement. Exact file-close failures retain the descriptor
+and block profile release. Trusted worktree cleanup retires only the captured
+directory identity, so later workspace creation remains usable.
+
+The Linux native callback borrows metadata-only, directory-relative no-follow
+handles from its own trusted workspace root and rechecks every captured identity
+before using the existing pinned opener. Callback drain closes the native root
+handles before acknowledging Node's profile release. Other platforms and older
+artifacts without the optional capability report unavailability. The current
+surface has 180 service commands, two separate direct native commands, and 23
+events. File pickers, arbitrary path grants, attachments/viewers and installed
+all-platform acceptance remain open. See [workspace ownership](workspace-file-owner.md),
+[bindings](workspace-file-bindings.md) and
+[native authority](workspace-native-file-authority.md).
+
+The preceding repository-control continuation retains its tested revision:
+
 The repository-control continuation shares one captured CLI process owner across
 the actual GitHub, GitLab and Forgejo managers, task sources and worktrees. It adds
 fifteen retained provider discovery, login selection and repository-map controls.

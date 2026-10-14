@@ -35,6 +35,9 @@ describe('OutputFieldsDisplay', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(shellApi.readTextFile).mockResolvedValue(null)
+    vi.mocked(shellApi.openPath).mockResolvedValue(undefined)
+    vi.mocked(shellApi.showItemInFolder).mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: {
@@ -181,5 +184,22 @@ describe('OutputFieldsDisplay', () => {
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith('line 1\nline 2')
     })
+  })
+  it('shows a useful oversized preview and native-action failure without rejecting the UI event', async () => {
+    vi.mocked(shellApi.readTextFile).mockResolvedValue({ content: '', size: 200000 })
+    vi.mocked(shellApi.openPath).mockRejectedValue(new Error('fixed unavailable callback'))
+    render(<OutputFieldsDisplay fields={[makeField({ type: 'file', value: '/workspace/task/report.md' })]} onChange={onChange} />)
+    expect(await screen.findByText('This file is too large to preview. Open it to view its contents.')).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('Open file'))
+    expect(await screen.findByText('This file action is unavailable.')).toBeTruthy()
+  })
+  it('drops an old file preview after a field changes and catches refused file reads', async () => {
+    let finish!: (value: { content: string; size: number }) => void
+    vi.mocked(shellApi.readTextFile).mockReturnValueOnce(new Promise(resolve => { finish = resolve })).mockRejectedValueOnce(new Error('fixed refused path'))
+    const view = render(<OutputFieldsDisplay fields={[makeField({ id: 'report', type: 'file', value: '/workspace/task/old.md' })]} onChange={onChange} />)
+    view.rerender(<OutputFieldsDisplay fields={[makeField({ id: 'report', type: 'file', value: '/workspace/task/new.md' })]} onChange={onChange} />)
+    finish({ content: 'Old private preview', size: 19 })
+    expect(await screen.findByText('File preview is unavailable.')).toBeTruthy()
+    expect(screen.queryByText('Old private preview')).toBeNull()
   })
 })

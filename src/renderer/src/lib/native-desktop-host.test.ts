@@ -52,7 +52,7 @@ it('uses exact codecs and trusted host metadata; missing binary/file bindings ne
   await expect(desktopApi.settings.get('api_key')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   const before = f.invoke.mock.calls.length
   await expect(desktopApi.voice.pushAudio('turn', new Uint8Array([1, 2]))).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE', capability: 'voice.pushAudio' })
-  await expect(desktopApi.shell.openPath('/private')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
+  await expect(desktopApi.attachments.pick()).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
   expect(() => desktopApi.webUtils.getPathForFile(new File([], 'private'))).toThrow('unavailable')
   expect(typeof desktopApi.commander.onEvent).toBe('function'); expect(Reflect.get(desktopApi, 'browser')).toBeUndefined()
   expect(f.host.supports('commander.send')).toBe(true); expect(f.invoke.mock.calls.length).toBe(before)
@@ -75,6 +75,24 @@ it('binds finite voice management while capture, audio and hosted services remai
   await expect(f.host.api.voice.tts.setEngine('elevenlabs')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   await expect(f.host.api.voice.getPermission()).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
   expect(f.invoke.mock.calls.length).toBe(before)
+})
+it('keeps workspace reads available during recovery, fences filesystem effects and reports absent native callbacks', async () => {
+  const f = fixture(), path = '/workspace/task_fixture/report.md'
+  f.results.set('shell:readTextFile', { content: 'Owned report', size: 12 })
+  f.results.set('tasks:getWorkspaceDir', '/workspace/task_fixture')
+  await f.host.reconnect()
+  expect(await f.host.api.shell.readTextFile(path)).toEqual({ content: 'Owned report', size: 12 })
+  await expect(f.host.api.tasks.getWorkspaceDir('task_fixture')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.shell.openPath(path)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.shell.showItemInFolder(path)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  expect(await f.host.api.tasks.getWorkspaceDir('task_fixture')).toBe('/workspace/task_fixture')
+  await f.host.api.shell.openPath(path); await f.host.api.shell.showItemInFolder(path)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'shell:openPath', payload: { filePath: path }, engineEpoch: 'engine-1' })
+  const original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => args?.operation === 'shell:openPath' ? Promise.reject({ code: 'UNKNOWN_OPERATION' }) : original(command, args))
+  await expect(f.host.api.shell.openPath(path)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+  expect(f.host.unavailableCapability).toBe('shell.openPath')
 })
 it('fences writes until durable recovery finishes and never replays a mutation interrupted by reconnect', async () => {
   const f = fixture(), hydration = deferred<void>()
@@ -146,7 +164,7 @@ it('binds the 178 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(178)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(182)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)

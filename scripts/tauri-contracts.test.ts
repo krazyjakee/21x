@@ -45,6 +45,12 @@ describe('desktop contract generation', () => {
     const unknown = createInventory({ sources: [{ file: 'src/main/a.ts', source: `import { ipcMain } from 'electron'; ipcMain.handle('newFamily:grantEverything', fn)` }] })
     expect(() => buildOperationManifest(unknown, '')).toThrow('Unassigned operation family')
   })
+  it('assigns workspace open/reveal admission to the service while requiring exact native callbacks', () => {
+    const source = `import { ipcMain } from 'electron'; ipcMain.handle('shell:openPath', fn); ipcMain.handle('shell:showItemInFolder', fn); ipcMain.handle('shell:openExternal', fn);`
+    const manifest = buildOperationManifest(createInventory({ sources: [{ file: 'src/main/app.ts', source }] }), '')
+    for (const name of ['shell:openPath', 'shell:showItemInFolder']) expect(manifest.operations.find((row: { name: string }) => row.name === name)).toMatchObject({ owner: 'service', nativeCallback: true })
+    expect(manifest.operations.find((row: { name: string }) => row.name === 'shell:openExternal')).toMatchObject({ owner: 'native-host' })
+  })
 
   it('attaches finite authoritative source ownership without hiding dynamic AST evidence', () => {
     const source = { file: 'src/main/relay.ts', line: 2, column: 3, target: 'guardedIpcSend', method: 'send', channelExpression: 'channel' }

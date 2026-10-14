@@ -1,6 +1,8 @@
 import { homedir, networkInterfaces } from 'node:os'
 import { PortableAgentDetectionOwner } from '../main/agent-installer/portable-detection'
 import { createProductionGitProviderOwner } from './production-git-provider-owner'
+import { WorkspaceFileOwner, type WorkspaceFileOwnerOptions } from '../main/workspace-file-owner'
+import type { WorkspacePathReceipt } from '../shared/workspace-native-callbacks'
 import { GitProviderProcessOwner, type GitProviderProcessOwnerOptions } from '../main/git-provider-process-owner'
 import { createProductionVoiceOwner, type ProductionVoiceOwner, type ProductionVoiceResources } from './production-voice-owner'
 import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobileAccessSettings, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, type MobileApiDeps } from '../main/mobile-api-server'
@@ -102,6 +104,8 @@ export interface ProductionOwnerBootstrap {
     /** PATH/native supervision readiness, before any adapter or scheduler starts. */
     prepareRuntime(signal: AbortSignal): Promise<void>
     openExternal(url: string): Promise<void> | void
+    openPath?(path: string, receipt: WorkspacePathReceipt): Promise<void>
+    showItemInFolder?(path: string, receipt: WorkspacePathReceipt): Promise<void>
     /** Trusted capability, separate from merely having an erroring callback. */
     oauthBrowser?: 'available' | 'unavailable'
     notify(title: string, body: string): void
@@ -123,9 +127,11 @@ export interface ProductionOwnerExternalBoundaries {
   mobileTunnel?: TunnelManagerCore
   agentDetection?: PortableAgentDetectionOwner
   gitProviderProcess?: (options: GitProviderProcessOwnerOptions) => GitProviderProcessOwner
+  workspaceFiles?: (options: WorkspaceFileOwnerOptions) => WorkspaceFileOwner
 }
 
 export interface ProductionServices {
+  workspaceFiles: WorkspaceFileOwner
   github: GitHubManager
   gitlab: GitLabManager
   forgejo: ForgejoManager
@@ -302,6 +308,17 @@ export class ProductionOwner {
         if (this.services !== services || owners.database !== database || owners.github !== github || owners.gitlab !== gitlab || owners.forgejo !== forgejo || owners.processOwner !== processOwner ||
           services.github !== github || services.gitlab !== gitlab || services.forgejo !== forgejo || services.gitProviderProcess !== processOwner) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
         processOwner.assertOpen(); github.assertOwners(processOwner); gitlab.assertOwners(processOwner); forgejo.assertOwners(processOwner)
+      } }
+  }
+
+  getWorkspaceFileBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!, files = services.workspaceFiles, database = services.db, workspaceRoot = this.bootstrap.paths.workspaceRoot
+    return { database, files, workspaceRoot,
+      assertWorkspaceFileOwners: (db: DatabaseManager, owner: WorkspaceFileOwner, root: string): void => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || services.db !== database || services.workspaceFiles !== files || db !== database || owner !== files || root !== workspaceRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        files.assertOwners(workspaceRoot)
       } }
   }
 
@@ -532,10 +549,21 @@ export class ProductionOwner {
     const { github, gitlab, forgejo, processOwner: gitProviderProcess } = gitProviders
     this.register('git-provider-process', () => gitProviderProcess.stop(), () => gitProviderProcess.close())
     const worktrees = new WorktreeManager({ reposRoot: this.bootstrap.paths.reposRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot,
-      exec: gitProviders.exec, assertPath: gitProviders.assertPath, emitProgress: data => this.emit('worktree:progress', data) })
+      exec: gitProviders.exec, assertPath: gitProviders.assertPath,
+      onTaskWorkspaceRemoved: (id, identity) => workspaceFiles.retireWorkspace(id, identity), emitProgress: data => this.emit('worktree:progress', data) })
     worktrees.setForgejoManager(forgejo)
     agents.setManagers(github, worktrees, gitlab, forgejo)
     this.register('worktrees', () => worktrees.shutdown(), () => worktrees.close())
+    const fileOptions: WorkspaceFileOwnerOptions = { workspaceRoot: this.bootstrap.paths.workspaceRoot,
+      native: { ...(native.openPath ? { openPath: native.openPath.bind(native) } : {}), ...(native.showItemInFolder ? { showItemInFolder: native.showItemInFolder.bind(native) } : {}) },
+      assertCurrent: () => {
+        if (this.abort.signal.aborted || !['starting', 'ready'].includes(this.phase) || processRegistry[registryKey] !== this.identity) throw new ProductionOwnerError('OWNER_CLOSING')
+        this.lock!.assertHeld()
+      } }
+    const workspaceFiles = this.boundaries.workspaceFiles ? this.boundaries.workspaceFiles(fileOptions) : new WorkspaceFileOwner(fileOptions)
+    if (!(workspaceFiles instanceof WorkspaceFileOwner)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    workspaceFiles.assertOwners(this.bootstrap.paths.workspaceRoot)
+    this.register('workspace-files', () => workspaceFiles.shutdown(), () => workspaceFiles.close())
     const oauth = new OAuthManager(db, { openExternal: url => native.openExternal(url), notify: (title, body) => this.notify(title, body) })
     agents.setOAuthManager(oauth)
     this.register('oauth', () => oauth.destroy(), () => oauth.close())
@@ -645,7 +673,7 @@ export class ProductionOwner {
         this.lock!.assertHeld()
       }, notify: (channel, payload) => this.emit(channel, payload) }) : null
     if (voice) this.register('voice', () => voice.shutdown(), () => voice.close())
-    this.services = { github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    this.services = { workspaceFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)

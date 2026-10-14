@@ -1,7 +1,7 @@
 import { OwnedOperationLifetime } from './owned-operation-lifetime'
 import { execFile, type ExecFileOptions } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, type Stats } from 'fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, type BigIntStats } from 'fs'
 import { readdir } from 'fs/promises'
 import { isAbsolute, join, relative, resolve, sep, win32 } from 'path'
 import type { ForgejoManager } from './forgejo-manager'
@@ -80,6 +80,7 @@ export interface WorktreeHost {
   /** Trusted captured process owner; absent only for the legacy host. */
   exec?(program: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions): Promise<{ stdout: string; stderr: string }>
   assertPath?(path: string): void
+  onTaskWorkspaceRemoved?(taskId: string, identity: { dev: string; ino: string }): void
 }
 
 export class WorktreeManager {
@@ -130,10 +131,10 @@ export class WorktreeManager {
     if (this.host.assertPath && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(taskId)) throw new Error('WORKTREE_PATH_UNAUTHORIZED')
     return this.directory(join(this.host.workspaceRoot, taskId))
   }
-  private assertRemoval(path: string, captured: Stats | null): void {
+  private assertRemoval(path: string, captured: BigIntStats | null): void {
     this.directory(path)
     if (captured) {
-      const current = lstatSync(path)
+      const current = lstatSync(path, { bigint: true })
       if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== captured.dev || current.ino !== captured.ino) throw new Error('WORKTREE_DIRECTORY_CHANGED')
     }
   }
@@ -397,12 +398,12 @@ export class WorktreeManager {
     removeTaskDir = true
   ): Promise<void> {
     const taskDir = this.taskDirectory(taskId)
-    const taskIdentity = this.host.assertPath && existsSync(taskDir) ? lstatSync(taskDir) : null
+    const taskIdentity = this.host.assertPath && existsSync(taskDir) ? lstatSync(taskDir, { bigint: true }) : null
     for (const repo of repos) {
       const repoName = repo.fullName.split('/').pop() || repo.fullName
       const barePath = this.bareClonePath(org, repoName)
       const wtPath = this.worktreePath(taskId, repoName)
-      const worktreeIdentity = this.host.assertPath && existsSync(wtPath) ? lstatSync(wtPath) : null
+      const worktreeIdentity = this.host.assertPath && existsSync(wtPath) ? lstatSync(wtPath, { bigint: true }) : null
 
       if (existsSync(barePath) && existsSync(wtPath)) {
         try {
@@ -431,6 +432,7 @@ export class WorktreeManager {
           this.lifetime.assertOpen()
           this.assertRemoval(taskDir, taskIdentity)
           rmSync(taskDir, { recursive: true, force: true })
+          if (taskIdentity) this.host.onTaskWorkspaceRemoved?.(taskId, { dev: taskIdentity.dev.toString(), ino: taskIdentity.ino.toString() })
         } catch {
           // Ignore
         }
