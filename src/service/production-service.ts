@@ -226,6 +226,18 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
     canUsePiece: (_piece, caller) => trusted(caller) && descriptor.capabilities.connectors === 'enabled',
     canBorrowSourceCredentials: (_source, _plugin, caller) => trusted(caller),
     canResolveUnsavedConfig: (_plugin, caller) => trusted(caller),
+    canAccessMarketplace: (_id, caller) => trusted(caller), canCreateMarketplace: (_data, caller) => trusted(caller),
+    canAccessPluginName: (_name, _marketplace, caller) => trusted(caller), canAccessPlugin: (_id, caller) => trusted(caller),
+    // Arbitrary local marketplace reads need a reviewed native path grant.
+    canUseMarketplaceSource: (source, caller) => trusted(caller) && source.source_type !== 'local',
+    canUsePluginSource: (_source, marketplace, _root, caller) => trusted(caller) && marketplace.source_type !== 'local',
+    canUsePluginAddress: (address, caller) => {
+      if (!trusted(caller)) return false
+      try { const url = new URL(address); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password } catch { return false }
+    },
+    canAccessSkill: (_id, caller) => trusted(caller), canCreateGlobalSkill: (_data, caller) => trusted(caller),
+    canCreateAgent: (_data, caller) => trusted(caller),
+    canCreateMcpServer: (_data, caller) => trusted(caller) && descriptor.capabilities.configuredMcp === 'enabled',
     canUseSourcePlugin: (id, caller) => trusted(caller) && !!service.getReadyServices()?.registry.get(id) &&
       (id !== 'connector-bridge' || descriptor.capabilities.connectors === 'enabled')
   }

@@ -1,3 +1,5 @@
+import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
+import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -67,6 +69,12 @@ async function fixture(providerOverride?: ChatProvider, connectors = false) {
     canAccessConnector: (_id, value) => trusted(value), canUseSourcePlugin: (_id, value) => trusted(value),
     canCreateInstance: (_piece, value) => trusted(value), canUsePiece: (_piece, value) => trusted(value),
     canBorrowSourceCredentials: (_id, _plugin, value) => trusted(value), canResolveUnsavedConfig: (_plugin, value) => trusted(value),
+    canAccessMarketplace: (_id, value) => trusted(value), canCreateMarketplace: (_data, value) => trusted(value),
+    canAccessPluginName: (_name, _source, value) => trusted(value), canAccessPlugin: (_id, value) => trusted(value),
+    canUseMarketplaceSource: (_source, value) => trusted(value), canUsePluginSource: (_source, _marketplace, _root, value) => trusted(value),
+    canUsePluginAddress: (_address, value) => trusted(value),
+    canAccessSkill: (_id, value) => trusted(value), canCreateGlobalSkill: (_data, value) => trusted(value),
+    canCreateAgent: (_data, value) => trusted(value), canCreateMcpServer: (_data, value) => trusted(value),
     canUseSecretEnvironment: (_name, value) => trusted(value), canReadEnvironment: (_key, value) => trusted(value),
     canAccessTerminal: (_id, value) => trusted(value), resolveTerminalDirectory: (_id, value) => trusted(value)
       ? { cwd: bootstrap.paths.workspaceRoot, root: bootstrap.paths.workspaceRoot } : null },
@@ -78,7 +86,7 @@ async function fixture(providerOverride?: ChatProvider, connectors = false) {
 describe('reviewed bindings attached to the actual production singleton', () => {
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(114)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(127)
     const lease = f.owner.getConnectorBindingLease()!
     const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
     const id = (ensured as { value: { instanceId: string } }).value.instanceId
@@ -160,9 +168,37 @@ describe('reviewed bindings attached to the actual production singleton', () => 
     expect(read).toEqual({ defined: true, value: '__21x_api_key_set__' })
     await f.services.chat.startTurn({ provider, messages: [] }, () => {}).done
   })
+  it('borrows the actual context and plugin owners, with independently revocable grants', async () => {
+    const f = await fixture(), session = f.services.commanderStore.createSession()
+    const context = SESSION_CONTEXT_CODECS['sessionContext:getSnapshot']
+    const wire = await f.backend.invoke('sessionContext:getSnapshot', context.encodeArguments([{ kind: 'commander', ownerId: session.id }]), f.caller, f.signal)
+    expect(wire).toMatchObject({ defined: true, value: { scope: { kind: 'commander', ownerId: session.id } } })
+    const plugin = CLAUDE_PLUGIN_CODECS['claudePlugin:getMarketplaceSources']
+    expect(await f.backend.invoke('claudePlugin:getMarketplaceSources', plugin.encodeArguments([]), f.caller, f.signal)).toMatchObject({ defined: true, value: expect.any(Array) })
+    f.options.authority.canAccessSession = () => false
+    await expect(f.backend.invoke('sessionContext:getSnapshot', context.encodeArguments([{ kind: 'commander', ownerId: session.id }]), f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    f.options.authority.canManageGlobalConfiguration = () => false
+    await expect(f.backend.invoke('claudePlugin:getMarketplaceSources', plugin.encodeArguments([]), f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+  it('joins ignored actual chat work before changing plugin state and retains the provider fence', async () => {
+    let finish!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => { finish = resolve }), entry = new Promise<void>(resolve => { entered = resolve })
+    let signal!: AbortSignal
+    const provider: ChatProvider = { id: 'controlled', model: 'controlled', async *stream(_request, current) { signal = current; entered(); await gate; yield { type: 'message_end', stopReason: 'end_turn' } } }
+    const f = await fixture(provider); finishers.push(finish)
+    const source = f.services.plugins.getMarketplaceSources()[0]
+    const installed = f.services.db.createInstalledPlugin({ name: 'controlled-plugin', marketplace_id: source.id, manifest: { name: 'controlled-plugin' } })
+    const chat = f.services.chat.startTurn({ provider, messages: [] }, () => {}); await entry
+    const write = f.backend.invoke('claudePlugin:disablePlugin', CLAUDE_PLUGIN_CODECS['claudePlugin:disablePlugin'].encodeArguments([installed.id]), f.caller, f.signal)
+    await vi.waitFor(() => expect(signal.aborted).toBe(true))
+    expect(f.services.db.getInstalledPlugin(installed.id)?.enabled).toBe(true)
+    expect(() => f.services.chat.startTurn({ provider, messages: [] }, () => {})).toThrow('CONFIGURATION_CHANGING')
+    finish(); await Promise.all([chat.done, write])
+    expect(f.services.db.getInstalledPlugin(installed.id)?.enabled).toBe(false)
+  })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(107)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(120)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

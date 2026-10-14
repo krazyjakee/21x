@@ -37,6 +37,7 @@ import { YouTrackPlugin } from '../main/plugins/youtrack-plugin'
 import { ConnectorBridgeCore } from '../main/plugins/connector-bridge-core'
 import { getConnectorRuntime, disposeConnectorRuntime, closeConnectorRuntime, type ConnectorRuntimeHost, type ConnectorRuntime } from '../main/connectors/bridge/runtime-core'
 import { ConnectorBridgeService } from '../main/connectors/bridge/service'
+import { SessionContextService } from '../main/sessions/context-service'
 import { createPackagedConnectorTransport, validateConnectorResources } from '../main/connectors/piece-host/packaged-resources'
 import { SyncManager } from '../main/sync-manager'
 import { TaskGroupService } from '../main/task-groups/service'
@@ -111,6 +112,7 @@ export interface ProductionOwnerExternalBoundaries {
 }
 
 export interface ProductionServices {
+  sessionContext: SessionContextService
   db: DatabaseManager
   agents: AgentManager
   oauth: OAuthManager
@@ -295,13 +297,35 @@ export class ProductionOwner {
       } }
   }
 
+  getSessionContextBindingLease(): { context: SessionContextService; assertOwners(owners: { database: DatabaseManager; context: SessionContextService }): void } {
+    this.getDatabaseBindingLease()
+    const services = this.services!, context = services.sessionContext
+    return { context, assertOwners: owners => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services || owners.database !== services.db || owners.context !== context || services.sessionContext !== context)
+        throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      context.assertSource(services.db)
+    } }
+  }
+
+  getClaudePluginBindingLease(): { assertPluginOwners(owners: { database: DatabaseManager; manager: ClaudePluginManager; agents: AgentManager; sync: SyncManager }): void } {
+    this.getDatabaseBindingLease()
+    const services = this.services!
+    return { assertPluginOwners: owners => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services || owners.database !== services.db || owners.manager !== services.plugins || owners.agents !== services.agents || owners.sync !== services.sync)
+        throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      services.plugins.assertSource(services.db)
+    } }
+  }
+
   runCredentialMutation<T>(input: ProductionCredentialMutation, mutation: () => T | Promise<T>): Promise<T> {
     return this.run(async services => {
       // Both reservations are synchronous. No new turn can enter while another
       // owner's accepted provider/tool work is being awaited.
       const leases: Array<{ drain(): Promise<void>; release(): void }> = []
       try {
-        if (input.kind === 'provider-key') {
+        if (input.kind === 'provider-key' || input.kind === 'plugin-resources') {
           leases.push(this.providers.beginMutation())
           leases.push(services.chat.beginProviderConfigurationMutation())
           leases.push(services.commander.beginProviderConfigurationMutation())
@@ -518,7 +542,8 @@ export class ProductionOwner {
     }
     const reminders = new OverdueNotifier(() => this.emit('overdue:check', undefined))
     this.register('reminders', () => reminders.shutdown(), async () => { reminders.shutdown() })
-    this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes }
+    const sessionContext = new SessionContextService(db)
+    this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     this.checkpoint('recovery')
     await agents.reconcileStartup()
     this.assertStarting()

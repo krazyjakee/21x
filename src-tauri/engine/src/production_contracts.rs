@@ -3,6 +3,19 @@
 use serde_json::Value;
 
 pub const COMMANDS: &[&str] = &[
+    "sessionContext:getSnapshot",
+    "sessionContext:setPolicy",
+    "claudePlugin:getMarketplaceSources",
+    "claudePlugin:addMarketplaceSource",
+    "claudePlugin:removeMarketplaceSource",
+    "claudePlugin:fetchCatalog",
+    "claudePlugin:discoverPlugins",
+    "claudePlugin:getInstalledPlugins",
+    "claudePlugin:installPlugin",
+    "claudePlugin:uninstallPlugin",
+    "claudePlugin:enablePlugin",
+    "claudePlugin:disablePlugin",
+    "claudePlugin:getPluginResources",
     "connectors:bridgePieces",
     "connectors:ensureInstance",
     "connectors:credentialStatus",
@@ -235,6 +248,527 @@ const PLUGIN_COMMANDS: &[&str] = &[
     "plugin:getDocumentation",
     "plugin:resolveOptions",
 ];
+const CONTEXT_COMMANDS: &[&str] = &["sessionContext:getSnapshot", "sessionContext:setPolicy"];
+const CLAUDE_COMMANDS: &[&str] = &[
+    "claudePlugin:getMarketplaceSources",
+    "claudePlugin:addMarketplaceSource",
+    "claudePlugin:removeMarketplaceSource",
+    "claudePlugin:fetchCatalog",
+    "claudePlugin:discoverPlugins",
+    "claudePlugin:getInstalledPlugins",
+    "claudePlugin:installPlugin",
+    "claudePlugin:uninstallPlugin",
+    "claudePlugin:enablePlugin",
+    "claudePlugin:disablePlugin",
+    "claudePlugin:getPluginResources",
+];
+fn context_scope(value: &Value) -> bool {
+    object(value, &["kind", "ownerId"], &[])
+        && (value["kind"] == "captain" || value["kind"] == "commander")
+        && id(&value["ownerId"])
+}
+fn context_policy(value: &Value) -> bool {
+    object(
+        value,
+        &[
+            "mode",
+            "contextRatio",
+            "compactions",
+            "wakeups",
+            "turns",
+            "maxAgeDays",
+        ],
+        &[],
+    ) && value["mode"]
+        .as_str()
+        .is_some_and(|s| ["off", "observe", "on"].contains(&s))
+        && value["contextRatio"]
+            .as_f64()
+            .is_some_and(|n| n.is_finite() && n > 0.0 && n <= 1.0)
+        && value["maxAgeDays"]
+            .as_f64()
+            .is_some_and(|n| n.is_finite() && n > 0.0 && n <= 3650.0)
+        && ["compactions", "wakeups", "turns"].iter().all(|key| {
+            value[*key]
+                .as_u64()
+                .is_some_and(|n| (1..=1_000_000).contains(&n))
+        })
+}
+fn context_reference(value: &Value) -> bool {
+    mcp_text(value, 4096) && value.as_str().is_some_and(|s| !s.is_empty())
+}
+fn context_nullable(value: &Value, check: fn(&Value) -> bool) -> bool {
+    value.is_null() || check(value)
+}
+fn context_snapshot(value: &Value) -> bool {
+    if !object(
+        value,
+        &[
+            "scope",
+            "generation",
+            "usage",
+            "counters",
+            "policy",
+            "reasons",
+            "warnings",
+            "summaries",
+        ],
+        &["handoff"],
+    ) || !context_scope(&value["scope"])
+        || !context_policy(&value["policy"])
+    {
+        return false;
+    }
+    let generation = &value["generation"];
+    if !generation.is_null()
+        && !(object(
+            generation,
+            &["id", "key", "engine", "state", "createdAt", "backendId"],
+            &[],
+        ) && context_reference(&generation["id"])
+            && context_reference(&generation["key"])
+            && (generation["engine"] == "chat" || generation["engine"] == "adapter")
+            && generation["state"]
+                .as_str()
+                .is_some_and(|s| ["open", "running", "closed", "interrupted"].contains(&s))
+            && integer(&generation["createdAt"])
+            && context_nullable(&generation["backendId"], context_reference))
+    {
+        return false;
+    }
+    let usage = &value["usage"];
+    if !object(
+        usage,
+        &["tokens", "source", "contextWindow", "model", "observedAt"],
+        &[],
+    ) || !context_nullable(&usage["tokens"], integer)
+        || !usage["source"]
+            .as_str()
+            .is_some_and(|s| ["reported", "estimated", "unknown"].contains(&s))
+        || !(usage["contextWindow"].is_null()
+            || integer(&usage["contextWindow"])
+                && usage["contextWindow"].as_u64().is_some_and(|n| n > 0))
+        || !(usage["model"].is_null() || mcp_text(&usage["model"], 4096))
+        || !context_nullable(&usage["observedAt"], integer)
+        || (if usage["source"] == "unknown" {
+            !usage["tokens"].is_null() || !usage["observedAt"].is_null()
+        } else {
+            usage["tokens"].is_null()
+        })
+    {
+        return false;
+    }
+    object(
+        &value["counters"],
+        &["compactions", "wakeups", "turns", "ageMs"],
+        &[],
+    ) && value["counters"]
+        .as_object()
+        .is_some_and(|map| map.values().all(integer))
+        && value["reasons"].as_array().is_some_and(|items| {
+            items.len() <= 5
+                && items.iter().all(|entry| {
+                    entry.as_str().is_some_and(|s| {
+                        ["context", "compactions", "wakeups", "turns", "age"].contains(&s)
+                    })
+                })
+                && items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    == items.len()
+        })
+        && value["warnings"].as_array().is_some_and(|items| {
+            items.len() <= 4 && items.iter().all(|entry| plugin_text(entry, 4096))
+        })
+        && value["summaries"].as_array().is_some_and(|items| {
+            items.len() <= 10
+                && items.iter().all(|item| {
+                    object(item, &["id", "content", "kind", "createdAt", "source"], &[])
+                        && context_reference(&item["id"])
+                        && plugin_text(&item["content"], 65_536)
+                        && item["kind"]
+                            .as_str()
+                            .is_some_and(|s| ["summary", "rollover", "recovery"].contains(&s))
+                        && integer(&item["createdAt"])
+                        && (item["source"].is_null()
+                            || item["source"] == "model"
+                            || item["source"] == "fallback")
+                })
+        })
+        && value.get("handoff").is_none_or(|handoff| {
+            handoff.is_null()
+                || object(handoff, &["id", "state"], &[])
+                    && context_reference(&handoff["id"])
+                    && handoff["state"].as_str().is_some_and(|s| {
+                        [
+                            "pending",
+                            "summary",
+                            "memory",
+                            "creating",
+                            "created",
+                            "creation_unconfirmed",
+                            "completed",
+                        ]
+                        .contains(&s)
+                    })
+        })
+}
+fn claude_reserved(value: &str) -> bool {
+    let name = value.split('.').next().unwrap_or("").to_ascii_lowercase();
+    ["con", "prn", "aux", "nul"].contains(&name.as_str())
+        || name.len() == 4
+            && (name.starts_with("com") || name.starts_with("lpt"))
+            && matches!(name.as_bytes()[3], b'1'..=b'9')
+}
+fn claude_name(value: &Value) -> bool {
+    mcp_text(value, 128)
+        && value.as_str().is_some_and(|s| {
+            s.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+                && s.bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+                && !s.ends_with('.')
+                && !claude_reserved(s)
+        })
+}
+fn claude_relative(value: &Value) -> bool {
+    mcp_text(value, 4096)
+        && value.as_str().is_some_and(|s| {
+            !s.starts_with('/') && !s.contains('\\') && {
+                let path = s.strip_prefix("./").unwrap_or(s);
+                path.is_empty()
+                    || path.split('/').all(|part| {
+                        !part.is_empty()
+                            && part != "."
+                            && part != ".."
+                            && !part.contains(':')
+                            && !part.contains('%')
+                            && !part.ends_with('.')
+                            && !part.ends_with(' ')
+                            && !claude_reserved(part)
+                    })
+            }
+        })
+}
+fn claude_repo(value: &Value) -> bool {
+    mcp_text(value, 4096)
+        && value.as_str().is_some_and(|s| {
+            let mut components = s.split('#');
+            let slug = components.next().unwrap_or("");
+            let reference = components.next();
+            let parts: Vec<_> = slug.split('/').collect();
+            components.next().is_none()
+                && parts.len() == 2
+                && parts
+                    .iter()
+                    .all(|part| claude_name(&Value::String((*part).to_owned())))
+                && reference.is_none_or(|part| {
+                    !part.is_empty() && claude_relative(&Value::String(part.to_owned()))
+                })
+        })
+}
+fn claude_source(value: &Value, relative: bool) -> bool {
+    if value.is_string() {
+        return relative && claude_relative(value);
+    }
+    object(
+        value,
+        &[],
+        &["source", "repo", "url", "ref", "sha", "path", "version"],
+    ) && value.as_object().is_some_and(|map| {
+        map.iter().all(|(key, entry)| match key.as_str() {
+            "source" => entry == "github" || entry == "url" || entry == "local",
+            "repo" => claude_repo(entry),
+            "url" => host_url(entry, true),
+            "ref" | "path" => claude_relative(entry),
+            _ => mcp_text(entry, 256),
+        })
+    })
+}
+fn claude_market_input(value: &Value) -> bool {
+    object(
+        value,
+        &["name", "source_url"],
+        &["source_type", "auto_update"],
+    ) && mcp_text(&value["name"], 256)
+        && value["name"]
+            .as_str()
+            .is_some_and(|s| !js_trim(s).is_empty())
+        && value.get("auto_update").is_none_or(Value::is_boolean)
+        && (match value
+            .get("source_type")
+            .and_then(Value::as_str)
+            .unwrap_or("github")
+        {
+            "github" => claude_repo(&value["source_url"]),
+            "url" => host_url(&value["source_url"], true),
+            "local" => {
+                mcp_text(&value["source_url"], 4096)
+                    && value["source_url"]
+                        .as_str()
+                        .is_some_and(|s| !s.is_empty() && s != "__21x_local_source__")
+            }
+            _ => false,
+        })
+        && value.get("source_type").is_none_or(Value::is_string)
+}
+fn claude_request(operation: &str, value: &Value) -> bool {
+    match operation {
+        "claudePlugin:getMarketplaceSources" | "claudePlugin:getInstalledPlugins" => {
+            object(value, &[], &[])
+        }
+        "claudePlugin:addMarketplaceSource" => {
+            object(value, &["data"], &[]) && claude_market_input(&value["data"])
+        }
+        "claudePlugin:removeMarketplaceSource" => {
+            object(value, &["id"], &[]) && mcp_id(&value["id"])
+        }
+        "claudePlugin:fetchCatalog" => {
+            object(value, &["sourceId"], &[]) && mcp_id(&value["sourceId"])
+        }
+        "claudePlugin:discoverPlugins" => {
+            object(value, &[], &["searchQuery"])
+                && value
+                    .get("searchQuery")
+                    .is_none_or(|entry| mcp_text(entry, 256))
+        }
+        "claudePlugin:installPlugin" => {
+            object(value, &["pluginName", "marketplaceId"], &["scope"])
+                && claude_name(&value["pluginName"])
+                && mcp_id(&value["marketplaceId"])
+                && value.get("scope").is_none_or(|entry| entry == "user")
+        }
+        _ => object(value, &["pluginId"], &[]) && mcp_id(&value["pluginId"]),
+    }
+}
+fn claude_strings(value: &Value) -> bool {
+    value
+        .as_array()
+        .is_some_and(|items| items.len() <= 64 && items.iter().all(|entry| mcp_text(entry, 256)))
+}
+fn claude_author(value: &Value) -> bool {
+    object(value, &["name"], &[]) && mcp_text(&value["name"], 256)
+}
+fn claude_link(value: &Value) -> bool {
+    value == "" || host_url(value, true)
+}
+fn claude_manifest(value: &Value) -> bool {
+    object(
+        value,
+        &["name"],
+        &[
+            "version",
+            "description",
+            "author",
+            "homepage",
+            "repository",
+            "license",
+            "keywords",
+        ],
+    ) && claude_name(&value["name"])
+        && value.as_object().is_some_and(|map| {
+            map.iter().all(|(key, entry)| match key.as_str() {
+                "name" => true,
+                "description" => mcp_text(entry, 8192),
+                "author" => claude_author(entry),
+                "homepage" | "repository" => claude_link(entry),
+                "keywords" => claude_strings(entry),
+                _ => mcp_text(entry, 256),
+            })
+        })
+}
+fn claude_market_row(value: &Value) -> bool {
+    object(
+        value,
+        &[
+            "id",
+            "name",
+            "source_type",
+            "source_url",
+            "metadata",
+            "auto_update",
+            "created_at",
+            "updated_at",
+        ],
+        &[],
+    ) && mcp_id(&value["id"])
+        && mcp_text(&value["name"], 256)
+        && value["name"]
+            .as_str()
+            .is_some_and(|s| !js_trim(s).is_empty())
+        && (match value["source_type"].as_str() {
+            Some("local") => value["source_url"] == "__21x_local_source__",
+            Some("github") => claude_repo(&value["source_url"]),
+            Some("url") => host_url(&value["source_url"], true),
+            _ => false,
+        })
+        && object(&value["metadata"], &[], &[])
+        && value["auto_update"].is_boolean()
+        && mcp_text(&value["created_at"], 32)
+        && mcp_text(&value["updated_at"], 32)
+}
+fn claude_installed(value: &Value) -> bool {
+    object(
+        value,
+        &[
+            "id",
+            "name",
+            "marketplace_id",
+            "manifest",
+            "source",
+            "scope",
+            "enabled",
+            "version",
+            "installed_at",
+            "updated_at",
+        ],
+        &[],
+    ) && mcp_id(&value["id"])
+        && claude_name(&value["name"])
+        && (value["marketplace_id"].is_null() || mcp_id(&value["marketplace_id"]))
+        && claude_manifest(&value["manifest"])
+        && claude_source(&value["source"], false)
+        && value["scope"] == "user"
+        && value["enabled"].is_boolean()
+        && mcp_text(&value["version"], 256)
+        && mcp_text(&value["installed_at"], 32)
+        && mcp_text(&value["updated_at"], 32)
+}
+fn claude_entry(value: &Value) -> bool {
+    object(
+        value,
+        &["name", "source"],
+        &[
+            "description",
+            "version",
+            "category",
+            "license",
+            "author",
+            "homepage",
+            "repository",
+            "tags",
+            "keywords",
+        ],
+    ) && claude_name(&value["name"])
+        && claude_source(&value["source"], true)
+        && value.as_object().is_some_and(|map| {
+            map.iter().all(|(key, entry)| match key.as_str() {
+                "name" | "source" => true,
+                "description" => mcp_text(entry, 8192),
+                "author" => claude_author(entry),
+                "homepage" | "repository" => claude_link(entry),
+                "tags" | "keywords" => claude_strings(entry),
+                _ => mcp_text(entry, 256),
+            })
+        })
+}
+fn claude_catalog(value: &Value) -> bool {
+    value.is_null()
+        || object(value, &["name", "owner", "plugins"], &["metadata"])
+            && mcp_text(&value["name"], 256)
+            && claude_author(&value["owner"])
+            && value["plugins"]
+                .as_array()
+                .is_some_and(|items| items.len() <= 512 && items.iter().all(claude_entry))
+            && value.get("metadata").is_none_or(|metadata| {
+                object(metadata, &[], &["description", "version"])
+                    && metadata.as_object().is_some_and(|map| {
+                        map.iter().all(|(key, entry)| {
+                            mcp_text(entry, if key == "description" { 8192 } else { 256 })
+                        })
+                    })
+            })
+}
+fn claude_discovery(value: &Value) -> bool {
+    object(
+        value,
+        &[
+            "name",
+            "description",
+            "version",
+            "author",
+            "category",
+            "tags",
+            "homepage",
+            "repository",
+            "license",
+            "marketplace_id",
+            "marketplace_name",
+            "source",
+            "installed",
+        ],
+        &["installed_plugin_id", "enabled"],
+    ) && claude_name(&value["name"])
+        && mcp_text(&value["description"], 8192)
+        && [
+            "version",
+            "author",
+            "category",
+            "license",
+            "marketplace_name",
+        ]
+        .iter()
+        .all(|key| mcp_text(&value[*key], 256))
+        && claude_strings(&value["tags"])
+        && claude_link(&value["homepage"])
+        && claude_link(&value["repository"])
+        && mcp_id(&value["marketplace_id"])
+        && claude_source(&value["source"], true)
+        && value["installed"].is_boolean()
+        && value.get("installed_plugin_id").is_none_or(mcp_id)
+        && value.get("enabled").is_none_or(Value::is_boolean)
+}
+fn claude_resources(value: &Value) -> bool {
+    object(value, &["skills", "mcpServers", "agents", "commands"], &[])
+        && ["skills", "mcpServers", "agents"].iter().all(|kind| {
+            value[*kind].as_array().is_some_and(|items| {
+                items.len() <= 256
+                    && items.iter().all(|item| {
+                        mcp_id(&item["id"])
+                            && mcp_text(&item["name"], 256)
+                            && if *kind == "mcpServers" {
+                                object(item, &["id", "name", "command", "args"], &[])
+                                    && item["command"] == ""
+                                    && item["args"].as_array().is_some_and(Vec::is_empty)
+                            } else {
+                                object(item, &["id", "name", "description"], &[])
+                                    && if *kind == "agents" {
+                                        item["description"] == ""
+                                    } else {
+                                        mcp_text(&item["description"], 8192)
+                                    }
+                            }
+                    })
+            })
+        })
+        && value["commands"]
+            .as_array()
+            .is_some_and(|items| items.len() <= 256 && items.iter().all(claude_relative))
+}
+fn claude_result(operation: &str, value: &Value) -> bool {
+    match operation {
+        "claudePlugin:getMarketplaceSources" => value
+            .as_array()
+            .is_some_and(|items| items.len() <= 128 && items.iter().all(claude_market_row)),
+        "claudePlugin:addMarketplaceSource" => claude_market_row(value),
+        "claudePlugin:removeMarketplaceSource" | "claudePlugin:uninstallPlugin" => {
+            value.is_boolean()
+        }
+        "claudePlugin:fetchCatalog" => claude_catalog(value),
+        "claudePlugin:discoverPlugins" => value
+            .as_array()
+            .is_some_and(|items| items.len() <= 512 && items.iter().all(claude_discovery)),
+        "claudePlugin:getInstalledPlugins" => value
+            .as_array()
+            .is_some_and(|items| items.len() <= 128 && items.iter().all(claude_installed)),
+        "claudePlugin:installPlugin"
+        | "claudePlugin:enablePlugin"
+        | "claudePlugin:disablePlugin" => claude_installed(value),
+        "claudePlugin:getPluginResources" => claude_resources(value),
+        _ => false,
+    }
+}
 fn js_trim(value: &str) -> &str {
     value.trim_matches(|c| matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'))
 }
@@ -1392,6 +1926,23 @@ pub fn images(value: &Value) -> bool {
         })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if CONTEXT_COMMANDS.contains(&operation) {
+        let key = if operation == "sessionContext:getSnapshot" {
+            "scope"
+        } else {
+            "policy"
+        };
+        return object(value, &[key], &[])
+            && bounded_bytes(value, 512_000)
+            && if key == "scope" {
+                context_scope(&value[key])
+            } else {
+                context_policy(&value[key])
+            };
+    }
+    if CLAUDE_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 1024 * 1024) && claude_request(operation, value);
+    }
     if PLUGIN_COMMANDS.contains(&operation) {
         return bounded_bytes(value, 512_000) && plugin_request(operation, value);
     }
@@ -1485,6 +2036,33 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if CONTEXT_COMMANDS.contains(&operation) {
+        return object(value, &["defined", "value"], &[])
+            && value["defined"] == true
+            && bounded_bytes(value, 1024 * 1024)
+            && bounded_bytes(&value["value"], 512_000)
+            && if operation == "sessionContext:getSnapshot" {
+                context_snapshot(&value["value"])
+            } else {
+                context_policy(&value["value"])
+            };
+    }
+    if CLAUDE_COMMANDS.contains(&operation) {
+        if !object(value, &["defined"], &["value"]) || !bounded_bytes(value, 1024 * 1024) {
+            return false;
+        }
+        if value["defined"] == false {
+            return value.get("value").is_none()
+                && matches!(
+                    operation,
+                    "claudePlugin:enablePlugin" | "claudePlugin:disablePlugin"
+                );
+        }
+        return value["defined"] == true
+            && value.get("value").is_some_and(|result| {
+                bounded_bytes(result, 768 * 1024) && claude_result(operation, result)
+            });
+    }
     if PLUGIN_COMMANDS.contains(&operation) {
         return object(value, &["defined", "value"], &[])
             && value["defined"] == true
@@ -1983,6 +2561,278 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn context_fixture() -> Value {
+        json!({"scope":{"kind":"captain","ownerId":"project_fixture"},"generation":{"id":"generation:fixture","key":"adapter:native_fixture","engine":"adapter","state":"running","createdAt":100,"backendId":"native_fixture"},"usage":{"tokens":1200,"source":"reported","contextWindow":16000,"model":"fixture/model","observedAt":110},"counters":{"compactions":1,"wakeups":2,"turns":3,"ageMs":10},"policy":{"mode":"observe","contextRatio":0.6,"compactions":3,"wakeups":20,"turns":10,"maxAgeDays":7},"reasons":["context"],"warnings":["Human\nwarning"],"summaries":[{"id":"summary:fixture","content":"Human\nsummary","kind":"rollover","createdAt":105,"source":"model"}],"handoff":{"id":"handoff:fixture","state":"creation_unconfirmed"}})
+    }
+    fn installed_fixture() -> Value {
+        json!({"id":"plugin.fixture:one","name":"fixture-plugin","marketplace_id":"marketplace.fixture:one","manifest":{"name":"fixture-plugin","version":"1.0","description":"Fixture","author":{"name":"Fixture Author"},"homepage":"https://example.test/plugin","repository":"","license":"MIT","keywords":["fixture"]},"source":{"source":"github","repo":"fixture/marketplace#main","path":"plugins/fixture-plugin"},"scope":"user","enabled":true,"version":"1.0","installed_at":"2026-10-14","updated_at":"2026-10-14"})
+    }
+    #[test]
+    fn session_context_policy_and_projection_are_finite_and_truthful() {
+        let snapshot = context_fixture();
+        let policy = snapshot["policy"].clone();
+        assert!(valid_request(
+            "sessionContext:getSnapshot",
+            &json!({"scope":{"kind":"commander","ownerId":"session_fixture"}})
+        ));
+        assert!(valid_request(
+            "sessionContext:setPolicy",
+            &json!({"policy":policy.clone()})
+        ));
+        assert!(valid_result(
+            "sessionContext:setPolicy",
+            &json!({"defined":true,"value":policy.clone()})
+        ));
+        for mode in ["off", "observe", "on"] {
+            let mut candidate = policy.clone();
+            candidate["mode"] = json!(mode);
+            assert!(valid_request(
+                "sessionContext:setPolicy",
+                &json!({"policy":candidate})
+            ));
+        }
+        assert!(valid_request(
+            "sessionContext:setPolicy",
+            &json!({"policy":{"mode":"on","contextRatio":1,"compactions":1000000,"wakeups":1000000,"turns":1000000,"maxAgeDays":3650}})
+        ));
+        for (key, value) in [
+            ("mode", json!("automatic")),
+            ("contextRatio", json!(0)),
+            ("contextRatio", json!(1.01)),
+            ("compactions", json!(0)),
+            ("wakeups", json!(1000001)),
+            ("turns", json!(1.5)),
+            ("maxAgeDays", json!(3651)),
+        ] {
+            let mut candidate = policy.clone();
+            candidate[key] = value;
+            assert!(!valid_request(
+                "sessionContext:setPolicy",
+                &json!({"policy":candidate})
+            ));
+        }
+        assert!(!valid_request(
+            "sessionContext:getSnapshot",
+            &json!({"scope":{"kind":"task","ownerId":"task_fixture"}})
+        ));
+        assert!(!valid_request(
+            "sessionContext:getSnapshot",
+            &json!({"scope":{"kind":"captain","ownerId":"project_fixture","profileRoot":"/foreign"}})
+        ));
+        assert!(valid_result(
+            "sessionContext:getSnapshot",
+            &json!({"defined":true,"value":snapshot.clone()})
+        ));
+        for state in ["open", "running", "closed", "interrupted"] {
+            let mut candidate = snapshot.clone();
+            candidate["generation"]["state"] = json!(state);
+            assert!(valid_result(
+                "sessionContext:getSnapshot",
+                &json!({"defined":true,"value":candidate})
+            ));
+        }
+        for state in [
+            "pending",
+            "summary",
+            "memory",
+            "creating",
+            "created",
+            "creation_unconfirmed",
+            "completed",
+        ] {
+            let mut candidate = snapshot.clone();
+            candidate["handoff"]["state"] = json!(state);
+            assert!(valid_result(
+                "sessionContext:getSnapshot",
+                &json!({"defined":true,"value":candidate})
+            ));
+        }
+        let mut unknown = snapshot.clone();
+        unknown["generation"] = Value::Null;
+        unknown["usage"] = json!({"tokens":null,"source":"unknown","contextWindow":null,"model":null,"observedAt":null});
+        unknown["handoff"] = Value::Null;
+        assert!(valid_result(
+            "sessionContext:getSnapshot",
+            &json!({"defined":true,"value":unknown.clone()})
+        ));
+        unknown["usage"]["tokens"] = json!(10);
+        assert!(!valid_result(
+            "sessionContext:getSnapshot",
+            &json!({"defined":true,"value":unknown})
+        ));
+        for (key, value) in [
+            ("reasons", json!(["context", "context"])),
+            ("reasons", json!(["unverified"])),
+            (
+                "handoff",
+                json!({"id":"fixture","state":"created","targetPath":"/private"}),
+            ),
+            (
+                "usage",
+                json!({"tokens":null,"source":"reported","contextWindow":16000,"model":"fixture","observedAt":100}),
+            ),
+        ] {
+            let mut candidate = snapshot.clone();
+            candidate[key] = value;
+            assert!(!valid_result(
+                "sessionContext:getSnapshot",
+                &json!({"defined":true,"value":candidate})
+            ));
+        }
+        let mut large = snapshot;
+        large["summaries"][0]["content"] = json!("x".repeat(65_536));
+        assert!(valid_result(
+            "sessionContext:getSnapshot",
+            &json!({"defined":true,"value":large.clone()})
+        ));
+        large["summaries"][0]["content"] = json!("x".repeat(65_537));
+        assert!(!valid_result(
+            "sessionContext:getSnapshot",
+            &json!({"defined":true,"value":large})
+        ));
+        assert!(!valid_result(
+            "sessionContext:getSnapshot",
+            &json!({"defined":false})
+        ));
+    }
+    #[test]
+    fn claude_plugin_contracts_preserve_finite_catalog_sources_and_strip_private_resources() {
+        let requests = [
+            ("claudePlugin:getMarketplaceSources", json!({})),
+            (
+                "claudePlugin:addMarketplaceSource",
+                json!({"data":{"name":"Fixture","source_url":"fixture/marketplace#main","auto_update":false}}),
+            ),
+            (
+                "claudePlugin:removeMarketplaceSource",
+                json!({"id":"marketplace.fixture:one"}),
+            ),
+            (
+                "claudePlugin:fetchCatalog",
+                json!({"sourceId":"marketplace.fixture:one"}),
+            ),
+            (
+                "claudePlugin:discoverPlugins",
+                json!({"searchQuery":"fixture"}),
+            ),
+            ("claudePlugin:getInstalledPlugins", json!({})),
+            (
+                "claudePlugin:installPlugin",
+                json!({"pluginName":"fixture-plugin","marketplaceId":"marketplace.fixture:one","scope":"user"}),
+            ),
+            (
+                "claudePlugin:uninstallPlugin",
+                json!({"pluginId":"plugin.fixture:one"}),
+            ),
+            (
+                "claudePlugin:enablePlugin",
+                json!({"pluginId":"plugin.fixture:one"}),
+            ),
+            (
+                "claudePlugin:disablePlugin",
+                json!({"pluginId":"plugin.fixture:one"}),
+            ),
+            (
+                "claudePlugin:getPluginResources",
+                json!({"pluginId":"plugin.fixture:one"}),
+            ),
+        ];
+        for (operation, mut request) in requests {
+            assert!(valid_request(operation, &request), "{operation}");
+            request["capability"] = json!({"namespace":"*"});
+            assert!(!valid_request(operation, &request));
+        }
+        for (kind, url) in [
+            ("url", "https://example.test/catalog"),
+            ("local", "/synthetic-fixture/catalog"),
+        ] {
+            assert!(valid_request(
+                "claudePlugin:addMarketplaceSource",
+                &json!({"data":{"name":"Fixture","source_type":kind,"source_url":url}})
+            ));
+        }
+        for name in [
+            "../escape",
+            "bad/name",
+            "CON",
+            "nul.json",
+            "plugin.",
+            "bad\0name",
+        ] {
+            assert!(!valid_request(
+                "claudePlugin:installPlugin",
+                &json!({"pluginName":name,"marketplaceId":"fixture"})
+            ));
+        }
+        assert!(!valid_request(
+            "claudePlugin:installPlugin",
+            &json!({"pluginName":"fixture-plugin","marketplaceId":"fixture","scope":"project"})
+        ));
+        assert!(!valid_request(
+            "claudePlugin:addMarketplaceSource",
+            &json!({"data":{"name":"Fixture","source_type":"local","source_url":"__21x_local_source__"}})
+        ));
+        assert!(!valid_request(
+            "claudePlugin:addMarketplaceSource",
+            &json!({"data":{"name":"Fixture","source_type":"url","source_url":"https://user:pass@example.test/catalog"}})
+        ));
+        let marketplace = json!({"id":"marketplace.fixture:one","name":"Fixture","source_type":"local","source_url":"__21x_local_source__","metadata":{},"auto_update":false,"created_at":"2026-10-14","updated_at":"2026-10-14"});
+        assert!(valid_result(
+            "claudePlugin:addMarketplaceSource",
+            &json!({"defined":true,"value":marketplace.clone()})
+        ));
+        let mut raw_market = marketplace;
+        raw_market["source_url"] = json!("/private/profile/catalog");
+        assert!(!valid_result(
+            "claudePlugin:addMarketplaceSource",
+            &json!({"defined":true,"value":raw_market})
+        ));
+        let installed = installed_fixture();
+        assert!(valid_result(
+            "claudePlugin:installPlugin",
+            &json!({"defined":true,"value":installed.clone()})
+        ));
+        let mut secret_manifest = installed;
+        secret_manifest["manifest"]["mcpServers"] =
+            json!({"private":{"command":"/private/tool","env":{"TOKEN":"private"}}});
+        assert!(!valid_result(
+            "claudePlugin:installPlugin",
+            &json!({"defined":true,"value":secret_manifest})
+        ));
+        assert!(valid_result(
+            "claudePlugin:fetchCatalog",
+            &json!({"defined":true,"value":{"name":"Fixture","owner":{"name":"Author"},"plugins":[{"name":"fixture-plugin","source":"./plugins/fixture-plugin","author":{"name":"Author"}}],"metadata":{"version":"1"}}})
+        ));
+        assert!(valid_result(
+            "claudePlugin:fetchCatalog",
+            &json!({"defined":true,"value":null})
+        ));
+        assert!(valid_result(
+            "claudePlugin:enablePlugin",
+            &json!({"defined":false})
+        ));
+        assert!(!valid_result(
+            "claudePlugin:installPlugin",
+            &json!({"defined":false})
+        ));
+        let mut resources = json!({"skills":[{"id":"skill:fixture","name":"Fixture","description":"Public description"}],"mcpServers":[{"id":"mcp:fixture","name":"Fixture","command":"","args":[]}],"agents":[{"id":"agent:fixture","name":"Fixture","description":""}],"commands":["./commands/fixture.md"]});
+        assert!(valid_result(
+            "claudePlugin:getPluginResources",
+            &json!({"defined":true,"value":resources.clone()})
+        ));
+        resources["mcpServers"][0]["command"] = json!("/private/tool");
+        assert!(!valid_result(
+            "claudePlugin:getPluginResources",
+            &json!({"defined":true,"value":resources.clone()})
+        ));
+        resources["mcpServers"][0]["command"] = json!("");
+        resources["agents"][0]["description"] = json!("private system prompt");
+        assert!(!valid_result(
+            "claudePlugin:getPluginResources",
+            &json!({"defined":true,"value":resources})
+        ));
+    }
+
     #[test]
     fn plugin_metadata_and_resolvers_have_exact_domain_shapes_and_scope() {
         assert!(valid_request("plugin:list", &json!({})));
@@ -2410,7 +3260,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 114);
+        assert_eq!(COMMANDS.len(), 127);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

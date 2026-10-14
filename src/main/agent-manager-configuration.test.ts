@@ -72,6 +72,32 @@ describe('actual AgentManager configuration ownership', () => {
     } finally { stopped.resolve(); await changing }
     expect(credentialMutation).toHaveBeenCalledOnce()
   })
+  it('joins task skill users and all Claude plugin consumers before one resource mutation', async () => {
+    const h = fixture()
+    const skill = h.db.createSkill({ name: 'plugin:skill', description: '', content: 'Actual plugin', tags: ['plugin'] })!
+    h.db.updateTask(h.tasks[0].id, { skill_ids: [skill.id] })
+    const claude = h.db.createAgent({ name: 'Global plugin consumer', config: { coding_agent: 'claude-code' } })!
+    const unrelated = h.db.createAgent({ name: 'Other backend', config: { coding_agent: 'pi' } })!
+    await h.manager.startTask(h.tasks[0].id)
+    const ids = { agentIds: [], mcpServerIds: [], skillIds: [skill.id] }
+    expect(h.manager.getPluginConfigurationAffectedAgents(ids)).toEqual([h.agent.id, claude.id].sort())
+    const entered = deferred(), stopped = deferred(), write = vi.fn(() => h.db.deleteSkill(skill.id))
+    h.adapter.destroySession.mockImplementationOnce(async () => { entered.resolve(); await stopped.promise })
+    const changing = h.manager.runPluginConfigurationMutation(ids, write)
+    try {
+      await entered.promise; expect(write).not.toHaveBeenCalled()
+      await expect(h.manager.requestSession(unrelated.id, h.tasks[1].id)).rejects.toThrow('configuration is being updated')
+    } finally { stopped.resolve(); await changing }
+    expect(write).toHaveBeenCalledOnce(); expect(h.adapter.notifyConfigChanged).toHaveBeenCalledOnce()
+  })
+  it('refuses malformed or oversized task skill JSON before plugin owner projection or Stop', async () => {
+    const h = fixture(), ids = { agentIds: [], mcpServerIds: [], skillIds: ['plugin-skill'] }
+    h.db.db.prepare('UPDATE tasks SET skill_ids=? WHERE id=?').run('x'.repeat(128 * 1024 + 1), h.tasks[0].id)
+    expect(() => h.manager.getPluginConfigurationAffectedAgents(ids)).toThrow('reconciliation')
+    h.db.db.prepare('UPDATE tasks SET skill_ids=? WHERE id=?').run('{malformed', h.tasks[0].id)
+    expect(() => h.manager.getPluginConfigurationAffectedAgents(ids)).toThrow('reconciliation')
+    expect(h.adapter.destroySession).not.toHaveBeenCalled()
+  })
   it('raises a cap and starts queued work without destroying a live session or refreshing provider config', async () => {
     const h = fixture()
     h.db.updateProject(h.project.id, { settings: { concurrency: { captain_control: false } } })

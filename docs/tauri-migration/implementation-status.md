@@ -6,23 +6,24 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
-The October 14 production form continuation binds three task-source plugin form
-controls and seven connector controls to the actual protected-profile owners.
-There are 114 finite production command contracts; profiles with connectors
-explicitly disabled expose 107 actual owner handlers and refuse the seven
-connector effects. Plugin option resolution borrows saved credentials only
-with explicit source/plugin authorization. Connector credential mutations hold
-source admission and a shared runtime fence covering bridge jobs, direct piece
-calls, raw credential/KV callbacks, retiring worker exits and OAuth work.
-Outstanding runtime work conservatively refuses an edit; the boundary never
-uses a public timeout as proof that the worker stopped. OAuth checks captured
-scope and identity immediately before storing the exchanged token. The existing
-task-action owner rechecks the external task/source binding before dispatch and
-local reconciliation. These controls do not establish packaged connector,
-native OAuth callback or all-platform migration acceptance. See
-[plugin form controls](task-source-plugin-production.md),
-[connector controls](connector-production.md) and [batch evidence](evidence/issue-closing-20261014-connector-plugin-forms.json)
-recorded with the implementation revision.
+The October 14 session context and Claude plugin continuation binds the two
+context controls and eleven plugin marketplace controls to the actual protected
+profile owners. There are 127 finite production command contracts; profiles
+with connectors explicitly disabled expose 120 actual owner handlers. Session
+context reads use the real ledger and policy service with independent
+conversation/project/setting grants and bounded legacy storage. Plugin edits
+join affected task/Claude agents and active chat, Commander and briefing work.
+Catalog, redirect and nested file requests recheck current transport grants.
+Downloads authorize the actual contained resource plan before publication and
+materialization; failed creation rolls back database resources and cleans only
+the exact owned published tree. Arbitrary local marketplace reads remain
+unavailable in the private staged host until a native path grant is reviewed.
+These controls do not establish installed plugin, OAuth callback or all-platform
+migration acceptance. See [session context controls](session-context-production.md),
+[Claude plugin controls](claude-plugin-production.md) and
+[batch evidence](evidence/issue-closing-20261014-context-marketplace.json).
+The earlier [plugin form and connector controls](evidence/issue-closing-20261014-connector-plugin-forms.json)
+retain their implementation revision and validation scope.
 
 
 - Installed artifact policy v3 and the twenty-receipt synthetic-agent diagnostic passed on all four targets, completing [#204](https://github.com/krazyjakee/21x/issues/204). See [artifact provenance](evidence/installed-artifact-v3-four-target-scenarios.json) and [agent provenance](evidence/installed-agent-08d495f-four-target-scenarios.json).

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPortableDbFixture } from '../../../test/helpers/portable-db-test-helper'
-import { applyPluginResources } from './resources'
+import { applyPluginResources, planPluginResources } from './resources'
 
 let root: string, fixture: ReturnType<typeof createPortableDbFixture>
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'plugin-resources-')); fixture = createPortableDbFixture() })
@@ -42,6 +42,23 @@ describe('plugin resource preflight', () => {
     expect(fixture.db.getSkills().find(skill => skill.name === 'plugin:cmd:build')?.content).toBe('Validated command')
     expect(fixture.db.getSkills().some(skill => skill.content.includes('Outside secret'))).toBe(false)
     expect(readFileSync(join(outside, 'build.md'), 'utf8')).toBe('Outside secret')
+  })
+
+  it('authorizes actual prompts and MCP configuration before atomically creating any resource', () => {
+    const { plugin, dir } = setup()
+    mkdirSync(join(dir, 'agents')); writeFileSync(join(dir, 'agents', 'review.md'), 'Actual prompt')
+    writeFileSync(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { tools: { command: 'actual-command', env: { FIXTURE: 'actual-value' } } } }))
+    const plan = planPluginResources('plugin', plugin.manifest, dir)
+    expect(fixture.db.getSkills()).toEqual([])
+    expect(plan.agents[0].config?.system_prompt).toBe('Actual prompt')
+    expect(plan.mcpServers[0].environment).toEqual({ FIXTURE: 'actual-value' })
+    expect(() => applyPluginResources(fixture.db, plugin, dir, () => { throw new Error('Scope withdrawn') })).toThrow('Scope withdrawn')
+    expect(fixture.db.getSkills()).toEqual([]); expect(fixture.db.getMcpServers()).toEqual([])
+    const originalAgents = fixture.db.getAgents()
+    vi.spyOn(fixture.db, 'createAgent').mockImplementationOnce(() => { throw new Error('Row write failed') })
+    expect(() => applyPluginResources(fixture.db, plugin, dir)).toThrow('Row write failed')
+    expect(fixture.db.getSkills()).toEqual([]); expect(fixture.db.getMcpServers()).toEqual([])
+    expect(fixture.db.getAgents()).toEqual(originalAgents)
   })
 
   it.each(['skills', 'commands', 'agents', 'hooks', 'mcpServers', 'lspServers'])('refuses escaping manifest %s paths before resource mutations', field => {

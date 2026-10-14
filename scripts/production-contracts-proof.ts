@@ -12,6 +12,8 @@ import { MCP_CODECS } from '../src/shared/mcp-codecs'
 import { TASK_SOURCE_CODECS } from '../src/shared/task-source-codecs'
 import { CONNECTOR_CODECS } from '../src/shared/connector-codecs'
 import { TASK_SOURCE_PLUGIN_CODECS } from '../src/shared/task-source-plugin-codecs'
+import { SESSION_CONTEXT_CODECS } from '../src/shared/session-context-codecs'
+import { CLAUDE_PLUGIN_CODECS } from '../src/shared/claude-plugin-codecs'
 import type { JsonValue } from '../src/shared/service-protocol'
 
 // Preserve the production binding's override order; older diagnostic task,
@@ -19,9 +21,10 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
+const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
 let deepOutput: JsonValue = 'fixture leaf'
 for (let depth = 0; depth < 40; depth++) deepOutput = { child: deepOutput }
 const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }, (_, server) => ({ serverId: `server_${server}`, enabledTools: Array.from({ length: 120 }, (_, tool) => `tool_${tool}_` + 'x'.repeat(240)) })) }
@@ -77,7 +80,12 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'connectors:clearCredentials': ['connector.fixture:one'], 'connectors:oauthConnect': ['connector.fixture:one', { clientId: 'fixture-client', clientSecret: 'synthetic-fixture-secret' }, 'persistent'],
   'connectors:syncStatus': ['connector.fixture:one'],
   'plugin:list': [], 'plugin:getDocumentation': ['notion'],
-  'plugin:resolveOptions': ['notion', 'status_options', { data_source_id: 'external:database', api_token: '__21x_api_key_set__' }, 'server_fixture', 'source_fixture']
+  'plugin:resolveOptions': ['notion', 'status_options', { data_source_id: 'external:database', api_token: '__21x_api_key_set__' }, 'server_fixture', 'source_fixture'],
+  'sessionContext:getSnapshot': [{ kind: 'captain', ownerId: project }], 'sessionContext:setPolicy': [policy],
+  'claudePlugin:getMarketplaceSources': [], 'claudePlugin:addMarketplaceSource': [{ name: 'Fixture marketplace', source_type: 'github', source_url: 'fixture/marketplace#main', auto_update: false }],
+  'claudePlugin:removeMarketplaceSource': ['marketplace.fixture:one'], 'claudePlugin:fetchCatalog': ['marketplace.fixture:one'], 'claudePlugin:discoverPlugins': ['fixture'],
+  'claudePlugin:getInstalledPlugins': [], 'claudePlugin:installPlugin': ['fixture-plugin', 'marketplace.fixture:one', 'user'],
+  'claudePlugin:uninstallPlugin': ['plugin.fixture:one'], 'claudePlugin:enablePlugin': ['plugin.fixture:one'], 'claudePlugin:disablePlugin': ['plugin.fixture:one'], 'claudePlugin:getPluginResources': ['plugin.fixture:one']
 }
 
 type Variant = { operation: string; case: string; args: unknown[] }
@@ -141,6 +149,18 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'plugin:resolveOptions', case: 'raw-declared-resolver-credential', args: ['notion', 'data_sources', { api_token: 'synthetic\nfixture-credential' }] },
   { operation: 'plugin:resolveOptions', case: 'resolver-credential-byte-boundary', args: ['youtrack', 'users', { api_token: 'x'.repeat(16384) }] },
   ...Object.entries({ linear: ['users'], hubspot: ['owners', 'pipelines'], 'github-issues': ['owners', 'repos'], 'forgejo-issues': ['logins', 'owners', 'repos'], notion: ['data_sources', 'status_options', 'data_source_properties'], youtrack: ['projects', 'users', 'states', 'priorities', 'types'], 'connector-bridge': ['pieces'] }).flatMap(([pluginId, resolvers]) => resolvers.map(resolverKey => ({ operation: 'plugin:resolveOptions', case: `resolver-${pluginId}-${resolverKey}`, args: [pluginId, resolverKey, {}] }))),
+  { operation: 'sessionContext:getSnapshot', case: 'commander-context-scope', args: [{ kind: 'commander', ownerId: session }] },
+  ...['off', 'observe', 'on'].map(mode => ({ operation: 'sessionContext:setPolicy', case: `rollover-mode-${mode}`, args: [{ ...policy, mode }] })),
+  { operation: 'sessionContext:setPolicy', case: 'policy-max-boundaries', args: [{ mode: 'on', contextRatio: 1, compactions: 1000000, wakeups: 1000000, turns: 1000000, maxAgeDays: 3650 }] },
+  { operation: 'sessionContext:setPolicy', case: 'policy-fractional-age', args: [{ mode: 'off', contextRatio: 0.001, compactions: 1, wakeups: 1, turns: 1, maxAgeDays: 0.125 }] },
+  { operation: 'claudePlugin:addMarketplaceSource', case: 'default-github-source', args: [{ name: 'Fixture default', source_url: 'fixture/marketplace' }] },
+  { operation: 'claudePlugin:addMarketplaceSource', case: 'https-catalog-source', args: [{ name: 'Fixture HTTPS', source_type: 'url', source_url: 'https://marketplace.example.test/catalog.json' }] },
+  { operation: 'claudePlugin:addMarketplaceSource', case: 'explicit-local-catalog-source', args: [{ name: 'Fixture local', source_type: 'local', source_url: '/synthetic-fixture/marketplace' }] },
+  { operation: 'claudePlugin:addMarketplaceSource', case: 'typed-omitted-source-options', args: [{ name: 'Fixture optional', source_type: undefined, source_url: 'fixture/marketplace', auto_update: undefined }] },
+  { operation: 'claudePlugin:discoverPlugins', case: 'unfiltered-discovery', args: [] },
+  { operation: 'claudePlugin:discoverPlugins', case: 'empty-discovery-query', args: [''] },
+  { operation: 'claudePlugin:installPlugin', case: 'default-user-scope', args: ['fixture-plugin', 'marketplace.fixture:one'] },
+  { operation: 'claudePlugin:installPlugin', case: 'maximum-safe-plugin-name', args: ['x'.repeat(128), 'marketplace.fixture:one', 'user'] },
   { operation: 'chat:start', case: 'tool-history', args: [{ messages: [{ role: 'user', content: 'Fixture request' }, { role: 'assistant', content: '', toolCalls: [{ id: 'call_fixture', name: 'fixture_tool', input: { projectId: project } }] }, { role: 'tool', toolCallId: 'call_fixture', name: 'fixture_tool', content: 'Fixture result', isError: false }], maxToolCalls: 32 }] },
   ...PRODUCTION_SETTINGS_KEYS.map(key => ({ operation: 'settings:get', case: `setting-${key}`, args: [key] })),
   ...PRODUCTION_ENV_KEYS.map(key => ({ operation: 'env:get', case: `marker-${key}`, args: [key] })),
@@ -150,7 +170,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 114 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 127 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

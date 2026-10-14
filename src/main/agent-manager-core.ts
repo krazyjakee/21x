@@ -1285,11 +1285,28 @@ export class AgentManager extends EventEmitter {
   /** Scope derivation is shared by authorization and the actual mutation. A
    * cached global backend refresh may affect every agent using that backend. */
   getProductionCredentialAffectedAgents(input: ProductionCredentialMutation): string[] {
-    if (input.kind !== 'secret' && input.kind !== 'mcp-server') return []
+    if (input.kind !== 'secret' && input.kind !== 'mcp-server' && input.kind !== 'plugin-resources') return []
     const agents = this.db.getAgents()
+    if (input.kind === 'plugin-resources' && input.skillIds.length) {
+      // Bound legacy JSON before SQLite's actual affected-owner projection parses it.
+      const sizes = this.db.db.prepare('SELECT COALESCE(MAX(length(CAST(skill_ids AS BLOB))),0) AS field, COALESCE(SUM(length(CAST(skill_ids AS BLOB))),0) AS bytes FROM tasks').get() as { field: number; bytes: number }
+      if (sizes.field > 128 * 1024 || sizes.bytes > 4 * 1024 * 1024 || this.db.db.prepare('SELECT 1 FROM tasks WHERE skill_ids IS NOT NULL AND NOT json_valid(skill_ids) LIMIT 1').get()) throw new Error('Plugin task references require reconciliation.')
+      const count = this.db.db.prepare(`SELECT COUNT(*) AS count, COALESCE(MAX(MAX(length(CAST(id AS BLOB)),COALESCE(length(CAST(agent_id AS BLOB)),0))),0) AS field FROM tasks WHERE EXISTS
+        (SELECT 1 FROM json_each(tasks.skill_ids) WHERE value IN (${input.skillIds.map(() => '?').join(',')}))`).get(...input.skillIds) as { count: number; field: number }
+      if (count.count > 512 || count.field > 128) throw new Error('Plugin task references exceed the supported bounds.')
+    }
+    const resourceTasks = input.kind === 'plugin-resources' && input.skillIds.length ? this.db.db.prepare(`SELECT id,agent_id FROM tasks WHERE EXISTS
+      (SELECT 1 FROM json_each(tasks.skill_ids) WHERE value IN (${input.skillIds.map(() => '?').join(',')}))`).all(...input.skillIds) as Array<{ id: string; agent_id: string | null }> : []
+    const taskAgents = new Set(resourceTasks.flatMap(task => {
+      const id = task.agent_id ?? this.findSessionByTaskId(task.id)?.session.agentId ?? this.admittedStarts.get(task.id) ?? this.startQueue.get(task.id)?.agentId
+      // An unassigned future task can be triaged onto any configured agent.
+      return id ? [id] : agents.map(agent => agent.id)
+    }))
     const referenced = agents.filter(agent => input.kind === 'secret'
       ? agent.config.secret_ids?.includes(input.secretId)
-      : agent.config.mcp_servers?.some(entry => (typeof entry === 'string' ? entry : entry.serverId) === input.serverId))
+      : input.kind === 'mcp-server' ? agent.config.mcp_servers?.some(entry => (typeof entry === 'string' ? entry : entry.serverId) === input.serverId)
+        : input.agentIds.includes(agent.id) || taskAgents.has(agent.id) || getAgentProvider(agent) === CodingAgentType.CLAUDE_CODE ||
+          agent.config.skill_ids?.some(id => input.skillIds.includes(id)) || agent.config.mcp_servers?.some(entry => input.mcpServerIds.includes(typeof entry === 'string' ? entry : entry.serverId)))
     const shared = new Set(referenced.map(getAgentProvider).filter(type => !!this.adapters.get(type)?.notifyConfigChanged))
     return agents.filter(agent => referenced.some(row => row.id === agent.id) || shared.has(getAgentProvider(agent))).map(agent => agent.id).sort()
   }
@@ -1322,13 +1339,22 @@ export class AgentManager extends EventEmitter {
     return this.runProductionCredentialMutation({ kind: 'mcp-server', serverId }, mutation)
   }
 
+  getPluginConfigurationAffectedAgents(resources: { agentIds: string[]; mcpServerIds: string[]; skillIds: string[] }): string[] {
+    return this.getProductionCredentialAffectedAgents({ kind: 'plugin-resources', ...resources })
+  }
+
+  runPluginConfigurationMutation<T>(resources: { agentIds: string[]; mcpServerIds: string[]; skillIds: string[] }, mutation: () => T | Promise<T>): Promise<T> {
+    return this.runProductionCredentialMutation({ kind: 'plugin-resources', ...structuredClone(resources) }, mutation)
+  }
+
   runProductionCredentialMutation<T>(input: ProductionCredentialMutation, mutation: () => T | Promise<T>): Promise<T> {
     if (this.shuttingDown || this.productionCredentialMutation || this.agentConfigurationMutations.size || this.backendConfigurationMutations.size)
       return Promise.reject(new Error('The credential lifecycle is unavailable. Retry after current changes finish.'))
-    if (!input || !['provider-key', 'secret', 'mcp-server', 'default-agent'].includes(input.kind) || typeof mutation !== 'function' ||
+    if (!input || !['provider-key', 'secret', 'mcp-server', 'default-agent', 'plugin-resources'].includes(input.kind) || typeof mutation !== 'function' ||
       input.kind === 'secret' && (typeof input.secretId !== 'string' || !input.secretId) ||
       input.kind === 'mcp-server' && (typeof input.serverId !== 'string' || !input.serverId) ||
-      input.kind === 'provider-key' && !['openai_api_key', 'anthropic_api_key'].includes(input.key))
+      input.kind === 'provider-key' && !['openai_api_key', 'anthropic_api_key'].includes(input.key) ||
+      input.kind === 'plugin-resources' && [input.agentIds, input.mcpServerIds, input.skillIds].some(ids => !Array.isArray(ids) || ids.length > 128 || ids.some(id => typeof id !== 'string' || !id || id.length > 128) || new Set(ids).size !== ids.length))
       return Promise.reject(new Error('Invalid credential mutation.'))
     const ids = new Set(this.getProductionCredentialAffectedAgents(input))
     const backends = new Set([...ids].map(id => getAgentProvider(this.db.getAgent(id)!)).filter(type => !!this.adapters.get(type)?.notifyConfigChanged))
@@ -1346,7 +1372,7 @@ export class AgentManager extends EventEmitter {
       }))
       return Promise.reject(new Error('Wait for task or Captain changes to finish before changing credentials.'))
     this.productionCredentialMutation = true
-    this.productionAdmissionMutation = input.kind === 'default-agent'
+    this.productionAdmissionMutation = input.kind === 'default-agent' || input.kind === 'plugin-resources'
     for (const id of ids) this.agentConfigurationMutations.add(id)
     for (const backend of backends) this.backendConfigurationMutations.add(backend)
     return this.ownShutdownWork((async () => {
@@ -3024,7 +3050,7 @@ export class AgentManager extends EventEmitter {
    * heartbeat and triage sessions bypass the limits (see admission.ts).
    */
   async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
-    if (this.productionAdmissionMutation) throw new Error('The default agent is being updated. Retry after it finishes.')
+    if (this.productionAdmissionMutation) throw new Error('The agent configuration is being updated. Retry after it finishes.')
     const execution = this.taskGroupExecution(taskId)
     if (execution) { taskId = execution.id; agentId = execution.agent_id! }
     this.assertAgentConfigurationAvailable(agentId)

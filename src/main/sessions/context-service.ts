@@ -34,6 +34,11 @@ export function parseRolloverPolicy(value: unknown): RolloverPolicy {
 export class SessionContextService {
   constructor(private readonly source: Source, private readonly now: () => number = Date.now) {}
 
+  /** Production bindings borrow this projection's exact database owner. */
+  assertSource(source: Source): void {
+    if (this.source !== source) throw new Error('Session context database owner does not match')
+  }
+
   setPolicy(value: unknown): RolloverPolicy {
     const policy = parseRolloverPolicy(value)
     const { mode, ...thresholds } = policy

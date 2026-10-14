@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from './database'
 import { ClaudePluginManager } from './claude-plugin-manager'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, renameSync as requireRename } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -543,5 +543,48 @@ You are a TypeScript Agent SDK application verifier.
 
     await manager.uninstallPlugin(installed.id)
     expect(existsSync(pluginDir)).toBe(false)
+  })
+})
+
+
+describe('actual controlled plugin publication', () => {
+  function localMarketplace() {
+    const root = join(tempPluginsDir, 'marketplace-source'), plugin = join(root, 'owned-plugin')
+    mkdirSync(join(plugin, 'skills'), { recursive: true }); mkdirSync(join(plugin, 'agents'))
+    writeFileSync(join(plugin, 'plugin.json'), JSON.stringify({ name: 'owned-plugin' }))
+    writeFileSync(join(plugin, 'skills', 'real.md'), 'Actual skill')
+    writeFileSync(join(plugin, 'agents', 'review.md'), 'Actual agent prompt')
+    writeFileSync(join(root, 'marketplace.json'), JSON.stringify({ name: 'controlled', owner: { name: 'fixture' }, plugins: [{ name: 'owned-plugin', source: './owned-plugin' }] }))
+    return manager.addMarketplaceSource({ name: 'controlled-local', source_type: 'local', source_url: root })
+  }
+  it('removes only its owned publication after scope withdrawal and permits an explicit retry', async () => {
+    const source = localMarketplace(); await manager.fetchMarketplaceCatalog(source.id)
+    const before = db.getAgents()
+    await expect(manager.installPlugin('owned-plugin', source.id, 'user', { beforeMaterialize() { throw new Error('Scope withdrawn') } })).rejects.toThrow('Scope withdrawn')
+    expect(existsSync(join(tempPluginsDir, 'owned-plugin'))).toBe(false)
+    expect(db.getInstalledPlugins()).toEqual([]); expect(db.getSkills()).toEqual([]); expect(db.getAgents()).toEqual(before)
+    const installed = await manager.installPlugin('owned-plugin', source.id, 'user', {})
+    expect(installed.name).toBe('owned-plugin'); expect(db.getSkills().map(row => row.content)).toEqual(['Actual skill'])
+  })
+  it('rolls back the installed row and all resources when actual materialization fails', async () => {
+    const source = localMarketplace(); await manager.fetchMarketplaceCatalog(source.id)
+    const original = vi.spyOn(db, 'createAgent').mockImplementationOnce(() => { throw new Error('Actual row failed') })
+    try { await expect(manager.installPlugin('owned-plugin', source.id, 'user', {})).rejects.toThrow('Actual row failed') }
+    finally { original.mockRestore() }
+    expect(db.getInstalledPlugins()).toEqual([]); expect(db.getSkills()).toEqual([])
+    expect(existsSync(join(tempPluginsDir, 'owned-plugin'))).toBe(false)
+  })
+  it('preserves an unowned replacement tree when publication identity changes', async () => {
+    const source = localMarketplace(); await manager.fetchMarketplaceCatalog(source.id)
+    await expect(manager.installPlugin('owned-plugin', source.id, 'user', { beforeMaterialize() {
+      const path = join(tempPluginsDir, 'owned-plugin')
+      // Keep the original inode allocated to make replacement identity distinct.
+      const moved = join(tempPluginsDir, 'retained-owned-tree')
+      requireRename(path, moved)
+      mkdirSync(path); writeFileSync(join(path, 'unrelated.txt'), 'Preserve foreign tree')
+      throw new Error('Owner changed')
+    } })).rejects.toThrow('Owner changed')
+    expect(db.getInstalledPlugins()).toEqual([])
+    expect(existsSync(join(tempPluginsDir, 'owned-plugin', 'unrelated.txt'))).toBe(true)
   })
 })

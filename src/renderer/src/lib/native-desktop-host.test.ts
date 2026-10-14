@@ -4,6 +4,8 @@ import { createNativeDesktopHost, NATIVE_COMMAND_BINDINGS, type NativeDesktopHos
 import { PRODUCTION_API_KEY_SET_MARKER } from '@shared/production-settings-codecs'
 import { MCP_SECRET_SET_MARKER } from '@shared/mcp-codecs'
 import { CONNECTOR_WRITE_ERROR, CONNECTOR_STORAGE_REMEDIATION, CONNECTOR_SYNC_ERROR } from '@shared/connector-codecs'
+import type { RolloverPolicy, SessionContextSnapshot } from '@shared/session-context'
+import { CLAUDE_PLUGIN_LOCAL_SOURCE } from '@shared/claude-plugin-codecs'
 import { desktopApi, installDesktopHost } from './desktop-api'
 import type { ServiceEvent } from '@shared/service-protocol'
 const hosts: NativeDesktopHost[] = [], releases: Array<() => void> = []
@@ -29,6 +31,13 @@ function mcpRow() {
 }
 function sourceRow() {
   return { id: 'source_fixture', mcp_server_id: null, name: 'Fixture Notion', plugin_id: 'notion', config: { api_token: PRODUCTION_API_KEY_SET_MARKER }, list_tool: 'legacy_list', list_tool_args: {}, update_tool: 'legacy_update', update_tool_args: {}, last_synced_at: null, enabled: false, project_id: 'project_fixture', created_at: '2026-10-14', updated_at: '2026-10-14' }
+}
+const rolloverPolicy: RolloverPolicy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
+function contextSnapshot(): SessionContextSnapshot {
+  return { scope: { kind: 'captain', ownerId: 'project_fixture' }, generation: { id: 'generation:fixture', key: 'adapter:native_fixture', engine: 'adapter', state: 'running', createdAt: 100, backendId: 'native_fixture' }, usage: { tokens: 1200, source: 'reported', contextWindow: 16000, model: 'fixture/model', observedAt: 110 }, counters: { compactions: 1, wakeups: 2, turns: 3, ageMs: 10 }, policy: rolloverPolicy, reasons: ['context'], warnings: ['Human\nwarning'], summaries: [{ id: 'summary:fixture', content: 'Human\nsummary', kind: 'rollover', createdAt: 105, source: 'model' }], handoff: { id: 'handoff:fixture', state: 'creation_unconfirmed' } }
+}
+function claudeInstalledRow() {
+  return { id: 'plugin.fixture:one', name: 'fixture-plugin', marketplace_id: 'marketplace.fixture:one', manifest: { name: 'fixture-plugin', author: { name: 'Fixture Author' }, description: 'Fixture public manifest' }, source: { source: 'github', repo: 'fixture/marketplace#main', path: 'plugins/fixture-plugin' }, scope: 'user', enabled: true, version: '1.0', installed_at: '2026-10-14', updated_at: '2026-10-14' }
 }
 it('uses exact codecs and trusted host metadata; missing binary/file bindings never reach native or Electron', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
@@ -104,7 +113,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 114 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 127 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -113,7 +122,7 @@ it('binds the 114 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(114)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(127)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -354,4 +363,73 @@ it('binds plugin metadata and finite resolver scopes with the fifth argument pre
   await expect(f.host.api.plugins.resolveOptions('linear', 'users', {})).rejects.toMatchObject({ code: 'INVALID_RESULT' })
   f.results.set('plugin:list', [...metadata, ...metadata])
   await expect(f.host.api.plugins.list()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('reads complete context snapshots during recovery and fences finite rollover policy writes', async () => {
+  const f = fixture(), snapshot = contextSnapshot()
+  f.results.set('sessionContext:getSnapshot', snapshot); f.results.set('sessionContext:setPolicy', rolloverPolicy)
+  await f.host.reconnect()
+  expect(await f.host.api.sessionContext.getSnapshot(snapshot.scope)).toEqual(snapshot)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'sessionContext:getSnapshot', payload: { scope: snapshot.scope }, engineEpoch: 'engine-1' })
+  await expect(f.host.api.sessionContext.setPolicy(rolloverPolicy)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  expect(await f.host.api.sessionContext.setPolicy(rolloverPolicy)).toEqual(rolloverPolicy)
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.sessionContext.getSnapshot({ kind: 'task', ownerId: 'task_fixture' } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.sessionContext.getSnapshot({ kind: 'captain', ownerId: 'project_fixture', profileRoot: '/foreign' } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.sessionContext.setPolicy({ ...rolloverPolicy, contextRatio: 0 })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.sessionContext.setPolicy({ ...rolloverPolicy, turns: 1000001 })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.results.set('sessionContext:getSnapshot', { ...snapshot, usage: { ...snapshot.usage, source: 'unknown' } })
+  await expect(f.host.api.sessionContext.getSnapshot(snapshot.scope)).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.set('sessionContext:getSnapshot', { ...snapshot, summaries: [{ ...snapshot.summaries[0], profilePath: '/private' }] })
+  await expect(f.host.api.sessionContext.getSnapshot(snapshot.scope)).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('binds Claude marketplace/plugin lifecycle using public projections and user-only install scope', async () => {
+  const f = fixture(), installed = claudeInstalledRow()
+  const source = { id: 'marketplace.fixture:one', name: 'Fixture local', source_type: 'local', source_url: CLAUDE_PLUGIN_LOCAL_SOURCE, metadata: {}, auto_update: false, created_at: '2026-10-14', updated_at: '2026-10-14' }
+  const catalog = { name: 'Fixture catalog', owner: { name: 'Fixture Author' }, plugins: [{ name: installed.name, source: './plugins/fixture-plugin', author: { name: 'Fixture Author' } }] }
+  const discovery = { name: installed.name, description: 'Fixture', version: '1.0', author: 'Fixture Author', category: '', tags: [], homepage: '', repository: '', license: '', marketplace_id: source.id, marketplace_name: source.name, source: './plugins/fixture-plugin', installed: false }
+  const resources = { skills: [{ id: 'skill:fixture', name: 'Fixture skill', description: 'Public description' }], mcpServers: [{ id: 'mcp:fixture', name: 'Fixture MCP', command: '', args: [] }], agents: [{ id: 'agent:fixture', name: 'Fixture agent', description: '' }], commands: ['commands/fixture.md'] }
+  f.results.set('claudePlugin:getMarketplaceSources', [source]); f.results.set('claudePlugin:addMarketplaceSource', source); f.results.set('claudePlugin:removeMarketplaceSource', true)
+  f.results.set('claudePlugin:fetchCatalog', catalog); f.results.set('claudePlugin:discoverPlugins', [discovery]); f.results.set('claudePlugin:getInstalledPlugins', [installed])
+  f.results.set('claudePlugin:installPlugin', installed); f.results.set('claudePlugin:uninstallPlugin', true); f.results.set('claudePlugin:enablePlugin', installed); f.results.set('claudePlugin:disablePlugin', { ...installed, enabled: false }); f.results.set('claudePlugin:getPluginResources', resources)
+  await f.host.reconnect()
+  expect(await f.host.api.claudePlugins.getMarketplaceSources()).toEqual([source])
+  expect(await f.host.api.claudePlugins.fetchCatalog(source.id)).toEqual(catalog)
+  expect(await f.host.api.claudePlugins.discoverPlugins('fixture')).toEqual([discovery])
+  expect(await f.host.api.claudePlugins.getInstalledPlugins()).toEqual([installed])
+  expect(await f.host.api.claudePlugins.getPluginResources(installed.id)).toEqual(resources)
+  await expect(f.host.api.claudePlugins.installPlugin(installed.name, source.id)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  const data = { name: source.name, source_type: 'local', source_url: '/synthetic-fixture/catalog', auto_update: false }
+  expect(await f.host.api.claudePlugins.addMarketplaceSource(data)).toEqual(source)
+  expect(await f.host.api.claudePlugins.installPlugin(installed.name, source.id, 'user')).toEqual(installed)
+  expect(await f.host.api.claudePlugins.disablePlugin(installed.id)).toMatchObject({ enabled: false })
+  expect(await f.host.api.claudePlugins.enablePlugin(installed.id)).toEqual(installed)
+  expect(await f.host.api.claudePlugins.uninstallPlugin(installed.id)).toBe(true)
+  expect(await f.host.api.claudePlugins.removeMarketplaceSource(source.id)).toBe(true)
+  f.results.delete('claudePlugin:enablePlugin'); expect(await f.host.api.claudePlugins.enablePlugin(installed.id)).toBeUndefined()
+  f.results.set('claudePlugin:fetchCatalog', null); expect(await f.host.api.claudePlugins.fetchCatalog(source.id)).toBeNull()
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'claudePlugin:installPlugin', payload: { pluginName: installed.name, marketplaceId: source.id, scope: 'user' }, engineEpoch: 'engine-1' })
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.claudePlugins.installPlugin('../foreign', source.id)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.claudePlugins.installPlugin(installed.name, source.id, 'project')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.claudePlugins.addMarketplaceSource({ ...data, source_url: CLAUDE_PLUGIN_LOCAL_SOURCE })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.results.set('claudePlugin:getMarketplaceSources', [{ ...source, source_url: '/private/profile/catalog' }])
+  await expect(f.host.api.claudePlugins.getMarketplaceSources()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.set('claudePlugin:getPluginResources', { ...resources, mcpServers: [{ id: 'mcp:fixture', name: 'Fixture MCP', command: '/private/tool', args: [] }] })
+  await expect(f.host.api.claudePlugins.getPluginResources(installed.id)).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('never repeats an accepted Claude plugin install after a lost network/native result', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const pending = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === 'claudePlugin:installPlugin' ? pending.promise : original(command, args))
+  const installing = f.host.api.claudePlugins.installPlugin('fixture-plugin', 'marketplace.fixture:one'), rejected = expect(installing).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); await f.host.reconnect(); await rejected
+  pending.resolve({ engineEpoch: 'engine-1', result: { defined: true, value: claudeInstalledRow() } }); await Promise.resolve()
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'claudePlugin:installPlugin')).toHaveLength(1)
 })

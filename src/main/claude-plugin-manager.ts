@@ -14,7 +14,8 @@ import type {
   MarketplaceSourceRecord,
   InstalledPluginRecord,
   ClaudePluginSource,
-  CreateMarketplaceSourceData
+  CreateMarketplaceSourceData,
+  ClaudePluginManifest
 } from './database'
 import {
   fetchCatalogFromSource,
@@ -28,13 +29,27 @@ import {
   pluginSkills,
   pluginMcpServers,
   pluginAgents,
-  type PluginResources
+  type PluginResources,
+  planPluginResources, type PluginResourcePlan
 } from './claude-plugins/resources'
 
 export interface PluginOperations {
-  fetchCatalog(source: MarketplaceSourceRecord, signal: AbortSignal): Promise<MarketplaceCatalog | null>
+  fetchCatalog(source: MarketplaceSourceRecord, signal: AbortSignal, beforeRequest?: (address: string) => void): Promise<MarketplaceCatalog | null>
   download(pluginsDir: string, pluginName: string, source: ClaudePluginSource,
-    marketplaceSource: MarketplaceSourceRecord | undefined, pluginRoot: string | undefined, signal: AbortSignal): Promise<string>
+    marketplaceSource: MarketplaceSourceRecord | undefined, pluginRoot: string | undefined, signal: AbortSignal, beforePublish?: (containedStagingDir: string) => void, beforeRequest?: (address: string) => void): Promise<string>
+}
+
+export interface PluginCatalogControls {
+  signal?: AbortSignal
+  beforeCatalog?(source: MarketplaceSourceRecord): void
+  beforeRequest?(address: string, source: MarketplaceSourceRecord): void
+}
+export interface PluginInstallControls {
+  signal?: AbortSignal
+  beforeDownload?(entry: MarketplaceCatalog['plugins'][number], marketplace: MarketplaceSourceRecord, pluginRoot?: string): void
+  beforePublish?(plan: PluginResourcePlan, manifest: ClaudePluginManifest): void
+  beforeRequest?(address: string): void
+  beforeMaterialize?(plan: PluginResourcePlan, manifest: ClaudePluginManifest): void
 }
 
 export interface DiscoverablePlugin {
@@ -98,6 +113,16 @@ export class ClaudePluginManager {
 
   private assertOpen(): void { if (this.closing) throw new Error('PLUGIN_MANAGER_CLOSED') }
 
+  assertSource(db: DatabaseManager): void { if (this.db !== db) throw new Error('Plugin database owner does not match') }
+
+  getCatalogEntry(pluginName: string, marketplaceId: string): { entry: MarketplaceCatalog['plugins'][number]; marketplace: MarketplaceSourceRecord; pluginRoot?: string } | null {
+    this.assertOpen()
+    const catalog = this.catalogCache.get(marketplaceId), marketplace = this.db.getMarketplaceSource(marketplaceId)
+    const entry = catalog?.plugins.find(plugin => plugin.name === pluginName)
+    if (!catalog || !marketplace || !entry) return null
+    return structuredClone({ entry, marketplace, ...(catalog.metadata?.pluginRoot === undefined ? {} : { pluginRoot: catalog.metadata.pluginRoot }) })
+  }
+
   private track<T>(operation: () => Promise<T>): Promise<T> {
     this.assertOpen()
     const raw = Promise.resolve().then(() => { this.assertOpen(); return operation() })
@@ -145,36 +170,46 @@ export class ClaudePluginManager {
   }
 
   /** Fetches a catalog, falling back to the last cached copy on failure. */
-  async fetchMarketplaceCatalog(sourceId: string): Promise<MarketplaceCatalog | null> {
-    return this.track(() => this.fetchCatalog(sourceId))
+  async fetchMarketplaceCatalog(sourceId: string, controls?: PluginCatalogControls): Promise<MarketplaceCatalog | null> {
+    return this.track(() => this.fetchCatalog(sourceId, controls))
   }
 
-  private async fetchCatalog(sourceId: string): Promise<MarketplaceCatalog | null> {
+  private async fetchCatalog(sourceId: string, controls?: PluginCatalogControls): Promise<MarketplaceCatalog | null> {
     const source = this.db.getMarketplaceSource(sourceId)
     if (!source) return null
+    const signal = controls?.signal ? AbortSignal.any([this.controller.signal, controls.signal]) : this.controller.signal
+    const snapshot = JSON.stringify(source)
+    const check = (): void => {
+      this.assertOpen(); signal.throwIfAborted()
+      if (JSON.stringify(this.db.getMarketplaceSource(sourceId)) !== snapshot) throw new Error('Plugin marketplace context changed')
+      controls?.beforeCatalog?.(source)
+    }
+    check()
 
     try {
-      const catalog = await this.operations.fetchCatalog(source, this.controller.signal)
-      this.assertOpen()
+      const catalog = await this.operations.fetchCatalog(source, signal, address => { check(); controls?.beforeRequest?.(address, structuredClone(source)); check() })
+      check()
       if (catalog) this.catalogCache.set(sourceId, catalog)
       return catalog
     } catch {
-      this.assertOpen()
+      check()
       console.error('[ClaudePluginManager] Failed to fetch marketplace catalog')
       return this.catalogCache.get(sourceId) ?? null
     }
   }
 
-  async discoverPlugins(searchQuery?: string): Promise<DiscoverablePlugin[]> {
-    return this.track(() => this.discover(searchQuery))
+  async discoverPlugins(searchQuery?: string, controls?: PluginCatalogControls & { sourceIds?: string[] }): Promise<DiscoverablePlugin[]> {
+    return this.track(() => this.discover(searchQuery, controls))
   }
 
-  private async discover(searchQuery?: string): Promise<DiscoverablePlugin[]> {
+  private async discover(searchQuery?: string, controls?: PluginCatalogControls & { sourceIds?: string[] }): Promise<DiscoverablePlugin[]> {
     const installedPlugins = this.db.getInstalledPlugins()
     const results: DiscoverablePlugin[] = []
 
     for (const source of this.db.getMarketplaceSources()) {
-      const catalog = this.catalogCache.get(source.id) ?? (await this.fetchMarketplaceCatalog(source.id))
+      if (controls?.sourceIds && !controls.sourceIds.includes(source.id)) continue
+      controls?.signal?.throwIfAborted(); controls?.beforeCatalog?.(source)
+      const catalog = this.catalogCache.get(source.id) ?? (await this.fetchMarketplaceCatalog(source.id, controls))
       this.assertOpen()
       if (!catalog) continue
 
@@ -219,18 +254,19 @@ export class ClaudePluginManager {
   async installPlugin(
     pluginName: string,
     marketplaceId: string,
-    scope: string = 'user'
+    scope: string = 'user',
+    controls?: PluginInstallControls
   ): Promise<InstalledPluginRecord> {
     return this.track(async () => {
       this.pluginPath(pluginName)
       if (this.installing.has(pluginName)) throw new Error('Plugin installation already in progress')
       this.installing.add(pluginName)
-      try { return await this.install(pluginName, marketplaceId, scope) }
+      try { return await this.install(pluginName, marketplaceId, scope, controls) }
       finally { this.installing.delete(pluginName) }
     })
   }
 
-  private async install(pluginName: string, marketplaceId: string, scope: string): Promise<InstalledPluginRecord> {
+  private async install(pluginName: string, marketplaceId: string, scope: string, controls?: PluginInstallControls): Promise<InstalledPluginRecord> {
     if (this.db.getInstalledPlugins().some(plugin => plugin.name === pluginName)) {
       throw new Error(`Plugin "${pluginName}" is already installed`)
     }
@@ -244,32 +280,77 @@ export class ClaudePluginManager {
     if (!entry) {
       throw new Error(`Plugin "${pluginName}" not found in marketplace`)
     }
+    const marketplace = this.db.getMarketplaceSource(marketplaceId)
+    if (!marketplace) throw new Error('Plugin marketplace was not found')
+    const signal = controls?.signal ? AbortSignal.any([this.controller.signal, controls.signal]) : this.controller.signal
+    const snapshot = JSON.stringify({ entry, marketplace, pluginRoot: catalog.metadata?.pluginRoot })
+    const check = (): void => {
+      this.assertOpen(); signal.throwIfAborted()
+      const current = this.getCatalogEntry(pluginName, marketplaceId)
+      if (!current || JSON.stringify(current) !== snapshot) throw new Error('Plugin installation context changed')
+      controls?.beforeDownload?.(structuredClone(entry), structuredClone(marketplace), catalog.metadata?.pluginRoot)
+    }
+    check()
 
     const source: ClaudePluginSource =
       typeof entry.source === 'string' ? { path: entry.source } : entry.source
 
-    const pluginDir = await this.operations.download(
-      this.pluginsDir,
-      pluginName,
-      source,
-      this.db.getMarketplaceSource(marketplaceId) ?? undefined,
-      catalog.metadata?.pluginRoot,
-      this.controller.signal
-    )
-
-    this.assertOpen()
-    if (pluginDir !== this.pluginPath(pluginName)) throw new Error('Plugin download returned an unexpected directory')
-    const installed = this.db.createInstalledPlugin({
-      name: entry.name,
-      marketplace_id: marketplaceId,
-      manifest: readPluginManifest(pluginDir, entry),
-      source,
-      scope,
-      version: entry.version || '1.0.0'
-    })
-
-    applyPluginResources(this.db, installed, pluginDir)
-    return installed
+    const finalDir = this.pluginPath(pluginName)
+    let publishedIdentity: { dev: number; ino: number } | undefined
+    let committed = false
+    try {
+      const pluginDir = await this.operations.download(
+        this.pluginsDir, pluginName, source, marketplace, catalog.metadata?.pluginRoot, signal,
+        dir => {
+          check()
+          if (publishedIdentity) throw new Error('Plugin publication was already authorized')
+          const manifest = readPluginManifest(dir, entry)
+          const plan = planPluginResources(pluginName, manifest, dir)
+          controls?.beforePublish?.(plan, manifest)
+          check()
+          const identity = lstatSync(dir)
+          if (!identity.isDirectory() || identity.isSymbolicLink()) throw new Error('Plugin publication directory changed')
+          publishedIdentity = { dev: identity.dev, ino: identity.ino }
+        }, address => { check(); controls?.beforeRequest?.(address); check() }
+      )
+      check()
+      if (pluginDir !== finalDir) throw new Error('Plugin download returned an unexpected directory')
+      // Native bindings require the actual downloader's pre-publication receipt.
+      // Legacy injected operations without controls keep their existing contract.
+      if (controls && !publishedIdentity) throw new Error('Plugin publication ownership was not confirmed')
+      if (publishedIdentity) {
+        const identity = lstatSync(pluginDir)
+        if (identity.dev !== publishedIdentity.dev || identity.ino !== publishedIdentity.ino || !identity.isDirectory() || identity.isSymbolicLink()) throw new Error('Plugin publication directory changed')
+      }
+      const manifest = readPluginManifest(pluginDir, entry)
+      const plan = planPluginResources(pluginName, manifest, pluginDir)
+      controls?.beforeMaterialize?.(plan, manifest)
+      check()
+      const installed = this.db.db.transaction(() => {
+        const row = this.db.createInstalledPlugin({ name: entry.name, marketplace_id: marketplaceId,
+          manifest, source, scope, version: entry.version || '1.0.0' })
+        applyPluginResources(this.db, row, pluginDir, currentPlan => {
+          check()
+          if (JSON.stringify(currentPlan) !== JSON.stringify(plan)) throw new Error('Plugin resource plan changed before materialization')
+        })
+        return row
+      })()
+      committed = true
+      return installed
+    } catch (error) {
+      // Reconcile only the precise tree published by this accepted download.
+      // A swapped, linked or otherwise unowned destination is preserved.
+      if (!committed && publishedIdentity && !this.db.getInstalledPlugins().some(plugin => plugin.name === pluginName)) {
+        try {
+          const identity = lstatSync(finalDir)
+          if (identity.dev === publishedIdentity.dev && identity.ino === publishedIdentity.ino && identity.isDirectory() && !identity.isSymbolicLink()) {
+            inspectPluginTree(finalDir)
+            rmSync(finalDir, { recursive: true })
+          }
+        } catch { /* An ambiguous tree remains available for manual recovery. */ }
+      }
+      throw error
+    }
   }
 
   async uninstallPlugin(pluginId: string): Promise<boolean> {
@@ -286,16 +367,19 @@ export class ClaudePluginManager {
       directoryPresent = false
     }
     if (directoryPresent) inspectPluginTree(pluginDir)
-    removePluginResources(this.db, plugin.name)
+    const removed = this.db.db.transaction(() => {
+      removePluginResources(this.db, plugin.name)
+      return this.db.deleteInstalledPlugin(pluginId)
+    })()
     if (existsSync(pluginDir)) {
       try {
         rmSync(pluginDir, { recursive: true, force: true })
-      } catch (err) {
-        console.warn(`[ClaudePluginManager] Failed to clean up plugin files for "${plugin.name}":`, err)
+      } catch {
+        console.warn('[ClaudePluginManager] Plugin cleanup requires manual recovery')
       }
     }
 
-    return this.db.deleteInstalledPlugin(pluginId)
+    return removed
   }
 
   private assertUnambiguousResources(name: string): void {

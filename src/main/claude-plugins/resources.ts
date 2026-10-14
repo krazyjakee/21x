@@ -7,7 +7,7 @@
 import { join, basename, relative } from 'path'
 import { readPluginTree, validateManifestPaths, PluginSourceError } from './containment'
 
-import type { DatabaseManager, InstalledPluginRecord } from '../database'
+import type { DatabaseManager, InstalledPluginRecord, ClaudePluginManifest, CreateSkillData, CreateMcpServerData, CreateAgentData } from '../database'
 
 export interface PluginResources {
   skills: { id: string; name: string; description: string }[]
@@ -44,62 +44,33 @@ function markdownDescription(content: string): string {
 }
 
 
-function createPluginSkill(
-  db: DatabaseManager,
-  pluginName: string,
-  skillKey: string,
-  description: string,
-  content: string
-): void {
-  try {
-    db.createSkill({
-      name: `${pluginName}:${skillKey}`,
-      description: description || `Skill from plugin "${pluginName}"`,
-      content,
-      tags: ['plugin', pluginName]
-    })
-  } catch (err) {
-    console.warn(`[ClaudePluginManager] Failed to create skill "${skillKey}" from plugin "${pluginName}":`, err)
-  }
+export interface PluginResourcePlan {
+  skills: CreateSkillData[]
+  mcpServers: CreateMcpServerData[]
+  /** Resource ID inheritance is filled by the actual materializer. */
+  agents: CreateAgentData[]
 }
 
-function createPluginMcpServer(
-  db: DatabaseManager,
-  pluginName: string,
-  serverName: string,
-  config: {
-    command?: string
-    args?: string[]
-    env?: Record<string, string>
-    environment?: Record<string, string>
-    url?: string
-    type?: 'local' | 'remote'
-  }
-): void {
-  try {
-    db.createMcpServer({
-      name: `${pluginName}:${serverName}`,
-      type: config.type || (config.url ? 'remote' : 'local'),
-      command: config.command || '',
-      args: config.args || [],
-      url: config.url,
-      environment: config.env || config.environment || {},
-      source: 'plugin'
-    })
-  } catch (err) {
-    console.warn(`[ClaudePluginManager] Failed to create MCP server "${serverName}" from plugin "${pluginName}":`, err)
-  }
+function createPluginSkill(plan: PluginResourcePlan, pluginName: string, skillKey: string, description: string, content: string): void {
+  plan.skills.push({ name: `${pluginName}:${skillKey}`, description: description || `Skill from plugin "${pluginName}"`, content, tags: ['plugin', pluginName] })
+}
+
+function createPluginMcpServer(plan: PluginResourcePlan, pluginName: string, serverName: string, config: {
+  command?: string; args?: string[]; env?: Record<string, string>; environment?: Record<string, string>; url?: string; type?: 'local' | 'remote'
+}): void {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new PluginSourceError('Invalid plugin MCP resource')
+  plan.mcpServers.push({ name: `${pluginName}:${serverName}`, type: config.type || (config.url ? 'remote' : 'local'), command: config.command || '',
+    args: config.args || [], url: config.url, environment: config.env || config.environment || {}, source: 'plugin' })
 }
 
 /**
- * Applies plugin resources from downloaded files:
+ * Plans plugin resources from one contained snapshot without database writes:
  * - skills/ and commands/ markdown → 20x skills (commands are keyed "cmd:<name>")
  * - .mcp.json (or manifest mcpServers) → 20x MCP servers
  * - agents/*.md → 20x agents, pre-assigned all of the plugin's skills and MCP servers
  */
-export function applyPluginResources(db: DatabaseManager, plugin: InstalledPluginRecord, pluginDir: string): void {
-  const pluginName = plugin.name
-  const manifest = plugin.manifest
+export function planPluginResources(pluginName: string, manifest: ClaudePluginManifest, pluginDir: string): PluginResourcePlan {
+  const plan: PluginResourcePlan = { skills: [], mcpServers: [], agents: [] }
 
   // Validate and read the entire bounded tree before modifying any resources.
   // Historic trees containing links are preserved and require manual reconciliation.
@@ -132,16 +103,16 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
         const skillMdPath = join(entryPath, 'SKILL.md')
         if (stat(skillMdPath).isFile()) {
           const content = readResource(skillMdPath)
-          createPluginSkill(db, pluginName, entry, markdownDescription(content), content)
+          createPluginSkill(plan, pluginName, entry, markdownDescription(content), content)
         } else {
           for (const mdFile of listMdFiles(entryPath)) {
             const content = readResource(join(entryPath, mdFile))
-            createPluginSkill(db, pluginName, `${entry}/${basename(mdFile, '.md')}`, markdownDescription(content), content)
+            createPluginSkill(plan, pluginName, `${entry}/${basename(mdFile, '.md')}`, markdownDescription(content), content)
           }
         }
       } else if (entryStat.isFile() && entry.endsWith('.md')) {
         const content = readResource(entryPath)
-        createPluginSkill(db, pluginName, basename(entry, '.md'), markdownDescription(content), content)
+        createPluginSkill(plan, pluginName, basename(entry, '.md'), markdownDescription(content), content)
       }
     }
   }
@@ -150,7 +121,7 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
   if (exists(commandsDir)) {
     const createCommand = (key: string, cmdName: string, content: string): void =>
       createPluginSkill(
-        db,
+        plan,
         pluginName,
         `cmd:${key}`,
         markdownDescription(content) || `Command "${cmdName}" from plugin "${pluginName}"`,
@@ -180,17 +151,15 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
       const servers = mcpConfig.mcpServers || mcpConfig
       if (typeof servers === 'object' && !Array.isArray(servers)) {
         for (const [serverName, serverConfig] of Object.entries(servers)) {
-          createPluginMcpServer(db, pluginName, serverName, serverConfig as Parameters<typeof createPluginMcpServer>[3])
+          createPluginMcpServer(plan, pluginName, serverName, serverConfig as Parameters<typeof createPluginMcpServer>[3])
         }
       }
     } catch (err) {
-      console.warn(`[ClaudePluginManager] Failed to parse .mcp.json for plugin "${pluginName}":`, err)
+      throw err instanceof PluginSourceError ? err : new PluginSourceError('Invalid plugin MCP resource')
     }
   }
 
   // Agents inherit only the skills/MCP servers created above, so this must run after them
-  const skillIds = pluginSkills(db, pluginName).map((s) => s.id)
-  const mcpServerIds = pluginMcpServers(db, pluginName).map((s) => s.id)
 
   const agentsDir = join(pluginDir, 'agents')
   if (exists(agentsDir)) {
@@ -199,19 +168,13 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
       if (!stat(entryPath).isFile() || !entry.endsWith('.md')) continue
       const content = readResource(entryPath)
       const agentKey = basename(entry, '.md')
-      try {
-        db.createAgent({
-          name: `${pluginName}:${agentKey}`,
-          config: {
-            system_prompt: content.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '').trim(),
-            model: frontmatterField(content, 'model') || undefined,
-            skill_ids: skillIds.length ? skillIds : undefined,
-            mcp_servers: mcpServerIds.length ? mcpServerIds : undefined
-          }
-        })
-      } catch (err) {
-        console.warn(`[ClaudePluginManager] Failed to create agent "${agentKey}" from plugin "${pluginName}":`, err)
-      }
+      plan.agents.push({
+        name: `${pluginName}:${agentKey}`,
+        config: {
+          system_prompt: content.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '').trim(),
+          model: frontmatterField(content, 'model') || undefined
+        }
+      })
     }
   }
 
@@ -219,35 +182,36 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
   if (!exists(mcpJsonPath) && manifest.mcpServers && typeof manifest.mcpServers === 'object' && !Array.isArray(manifest.mcpServers)) {
     const servers = manifest.mcpServers as Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>
     for (const [serverName, serverConfig] of Object.entries(servers)) {
-      try {
-        db.createMcpServer({
-          name: `${pluginName}:${serverName}`,
-          command: serverConfig.command || '',
-          args: serverConfig.args || [],
-          environment: serverConfig.env || {},
-          source: 'plugin'
-        })
-      } catch (err) {
-        console.warn(`[ClaudePluginManager] Failed to create MCP server from manifest:`, err)
-      }
+      createPluginMcpServer(plan, pluginName, serverName, serverConfig)
     }
   }
 
   const hasSkillFiles = exists(skillsDir) || exists(commandsDir)
   if (!hasSkillFiles && Array.isArray(manifest.skills)) {
     for (const skillPath of manifest.skills) {
-      try {
-        db.createSkill({
-          name: `${pluginName}:${typeof skillPath === 'string' ? skillPath.replace(/\//g, '-').replace(/^-/, '') : 'skill'}`,
-          description: `Skill from plugin "${pluginName}"`,
-          content: `Plugin skill: ${skillPath}`,
-          tags: ['plugin', pluginName]
-        })
-      } catch (err) {
-        console.warn(`[ClaudePluginManager] Failed to create skill from manifest:`, err)
-      }
+      plan.skills.push({
+        name: `${pluginName}:${typeof skillPath === 'string' ? skillPath.replace(/\//g, '-').replace(/^-/, '') : 'skill'}`,
+        description: `Skill from plugin "${pluginName}"`, content: `Plugin skill: ${skillPath}`, tags: ['plugin', pluginName]
+      })
     }
   }
+  return plan
+}
+
+/** Scan and authorize the whole contained tree before the first database write.
+ * Resource creation is atomic; a failed row never publishes a partial set. */
+export function applyPluginResources(db: DatabaseManager, plugin: InstalledPluginRecord, pluginDir: string, beforeCreate?: (plan: PluginResourcePlan) => void): void {
+  const plan = planPluginResources(plugin.name, plugin.manifest, pluginDir)
+  beforeCreate?.(plan)
+  db.db.transaction(() => {
+    for (const data of plan.skills) if (!db.createSkill(data)) throw new PluginSourceError('Plugin skill could not be created')
+    for (const data of plan.mcpServers) if (!db.createMcpServer(data)) throw new PluginSourceError('Plugin MCP server could not be created')
+    const skillIds = pluginSkills(db, plugin.name).map(skill => skill.id)
+    const mcpServerIds = pluginMcpServers(db, plugin.name).map(server => server.id)
+    for (const data of plan.agents) if (!db.createAgent({ ...data, config: { ...data.config,
+      skill_ids: skillIds.length ? skillIds : undefined, mcp_servers: mcpServerIds.length ? mcpServerIds : undefined } })) throw new PluginSourceError('Plugin agent could not be created')
+  })()
+
 }
 
 export function removePluginResources(db: DatabaseManager, pluginName: string): void {

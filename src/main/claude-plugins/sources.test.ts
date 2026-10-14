@@ -27,6 +27,26 @@ describe('bounded private plugin acquisition', () => {
     expect(readdirSync(profile).sort()).toEqual(['plugin', 'unrelated.txt'])
   })
 
+  it('refuses publication after the actual contained staging plan loses its grant', async () => {
+    localPlugin()
+    const publish = vi.fn((dir: string) => { expect(readFileSync(join(dir, 'plugin.json'), 'utf8')).toContain('plugin'); throw new Error('Grant withdrawn') })
+    await expect(downloadPluginFiles(profile, 'plugin', { path: './nested/plugin' }, source(marketplace), undefined, undefined, publish)).rejects.toThrow()
+    expect(publish).toHaveBeenCalledOnce(); expect(readdirSync(profile)).toEqual([])
+    expect(existsSync(join(marketplace, 'nested', 'plugin'))).toBe(true)
+  })
+
+  it('rechecks every redirect and nested GitHub file address before network effects', async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 302, headers: { location: 'https://ungranted.invalid/catalog' } }))
+    vi.stubGlobal('fetch', fetcher)
+    const sourceRow = { ...source(marketplace), source_type: 'url', source_url: 'https://granted.invalid/catalog' }
+    await expect(fetchCatalogFromSource(sourceRow, undefined, address => { if (address.includes('ungranted')) throw new Error('Address grant withdrawn') })).rejects.toThrow('Address grant withdrawn')
+    expect(fetcher).toHaveBeenCalledOnce()
+    fetcher.mockReset(); fetcher.mockImplementation(async () => Response.json([{ name: 'plugin.json', path: 'plugin.json', type: 'file', download_url: 'https://ungranted.invalid/plugin.json' }]))
+    await expect(downloadPluginFiles(profile, 'plugin', { source: 'github', repo: 'fixture/repo' }, undefined, undefined, undefined, undefined,
+      address => { if (address.includes('ungranted')) throw new Error('Address grant withdrawn') })).rejects.toThrow()
+    expect(fetcher).toHaveBeenCalledOnce(); expect(readdirSync(profile)).toEqual([])
+  })
+
   it('refuses a pre-existing partial tree without fetching or changing its files', async () => {
     mkdirSync(join(profile, 'plugin')); writeFileSync(join(profile, 'plugin', 'old.txt'), 'keep')
     const http = vi.fn(); vi.stubGlobal('fetch', http)

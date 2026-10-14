@@ -1,3 +1,7 @@
+import { SessionContextBackend } from './session-context-backend'
+import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
+import { ClaudePluginBackend, type ClaudePluginBackendOptions } from './claude-plugin-backend'
+import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
 import { TaskLifecycleBackend } from './task-lifecycle-backend'
 import { ProductionAgentBackend } from './production-agent-backend'
 import { CommanderBackend } from './commander-backend'
@@ -47,7 +51,8 @@ type Authority = Pick<AgentConfigurationBackendOptions, 'isTrustedDesktop' | 'ca
 } & Pick<ProductionSettingsBackendOptions, 'canReadSetting' | 'canWriteSetting' | 'canAccessSecret' | 'canCreateSecret' | 'canUseSecretEnvironment' | 'canReadEnvironment'> &
   Pick<McpBackendOptions, 'canUseTransport' | 'canUseEnvironmentName'> & Pick<TaskSourceBackendOptions, 'canAccessConnector'> &
   Pick<TaskSourcePluginBackendOptions, 'canBorrowSourceCredentials' | 'canResolveUnsavedConfig'> &
-  Pick<ConnectorBackendOptions, 'canCreateInstance' | 'canUsePiece'> & {
+  Pick<ConnectorBackendOptions, 'canCreateInstance' | 'canUsePiece'> &
+  Pick<ClaudePluginBackendOptions, 'canAccessMarketplace' | 'canCreateMarketplace' | 'canAccessPluginName' | 'canAccessPlugin' | 'canUseMarketplaceSource' | 'canUsePluginSource' | 'canAccessSkill' | 'canCreateGlobalSkill' | 'canCreateAgent' | 'canCreateMcpServer' | 'canUsePluginAddress'> & {
     canUseSourcePlugin(id: string, caller: DesktopCallerContext, operation: TaskSourceOperation | TaskSourcePluginOperation | 'plugin:executeAction'): boolean
   }
 export interface ProductionDesktopBindingOptions {
@@ -60,7 +65,7 @@ export interface ProductionDesktopBindingOptions {
 export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
   ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS }
 
@@ -92,6 +97,8 @@ export class ProductionDesktopBindings {
   private readonly sources: TaskSourceBackend
   private readonly sourcePlugins: TaskSourcePluginBackend
   private readonly connectors: ConnectorBackend | null
+  private readonly sessionContext: SessionContextBackend
+  private readonly claudePlugins: ClaudePluginBackend
   private readonly epoch: string
   private constructor(private readonly owner: ProductionOwner, private readonly services: Awaited<ReturnType<ProductionOwner['start']>>, private readonly options: ProductionDesktopBindingOptions) {
     const lease = owner.getDatabaseBindingLease()
@@ -162,10 +169,19 @@ export class ProductionDesktopBindings {
     this.connectors = connectorLease ? new ConnectorBackend({ database: services.db, sync: services.sync, ...connectorLease,
       engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
       canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration, canAccessInstance: dynamicAuthority.canAccessConnector }) : null
+    this.sessionContext = new SessionContextBackend({ database: services.db, ...owner.getSessionContextBindingLease(),
+      engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
+      canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration,
+      canAccessSetting: (key, caller, access) => authority.canReadSetting(key, caller) && (access === 'read' || authority.canWriteSetting(key, caller)) })
+    this.claudePlugins = new ClaudePluginBackend({ database: services.db, manager: services.plugins, agents: services.agents, sync: services.sync,
+      ...owner.getClaudePluginBindingLease(), engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
+      canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration, canManageGlobalSkills: dynamicAuthority.canAccessGlobalSkills,
+      runPluginMutation: (resources, mutation) => owner.runCredentialMutation({ kind: 'plugin-resources', ...resources }, mutation),
+      emit: options.emit, onFatalEvent: options.fatal })
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown()
-      void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close()]).then(() => undefined))
+      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown()
+      void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close(), this.sessionContext.close()]).catch(() => { /* Registered drain retains raw work. */ })
+    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close()]).then(() => undefined))
   }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
@@ -234,7 +250,7 @@ export class ProductionDesktopBindings {
     const schemas = { ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
       ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
       ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller), ...this.mcp.operationSchemas(caller), ...this.sources.operationSchemas(caller),
-      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller) }
+      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller) }
     return Object.fromEntries(Object.entries(schemas).map(([operation, schema]) => [operation, {
       ...schema, handle: (payload: JsonValue, signal: AbortSignal) => this.invoke(operation, payload, caller, signal)
     }]))
@@ -249,6 +265,8 @@ export class ProductionDesktopBindings {
       signal.addEventListener('abort', abort, { once: true }); ownerSignal.addEventListener('abort', abort, { once: true })
       if (signal.aborted || ownerSignal.aborted) abort()
       try {
+        if (Object.hasOwn(SESSION_CONTEXT_CODECS, operation)) return await this.sessionContext.registry.invoke(operation, payload, caller, combined.signal)
+        if (Object.hasOwn(CLAUDE_PLUGIN_CODECS, operation)) return await this.claudePlugins.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(TASK_SOURCE_PLUGIN_CODECS, operation)) return await this.sourcePlugins.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(CONNECTOR_CODECS, operation)) {
           if (!this.connectors) throw new ServiceProtocolError('UNKNOWN_OPERATION')

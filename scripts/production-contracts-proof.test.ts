@@ -4,12 +4,14 @@ import { isRecord } from '../src/shared/service-protocol'
 import { PRODUCTION_COMMAND_CODECS } from '../src/service/production-desktop-bindings'
 import { CONNECTOR_WRITE_ERROR, CONNECTOR_STORAGE_REMEDIATION, CONNECTOR_SYNC_ERROR } from '../src/shared/connector-codecs'
 import { TASK_SOURCE_RESOLVER_KEYS } from '../src/shared/task-source-plugin-codecs'
+import { CLAUDE_PLUGIN_LOCAL_SOURCE } from '../src/shared/claude-plugin-codecs'
+import { SESSION_CONTEXT_GENERATION_STATES, SESSION_CONTEXT_HANDOFF_STATES } from '../src/shared/session-context-codecs'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 114 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 127 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(114)
+    expect(corpus.operations).toHaveLength(127)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -106,10 +108,50 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     expect(resolver.validateWireResult({ defined: true, value: [{ value: 'external:user', label: 'é'.repeat(2049) }] })).toBe(false)
     expect(PROOF_COMMAND_CODECS['plugin:list'].validateWireResult({ defined: true, value: [{ id: 'linear', displayName: 'Linear', description: '', icon: 'linear' }, { id: 'linear', displayName: 'Duplicate', description: '', icon: 'linear' }] })).toBe(false)
   })
+  it('covers finite rollover policies and full context states without adding owner authority', () => {
+    const corpus = createProductionRequestCorpus(), policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
+    expect(corpus.requests.filter(row => row.case.startsWith('rollover-mode-')).map(row => row.case)).toEqual(['rollover-mode-off', 'rollover-mode-observe', 'rollover-mode-on'])
+    const codec = PROOF_COMMAND_CODECS['sessionContext:setPolicy']
+    for (const extra of [{ mode: 'automatic' }, { contextRatio: 0 }, { contextRatio: 1.1 }, { compactions: 0 }, { wakeups: 1000001 }, { turns: 1.5 }, { maxAgeDays: 3651 }]) expect(() => codec.encodeArguments([{ ...policy, ...extra }] as never)).toThrow()
+    expect(() => codec.decodeArguments({ policy, ownerId: 'foreign_owner' })).toThrow()
+    const snapshot = { scope: { kind: 'commander', ownerId: 'session_fixture' }, generation: { id: 'generation:fixture', key: 'chat:fixture', engine: 'chat', state: 'running', createdAt: 100, backendId: null }, usage: { tokens: 1200, source: 'estimated', contextWindow: 16000, model: 'fixture/model', observedAt: 110 }, counters: { compactions: 1, wakeups: 0, turns: 2, ageMs: 10 }, policy, reasons: ['turns'], warnings: ['Human\nwarning'], summaries: [{ id: 'summary:fixture', content: 'Human\nsummary', kind: 'summary', createdAt: 105, source: 'fallback' }], handoff: { id: 'handoff:fixture', state: 'creation_unconfirmed' } }
+    const context = PROOF_COMMAND_CODECS['sessionContext:getSnapshot']
+    for (const state of SESSION_CONTEXT_GENERATION_STATES) expect(context.validateWireResult({ defined: true, value: { ...snapshot, generation: { ...snapshot.generation, state } } })).toBe(true)
+    for (const state of SESSION_CONTEXT_HANDOFF_STATES) expect(context.validateWireResult({ defined: true, value: { ...snapshot, handoff: { ...snapshot.handoff, state } } })).toBe(true)
+    expect(context.validateWireResult({ defined: true, value: { ...snapshot, generation: null, usage: { tokens: null, source: 'unknown', contextWindow: null, model: null, observedAt: null }, handoff: null } })).toBe(true)
+    expect(context.validateWireResult({ defined: true, value: { ...snapshot, usage: { ...snapshot.usage, source: 'unknown' } } })).toBe(false)
+    expect(context.validateWireResult({ defined: true, value: { ...snapshot, summaries: [{ ...snapshot.summaries[0], content: 'x'.repeat(65537) }] } })).toBe(false)
+    expect(context.validateWireResult({ defined: true, value: { ...snapshot, handoff: { ...snapshot.handoff, profileRoot: '/private' } } })).toBe(false)
+    expect(context.validateWireResult({ defined: false })).toBe(false)
+  })
+  it('covers safe marketplace/install inputs and preserves public projections without private manifest/resources', () => {
+    const corpus = createProductionRequestCorpus(), add = PROOF_COMMAND_CODECS['claudePlugin:addMarketplaceSource'], install = PROOF_COMMAND_CODECS['claudePlugin:installPlugin']
+    expect(corpus.requests.find(row => row.case === 'typed-omitted-source-options')?.payload).toEqual({ data: { name: 'Fixture optional', source_url: 'fixture/marketplace' } })
+    for (const name of ['../foreign', 'bad/path', 'CON', 'lpt1.json', 'trailing.', 'bad\0name', 'x'.repeat(129)]) expect(() => install.encodeArguments([name, 'marketplace.fixture:one'])).toThrow()
+    expect(() => install.encodeArguments(['fixture-plugin', 'marketplace.fixture:one', 'project'])).toThrow()
+    expect(() => install.decodeArguments({ pluginName: 'fixture-plugin', marketplaceId: 'marketplace.fixture:one', scope: 'user', profileRoot: '/private' })).toThrow()
+    expect(() => add.encodeArguments([{ name: 'Fixture', source_type: 'local', source_url: CLAUDE_PLUGIN_LOCAL_SOURCE }])).toThrow()
+    expect(() => add.encodeArguments([{ name: 'Fixture', source_type: 'url', source_url: 'https://user:pass@example.test/catalog' }])).toThrow()
+    expect(() => add.encodeArguments([{ name: 'Fixture', source_url: 'fixture/marketplace#../foreign' }])).toThrow()
+    const rawSource = { id: 'marketplace.fixture:one', name: 'Fixture', source_type: 'local', source_url: '/private/profile/catalog', metadata: { token: 'private' }, auto_update: false, created_at: '2026-10-14', updated_at: '2026-10-14' }
+    expect(add.encodeResult(rawSource)).toEqual({ defined: true, value: { ...rawSource, source_url: CLAUDE_PLUGIN_LOCAL_SOURCE, metadata: {} } })
+    expect(add.validateWireResult({ defined: true, value: rawSource })).toBe(false)
+    const raw = { id: 'plugin.fixture:one', name: 'fixture-plugin', marketplace_id: rawSource.id, manifest: { name: 'fixture-plugin', author: 'Fixture Author', mcpServers: { private: { command: '/private/tool', env: { TOKEN: 'private' } } }, agents: '/private/agents' }, source: { source: 'github', repo: 'fixture/marketplace', auth: 'private' }, scope: 'user', enabled: true, version: '1.0', installed_at: '2026-10-14', updated_at: '2026-10-14' }
+    const projected = install.encodeResult(raw)
+    expect(projected).toMatchObject({ defined: true, value: { manifest: { name: 'fixture-plugin', author: { name: 'Fixture Author' } }, source: { source: 'github', repo: 'fixture/marketplace' } } })
+    expect(JSON.stringify(projected)).not.toContain('private')
+    expect(install.validateWireResult({ defined: true, value: raw })).toBe(false)
+    const resources = PROOF_COMMAND_CODECS['claudePlugin:getPluginResources'].encodeResult({ skills: [{ id: 'skill:fixture', name: 'Fixture', description: 'Public description' }], mcpServers: [{ id: 'mcp:fixture', name: 'Fixture', command: '/private/tool', args: ['private'] }], agents: [{ id: 'agent:fixture', name: 'Fixture', description: 'private system prompt' }], commands: [{ name: 'commands/fixture.md', content: 'private command body' }] })
+    expect(resources).toMatchObject({ defined: true, value: { mcpServers: [{ command: '', args: [] }], agents: [{ description: '' }], commands: ['commands/fixture.md'] } })
+    expect(JSON.stringify(resources)).not.toContain('private')
+    expect(PROOF_COMMAND_CODECS['claudePlugin:enablePlugin'].encodeResult(undefined)).toEqual({ defined: false })
+    expect(PROOF_COMMAND_CODECS['claudePlugin:fetchCatalog'].encodeResult(null)).toEqual({ defined: true, value: null })
+    expect(() => install.encodeResult(undefined)).toThrow()
+  })
   it('exports the validated corpus only when the coordinator selects an artifact path', async () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(114)
+    expect(corpus.operations).toHaveLength(127)
   })
 })

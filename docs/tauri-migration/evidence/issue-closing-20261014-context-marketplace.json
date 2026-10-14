@@ -1,0 +1,215 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    210,
+    212,
+    213
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "fe59ae9a319f2d40fd9de3d6e370af5c3a5239ee",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/event-forwarding-review.json": "6eadd2db1fcce29eef7d9376a3a8f6cf3cd277838393d3472f60d72960885d10",
+      "docs/tauri-migration/implementation-status.md": "099ba6e7e48c7a8f2c7e59dad59eec175eb8e4c7b997f93695db7168dc86ed3d",
+      "docs/tauri-migration/inventory.json": "4ba4110b4c99997b43fb57f5bb3763994f621eebbfc26822573cd0db36f4f3f2",
+      "docs/tauri-migration/operations.json": "41bd264dd7717891bdcf6a53f44bfcfbf580e84d6e849e6d5a6ed0544652053d",
+      "scripts/production-contracts-proof.test.ts": "9937a9bdecddc54967e9341f0d9c33652b0627fc8af2edc6ab9ee8676c75ae44",
+      "scripts/production-contracts-proof.ts": "435e16ddec3973cdc3777f1c8b540c91beeefb16ab65ac20754296d4b39a7041",
+      "src-tauri/engine/src/production_contracts.rs": "5ba5528d8d25a398bfab4baa014fa02d04ed80a29c95a9e5a2f2620834484add",
+      "src/main/agent-manager-configuration.test.ts": "d18a267f3a987400e974a7410f9dd02500764022c3b98a9ca0cd66e0da643d01",
+      "src/main/agent-manager-core.ts": "ac6fb6c205115e87b94cfd651f52555458cb8d28d2fb3e369c46c232fa33dc41",
+      "src/main/claude-plugin-manager.test.ts": "c8d12125df3a7267a0d7361b3f43776a86ee9d8cb6052daa8404d8d5297f1127",
+      "src/main/claude-plugin-manager.ts": "ff112974a24af2cc7820caf49b378f553643f453e6589a85a1b90973b8118c43",
+      "src/main/claude-plugins/resources.containment.test.ts": "2bdb0a721cb7225054d4df13f4713a44290cebc1baa53cd5ad6175fda4fbe846",
+      "src/main/claude-plugins/resources.ts": "24161a4bcf09b083a7d978355033ae9e550894c72f78f38a50db2bfce84450c6",
+      "src/main/claude-plugins/sources.test.ts": "e829b916a4a4d0700aa0e10cef274fc70a27e15b6a709a9f96bb5bed9aa2177c",
+      "src/main/claude-plugins/sources.ts": "e175a559f6e10cc771f21bafec6c4d3127ac3dd0a8e3a6f4269c9fec317f6546",
+      "src/main/sessions/context-service.ts": "b62a12fa498bb8cfae262382b507382f3c94dae62c85b08193492d22f93fee11",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "9be7cf87afe37392e3d8127c9dcf9d5742701d4b69d130c0f530e6ea0fb58214",
+      "src/renderer/src/lib/native-desktop-host.ts": "9dfbca78f6704ed335b790d865265471899e2eebf66e9b4cd3fb4c7fafbe86d0",
+      "src/service/production-desktop-bindings.test.ts": "581b0d7f63b0536b43666dd57b61c9344fe702dd88db21d4442c8ea5b1d4687a",
+      "src/service/production-desktop-bindings.ts": "da48f3b2c9a6e5ad0cd8d0686892992ac911bab60a73a05ef0a6a4fe442e37f0",
+      "src/service/production-owner.ts": "29ed1fbab9e416fec0b71d88201520fbc025a9c508604f846d4b96a3d451b84f",
+      "src/service/production-service.test.ts": "38c09f38ef6f0c93434d1e7d26817796eea283afb6f59bfe582fc634637f491c",
+      "src/service/production-service.ts": "db7b6011bfecabab59453dace8459896bd5da194750d7f0f0bde53690f76de66",
+      "src/shared/desktop-event-forwarding.ts": "6d97d3b0dafda794b86a8cf8006cf16aa71a23275ae74afa59b1a3b7ea8a6219",
+      "src/shared/production-credential-mutation.ts": "9c81bca5cd4d4ce72bd1ca2e89f2c76451ceed66b2d7e7dc05d4d9b810dda0fb",
+      "docs/tauri-migration/claude-plugin-production.md": "07b182b34800022d797c1871fa65e56326a6de37687e0f074574fe29272cc41f",
+      "docs/tauri-migration/session-context-production.md": "a0d75517af5f748795deb26bb62520e05a949098c0d9eadfcd6f2d5e006501c4",
+      "src/service/claude-plugin-backend.test.ts": "d92ba1c691e5c4db6e82fc778f7288df6b8ff1eef3d7c4920811778ab10af4e8",
+      "src/service/claude-plugin-backend.ts": "16a2190582ff23fe1f71c9f6489a765930661da91f654a22393fd9eb8f111eb6",
+      "src/service/session-context-backend.test.ts": "1617dd4822bee6b2131e0d26c24d95948a5d166bef38580578c1ab7f43e76f55",
+      "src/service/session-context-backend.ts": "c16011a325e75962f042f5990d5a1013d309b97ca86985905f2577cd16cb325d",
+      "src/shared/claude-plugin-codecs.test.ts": "b8e1efffaf5ca2fe7f926321ef485acd0bf3dd86bfb52ca636fcb04097d7817b",
+      "src/shared/claude-plugin-codecs.ts": "5477da09fbb33e30e26124d8ee604f424f6b7cd2aa6c788566ce7ecb2af3c10d",
+      "src/shared/session-context-codecs.test.ts": "8700714bb13711bdf975f5d33928f6ef76a7968386e1813085517fc87688c37d",
+      "src/shared/session-context-codecs.ts": "3f3ced70445710b71f14b8e300716596bf9ab501ac37b30fa9ffa1778b20ebcd"
+    }
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "bindings": {
+    "finiteCommandContracts": 127,
+    "ownerHandlersConnectorsDisabled": 120,
+    "ownerHandlersConnectorsEnabled": 127,
+    "events": 17,
+    "newSessionContextCommands": 2,
+    "newClaudePluginCommands": 11
+  },
+  "scope": "Actual protected-profile session context and Claude marketplace controls; full migration gates remain open.",
+  "implemented": [
+    "Actual SessionContextService/SQLite ledger projection and transactional policy controls with independent conversation/project/agent/settings grants, preparse bounds and ambiguous historical owner-ID refusal.",
+    "Actual ClaudePluginManager marketplace/catalog/resource controls with safe public projection, exact current owner/source/reference snapshots and per-request address authorization for initial, redirected and nested HTTP requests.",
+    "Actual bounded contained staging and resource planner authorize prompts/MCP configuration before publication/materialization; atomic database resource writes and exact directory publication receipt cleanup preserve swapped/unowned trees.",
+    "Actual AgentManager resource mutation joins acknowledged Stop/queue/send/config refresh; current task skill JSON bounded before SQLite projection, all Claude plugin consumers included.",
+    "Production owner joins chat/Commander/providers/briefing leases and relevant source admission before plugin changes; linked resources/cascades and ambiguous historical namespaces conservatively refused.",
+    "Native/facade exact codecs, optional arguments, hydration fences, captured engine epoch and cancellation without accepted mutation replay."
+  ],
+  "artifact": {
+    "buildIdentity": "production-347cef90732917459c73435979dd64a0",
+    "resourceManifestSha256": "b92c33a85782c155bcbd77dc208b0ead01046e348868933189eee9610d1ef5ba",
+    "redistributionReviewComplete": false
+  },
+  "contractCorpus": {
+    "operations": 127,
+    "requests": 291,
+    "sha256": "e1951e07cce515e3e1ee07ffcd40734ec2be4ab37941453f307fc1f8dbe25323"
+  },
+  "tests": {
+    "application": {
+      "command": "rtk proxy pnpm test:run --reporter=default --reporter=json",
+      "passed": 6265,
+      "failed": 0,
+      "skipped": 28,
+      "reportSha256": "16797c5cf4ad390d6fa209b04d35fcab2726393a68c52c8302821947535e6c78"
+    },
+    "standalone": {
+      "command": "rtk node scripts/tauri-test.mjs",
+      "passed": 2508,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "7291cb387ba836d40d4d18fbba988c83d256ec6b96bd24d1ca333cd07df3c011"
+    },
+    "focused": {
+      "command": "rtk pnpm test:run <13 affected files>",
+      "passed": 186,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "787fe8fd84417ed04c81cb33ff01e533305a2749992776b0d7139d134b7c04d6"
+    },
+    "privateStagedNode": {
+      "command": "rtk node scripts/tauri-test.mjs --production-proofs scripts/production-service-proof.test.ts",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "fe035b6cc97900d9d0117c956975f8ea70acf3113ef19f016ea2920939cb5934"
+    },
+    "actualContractCorpusExport": {
+      "command": "rtk env TWENTYONEX_PRODUCTION_CONTRACTS_OUT=<artifact> pnpm test:run scripts/production-contracts-proof.test.ts",
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "69c6dd34c61f364200bb8f402595011099cf9227d399ebe9c865973338c0edf4"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": "rtk pnpm lint",
+      "exitCode": 0,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "shippingBuild": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "logSha256": "c2a643169f1963465b169d17ffde2790869cd2e9643abcdec40096c4b118b0cf"
+    },
+    "productionRendererBuild": {
+      "command": "rtk pnpm tauri:production:frontend:build",
+      "exitCode": 0,
+      "logSha256": "0718db5b26c15e2dc6adf1d30c0bc0499c89232bfd93c9e7000ff71ac31258e0"
+    },
+    "diagnosticRendererBuild": {
+      "command": "rtk pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "logSha256": "39c0e57d98440e15d840f7913096b88189cec32dbe4e74708170b0d239a95ec0"
+    },
+    "productionStage": {
+      "command": "rtk pnpm tauri:prepare:production",
+      "exitCode": 0,
+      "logSha256": "42dc2abc0fca0596b5fe4d82dfa982517ac15ed0a24df6ee08d9a84ce1ea2715"
+    },
+    "inventoryFreshness": {
+      "command": "rtk node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "logSha256": "341a1540e7c2b1e4c6db8fcaf69fd235f28d72f47b9333376cc6c789c98a2e2c"
+    },
+    "contractFreshness": {
+      "command": "rtk node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rustFormat": {
+      "command": "rtk cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "nativeHostCompile": {
+      "command": "rtk python3 loads production TAURI_CONFIG JSON and invokes rtk cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+      "exitCode": 0,
+      "logSha256": "383a490bc6e9ac58d44b798c35d480c0b1969af84a48be699bfa881553acc324"
+    },
+    "nativeProductionUnit": {
+      "command": "rtk cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service",
+      "exitCode": 0,
+      "logSha256": "faf756ba7b5d276fd235cc6276a74398a8cd83518df19b311039b20784edc6e3",
+      "passed": 22,
+      "ignored": 4
+    },
+    "nativeContractParity": {
+      "command": "rtk env TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=<artifact> cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants -- --exact",
+      "exitCode": 0,
+      "logSha256": "aa58edb02fdae330619c7ee8feb49b03e20ae7590125e9e27df545ed51a736a2",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "diffWhitespace": {
+      "command": "rtk git diff --check",
+      "exitCode": 0,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "validationCorrections": [
+    "Corrected a malformed-input test fixture union typing issue without weakening the public JSON contract. Updated three exact source review coordinates after static confirmation that the forwarding sites and reviewed names were unchanged.",
+    "Initial full application JSON reported all 6265 assertions passed with zero failures but runner exited 1. Retained that run; complete unchanged-source rerun with full diagnostics exited 0 and all assertions passed. No unresolved failing assertion or runner error remained."
+  ],
+  "initialApplicationRun": {
+    "exitCode": 1,
+    "reportSha256": "60bf7acc27f6eda9f6082366766cefa69ee9ecc63de5941e820ea04b0c58e36c",
+    "logSha256": "25c270fd8541a9d6d746047b2b7edf86530a2cdb9d395076f361429599194151"
+  },
+  "remainingAcceptance": [
+    "Installed supported-target plugin marketplace/CLI integration and remaining production domain/native service parity.",
+    "Arbitrary local marketplace access in the private staged host requires a reviewed native path grant and remains unavailable; no downloaded plugin tools were executed by the fixtures.",
+    "Installed real Captain recovery/memory/background orchestration, full historical-profile/credential conversion and release/platform gates remain open.",
+    "Hosted voice issue #92 remains deferred by explicit user decision; no new installed Tauri GUI, live provider or all-platform claim."
+  ]
+}

@@ -4,3 +4,4 @@ export type ProductionCredentialMutation =
   | { kind: 'secret'; secretId: string }
   | { kind: 'mcp-server'; serverId: string }
   | { kind: 'default-agent' }
+  | { kind: 'plugin-resources'; agentIds: string[]; mcpServerIds: string[]; skillIds: string[] }
