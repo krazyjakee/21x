@@ -28,6 +28,36 @@ async function realHandle(path: string, flags: number): Promise<WorkspaceFileHan
 }
 
 describe('WorkspaceFileOwner actual captured filesystem', () => {
+  it('reads a real bounded prefix of oversized memory while preserving public preview semantics', async () => {
+    const bytes = WORKSPACE_FILE_LIMITS.textBytes + 500, calls: number[] = []
+    await writeFile(file, Buffer.alloc(bytes, 65))
+    const owner = make({ fs: { open: async (path, flags) => {
+      const handle = await realHandle(path, flags)
+      return { ...handle, read: (...args: Parameters<WorkspaceFileHandle['read']>) => { calls.push(args[2]); return handle.read(...args) } }
+    } } })
+    expect(await owner.readTextFile('task-one', file, controls())).toEqual({ content: '', size: bytes })
+    expect(calls).toEqual([])
+    expect(await owner.readTextPrefix('task-one', file, 65537, controls())).toEqual({ content: 'A'.repeat(65537), size: bytes, truncated: true })
+    expect(calls).toEqual([32768, 32768, 1]); expect(owner.inflightCount).toBe(0)
+    await writeFile(file, 'Small memory')
+    expect(await owner.readTextPrefix('task-one', file, 65537, controls())).toEqual({ content: 'Small memory', size: 12, truncated: false })
+    expect(await owner.readTextPrefix('task-one', join(workspace, 'missing'), 10, controls())).toBeNull()
+    for (const capacity of [0, -1, 1.5, WORKSPACE_FILE_LIMITS.textBytes + 1]) await expect(owner.readTextPrefix('task-one', file, capacity, controls())).rejects.toThrow('INVALID_ARGUMENTS')
+  })
+  it('drops a revoked prefix and keeps its real close receipt through shutdown', async () => {
+    const entered = deferred(), release = deferred(), controller = new AbortController()
+    const owner = make({ fs: { open: async (path, flags) => {
+      const handle = await realHandle(path, flags)
+      return { ...handle, read: async (...args: Parameters<WorkspaceFileHandle['read']>) => { entered.resolve(); await release.promise; return handle.read(...args) } }
+    } } })
+    const work = owner.readTextPrefix('task-one', file, 10, controls(() => {}, controller)).catch(error => error)
+    try {
+      await entered.promise; controller.abort()
+      await expect(owner.close(10)).rejects.toThrow('DRAIN_INCOMPLETE')
+      expect(owner.inflightCount).toBeGreaterThan(0); release.resolve()
+      expect((await work).code).toBe('WORKSPACE_CANCELLED'); await owner.close()
+    } finally { release.resolve(); await work }
+  })
   it('creates only a literal authorized task workspace and preserves read/missing/oversized shapes', async () => {
     const beforeEffect = vi.fn(), owner = make(), read = vi.fn()
     owner.assertOwners(root)

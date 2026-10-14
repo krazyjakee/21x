@@ -6,6 +6,28 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The project/group continuation binds nine retained task-group controls and ten
+project status, history, Captain memory, limits and concurrency controls to their
+actual protected-profile owners. Narrow bounded scalar projections reuse the
+existing live admission/status algorithms; group source completion, starts and
+review feedback retain raw work and recheck caller authority through nested
+worktree, configuration, credential-refresh and provider boundaries. Background
+work and accepted cleanup use explicit manager ownership rather than inherited
+completed-request authority.
+
+Captain memory reads a real bounded descriptor-backed prefix with an explicit
+truncation flag. Finite history limits retain the existing floor/clamp semantics.
+Global pause and overview require all relevant current grants, and user pin/control
+writes use the actual manager's audit and queue scheduling. The finite surface has
+199 service commands, two separate direct native commands and 23 events. Existing
+Electron behavior remains the default for unscoped core callers. Installed native
+UI, provider/platform and full migration acceptance remain open. See
+[project runtime bindings](project-runtime-bindings.md),
+[task group bindings](task-group-bindings.md) and
+[request authority](task-group-request-authority.md).
+
+The preceding workspace-file continuation retains its tested revision:
+
 The workspace-file continuation binds four existing task workspace, text preview,
 open and reveal controls to the actual protected-profile owner. Task/project/group
 and repository/session scopes are shared with artifact reads and rechecked through

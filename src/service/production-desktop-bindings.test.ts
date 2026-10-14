@@ -28,6 +28,8 @@ import { GIT_PROVIDER_CODECS } from '../shared/git-provider-codecs'
 import { execFile, type ExecFileException } from 'node:child_process'
 import type { ProductionOwnerExternalBoundaries } from './production-owner'
 import { WORKSPACE_FILE_CODECS } from '../shared/workspace-file-codecs'
+import { TASK_GROUP_CODECS } from '../shared/task-group-codecs'
+import { PROJECT_RUNTIME_CODECS } from '../shared/project-runtime-codecs'
 import { open as openFile } from 'node:fs/promises'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
@@ -104,6 +106,49 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('exports actual group and project responses through their captured singleton owners', async () => {
+    const f = await fixture(), db = f.services.db, agent = db.getAgents()[0], project = db.getDefaultProject()!
+    const task = db.createTask({ title: 'First group member', project_id: project.id })!
+    const other = db.createTask({ title: 'Second group member', project_id: project.id })!
+    const third = db.createTask({ title: 'Extra group member', project_id: project.id })!
+    for (const member of [task, other, third]) db.updateTask(member.id, { agent_id: agent.id })
+    const groupLease = f.owner.getTaskGroupBindingLease(), projectLease = f.owner.getProjectRuntimeBindingLease()
+    expect(groupLease.groups).toBe(f.services.groups); expect(projectLease.files).toBe(f.services.workspaceFiles)
+    groupLease.assertTaskGroupOwners(groupLease); projectLease.assertProjectRuntimeOwners(projectLease)
+    const responses: Array<{ operation: string; wire: unknown }> = []
+    const invoke = async (operation: string, payload: Parameters<typeof f.backend.invoke>[1]) => {
+      const wire = await f.backend.invoke(operation, payload, f.caller, f.signal)
+      responses.push({ operation, wire }); return (wire as { value: unknown }).value
+    }
+    const group = await invoke('taskGroups:create', TASK_GROUP_CODECS['taskGroups:create'].encodeArguments([{ title: 'Actual shared batch', task_ids: [task.id, other.id], agent_id: agent.id }])) as { id: string; execution_task_id: string }
+    await invoke('taskGroups:add', { id: group.id, taskIds: [third.id] })
+    await invoke('taskGroups:remove', { id: group.id, taskId: third.id })
+    const snapshot = await invoke('taskGroups:get', { id: group.id }) as { members: Array<{ id: string }>; task: { id: string } }
+    expect(snapshot.task.id).toBe(group.execution_task_id); expect(snapshot.members.map(row => row.id)).toContain(third.id)
+    await invoke('taskGroups:history', { taskId: third.id })
+    await invoke('taskGroups:list', { projectId: project.id, includeDissolved: true })
+    await invoke('taskGroups:move', { id: group.id, status: 'ready_for_review' })
+    db.updateTask(task.id, { status: 'ready_for_review' }); db.updateTask(other.id, { status: 'ready_for_review' })
+    const review = await invoke('taskGroups:review', { data: { group_id: group.id, action: 'approve', complete_at_source: false } }) as { completed_task_ids: string[]; failures: unknown[] }
+    expect(review.completed_task_ids.sort()).toEqual([task.id, other.id].sort()); expect(review.failures).toEqual([])
+    await invoke('taskGroups:dissolve', { id: group.id })
+    const captain = db.getCoordinatorTask(project.id)!, workspace = db.getWorkspaceDir(captain.id)
+    writeFileSync(join(workspace, 'MEMORY.md'), 'Real retained memory.\n' + 'M'.repeat(140000))
+    const memory = await invoke('project:getCaptainMemory', { projectId: project.id })
+    expect(memory).toMatchObject({ path: join(workspace, 'MEMORY.md'), truncated: true, content: expect.stringContaining('Real retained memory.') })
+    for (const operation of ['project:getStatus', 'project:getStatusHistory', 'projectLimits:getState', 'concurrency:getState'] as const)
+      await invoke(operation, PROJECT_RUNTIME_CODECS[operation].encodeArguments([project.id]))
+    await invoke('project:getAllStatuses', {})
+    await invoke('projectLimits:isAllPaused', {})
+    expect(await invoke('projectLimits:pauseAll', { paused: true })).toBe(true)
+    expect(f.services.agents.isAllProjectsPaused()).toBe(true)
+    await invoke('concurrency:setCaptainControl', { projectId: project.id, enabled: false })
+    await invoke('concurrency:pin', { projectId: project.id, agentId: agent.id, level: 1 })
+    expect(new Set(responses.map(row => row.operation)).size).toBe(19)
+    const output = process.env.TWENTYONEX_PROJECT_GROUP_RESULTS_OUT
+    if (output) writeFileSync(output, JSON.stringify({ version: 1, responses }))
+    expect(db.db.open).toBe(true)
+  })
   it('uses actual task workspaces and transfers legitimate cleanup identity before workspace recreation', async () => {
     const f = await fixture(), lease = f.owner.getWorkspaceFileBindingLease(), task = f.services.db.createTask({ title: 'Owned workspace report' })!
     expect(lease.files).toBe(f.services.workspaceFiles); expect(lease.database).toBe(f.services.db); lease.assertWorkspaceFileOwners(lease.database, lease.files, lease.workspaceRoot)
@@ -287,7 +332,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
 
   it('pairs against the actual mobile HTTP owner and sends a phone start through shared admission', async () => {
     const f = await fixture(undefined, false, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(150)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(169)
     const lease = f.owner.getMobileBindingLease()!
     expect(lease.deps.db).toBe(f.services.db); expect(lease.deps.agentManager).toBe(f.services.agents)
     expect(lease.deps.taskOwners?.automation).toBe(f.services.automation)
@@ -322,7 +367,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(147)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(166)
     const lease = f.owner.getConnectorBindingLease()!
     const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
     const id = (ensured as { value: { instanceId: string } }).value.instanceId
@@ -434,7 +479,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(140)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(159)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

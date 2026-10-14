@@ -46,9 +46,11 @@ export async function writeSkillFiles(
   taskId: string,
   agentId: string,
   workspaceDir: string,
-  injectedMcpServers?: Record<string, McpServerConfig>
+  injectedMcpServers?: Record<string, McpServerConfig>,
+  beforeEffect?: () => void
 ): Promise<void> {
   try {
+    beforeEffect?.()
     const task = db.getTask(taskId)
     const agentConfig = db.getAgent(agentId)?.config
     const skillIds = [...new Set([...(task?.skill_ids ?? []), ...(agentConfig?.skill_ids ?? [])])]
@@ -65,19 +67,24 @@ export async function writeSkillFiles(
         : join(workspaceDir, '.agents', 'skills')
       for (const skill of skills) {
         const dir = join(skillsDir, skill.name)
+        beforeEffect?.()
         await mkdir(dir, { recursive: true })
+        beforeEffect?.()
         const safeName = sanitizeYamlValue(skill.name)
         const safeDesc = sanitizeYamlValue(skill.description || skill.name)
         // preferred_model round-trips through syncSkillsFromDirectory.
         const modelLine = skill.preferred_model ? `preferred_model: "${sanitizeYamlValue(skill.preferred_model)}"\n` : ''
         const content = `---\nname: "${safeName}"\ndescription: "${safeDesc}"\n${modelLine}---\n\n${skill.content}`
+        beforeEffect?.()
         await writeFile(join(dir, 'SKILL.md'), content, 'utf-8')
       }
       console.log(`[AgentManager] Wrote ${skills.length} SKILL.md file(s) to ${skillsDir}`)
     }
 
-    await writeAgentsDocumentation(db, workspaceDir, skills, task?.repos || [], agentId, injectedMcpServers)
+    await writeAgentsDocumentation(db, workspaceDir, skills, task?.repos || [], agentId, injectedMcpServers, beforeEffect)
+    beforeEffect?.()
   } catch (error) {
+    beforeEffect?.()
     console.error('[AgentManager] Error writing skill files:', error)
   }
 }
@@ -89,14 +96,19 @@ export async function writeAgentsDocumentation(
   skills: SkillRecord[],
   repos: string[],
   agentId?: string,
-  injectedMcpServers?: Record<string, McpServerConfig>
+  injectedMcpServers?: Record<string, McpServerConfig>,
+  beforeEffect?: () => void
 ): Promise<void> {
   try {
+    beforeEffect?.()
     const sortedSkills = [...skills].sort((a, b) => b.confidence - a.confidence)
     await writeFile(join(workspaceDir, 'AGENTS.md'), generateAgentsMd(db, sortedSkills, repos, workspaceDir, agentId, injectedMcpServers), 'utf-8')
+    beforeEffect?.()
     await writeFile(join(workspaceDir, 'CLAUDE.md'), generateClaudeMd(db, sortedSkills, repos, workspaceDir, agentId, injectedMcpServers), 'utf-8')
+    beforeEffect?.()
     console.log('[AgentManager] Generated AGENTS.md and CLAUDE.md in workspace root')
   } catch (error) {
+    beforeEffect?.()
     console.error('[AgentManager] Error writing agent documentation:', error)
   }
 }

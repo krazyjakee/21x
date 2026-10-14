@@ -194,7 +194,10 @@ export class SyncManager {
     const ctx = this.buildContext(sourceId)
     const config = this.getConfig(source)
 
-    const result = await plugin.executeAction(actionId, task, input, config, ctx)
+    const execute = () => plugin.executeAction(actionId, task, input, config, ctx)
+    const result = await (controls && this.oauthManager
+      ? this.oauthManager.withRequestGuard(execute, controls.beforeEffect)
+      : execute())
     controls?.beforeLocalWrite()
 
     if (result.success && result.taskUpdate && Object.keys(result.taskUpdate).length > 0) {

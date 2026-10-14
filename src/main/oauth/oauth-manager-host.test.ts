@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPortableDbFixture } from '../../../test/helpers/portable-db-test-helper'
 import { OAuthManager } from './oauth-manager-core'
 import { LinearProvider } from './providers/linear-provider'
+import { McpOAuthProvider } from './providers/mcp-oauth-provider'
 
 function held() {
   let finish!: () => void
@@ -69,4 +70,35 @@ describe('portable OAuth owner', () => {
       expect(source.rawDb.open).toBe(true)
     } finally { open.finish(); await result; await owner.close(); source.rawDb.close() }
   })
+})
+
+it('retains raw MCP refresh but refuses token writes, notifications and fallback after caller scope withdrawal', async () => {
+  const source = createPortableDbFixture(), gate = held(), entered = held(), denied = new Error('Caller scope withdrawn')
+  let allowed = true
+  const host = { openExternal: vi.fn(), notify: vi.fn() }, owner = new OAuthManager(source.db, host)
+  const server = source.db.createMcpServer({ name: 'Scoped MCP', type: 'remote', url: 'https://mcp.example.test/', oauth_metadata: { client_id: 'fixture', token_endpoint: 'https://mcp.example.test/token', resource_url: 'https://mcp.example.test/', authorization_server_url: 'https://mcp.example.test/', authorization_endpoint: 'https://mcp.example.test/authorize', registration_method: 'manual', discovered_at: '2026-10-14' } })!
+  source.db.createOAuthToken({ provider: 'mcp-server', mcp_server_id: server.id, access_token: 'old', refresh_token: 'old-refresh', expires_in: -1, scope: null })
+  const refresh = vi.spyOn(McpOAuthProvider.prototype, 'refreshToken').mockImplementation(async () => { entered.finish(); await gate.promise; return { access_token: 'rotated', refresh_token: 'rotated-refresh', expires_in: 3600 } })
+  const beforeEffect = (): void => { if (!allowed) throw denied }
+  const token = owner.getValidMcpServerToken(server.id, beforeEffect), rejected = expect(token).rejects.toBe(denied)
+  try {
+    await entered.promise; allowed = false
+    await expect(owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(source.rawDb.open).toBe(true); gate.finish(); await rejected; await owner.close()
+    expect(source.db.getOAuthTokenByMcpServer(server.id)?.refresh_token).toBe('old-refresh')
+    expect(refresh).toHaveBeenCalledOnce(); expect(host.notify).not.toHaveBeenCalled(); expect(host.openExternal).not.toHaveBeenCalled()
+  } finally { gate.finish(); await rejected; await owner.close(); source.rawDb.close() }
+})
+it('passes nested source caller guards into OAuth refresh without changing ordinary accepted refresh behavior', async () => {
+  const source = createPortableDbFixture(), gate = held(), entered = held(), denied = new Error('Source caller scope withdrawn')
+  const owner = new OAuthManager(source.db, { openExternal: vi.fn(), notify: vi.fn() })
+  const taskSource = source.db.createTaskSource({ name: 'Scoped source', plugin_id: 'linear', mcp_server_id: null, config: { client_id: 'fixture', client_secret: 'fixture' } })!
+  source.db.createOAuthToken({ provider: 'linear', source_id: taskSource.id, access_token: 'old', refresh_token: 'old-refresh', expires_in: -1, scope: null })
+  let allowed = true
+  vi.spyOn(LinearProvider.prototype, 'refreshToken').mockImplementation(async () => { entered.finish(); await gate.promise; return { access_token: 'rotated', expires_in: 3600 } })
+  const work = owner.withRequestGuard(() => owner.getValidToken(taskSource.id), () => { if (!allowed) throw denied }), rejected = expect(work).rejects.toBe(denied)
+  try {
+    await entered.promise; allowed = false; gate.finish(); await rejected
+    expect(source.db.getOAuthTokenBySource(taskSource.id)?.access_token).toBe('old')
+  } finally { gate.finish(); await rejected; await owner.close(); source.rawDb.close() }
 })

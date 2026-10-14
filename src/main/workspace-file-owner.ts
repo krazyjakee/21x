@@ -235,6 +235,15 @@ export class WorkspaceFileOwner {
     })
   }
   readTextFile(taskId: string, filePath: string, controls: WorkspaceFileControls): Promise<{ content: string; size: number } | null> {
+    return this.readOwnedText(taskId, filePath, controls).then(value => value && { content: value.content, size: value.size })
+  }
+  /** Trusted internal reads such as Captain memory, never a renderer capacity
+   * override. Even oversized files retain a real bounded content prefix. */
+  readTextPrefix(taskId: string, filePath: string, maxBytes: number, controls: WorkspaceFileControls): Promise<{ content: string; size: number; truncated: boolean } | null> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > WORKSPACE_FILE_LIMITS.textBytes) return Promise.reject(new WorkspaceFileError('WORKSPACE_INVALID_ARGUMENTS'))
+    return this.readOwnedText(taskId, filePath, controls, maxBytes)
+  }
+  private readOwnedText(taskId: string, filePath: string, controls: WorkspaceFileControls, prefixBytes?: number): Promise<{ content: string; size: number; truncated: boolean } | null> {
     return this.run(taskId, controls, async current => {
       const captured = await this.capture(taskId, filePath, current)
       if (!captured) { this.current(current); return null }
@@ -242,10 +251,12 @@ export class WorkspaceFileOwner {
       const owned = await this.opened(captured, current)
       try {
         const size = Number(captured.receipt.target.size)
-        if (size > WORKSPACE_FILE_LIMITS.textBytes) { await this.verify(captured.receipt, current); return { content: '', size } }
+        if (prefixBytes === undefined && size > WORKSPACE_FILE_LIMITS.textBytes) { await this.verify(captured.receipt, current); return { content: '', size, truncated: true } }
+        const capacity = prefixBytes === undefined ? WORKSPACE_FILE_LIMITS.textBytes + 1 : Math.min(prefixBytes, size)
         const chunks: Buffer[] = []; let total = 0
         for (;;) {
-          const buffer = Buffer.alloc(Math.min(32 * 1024, WORKSPACE_FILE_LIMITS.textBytes + 1 - total))
+          if (prefixBytes !== undefined && total === capacity) break
+          const buffer = Buffer.alloc(Math.min(32 * 1024, capacity - total))
           const result = await this.step(current, () => owned.handle.read(buffer, 0, buffer.length, total))
           if (!Number.isSafeInteger(result.bytesRead) || result.bytesRead < 0 || result.bytesRead > buffer.length) fail('WORKSPACE_IO_FAILED')
           if (!result.bytesRead) break
@@ -255,9 +266,9 @@ export class WorkspaceFileOwner {
         }
         const final = await this.step(current, () => owned.handle.stat())
         const leaf = await this.step(current, () => this.fs.lstat(filePath))
-        if (!sameFile(captured.info, final) || !sameFile(final, leaf) || total !== size) fail('WORKSPACE_PATH_CHANGED')
+        if (!sameFile(captured.info, final) || !sameFile(final, leaf) || total !== (prefixBytes === undefined ? size : Math.min(prefixBytes, size))) fail('WORKSPACE_PATH_CHANGED')
         await this.verify(captured.receipt, current)
-        return { content: Buffer.concat(chunks, total).toString('utf8'), size }
+        return { content: Buffer.concat(chunks, total).toString('utf8'), size, truncated: total < size }
       } finally { await this.release(owned) }
     })
   }

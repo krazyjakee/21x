@@ -1,0 +1,486 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    210,
+    212
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "ec37d9cbed150eba750b167bdb647ce5655ff290",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/event-forwarding-review.json": "a76a632049be1e5347f532cf2f9598d2b86782f89744937f8c7c20dac3544477",
+      "docs/tauri-migration/implementation-status.md": "19f96d2653afa30560971f087a0fa0b58fabe58c2de7e55b75300220838270d0",
+      "docs/tauri-migration/inventory.json": "9e76138d68d4416d8957c42beba8c632ad11f5db644cf1e8514dfc25c8bb60bc",
+      "docs/tauri-migration/operations.json": "e0c5b395a8a364d9b6a15030e89dbccba9a94d49128ddb028c816326d12738ba",
+      "docs/tauri-migration/project-runtime-bindings.md": "bb4eac6089572a7ead33021de4bf8f6355c3fa4b4a44e18e5a5d84d18d2e3c3f",
+      "docs/tauri-migration/task-group-bindings.md": "4941332b098f984dbc9d20107d216d1aae5385edce7ffdafa52a8ba6c24ad0df",
+      "docs/tauri-migration/task-group-request-authority.md": "da9ce3a414b815655ebb042ec8aed09253791d2d5a660161deb23825a31f9a25",
+      "scripts/production-contracts-proof.test.ts": "3991357815aa6f7f961f24dc914f58a053d65eda2adab579029a8bf4b8829266",
+      "scripts/production-contracts-proof.ts": "96fd2585f0fbe09d5e0005c35f651542d6673e7754458c63779cf6be370e2108",
+      "src-tauri/engine/src/production_contracts.rs": "b82ee65211ad5abd806a92b3bfbd7e504e5c299e2c10b197dcbb43bca4cf6326",
+      "src-tauri/engine/src/production_project_groups.rs": "0647eb58329d7ab04bc3bc16fd052280cd6cd8b6a04eac6ac16f62bdcdf352b9",
+      "src/main/agent-manager-core.ts": "658c69e3d45911bf1b1cdec97e4558896d05a4b9f6c077ff8d02c931c0baa4fb",
+      "src/main/agent-manager-task-group-request.test.ts": "1dd1a5c49f1b27c7f844d89136a1b2f2916af498e4d1e00cf639eabd2ff09626",
+      "src/main/agent-manager/session-config-core.ts": "1ac010e5b578a28c27c39e84644e3d0048eee8b0c1f905ec915fd68a81d7e60a",
+      "src/main/agent-manager/task-group-request-scope.test.ts": "264a59764a0251fef00a4efd1286b416ee7fb0148e7c8c71863117570925b068",
+      "src/main/agent-manager/task-group-request-scope.ts": "7aa93411d987f40a435a64a6b2b95352dc08404ddbf5f1b2cc62ffe0ca11281c",
+      "src/main/agent-manager/workspace-docs-request-scope.test.ts": "7746fabdb22e1b3bf6ff323e7d081b2e379dd7f264a27a48d1d59e2d7e53e6ac",
+      "src/main/agent-manager/workspace-docs.ts": "6c781c2893c26776617df3bac3bc50cb7d69a85120275cbc5849363837485c55",
+      "src/main/agent-manager/worktree-setup.ts": "8978f085ec106373b2b523ba200a88738b038cea0a299cb0f53c63df3f9f952f",
+      "src/main/oauth/oauth-manager-core.ts": "7df3cfeca1684d984dbc888b5525aa50d00d27998114fe6c9d7375c99c403827",
+      "src/main/oauth/oauth-manager-host.test.ts": "7ca2a8616787503d0d48614e84f954b73559f38600a3079ae3e40f7962e1a3e5",
+      "src/main/sync-manager-lifetime.test.ts": "ffebdf453c39e6008bebfe712b718c7725183ec59aa3a6e1768489b993dce517",
+      "src/main/sync-manager.ts": "704741425135d5b683220ab50835e36c5bb05c4ac1e5f8333a74affe74b2712b",
+      "src/main/task-groups/service.test.ts": "6d0022a828de3d073c132252970c668e2d7596cea010498091383a1bdb8b2a18",
+      "src/main/task-groups/service.ts": "5aae7b5918ce53af14beadf75c5a105afa6827c3030957d0093b6d300194905c",
+      "src/main/workspace-file-owner.test.ts": "c74f88eca932137f2b7ce235b153372b4bf1c5cc0cc949de3a46d19127a61567",
+      "src/main/workspace-file-owner.ts": "920f5f114049270ea5aa389e47217bcc461d8a62b4c5ea91e5aafae2ea24fc23",
+      "src/main/worktree-manager-core.ts": "501b93af7ff7170eed75f56f15245c984505b3fb5ec061a8720a6a220e6d9cb0",
+      "src/main/worktree-manager-host.test.ts": "e97142f0ec454430f8aea9ec357c568438240cbd97effd6b2ca3460eac12f48d",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "c0339ace70e0547246a1cc9b31aa15ff12e7a1523f341ffb3289947c427146d9",
+      "src/renderer/src/lib/native-desktop-host.ts": "651e468100d9626c00bad7448f300f3f6e6cb50f229a1e667be9b745e4231222",
+      "src/service/production-desktop-bindings.test.ts": "64436c25eeadc5c1859cca87e3f144ed8600a252f4546b10f47279ea47938010",
+      "src/service/production-desktop-bindings.ts": "e2bdf7ce4dce4d0a9dae25adaff2a1bced9ee9a7a34cf9dde3d44fcd1c35a23f",
+      "src/service/production-owner.ts": "1936d45d039c957ffdd939573e740cea9a55e0dff4ce04f85921c64b5bb4099b",
+      "src/service/project-runtime-backend.test.ts": "4f5e71d2410bea277f335adc3f1147959bb21fda41d4e32f2ab85883076ee1b0",
+      "src/service/project-runtime-backend.ts": "acecb21e37f6c8391009149d3601634f89806c3a6086757624bd400f848c38f6",
+      "src/service/task-group-backend.test.ts": "8a2a6a0b59f6a5573bb42f2d8ba0c13420731a2e8a18040ebaf7c35e6b1c0c99",
+      "src/service/task-group-backend.ts": "4cfa48b9f8556e2fb1711a5ddcc53fac20b7482377b353668676f20511de8d86",
+      "src/service/task-group-codecs.test.ts": "e6c0d83f4087c2d34cfea6e4ad2152bd5c0ae2477104514893daef51c8d0d04a",
+      "src/shared/desktop-event-forwarding.ts": "b7aebf021a6526b54e8734b9f77c62ca457879b4837ceb33160e44be8f4fd79d",
+      "src/shared/project-runtime-codecs.test.ts": "4ff0cb1d4b0225d5bb28f027fbb98354c52e986e834402a257f20829fcab584c",
+      "src/shared/project-runtime-codecs.ts": "d0b11946ee492f38784b7bd232d087c05be571a5892ac24ba86fbbd6fe181069",
+      "src/shared/task-group-codecs.ts": "06d99e46d9eec0030dfd4056706bca7038bd5333da99ae3e2a7add8bab819e2b",
+      "vitest.tauri.config.ts": "881ba90878d3d55260ef13a73de6ba6c9298416bb79e24d37e643890c7485f9c"
+    }
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Nine retained task-group and ten project status/history/Captain memory/limits/concurrency controls through actual protected-profile owners and real nested lifecycle effects. Existing Electron shipping remains in place.",
+  "bindings": {
+    "finiteServiceCommandContracts": 199,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 201,
+    "events": 23,
+    "newCommands": 19,
+    "newEvents": 0
+  },
+  "implemented": [
+    "The actual ProductionOwner exposes captured group/project leases over the same database, AgentManager, TaskGroupService, SyncManager, registry, OAuth and WorkspaceFileOwner. The group service is registered for immediate shutdown/raw drain before task API exposure and protected profile release.",
+    "Nine group controls call the real definition/review/source/admission/durable-delivery owners. Narrow SQL preflight bounds relevant stored data before getters/parsing/decryption; public DTOs omit private storage extensions. Anchor/current/former/member/resource/source grants are current, source/external bindings remain frozen across awaits, and only requested membership/derived skill transitions are accepted. Per-member source failure reasons are fixed and private-diagnostic-free.",
+    "Actual group and manager request scopes join raw children and refuse revoked, cancelled, closed or completed inherited authority at real effects. Adapter initialization/create/resume, worktree metadata/fallback/clone/fetch/setup, MCP/OAuth credential refresh, skill/workspace documents, durable prompt dispatch and source local writes propagate those guards. Model/native acceptance remains truthful and is never replayed or claimed undone.",
+    "Task-addressable raw startup receipts survive public deadlines. Group edits and duplicate starts/messages/resumes/recovery stay fenced while SDK creation or late cleanup is uncertain; Stop joins real receipts. Failed/ambiguous cleanup retains actual identities/configuration, refuses new effects and keeps protected ownership. Accepted polling, queue processing and stop/destroy cleanup explicitly use manager ownership rather than completed caller authority.",
+    "Ten project controls reuse actual status/overview/history/admission/concurrency algorithms through optional trusted bounded scalar stores. Existing Electron defaults remain unchanged. Live session lookup also borrows that store, so project reads avoid unrelated task/agent credential deserialization. Overview/global pause require all relevant current grants; actual manager pin/control writes retain audit and queue scheduling.",
+    "Captain memory reads real bounded descriptor-backed content prefixes from only the literal captured Captain workspace, preserves truncation/terminology and avoids surrogate splits. Missing/null semantics remain useful. Files remain borrowed and shared; their raw/failed closes stay protected by the existing Root owner. History query limits preserve finite floor/clamp semantics while stored page materialization stays bounded.",
+    "The facade permits reads during recovery, fences group/pin/pause effects until hydration and never replays uncertain mutations. Finite native request and outer result DTO policy preserves UTF-16/UTF-8 limits, optional/null/defined results and private-field refusal; full lifecycle/date semantics remain additionally checked by service/renderer codecs. Actual requests and nineteen real singleton responses are separately exported and accepted by native policy."
+  ],
+  "artifact": {
+    "buildIdentity": "production-ba3428f6188e1794ffd1316effed4476",
+    "resourceManifestSha256": "1cc01613f5e9572001793b5ed587038e45e4283e4cb26f80e871c598cb666ca1",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "cargoLockUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 199,
+    "requests": 406,
+    "sha256": "1b1ac500dcdd1182e467d08f595bf91567b0fdb483410ce0e3a1c33565274985"
+  },
+  "actualDomainResponses": {
+    "operations": 19,
+    "responses": 19,
+    "sha256": "1e5d46427d5fba0bd9202ef9b12ffe69b136bb2580175c1c7cbcd056198c1057",
+    "scope": "actual protected-profile singleton with real SQLite/domain/filesystem owners and explicit synthetic adapter/provider boundaries"
+  },
+  "tests": {
+    "app": {
+      "passed": 6693,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "0450e5391fe1cc232df33e2578d2fe783af9c5284a14cbf385211d9aa26be637",
+      "logSha256": "c1d12dbc88f5823c7b427f736fe8d100fa05842c4398b3f704f25a6a86105345"
+    },
+    "standalone": {
+      "passed": 3197,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "482ac79d5c87cf94c1f984a4d72e11a00bfc074182b43a50f47bc82bb0fe6f56",
+      "logSha256": "8965f601288722e6fa23acabe58fbe7050497d629c26bd80b9993372838e3942"
+    },
+    "focused": {
+      "passed": 237,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "b9d7b99143a9db6a779544456910f454516bb7ade210944ebf8813da9764bbe9",
+      "logSha256": "b5579a244a2f2dca82729a15c6656e4d6dedde15d428faf9ba32b00ebe0644ca"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "780ad90f422e3c45e7d16d8ce0b3d2deb9c376a8ecd156da3ad34e1b3d3fd423",
+      "logSha256": "2cd93772ed898cc20066d37e1c624fecfa66fe652ab38159f534f3d254e7087a"
+    },
+    "corpus-export": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "affb8455d2f4c33d12f346cfe4041e00919a066156f389ad89a9d24fa4f9deb7",
+      "logSha256": "6ccb0189aeeed319bf2d2d5d931937282e9bcf23fab2dd3d4b1216a5383116c9"
+    },
+    "results-export": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 21,
+      "success": true,
+      "reportSha256": "848819c7c2d32997435153d4255676b495631170a544c1d5a98c930241e430f9",
+      "logSha256": "e217a3a25c8bb68a61aecd932f355031df4d0a74ed6c6fac12739f1c68cf7e09"
+    }
+  },
+  "filteredResultExportTests": "21 tests filtered by the exact singleton export name; distinct from unavailable/optional inference tests",
+  "standaloneOptionalInstalledInference": [
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "VoiceWorkerClient with the installed runtime loads the real recogniser, so the config shape cannot drift",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "Parakeet v3 with the installed runtime loads the offline recogniser and transcribes a complete turn",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "a single-shot turn reports a final and never a segment, so dictation cannot send by itself",
+      "reason": "requires an installed local recognition runtime/model"
+    }
+  ],
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 30.186,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.288,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 39.033,
+      "logSha256": "5da7407095bcec480e2a8726f5c19a56b896fcf10358cbee9cd5bf3fc5653f5a"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 11.307,
+      "logSha256": "8e9d7587ea6486ccab11448113647c5ede16659f9d218ad00a5ff7d10f5a21e9"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.717,
+      "logSha256": "46d3f196678a78a0981b266da221fcbc3f443f02d4e35b2cba2cb5542c1c3c25"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.428,
+      "logSha256": "a597a3cfca0657a88d57e5077c750c6307ae4449421b4cebda711286715f2ccd"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.223,
+      "logSha256": "096bd464fa5cc348d25251d6e7a7a2aed76c1bc2e5982bfc8e34274dd3d42b74"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.318,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.554,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.433,
+      "logSha256": "cd16eb0b576f442e503ded98c7ebfeffc89543460ae378bee5aa3e11252aa6f2",
+      "passed": 40,
+      "failed": 0,
+      "ignored": 4
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.726,
+      "logSha256": "ea57ceba6c98939fd691e2dd54e310009d6ceb1bf7864826624b6b1129554a2d"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 4.119,
+      "logSha256": "41d7e74f5a9f9d5cb8bbe910150112f876362fd64ed6560cc7ff73c98de3f746",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch19-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.272,
+      "logSha256": "95e0f05763693c9cbfc518cff6e9a6d01bc14ba2049782fcfdfe61a795ae1e78",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "native-results": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PROJECT_GROUP_RESULTS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch19-domain-results.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::project_groups::tests::actual_owned_results_have_finite_outer_dtos",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.195,
+      "logSha256": "f45ba6e7b1af52c647880674b48796ac00dd2cc0ddcbd9b0187797131b142981",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.067,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "retainedInitialChecks": {
+    "focused": {
+      "passed": 208,
+      "failed": 29,
+      "skipped": 0,
+      "success": false,
+      "reportSha256": "d45aceffa3f92a040c840001e89cbf1844ebecb4563cb41e600675333227862c",
+      "logSha256": "3e8c441341b29c656013de4b9c1978757885ce224c8cd5715e3a794050ef4b5b"
+    },
+    "focusedAfterFixtureCorrections": {
+      "passed": 235,
+      "failed": 2,
+      "skipped": 0,
+      "success": false,
+      "reportSha256": "3c4d77147b77d64e873a866934ca582073633513330de19b39c39ce6b840ede7",
+      "logSha256": "0ee0eb505f66383dfd0d3acefbc291bb3ec560368b906463f1e53c2fdd31c942"
+    }
+  },
+  "initialCompiler": {
+    "command": [
+      "rtk",
+      "pnpm",
+      "exec",
+      "tsc",
+      "--build",
+      "--noEmit",
+      "--force"
+    ],
+    "exitCode": 1,
+    "elapsedSeconds": 28.603,
+    "logSha256": "dbbe498f36cc94ceda54c1011eeb8ce92322cde06661e967cc53d8af548cd9d7"
+  },
+  "initialLint": {
+    "command": [
+      "rtk",
+      "pnpm",
+      "lint"
+    ],
+    "exitCode": 1,
+    "elapsedSeconds": 13.421,
+    "logSha256": "31927640197dd7c4cae1ebea1140f0afae26badc13824619f1769824a9e1c20e",
+    "errors": 1,
+    "existingWarnings": 165
+  },
+  "initialNativeUnit": {
+    "command": [
+      "rtk",
+      "cargo",
+      "test",
+      "--locked",
+      "--manifest-path",
+      "src-tauri/Cargo.toml",
+      "-p",
+      "twentyonex-engine",
+      "--features",
+      "production-service"
+    ],
+    "exitCode": 101,
+    "elapsedSeconds": 1.931,
+    "logSha256": "ddabbcee74bfdb743679ae561320c019ce564422e1b566217bb4a88679bb88f7",
+    "passed": 39,
+    "failed": 1,
+    "ignored": 4
+  },
+  "initialContractGeneration": {
+    "command": [
+      "rtk",
+      "node",
+      "scripts/tauri-contracts.mjs"
+    ],
+    "exitCode": 1,
+    "elapsedSeconds": 3.268,
+    "logSha256": "63684c076ee747f3e222afaf9de2fc9d56ab202321a75ae846c27f0bce123bef"
+  },
+  "validationCorrections": [
+    "Initial focused208pass/29fail and one unhandled error: stale180 counts in corpus/native assertions, missing fixture Captain seed, public error-code assertions, public DTO projection expectations and missing facade reconnect were corrected. The fake timer late-callback fixture now uses a native promise continuation that preserves actual AsyncLocalStorage inheritance.",
+    "Group snapshot result validation now requires the exact execution anchor and unique current/former member IDs. The grouped codec actual-SQLite fixture moved from shared to service tests, preserving meaningful coverage without importing main/database runtime into the browser compiler project.",
+    "Initial compiler failures also concerned fixture-only CreateTaskData agent assignment, literal-inferred byte-cap parameters, missing-setting undefined semantics, validated DTO cast and JSON fixture typing plus an unused type import. Real task assignment uses the existing update API; no project/compiler file-list expansion or unsafe runtime cast bypass is introduced.",
+    "Three already-reviewed dynamic event sites moved in AgentManager. Their exact positions were refreshed after source inspection; event names, owners and authority were unchanged. The first metadata failure was retained; generated-contract checks pass after this coordinated update.",
+    "Second focused235pass/2fail: one budget test expected an internal INVALID_RESULT through an authorization registry that intentionally publishes INVALID_REQUEST, preserving storage/getter refusal assertions. A project test caught findSessionByTaskId still using the full getter; the actual existing lookup now accepts the trusted bounded store, preserving session facts and ordinary defaults. Final focused237pass/0.",
+    "Lint required one test-only single-assignment argument array to use const; final forced compiler and lint passed. Final full suites/builds/staged proofs cover delivered source. Native counts/outer association were updated and rechecked with actual golden request/response corpora."
+  ],
+  "remainingAcceptance": [
+    "#202/#208 complete retained/native parity, installed supported-target crash/cleanup/resource/redistribution, macOS/Windows production containment and live cutover/Electron retirement remain open.",
+    "#210/#212 remaining heartbeat/worktree/concurrency-related endpoints, native voice starts, full installed real-provider/background/recovery acceptance and all supported targets remain open.",
+    "Controlled adapter, raw provider callback and actual filesystem/SQLite tests establish only exercised lifecycle/authority/projection behavior. No real model/provider credential session, native interactive window, production signed installation or external source completion is claimed.",
+    "Accepted external/native/provider effects cannot be retracted by a later denied guard; no automatic retry/replay or rollback of such effects is promised. Filesystem prefix guards retain the batch18 cooperative pathname race limits.",
+    "Three standalone installed recognition tests and four engine platform/runtime proofs remain explicitly optional/unavailable. Hosted voice #92 remains deferred by the user."
+  ]
+}

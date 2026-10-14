@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SyncManager, SyncManagerClosedError, SyncManagerShutdownIncompleteError } from './sync-manager'
 import type { DatabaseManager, TaskRecord } from './database'
-import type { PluginRegistry } from './plugins/registry'
+import { PluginRegistry } from './plugins/registry'
 import type { TaskSourcePlugin } from './plugins/types'
 import { PluginActionId } from '../shared/constants'
+import { createPortableDbFixture } from '../../test/helpers/portable-db-test-helper'
+import { OAuthManager } from './oauth/oauth-manager-core'
+import { LinearProvider } from './oauth/providers/linear-provider'
 
 function fixture() {
   let finish!: (value: unknown) => void
@@ -32,6 +35,32 @@ function invoke(f: ReturnType<typeof fixture>, method: Method) {
 }
 
 describe('source sync shutdown ownership', () => {
+  it('propagates source caller authority through actual OAuth refresh and retains both raw owners', async () => {
+    const fixture = createPortableDbFixture(), db = fixture.db
+    const source = db.createTaskSource({ name: 'Scoped source', plugin_id: 'linear', mcp_server_id: null, config: { client_id: 'fixture', client_secret: 'fixture' } })!
+    db.createOAuthToken({ provider: 'linear', source_id: source.id, access_token: 'old', refresh_token: 'old-refresh', expires_in: -1, scope: null })
+    const task = db.createTask({ title: 'Original task', source_id: source.id, external_id: 'fixture-card' })!
+    const oauth = new OAuthManager(db, { openExternal: vi.fn(), notify: vi.fn() }), registry = new PluginRegistry()
+    let release!: () => void, entered!: () => void, allowed = true
+    const gate = new Promise<void>(resolve => { release = resolve }), entry = new Promise<void>(resolve => { entered = resolve }), denied = new Error('Source caller withdrawn')
+    const refresh = vi.spyOn(LinearProvider.prototype, 'refreshToken').mockImplementation(async () => { entered(); await gate; return { access_token: 'rotated', expires_in: 3600 } })
+    const plugin: Partial<TaskSourcePlugin> = { id: 'linear', executeAction: async (_action, _task, _input, _config, context) => {
+      await context.oauthManager!.getValidToken(context.sourceId!)
+      return { success: true, taskUpdate: { title: 'Late changed task' } }
+    } }
+    registry.register(plugin as TaskSourcePlugin)
+    const manager = new SyncManager(db, registry, oauth), check = () => { if (!allowed) throw denied }
+    const work = manager.executeAction(PluginActionId.Complete, task, undefined, source.id, 'task-group', { beforeEffect: check, beforeLocalWrite: check }).catch(error => error)
+    try {
+      await entry; allowed = false
+      await expect(manager.close(5)).rejects.toBeInstanceOf(SyncManagerShutdownIncompleteError)
+      await expect(oauth.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+      expect(fixture.rawDb.open).toBe(true); release(); expect(await work).toBe(denied)
+      await manager.close(); await oauth.close()
+      expect(db.getTask(task.id)?.title).toBe('Original task'); expect(db.getOAuthTokenBySource(source.id)?.access_token).toBe('old')
+      expect(refresh).toHaveBeenCalledOnce()
+    } finally { release(); await work; await manager.close(); await oauth.close(); fixture.rawDb.close(); vi.restoreAllMocks() }
+  })
   it.each(methods)('joins raw %s work and its following database writes', async method => {
     const f = fixture()
     const active = invoke(f, method)

@@ -1,8 +1,29 @@
 //! Finite production ingress/egress policy, independent of diagnostic grants.
 //! Native bounds/outer DTO checks complement the service's exact domain codecs.
 use serde_json::Value;
+#[path = "production_project_groups.rs"]
+mod project_groups;
 
 pub const COMMANDS: &[&str] = &[
+    "taskGroups:list",
+    "taskGroups:get",
+    "taskGroups:history",
+    "taskGroups:create",
+    "taskGroups:add",
+    "taskGroups:remove",
+    "taskGroups:dissolve",
+    "taskGroups:move",
+    "taskGroups:review",
+    "project:getStatus",
+    "project:getAllStatuses",
+    "project:getStatusHistory",
+    "project:getCaptainMemory",
+    "projectLimits:getState",
+    "projectLimits:isAllPaused",
+    "projectLimits:pauseAll",
+    "concurrency:getState",
+    "concurrency:setCaptainControl",
+    "concurrency:pin",
     "tasks:getWorkspaceDir",
     "shell:readTextFile",
     "shell:openPath",
@@ -3145,6 +3166,9 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if project_groups::COMMANDS.contains(&operation) {
+        return project_groups::request(operation, value);
+    }
     if WORKSPACE_FILE_COMMANDS.contains(&operation) {
         return if operation == "tasks:getWorkspaceDir" {
             object(value, &["taskId"], &[]) && id(&value["taskId"])
@@ -3277,6 +3301,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if project_groups::COMMANDS.contains(&operation) {
+        return project_groups::result(operation, value);
+    }
     if WORKSPACE_FILE_COMMANDS.contains(&operation) {
         if matches!(operation, "shell:openPath" | "shell:showItemInFolder") {
             return object(value, &["defined"], &[]) && value["defined"] == false;
@@ -4949,7 +4976,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 180);
+        assert_eq!(COMMANDS.len(), 199);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

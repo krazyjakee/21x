@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { OwnedOperationLifetime } from './owned-operation-lifetime'
 import { execFile, type ExecFileOptions } from 'child_process'
 import { promisify } from 'util'
@@ -85,6 +86,7 @@ export interface WorktreeHost {
 
 export class WorktreeManager {
   private readonly lifetime = new OwnedOperationLifetime()
+  private readonly requestGuard = new AsyncLocalStorage<(() => void) | undefined>()
   constructor(private readonly host: WorktreeHost) {
     for (const path of [host.reposRoot, host.workspaceRoot]) {
       if (!isAbsolute(path) || path.includes('\0')) throw new Error('WORKTREE_PATH_INVALID')
@@ -105,13 +107,18 @@ export class WorktreeManager {
   }
 
   private sendProgress(taskId: string, repo: string, step: string, done: boolean, error?: string): void {
+    this.assertRequestCurrent()
     this.host.emitProgress({ taskId, repo, step, done, error })
   }
 
-  private execOwned(file: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions = {}): Promise<{ stdout: string; stderr: string }> {
-    this.lifetime.assertOpen()
-    if (this.host.exec) return this.host.exec(file, args, { ...options, cwd: options.cwd ?? this.host.reposRoot })
-    return execFileAsync(file, args, options).then(({ stdout, stderr }) => ({ stdout: stdout.toString(), stderr: stderr.toString() }))
+  private assertRequestCurrent(): void { this.lifetime.assertOpen(); this.requestGuard.getStore()?.() }
+
+  private async execOwned(file: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions = {}): Promise<{ stdout: string; stderr: string }> {
+    this.assertRequestCurrent()
+    const result = this.host.exec ? await this.host.exec(file, args, { ...options, cwd: options.cwd ?? this.host.reposRoot })
+      : await execFileAsync(file, args, options).then(({ stdout, stderr }) => ({ stdout: stdout.toString(), stderr: stderr.toString() }))
+    this.assertRequestCurrent()
+    return result
   }
 
   private bareClonePath(org: string, repoName: string): string {
@@ -126,7 +133,7 @@ export class WorktreeManager {
 
   private validSegment(value: string): boolean { return value !== '.' && value !== '..' && /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}$/.test(value) }
   private validNamespace(value: string): boolean { return value.length <= 2048 && value.split('/').length <= 15 && value.split('/').every(part => this.validSegment(part)) }
-  private directory(path: string): string { this.host.assertPath?.(path); return path }
+  private directory(path: string): string { this.assertRequestCurrent(); this.host.assertPath?.(path); return path }
   private taskDirectory(taskId: string): string {
     if (this.host.assertPath && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(taskId)) throw new Error('WORKTREE_PATH_UNAUTHORIZED')
     return this.directory(join(this.host.workspaceRoot, taskId))
@@ -153,7 +160,7 @@ export class WorktreeManager {
   /** Read one selected file on demand while keeping renderer-provided paths
    * inside the task workspace (and inside the selected repository, if any). */
   readTaskFile(taskId: string, repoFullName: string | null, filePath: string): TaskFileContent | null {
-    this.lifetime.assertOpen()
+    this.assertRequestCurrent()
     if (!filePath || filePath.includes('\0') || isAbsolute(filePath) || win32.isAbsolute(filePath)) return null
     const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '')
     if (normalized.split('/').some((segment) => !segment || segment === '.' || segment === '..')) return null
@@ -193,9 +200,16 @@ export class WorktreeManager {
     taskId: string,
     repos: WorktreeRepo[],
     org: string,
-    provider?: string
+    provider?: string,
+    beforeEffect?: () => void
   ): Promise<string> {
-    return this.lifetime.run(() => this.performSetupWorkspaceForTask(taskId, repos, org, provider))
+    const parent = this.requestGuard.getStore()
+    return this.requestGuard.run(beforeEffect ? () => { parent?.(); beforeEffect() } : parent, () => this.lifetime.run(async () => {
+      this.assertRequestCurrent()
+      const result = await this.performSetupWorkspaceForTask(taskId, repos, org, provider)
+      this.assertRequestCurrent()
+      return result
+    }))
   }
 
   private async performSetupWorkspaceForTask(
@@ -212,7 +226,7 @@ export class WorktreeManager {
     console.log(`[WorktreeManager]   Provider: ${provider || 'github'}`)
     console.log(`[WorktreeManager]   Repos to setup: ${repos.map(r => r.fullName).join(', ')}`)
 
-    this.lifetime.assertOpen()
+    this.assertRequestCurrent()
     mkdirSync(taskDir, { recursive: true })
 
     for (const repo of repos) {
@@ -252,7 +266,7 @@ export class WorktreeManager {
     console.log(`[WorktreeManager]   Bare clone not found, creating: ${barePath}`)
     this.sendProgress('', repoName, 'cloning', false)
     const orgDir = this.directory(join(this.host.reposRoot, org))
-    this.lifetime.assertOpen()
+    this.assertRequestCurrent()
     mkdirSync(orgDir, { recursive: true })
 
     if (provider === 'forgejo') {
@@ -413,13 +427,13 @@ export class WorktreeManager {
         } catch {
           // If git worktree remove fails, remove directory manually
           if (existsSync(wtPath)) {
-            this.lifetime.assertOpen()
+            this.assertRequestCurrent()
             this.assertRemoval(wtPath, worktreeIdentity)
             rmSync(wtPath, { recursive: true, force: true })
           }
         }
       } else if (existsSync(wtPath)) {
-        this.lifetime.assertOpen()
+        this.assertRequestCurrent()
         this.assertRemoval(wtPath, worktreeIdentity)
         rmSync(wtPath, { recursive: true, force: true })
       }
@@ -429,7 +443,7 @@ export class WorktreeManager {
     if (removeTaskDir) {
       if (existsSync(taskDir)) {
         try {
-          this.lifetime.assertOpen()
+          this.assertRequestCurrent()
           this.assertRemoval(taskDir, taskIdentity)
           rmSync(taskDir, { recursive: true, force: true })
           if (taskIdentity) this.host.onTaskWorkspaceRemoved?.(taskId, { dev: taskIdentity.dev.toString(), ino: taskIdentity.ino.toString() })

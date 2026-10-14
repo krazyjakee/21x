@@ -94,3 +94,25 @@ describe('portable worktree host and command lifetime', () => {
     } finally { finish?.(new Error('fixture finished')); await failed; await owner.close(); rmSync(root, { recursive: true, force: true }) }
   })
 })
+
+it('fences the next worktree command and publication after an accepted fetch loses its caller guard', async () => {
+  const root = mkdtempSync(join(tmpdir(), '21x-worktree-request-')), reposRoot = join(root, 'repos'), workspaceRoot = join(root, 'workspaces')
+  mkdirSync(join(reposRoot, 'fixture-org', 'repo.git'), { recursive: true }); mkdirSync(workspaceRoot)
+  const paths = new WorktreeDirectoryAuthority([reposRoot, workspaceRoot], () => {})
+  let finish!: () => void, entered!: () => void, allowed = true
+  const started = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { finish = resolve })
+  const denied = new Error('Caller scope withdrawn'), progress = vi.fn()
+  const exec = vi.fn<NonNullable<WorktreeHost['exec']>>(async () => { entered(); await gate; return { stdout: '', stderr: '' } })
+  const owner = new WorktreeManager({ reposRoot, workspaceRoot, emitProgress: progress, exec, assertPath: path => paths.assertPath(path) })
+  const beforeEffect = (): void => { if (!allowed) throw denied }
+  const work = owner.setupWorkspaceForTask('fixture-task', [{ fullName: 'fixture-org/repo', defaultBranch: 'main' }, { fullName: 'fixture-org/later', defaultBranch: 'main' }], 'fixture-org', 'github', beforeEffect)
+  const rejected = expect(work).rejects.toBe(denied)
+  try {
+    await started; allowed = false; const emitted = progress.mock.calls.length
+    finish(); await rejected
+    expect(exec).toHaveBeenCalledOnce(); expect(exec.mock.calls[0][1]).toEqual(['fetch', 'origin'])
+    expect(progress.mock.calls.length).toBe(emitted)
+    expect(existsSync(join(workspaceRoot, 'fixture-task', 'repo'))).toBe(false)
+    expect(existsSync(join(reposRoot, 'fixture-org', 'later.git'))).toBe(false)
+  } finally { finish?.(); await rejected; await owner.close(); rmSync(root, { recursive: true, force: true }) }
+})

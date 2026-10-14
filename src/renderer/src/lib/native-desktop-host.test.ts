@@ -44,6 +44,27 @@ function claudeInstalledRow() {
 function mobileInfo() {
   return { enabled: false, lanAccess: false, sessionIdleDays: 7, url: 'http://127.0.0.1:3210/pair?code=init.fixture:one', port: 3210, lanUrl: null, tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null }
 }
+it('routes project reads during hydration and fences real group, pin and pause writes without replay', async () => {
+  const f = fixture(); await f.host.reconnect()
+  f.results.set('taskGroups:list', [])
+  f.results.set('project:getStatusHistory', { entries: [], has_more: false, next_cursor: null })
+  f.results.set('projectLimits:isAllPaused', false); f.results.set('projectLimits:pauseAll', true)
+  f.results.set('concurrency:pin', { success: true })
+  const gate = deferred<void>(); f.host.setRehydrator(() => gate.promise)
+  const recovery = f.host.rehydrate()
+  expect(await f.host.api.taskGroups.list('project_fixture')).toEqual([])
+  expect(await f.host.api.projects.getStatusHistory('project_fixture', { limit: 1.5 })).toEqual({ entries: [], has_more: false, next_cursor: null })
+  expect(await f.host.api.projectLimits.isAllPaused()).toBe(false)
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.projectLimits.pauseAll(true)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.concurrency.pin('project_fixture', 'agent_fixture', 2)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.taskGroups.create({ title: 'Group', task_ids: ['task_a', 'task_b'] })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  gate.resolve(); await recovery
+  expect(await f.host.api.projectLimits.pauseAll(true)).toBe(true)
+  expect(await f.host.api.concurrency.pin('project_fixture', 'agent_fixture', null)).toEqual({ success: true })
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'concurrency:pin', payload: { projectId: 'project_fixture', agentId: 'agent_fixture', level: null }, engineEpoch: 'engine-1' })
+})
 it('uses exact codecs and trusted host metadata; missing binary/file bindings never reach native or Electron', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
@@ -164,7 +185,7 @@ it('binds the 178 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(182)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(201)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)

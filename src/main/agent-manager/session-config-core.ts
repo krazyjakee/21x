@@ -108,8 +108,10 @@ export async function buildMcpServers(
   oauthManager: OAuthManager | null,
   agentId: string,
   opts: McpServerOptions | undefined,
-  host: SessionConfigHost
+  host: SessionConfigHost,
+  beforeEffect?: () => void
 ): Promise<Record<string, McpServerConfig>> {
+  beforeEffect?.()
   const agent = db.getAgent(agentId)
   const mcpEntries = agent?.config?.mcp_servers || []
   if (host.configuredMcp === 'disabled' && mcpEntries.length) throw new Error('Configured MCP servers are unavailable in this host')
@@ -124,6 +126,7 @@ export async function buildMcpServers(
   await new Promise<void>((r) => setImmediate(r))
 
   for (const serverId of toolLimits.keys()) {
+    beforeEffect?.()
     const mcpServer = db.getMcpServer(serverId)
     if (!mcpServer) continue
 
@@ -141,7 +144,8 @@ export async function buildMcpServers(
     } else if (mcpServer.type === 'remote') {
       let headers = { ...mcpServer.headers }
       if (oauthManager && mcpServer.oauth_metadata && 'resource_url' in mcpServer.oauth_metadata) {
-        const token = await oauthManager.getValidMcpServerToken(mcpServer.id)
+        const token = await (beforeEffect ? oauthManager.getValidMcpServerToken(mcpServer.id, beforeEffect) : oauthManager.getValidMcpServerToken(mcpServer.id))
+        beforeEffect?.()
         if (token) headers = { ...headers, Authorization: `Bearer ${token}` }
       }
       result[mcpServer.name] = {
@@ -153,6 +157,7 @@ export async function buildMcpServers(
     }
   }
 
+  beforeEffect?.()
   if (opts?.ensureTaskManagement && !result['task-management']) {
     const taskManagement = host.managedTaskMcp.kind === 'server' ? host.managedTaskMcp.buildConfig(opts) : null
     if (taskManagement) result['task-management'] = taskManagement

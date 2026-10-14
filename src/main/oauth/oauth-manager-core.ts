@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 /**
  * OAuth Manager
  *
@@ -27,6 +28,7 @@ export interface OAuthHost {
 
 export class OAuthManager {
   private readonly lifetime = new OwnedOperationLifetime()
+  private readonly requestGuard = new AsyncLocalStorage<(() => void) | undefined>()
   private readonly servers = new Set<LocalOAuthServer>()
   private db: DatabaseManager
   private providers: Map<string, OAuthProvider>
@@ -43,6 +45,19 @@ export class OAuthManager {
     this.registerProvider(new HubSpotProvider())
     this.registerProvider(new McpOAuthProvider())
   }
+
+  /** A caller scope fences token writes while the actual OAuth owner retains raw refresh work. */
+  withRequestGuard<T>(effect: () => Promise<T>, beforeEffect: () => void): Promise<T> {
+    const parent = this.requestGuard.getStore()
+    return this.requestGuard.run(() => { parent?.(); beforeEffect() }, () => this.lifetime.run(async () => {
+      this.assertRequestCurrent()
+      const result = await effect()
+      this.assertRequestCurrent()
+      return result
+    }))
+  }
+
+  private assertRequestCurrent(): void { this.requestGuard.getStore()?.() }
 
   /**
    * Register an OAuth provider
@@ -155,6 +170,7 @@ export class OAuthManager {
   }
 
   private async performGetValidToken(sourceId: string): Promise<string | null> {
+    this.assertRequestCurrent()
     const tokenRecord = this.db.getOAuthTokenBySource(sourceId)
     if (!tokenRecord) {
       return null
@@ -170,9 +186,11 @@ export class OAuthManager {
         await this.refreshToken(tokenRecord.id, tokenRecord.provider, tokenRecord.refresh_token)
 
         // Fetch the refreshed token
+        this.assertRequestCurrent()
         const refreshedToken = this.db.getOAuthTokenBySource(sourceId)
         return refreshedToken?.access_token || null
       } catch {
+        this.assertRequestCurrent()
         // If refresh fails (e.g., missing credentials), log and return null
         console.error('[OAuthManager] Source token refresh failed')
         return null
@@ -190,6 +208,7 @@ export class OAuthManager {
     providerId: string,
     refreshToken: string | null
   ): Promise<void> {
+    this.assertRequestCurrent()
     if (!refreshToken) {
       throw new Error('No refresh token available')
     }
@@ -235,6 +254,7 @@ export class OAuthManager {
     const data = await provider.refreshToken(refreshToken, clientId, clientSecret)
 
     // Update token in database
+    this.assertRequestCurrent()
     this.db.updateOAuthToken(
       tokenId,
       data.access_token,
@@ -503,11 +523,13 @@ export class OAuthManager {
   /**
    * Get a valid access token for an MCP server, refreshing if needed.
    */
-  async getValidMcpServerToken(mcpServerId: string): Promise<string | null> {
+  async getValidMcpServerToken(mcpServerId: string, beforeEffect?: () => void): Promise<string | null> {
+    if (beforeEffect) return this.withRequestGuard(() => this.getValidMcpServerToken(mcpServerId), beforeEffect)
     return this.lifetime.run(() => this.performGetValidMcpServerToken(mcpServerId))
   }
 
   private async performGetValidMcpServerToken(mcpServerId: string): Promise<string | null> {
+    this.assertRequestCurrent()
     const tokenRecord = this.db.getOAuthTokenByMcpServer(mcpServerId)
     if (!tokenRecord) return null
 
@@ -517,9 +539,11 @@ export class OAuthManager {
     if (expiresAt < nowPlus5Min) {
       try {
         await this.refreshMcpServerToken(tokenRecord)
+        this.assertRequestCurrent()
         const refreshed = this.db.getOAuthTokenByMcpServer(mcpServerId)
         return refreshed?.access_token || null
       } catch (error) {
+        this.assertRequestCurrent()
         const serverName = this.db.getMcpServer(mcpServerId)?.name || mcpServerId
         console.error('[OAuthManager] MCP token refresh failed')
 
@@ -550,6 +574,7 @@ export class OAuthManager {
    * Refresh an MCP server's OAuth token using credentials from oauth_metadata registration.
    */
   private async refreshMcpServerToken(tokenRecord: import('../database/types').OAuthTokenRecord): Promise<void> {
+    this.assertRequestCurrent()
     if (!tokenRecord.refresh_token) throw new Error('No refresh token available')
     if (!tokenRecord.mcp_server_id) throw new Error('No MCP server ID on token')
 
@@ -570,6 +595,7 @@ export class OAuthManager {
       registration.token_endpoint
     )
 
+    this.assertRequestCurrent()
     this.db.updateOAuthToken(
       tokenRecord.id,
       data.access_token,

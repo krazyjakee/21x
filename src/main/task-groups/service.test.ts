@@ -17,11 +17,12 @@ vi.mock('../agent-manager/workspace-docs', async original => ({
 }))
 type Session = NonNullable<ReturnType<AgentManager['getSession']>>
 type Internals = { transitionToIdle(id: string, session: Session): Promise<void>; countedSessions(): unknown[] }
-const resources: Array<{ db: ReturnType<typeof createPortableTestDb>; manager: AgentManager; sync: SyncManager; directory: string }> = []
+function heldSource() { let release!: () => void; let enter!: () => void; const pending = new Promise<void>(resolve => { release = resolve }); const entered = new Promise<void>(resolve => { enter = resolve }); return { pending, entered, release, enter } }
+const resources: Array<{ db: ReturnType<typeof createPortableTestDb>; manager: AgentManager; sync: SyncManager; service: TaskGroupService; directory: string }> = []
 beforeEach(() => vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }))
 afterEach(async () => {
   for (const resource of resources.splice(0)) {
-    await resource.manager.stopAllSessions(); await resource.sync.close(); resource.db.close()
+    await resource.service.close(); await resource.manager.stopAllSessions(); await resource.sync.close(); resource.db.close()
     rmSync(resource.directory, { recursive: true, force: true })
   }
   vi.useRealTimers(); vi.restoreAllMocks()
@@ -49,7 +50,7 @@ async function fixture(withSource = false) {
   const service = new TaskGroupService(db, manager, sync)
   const group = await service.create({ title: 'Small related changes', task_ids: members.map(task => task.id) })
   const directory = dirname(dirname(db.getWorkspaceDir(group.execution_task_id)))
-  resources.push({ db, manager, sync, directory })
+  resources.push({ db, manager, sync, service, directory })
   const internal = manager as unknown as Internals
   const finish = async () => {
     const live = manager.findSessionByTaskId(group.execution_task_id)!
@@ -61,6 +62,61 @@ async function fixture(withSource = false) {
 }
 
 describe('task-group session and review authority', () => {
+  it('retains unscoped accepted source work through final shutdown and failed-close retry', async () => {
+    const h = await fixture(true), held = heldSource()
+    for (const member of h.members) h.db.updateTask(member.id, { status: TaskStatus.ReadyForReview }, 'task-group')
+    h.db.updateTask(h.group.execution_task_id, { status: TaskStatus.ReadyForReview }, 'task-group')
+    h.execute.mockImplementation(async () => { held.enter(); await held.pending; return { success: true, taskUpdate: { status: TaskStatus.Completed } } })
+    const pending = h.service.review({ group_id: h.group.id, action: 'approve' }).catch(cause => cause)
+    try {
+      await held.entered
+      const closing = expect(h.service.close(10)).rejects.toThrow('TASK_GROUP_DRAIN_INCOMPLETE')
+      await vi.advanceTimersByTimeAsync(10); await closing
+      expect(h.service.inflightCount).toBeGreaterThan(0); expect(h.db.db.open).toBe(true)
+      held.release(); expect((await pending).message).toBe('TASK_GROUP_CLOSED')
+      expect(h.execute).toHaveBeenCalledTimes(1)
+      expect(h.members.every(member => h.db.getTask(member.id)?.status === TaskStatus.ReadyForReview)).toBe(true)
+      await h.service.close(); expect(h.service.inflightCount).toBe(0)
+      expect(() => h.service.list(h.project.id)).toThrow('TASK_GROUP_CLOSED')
+    } finally { held.release(); await pending }
+  })
+
+  it('rechecks scoped source authority before actual SyncManager local writes and later members', async () => {
+    const h = await fixture(true), held = heldSource(); let granted = true
+    for (const member of h.members) h.db.updateTask(member.id, { status: TaskStatus.ReadyForReview }, 'task-group')
+    h.db.updateTask(h.group.execution_task_id, { status: TaskStatus.ReadyForReview }, 'task-group')
+    h.execute.mockImplementation(async () => { held.enter(); await held.pending; return { success: true, taskUpdate: { status: TaskStatus.Completed } } })
+    const pending = h.service.withRequestGuard(() => h.service.review({ group_id: h.group.id, action: 'approve' }), () => { if (!granted) throw new Error('FIXTURE_GROUP_GRANT_REVOKED') }, new AbortController().signal).catch(cause => cause)
+    try {
+      await held.entered; granted = false; held.release()
+      expect((await pending).message).toBe('FIXTURE_GROUP_GRANT_REVOKED')
+      expect(h.execute).toHaveBeenCalledTimes(1)
+      expect(h.members.every(member => h.db.getTask(member.id)?.status === TaskStatus.ReadyForReview)).toBe(true)
+      expect(h.service.inflightCount).toBe(0)
+    } finally { held.release(); await pending }
+  })
+
+  it('asserts exact group owners without recursively invoking the current caller guard', async () => {
+    const h = await fixture(); let calls = 0
+    await h.service.withRequestGuard(async () => h.service.get(h.group.id), () => {
+      calls++; h.service.assertOwners({ database: h.db, manager: h.manager, sync: h.sync })
+    }, new AbortController().signal)
+    expect(calls).toBeGreaterThan(0); expect(calls).toBeLessThan(100)
+    expect(() => h.service.assertOwners({ database: h.db, manager: h.manager, sync: {} as SyncManager })).toThrow('OWNER_UNAVAILABLE')
+  })
+
+  it('refuses a late inherited callback after its completed request scope settles', async () => {
+    const h = await fixture(); let callback!: Promise<unknown>, release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    await h.service.withRequestGuard(async () => {
+      callback = gate.then(() => { try { return h.service.get(h.group.id) } catch (cause) { return cause } })
+      return h.service.get(h.group.id)
+    }, () => {}, new AbortController().signal)
+    release()
+    expect((await callback as Error).message).toBe('TASK_GROUP_REQUEST_INACTIVE')
+    expect(h.service.get(h.group.id).group.id).toBe(h.group.id)
+  })
+
   it('routes simultaneous member starts through one counted backend and lists every member in its initial prompt', async () => {
     const h = await fixture()
     const [one, two] = await Promise.all(h.members.map(member => h.manager.startTask(member.id)))

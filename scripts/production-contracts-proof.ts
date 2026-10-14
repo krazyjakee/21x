@@ -1,3 +1,5 @@
+import { TASK_GROUP_CODECS } from '../src/shared/task-group-codecs'
+import { PROJECT_RUNTIME_CODECS } from '../src/shared/project-runtime-codecs'
 import { VOICE_MANAGEMENT_CODECS } from '../src/shared/voice-management-codecs'
 import { GIT_PROVIDER_CODECS } from '../src/shared/git-provider-codecs'
 import { WORKSPACE_FILE_CODECS } from '../src/shared/workspace-file-codecs'
@@ -27,7 +29,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -37,6 +39,13 @@ const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }
 
 /** One explicit valid API argument tuple for every finite production command. */
 export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
+  'taskGroups:list': [project, true], 'taskGroups:get': ['group_fixture'], 'taskGroups:history': [task],
+  'taskGroups:create': [{ title: 'Fixture batch', task_ids: [task, 'task_second'], agent_id: agent }],
+  'taskGroups:add': ['group_fixture', ['task_third']], 'taskGroups:remove': ['group_fixture', task], 'taskGroups:dissolve': ['group_fixture'],
+  'taskGroups:move': ['group_fixture', 'ready_for_review'], 'taskGroups:review': [{ group_id: 'group_fixture', action: 'approve', task_ids: [task], complete_at_source: false }],
+  'project:getStatus': [project], 'project:getAllStatuses': [], 'project:getStatusHistory': [project, { limit: 5, cursor: null }], 'project:getCaptainMemory': [project],
+  'projectLimits:getState': [project], 'projectLimits:isAllPaused': [], 'projectLimits:pauseAll': [true],
+  'concurrency:getState': [project], 'concurrency:setCaptainControl': [project, true], 'concurrency:pin': [project, agent, 2],
   'tasks:getWorkspaceDir': [task], 'shell:readTextFile': ['/trusted-workspace/task_fixture/report.md'], 'shell:openPath': ['/trusted-workspace/task_fixture'], 'shell:showItemInFolder': ['/trusted-workspace/task_fixture/report.md'],
   'github:checkCli': [], 'github:fetchOrgs': [], 'github:fetchOrgRepos': ['fixture-org'], 'github:fetchUserRepos': [], 'github:fetchPullRequestDetails': ['https://github.com/fixture/repo/pull/42'],
   'gitlab:checkCli': [], 'gitlab:fetchOrgs': [], 'gitlab:fetchOrgRepos': ['team/subgroup'], 'gitlab:fetchUserRepos': [],
@@ -109,6 +118,17 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
 
 type Variant = { operation: string; case: string; args: unknown[] }
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  { operation: 'taskGroups:create', case: 'unicode-trimmed-title', args: [{ title: '\uFEFF🌱\uFEFF', task_ids: [task, 'task_second'] }] },
+  { operation: 'taskGroups:review', case: 'max-escaped-feedback', args: [{ group_id: 'group_fixture', action: 'send_back', message: '\u0001'.repeat(4000), task_ids: [task] }] },
+  { operation: 'taskGroups:list', case: 'omitted-dissolved-filter', args: [project] },
+  { operation: 'taskGroups:review', case: 'omitted-review-members', args: [{ group_id: 'group_fixture', action: 'approve' }] },
+  { operation: 'project:getStatusHistory', case: 'omitted-history-query', args: [project] },
+  { operation: 'project:getStatusHistory', case: 'history-limit-floored', args: [project, { limit: 1.5 }] },
+  { operation: 'project:getStatusHistory', case: 'history-limit-lower-clamp', args: [project, { limit: 0 }] },
+  { operation: 'project:getStatusHistory', case: 'history-limit-upper-clamp', args: [project, { limit: 1e100 }] },
+  { operation: 'concurrency:pin', case: 'remove-user-pin', args: [project, agent, null] },
+  { operation: 'concurrency:pin', case: 'hard-cap-pin', args: [project, agent, 10] },
+
   { operation: 'shell:readTextFile', case: 'workspace-unicode-path', args: ['/trusted-workspace/task_fixture/報告.md'] },
   { operation: 'shell:openPath', case: 'workspace-windows-path', args: ['C:\\workspace\\task_fixture\\report.md'] },
   { operation: 'shell:showItemInFolder', case: 'workspace-unc-path', args: ['\\\\server\\share\\task_fixture\\report.md'] },
@@ -216,7 +236,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 180 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 199 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

@@ -1,3 +1,4 @@
+import { TaskGroupRequestScope } from './agent-manager/task-group-request-scope'
 import { serializeTaskSend } from './task-send-lock'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import type { AgentManagerHost, AgentWindow } from './agent-manager/host'
@@ -215,6 +216,11 @@ interface PollingEntry {
   garbledOutputCount?: number
 }
 
+/** Trusted internal bounded readers for desktop projections. Never an RPC
+ * parameter; the actual manager retains live sessions, queue and scheduling. */
+export type ProjectRuntimeReadStore = Pick<DatabaseManager, 'getTask' | 'getTasks' | 'getSubtasks' | 'getProject' | 'getAgent' | 'getSetting' | 'setSetting' | 'listConcurrencyAudit'>
+export type ProjectRuntimeMutationStore = Parameters<typeof setUserConcurrency>[0]
+
 export class AgentManager extends EventEmitter {
   private sessions: Map<string, AgentSession> = new Map()
   /** Maps old (temp) session IDs to their re-keyed (real) IDs so that
@@ -348,8 +354,14 @@ export class AgentManager extends EventEmitter {
   /** In-flight admitted starts, so a durable message accepted during warm-up
    * joins that start instead of opening a competing Captain session. */
   private sessionStarts: Map<string, Promise<string>> = new Map()
+  /** Actual task startup/cleanup receipts outlive bounded public deadlines. */
+  private readonly rawTaskStarts = new Map<string, Set<Promise<unknown>>>()
   /** Raw flights stay owned even when their caller's startup deadline expires. */
   private readonly shutdownWork = new Set<Promise<unknown>>()
+  private readonly taskGroupRequests = new TaskGroupRequestScope()
+  private readonly scopedCleanupFailures = new Set<string>()
+  private readonly scopedCleanupConflicts = new Set<string>()
+  private readonly scopedRetirementConfigs = new WeakMap<AgentSession, SessionConfig>()
   private readonly agentConfigurationMutations = new Set<string>()
   private readonly backendConfigurationMutations = new Set<string>()
   private readonly failedBackendConfigurations = new Set<string>()
@@ -460,7 +472,7 @@ export class AgentManager extends EventEmitter {
 
   /** True when stopping/moving a task must first withdraw runtime ownership. */
   hasTaskStartOwnership(taskId: string): boolean {
-    if (this.taskStops.has(taskId) || this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return true
+    if (this.taskStops.has(taskId) || this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId) || this.rawTaskStarts.has(taskId)) return true
     const live = this.findSessionByTaskId(taskId)
     if (live && live.session.status !== 'error') return true
     const recovery = this.startQueue.get(taskId)
@@ -476,7 +488,7 @@ export class AgentManager extends EventEmitter {
     taskId = this.taskGroupExecution(taskId)?.id ?? taskId
     const task = this.db.getTask(taskId)
     if (!task || (task.status !== TaskStatus.AgentWorking && task.status !== TaskStatus.Triaging)) return false
-    if (this.taskStops.has(taskId) || this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return false
+    if (this.taskStops.has(taskId) || this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId) || this.rawTaskStarts.has(taskId)) return false
 
     const live = this.findSessionByTaskId(taskId)
     if (live && live.session.status !== 'error') {
@@ -602,7 +614,7 @@ export class AgentManager extends EventEmitter {
     // task/session ownership. A reconnect below may then acknowledge it as
     // recovered instead of dispatching a second start.
     for (const claim of this.startQueue.interruptedClaims(this.startQueueLeaseOwner)) {
-      if (this.sessionStarts.has(claim.taskId)) continue
+      if (this.sessionStarts.has(claim.taskId) || this.rawTaskStarts.has(claim.taskId)) continue
       const task = this.db.getTask(claim.taskId)
       if (task?.status === TaskStatus.Triaging) {
         // Triage can change assignment while it runs. Never replay a crashed
@@ -696,7 +708,7 @@ export class AgentManager extends EventEmitter {
     for (const stale of staleTasks) {
       const task = this.db.getTask(stale.id)
       if (!task) continue
-      if (this.sessionStarts.has(stale.id) || this.providerRecoveryOwnsTask(stale.id)) continue
+      if (this.sessionStarts.has(stale.id) || this.rawTaskStarts.has(stale.id) || this.providerRecoveryOwnsTask(stale.id)) continue
       const liveOwner = this.findSessionByTaskId(stale.id)
       if (liveOwner && liveOwner.session.status !== 'error') {
         this.updateTaskFromLocalAgent(stale.id, { session_id: liveOwner.sessionId })
@@ -932,6 +944,7 @@ export class AgentManager extends EventEmitter {
   /** Schedule a blocker update once the current mutation of the sessions map
    *  has fully settled. */
   private schedulePowerSaveBlockerUpdate(): void {
+    if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.schedulePowerSaveBlockerUpdate())
     setImmediate(() => this.updatePowerSaveBlocker())
   }
 
@@ -1055,9 +1068,12 @@ export class AgentManager extends EventEmitter {
     }
   }
 
-  private setupWorktreeIfNeeded(taskId: string): Promise<string | undefined> {
+  private async setupWorktreeIfNeeded(taskId: string): Promise<string | undefined> {
+    this.taskGroupRequests.assertCurrent()
     const { worktreeManager, githubManager, gitlabManager, forgejoManager } = this
-    return setupTaskWorktrees(this.db, { worktreeManager, githubManager, gitlabManager, forgejoManager }, taskId)
+    const result = await this.ownShutdownWork(setupTaskWorktrees(this.db, { worktreeManager, githubManager, gitlabManager, forgejoManager }, taskId, this.taskGroupRequests.capture()))
+    this.taskGroupRequests.assertCurrent()
+    return result
   }
 
   private getAdapter(agentId: string): CodingAgentAdapter | null {
@@ -1076,11 +1092,13 @@ export class AgentManager extends EventEmitter {
   }
 
   private buildMcpServersForAdapter(agentId: string, opts?: McpServerOptions): ReturnType<typeof buildMcpServers> {
-    return buildMcpServers(this.db, this.oauthManager, agentId, opts, this.host)
+    this.taskGroupRequests.assertCurrent()
+    return this.ownShutdownWork(buildMcpServers(this.db, this.oauthManager, agentId, opts, this.host, this.taskGroupRequests.capture()))
   }
 
   /** Session config for follow-up calls on an existing session (send, abort, stop). */
   private async buildSessionConfig(agentId: string, taskId: string, workspaceDir?: string): Promise<SessionConfig> {
+    this.taskGroupRequests.assertCurrent()
     const agent = this.db.getAgent(agentId)
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`)
@@ -1089,6 +1107,7 @@ export class AgentManager extends EventEmitter {
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(
       taskId, task, this.heartbeatScopeTask(taskId, task), agentId, this.db.getTaskMcpScopeNonce?.(taskId) ?? null
     ))
+    this.taskGroupRequests.assertCurrent()
     // Task context keeps follow-up messages after idle aware of the task;
     // without it doSendAdapterMessage sends a bare prompt. A coordinator row
     // is not work to describe.
@@ -1170,9 +1189,15 @@ export class AgentManager extends EventEmitter {
   }
 
   private assertSessionGeneration(sessionId: string, session: AgentSession): void {
+    this.taskGroupRequests.assertCurrent()
     if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) {
       throw new Error('Message delivery was cancelled because the user stopped this task.')
     }
+  }
+
+  /** Caller authority follows the entire raw lifecycle, including bounded-start children. */
+  withTaskGroupRequestGuard<T>(effect: () => Promise<T>, beforeEffect: () => void, signal: AbortSignal): Promise<T> {
+    return this.ownShutdownWork(this.taskGroupRequests.run(effect, beforeEffect, signal))
   }
 
   /** A definition/review lease blocks new dispatches while source effects or
@@ -1189,6 +1214,7 @@ export class AgentManager extends EventEmitter {
       try {
         await Promise.all(ids.map(id => serializeTaskSend(this, id, async () => undefined)))
         if (this.shuttingDown) throw new Error('The app is shutting down.')
+        this.taskGroupRequests.assertCurrent()
         return await mutation()
       } finally { for (const id of ids) this.taskGroupMutations.delete(id) }
     })())
@@ -1208,6 +1234,7 @@ export class AgentManager extends EventEmitter {
       try {
         await Promise.all(ids.map(id => serializeTaskSend(this, id, async () => undefined)))
         if (this.shuttingDown) throw new Error('The app is shutting down.')
+        this.taskGroupRequests.assertCurrent()
         return await mutation()
       } finally {
         for (const id of ids) this.taskLifecycleMutations.delete(id)
@@ -1402,6 +1429,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private assertAgentConfigurationAvailable(agentId: string | undefined): void {
+    this.taskGroupRequests.assertCurrent()
     if (!agentId) return
     const agent = this.db.getAgent(agentId)
     const backend = agent && getAgentProvider(agent)
@@ -1419,12 +1447,14 @@ export class AgentManager extends EventEmitter {
   /** Membership changes retire only their idle backend. Saved transcript and
    * the pending continuity seed survive until the next accepted instruction. */
   async retireTaskGroupContext(taskId: string): Promise<void> {
+    this.taskGroupRequests.assertCurrent()
     const task = this.db.getTask(taskId)
     if (task?.role !== 'task_group') throw new Error('Task group execution was not found.')
     const live = this.findSessionByTaskId(taskId)
     if (live && ['working', 'waiting_approval'].includes(live.session.status)) throw new Error('Stop the group before changing its members.')
     const previousId = live?.sessionId ?? task.session_id
     if (live) await this.stopSession(live.sessionId, false, true)
+    this.taskGroupRequests.assertCurrent()
     if (previousId) {
       const lossId = `session-loss-pending-${randomUUID()}`
       this.emitSystemNotice(previousId, taskId, lossId, 'Group membership changed. The previous shared transcript is retained; the next accepted instruction carries a continuity recap.')
@@ -1437,6 +1467,8 @@ export class AgentManager extends EventEmitter {
   }
 
   private assertNoTaskGroupMutation(taskId: string): void {
+    const pendingCleanup = this.findSessionByTaskId(taskId)
+    if (pendingCleanup && this.scopedCleanupFailures.has(pendingCleanup.sessionId)) throw new Error('Accepted native cleanup must finish before this task can restart.')
     if (this.taskLifecycleMutations.has(taskId)) throw new Error('The task is being updated. Retry after its lifecycle change finishes.')
     if (this.taskGroupMutations.has(taskId)) throw new Error('The task group is being updated. Retry after its review or membership change finishes.')
     this.assertAgentConfigurationAvailable(this.db.getTask(taskId)?.agent_id ?? this.findSessionByTaskId(taskId)?.session.agentId)
@@ -1572,12 +1604,15 @@ export class AgentManager extends EventEmitter {
   }
 
   private async initializeAndProbeAdapter(adapter: CodingAgentAdapter, taskId: string, generation = this.captainRuntimes.get(taskId)?.generation): Promise<void> {
+    this.taskGroupRequests.assertCurrent()
     const init = this.ownShutdownWork(adapter.initialize())
     try {
       await withStartupDeadline(init, AGENT_SERVER_START_TIMEOUT_MS, 'Agent server startup')
+      this.taskGroupRequests.assertCurrent()
       const health = typeof adapter.checkHealth === 'function'
         ? await withStartupDeadline(this.ownShutdownWork(adapter.checkHealth()), AGENT_SERVER_START_TIMEOUT_MS, 'Agent health probe')
         : { available: true }
+      this.taskGroupRequests.assertCurrent()
       if (!health.available) {
         this.transitionCaptainRuntime(taskId, 'unhealthy', {
           lastProbeAt: Date.now(),
@@ -1610,6 +1645,7 @@ export class AgentManager extends EventEmitter {
     markHealthy = true,
     generation = this.captainRuntimes.get(taskId)?.generation
   ): Promise<SessionStatusType> {
+    this.taskGroupRequests.assertCurrent()
     this.transitionCaptainRuntime(taskId, 'verifying', { sessionId, lastProbeAt: Date.now() }, generation)
     const readiness = adapter as CodingAgentAdapter & {
       getSessionStatus?: (id: string, config: SessionConfig) => Promise<{ type: SessionStatusType; message?: string }>
@@ -1627,6 +1663,7 @@ export class AgentManager extends EventEmitter {
       AGENT_SERVER_START_TIMEOUT_MS,
       'Agent session readiness probe'
     )
+    this.taskGroupRequests.assertCurrent()
     if (status.type === SessionStatusType.ERROR && this.providerRecoveries.get(taskId)?.state === 'retrying'
       && this.providerRecoveries.get(taskId)?.sessionId === sessionId) return SessionStatusType.IDLE
     if (status.type === SessionStatusType.ERROR) {
@@ -1662,6 +1699,23 @@ export class AgentManager extends EventEmitter {
     return status.type
   }
 
+  private async retireScopedAdapterSession(adapter: CodingAgentAdapter, sessionId: string, config: SessionConfig): Promise<void> {
+    const existing = this.sessions.get(sessionId)
+    if (existing && (existing.taskId !== config.taskId || existing.agentId !== config.agentId || existing.adapter !== adapter)) {
+      this.scopedCleanupFailures.add(sessionId)
+      this.scopedCleanupConflicts.add(sessionId)
+      throw new Error('Accepted native cleanup has conflicting ownership; retain the profile for reconciliation.')
+    }
+    if (!existing) this.sessions.set(sessionId, {
+      id: sessionId, agentId: config.agentId!, taskId: config.taskId!, workspaceDir: config.workspaceDir,
+      status: 'idle', createdAt: new Date(), seenMessageIds: new Set(), seenPartIds: new Set(), partContentLengths: new Map(),
+      adapter, fallbackAgentIds: [], attemptedAgentIds: new Set([config.agentId!]), configuredModel: config.model, secretSessionToken: config.secretSessionToken
+    })
+    this.scopedCleanupFailures.add(sessionId)
+    this.scopedRetirementConfigs.set(this.sessions.get(sessionId)!, config)
+    await this.ownTaskStartup(config.taskId!, this.taskGroupRequests.detached(() => this.stopSession(sessionId, false, true)))
+  }
+
   /**
    * Starts a session using a coding agent adapter (Claude Code, etc.)
    *
@@ -1683,6 +1737,7 @@ export class AgentManager extends EventEmitter {
     deferCoordinatorBinding = false,
     mayStart: () => boolean = () => !this.shuttingDown
   ): Promise<string> {
+    this.taskGroupRequests.assertCurrent()
     const agent = this.db.getAgent(agentId)!
     workspaceDir ||= this.db.getWorkspaceDir(taskId)
 
@@ -1693,214 +1748,248 @@ export class AgentManager extends EventEmitter {
     const runtimeGeneration = this.captainRuntimes.get(taskId)?.generation
     const isTriageSession = isTriageSessionTask(taskId, task)
     await yieldEventLoop()
+    this.taskGroupRequests.assertCurrent()
 
     const mcpScopeNonce = task && !isCoordinatorTask(task) ? this.db.rotateTaskMcpScopeNonce?.(taskId) ?? null : null
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(
       taskId, task, this.heartbeatScopeTask(taskId, task), agentId, mcpScopeNonce
     ))
 
+    this.taskGroupRequests.assertCurrent()
     // Written AFTER the MCP map is built so the documentation describes the
     // servers this session really gets, instead of the agent configuration,
     // which both over- and under-reports them.
-    await writeSkillFiles(this.db, taskId, agentId, workspaceDir, mcpServers)
+    await this.ownShutdownWork(writeSkillFiles(this.db, taskId, agentId, workspaceDir, mcpServers, this.taskGroupRequests.capture()))
     await yieldEventLoop()
+    this.taskGroupRequests.assertCurrent()
 
     const secretToken = this.setupSecretSession(agentId)
-    const sessionConfig = assembleSessionConfig(this.db, agent, {
-      agentId,
-      taskId,
-      task,
-      workspaceDir,
-      mcpServers,
-      systemPrompt: agent.config?.system_prompt,
-      secretToken,
-      onModelNotice: (notice) => this.emitSystemError('', taskId, `skill-model-${Date.now()}`, notice)
-    }, this.host)
-    await yieldEventLoop()
-
-    console.log(`[AgentManager] startAdapterSession: agent=${agent.name}, coding_agent=${agent.config?.coding_agent || 'opencode'}, model=${agent.config?.model}, adapter=${adapter.constructor.name}`)
-    await this.initializeAndProbeAdapter(adapter, taskId, runtimeGeneration)
-
-    if (managedTask && (handoffFromAgentName || this.pendingSessionLoss(taskId))) this.taskRecap(taskId, sessionConfig.model, !handoffFromAgentName,
-      skipInitialPrompt ? 0 : this.taskHandoffReservedTokens(taskId))
-    if (!mayStart()) throw new Error('Start ownership was withdrawn before session creation.')
-    const creating = this.ownShutdownWork(engine
-      ? engine.createSession(taskId, adapter, sessionConfig) : adapter.createSession(sessionConfig))
-    const adapterSessionId = await withStartupDeadline(
-      creating,
-      AGENT_SESSION_START_TIMEOUT_MS,
-      'Agent session startup',
-      (lateSessionId) => this.ownShutdownWork(adapter.destroySession(lateSessionId, sessionConfig)).catch(() => {})
-    )
-    console.log(`[AgentManager] Session created: ${adapterSessionId}, workspaceDir=${workspaceDir}`)
+    let acceptedSessionId: string | undefined
+    let creationStarted = false
+    let scopedSecretReleased = false
+    let scopedRetirementAttempted = false
     try {
-      await this.verifyAdapterSession(adapter, adapterSessionId, sessionConfig, taskId, !deferCoordinatorBinding, runtimeGeneration)
+      const sessionConfig = assembleSessionConfig(this.db, agent, {
+        agentId,
+        taskId,
+        task,
+        workspaceDir,
+        mcpServers,
+        systemPrompt: agent.config?.system_prompt,
+        secretToken,
+        onModelNotice: (notice) => this.emitSystemError('', taskId, `skill-model-${Date.now()}`, notice)
+      }, this.host)
+      await yieldEventLoop()
+      this.taskGroupRequests.assertCurrent()
+
+      console.log(`[AgentManager] startAdapterSession: agent=${agent.name}, coding_agent=${agent.config?.coding_agent || 'opencode'}, model=${agent.config?.model}, adapter=${adapter.constructor.name}`)
+      await this.initializeAndProbeAdapter(adapter, taskId, runtimeGeneration)
+
+      if (managedTask && (handoffFromAgentName || this.pendingSessionLoss(taskId))) this.taskRecap(taskId, sessionConfig.model, !handoffFromAgentName,
+        skipInitialPrompt ? 0 : this.taskHandoffReservedTokens(taskId))
+      this.taskGroupRequests.assertCurrent()
+      if (!mayStart()) throw new Error('Start ownership was withdrawn before session creation.')
+      creationStarted = true
+      const creating = this.ownTaskStartup(taskId, engine
+        ? engine.createSession(taskId, adapter, sessionConfig) : adapter.createSession(sessionConfig))
+      const adapterSessionId = await withStartupDeadline(
+        creating,
+        AGENT_SESSION_START_TIMEOUT_MS,
+        'Agent session startup',
+        (lateSessionId) => this.ownShutdownWork(this.taskGroupRequests.detached(() => this.retireScopedAdapterSession(adapter, lateSessionId, sessionConfig))).catch(error => console.error('[AgentManager] Late native cleanup remains owned:', error))
+      )
+      acceptedSessionId = adapterSessionId
+      this.taskGroupRequests.assertCurrent()
+      console.log(`[AgentManager] Session created: ${adapterSessionId}, workspaceDir=${workspaceDir}`)
+      try {
+        await this.verifyAdapterSession(adapter, adapterSessionId, sessionConfig, taskId, !deferCoordinatorBinding, runtimeGeneration)
+      } catch (error) {
+        if (this.taskGroupRequests.scoped) {
+          scopedRetirementAttempted = true
+          await this.retireScopedAdapterSession(adapter, adapterSessionId, sessionConfig)
+          acceptedSessionId = undefined
+          scopedSecretReleased = true
+        } else await this.ownShutdownWork(adapter.destroySession(adapterSessionId, sessionConfig)).catch(() => {})
+        throw error
+      }
+
+      // OpenCode receives its MCP servers through runtime calls, so attachment can
+      // still fail after the documentation was written. Rewrite the documentation
+      // without the servers that are not attached: an agent that is told it has 35
+      // task-management tools it cannot call behaves far worse than one that knows
+      // it has none.
+      const attachFailures = getAdapterMcpAttachFailures(adapter, adapterSessionId)
+      if (attachFailures.length > 0) {
+        console.error(
+          `[AgentManager] MCP servers NOT attached for session ${adapterSessionId}: ${attachFailures.join(', ')} — ` +
+          `rewriting session documentation without them`
+        )
+        const attached = Object.fromEntries(
+          Object.entries(mcpServers).filter(([name]) => !attachFailures.includes(name))
+        )
+        await this.ownShutdownWork(writeSkillFiles(this.db, taskId, agentId, workspaceDir, attached, this.taskGroupRequests.capture()))
+      }
+
+      this.taskGroupRequests.assertCurrent()
+      this.schedulePowerSaveBlockerUpdate()
+      // Keep one shared set across nested startup fallbacks. If a replacement
+      // itself exhausts credits before startAdapterSession returns, the outer
+      // handoff must see every agent the nested handoff already attempted.
+      const attemptedAgentIds = inheritedFallbackState?.attemptedAgentIds ?? new Set<string>()
+      attemptedAgentIds.add(agentId)
+      const configuredFallbacks = normalizeFallbackAgentIds(agent.config?.fallback_agent_ids)
+      const fallbackAgentIds = [
+        ...(inheritedFallbackState?.remainingAgentIds ?? []),
+        ...configuredFallbacks,
+      ].filter((id, index, ids) => id !== agentId && !attemptedAgentIds.has(id) && ids.indexOf(id) === index)
+
+      this.sessions.set(adapterSessionId, {
+        id: adapterSessionId,
+        agentId,
+        taskId,
+        workspaceDir,
+        status: 'working',
+        createdAt: new Date(),
+        lastActivityAt: Date.now(),
+        seenMessageIds: new Set(),
+        seenPartIds: new Set(),
+        partContentLengths: new Map(),
+        assistantTextKeys: new Set(),
+        adapter,
+        isTriageSession,
+        secretSessionToken: secretToken,
+        fallbackAgentIds,
+        attemptedAgentIds,
+        managedCaptain,
+        managedTask,
+        configuredModel: sessionConfig.model,
+        configuredAgent: isCoordinatorTask(task) ? structuredClone(agent) : undefined
+      })
+
+      if (!mayStart()) {
+        // Retain ownership if the backend refuses cleanup, so a pending user
+        // stop cannot report success while an untracked session survives.
+        await this.stopSession(adapterSessionId, false, true)
+        throw new Error('Start ownership was withdrawn before session registration.')
+      }
+
+      if (!deferCoordinatorBinding) {
+        this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
+        this.recordCoordinatorSessionAgent(taskId, agentId)
+      }
+      console.log(`[SessionTracker] CREATED session=${adapterSessionId} task=${taskId} agent=${agentId} reason=new_session`)
+
+      // A replacement for a lost session is never started blank or silently.
+      // A handoff already carries the full recap, so it only gets the notice.
+      const lostSessionRecap = this.announceLostSessionReplacement(taskId, adapterSessionId)
+      this.restoreCaptainHandoffSeed(this.sessions.get(adapterSessionId)!)
+      const seedRecap = handoffFromAgentName ? '' : this.sessions.get(adapterSessionId)!.pendingRecap ?? lostSessionRecap
+
+      // Triage sessions keep the Triaging status; coordinator rows have none.
+      if (!isTriageSession && !isCoordinatorTask(task)) {
+        this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.AgentWorking })
+        this.sendToRenderer('task:updated', {
+          taskId,
+          updates: { status: TaskStatus.AgentWorking }
+        })
+      }
+      await yieldEventLoop()
+      this.taskGroupRequests.assertCurrent()
+
+      if (!mayStart()) {
+        await this.stopSession(adapterSessionId, false, true)
+        throw new Error('Start ownership was withdrawn before prompt delivery.')
+      }
+
+      if (!deferCoordinatorBinding) {
+        this.emitStatus(adapterSessionId, { agentId, taskId }, 'working')
+        this.startAdapterPolling(adapterSessionId, adapter, sessionConfig)
+      }
+
+      if (!skipInitialPrompt) {
+        let promptText: string
+        if (isTriageSession && task) {
+          promptText = buildTriagePrompt(task, this.projectRepoNames(task))
+        } else {
+          promptText = buildTaskWorkPrompt(this.db, taskId, task ?? this.db.getTask(taskId))
+          const attachmentRefs = syncAttachmentsToWorkspace(this.db, taskId, workspaceDir)
+          if (attachmentRefs.length > 0) {
+            promptText += `\n\nAttached files (relative to your working directory):\n${attachmentRefs.join('\n')}`
+          }
+        }
+        promptText += HEARTBEAT_MONITORING_INSTRUCTIONS
+        // In the user message because agents follow it more reliably than the system prompt.
+        promptText += `\n\nIMPORTANT: First, read the \`${getMemoryFileName(this.db, agentId)}\` file in the working directory — it has workspace config, skills, and project context.`
+
+        // Agent handoff — prepend a recap of the existing conversation so the
+        // new agent isn't starting from a blank slate. Comes last so it reads
+        // first, right before the actual work instructions.
+        if (handoffFromAgentName) {
+          const recap = this.taskRecap(taskId, sessionConfig.model, false, estimateTokens(promptText.length + 256))
+          if (recap) {
+            promptText = `## Picking up from ${handoffFromAgentName}\n\nThis task was previously being worked on by a different agent. Here is the conversation so far:\n\n${recap}\n\n---\n\n${promptText}`
+          }
+        } else if (seedRecap) {
+          promptText = `${seedRecap}\n\n${promptText}`
+        }
+
+        if (managedTask && (handoffFromAgentName || seedRecap) && estimateTokens(promptText.length) > taskContextBudget(sessionConfig.model ?? ''))
+          throw new Error('TASK_RECAP_INSTRUCTION_TOO_LARGE: task instructions and continuity do not fit intact; the transcript remains saved.')
+
+        // Show the full prompt so the user can see the complete context sent to
+        // the agent (repos, skills, secrets, heartbeat, etc.)
+        this.sendToRenderer('agent:output', {
+          sessionId: adapterSessionId,
+          taskId,
+          type: 'message',
+          data: {
+            id: `${INITIAL_PROMPT_PART_PREFIX}${Date.now()}`,
+            role: 'user',
+            content: promptText,
+            partType: 'text'
+          }
+        })
+
+        const startingSession = this.sessions.get(adapterSessionId)!
+        const pendingLossId = startingSession.pendingLossId
+        try {
+          const send = () => this.sendTrackedPrompt(startingSession, adapterSessionId, promptText, sessionConfig)
+          await serializeTaskSend(this, taskId, send)
+          this.acknowledgeSessionRecap(startingSession, pendingLossId)
+        } catch (sendError) {
+          if (!this.taskGroupRequests.isCurrent()) throw sendError
+          console.error(`[AgentManager] sendPrompt FAILED:`, sendError)
+          const message = sendError instanceof Error ? sendError.message : String(sendError)
+          const session = this.sessions.get(adapterSessionId)
+          if (session && await this.tryProviderRecovery(adapterSessionId, session, classifyProviderFailure(sendError))) {
+            return this.findSessionByTaskId(taskId)?.sessionId || adapterSessionId
+          }
+          if (task && this.startQueue.fail(taskId, 'unsafe_side_effect_unknown', 'prompt_delivery_unconfirmed', message)) {
+            this.recordRecoveryAudit(task, 'unsafe_side_effect_unknown', 'terminal_failure', 'prompt_delivery_unconfirmed', message)
+          }
+          await this.stopSession(adapterSessionId, false)
+          const currentTask = this.db.getTask(taskId)
+          if (currentTask?.session_id === adapterSessionId && currentTask.status !== TaskStatus.Completed) {
+            this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null }, 'system')
+          }
+          throw sendError
+        }
+      }
+
+      return adapterSessionId
     } catch (error) {
-      await adapter.destroySession(adapterSessionId, sessionConfig).catch(() => {})
+      if (!this.taskGroupRequests.isCurrent()) {
+        if (acceptedSessionId && !scopedRetirementAttempted) {
+          scopedRetirementAttempted = true
+          await this.retireScopedAdapterSession(adapter, acceptedSessionId, { agentId, taskId, workspaceDir, secretSessionToken: secretToken })
+          scopedSecretReleased = true
+          const current = this.db.getTask(taskId)
+          if (current?.session_id === acceptedSessionId) this.taskGroupRequests.detached(() => this.updateTaskFromLocalAgent(taskId, { session_id: null }, 'system'))
+        }
+        if (!creationStarted && !scopedRetirementAttempted && !scopedSecretReleased && secretToken && this.host.secrets.kind === 'broker') this.host.secrets.unregister(secretToken)
+      }
       throw error
     }
-
-    // OpenCode receives its MCP servers through runtime calls, so attachment can
-    // still fail after the documentation was written. Rewrite the documentation
-    // without the servers that are not attached: an agent that is told it has 35
-    // task-management tools it cannot call behaves far worse than one that knows
-    // it has none.
-    const attachFailures = getAdapterMcpAttachFailures(adapter, adapterSessionId)
-    if (attachFailures.length > 0) {
-      console.error(
-        `[AgentManager] MCP servers NOT attached for session ${adapterSessionId}: ${attachFailures.join(', ')} — ` +
-        `rewriting session documentation without them`
-      )
-      const attached = Object.fromEntries(
-        Object.entries(mcpServers).filter(([name]) => !attachFailures.includes(name))
-      )
-      await writeSkillFiles(this.db, taskId, agentId, workspaceDir, attached)
-    }
-
-    this.schedulePowerSaveBlockerUpdate()
-    // Keep one shared set across nested startup fallbacks. If a replacement
-    // itself exhausts credits before startAdapterSession returns, the outer
-    // handoff must see every agent the nested handoff already attempted.
-    const attemptedAgentIds = inheritedFallbackState?.attemptedAgentIds ?? new Set<string>()
-    attemptedAgentIds.add(agentId)
-    const configuredFallbacks = normalizeFallbackAgentIds(agent.config?.fallback_agent_ids)
-    const fallbackAgentIds = [
-      ...(inheritedFallbackState?.remainingAgentIds ?? []),
-      ...configuredFallbacks,
-    ].filter((id, index, ids) => id !== agentId && !attemptedAgentIds.has(id) && ids.indexOf(id) === index)
-
-    this.sessions.set(adapterSessionId, {
-      id: adapterSessionId,
-      agentId,
-      taskId,
-      workspaceDir,
-      status: 'working',
-      createdAt: new Date(),
-      lastActivityAt: Date.now(),
-      seenMessageIds: new Set(),
-      seenPartIds: new Set(),
-      partContentLengths: new Map(),
-      assistantTextKeys: new Set(),
-      adapter,
-      isTriageSession,
-      secretSessionToken: secretToken,
-      fallbackAgentIds,
-      attemptedAgentIds,
-      managedCaptain,
-      managedTask,
-      configuredModel: sessionConfig.model,
-      configuredAgent: isCoordinatorTask(task) ? structuredClone(agent) : undefined
-    })
-
-    if (!mayStart()) {
-      // Retain ownership if the backend refuses cleanup, so a pending user
-      // stop cannot report success while an untracked session survives.
-      await this.stopSession(adapterSessionId, false, true)
-      throw new Error('Start ownership was withdrawn before session registration.')
-    }
-
-    if (!deferCoordinatorBinding) {
-      this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
-      this.recordCoordinatorSessionAgent(taskId, agentId)
-    }
-    console.log(`[SessionTracker] CREATED session=${adapterSessionId} task=${taskId} agent=${agentId} reason=new_session`)
-
-    // A replacement for a lost session is never started blank or silently.
-    // A handoff already carries the full recap, so it only gets the notice.
-    const lostSessionRecap = this.announceLostSessionReplacement(taskId, adapterSessionId)
-    this.restoreCaptainHandoffSeed(this.sessions.get(adapterSessionId)!)
-    const seedRecap = handoffFromAgentName ? '' : this.sessions.get(adapterSessionId)!.pendingRecap ?? lostSessionRecap
-
-    // Triage sessions keep the Triaging status; coordinator rows have none.
-    if (!isTriageSession && !isCoordinatorTask(task)) {
-      this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.AgentWorking })
-      this.sendToRenderer('task:updated', {
-        taskId,
-        updates: { status: TaskStatus.AgentWorking }
-      })
-    }
-    await yieldEventLoop()
-
-    if (!mayStart()) {
-      await this.stopSession(adapterSessionId, false, true)
-      throw new Error('Start ownership was withdrawn before prompt delivery.')
-    }
-
-    if (!deferCoordinatorBinding) {
-      this.emitStatus(adapterSessionId, { agentId, taskId }, 'working')
-      this.startAdapterPolling(adapterSessionId, adapter, sessionConfig)
-    }
-
-    if (!skipInitialPrompt) {
-      let promptText: string
-      if (isTriageSession && task) {
-        promptText = buildTriagePrompt(task, this.projectRepoNames(task))
-      } else {
-        promptText = buildTaskWorkPrompt(this.db, taskId, task ?? this.db.getTask(taskId))
-        const attachmentRefs = syncAttachmentsToWorkspace(this.db, taskId, workspaceDir)
-        if (attachmentRefs.length > 0) {
-          promptText += `\n\nAttached files (relative to your working directory):\n${attachmentRefs.join('\n')}`
-        }
-      }
-      promptText += HEARTBEAT_MONITORING_INSTRUCTIONS
-      // In the user message because agents follow it more reliably than the system prompt.
-      promptText += `\n\nIMPORTANT: First, read the \`${getMemoryFileName(this.db, agentId)}\` file in the working directory — it has workspace config, skills, and project context.`
-
-      // Agent handoff — prepend a recap of the existing conversation so the
-      // new agent isn't starting from a blank slate. Comes last so it reads
-      // first, right before the actual work instructions.
-      if (handoffFromAgentName) {
-        const recap = this.taskRecap(taskId, sessionConfig.model, false, estimateTokens(promptText.length + 256))
-        if (recap) {
-          promptText = `## Picking up from ${handoffFromAgentName}\n\nThis task was previously being worked on by a different agent. Here is the conversation so far:\n\n${recap}\n\n---\n\n${promptText}`
-        }
-      } else if (seedRecap) {
-        promptText = `${seedRecap}\n\n${promptText}`
-      }
-
-      if (managedTask && (handoffFromAgentName || seedRecap) && estimateTokens(promptText.length) > taskContextBudget(sessionConfig.model ?? ''))
-        throw new Error('TASK_RECAP_INSTRUCTION_TOO_LARGE: task instructions and continuity do not fit intact; the transcript remains saved.')
-
-      // Show the full prompt so the user can see the complete context sent to
-      // the agent (repos, skills, secrets, heartbeat, etc.)
-      this.sendToRenderer('agent:output', {
-        sessionId: adapterSessionId,
-        taskId,
-        type: 'message',
-        data: {
-          id: `${INITIAL_PROMPT_PART_PREFIX}${Date.now()}`,
-          role: 'user',
-          content: promptText,
-          partType: 'text'
-        }
-      })
-
-      const startingSession = this.sessions.get(adapterSessionId)!
-      const pendingLossId = startingSession.pendingLossId
-      try {
-        const send = () => this.sendTrackedPrompt(startingSession, adapterSessionId, promptText, sessionConfig)
-        await serializeTaskSend(this, taskId, send)
-        this.acknowledgeSessionRecap(startingSession, pendingLossId)
-      } catch (sendError) {
-        console.error(`[AgentManager] sendPrompt FAILED:`, sendError)
-        const message = sendError instanceof Error ? sendError.message : String(sendError)
-        const session = this.sessions.get(adapterSessionId)
-        if (session && await this.tryProviderRecovery(adapterSessionId, session, classifyProviderFailure(sendError))) {
-          return this.findSessionByTaskId(taskId)?.sessionId || adapterSessionId
-        }
-        if (task && this.startQueue.fail(taskId, 'unsafe_side_effect_unknown', 'prompt_delivery_unconfirmed', message)) {
-          this.recordRecoveryAudit(task, 'unsafe_side_effect_unknown', 'terminal_failure', 'prompt_delivery_unconfirmed', message)
-        }
-        await this.stopSession(adapterSessionId, false)
-        const currentTask = this.db.getTask(taskId)
-        if (currentTask?.session_id === adapterSessionId && currentTask.status !== TaskStatus.Completed) {
-          this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null }, 'system')
-        }
-        throw sendError
-      }
-    }
-
-    return adapterSessionId
   }
 
   // ── Centralized Polling Coordinator ──────────────────────────────
@@ -1919,6 +2008,7 @@ export class AgentManager extends EventEmitter {
     config: SessionConfig,
     existingSession?: AgentSession
   ): void {
+    if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.startAdapterPolling(initialSessionId, adapter, config, existingSession))
     const owner = existingSession ?? this.sessions.get(initialSessionId)
     if (owner && !this.mayPollSessionGeneration(owner)) return
     const entry: PollingEntry = {
@@ -1948,6 +2038,7 @@ export class AgentManager extends EventEmitter {
     // the 2-second heartbeat).
     if (!adapter.onDataAvailable) {
       adapter.onDataAvailable = (dataSessionId: string) => {
+        if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => adapter.onDataAvailable?.(dataSessionId))
         // A session whose polling was already stopped (it went idle) can still
         // produce data later — Claude Code backgrounds subagents, so the turn
         // ends first and the children report back afterwards. Re-register it,
@@ -2120,6 +2211,7 @@ export class AgentManager extends EventEmitter {
    * run a poll cycle for every single streaming chunk.
    */
   private nudgePollingCoordinator(): void {
+    if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.nudgePollingCoordinator())
     if (this.nudgeTimer) return
 
     // A running tick only picks the data up if it has not polled this session
@@ -2839,170 +2931,193 @@ export class AgentManager extends EventEmitter {
     // session file won't be found.
     const workspaceDir = await this.setupWorktreeIfNeeded(taskId) || this.db.getWorkspaceDir(taskId)
 
+    this.taskGroupRequests.assertCurrent()
     // Pick up attachments added since the session was started/last resumed.
     syncAttachmentsToWorkspace(this.db, taskId, workspaceDir)
 
     const task = this.db.getTask(taskId)
     await yieldEventLoop()
+    this.taskGroupRequests.assertCurrent()
 
     const mcpScopeNonce = task && !isCoordinatorTask(task) ? this.db.rotateTaskMcpScopeNonce?.(taskId) ?? null : null
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(
       taskId, task, this.heartbeatScopeTask(taskId, task), agentId, mcpScopeNonce
     ))
+    this.taskGroupRequests.assertCurrent()
     // Resumed sessions must read current tool descriptions and assigned skills,
     // not workspace instructions left behind by an older app version.
-    await writeSkillFiles(this.db, taskId, agentId, workspaceDir, mcpServers)
+    await this.ownShutdownWork(writeSkillFiles(this.db, taskId, agentId, workspaceDir, mcpServers, this.taskGroupRequests.capture()))
     // Task context in the system prompt survives context compaction.
     const taskContext = task && !isCoordinatorTask(task)
       ? `\n\n[Task Context]\nTask: "${task.title}"\n${task.description || ''}`
       : ''
+    this.taskGroupRequests.assertCurrent()
     const secretToken = this.setupSecretSession(agentId)
-    const sessionConfig = assembleSessionConfig(this.db, agent, {
-      agentId,
-      taskId,
-      task,
-      workspaceDir,
-      mcpServers,
-      systemPrompt: (agent.config?.system_prompt || '') + taskContext,
-      secretToken
-    }, this.host)
-    await yieldEventLoop()
-
-    await this.initializeAndProbeAdapter(adapter, taskId, runtimeGeneration)
-
-    let messages: SessionMessage[]
+    let resumedAccepted = false
+    let resumptionStarted = false
+    let resumedRetired = false
     try {
-      console.log('[AgentManager] Calling adapter.resumeSession...')
-      messages = await withStartupDeadline(
-        this.ownShutdownWork(engine
-          ? engine.resumeSession(taskId, adapterSessionId, adapter, sessionConfig)
-          : adapter.resumeSession(adapterSessionId, sessionConfig)),
-        AGENT_SESSION_START_TIMEOUT_MS,
-        'Agent session resume',
-        () => this.ownShutdownWork(adapter.destroySession(adapterSessionId, sessionConfig)).catch(() => {})
-      )
-      console.log('[AgentManager] adapter.resumeSession completed successfully')
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      console.log('[AgentManager] adapter.resumeSession failed')
+      const sessionConfig = assembleSessionConfig(this.db, agent, {
+        agentId,
+        taskId,
+        task,
+        workspaceDir,
+        mcpServers,
+        systemPrompt: (agent.config?.system_prompt || '') + taskContext,
+        secretToken
+      }, this.host)
+      await yieldEventLoop()
+      this.taskGroupRequests.assertCurrent()
 
-      if (
-        errorMessage.includes('INCOMPATIBLE_SESSION_ID') ||
-        errorMessage.includes('No conversation found') ||
-        errorMessage.includes('SESSION_FILE_NOT_FOUND') ||
-        errorMessage.includes('Session no longer exists on server')
-      ) {
-        console.warn(`[AgentManager] Session not found or incompatible: ${adapterSessionId}`)
+      await this.initializeAndProbeAdapter(adapter, taskId, runtimeGeneration)
 
-        // For completed/review tasks, the session may have ended normally.
-        // Don't show the alarming "incompatible" dialog — just clear the session_id
-        // so the UI shows "Start" instead. This commonly happens with subtask sessions.
-        const currentTask = this.db.getTask(taskId)
-        this.markSessionLost(taskId, adapterSessionId, errorMessage)
-        // A coordinator conversation the backend no longer has is simply over;
-        // the caller opens a new one. There is no task to ask the user about.
-        if (isCoordinatorTask(currentTask)) {
-          console.log(`[AgentManager] Coordinator session ${adapterSessionId} is gone — clearing session_id for ${taskId}`)
+      let messages: SessionMessage[]
+      try {
+        this.taskGroupRequests.assertCurrent()
+        console.log('[AgentManager] Calling adapter.resumeSession...')
+        resumptionStarted = true
+        messages = await withStartupDeadline(
+          this.ownTaskStartup(taskId, engine
+            ? engine.resumeSession(taskId, adapterSessionId, adapter, sessionConfig)
+            : adapter.resumeSession(adapterSessionId, sessionConfig)),
+          AGENT_SESSION_START_TIMEOUT_MS,
+          'Agent session resume',
+          () => this.ownShutdownWork(this.taskGroupRequests.detached(() => this.retireScopedAdapterSession(adapter, adapterSessionId, sessionConfig))).catch(error => console.error('[AgentManager] Late resume cleanup remains owned:', error))
+        )
+        resumedAccepted = true
+        this.taskGroupRequests.assertCurrent()
+        console.log('[AgentManager] adapter.resumeSession completed successfully')
+      } catch (error: unknown) {
+        this.taskGroupRequests.assertCurrent()
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        console.log('[AgentManager] adapter.resumeSession failed')
+
+        if (
+          errorMessage.includes('INCOMPATIBLE_SESSION_ID') ||
+          errorMessage.includes('No conversation found') ||
+          errorMessage.includes('SESSION_FILE_NOT_FOUND') ||
+          errorMessage.includes('Session no longer exists on server')
+        ) {
+          console.warn(`[AgentManager] Session not found or incompatible: ${adapterSessionId}`)
+
+          // For completed/review tasks, the session may have ended normally.
+          // Don't show the alarming "incompatible" dialog — just clear the session_id
+          // so the UI shows "Start" instead. This commonly happens with subtask sessions.
+          const currentTask = this.db.getTask(taskId)
+          this.markSessionLost(taskId, adapterSessionId, errorMessage)
+          // A coordinator conversation the backend no longer has is simply over;
+          // the caller opens a new one. There is no task to ask the user about.
+          if (isCoordinatorTask(currentTask)) {
+            console.log(`[AgentManager] Coordinator session ${adapterSessionId} is gone — clearing session_id for ${taskId}`)
+            this.updateTaskFromLocalAgent(taskId, { session_id: null })
+            return ''
+          }
+          const pendingFeedback = currentTask?.status === TaskStatus.AgentLearning
+            && this.db.getSetting(`session-feedback-completion:${taskId}`)
+          if (currentTask && (currentTask.status === TaskStatus.ReadyForReview || currentTask.status === TaskStatus.Completed || pendingFeedback)) {
+            console.log(`[AgentManager] Session ended normally for ${currentTask.status} task ${taskId} — clearing session_id`)
+            this.updateTaskFromLocalAgent(taskId, { session_id: null })
+            this.sendToRenderer('task:updated', { taskId, updates: { session_id: null } })
+            // Return a sentinel value instead of throwing, so the IPC handler doesn't
+            // log a noisy error. The public resumeSession() method returns empty string
+            // which signals to the renderer that the session is gone.
+            return ''
+          }
+
           this.updateTaskFromLocalAgent(taskId, { session_id: null })
-          return ''
+
+          let userMessage = 'Session not found. Would you like to start a new session?'
+          if (errorMessage.includes('SESSION_FILE_NOT_FOUND')) {
+            userMessage = 'Session file not found. The session may have been deleted or never synced. Would you like to start a new session?'
+          } else if (errorMessage.includes('No conversation found')) {
+            userMessage = 'Session not found on server. Would you like to start a new session?'
+          } else {
+            userMessage = 'The backend session is incompatible. Start a new session to continue with a recap.'
+          }
+
+          // The renderer asks the user whether to start fresh.
+          console.log('[AgentManager] Emitting agent:incompatible-session event')
+          this.sendToRenderer('agent:incompatible-session', {
+            taskId,
+            agentId,
+            error: userMessage
+          })
+
+          throw new Error('SESSION_INCOMPATIBLE')
         }
-        const pendingFeedback = currentTask?.status === TaskStatus.AgentLearning
-          && this.db.getSetting(`session-feedback-completion:${taskId}`)
-        if (currentTask && (currentTask.status === TaskStatus.ReadyForReview || currentTask.status === TaskStatus.Completed || pendingFeedback)) {
-          console.log(`[AgentManager] Session ended normally for ${currentTask.status} task ${taskId} — clearing session_id`)
-          this.updateTaskFromLocalAgent(taskId, { session_id: null })
-          this.sendToRenderer('task:updated', { taskId, updates: { session_id: null } })
-          // Return a sentinel value instead of throwing, so the IPC handler doesn't
-          // log a noisy error. The public resumeSession() method returns empty string
-          // which signals to the renderer that the session is gone.
-          return ''
-        }
-
-        this.updateTaskFromLocalAgent(taskId, { session_id: null })
-
-        let userMessage = 'Session not found. Would you like to start a new session?'
-        if (errorMessage.includes('SESSION_FILE_NOT_FOUND')) {
-          userMessage = 'Session file not found. The session may have been deleted or never synced. Would you like to start a new session?'
-        } else if (errorMessage.includes('No conversation found')) {
-          userMessage = 'Session not found on server. Would you like to start a new session?'
-        } else {
-          userMessage = 'The backend session is incompatible. Start a new session to continue with a recap.'
-        }
-
-        // The renderer asks the user whether to start fresh.
-        console.log('[AgentManager] Emitting agent:incompatible-session event')
-        this.sendToRenderer('agent:incompatible-session', {
-          taskId,
-          agentId,
-          error: userMessage
-        })
-
-        throw new Error('SESSION_INCOMPATIBLE')
+        throw error
       }
+
+      const readiness = await this.verifyAdapterSession(adapter, adapterSessionId, sessionConfig, taskId, true, runtimeGeneration)
+      this.taskGroupRequests.assertCurrent()
+      const currentTask = this.db.getTask(taskId)
+      const runtime = this.captainRuntimes.get(taskId)
+      const staleRuntime = runtimeGeneration !== undefined && (runtime?.generation !== runtimeGeneration
+        || ['failed', 'timed_out', 'rolled_back'].includes(runtime.phase))
+      if (this.shuttingDown || staleRuntime || (originalTask && (!currentTask || currentTask.session_id !== originalBinding))) {
+        if (this.taskGroupRequests.scoped) {
+          resumedRetired = true
+          await this.retireScopedAdapterSession(adapter, adapterSessionId, sessionConfig)
+        } else await this.ownShutdownWork(adapter.destroySession(adapterSessionId, sessionConfig)).catch(() => {})
+        throw new Error('Resume ownership changed before the backend reconnected.')
+      }
+      const resumedStatus = readiness === SessionStatusType.WAITING_APPROVAL ? 'waiting_approval'
+        : readiness === SessionStatusType.BUSY || readiness === SessionStatusType.RETRY ? 'working' : 'idle'
+
+      // Seed the dedup state from the resumed history so polling won't re-emit
+      // historical parts as new output. Resume does NOT push the transcript to
+      // clients: they render the durable projection (snapshot +
+      // `transcript:changed` deltas), which the one-time backfill seeds.
+      const dedupState = dedupStateFromHistory(messages)
+
+      // Reconnected busy/approval sessions still own capacity.
+      this.schedulePowerSaveBlockerUpdate()
+      this.sessions.set(adapterSessionId, {
+        id: adapterSessionId,
+        agentId,
+        taskId,
+        workspaceDir,
+        status: resumedStatus,
+        createdAt: new Date(),
+        lastActivityAt: Date.now(),
+        ...dedupState,
+        adapter,
+        pollingStarted: false,
+        secretSessionToken: secretToken,
+        fallbackAgentIds: normalizeFallbackAgentIds(agent.config?.fallback_agent_ids)
+          .filter((id) => id !== agentId),
+        attemptedAgentIds: new Set([agentId]),
+        managedCaptain,
+        managedTask,
+        configuredModel: sessionConfig.model,
+        configuredAgent: isCoordinatorTask(task) ? structuredClone(agent) : undefined
+      })
+
+      // A replacement may have restarted before its first prompt was accepted.
+      this.announceLostSessionReplacement(taskId, adapterSessionId)
+      this.restoreCaptainHandoffSeed(this.sessions.get(adapterSessionId)!)
+
+      // Persist the resumed session binding and tell the renderer BEFORE any
+      // follow-up prompt starts. Without this, a silent main-process resume
+      // (e.g. an event-driven wake-up after the runtime was released) leaves the
+      // renderer bound to a stale session id and the wake turn's output renders
+      // late or not at all.
+      this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
+      this.recordCoordinatorSessionAgent(taskId, agentId)
+      this.sendToRenderer('task:updated', { taskId, updates: { session_id: adapterSessionId } })
+
+      if (resumedStatus !== 'idle') {
+        this.startAdapterPolling(adapterSessionId, adapter, sessionConfig, this.sessions.get(adapterSessionId))
+        if (currentTask?.status !== TaskStatus.Completed) this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.AgentWorking })
+      }
+      this.emitStatus(adapterSessionId, { agentId, taskId }, resumedStatus)
+
+      return adapterSessionId
+    } catch (error) {
+      if (this.taskGroupRequests.scoped && resumedAccepted && !resumedRetired) await this.retireScopedAdapterSession(adapter, adapterSessionId, { agentId, taskId, workspaceDir, secretSessionToken: secretToken })
+      else if (!resumptionStarted && !resumedRetired && !this.taskGroupRequests.isCurrent() && secretToken && this.host.secrets.kind === 'broker') this.host.secrets.unregister(secretToken)
       throw error
     }
-
-    const readiness = await this.verifyAdapterSession(adapter, adapterSessionId, sessionConfig, taskId, true, runtimeGeneration)
-    const currentTask = this.db.getTask(taskId)
-    const runtime = this.captainRuntimes.get(taskId)
-    const staleRuntime = runtimeGeneration !== undefined && (runtime?.generation !== runtimeGeneration
-      || ['failed', 'timed_out', 'rolled_back'].includes(runtime.phase))
-    if (this.shuttingDown || staleRuntime || (originalTask && (!currentTask || currentTask.session_id !== originalBinding))) {
-      await adapter.destroySession(adapterSessionId, sessionConfig).catch(() => {})
-      throw new Error('Resume ownership changed before the backend reconnected.')
-    }
-    const resumedStatus = readiness === SessionStatusType.WAITING_APPROVAL ? 'waiting_approval'
-      : readiness === SessionStatusType.BUSY || readiness === SessionStatusType.RETRY ? 'working' : 'idle'
-
-    // Seed the dedup state from the resumed history so polling won't re-emit
-    // historical parts as new output. Resume does NOT push the transcript to
-    // clients: they render the durable projection (snapshot +
-    // `transcript:changed` deltas), which the one-time backfill seeds.
-    const dedupState = dedupStateFromHistory(messages)
-
-    // Reconnected busy/approval sessions still own capacity.
-    this.schedulePowerSaveBlockerUpdate()
-    this.sessions.set(adapterSessionId, {
-      id: adapterSessionId,
-      agentId,
-      taskId,
-      workspaceDir,
-      status: resumedStatus,
-      createdAt: new Date(),
-      lastActivityAt: Date.now(),
-      ...dedupState,
-      adapter,
-      pollingStarted: false,
-      secretSessionToken: secretToken,
-      fallbackAgentIds: normalizeFallbackAgentIds(agent.config?.fallback_agent_ids)
-        .filter((id) => id !== agentId),
-      attemptedAgentIds: new Set([agentId]),
-      managedCaptain,
-      managedTask,
-      configuredModel: sessionConfig.model,
-      configuredAgent: isCoordinatorTask(task) ? structuredClone(agent) : undefined
-    })
-
-    // A replacement may have restarted before its first prompt was accepted.
-    this.announceLostSessionReplacement(taskId, adapterSessionId)
-    this.restoreCaptainHandoffSeed(this.sessions.get(adapterSessionId)!)
-
-    // Persist the resumed session binding and tell the renderer BEFORE any
-    // follow-up prompt starts. Without this, a silent main-process resume
-    // (e.g. an event-driven wake-up after the runtime was released) leaves the
-    // renderer bound to a stale session id and the wake turn's output renders
-    // late or not at all.
-    this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
-    this.recordCoordinatorSessionAgent(taskId, agentId)
-    this.sendToRenderer('task:updated', { taskId, updates: { session_id: adapterSessionId } })
-
-    if (resumedStatus !== 'idle') {
-      this.startAdapterPolling(adapterSessionId, adapter, sessionConfig, this.sessions.get(adapterSessionId))
-      if (currentTask?.status !== TaskStatus.Completed) this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.AgentWorking })
-    }
-    this.emitStatus(adapterSessionId, { agentId, taskId }, resumedStatus)
-
-    return adapterSessionId
   }
 
   /**
@@ -3011,6 +3126,7 @@ export class AgentManager extends EventEmitter {
    * done, only resumable. Its session_id still persists like any task's.
    */
   private updateTaskFromLocalAgent(taskId: string, updates: Parameters<DatabaseManager['updateTask']>[1], origin?: 'system'): TaskRecord | undefined {
+    this.taskGroupRequests.assertCurrent()
     const fields = { ...updates }
     if (fields.status !== undefined) {
       const current = this.db.getTask(taskId)
@@ -3051,6 +3167,7 @@ export class AgentManager extends EventEmitter {
    */
   async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
     if (this.productionAdmissionMutation) throw new Error('The agent configuration is being updated. Retry after it finishes.')
+    this.taskGroupRequests.assertCurrent()
     const execution = this.taskGroupExecution(taskId)
     if (execution) { taskId = execution.id; agentId = execution.agent_id! }
     this.assertAgentConfigurationAvailable(agentId)
@@ -3069,6 +3186,7 @@ export class AgentManager extends EventEmitter {
     }
     const pending = this.sessionStarts.get(taskId)
     if (pending) return { status: 'started', sessionId: await pending }
+    if (this.rawTaskStarts.has(taskId)) throw new Error('Native startup acknowledgement remains pending for this task.')
     const live = this.findSessionByTaskId(taskId)
     if (live && live.session.agentId === agentId && live.session.status !== 'idle' && live.session.status !== 'error') {
       return { status: 'started', sessionId: live.sessionId }
@@ -3157,6 +3275,7 @@ export class AgentManager extends EventEmitter {
       trackedStart = boundedStart
       this.sessionStarts.set(taskId, boundedStart)
       const sessionId = await boundedStart
+      // This is the receipt for an already accepted native start, not a new effect.
       if (startClaim && !this.startQueue.acknowledgeStarted(startClaim.id, startClaim.generation, sessionId)) {
         await this.stopSession(sessionId, false, true)
         throw new Error('Start ownership was withdrawn.')
@@ -3164,6 +3283,10 @@ export class AgentManager extends EventEmitter {
       if (startClaim) this.emitStartQueueChanged()
       return { status: 'started', sessionId }
     } catch (error) {
+      if (!this.taskGroupRequests.isCurrent()) {
+        if (startClaim) this.startQueue.cancel(taskId, 'caller_scope_withdrawn', 'request_cancelled_without_replay')
+        throw error
+      }
       // The reserved slot is free again (released in finally, before the
       // deferred drain runs).
       this.scheduleStartQueueDrain()
@@ -3232,7 +3355,7 @@ export class AgentManager extends EventEmitter {
    * failed and may be starting another.
    */
   private boundedSessionStart(starting: Promise<string>, agentName: string, taskId: string, timeoutMs: number): Promise<string> {
-    this.ownShutdownWork(starting)
+    this.ownTaskStartup(taskId, starting)
     return withStartupDeadline(starting, timeoutMs, `${agentName} startup`, (sessionId) => {
       console.warn(`[AgentManager] ${taskId} came up after its start timed out; stopping ${sessionId}`)
       if (sessionId) return this.ownShutdownWork(this.stopSession(sessionId, false))
@@ -3615,6 +3738,7 @@ export class AgentManager extends EventEmitter {
     queuePosition?: number
     queueReason?: AdmissionReason
   }> {
+    this.taskGroupRequests.assertCurrent()
     const execution = this.taskGroupExecution(taskId)
     if (execution && execution.id !== taskId) return this.startTask(execution.id, opts)
     this.assertNoTaskGroupMutation(taskId)
@@ -3812,8 +3936,8 @@ export class AgentManager extends EventEmitter {
    * waitForSessionResult still holds the old temp ID. This method looks up by taskId
    * which is stable across re-keying.
    */
-  findSessionByTaskId(taskId: string): { sessionId: string; session: AgentSession } | undefined {
-    const task = this.db.getTask(taskId)
+  findSessionByTaskId(taskId: string, store: Pick<DatabaseManager, 'getTask'> = this.db): { sessionId: string; session: AgentSession } | undefined {
+    const task = store.getTask(taskId)
     if (isCoordinatorTask(task) && task?.session_id) {
       const bound = this.sessions.get(task.session_id)
       if (bound?.taskId === taskId) return { sessionId: task.session_id, session: bound }
@@ -4104,6 +4228,7 @@ export class AgentManager extends EventEmitter {
    * its provider status (history is not replayed; clients render the durable projection).
    */
   async resumeSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
+    this.taskGroupRequests.assertCurrent()
     const execution = this.taskGroupExecution(taskId)
     if (execution) {
       if (execution.session_id !== sessionId) throw new Error('The native session does not belong to this task group.')
@@ -4135,13 +4260,14 @@ export class AgentManager extends EventEmitter {
 
     const pending = this.sessionStarts.get(taskId)
     if (pending) return pending
+    if (this.rawTaskStarts.has(taskId)) throw new Error('Native startup acknowledgement remains pending for this task.')
     if (isCoordinatorTask(this.db.getTask(taskId))) {
       const retainedTarget = await this.recoverCreatedCaptainHandoff(taskId, agentId)
       if (retainedTarget) return retainedTarget
     }
     const live = this.findSessionByTaskId(taskId)
     if (live && live.session.status !== 'error') return live.sessionId
-    const resumed = this.ownShutdownWork(this.resumeAdapterSession(adapter, agentId, taskId, sessionId))
+    const resumed = this.ownTaskStartup(taskId, this.resumeAdapterSession(adapter, agentId, taskId, sessionId))
     this.sessionStarts.set(taskId, resumed)
     try {
       return await resumed
@@ -4566,6 +4692,7 @@ export class AgentManager extends EventEmitter {
   }
 
   async abortSession(sessionId: string, options: { requireAcknowledgement?: boolean } = {}): Promise<void> {
+    this.taskGroupRequests.assertCurrent()
     return this.ownShutdownWork(this.abortSessionNow(sessionId, options))
   }
 
@@ -4649,6 +4776,7 @@ export class AgentManager extends EventEmitter {
    * @param resetTaskStatus - If true, resets task status to NotStarted (default: true)
    */
   async stopSession(sessionId: string, resetTaskStatus: boolean = true, requireAcknowledgement = false, rolloverInternal = false): Promise<void> {
+    this.taskGroupRequests.assertCurrent()
     if (!rolloverInternal) {
       const owner = this.sessions.get(sessionId)
       if (owner) this.captainRollover?.cancel(owner.taskId)
@@ -4658,19 +4786,23 @@ export class AgentManager extends EventEmitter {
     const owner = this.sessions.get(sessionId)
     const pendingForTask = owner ? this.taskStops.get(owner.taskId) : undefined
     if (pendingForTask) return pendingForTask.promise
-    const stopping = this.stopSessionNow(sessionId, resetTaskStatus, requireAcknowledgement)
+    this.taskGroupRequests.assertCurrent()
+    const cleanupConfig = owner ? this.scopedRetirementConfigs.get(owner) ?? (this.taskGroupRequests.scoped ? this.sessionConfigFor(owner) : undefined) : undefined
+    const stopping = this.ownShutdownWork(this.taskGroupRequests.detached(() => this.stopSessionNow(sessionId, resetTaskStatus, requireAcknowledgement, cleanupConfig)))
     this.sessionStops.set(sessionId, stopping)
     const retainTaskOwnership = owner && (resetTaskStatus || requireAcknowledgement)
     if (retainTaskOwnership) this.taskStops.set(owner.taskId, { sessionId, session: owner, promise: stopping })
     try {
       await stopping
+      this.scopedCleanupFailures.delete(sessionId)
+      if (owner) this.scopedRetirementConfigs.delete(owner)
     } finally {
       this.sessionStops.delete(sessionId)
       if (retainTaskOwnership && this.taskStops.get(owner.taskId)?.promise === stopping) this.taskStops.delete(owner.taskId)
     }
   }
 
-  private async stopSessionNow(sessionId: string, resetTaskStatus: boolean, requireAcknowledgement: boolean): Promise<void> {
+  private async stopSessionNow(sessionId: string, resetTaskStatus: boolean, requireAcknowledgement: boolean, cleanupConfig?: SessionConfig): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session) {
       console.log(`[AgentManager] Session ${sessionId} not found`)
@@ -4702,7 +4834,7 @@ export class AgentManager extends EventEmitter {
     const adapter = session.adapter ?? this.getAdapter(session.agentId)
     if (adapter) {
       try {
-        const sessionConfig = await this.buildSessionConfig(session.agentId, session.taskId, session.workspaceDir)
+        const sessionConfig = cleanupConfig ?? await this.buildSessionConfig(session.agentId, session.taskId, session.workspaceDir)
         await adapter.destroySession(sessionId, sessionConfig)
       } catch (error) {
         console.error(`[AgentManager] Error destroying adapter session:`, error)
@@ -4768,6 +4900,7 @@ export class AgentManager extends EventEmitter {
    * is broken (Session: none) and the normal stop-by-sessionId path fails.
    */
   async stopByTaskId(taskId: string): Promise<{ sessionId: string | null }> {
+    this.taskGroupRequests.assertCurrent()
     taskId = this.taskGroupExecution(taskId)?.id ?? taskId
     this.captainRollover?.cancel(taskId)
     const pending = this.taskStops.get(taskId)
@@ -4784,8 +4917,10 @@ export class AgentManager extends EventEmitter {
       const starting = this.sessionStarts.get(taskId)
       if (starting) {
         try { await starting } catch { /* The start path reports its own failure. */ }
-        found = this.findSessionByTaskId(taskId)
       }
+      await this.joinRawTaskStarts(taskId)
+      this.taskGroupRequests.assertCurrent()
+      found = this.findSessionByTaskId(taskId)
     }
     if (!found) {
       const task = this.db.getTask(taskId)
@@ -4797,6 +4932,7 @@ export class AgentManager extends EventEmitter {
     }
     console.log(`[AgentManager] stopByTaskId: found session ${found.sessionId} for task ${taskId}, stopping`)
     await this.stopSession(found.sessionId, true, true)
+    this.taskGroupRequests.assertCurrent()
     // A fenced start may have already initiated cleanup without resetting the
     // task. The explicit stop still owns the final rollback after it settles.
     const task = this.db.getTask(taskId)
@@ -4841,27 +4977,27 @@ export class AgentManager extends EventEmitter {
   }
 
   /** Sessions holding a slot: working real-task sessions plus admitted starts in flight. */
-  private countedSessions(): CountedSession[] {
+  private countedSessions(store: Pick<DatabaseManager, 'getTask'> = this.db): CountedSession[] {
     const counted = new Map<string, CountedSession>()
     for (const session of this.sessions.values()) {
       if (session.status !== 'working' && session.status !== 'waiting_approval') continue
       if (session.isTriageSession) continue
-      const task = this.db.getTask(session.taskId)
+      const task = store.getTask(session.taskId)
       if (isExemptFromAdmission(session.taskId, task)) continue
       counted.set(session.taskId, { taskId: session.taskId, agentId: session.agentId, projectId: taskProjectId(task) })
     }
     for (const [taskId, stopping] of this.taskStops) {
-      const task = this.db.getTask(taskId)
+      const task = store.getTask(taskId)
       if (stopping.session.isTriageSession || isExemptFromAdmission(taskId, task)) continue
       counted.set(taskId, { taskId, agentId: stopping.session.agentId, projectId: taskProjectId(task) })
     }
     for (const { taskId, agentId } of this.providerRecoveries.owners()) {
-      const task = this.db.getTask(taskId)
+      const task = store.getTask(taskId)
       if (!task || isExemptFromAdmission(taskId, task)) continue
       if (!counted.has(taskId)) counted.set(taskId, { taskId, agentId, projectId: taskProjectId(task) })
     }
     for (const [taskId, agentId] of this.admittedStarts) {
-      if (!counted.has(taskId)) counted.set(taskId, { taskId, agentId, projectId: taskProjectId(this.db.getTask(taskId)) })
+      if (!counted.has(taskId)) counted.set(taskId, { taskId, agentId, projectId: taskProjectId(store.getTask(taskId)) })
     }
     return [...counted.values()]
   }
@@ -4960,8 +5096,8 @@ export class AgentManager extends EventEmitter {
   }
 
   /** The user's pin / Captain-control switch from the project editor. */
-  setUserConcurrency(projectId: string, change: { captainControl: boolean } | { agentId: string; pinnedLevel: number | null }, reason?: string): { success: true } | { error: string } {
-    const result = setUserConcurrency(this.db, projectId, change, reason)
+  setUserConcurrency(projectId: string, change: { captainControl: boolean } | { agentId: string; pinnedLevel: number | null }, reason?: string, store: ProjectRuntimeMutationStore = this.db): { success: true } | { error: string } {
+    const result = setUserConcurrency(store, projectId, change, reason)
     if ('success' in result) {
       this.emitConcurrencyChanged(projectId)
       this.scheduleStartQueueDrain()
@@ -4983,14 +5119,14 @@ export class AgentManager extends EventEmitter {
    * running or queued work in the project, or a level/pin set there, plus the
    * project's default and Captain agents.
    */
-  getConcurrencyState(projectId: string, auditLimit = 10): ProjectConcurrencyState {
-    const settings = readProjectConcurrency(this.db, projectId)
-    const counted = this.countedSessions()
+  getConcurrencyState(projectId: string, auditLimit = 10, store: ProjectRuntimeReadStore = this.db): ProjectConcurrencyState {
+    const settings = readProjectConcurrency(store, projectId)
+    const counted = this.countedSessions(store)
     const queue = this.startQueue.snapshot()
-    const project = this.db.getProject(projectId)
+    const project = store.getProject(projectId)
     // Agents with open tasks in the project stay listed, so a level can be
     // pinned before anything runs and does not vanish when a pin is removed.
-    const openTaskAgents = this.db.getTasks({ projectId })
+    const openTaskAgents = store.getTasks({ projectId })
       .filter((t) => t.agent_id && t.status !== TaskStatus.Completed && !isCoordinatorTask(t))
       .map((t) => t.agent_id as string)
     const agentIds = new Set<string>([
@@ -4998,19 +5134,19 @@ export class AgentManager extends EventEmitter {
       ...Object.keys(settings.levels),
       ...Object.keys(settings.pinned),
       ...counted.filter((s) => s.projectId === projectId).map((s) => s.agentId),
-      ...queue.filter((e) => taskProjectId(this.db.getTask(e.taskId)) === projectId).map((e) => e.agentId)
+      ...queue.filter((e) => taskProjectId(store.getTask(e.taskId)) === projectId).map((e) => e.agentId)
     ])
     if (project?.default_agent_id) agentIds.add(project.default_agent_id)
     const pressure = this.getResourcePressure()
     const agents = [...agentIds].flatMap((agentId) => {
-      const agent = this.db.getAgent(agentId)
+      const agent = store.getAgent(agentId)
       if (!agent) return []
       const cap = agentCap(agent)
       const { level, source } = effectiveLevel(settings, agentId, cap)
       const runningInProject = counted.filter((s) => s.agentId === agentId && s.projectId === projectId).length
       const runningTotal = counted.filter((s) => s.agentId === agentId).length
-      const queued = queue.filter((e) => e.agentId === agentId && taskProjectId(this.db.getTask(e.taskId)) === projectId)
-      const serialChainQueued = queued.filter((e) => this.isSerialChainStart(e.taskId)).length
+      const queued = queue.filter((e) => e.agentId === agentId && taskProjectId(store.getTask(e.taskId)) === projectId)
+      const serialChainQueued = queued.filter((e) => this.isSerialChainStart(e.taskId, store)).length
       const overlapQueued = queued.filter((e) => e.reason === 'file_overlap').length
       return [{
         agentId,
@@ -5029,16 +5165,16 @@ export class AgentManager extends EventEmitter {
       captainControl: settings.captain_control,
       agents,
       pressure,
-      recentChanges: this.db.listConcurrencyAudit(projectId, auditLimit)
+      recentChanges: store.listConcurrencyAudit(projectId, auditLimit)
     }
   }
 
   /** A queued subtask whose parent sequences its children and has one still running. */
-  private isSerialChainStart(taskId: string): boolean {
-    const task = this.db.getTask(taskId)
+  private isSerialChainStart(taskId: string, store: Pick<DatabaseManager, 'getTask' | 'getSubtasks'> = this.db): boolean {
+    const task = store.getTask(taskId)
     if (!task?.parent_task_id) return false
-    const siblings = this.db.getSubtasks(task.parent_task_id)
-    const parent = this.db.getTask(task.parent_task_id)
+    const siblings = store.getSubtasks(task.parent_task_id)
+    const parent = store.getTask(task.parent_task_id)
     return siblings.some((predecessor) => predecessor.next_subtask_ids?.includes(taskId)
       && predecessor.status !== TaskStatus.Completed
       && !(predecessor.status === TaskStatus.ReadyForReview && successorsFireOnReview(parent, predecessor)))
@@ -5085,9 +5221,9 @@ export class AgentManager extends EventEmitter {
    * A `limits` field on the project status (#58) is the intended home once
    * that reads live session state; until then this is its own read.
    */
-  getProjectLimitState(projectId: string): ProjectLimitState {
-    const queued = this.startQueue.list().filter((entry) => taskProjectId(this.db.getTask(entry.taskId)) === projectId)
-    return buildProjectLimitState(this.db, projectId, this.countedSessions(), queued)
+  getProjectLimitState(projectId: string, store: ProjectRuntimeReadStore = this.db): ProjectLimitState {
+    const queued = this.startQueue.list().filter((entry) => taskProjectId(store.getTask(entry.taskId)) === projectId)
+    return buildProjectLimitState(store, projectId, this.countedSessions(store), queued)
   }
 
   /**
@@ -5174,6 +5310,7 @@ export class AgentManager extends EventEmitter {
 
   /** Deferred so the transition that freed the slot finishes first. */
   private scheduleStartQueueDrain(): void {
+    if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.scheduleStartQueueDrain())
     if (this.shuttingDown || this.startQueue.size === 0 || this.startQueueDrainScheduled) return
     if (this.startQueueRetryTimer) {
       clearTimeout(this.startQueueRetryTimer)
@@ -5193,6 +5330,7 @@ export class AgentManager extends EventEmitter {
    * dropped.
    */
   drainStartQueue(): void {
+    if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.drainStartQueue())
     if (this.shuttingDown || this.startupReconciliation || this.productionAdmissionMutation) return
     let changed = false
     let nextRetryAt: number | null = null
@@ -5220,7 +5358,7 @@ export class AgentManager extends EventEmitter {
         changed = true
         continue
       }
-      if (this.sessionStarts.has(entry.taskId)) continue
+      if (this.sessionStarts.has(entry.taskId) || this.rawTaskStarts.has(entry.taskId)) continue
       if (this.hasActiveSessionForTask(entry.taskId)) {
         const live = this.findSessionByTaskId(entry.taskId)
         if (live) {
@@ -5336,6 +5474,7 @@ export class AgentManager extends EventEmitter {
     attachments?: MessageAttachmentRef[],
     deliveryId?: string
   ): Promise<{ sessionId: string | null; newSessionId?: string }> {
+    this.taskGroupRequests.assertCurrent()
     const execution = this.taskGroupExecution(taskId)
     if (execution && execution.id !== taskId) {
       if (attachments?.length) throw new Error('Send attachments from the shared group conversation so they belong to its execution workspace.')
@@ -5364,8 +5503,10 @@ export class AgentManager extends EventEmitter {
     attachments?: MessageAttachmentRef[],
     deliveryId = `agent-message:${randomUUID()}`
   ): Promise<{ newSessionId?: string }> {
+    this.taskGroupRequests.assertCurrent()
     if (taskId) {
-      const execution = this.taskGroupExecution(taskId)
+      this.taskGroupRequests.assertCurrent()
+    const execution = this.taskGroupExecution(taskId)
       if (execution && execution.id !== taskId) {
         if (attachments?.length) throw new Error('Send attachments from the shared group conversation so they belong to its execution workspace.')
         message = `For group member ${this.db.getTask(taskId)?.title ?? taskId} (id: ${taskId}):\n${message}`
@@ -5420,6 +5561,10 @@ export class AgentManager extends EventEmitter {
   }
 
   private async dispatchAgentMessageNow(record: DeliveryRecord): Promise<{ newSessionId?: string }> {
+    if (!this.taskGroupRequests.isCurrent()) {
+      if (!['accepted', 'acknowledged'].includes(record.state)) this.deliveries.terminal(record.id, 'cancelled', 'Request authority was withdrawn before dispatch; this intent will not be replayed.')
+      this.taskGroupRequests.assertCurrent()
+    }
     if (['failed', 'timed_out', 'cancelled'].includes(record.state)) throw new Error(record.lastError ?? 'Delivery ended without acknowledgement.')
     if (record.state === 'acknowledged') return record.destinationId ? { newSessionId: record.destinationId } : {}
     if (record.state === 'accepted') {
@@ -5443,21 +5588,24 @@ export class AgentManager extends EventEmitter {
     }
     try {
       payload = JSON.parse(claimed.payload) as typeof payload
-      const result = await withStartupDeadline(this.sendMessageNow(
+      this.taskGroupRequests.assertCurrent()
+      const result = await withStartupDeadline(this.ownShutdownWork(this.sendMessageNow(
         payload.sessionId,
         payload.message,
         payload.taskId,
         payload.agentId,
         payload.attachments,
         `delivery-${claimed.id}`
-      ), AGENT_START_TIMEOUT_MS + AGENT_SESSION_START_TIMEOUT_MS, 'Message handoff')
+      )), AGENT_START_TIMEOUT_MS + AGENT_SESSION_START_TIMEOUT_MS, 'Message handoff')
       const destination = result.newSessionId || payload.sessionId || claimed.taskId || claimed.id
       this.deliveries.accept(claimed.id, this.deliveryOwner, destination)
       this.deliveries.acknowledge(claimed.id, this.deliveryOwner)
       return result
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      if (detail.startsWith('Message handoff timed out')) {
+      if (!this.taskGroupRequests.isCurrent()) {
+        this.deliveries.terminal(claimed.id, 'cancelled', 'Request authority was withdrawn; this intent will not be replayed.')
+      } else if (detail.startsWith('Message handoff timed out')) {
         this.deliveries.terminal(claimed.id, 'timed_out', `${detail}; backend acceptance is unknown. Inspect the conversation before retrying.`)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-timeout-${claimed.id}`,
           `${detail}. Backend acceptance is unknown; inspect the conversation before retrying.`)
@@ -5482,6 +5630,7 @@ export class AgentManager extends EventEmitter {
     }
     const active = this.sessionStarts.get(taskId)
     if (active) return active
+    if (this.rawTaskStarts.has(taskId)) throw new Error('Native startup acknowledgement remains pending for this task.')
     const live = this.findSessionByTaskId(taskId)
     if (live && live.session.agentId === agentId) return Promise.resolve(live.sessionId)
     const task = this.db.getTask(taskId)
@@ -5492,6 +5641,7 @@ export class AgentManager extends EventEmitter {
         if (adapter) {
           try { return await this.resumeAdapterSession(adapter, agentId, taskId, task.session_id) }
           catch (error) {
+            this.taskGroupRequests.assertCurrent()
             const detail = error instanceof Error ? error.message : String(error)
             if (/already has an active writer|thread-store conflict/.test(detail)) {
               throw new Error(`Cannot resume this conversation because its runtime is still active. The existing session has been preserved. Retry after the runtime has released it. ${detail}`)
@@ -5534,6 +5684,7 @@ export class AgentManager extends EventEmitter {
       const starting = this.sessionStarts.get(taskId)
       if (starting) {
         sessionId = await starting
+        this.taskGroupRequests.assertCurrent()
         session = this.sessions.get(sessionId)
         if (!session) throw new Error(`Started session was not registered: ${sessionId}`)
       }
@@ -5548,6 +5699,7 @@ export class AgentManager extends EventEmitter {
       if (resolvedAgentId) {
         if (isCoordinatorTask(task)) this.dropForeignCoordinatorSession(taskId, resolvedAgentId)
         sessionId = await this.recoverMessageSession(taskId, resolvedAgentId)
+        this.taskGroupRequests.assertCurrent()
         session = this.sessions.get(sessionId)
         recovered = true
       }
@@ -5578,6 +5730,7 @@ export class AgentManager extends EventEmitter {
    * the next send clears the error state (see doSendAdapterMessage).
    */
   private async handleSessionError(sessionId: string, session: AgentSession, err: unknown): Promise<boolean> {
+    if (!this.taskGroupRequests.isCurrent()) return false
     if (!this.ownsSessionGeneration(sessionId, session)) return false
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[AgentManager] Session ${sessionId} error:`, message)
@@ -5615,7 +5768,7 @@ export class AgentManager extends EventEmitter {
         session.managedIntentId = row.intentId
         await this.managedEngine(session)!.sendPrompt(session.taskId, sessionId, row.intentId, row.attempt, prompt, adapter, trackedConfig,
           () => this.assertSessionGeneration(sessionId, session))
-      } else await adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: prompt }], trackedConfig)
+      } else await this.ownShutdownWork(adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: prompt }], trackedConfig))
     } catch (error) {
       if (!row) throw error
       const failure = classifyProviderFailure(error)
@@ -5701,6 +5854,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private scheduleProviderRecovery(): void {
+    if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.scheduleProviderRecovery())
     if (this.shuttingDown || this.startupReconciliation) return
     if (this.providerRecoveryTimer) clearTimeout(this.providerRecoveryTimer)
     const pending = this.providerRecoveries.list(['retrying']).filter((row) => !this.providerRecoveryFlights.has(row.taskId) && !this.agentConfigurationBlocked(row.agentId) && !this.taskLifecycleMutations.has(row.taskId))
@@ -5867,7 +6021,8 @@ export class AgentManager extends EventEmitter {
     if (session.status === 'error') {
       // An incompatible session is not recoverable; other errors (e.g. rate limits) are.
       if (session.adapter) {
-        const adapterStatus = await session.adapter.getStatus(sessionId, {} as SessionConfig)
+        const adapterStatus = await this.ownShutdownWork(session.adapter.getStatus(sessionId, {} as SessionConfig))
+        this.assertSessionGeneration(sessionId, session)
         if (adapterStatus.message?.includes('INCOMPATIBLE_SESSION_ID')) {
           throw new Error('Session is in error state: incompatible session')
         }
@@ -6175,6 +6330,7 @@ export class AgentManager extends EventEmitter {
     // Shutdown preserves the durable queue. The next process reconciles any
     // outstanding claim; stops below must not drain it in this process.
     this.shuttingDown = true
+    this.taskGroupRequests.shutdown()
     this.captainRollover?.shutdown()
     this.captainEngine?.shutdown()
     this.taskEngine?.shutdown()
@@ -6208,12 +6364,30 @@ export class AgentManager extends EventEmitter {
     // exits with DB/provider/lease held if this short drain cannot complete.
     await this.drainShutdownWork()
     await Promise.allSettled([...this.sessions.keys()].map(sessionId => this.stopSession(sessionId, false)))
+    for (const id of this.scopedCleanupFailures) if (!this.sessions.has(id)) this.scopedCleanupFailures.delete(id)
+    if (this.scopedCleanupFailures.size || this.scopedCleanupConflicts.size) throw new AgentShutdownIncompleteError()
     if (this.transcriptChangedTimer) clearTimeout(this.transcriptChangedTimer)
     this.transcriptChangedTimer = null
     this.flushTranscriptChanged()
   }
 
+  private ownTaskStartup<T>(taskId: string, raw: Promise<T>): Promise<T> {
+    const work = this.rawTaskStarts.get(taskId) ?? new Set<Promise<unknown>>()
+    work.add(raw); this.rawTaskStarts.set(taskId, work)
+    const settled = (): void => {
+      work.delete(raw)
+      if (!work.size && this.rawTaskStarts.get(taskId) === work) { this.rawTaskStarts.delete(taskId); this.scheduleStartQueueDrain() }
+    }
+    void raw.then(settled, settled)
+    return this.ownShutdownWork(raw)
+  }
+
+  private async joinRawTaskStarts(taskId: string): Promise<void> {
+    while (this.rawTaskStarts.has(taskId)) await Promise.allSettled([...this.rawTaskStarts.get(taskId)!])
+  }
+
   private ownShutdownWork<T>(operation: Promise<T>): Promise<T> {
+    this.taskGroupRequests.retainRaw(operation)
     this.shutdownWork.add(operation)
     void operation.then(() => { this.shutdownWork.delete(operation) }, () => { this.shutdownWork.delete(operation) })
     return operation
@@ -6440,6 +6614,7 @@ export class AgentManager extends EventEmitter {
    * the cache being keyed on part id and sorted by created_at.
    */
   private emitTranscriptChanged(taskId: string, sinceRev: number, maxRev: number): void {
+    if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.emitTranscriptChanged(taskId, sinceRev, maxRev))
     const pending = this.pendingTranscriptChanged.get(taskId)
     this.pendingTranscriptChanged.set(taskId, {
       sinceRev: pending ? Math.min(pending.sinceRev, sinceRev) : sinceRev,

@@ -322,6 +322,30 @@ export class ProductionOwner {
       } }
   }
 
+  getTaskGroupBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!, { db: database, groups, agents: manager, sync, registry: plugins, oauth } = services
+    return { database, groups, manager, sync, plugins, oauth,
+      assertTaskGroupOwners: (owners: { database: DatabaseManager; groups: TaskGroupService; manager: AgentManager; sync: SyncManager; plugins: PluginRegistry; oauth: OAuthManager }): void => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || services.db !== database || services.groups !== groups || services.agents !== manager || services.sync !== sync ||
+          owners.database !== database || owners.groups !== groups || owners.manager !== manager || owners.sync !== sync || services.registry !== plugins || services.oauth !== oauth || owners.plugins !== plugins || owners.oauth !== oauth) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        groups.assertOwners({ database, manager, sync }); sync.assertOwners(database, plugins, oauth)
+      } }
+  }
+
+  getProjectRuntimeBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!, { db: database, agents: manager, workspaceFiles: files } = services, workspaceRoot = this.bootstrap.paths.workspaceRoot
+    return { database, manager, files, workspaceRoot,
+      assertProjectRuntimeOwners: (owners: { database: DatabaseManager; manager: AgentManager; files: WorkspaceFileOwner; workspaceRoot: string }): void => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || services.db !== database || services.agents !== manager || services.workspaceFiles !== files ||
+          owners.database !== database || owners.manager !== manager || owners.files !== files || owners.workspaceRoot !== workspaceRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        files.assertOwners(workspaceRoot)
+      } }
+  }
+
   getIntegrationBindingLease(): { secretStorage: AuthenticatedSecretStorage; configuredMcp: 'enabled' | 'disabled'; oauthBrowser: 'available' | 'unavailable'; assertOwners(owners: {
     database: DatabaseManager; manager?: AgentManager; sync?: SyncManager; plugins?: PluginRegistry; probes?: McpProbeService; secretStorage?: unknown; oauth?: OAuthManager;
     recurrence?: RecurrenceSchedulerCore; heartbeat?: HeartbeatSchedulerCore; automation?: TaskAutomationScheduler
@@ -602,6 +626,7 @@ export class ProductionOwner {
     agents.setSyncManager(sync)
     this.register('sync', () => sync.stop(), () => sync.close())
     const groups = new TaskGroupService(db, agents, sync, (channel, data) => this.emit(channel, data))
+    this.register('task-groups', () => groups.shutdown(), () => groups.close())
     setTaskApiNotifier((channel, data) => this.emit(channel, data))
     setTranscriptProvider(taskId => agents.getTranscriptForTask(taskId))
     setTaskApiAgentController(agents)

@@ -33,8 +33,10 @@ function providerManager(managers: GitManagers, provider: GitProvider): RepoList
 export async function setupTaskWorktrees(
   db: DatabaseManager,
   managers: GitManagers,
-  taskId: string
+  taskId: string,
+  beforeEffect?: () => void
 ): Promise<string | undefined> {
+  beforeEffect?.()
   const { worktreeManager } = managers
   if (taskId.startsWith('heartbeat-')) return undefined
 
@@ -80,14 +82,17 @@ export async function setupTaskWorktrees(
     let resolvedWorkspaceDir: string | undefined
 
     for (const { provider, org, repos } of reposByGroup.values()) {
+      beforeEffect?.()
       let orgRepos: Array<{ fullName: string; defaultBranch: string; cloneUrl?: string }> = []
 
       try {
         orgRepos = await providerManager(managers, provider)?.fetchOrgRepos(org) ?? []
       } catch (error) {
+        beforeEffect?.()
         console.warn(`[AgentManager] Failed to fetch ${provider} repo metadata for org "${org}", falling back to task repo names:`, error)
       }
 
+      beforeEffect?.()
       const branchByRepo = new Map(orgRepos.map((repo) => [repo.fullName, repo.defaultBranch]))
       const cloneUrlByRepo = new Map(orgRepos.map((repo) => [repo.fullName, repo.cloneUrl]))
       const reposForSetup = repos.map(({ fullName, defaultBranch }) => ({
@@ -98,17 +103,16 @@ export async function setupTaskWorktrees(
 
       console.log(`[AgentManager] Setting up ${reposForSetup.length} ${provider} repo(s) for org "${org}": ${reposForSetup.map((repo) => repo.fullName).join(', ')}`)
 
-      const workspaceDirForOrg = await worktreeManager.setupWorkspaceForTask(
-        taskId,
-        reposForSetup,
-        org,
-        provider
-      )
+      const workspaceDirForOrg = await (beforeEffect
+        ? worktreeManager.setupWorkspaceForTask(taskId, reposForSetup, org, provider, beforeEffect)
+        : worktreeManager.setupWorkspaceForTask(taskId, reposForSetup, org, provider))
+      beforeEffect?.()
       resolvedWorkspaceDir = resolvedWorkspaceDir || workspaceDirForOrg
     }
 
     return resolvedWorkspaceDir
   } catch (error) {
+    beforeEffect?.()
     console.error(`[AgentManager] Worktree setup failed:`, error)
     return undefined
   }
