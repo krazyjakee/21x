@@ -62,7 +62,7 @@ async function moduleFiles(root: string, name = 'service/node_modules'): Promise
   }
   return files
 }
-export interface VerifiedProductionResources { node: string; engine: string; credentialHelper: string; taskMcp: string }
+export interface VerifiedProductionResources { mobileDistRoot?: string; node: string; engine: string; credentialHelper: string; taskMcp: string }
 /** The host pins manifest bytes privately. This verifies every runtime byte,
  * physical package pin and write/resource separation before any native load. */
 export async function verifyProductionResources(descriptor: ProductionLaunchDescriptor, runtime = {
@@ -84,10 +84,11 @@ export async function verifyProductionResources(descriptor: ProductionLaunchDesc
   if (!isRecord(manifest) || !hasExactKeys(manifest, ['version', 'kind', 'buildIdentity', 'nodeVersion', 'platform', 'arch', 'entries', 'packages', 'files', 'redistributionReviewComplete']) ||
     manifest.version !== 1 || manifest.kind !== 'production-resource-closure' || manifest.buildIdentity !== descriptor.buildIdentity || manifest.nodeVersion !== '22.23.2' ||
     manifest.platform !== runtime.platform || manifest.arch !== runtime.arch || manifest.redistributionReviewComplete !== false || !isRecord(manifest.entries) ||
-    !hasExactKeys(manifest.entries, ['node', 'engine', 'stdio', 'credentialHelper', 'taskMcp']) || !isRecord(manifest.packages) || !isRecord(manifest.files) || Object.keys(manifest.files).length > 100_000) fail('RESOURCE_MANIFEST_INVALID')
+    !hasExactKeys(manifest.entries, ['node', 'engine', 'stdio', 'credentialHelper', 'taskMcp'], ['mobile']) || !isRecord(manifest.packages) || !isRecord(manifest.files) || Object.keys(manifest.files).length > 100_000) fail('RESOURCE_MANIFEST_INVALID')
   const entries = manifest.entries
   const nodeName = runtime.platform === 'win32' ? 'node/node.exe' : 'node/node'
   const helperName = `native/twentyonex-credential-key${runtime.platform === 'win32' ? '.exe' : ''}`
+  if (entries.mobile !== undefined && entries.mobile !== 'mobile/index.html') fail('RESOURCE_MANIFEST_INVALID')
   if (entries.node !== nodeName || entries.engine !== 'service/production-engine.mjs' || entries.stdio !== 'service/production-stdio.mjs' || entries.credentialHelper !== helperName || entries.taskMcp !== 'service/production-task-mcp.mjs') fail('RESOURCE_MANIFEST_INVALID')
   if (!hasExactKeys(manifest.packages, Object.keys(PRODUCTION_RESOURCE_PINS))) fail('RESOURCE_PIN_CHANGED')
   for (const [name, version] of Object.entries(PRODUCTION_RESOURCE_PINS)) {
@@ -104,6 +105,10 @@ export async function verifyProductionResources(descriptor: ProductionLaunchDesc
   const closure = await moduleFiles(root)
   if (closure.some(name => !Object.hasOwn(manifest.files as object, name)) || Object.keys(manifest.files).filter(name => name.startsWith('service/node_modules/')).length !== closure.length ||
     !closure.some(name => name.startsWith('service/node_modules/better-sqlite3/') && name.endsWith('.node'))) fail('RESOURCE_CLOSURE_INCOMPLETE')
+  if (entries.mobile !== undefined) {
+    const mobile = await moduleFiles(root, 'mobile')
+    if (mobile.length > 512 || mobile.some(name => !Object.hasOwn(manifest.files as object, name)) || Object.keys(manifest.files).filter(name => name.startsWith('mobile/')).length !== mobile.length) fail('RESOURCE_CLOSURE_INCOMPLETE')
+  }
   for (const name of Object.values(entries)) if (typeof name !== 'string' || !Object.hasOwn(manifest.files, name)) fail('RESOURCE_CLOSURE_INCOMPLETE')
   if (descriptor.capabilities.connectors === 'enabled' && ['service/piece-host.cjs', 'service/CONNECTOR_WORKER_MANIFEST.json'].some(name => !Object.hasOwn(manifest.files as object, name))) fail('CONNECTOR_RESOURCE_UNPINNED')
   if (!Object.hasOwn(manifest.files, 'service/.native-prepared.json')) fail('RESOURCE_CLOSURE_INCOMPLETE')
@@ -112,7 +117,7 @@ export async function verifyProductionResources(descriptor: ProductionLaunchDesc
     Object.entries(PRODUCTION_RESOURCE_PINS).some(([name, version]) => (prepared.dependencies as Record<string, unknown>)[name] !== version)) fail('RESOURCE_PIN_CHANGED')
   const node = await resourceFile(root, nodeName)
   if (await realpath(runtime.executable) !== node) fail('RUNTIME_IDENTITY_INVALID')
-  return { node, engine: await resourceFile(root, entries.engine as string), credentialHelper: await resourceFile(root, helperName), taskMcp: await resourceFile(root, entries.taskMcp as string) }
+  return { node, engine: await resourceFile(root, entries.engine as string), credentialHelper: await resourceFile(root, helperName), taskMcp: await resourceFile(root, entries.taskMcp as string), ...(entries.mobile === undefined ? {} : { mobileDistRoot: join(root, 'mobile') }) }
 }
 
 /** Descriptor is a private anonymous pipe, not argv/environment/a disk file. */

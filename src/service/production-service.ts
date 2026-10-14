@@ -198,7 +198,7 @@ export class ProductionService {
 
 /** Used only by the separately staged entry after physical resource verification.
  * The private host must validate its main WebView before forwarding commands. */
-export function createStagedProductionService(descriptor: ProductionLaunchDescriptor, resources: { node: string; credentialHelper: string; taskMcp: string }, transport: ConstructorParameters<typeof ProductionService>[1]): ProductionService {
+export function createStagedProductionService(descriptor: ProductionLaunchDescriptor, resources: { node: string; credentialHelper: string; taskMcp: string; mobileDistRoot?: string }, transport: ConstructorParameters<typeof ProductionService>[1]): ProductionService {
   const trusted = (caller: DesktopCallerContext): boolean => caller.principal === 'trusted-desktop-main' && caller.webviewId === 'main' && caller.origin === 'tauri://localhost' && caller.engineEpoch === service.owner.snapshot().epoch && service.getReadyServices() !== null
   const authority: ProductionDesktopBindingOptions['authority'] = {
     isTrustedDesktop: trusted,
@@ -226,6 +226,8 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
     canUsePiece: (_piece, caller) => trusted(caller) && descriptor.capabilities.connectors === 'enabled',
     canBorrowSourceCredentials: (_source, _plugin, caller) => trusted(caller),
     canResolveUnsavedConfig: (_plugin, caller) => trusted(caller),
+    canManageMobile: (caller, access) => trusted(caller) && authority.canManageGlobalConfiguration(caller, access),
+    canAccessMobileSession: (_id, caller) => trusted(caller),
     canAccessMarketplace: (_id, caller) => trusted(caller), canCreateMarketplace: (_data, caller) => trusted(caller),
     canAccessPluginName: (_name, _marketplace, caller) => trusted(caller), canAccessPlugin: (_id, caller) => trusted(caller),
     // Arbitrary local marketplace reads need a reviewed native path grant.
@@ -245,6 +247,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
     unbridgedOwnerEvent: () => { process.stderr.write('PRODUCTION_NATIVE_EVENT_UNSUPPORTED\n') },
     constructBootstrap: callbacks => ({ profileId: descriptor.profileId, paths: descriptor.paths,
       credentials: { store: new NativeApplicationKeyStore(resources.credentialHelper), mode: descriptor.profileIntent === 'create-new' ? 'create' : 'load' },
+      ...(resources.mobileDistRoot === undefined ? {} : { mobile: { distRoot: resources.mobileDistRoot } }),
       connectors: descriptor.capabilities.connectors === 'enabled' ? { kind: 'enabled' } : { kind: 'disabled', reason: 'Private launch explicitly disables connectors' },
       managedTaskMcp: descriptor.capabilities.managedTaskMcp === 'disabled' ? { disabled: true } : {
         command: resources.node, args: [resources.taskMcp], environment: {}, tools: listToolsForScope(FULL_ACCESS_SCOPE).map(tool => ({ name: tool.name, description: tool.description ?? '' })) },

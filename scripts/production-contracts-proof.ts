@@ -14,6 +14,7 @@ import { CONNECTOR_CODECS } from '../src/shared/connector-codecs'
 import { TASK_SOURCE_PLUGIN_CODECS } from '../src/shared/task-source-plugin-codecs'
 import { SESSION_CONTEXT_CODECS } from '../src/shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '../src/shared/claude-plugin-codecs'
+import { MOBILE_CODECS } from '../src/shared/mobile-codecs'
 import type { JsonValue } from '../src/shared/service-protocol'
 
 // Preserve the production binding's override order; older diagnostic task,
@@ -21,7 +22,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -85,7 +86,10 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'claudePlugin:getMarketplaceSources': [], 'claudePlugin:addMarketplaceSource': [{ name: 'Fixture marketplace', source_type: 'github', source_url: 'fixture/marketplace#main', auto_update: false }],
   'claudePlugin:removeMarketplaceSource': ['marketplace.fixture:one'], 'claudePlugin:fetchCatalog': ['marketplace.fixture:one'], 'claudePlugin:discoverPlugins': ['fixture'],
   'claudePlugin:getInstalledPlugins': [], 'claudePlugin:installPlugin': ['fixture-plugin', 'marketplace.fixture:one', 'user'],
-  'claudePlugin:uninstallPlugin': ['plugin.fixture:one'], 'claudePlugin:enablePlugin': ['plugin.fixture:one'], 'claudePlugin:disablePlugin': ['plugin.fixture:one'], 'claudePlugin:getPluginResources': ['plugin.fixture:one']
+  'claudePlugin:uninstallPlugin': ['plugin.fixture:one'], 'claudePlugin:enablePlugin': ['plugin.fixture:one'], 'claudePlugin:disablePlugin': ['plugin.fixture:one'], 'claudePlugin:getPluginResources': ['plugin.fixture:one'],
+  'mobile:getInfo': [], 'mobile:setAccess': [{ enabled: false, lanAccess: false, sessionIdleDays: 7 }], 'mobile:startTunnel': [], 'mobile:stopTunnel': [],
+  'mobile:setCustomUrl': ['https://mobile.example.test/access'], 'mobile:clearCustomUrl': [], 'mobile:getPendingPin': [], 'mobile:getSessions': [],
+  'mobile:revokeSession': ['mobile-session-fixture'], 'mobile:revokeAllSessions': []
 }
 
 type Variant = { operation: string; case: string; args: unknown[] }
@@ -161,6 +165,16 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'claudePlugin:discoverPlugins', case: 'empty-discovery-query', args: [''] },
   { operation: 'claudePlugin:installPlugin', case: 'default-user-scope', args: ['fixture-plugin', 'marketplace.fixture:one'] },
   { operation: 'claudePlugin:installPlugin', case: 'maximum-safe-plugin-name', args: ['x'.repeat(128), 'marketplace.fixture:one', 'user'] },
+  { operation: 'mobile:setAccess', case: 'mobile-enabled-only', args: [{ enabled: true }] },
+  { operation: 'mobile:setAccess', case: 'mobile-lan-opt-in', args: [{ lanAccess: true, sessionIdleDays: 365 }] },
+  { operation: 'mobile:setAccess', case: 'mobile-fractional-idle', args: [{ sessionIdleDays: 0.125 }] },
+  { operation: 'mobile:setAccess', case: 'mobile-typed-omitted-option', args: [{ enabled: false, lanAccess: undefined, sessionIdleDays: undefined }] },
+  { operation: 'mobile:setCustomUrl', case: 'mobile-loopback-custom-url', args: ['http://127.0.0.1:3210'] },
+  { operation: 'mobile:setCustomUrl', case: 'mobile-ipv6-custom-url', args: ['https://[::1]:3210/access'] },
+  { operation: 'mobile:setCustomUrl', case: 'mobile-empty-query-base', args: ['https://mobile.example.test/access?'] },
+  { operation: 'mobile:setCustomUrl', case: 'mobile-empty-fragment-base', args: ['https://mobile.example.test/access#'] },
+  { operation: 'mobile:setCustomUrl', case: 'mobile-address-byte-boundary', args: ['https://mobile.example.test/' + 'x'.repeat(2048 - 'https://mobile.example.test/'.length)] },
+  { operation: 'mobile:revokeSession', case: 'mobile-namespaced-session-id', args: ['mobile.fixture:one'] },
   { operation: 'chat:start', case: 'tool-history', args: [{ messages: [{ role: 'user', content: 'Fixture request' }, { role: 'assistant', content: '', toolCalls: [{ id: 'call_fixture', name: 'fixture_tool', input: { projectId: project } }] }, { role: 'tool', toolCallId: 'call_fixture', name: 'fixture_tool', content: 'Fixture result', isError: false }], maxToolCalls: 32 }] },
   ...PRODUCTION_SETTINGS_KEYS.map(key => ({ operation: 'settings:get', case: `setting-${key}`, args: [key] })),
   ...PRODUCTION_ENV_KEYS.map(key => ({ operation: 'env:get', case: `marker-${key}`, args: [key] })),
@@ -170,7 +184,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 127 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 137 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

@@ -12,13 +12,16 @@ import {
 describe('portable mobile API ownership', () => {
   let source: ReturnType<typeof createPortableDbFixture>
   const token = 'fixture-mobile-owner-token'
+  const github = {} as never
+  let agent: Parameters<typeof startMobileApiServer>[1]
   beforeEach(() => {
+    agent = {} as never
     source = createPortableDbFixture()
     source.db.createMobileSession('fixture-session', createHash('sha256').update(token).digest('hex'), 'fixture device')
-    setMobileApiDeps({ db: source.db, agentManager: {} as never, githubManager: {} as never })
+    setMobileApiDeps({ db: source.db, agentManager: agent, githubManager: github })
   })
   afterEach(async () => { await closeMobileApiServer(); source.rawDb.close() })
-  const start = (agent: Parameters<typeof startMobileApiServer>[1] = {} as never) => startMobileApiServer(source.db, agent, {} as never, 0)
+  const start = (driver: Parameters<typeof startMobileApiServer>[1] = agent) => startMobileApiServer(source.db, driver, github, 0)
 
   it('coalesces startup and publishes only its actual native port', async () => {
     const first = start()
@@ -110,13 +113,9 @@ describe('portable mobile API ownership', () => {
   })
 
   it('keeps a directly started source closed after an earlier completed stop', async () => {
-    const other = createPortableDbFixture()
-    try {
-      setMobileApiDeps({ db: other.db, agentManager: {} as never, githubManager: {} as never })
-      await start()
-      await stopMobileApiServer()
-      await closeMobileApiServer()
-      await expect(start()).rejects.toThrow('MOBILE_API_CLOSED')
-    } finally { other.rawDb.close() }
+    await start()
+    await stopMobileApiServer()
+    await closeMobileApiServer()
+    await expect(start()).rejects.toThrow('MOBILE_API_CLOSED')
   })
 })

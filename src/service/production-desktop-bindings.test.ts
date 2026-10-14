@@ -1,7 +1,8 @@
+import { MOBILE_CODECS } from '../shared/mobile-codecs'
 import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProductionOwner, ProductionOwnerBootstrap } from './production-owner'
@@ -33,11 +34,13 @@ afterEach(async () => {
   for (const { owner, root } of owned.splice(0)) { await owner.close(); rmSync(root, { recursive: true, force: true }) }
   vi.restoreAllMocks()
 })
-async function fixture(providerOverride?: ChatProvider, connectors = false) {
+async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false) {
   const { ProductionOwner } = ownerModule
   const { ProductionDesktopBindings } = bindingModule
   const root = mkdtempSync(join(tmpdir(), '21x-production-bindings-')), resourceRoot = join(root, 'resources')
   mkdirSync(resourceRoot)
+  const mobileRoot = join(resourceRoot, 'mobile')
+  if (mobile) { mkdirSync(mobileRoot); writeFileSync(join(mobileRoot, 'index.html'), '<main>Actual owned mobile fixture</main>') }
   const keys = new Map<string, Buffer>(), adapter = new FakeAdapter()
   const bootstrap: ProductionOwnerBootstrap = {
     profileId: 'production-bindings-fixture', paths: { profileRoot: join(root, 'profile'), workspaceRoot: join(root, 'workspaces'), attachmentRoot: join(root, 'attachments'), reposRoot: join(root, 'repos'), resourceRoot, tempRoot: join(root, 'temp') },
@@ -46,6 +49,7 @@ async function fixture(providerOverride?: ChatProvider, connectors = false) {
       if (!key) throw Object.assign(new Error('KEYSTORE_NO_ENTRY'), { code: 'KEYSTORE_NO_ENTRY' })
       return Buffer.from(key)
     } } },
+    ...(mobile ? { mobile: { distRoot: mobileRoot, port: 0 } } : {}),
     managedTaskMcp: { disabled: true }, connectors: connectors ? { kind: 'enabled' } : { kind: 'disabled', reason: 'No connector resources in this fixture.' },
     native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: 'disabled' },
       prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }) }
@@ -69,6 +73,7 @@ async function fixture(providerOverride?: ChatProvider, connectors = false) {
     canAccessConnector: (_id, value) => trusted(value), canUseSourcePlugin: (_id, value) => trusted(value),
     canCreateInstance: (_piece, value) => trusted(value), canUsePiece: (_piece, value) => trusted(value),
     canBorrowSourceCredentials: (_id, _plugin, value) => trusted(value), canResolveUnsavedConfig: (_plugin, value) => trusted(value),
+    canManageMobile: trusted, canAccessMobileSession: (_id, value) => trusted(value),
     canAccessMarketplace: (_id, value) => trusted(value), canCreateMarketplace: (_data, value) => trusted(value),
     canAccessPluginName: (_name, _source, value) => trusted(value), canAccessPlugin: (_id, value) => trusted(value),
     canUseMarketplaceSource: (_source, value) => trusted(value), canUsePluginSource: (_source, _marketplace, _root, value) => trusted(value),
@@ -84,6 +89,41 @@ async function fixture(providerOverride?: ChatProvider, connectors = false) {
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('pairs against the actual mobile HTTP owner and sends a phone start through shared admission', async () => {
+    const f = await fixture(undefined, false, true)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(130)
+    const lease = f.owner.getMobileBindingLease()!
+    expect(lease.deps.db).toBe(f.services.db); expect(lease.deps.agentManager).toBe(f.services.agents)
+    expect(lease.deps.taskOwners?.automation).toBe(f.services.automation)
+    await f.backend.invoke('mobile:setAccess', MOBILE_CODECS['mobile:setAccess'].encodeArguments([{ enabled: true }]), f.caller, f.signal)
+    const infoWire = await f.backend.invoke('mobile:getInfo', {}, f.caller, f.signal) as { value: { url: string; port: number } }
+    const info = infoWire.value, base = `http://127.0.0.1:${info.port}`
+    expect(await (await fetch(base)).text()).toContain('Actual owned mobile fixture')
+    expect((await fetch(base + '/api/tasks')).status).toBe(401)
+    const post = async (path: string, body: unknown, token?: string) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body) })
+    const initiated = await post('/api/auth/pair/initiate', { code: new URL(info.url).searchParams.get('code') })
+    expect(initiated.status).toBe(200)
+    const pinWire = await f.backend.invoke('mobile:getPendingPin', {}, f.caller, f.signal) as { value: { pin: string; pairCodeId: string; expiresAt: number } }
+    const pin = pinWire.value
+    const event = f.backend.encodeOwnerEvent('mobile:pairing-initiated', pin)
+    f.options.authority.canManageMobile = (_caller, access) => access === 'read'
+    expect(f.backend.projectOwnerEvent('mobile:pairing-initiated', event, f.caller)).toBeUndefined()
+    await expect(f.backend.invoke('mobile:getPendingPin', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    f.options.authority.canManageMobile = () => true
+    const paired = await (await post('/api/auth/pair/verify', { pin: pin.pin, pairCodeId: pin.pairCodeId })).json() as { sessionToken: string; sessionId: string }
+    const agent = f.services.db.getAgents()[0], task = f.services.db.createTask({ title: 'Phone shared owner' })!
+    f.services.db.updateAgent(agent.id, { config: { coding_agent: 'pi', api_keys: { openai: 'private-phone-fixture' } } })
+    const start = await post('/api/sessions/start', { agentId: agent.id, taskId: task.id }, paired.sessionToken)
+    expect(start.status).toBe(200)
+    expect(f.services.agents.findSessionByTaskId(task.id)).toMatchObject({ sessionId: expect.any(String) })
+    const agents = await (await fetch(base + '/api/agents', { headers: { Authorization: 'Bearer ' + paired.sessionToken } })).text()
+    expect(agents).not.toContain('private-phone-fixture'); expect(agents).not.toContain('api_keys')
+    await expect(f.backend.invoke('mobile:startTunnel', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    await f.backend.invoke('mobile:revokeSession', MOBILE_CODECS['mobile:revokeSession'].encodeArguments([paired.sessionId]), f.caller, f.signal)
+    expect((await fetch(base + '/api/tasks', { headers: { Authorization: 'Bearer ' + paired.sessionToken } })).status).toBe(401)
+    await f.owner.close(); expect(f.services.db.db.open).toBe(false)
+    await expect(fetch(base)).rejects.toThrow()
+  })
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
     expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(127)

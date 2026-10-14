@@ -3,6 +3,16 @@
 use serde_json::Value;
 
 pub const COMMANDS: &[&str] = &[
+    "mobile:getInfo",
+    "mobile:setAccess",
+    "mobile:startTunnel",
+    "mobile:stopTunnel",
+    "mobile:setCustomUrl",
+    "mobile:clearCustomUrl",
+    "mobile:getPendingPin",
+    "mobile:getSessions",
+    "mobile:revokeSession",
+    "mobile:revokeAllSessions",
     "sessionContext:getSnapshot",
     "sessionContext:setPolicy",
     "claudePlugin:getMarketplaceSources",
@@ -132,6 +142,8 @@ pub const COMMANDS: &[&str] = &[
     "taskSource:reassign",
 ];
 pub const EVENTS: &[&str] = &[
+    "mobile:pairing-initiated",
+    "mobile:device-connected",
     "task:created",
     "task:updated",
     "task:deleted",
@@ -249,6 +261,148 @@ const PLUGIN_COMMANDS: &[&str] = &[
     "plugin:resolveOptions",
 ];
 const CONTEXT_COMMANDS: &[&str] = &["sessionContext:getSnapshot", "sessionContext:setPolicy"];
+const MOBILE_COMMANDS: &[&str] = &[
+    "mobile:getInfo",
+    "mobile:setAccess",
+    "mobile:startTunnel",
+    "mobile:stopTunnel",
+    "mobile:setCustomUrl",
+    "mobile:clearCustomUrl",
+    "mobile:getPendingPin",
+    "mobile:getSessions",
+    "mobile:revokeSession",
+    "mobile:revokeAllSessions",
+];
+fn mobile_days(value: &Value) -> bool {
+    value
+        .as_f64()
+        .is_some_and(|n| n.is_finite() && n > 0.0 && n <= 365.0)
+}
+fn mobile_address(value: &Value, paired: bool) -> bool {
+    mcp_text(value, 2048)
+        && value.as_str().is_some_and(|s| {
+            s == js_trim(s)
+                && url::Url::parse(s).is_ok_and(|u| {
+                    matches!(u.scheme(), "http" | "https")
+                        && u.username().is_empty()
+                        && u.password().is_none_or(str::is_empty)
+                        && u.fragment().is_none_or(str::is_empty)
+                        && if paired {
+                            let pairs: Vec<_> = u.query_pairs().collect();
+                            u.path().ends_with("/pair")
+                                && pairs.len() == 1
+                                && pairs[0].0 == "code"
+                                && mcp_id(&Value::String(pairs[0].1.to_string()))
+                        } else {
+                            u.query().is_none_or(str::is_empty)
+                        }
+                })
+        })
+}
+fn mobile_pin(value: &Value) -> bool {
+    object(value, &["pin", "pairCodeId", "expiresAt"], &[])
+        && value["pin"]
+            .as_str()
+            .is_some_and(|s| s.len() == 6 && s.bytes().all(|c| c.is_ascii_digit()))
+        && mcp_id(&value["pairCodeId"])
+        && integer(&value["expiresAt"])
+}
+fn mobile_session(value: &Value) -> bool {
+    object(value, &["id", "device_name", "paired_at", "last_seen"], &[])
+        && mcp_id(&value["id"])
+        && mcp_text(&value["device_name"], 256)
+        && integer(&value["paired_at"])
+        && integer(&value["last_seen"])
+}
+fn mobile_request(operation: &str, value: &Value) -> bool {
+    match operation {
+        "mobile:setAccess" => {
+            object(value, &["options"], &[])
+                && object(
+                    &value["options"],
+                    &[],
+                    &["enabled", "lanAccess", "sessionIdleDays"],
+                )
+                && value["options"].as_object().is_some_and(|map| {
+                    !map.is_empty()
+                        && map.iter().all(|(key, entry)| {
+                            if key == "sessionIdleDays" {
+                                mobile_days(entry)
+                            } else {
+                                entry.is_boolean()
+                            }
+                        })
+                })
+        }
+        "mobile:setCustomUrl" => {
+            object(value, &["url"], &[]) && mobile_address(&value["url"], false)
+        }
+        "mobile:revokeSession" => object(value, &["sessionId"], &[]) && mcp_id(&value["sessionId"]),
+        _ => object(value, &[], &[]),
+    }
+}
+fn mobile_result(operation: &str, value: &Value) -> bool {
+    match operation {
+        "mobile:getInfo" => {
+            object(
+                value,
+                &[
+                    "enabled",
+                    "lanAccess",
+                    "sessionIdleDays",
+                    "url",
+                    "port",
+                    "lanUrl",
+                    "tunnelUrl",
+                    "tunnelActive",
+                    "remoteMode",
+                    "customUrl",
+                ],
+                &[],
+            ) && value["enabled"].is_boolean()
+                && value["lanAccess"].is_boolean()
+                && mobile_days(&value["sessionIdleDays"])
+                && mobile_address(&value["url"], true)
+                && value["port"]
+                    .as_u64()
+                    .is_some_and(|n| (1..=65535).contains(&n))
+                && ["lanUrl", "tunnelUrl"]
+                    .iter()
+                    .all(|key| value[*key].is_null() || mobile_address(&value[*key], true))
+                && value["tunnelActive"].is_boolean()
+                && (value["remoteMode"] == "quick" || value["remoteMode"] == "custom")
+                && (value["customUrl"].is_null() || mobile_address(&value["customUrl"], false))
+        }
+        "mobile:setAccess" => {
+            object(
+                value,
+                &["enabled", "lanAccess", "sessionIdleDays", "listening"],
+                &[],
+            ) && value["enabled"].is_boolean()
+                && value["lanAccess"].is_boolean()
+                && mobile_days(&value["sessionIdleDays"])
+                && value["listening"].is_boolean()
+        }
+        "mobile:startTunnel" => {
+            object(value, &["tunnelUrl"], &[]) && mobile_address(&value["tunnelUrl"], true)
+        }
+        "mobile:setCustomUrl" => {
+            object(value, &["url"], &[]) && mobile_address(&value["url"], true)
+        }
+        "mobile:getPendingPin" => value.is_null() || mobile_pin(value),
+        "mobile:getSessions" => value.as_array().is_some_and(|items| {
+            items.len() <= 128
+                && items.iter().all(mobile_session)
+                && items
+                    .iter()
+                    .filter_map(|row| row["id"].as_str())
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    == items.len()
+        }),
+        _ => object(value, &["success"], &[]) && value["success"].is_boolean(),
+    }
+}
 const CLAUDE_COMMANDS: &[&str] = &[
     "claudePlugin:getMarketplaceSources",
     "claudePlugin:addMarketplaceSource",
@@ -1926,6 +2080,9 @@ pub fn images(value: &Value) -> bool {
         })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if MOBILE_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 1024 * 1024) && mobile_request(operation, value);
+    }
     if CONTEXT_COMMANDS.contains(&operation) {
         let key = if operation == "sessionContext:getSnapshot" {
             "scope"
@@ -2036,6 +2193,13 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if MOBILE_COMMANDS.contains(&operation) {
+        return object(value, &["defined", "value"], &[])
+            && value["defined"] == true
+            && bounded_bytes(value, 1024 * 1024)
+            && bounded_bytes(&value["value"], 64 * 1024)
+            && mobile_result(operation, &value["value"]);
+    }
     if CONTEXT_COMMANDS.contains(&operation) {
         return object(value, &["defined", "value"], &[])
             && value["defined"] == true
@@ -2287,6 +2451,13 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
         return false;
     }
     match operation {
+        "mobile:pairing-initiated" => bounded_bytes(value, 64 * 1024) && mobile_pin(value),
+        "mobile:device-connected" => {
+            bounded_bytes(value, 64 * 1024)
+                && object(value, &["sessionId", "deviceName"], &[])
+                && mcp_id(&value["sessionId"])
+                && mcp_text(&value["deviceName"], 256)
+        }
         "tasks:refresh" => object(value, &[], &[]),
         "task:created" => object(value, &["task"], &[]),
         "task:updated" => {
@@ -2560,6 +2731,144 @@ fn commander_event(value: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
+        assert_eq!(EVENTS.len(), 19);
+        let requests = [
+            ("mobile:getInfo", json!({})),
+            (
+                "mobile:setAccess",
+                json!({"options":{"enabled":false,"lanAccess":false,"sessionIdleDays":7}}),
+            ),
+            ("mobile:startTunnel", json!({})),
+            ("mobile:stopTunnel", json!({})),
+            (
+                "mobile:setCustomUrl",
+                json!({"url":"https://mobile.example.test/access"}),
+            ),
+            ("mobile:clearCustomUrl", json!({})),
+            ("mobile:getPendingPin", json!({})),
+            ("mobile:getSessions", json!({})),
+            (
+                "mobile:revokeSession",
+                json!({"sessionId":"mobile.fixture:one"}),
+            ),
+            ("mobile:revokeAllSessions", json!({})),
+        ];
+        for (operation, mut request) in requests {
+            assert!(valid_request(operation, &request), "{operation}");
+            request["caller"] = json!({"id":"foreign","capabilities":["*"]});
+            assert!(!valid_request(operation, &request));
+        }
+        assert!(valid_request(
+            "mobile:setAccess",
+            &json!({"options":{"sessionIdleDays":0.125}})
+        ));
+        for options in [
+            json!({}),
+            json!({"enabled":"true"}),
+            json!({"sessionIdleDays":0}),
+            json!({"sessionIdleDays":366}),
+            json!({"enabled":true,"profileRoot":"/private"}),
+        ] {
+            assert!(!valid_request(
+                "mobile:setAccess",
+                &json!({"options":options})
+            ));
+        }
+        for address in [
+            "file:///private",
+            "https://user:pass@example.test",
+            "https://example.test?sessionToken=private",
+            "https://example.test#private",
+            " https://example.test",
+            "https://example.test/bad\0path",
+        ] {
+            assert!(!valid_request(
+                "mobile:setCustomUrl",
+                &json!({"url":address})
+            ));
+        }
+        let info = json!({"enabled":false,"lanAccess":false,"sessionIdleDays":7,"url":"http://127.0.0.1:3210/pair?code=init.fixture:one","port":3210,"lanUrl":null,"tunnelUrl":null,"tunnelActive":false,"remoteMode":"quick","customUrl":null});
+        assert!(valid_result(
+            "mobile:getInfo",
+            &json!({"defined":true,"value":info.clone()})
+        ));
+        assert!(valid_result(
+            "mobile:startTunnel",
+            &json!({"defined":true,"value":{"tunnelUrl":"https://mobile.example.test/pair?code=init.fixture:one"}})
+        ));
+        assert!(valid_result(
+            "mobile:setCustomUrl",
+            &json!({"defined":true,"value":{"url":"https://mobile.example.test/access/pair?code=init.fixture:one"}})
+        ));
+        let mut leaked = info.clone();
+        leaked["sessionToken"] = json!("private");
+        assert!(!valid_result(
+            "mobile:getInfo",
+            &json!({"defined":true,"value":leaked})
+        ));
+        for address in [
+            "https://example.test/pair?code=one&code=two",
+            "https://example.test/pair?code=one&sessionToken=private",
+            "https://example.test/not-pair?code=one",
+            "https://example.test/pair?code=bad%2Fcode",
+            "https://example.test/pair?code=one#private",
+        ] {
+            let mut malformed = info.clone();
+            malformed["url"] = json!(address);
+            assert!(!valid_result(
+                "mobile:getInfo",
+                &json!({"defined":true,"value":malformed})
+            ));
+        }
+        let pin = json!({"pin":"123456","pairCodeId":"pair.fixture:one","expiresAt":1000});
+        assert!(valid_result(
+            "mobile:getPendingPin",
+            &json!({"defined":true,"value":pin.clone()})
+        ));
+        assert!(valid_result(
+            "mobile:getPendingPin",
+            &json!({"defined":true,"value":null})
+        ));
+        assert!(valid_event("mobile:pairing-initiated", &pin));
+        assert!(valid_event(
+            "mobile:device-connected",
+            &json!({"sessionId":"mobile.fixture:one","deviceName":"Fixture Phone"})
+        ));
+        assert!(!valid_event(
+            "mobile:pairing-initiated",
+            &json!({"pin":"12345","pairCodeId":"fixture","expiresAt":1000})
+        ));
+        assert!(!valid_event(
+            "mobile:device-connected",
+            &json!({"sessionId":"fixture","deviceName":"Fixture","sessionToken":"private"})
+        ));
+        let row = json!({"id":"mobile.fixture:one","device_name":"Fixture Phone","paired_at":1000,"last_seen":1001});
+        assert!(valid_result(
+            "mobile:getSessions",
+            &json!({"defined":true,"value":[row.clone()]})
+        ));
+        assert!(!valid_result(
+            "mobile:getSessions",
+            &json!({"defined":true,"value":[row.clone(),row.clone()]})
+        ));
+        let mut raw = row;
+        raw["token_hash"] = json!("private");
+        assert!(!valid_result(
+            "mobile:getSessions",
+            &json!({"defined":true,"value":[raw]})
+        ));
+        assert!(valid_result(
+            "mobile:revokeSession",
+            &json!({"defined":true,"value":{"success":false}})
+        ));
+        assert!(!valid_result(
+            "mobile:startTunnel",
+            &json!({"defined":false})
+        ));
+    }
 
     fn context_fixture() -> Value {
         json!({"scope":{"kind":"captain","ownerId":"project_fixture"},"generation":{"id":"generation:fixture","key":"adapter:native_fixture","engine":"adapter","state":"running","createdAt":100,"backendId":"native_fixture"},"usage":{"tokens":1200,"source":"reported","contextWindow":16000,"model":"fixture/model","observedAt":110},"counters":{"compactions":1,"wakeups":2,"turns":3,"ageMs":10},"policy":{"mode":"observe","contextRatio":0.6,"compactions":3,"wakeups":20,"turns":10,"maxAgeDays":7},"reasons":["context"],"warnings":["Human\nwarning"],"summaries":[{"id":"summary:fixture","content":"Human\nsummary","kind":"rollover","createdAt":105,"source":"model"}],"handoff":{"id":"handoff:fixture","state":"creation_unconfirmed"}})
@@ -3260,7 +3569,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 127);
+        assert_eq!(COMMANDS.len(), 137);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

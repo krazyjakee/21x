@@ -39,6 +39,9 @@ function contextSnapshot(): SessionContextSnapshot {
 function claudeInstalledRow() {
   return { id: 'plugin.fixture:one', name: 'fixture-plugin', marketplace_id: 'marketplace.fixture:one', manifest: { name: 'fixture-plugin', author: { name: 'Fixture Author' }, description: 'Fixture public manifest' }, source: { source: 'github', repo: 'fixture/marketplace#main', path: 'plugins/fixture-plugin' }, scope: 'user', enabled: true, version: '1.0', installed_at: '2026-10-14', updated_at: '2026-10-14' }
 }
+function mobileInfo() {
+  return { enabled: false, lanAccess: false, sessionIdleDays: 7, url: 'http://127.0.0.1:3210/pair?code=init.fixture:one', port: 3210, lanUrl: null, tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null }
+}
 it('uses exact codecs and trusted host metadata; missing binary/file bindings never reach native or Electron', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
@@ -113,7 +116,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 127 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 137 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -122,7 +125,7 @@ it('binds the 127 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(127)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(137)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -432,4 +435,92 @@ it('never repeats an accepted Claude plugin install after a lost network/native 
   f.changeEpoch(); await f.host.reconnect(); await rejected
   pending.resolve({ engineEpoch: 'engine-1', result: { defined: true, value: claudeInstalledRow() } }); await Promise.resolve()
   expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'claudePlugin:installPlugin')).toHaveLength(1)
+})
+
+it('binds mobile controls and fences one-time pairing code creation during recovery', async () => {
+  const f = fixture(), info = mobileInfo(), pin = { pin: '123456', pairCodeId: 'pair.fixture:one', expiresAt: 1000 }
+  const sessions = [{ id: 'mobile.fixture:one', device_name: 'Fixture Phone', paired_at: 1000, last_seen: 1001 }]
+  f.results.set('mobile:getInfo', info); f.results.set('mobile:getPendingPin', pin); f.results.set('mobile:getSessions', sessions)
+  f.results.set('mobile:setAccess', { enabled: false, lanAccess: false, sessionIdleDays: 7, listening: false })
+  f.results.set('mobile:startTunnel', { tunnelUrl: 'https://mobile.example.test/pair?code=init.fixture:one' }); f.results.set('mobile:stopTunnel', { success: true })
+  f.results.set('mobile:setCustomUrl', { url: 'https://mobile.example.test/access/pair?code=init.fixture:one' }); f.results.set('mobile:clearCustomUrl', { success: true })
+  f.results.set('mobile:revokeSession', { success: false }); f.results.set('mobile:revokeAllSessions', { success: true })
+  await f.host.reconnect()
+  expect(await f.host.api.mobile.getSessions()).toEqual(sessions)
+  expect(await f.host.api.mobile.getPendingPin()).toEqual(pin)
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.mobile.getInfo()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.mobile.setAccess({ enabled: true })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.mobile.startTunnel()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.mobile.revokeSession(sessions[0].id)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  expect(await f.host.api.mobile.getInfo()).toEqual(info)
+  expect(await f.host.api.mobile.setAccess({ enabled: false, lanAccess: undefined })).toMatchObject({ listening: false })
+  expect(await f.host.api.mobile.startTunnel()).toEqual({ tunnelUrl: 'https://mobile.example.test/pair?code=init.fixture:one' })
+  expect(await f.host.api.mobile.stopTunnel()).toEqual({ success: true })
+  expect(await f.host.api.mobile.setCustomUrl('https://mobile.example.test/access')).toEqual({ url: 'https://mobile.example.test/access/pair?code=init.fixture:one' })
+  expect(await f.host.api.mobile.clearCustomUrl()).toEqual({ success: true })
+  expect(await f.host.api.mobile.revokeSession(sessions[0].id)).toEqual({ success: false })
+  expect(await f.host.api.mobile.revokeAllSessions()).toEqual({ success: true })
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'mobile:setAccess', payload: { options: { enabled: false } }, engineEpoch: 'engine-1' })
+  const beforeInvalid = f.invoke.mock.calls.length
+  await expect(f.host.api.mobile.setCustomUrl('https://user:pass@example.test')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.mobile.setAccess({ enabled: true, profileRoot: '/private' } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.mobile.setAccess({ enabled: undefined })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(beforeInvalid)
+  f.results.set('mobile:getInfo', { ...info, sessionToken: 'private' }); await expect(f.host.api.mobile.getInfo()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.set('mobile:getSessions', [{ ...sessions[0], token_hash: 'private' }]); await expect(f.host.api.mobile.getSessions()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.set('mobile:getPendingPin', null); expect(await f.host.api.mobile.getPendingPin()).toBeNull()
+})
+
+it('retains mobile event listeners through epochs without inventing connected devices during recovery', async () => {
+  const f = fixture(), pairing = vi.fn(), connected = vi.fn(), pin = { pin: '123456', pairCodeId: 'pair.fixture:one', expiresAt: 1000 }
+  const offPairing = f.host.api.mobile.onPairingInitiated(pairing), offConnected = f.host.api.mobile.onDeviceConnected(connected)
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(pairing).not.toHaveBeenCalled(); expect(connected).not.toHaveBeenCalled()
+  f.emit('mobile:pairing-initiated', pin); f.emit('mobile:device-connected', { sessionId: 'mobile.fixture:one', deviceName: 'Fixture Phone' })
+  expect(pairing).toHaveBeenCalledExactlyOnceWith(pin); expect(connected).toHaveBeenCalledExactlyOnceWith({ sessionId: 'mobile.fixture:one', deviceName: 'Fixture Phone' })
+  f.changeEpoch(); await f.host.reconnect()
+  f.history[0]?.({ payload: { protocolVersion: 1, kind: 'event', operation: 'mobile:device-connected', payload: { sessionId: 'retired', deviceName: 'Retired' }, engineEpoch: 'engine-1', sequence: 3 } })
+  expect(connected).toHaveBeenCalledOnce()
+  f.emit('mobile:device-connected', { sessionId: 'mobile.fixture:two', deviceName: 'Fixture Tablet' }); expect(connected).toHaveBeenCalledTimes(2)
+  offPairing(); offConnected()
+  f.emit('mobile:pairing-initiated', pin); expect(pairing).toHaveBeenCalledOnce()
+})
+
+it('refuses secret-bearing or caller-grant mobile event payloads before notifying listeners', async () => {
+  const f = fixture(), connected = vi.fn(); f.host.api.mobile.onDeviceConnected(connected)
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  f.emit('mobile:device-connected', { sessionId: 'mobile.fixture:one', deviceName: 'Fixture Phone', sessionToken: 'private' })
+  expect(connected).not.toHaveBeenCalled(); expect(f.host.connection.status).toBe('disconnected')
+})
+
+it('reports an unavailable native quick tunnel without falling back to a hosted service', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === 'mobile:startTunnel' ? Promise.reject({ code: 'UNKNOWN_OPERATION', privateDetail: 'No native tunnel owner' }) : original(command, args))
+  await expect(f.host.api.mobile.startTunnel()).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+  expect(f.host.unavailableCapability).toBe('mobile.startTunnel')
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'mobile:startTunnel')).toHaveLength(1)
+})
+
+const mobileMutations: Array<{ operation: string; invoke(host: NativeDesktopHost): Promise<unknown>; result: unknown }> = [
+  { operation: 'mobile:getInfo', invoke: host => host.api.mobile.getInfo(), result: mobileInfo() },
+  { operation: 'mobile:setAccess', invoke: host => host.api.mobile.setAccess({ enabled: false }), result: { enabled: false, lanAccess: false, sessionIdleDays: 7, listening: false } },
+  { operation: 'mobile:startTunnel', invoke: host => host.api.mobile.startTunnel(), result: { tunnelUrl: 'https://mobile.example.test/pair?code=init.fixture:one' } },
+  { operation: 'mobile:stopTunnel', invoke: host => host.api.mobile.stopTunnel(), result: { success: true } },
+  { operation: 'mobile:setCustomUrl', invoke: host => host.api.mobile.setCustomUrl('https://mobile.example.test/access'), result: { url: 'https://mobile.example.test/access/pair?code=init.fixture:one' } },
+  { operation: 'mobile:clearCustomUrl', invoke: host => host.api.mobile.clearCustomUrl(), result: { success: true } },
+  { operation: 'mobile:revokeSession', invoke: host => host.api.mobile.revokeSession('mobile.fixture:one'), result: { success: true } },
+  { operation: 'mobile:revokeAllSessions', invoke: host => host.api.mobile.revokeAllSessions(), result: { success: true } }
+]
+it.each(mobileMutations)('never replays accepted $operation after a native disconnect', async row => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const pending = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === row.operation ? pending.promise : original(command, args))
+  const mutation = row.invoke(f.host), rejected = expect(mutation).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); await f.host.reconnect(); await rejected
+  pending.resolve({ engineEpoch: 'engine-1', result: { defined: true, value: row.result } }); await Promise.resolve()
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === row.operation)).toHaveLength(1)
 })

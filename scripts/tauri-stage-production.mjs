@@ -2,7 +2,7 @@
 import { isBuiltin } from 'node:module'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, realpath, rename, writeFile, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
@@ -49,6 +49,47 @@ async function writeChanged(file, bytes) {
   await writeFile(temporary, bytes, { mode: 0o600 }); await rename(temporary, file)
 }
 
+/** Materialize only a bounded browser build snapshot, preserving unowned files. */
+export async function stageProductionMobile(resources, outputs) {
+  const files = new Map()
+  let total = 0
+  for (const output of outputs) {
+    const name = output.fileName
+    if (typeof name !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(name) || name.split('/').some(part => !part || part === '.' || part === '..') || files.has(name)) throw new Error('Mobile build contains an invalid or duplicate resource path')
+    const body = output.type === 'chunk' ? output.code : output.type === 'asset' ? output.source : undefined
+    if (typeof body !== 'string' && !(body instanceof Uint8Array)) throw new Error('Mobile build contains an invalid resource')
+    const bytes = Buffer.from(body)
+    total += bytes.length
+    if (bytes.length > 8 * 1024 * 1024 || total > 32 * 1024 * 1024 || files.size >= 512) throw new Error('Mobile build exceeds resource bounds')
+    files.set(name, bytes)
+  }
+  if (!files.has('index.html')) throw new Error('Mobile build has no entry document')
+  const destination = join(resources, 'mobile')
+  let prior = {}
+  try { prior = JSON.parse(await readFile(join(resources, 'service/PRODUCTION_RESOURCE_MANIFEST.json'), 'utf8')).files ?? {} }
+  catch (error) { if (error.code !== 'ENOENT') throw error }
+  let existing = []
+  try { existing = await collectProductionClosure(resources, 'mobile') }
+  catch (error) { if (error.code !== 'ENOENT') throw error }
+  for (const name of existing) {
+    const receipt = prior[name]
+    const actual = await signature(join(resources, name))
+    const generated = files.get(name.slice('mobile/'.length))
+    const exactOutput = generated && digest(generated) === actual.sha256 && generated.length === actual.bytes
+    if (!exactOutput && (!receipt || receipt.sha256 !== actual.sha256 || receipt.bytes !== actual.bytes)) throw new Error('Unowned mobile staging files were preserved')
+  }
+  await mkdir(destination, { recursive: true })
+  for (const [name, bytes] of files) {
+    const directory = join(destination, dirname(name))
+    await mkdir(directory, { recursive: true })
+    const stat = await lstat(directory)
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Mobile staging directories cannot be linked')
+    await writeChanged(join(destination, name), bytes)
+  }
+  for (const name of existing) if (!files.has(name.slice('mobile/'.length))) await rm(join(resources, name))
+  return [...files.keys()].sort().map(name => `mobile/${name}`)
+}
+
 /** No provider/SQLite execution here; preparation and platform proof are separate. */
 export async function stageProductionService(root = repository) {
   root = await realpath(root)
@@ -74,7 +115,7 @@ export async function stageProductionService(root = repository) {
     if (metadata.name !== name || metadata.version !== version) throw new Error('Physically staged production package pin changed')
   }
   const external = id => isBuiltin(id) || Object.keys(packages).some(name => id === name || id.startsWith(name + '/'))
-  const entries = { node, credentialHelper, stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs' }
+  const entries = { node, credentialHelper, mobile: 'mobile/index.html', stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs' }
   const sources = { stdio: 'src/service/production-stdio.ts', engine: 'src/service/production-service.ts', taskMcp: 'src/main/mcp-servers/task-management-mcp.ts' }
   const outputs = {}
   for (const [kind, source] of Object.entries(sources)) {
@@ -90,9 +131,13 @@ export async function stageProductionService(root = repository) {
     if (chunks.length !== 1 || chunks[0].type !== 'chunk' || chunks[0].imports.some(id => !(kind === 'stdio' ? isBuiltin(id) : external(id)))) throw new Error('Unreviewed production bundle import: ' + kind + ' ' + JSON.stringify(chunks.map(chunk => ({ type: chunk.type, imports: chunk.imports }))))
     outputs[kind] = chunks[0].code
   }
-  const buildIdentity = 'production-' + digest(Buffer.from(Object.values(outputs).join('\n'))).slice(0, 32)
+  const browser = await build({ configFile: join(root, 'vite.mobile.config.ts'), root: join(root, 'src/mobile'), logLevel: 'silent', build: { write: false } })
+  const mobileOutputs = Array.isArray(browser) ? browser.flatMap(item => item.output) : browser.output
+  const mobileFiles = await stageProductionMobile(resources, mobileOutputs)
+  const mobileIdentity = digest(Buffer.from((await Promise.all(mobileFiles.map(async name => name + ':' + (await signature(join(resources, name))).sha256))).join('\n')))
+  const buildIdentity = 'production-' + digest(Buffer.from(Object.values(outputs).join('\n') + '\n' + mobileIdentity)).slice(0, 32)
   for (const [kind, bytes] of Object.entries(outputs)) await writeChanged(join(resources, entries[kind]), bytes)
-  const names = [...closure, ...Object.values(entries), 'service/.native-prepared.json']
+  const names = [...closure, ...mobileFiles, ...Object.values(entries), 'service/.native-prepared.json']
   for (const name of ['service/piece-host.cjs', 'service/CONNECTOR_WORKER_MANIFEST.json']) {
     try { await regular(join(resources, name)); names.push(name) }
     catch (error) { if (error.code !== 'ENOENT') throw error }

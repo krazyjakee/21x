@@ -1,5 +1,5 @@
 import { TextDecoder } from 'node:util'
-import type { SecretStorage } from './secret-storage'
+import { AUTHENTICATED_SECRET_STORAGE_FORMAT, type SecretStorage } from './secret-storage'
 
 const LEGACY_SETTING_PREFIX = 'safeStorage:v1:'
 
@@ -8,9 +8,21 @@ export type CredentialLocation =
   | { readonly table: 'settings'; readonly rowId: string; readonly column: 'value' }
   | { readonly table: 'oauth_tokens'; readonly rowId: string; readonly column: 'access_token' | 'refresh_token' }
   | { readonly table: 'connector_instances'; readonly rowId: string; readonly column: 'auth' }
+  | RecordCredentialLocation
+
+export type RecordCredentialLocation =
+  | { readonly table: 'agents'; readonly rowId: string; readonly column: 'config'; readonly jsonPath: readonly ['api_keys', string] }
+  | { readonly table: 'mcp_servers'; readonly rowId: string; readonly column: 'headers' | 'environment'; readonly jsonPath: readonly [string] }
+  | { readonly table: 'mcp_servers'; readonly rowId: string; readonly column: 'oauth_metadata'; readonly jsonPath: readonly ['client_secret'] }
+  | { readonly table: 'task_sources'; readonly rowId: string; readonly column: 'config'; readonly jsonPath: readonly ['client_secret' | 'access_token' | 'api_token'] }
+
+export type RecordCredentialInterpretation =
+  | { readonly interpretation: 'plaintext-utf8' }
+  | { readonly interpretation: 'authenticated-record'; readonly formatId: typeof AUTHENTICATED_SECRET_STORAGE_FORMAT }
 
 export type LegacyCredentialSource =
   | { readonly kind: 'setting'; readonly value: string }
+  | ({ readonly kind: 'record'; readonly value: string } & RecordCredentialInterpretation)
   | {
       readonly kind: 'blob'
       readonly value: Buffer
@@ -94,6 +106,15 @@ function available(storage: SecretStorage | undefined, code: CredentialMigration
   }
 }
 
+export function isRecordCredentialLocation(location: unknown): location is RecordCredentialLocation {
+  if (!location || typeof location !== 'object') return false
+  const value = location as Record<string, unknown>, path = value.jsonPath
+  if (!Array.isArray(path) || !path.every(key => typeof key === 'string' && !!key && key.length <= 256 && !key.includes('\0'))) return false
+  if (value.table === 'agents') return value.column === 'config' && path.length === 2 && path[0] === 'api_keys'
+  if (value.table === 'mcp_servers') return (value.column === 'headers' || value.column === 'environment') && path.length === 1 || value.column === 'oauth_metadata' && path.length === 1 && path[0] === 'client_secret'
+  return value.table === 'task_sources' && value.column === 'config' && path.length === 1 && ['client_secret', 'access_token', 'api_token'].includes(path[0])
+}
+
 function validLocation(location: CredentialLocation): boolean {
   if (!location || typeof location.rowId !== 'string' || !location.rowId || location.rowId.length > 256) return false
   switch (location.table) {
@@ -101,6 +122,7 @@ function validLocation(location: CredentialLocation): boolean {
     case 'settings': return location.column === 'value' && location.rowId.endsWith('_api_key')
     case 'oauth_tokens': return location.column === 'access_token' || location.column === 'refresh_token'
     case 'connector_instances': return location.column === 'auth'
+    case 'agents': case 'mcp_servers': case 'task_sources': return isRecordCredentialLocation(location)
     default: return false
   }
 }
@@ -128,6 +150,17 @@ function decryptLegacy(value: Buffer, storage: SecretStorage | undefined, index:
 }
 
 function decodeSource(input: LegacyCredentialInput, storage: SecretStorage | undefined, index: number): string {
+  if (input.source.kind === 'record') {
+    if (input.source.interpretation === 'plaintext-utf8') return input.source.value
+    const prefix = `21x-record-credential:v1:21x-credential:${AUTHENTICATED_SECRET_STORAGE_FORMAT}:`
+    const encoded = input.source.value.slice(prefix.length)
+    if (!input.source.value.startsWith(prefix) || !encoded || encoded.length % 4 !== 0) fail('INVALID_SOURCE_FORMAT', index)
+    const ciphertext = Buffer.from(encoded, 'base64')
+    try {
+      if (ciphertext.toString('base64') !== encoded) fail('INVALID_SOURCE_FORMAT', index)
+      return decryptLegacy(ciphertext, storage, index)
+    } finally { ciphertext.fill(0) }
+  }
   if (input.source.kind === 'setting') {
     const value = input.source.value
     if (!value.startsWith(LEGACY_SETTING_PREFIX)) return value
@@ -234,17 +267,28 @@ export function prepareCredentialMigration(
   // duplicate rows cannot become a partially usable plan.
   for (const [index, input] of inputs.entries()) {
     if (!input || !validLocation(input.location) || !input.source) fail('INVALID_SOURCE', index)
-    const key = JSON.stringify([input.location.table, input.location.rowId, input.location.column])
+    const key = JSON.stringify([input.location.table, input.location.rowId, input.location.column, ...('jsonPath' in input.location ? input.location.jsonPath : [])])
     if (locations.has(key)) fail('DUPLICATE_LOCATION', index)
     locations.add(key)
     let bytes: number
-    if (input.source.kind === 'setting') {
+    if (input.source.kind === 'record') {
+      if (!isRecordCredentialLocation(input.location) || typeof input.source.value !== 'string' || !input.source.value) fail('INVALID_SOURCE', index)
+      if (input.source.interpretation === 'plaintext-utf8') {
+        if ('formatId' in input.source || input.source.value.startsWith('21x-record-credential:')) fail('INVALID_SOURCE_FORMAT', index)
+      } else if (input.source.interpretation === 'authenticated-record') {
+        if (input.source.formatId !== AUTHENTICATED_SECRET_STORAGE_FORMAT || providers.legacy && providers.legacy.formatId !== input.source.formatId) fail('INVALID_SOURCE_FORMAT', index)
+        needsLegacy = true
+      } else fail('INVALID_SOURCE_FORMAT', index)
+      if (destination.formatId !== AUTHENTICATED_SECRET_STORAGE_FORMAT || destination.storage.formatId !== AUTHENTICATED_SECRET_STORAGE_FORMAT) fail('DESTINATION_NOT_SECURE', index)
+      bytes = Buffer.byteLength(input.source.value, 'utf8')
+    } else if (input.source.kind === 'setting') {
       if (input.location.table !== 'settings' || typeof input.source.value !== 'string') fail('INVALID_SOURCE', index)
+      if (input.source.value.startsWith('21x-credential:') || input.source.value.startsWith('21x-record-credential:')) fail('INVALID_SOURCE_FORMAT', index)
       if (input.source.value.startsWith('safeStorage:') && !input.source.value.startsWith(LEGACY_SETTING_PREFIX)) fail('INVALID_SOURCE_FORMAT', index)
       bytes = Buffer.byteLength(input.source.value, 'utf8')
       needsLegacy ||= input.source.value.startsWith(LEGACY_SETTING_PREFIX)
     } else if (input.source.kind === 'blob') {
-      if (input.location.table === 'settings' || !Buffer.isBuffer(input.source.value)) fail('INVALID_SOURCE', index)
+      if (input.location.table === 'settings' || isRecordCredentialLocation(input.location) || !Buffer.isBuffer(input.source.value)) fail('INVALID_SOURCE', index)
       if (input.source.interpretation !== 'safeStorage' && input.source.interpretation !== 'plaintext-utf8') fail('AMBIGUOUS_BLOB', index)
       if (input.location.table === 'connector_instances' && (input.source.interpretation !== 'safeStorage' || !input.connectorAuthType)) fail('INVALID_SOURCE_FORMAT', index)
       bytes = input.source.value.length
@@ -267,7 +311,8 @@ export function prepareCredentialMigration(
     try {
       encryptedBytes += ciphertext.length
       changes.push(Object.freeze({
-        location: Object.freeze({ table: input.location.table, rowId: input.location.rowId, column: input.location.column }) as CredentialLocation,
+        location: Object.freeze({ table: input.location.table, rowId: input.location.rowId, column: input.location.column,
+          ...('jsonPath' in input.location ? { jsonPath: Object.freeze([...input.location.jsonPath]) } : {}) }) as CredentialLocation,
         ciphertextBase64: ciphertext.toString('base64')
       }))
     } finally {

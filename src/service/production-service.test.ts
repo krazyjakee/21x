@@ -55,6 +55,7 @@ function fixture() {
     canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessTerminal: check, canAccessMcpServer: check,
     canUseTransport: check, canUseEnvironmentName: check, canAccessConnector: check, canUseSourcePlugin: check,
     canCreateInstance: check, canUsePiece: check, canBorrowSourceCredentials: check, canResolveUnsavedConfig: check,
+    canManageMobile: check, canAccessMobileSession: check,
     canAccessMarketplace: check, canCreateMarketplace: check, canAccessPluginName: check, canAccessPlugin: check,
     canUseMarketplaceSource: check, canUsePluginAddress: check, canUsePluginSource: check, canAccessSkill: check,
     canCreateGlobalSkill: check, canCreateAgent: check, canCreateMcpServer: check,
@@ -173,7 +174,7 @@ describe('actual private production peer', () => {
   }, 15_000)
 })
 
-async function resourceFixture() {
+async function resourceFixture(mobile = false) {
   const root = mkdtempSync(join(tmpdir(), '21x-production-resources-')); roots.push(root)
   const launch = descriptor(root), resources = launch.paths.resourceRoot
   const node = process.platform === 'win32' ? 'node/node.exe' : 'node/node'
@@ -187,8 +188,9 @@ async function resourceFixture() {
   for (const [name, version] of Object.entries(PRODUCTION_RESOURCE_PINS)) put(`service/node_modules/${name}/package.json`, JSON.stringify({ name, version }))
   put('service/node_modules/better-sqlite3/build/Release/better_sqlite3.node', 'controlled-native-boundary-not-loaded')
   put('service/.native-prepared.json', JSON.stringify({ nodeVersion: '22.23.2', platform: process.platform, arch: process.arch, dependencies: PRODUCTION_RESOURCE_PINS }))
+  if (mobile) { put('mobile/index.html', '<main>actual mobile resource</main>'); put('mobile/assets/app.js', 'actual mobile script') }
   const manifest = { version: 1, kind: 'production-resource-closure', buildIdentity: launch.buildIdentity, nodeVersion: '22.23.2', platform: process.platform, arch: process.arch,
-    entries: { node, credentialHelper: helper, stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs' },
+    entries: { ...(mobile ? { mobile: 'mobile/index.html' } : {}), node, credentialHelper: helper, stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs' },
     packages: PRODUCTION_RESOURCE_PINS, files, redistributionReviewComplete: false }
   const bytes = JSON.stringify(manifest); writeFileSync(join(resources, 'service/PRODUCTION_RESOURCE_MANIFEST.json'), bytes)
   launch.resourceManifestSha256 = createHash('sha256').update(bytes).digest('hex')
@@ -203,6 +205,14 @@ describe('production resource gate before engine loading', () => {
     await expect(verifyProductionResources(f.launch, f.runtime)).rejects.toThrow('RESOURCE_CLOSURE_INCOMPLETE')
     rmSync(sdkFile); writeFileSync(join(f.resources, 'service/node_modules/@opencode-ai/sdk/package.json'), '{"name":"@opencode-ai/sdk","version":"wrong"}')
     await expect(verifyProductionResources(f.launch, f.runtime)).rejects.toThrow('RESOURCE_PIN_CHANGED')
+  })
+  it('verifies the optional entire mobile web closure and rejects late unmanifested browser resources', async () => {
+    const f = await resourceFixture(true)
+    expect(await verifyProductionResources(f.launch, f.runtime)).toMatchObject({ mobileDistRoot: join(f.resources, 'mobile') })
+    const extra = join(f.resources, 'mobile', 'assets', 'late.js'); writeFileSync(extra, 'unmanifested browser code')
+    await expect(verifyProductionResources(f.launch, f.runtime)).rejects.toThrow('RESOURCE_CLOSURE_INCOMPLETE')
+    rmSync(extra); writeFileSync(join(f.resources, 'mobile', 'index.html'), 'changed mobile resource')
+    await expect(verifyProductionResources(f.launch, f.runtime)).rejects.toThrow('RESOURCE_BYTES_CHANGED')
   })
   it('rejects resource/profile overlap, alternate Node/preloads and changed pinned manifest', async () => {
     const f = await resourceFixture()

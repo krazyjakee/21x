@@ -10,6 +10,7 @@ import { CONNECTOR_CODECS } from '@shared/connector-codecs'
 import { TASK_SOURCE_PLUGIN_CODECS } from '@shared/task-source-plugin-codecs'
 import { SESSION_CONTEXT_CODECS } from '@shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '@shared/claude-plugin-codecs'
+import { MOBILE_CODECS, MOBILE_EVENT_CODECS } from '@shared/mobile-codecs'
 import type { DesktopApi } from '@shared/desktop-api'
 import { DATABASE_COMMAND_CODECS, DATABASE_EVENT_CODECS } from '@shared/database-desktop-codecs'
 import { CONFIGURATION_COMMAND_CODECS, CONFIGURATION_EVENT_CODECS } from '@shared/configuration-desktop-codecs'
@@ -21,8 +22,8 @@ import { DesktopClient, type DesktopClientState } from './desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS }
-const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS,
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS }
+const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
 /** Explicit binding is separate from codec validation and native/service authorization. */
@@ -63,20 +64,23 @@ export const NATIVE_COMMAND_BINDINGS = {
   'sessionContext:getSnapshot': 'sessionContext.getSnapshot', 'sessionContext:setPolicy': 'sessionContext.setPolicy',
   'claudePlugin:getMarketplaceSources': 'claudePlugins.getMarketplaceSources', 'claudePlugin:addMarketplaceSource': 'claudePlugins.addMarketplaceSource', 'claudePlugin:removeMarketplaceSource': 'claudePlugins.removeMarketplaceSource',
   'claudePlugin:fetchCatalog': 'claudePlugins.fetchCatalog', 'claudePlugin:discoverPlugins': 'claudePlugins.discoverPlugins', 'claudePlugin:getInstalledPlugins': 'claudePlugins.getInstalledPlugins',
-  'claudePlugin:installPlugin': 'claudePlugins.installPlugin', 'claudePlugin:uninstallPlugin': 'claudePlugins.uninstallPlugin', 'claudePlugin:enablePlugin': 'claudePlugins.enablePlugin', 'claudePlugin:disablePlugin': 'claudePlugins.disablePlugin', 'claudePlugin:getPluginResources': 'claudePlugins.getPluginResources'
+  'claudePlugin:installPlugin': 'claudePlugins.installPlugin', 'claudePlugin:uninstallPlugin': 'claudePlugins.uninstallPlugin', 'claudePlugin:enablePlugin': 'claudePlugins.enablePlugin', 'claudePlugin:disablePlugin': 'claudePlugins.disablePlugin', 'claudePlugin:getPluginResources': 'claudePlugins.getPluginResources',
+  'mobile:getInfo': 'mobile.getInfo', 'mobile:setAccess': 'mobile.setAccess', 'mobile:startTunnel': 'mobile.startTunnel', 'mobile:stopTunnel': 'mobile.stopTunnel',
+  'mobile:setCustomUrl': 'mobile.setCustomUrl', 'mobile:clearCustomUrl': 'mobile.clearCustomUrl', 'mobile:getPendingPin': 'mobile.getPendingPin', 'mobile:getSessions': 'mobile.getSessions', 'mobile:revokeSession': 'mobile.revokeSession', 'mobile:revokeAllSessions': 'mobile.revokeAllSessions'
 } as const satisfies Record<keyof typeof commands, ApiPath<DesktopApi>>
 export const NATIVE_EVENT_BINDINGS = {
   'task:created': 'onTaskCreated', 'task:updated': 'onTaskUpdated', 'task:deleted': 'onTaskDeleted', 'project:changed': 'projects.onChanged', 'transcript:changed': 'onTranscriptChanged',
   'skills:changed': 'skills.onChanged', 'agent:status': 'onAgentStatus', 'agent:startQueueChanged': 'onAgentStartQueueChanged',
   'project:statusChanged': 'projects.onStatusChanged', 'concurrency:changed': 'concurrency.onChanged', 'tasks:refresh': 'onTasksRefresh',
-  'commander:event': 'commander.onEvent', 'chat:event': 'chat.onEvent', 'terminal:data': 'terminal.onData', 'terminal:exit': 'terminal.onExit'
+  'commander:event': 'commander.onEvent', 'chat:event': 'chat.onEvent', 'terminal:data': 'terminal.onData', 'terminal:exit': 'terminal.onExit',
+  'mobile:pairing-initiated': 'mobile.onPairingInitiated', 'mobile:device-connected': 'mobile.onDeviceConnected'
   // Recovery-state codec exists, but there is no production API binding yet.
 } as const satisfies Partial<Record<keyof typeof events, ApiPath<DesktopApi>>>
 const reads = new Set<keyof typeof commands>(['db:getTasks', 'db:getTask', 'project:getAll', 'project:get', 'project:getDefault', 'settings:get', 'settings:getAll', 'agent:getAll', 'skills:getAll', 'projectRepo:list', 'projectResource:list', 'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage', 'agentConfig:getProviders', 'agentConfig:listModels', 'db:getSubtasks', 'tasks:getCoordinatorTaskId', 'agent:getStartQueue',
   'agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'captainRuntime:get', 'commander:listSessions',
   'commander:listMessages', 'commander:getImage', 'commander:getActivity', 'secrets:getAll', 'env:get', 'terminal:getCwd', 'terminal:getBuffer',
   'mcp:getAll', 'mcp:getOAuthStatus', 'mcp:probeForAuth', 'taskSource:getAll', 'taskSource:getUsers', 'connectors:bridgePieces', 'connectors:credentialStatus', 'connectors:syncStatus', 'plugin:list', 'plugin:getDocumentation', 'plugin:resolveOptions',
-  'sessionContext:getSnapshot', 'claudePlugin:getMarketplaceSources', 'claudePlugin:fetchCatalog', 'claudePlugin:discoverPlugins', 'claudePlugin:getInstalledPlugins', 'claudePlugin:getPluginResources'])
+  'sessionContext:getSnapshot', 'claudePlugin:getMarketplaceSources', 'claudePlugin:fetchCatalog', 'claudePlugin:discoverPlugins', 'claudePlugin:getInstalledPlugins', 'claudePlugin:getPluginResources', 'mobile:getPendingPin', 'mobile:getSessions'])
 
 export interface NativeDesktopHost extends DesktopHost {
   reconnect: () => Promise<void>
@@ -124,7 +128,7 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
       let result: unknown
       try { result = await client.invoke(operation, args as DesktopCommandMap[typeof operation]['apiArguments']) }
       catch (error) {
-        if (operation.startsWith('connectors:') && error instanceof ServiceProtocolError && error.code === 'UNKNOWN_OPERATION') {
+        if ((operation.startsWith('connectors:') || operation.startsWith('mobile:')) && error instanceof ServiceProtocolError && error.code === 'UNKNOWN_OPERATION') {
           unavailableCapability = path; notify()
         }
         throw error

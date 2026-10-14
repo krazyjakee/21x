@@ -6,12 +6,13 @@ import { CONNECTOR_WRITE_ERROR, CONNECTOR_STORAGE_REMEDIATION, CONNECTOR_SYNC_ER
 import { TASK_SOURCE_RESOLVER_KEYS } from '../src/shared/task-source-plugin-codecs'
 import { CLAUDE_PLUGIN_LOCAL_SOURCE } from '../src/shared/claude-plugin-codecs'
 import { SESSION_CONTEXT_GENERATION_STATES, SESSION_CONTEXT_HANDOFF_STATES } from '../src/shared/session-context-codecs'
+import { MOBILE_EVENTS, MOBILE_EVENT_CODECS } from '../src/shared/mobile-codecs'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 127 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 137 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(127)
+    expect(corpus.operations).toHaveLength(137)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -148,10 +149,35 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     expect(PROOF_COMMAND_CODECS['claudePlugin:fetchCatalog'].encodeResult(null)).toEqual({ defined: true, value: null })
     expect(() => install.encodeResult(undefined)).toThrow()
   })
+  it('covers exact mobile settings, pairing URLs and public session/event boundaries', () => {
+    const corpus = createProductionRequestCorpus(), access = PROOF_COMMAND_CODECS['mobile:setAccess'], custom = PROOF_COMMAND_CODECS['mobile:setCustomUrl']
+    expect(corpus.requests.find(row => row.case === 'mobile-typed-omitted-option')?.payload).toEqual({ options: { enabled: false } })
+    expect(corpus.requests.find(row => row.case === 'mobile-fractional-idle')?.payload).toEqual({ options: { sessionIdleDays: 0.125 } })
+    for (const options of [{}, { enabled: undefined }, { enabled: 'true' }, { sessionIdleDays: 0 }, { sessionIdleDays: 366 }, { enabled: true, profileRoot: '/private' }]) expect(() => access.encodeArguments([options] as never)).toThrow()
+    for (const url of ['file:///private', 'https://user:pass@example.test', 'https://example.test?token=private', 'https://example.test#private', ' https://example.test', 'https://example.test/bad\0path']) expect(() => custom.encodeArguments([url])).toThrow()
+    expect(() => custom.encodeArguments(['https://mobile.example.test/' + 'x'.repeat(2049 - 'https://mobile.example.test/'.length)])).toThrow()
+    expect(corpus.requests.find(row => row.case === 'mobile-address-byte-boundary')?.payload).toMatchObject({ url: expect.any(String) })
+    expect(() => PROOF_COMMAND_CODECS['mobile:revokeSession'].decodeArguments({ sessionId: 'mobile.fixture:one', caller: { capabilities: ['*'] } })).toThrow()
+    const info = { enabled: false, lanAccess: false, sessionIdleDays: 7, url: 'http://127.0.0.1:3210/pair?code=init.fixture:one', port: 3210, lanUrl: null, tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null }
+    const getInfo = PROOF_COMMAND_CODECS['mobile:getInfo']
+    expect(getInfo.validateWireResult({ defined: true, value: info })).toBe(true)
+    for (const url of ['https://example.test/pair?code=one&code=two', 'https://example.test/pair?code=one&token=private', 'https://example.test/not-pair?code=one', 'https://example.test/pair?code=bad%2Fcode']) expect(getInfo.validateWireResult({ defined: true, value: { ...info, url } })).toBe(false)
+    expect(getInfo.validateWireResult({ defined: true, value: { ...info, sessionToken: 'private' } })).toBe(false)
+    const row = { id: 'mobile.fixture:one', device_name: 'Fixture Phone', paired_at: 1000, last_seen: 1001 }
+    expect(PROOF_COMMAND_CODECS['mobile:getSessions'].encodeResult([{ ...row, revoked: false }])).toEqual({ defined: true, value: [row] })
+    expect(() => PROOF_COMMAND_CODECS['mobile:getSessions'].encodeResult([{ ...row, token_hash: 'private' }])).toThrow()
+    expect(PROOF_COMMAND_CODECS['mobile:getSessions'].validateWireResult({ defined: true, value: [row, row] })).toBe(false)
+    expect(PROOF_COMMAND_CODECS['mobile:startTunnel'].validateWireResult({ defined: false })).toBe(false)
+    expect(MOBILE_EVENTS).toEqual(['mobile:pairing-initiated', 'mobile:device-connected'])
+    expect(MOBILE_EVENT_CODECS['mobile:pairing-initiated'].validatePayload({ pin: '123456', pairCodeId: 'pair.fixture:one', expiresAt: 1000 })).toBe(true)
+    expect(MOBILE_EVENT_CODECS['mobile:pairing-initiated'].validatePayload({ pin: '12345', pairCodeId: 'fixture', expiresAt: 1000 })).toBe(false)
+    expect(MOBILE_EVENT_CODECS['mobile:device-connected'].validatePayload({ sessionId: row.id, deviceName: row.device_name, sessionToken: 'private' })).toBe(false)
+    expect(() => MOBILE_EVENT_CODECS['mobile:device-connected'].decodePayload({ sessionId: row.id, deviceName: 'bad\0name' })).toThrow()
+  })
   it('exports the validated corpus only when the coordinator selects an artifact path', async () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(127)
+    expect(corpus.operations).toHaveLength(137)
   })
 })

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { collectProductionClosure, stageProductionService, validateProductionPins } from './tauri-stage-production.mjs'
+import { collectProductionClosure, stageProductionMobile, stageProductionService, validateProductionPins } from './tauri-stage-production.mjs'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -25,6 +25,17 @@ describe('explicit production resource staging', () => {
     expect(await collectProductionClosure(resources)).toEqual(['service/node_modules/package-a/dependency/runtime.js', 'service/node_modules/package-a/package.json'])
     symlinkSync(join(modules, 'package-a'), join(modules, 'linked-package'), process.platform === 'win32' ? 'junction' : 'dir')
     await expect(collectProductionClosure(resources)).rejects.toThrow('package links')
+  })
+  it('stages an actual bounded web snapshot and refuses to replace an unowned mobile tree', async () => {
+    const resources = root()
+    const outputs = [{ type: 'asset', fileName: 'index.html', source: '<main>Mobile web client</main>' }, { type: 'chunk', fileName: 'assets/app.js', code: 'globalThis.fixture = true' }]
+    expect(await stageProductionMobile(resources, outputs)).toEqual(['mobile/assets/app.js', 'mobile/index.html'])
+    expect(await stageProductionMobile(resources, outputs)).toEqual(['mobile/assets/app.js', 'mobile/index.html'])
+    writeFileSync(join(resources, 'mobile', 'personal.txt'), 'Preserve unowned source')
+    await expect(stageProductionMobile(resources, outputs)).rejects.toThrow('Unowned mobile staging')
+    const outside = join(resources, 'outside'); mkdirSync(outside)
+    await expect(stageProductionMobile(resources, [{ type: 'asset', fileName: '../outside/index.html', source: 'escape' }])).rejects.toThrow('invalid')
+    await expect(stageProductionMobile(resources, [{ type: 'asset', fileName: 'index.html', source: 'x'.repeat(8 * 1024 * 1024 + 1) }])).rejects.toThrow('bounds')
   })
   it('fails before bundling or writing artifacts when the real native key-store helper is absent', async () => {
     const repository = root(); mkdirSync(join(repository, 'scripts')); writeFileSync(join(repository, 'scripts/tauri-runtime.json'), JSON.stringify(pins))

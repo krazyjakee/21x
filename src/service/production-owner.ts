@@ -1,3 +1,6 @@
+import { networkInterfaces } from 'node:os'
+import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobileAccessSettings, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, type MobileApiDeps } from '../main/mobile-api-server'
+import { TunnelManagerCore } from '../main/tunnel-manager-core'
 import SQLite from 'better-sqlite3'
 import { createRequire } from 'node:module'
 import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-service-core'
@@ -10,7 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { McpProbeService } from '../main/agent-manager/mcp-probe-service'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync, statSync } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import { DatabaseManager, type DatabaseRuntimeOptions } from '../main/database/manager'
 import { decryptSettingValue, decryptRecordCredential } from '../main/database/serializers'
 import { acquireProfileLock, type ProfileLock } from '../main/platform/profile-lock'
@@ -86,6 +89,8 @@ export interface ProductionOwnerBootstrap {
   credentials: { store: ProtectedApplicationKeyStore; mode: 'load' | 'create' }
   managedTaskMcp: DatabaseRuntimeOptions['managedTaskMcp']
   connectors: { kind: 'disabled'; reason: string } | { kind: 'enabled' }
+  /** Verified browser resource root; absent artifacts never expose mobile access. */
+  mobile?: { distRoot: string; port?: number }
   native: {
     agents: Pick<AgentManagerHost, 'renderer' | 'notifications' | 'energy' | 'configuredMcp'>
     /** PATH/native supervision readiness, before any adapter or scheduler starts. */
@@ -109,6 +114,7 @@ export interface ProductionOwnerExternalBoundaries {
   createProvider?: typeof createChatProviderFromSettings
   connectorTransport?: ConnectorRuntimeHost['createTransport']
   terminalProcessHost?: TerminalProcessHost
+  mobileTunnel?: TunnelManagerCore
 }
 
 export interface ProductionServices {
@@ -139,11 +145,13 @@ export interface ProductionServices {
 
 // Task API, secret storage, report bridge and task lifecycle hooks are process
 // globals. Reserve them before asynchronous key access, even for distinct profiles.
+const MOBILE_OWNER_EVENTS = new Set(['agent:status', 'agent:incompatible-session', 'agent:recoveryStateChanged', 'agent:startQueueChanged', 'concurrency:changed', 'project:statusChanged', 'task:source-action-failed', 'task:updated', 'transcript:changed', 'task:created', 'task:subtasks-reordered', 'task:checkpointAnswered', 'artifact:updated', 'task:deleted', 'tasks:refresh', 'ui:command', 'project:changed'])
 const registryKey = Symbol.for('21x.production-service.owner.v1')
 const processRegistry = globalThis as typeof globalThis & { [registryKey]?: object }
 
 /** One application lifetime independent of any renderer/window attachment. */
 export class ProductionOwner {
+  private mobile: { deps: MobileApiDeps; tunnel: TunnelManagerCore | null; port?: number } | null = null
   private phase: ProductionOwnerPhase = 'new'
   private stage = 'new'
   private code: string | undefined
@@ -316,6 +324,22 @@ export class ProductionOwner {
       if (this.services !== services || owners.database !== services.db || owners.manager !== services.plugins || owners.agents !== services.agents || owners.sync !== services.sync)
         throw new ProductionOwnerError('SERVICE_OWNER_LOST')
       services.plugins.assertSource(services.db)
+    } }
+  }
+
+  getMobileBindingLease(): { deps: MobileApiDeps; tunnel: TunnelManagerCore | null; port?: number; lanAddress(): string; assertMobileOwners(deps: MobileApiDeps, tunnel: TunnelManagerCore | null): void } | null {
+    this.getDatabaseBindingLease()
+    const mobile = this.mobile, services = this.services!
+    if (!mobile) return null
+    const deps = mobile.deps, tunnel = mobile.tunnel
+    return { deps, tunnel, port: mobile.port, lanAddress: () => {
+      for (const entries of Object.values(networkInterfaces())) for (const address of entries ?? []) if (address.family === 'IPv4' && !address.internal) return address.address
+      return 'localhost'
+    }, assertMobileOwners: (actual, actualTunnel) => {
+      this.getDatabaseBindingLease()
+      if (this.mobile !== mobile || this.services !== services || actualTunnel !== tunnel || actual.db !== services.db || actual.agentManager !== services.agents || actual.syncManager !== services.sync || actual.pluginRegistry !== services.registry || actual.taskOwners?.recurrence !== services.recurrence || actual.taskOwners?.heartbeat !== services.heartbeat || actual.taskOwners?.automation !== services.automation ||
+        Object.keys(deps).some(key => Reflect.get(actual, key) !== Reflect.get(deps, key))) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      assertMobileApiDeps(deps)
     } }
   }
 
@@ -544,6 +568,20 @@ export class ProductionOwner {
     this.register('reminders', () => reminders.shutdown(), async () => { reminders.shutdown() })
     const sessionContext = new SessionContextService(db)
     this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    if (this.bootstrap.mobile) {
+      const { distRoot, port } = this.bootstrap.mobile
+      const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)
+      if (!isAbsolute(distRoot) || actual !== distRoot || !location || location.startsWith('..') || isAbsolute(location) || lstatSync(distRoot).isSymbolicLink() || !lstatSync(join(distRoot, 'index.html')).isFile() || lstatSync(join(distRoot, 'index.html')).isSymbolicLink() ||
+        port !== undefined && (!Number.isSafeInteger(port) || port < 0 || port > 65535)) throw new ProductionOwnerError('MOBILE_RESOURCES_UNAVAILABLE')
+      const deps = Object.freeze({ db, agentManager: agents, githubManager: github, gitlabManager: gitlab, forgejoManager: forgejo, syncManager: sync, pluginRegistry: registry, mobileDistRoot: actual, taskOwners: Object.freeze({ recurrence, heartbeat, automation }) })
+      const tunnel = this.boundaries.mobileTunnel ?? null
+      if (tunnel !== null && !(tunnel instanceof TunnelManagerCore)) throw new ProductionOwnerError('MOBILE_TUNNEL_OWNER_INVALID')
+      setMobileApiDeps(deps)
+      this.mobile = { deps, tunnel, port }
+      setMobileApiNotifier((channel, data) => this.emit(channel, data))
+      this.register('mobile-api', () => { void stopMobileApiServer().catch(() => {}) }, () => closeMobileApiServer())
+      if (tunnel) this.register('mobile-tunnel', () => { void tunnel.stop().catch(() => {}) }, () => tunnel.close())
+    }
     this.checkpoint('recovery')
     await agents.reconcileStartup()
     this.assertStarting()
@@ -555,11 +593,13 @@ export class ProductionOwner {
     reminders.start()
     this.connector?.startPolling({ db, onSynced: () => this.emit('tasks:refresh', undefined) })
     for (const scheduler of [recurrence, heartbeat, automation, wakeups, coordination, cleanup]) { this.assertStarting(); scheduler.start() }
+    if (this.mobile) { await applyMobileAccessSettings(this.mobile.port); this.assertStarting() }
   }
 
   private register(name: string, stop: () => void, drain: () => Promise<void>): void { this.stopOwners.push(stop); this.drains.set(name, drain) }
   private emit(channel: string, data: unknown): void {
     if (this.abort.signal.aborted) return
+    if (this.mobile && MOBILE_OWNER_EVENTS.has(channel)) broadcastToMobileClients(channel, data)
     try { this.bootstrap.native.emit(channel, data) } catch { /* window loss cannot stop background ownership */ }
   }
   private notify(title: string, body: string): void {

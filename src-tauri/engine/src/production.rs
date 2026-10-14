@@ -311,12 +311,15 @@ fn resources(value: &ProductionDescriptor) -> Result<Resources, EngineError> {
     if !contracts::object(
         entries,
         &["node", "stdio", "engine", "credentialHelper", "taskMcp"],
-        &[],
+        &["mobile"],
     ) || entries["node"] != node
         || entries["stdio"] != "service/production-stdio.mjs"
         || entries["engine"] != "service/production-engine.mjs"
         || entries["credentialHelper"] != helper
         || entries["taskMcp"] != "service/production-task-mcp.mjs"
+        || entries
+            .get("mobile")
+            .is_some_and(|value| value != "mobile/index.html")
     {
         return Err(problem("INVALID_RESULT", "production-resource-entries"));
     }
@@ -346,6 +349,12 @@ fn resources(value: &ProductionDescriptor) -> Result<Resources, EngineError> {
         if !files.contains_key(name) {
             return Err(problem("INVALID_RESULT", "production-resource-closure"));
         }
+    }
+    if entries.get("mobile").is_some() && !files.contains_key("mobile/index.html") {
+        return Err(problem(
+            "INVALID_RESULT",
+            "production-mobile-resource-closure",
+        ));
     }
     // The already authenticated thin Node gate additionally verifies actual
     // runtime ABI/platform/pins and the complete unmanifested-package closure.

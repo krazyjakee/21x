@@ -10,6 +10,7 @@ import { applySchema } from '../database/schema'
 import { AuthenticatedSecretStorage } from './authenticated-secret-storage'
 import { acquireProfileLock, type ProfileLock } from './profile-lock'
 import { createProfileMigrationFixture, rehearseProfileCredentialImport, rehearseProfileCredentialRollback, type RehearsalBoundary, type RehearsalOptions } from './profile-migration-rehearsal'
+import type { RecordCredentialProvenance } from './record-credential-conversion'
 
 const require = createRequire(import.meta.url)
 const fixtures: { root: string; lock: ProfileLock; legacy: AuthenticatedSecretStorage; destination: AuthenticatedSecretStorage; sourceKey: Buffer; destinationKey: Buffer; options: RehearsalOptions }[] = []
@@ -54,6 +55,29 @@ function query(path: string, sql: string) {
   const db = new Database(path, { readonly: true })
   try { return db.prepare(sql).all() } finally { db.close() }
 }
+function recordFixture(authenticated = false) {
+  const value = fixture(), source = new Database(join(value.root, '21x.db'))
+  const encode = (plain: string) => authenticated ? `21x-record-credential:v1:21x-credential:${value.legacy.formatId}:` + value.legacy.encryptString(plain).toString('base64') : plain
+  const agent = ' { "api_keys" : ' + JSON.stringify({ openai: encode('\uFEFFrecord-agent-雪\nkey'), anthropic: encode('record-anthropic'), cursor: encode('record-cursor') }) + ', "model" : "retained-model", "unknown_metadata" : {"number":1e2} } '
+  const headers = JSON.stringify({ Authorization: encode('Bearer record-header'), Empty: '' }), environment = JSON.stringify({ TOKEN: encode('record-environment') })
+  const metadata = JSON.stringify({ client_secret: encode('record-client-secret'), client_id: 'retained-client', metadata: { extra: 'preserved' } })
+  const config = JSON.stringify({ client_secret: encode('record-source-client'), access_token: encode('record-source-access'), api_token: encode('record-source-api'), unknown_metadata: { filter: true } })
+  try {
+    source.prepare('INSERT INTO agents(id,name,config,created_at,updated_at) VALUES(?,?,?,?,?)').run('record-agent', 'Preserved agent', agent, 'created', 'updated')
+    source.prepare('INSERT INTO mcp_servers(id,name,headers,environment,oauth_metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('record-mcp', 'Preserved MCP', headers, environment, metadata, 'created', 'updated')
+    source.prepare('INSERT INTO task_sources(id,name,mcp_server_id,list_tool,plugin_id,config,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('record-source', 'Preserved source', 'record-mcp', 'retained-list', 'hubspot', config, 'created', 'updated')
+  } finally { source.close() }
+  const locations = [
+    ...['openai', 'anthropic', 'cursor'].map(key => ({ table: 'agents' as const, rowId: 'record-agent', column: 'config' as const, jsonPath: ['api_keys', key] as const })),
+    { table: 'mcp_servers' as const, rowId: 'record-mcp', column: 'headers' as const, jsonPath: ['Authorization'] as const },
+    { table: 'mcp_servers' as const, rowId: 'record-mcp', column: 'environment' as const, jsonPath: ['TOKEN'] as const },
+    { table: 'mcp_servers' as const, rowId: 'record-mcp', column: 'oauth_metadata' as const, jsonPath: ['client_secret'] as const },
+    ...(['client_secret', 'access_token', 'api_token'] as const).map(key => ({ table: 'task_sources' as const, rowId: 'record-source', column: 'config' as const, jsonPath: [key] as const }))
+  ]
+  const recordInterpretations: RecordCredentialProvenance[] = locations.map(location => authenticated ? { location, interpretation: 'authenticated-record', formatId: value.legacy.formatId } : { location, interpretation: 'plaintext-utf8' })
+  value.options = { ...value.options, recordInterpretations }
+  return { value, agent, headers, environment, metadata, config }
+}
 const originalRows = (root: string) => query(join(root, '21x.db'), 'SELECT id,name,env_var_name,value,created_at,updated_at FROM secrets')
 
 afterEach(() => {
@@ -70,6 +94,75 @@ afterEach(() => {
 // Several completed cases exceed Vitest's default 5 s on a busy local disk;
 // allow durable IO without weakening production bounds or preservation checks.
 describe('bounded actual SQLite import rehearsal', { timeout: 15_000 }, () => {
+  it('converts every protected record class while preserving original bytes, unknown metadata and fixture resources', () => {
+    const { value, agent, headers, config } = recordFixture()
+    const resource = readFileSync(join(value.root, 'attachments/evidence.bin'))
+    const result = rehearseProfileCredentialImport(value.options)
+    expect(result.credentialChanges).toBe(14)
+    expect(query(join(value.root, '21x.db'), "SELECT config FROM agents WHERE id='record-agent'")).toEqual([{ config: agent }])
+    expect(query(join(value.root, '21x.db'), "SELECT headers FROM mcp_servers WHERE id='record-mcp'")).toEqual([{ headers }])
+    expect(query(join(value.root, '21x.db'), "SELECT config FROM task_sources WHERE id='record-source'")).toEqual([{ config }])
+    const row = query(result.candidatePath, "SELECT id,config,created_at,updated_at FROM agents WHERE id='record-agent'")[0] as { id: string; config: string; created_at: string; updated_at: string }
+    expect(row).toMatchObject({ id: 'record-agent', created_at: 'created', updated_at: 'updated' }); expect(row.config).toContain('"number":1e2')
+    const prefix = `21x-record-credential:v1:21x-credential:${value.destination.formatId}:`
+    expect(value.destination.decryptString(Buffer.from(JSON.parse(row.config).api_keys.openai.slice(prefix.length), 'base64'))).toBe('\uFEFFrecord-agent-雪\nkey')
+    expect(readFileSync(result.candidatePath).includes(Buffer.from('record-environment'))).toBe(false)
+    expect(readFileSync(result.encryptedOriginalPath).includes(Buffer.from('record-source-api'))).toBe(false)
+    expect(readFileSync(join(value.root, 'attachments/evidence.bin'))).toEqual(resource)
+    const retained = readFileSync(result.candidatePath)
+    expect(rehearseProfileCredentialImport(value.options).recovered).toBe(true)
+    expect(readFileSync(result.candidatePath)).toEqual(retained)
+    expect(() => rehearseProfileCredentialRollback(value.options)).toThrow('REHEARSAL_ROLLBACK_PLAINTEXT')
+    expect(existsSync(join(value.root, 'credential-import-rehearsal/rollback-original.sqlite'))).toBe(false)
+  })
+
+  it.each<RehearsalBoundary>(['journal-prepared', 'candidate-written', 'journal-ready', 'candidate-published'])('retains exact record provenance through interruption after %s', interruptAfter => {
+    const { value, agent } = recordFixture(true)
+    expect(() => rehearseProfileCredentialImport({ ...value.options, interruptAfter })).toThrow('REHEARSAL_INTERRUPTED')
+    const result = rehearseProfileCredentialImport(value.options)
+    expect(result.credentialChanges).toBe(14); expect(query(result.candidatePath, 'PRAGMA integrity_check')).toEqual([{ integrity_check: 'ok' }])
+    const rollback = rehearseProfileCredentialRollback(value.options)
+    expect(query(rollback, "SELECT config FROM agents WHERE id='record-agent'")).toEqual([{ config: agent }])
+    expect(rehearseProfileCredentialRollback(value.options)).toBe(rollback)
+  })
+
+  it('binds trusted record interpretation to recovery and refuses a changed provenance manifest', () => {
+    const { value } = recordFixture(true)
+    const result = rehearseProfileCredentialImport(value.options), backup = readFileSync(result.encryptedOriginalPath)
+    const changed = value.options.recordInterpretations!.map(entry => ({ location: entry.location, interpretation: 'plaintext-utf8' as const }))
+    expect(() => rehearseProfileCredentialImport({ ...value.options, recordInterpretations: changed })).toThrow('REHEARSAL_STATE_CONFLICT')
+    expect(readFileSync(result.encryptedOriginalPath)).toEqual(backup)
+    expect(() => rehearseProfileCredentialImport({ ...value.options, recordInterpretations: value.options.recordInterpretations!.slice(1) })).toThrow('REHEARSAL_COVERAGE_INCOMPLETE')
+  })
+
+  it('rejects same-column noncredential mutation and credential swaps by SQLite triggers without candidate publication', () => {
+    for (const swap of [false, true]) {
+      const { value, agent } = recordFixture()
+      const source = new Database(join(value.root, '21x.db'))
+      source.exec(swap
+        ? "CREATE TRIGGER record_swap AFTER UPDATE OF config ON task_sources BEGIN UPDATE agents SET config=json_set(config,'$.api_keys.openai','trigger-credential') WHERE id='record-agent'; END"
+        : "CREATE TRIGGER record_metadata AFTER UPDATE OF config ON agents BEGIN UPDATE agents SET config=json_set(config,'$.model','trigger-model') WHERE id=NEW.id; END")
+      source.close()
+      expect(() => rehearseProfileCredentialImport(value.options)).toThrow('REHEARSAL_PRESERVATION_FAILED')
+      expect(existsSync(join(value.root, 'credential-import-rehearsal/candidate.sqlite'))).toBe(false)
+      expect(query(join(value.root, '21x.db'), "SELECT config FROM agents WHERE id='record-agent'")).toEqual([{ config: agent }])
+    }
+  })
+
+  it('rehearses a small historical table subset without inventing missing classes or metadata columns', () => {
+    const value = fixture(), path = join(value.root, 'old-subset.sqlite')
+    const old = new Database(path)
+    old.exec('CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE mcp_servers(id TEXT PRIMARY KEY,headers TEXT,environment TEXT)')
+    old.prepare('INSERT INTO mcp_servers VALUES(?,?,?)').run('old-server', ' {"Authorization":"old-key"} ', '{}'); old.close()
+    // Replace only a test-owned synthetic source before any backup exists.
+    const fs = require('node:fs') as typeof import('node:fs')
+    fs.copyFileSync(path, join(value.root, '21x.db'))
+    const result = rehearseProfileCredentialImport({ ...value.options, blobInterpretations: [], recordInterpretations: [{ location: { table: 'mcp_servers', rowId: 'old-server', column: 'headers', jsonPath: ['Authorization'] }, interpretation: 'plaintext-utf8' }] })
+    expect(result.credentialChanges).toBe(1)
+    expect(query(result.candidatePath, "SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")).toEqual([{ name: 'mcp_servers' }, { name: 'settings' }])
+    expect((query(result.candidatePath, 'PRAGMA table_info(mcp_servers)') as Array<{ name: string }>).map(row => row.name)).toEqual(['id', 'headers', 'environment'])
+  })
+
   it('commits a real encrypted candidate while retaining original rows, schema and byte-identical resources', () => {
     const value = fixture()
     const originals = originalRows(value.root)
@@ -258,7 +351,7 @@ describe('bounded actual SQLite import rehearsal', { timeout: 15_000 }, () => {
   })
 
   it('recovers after a real owner crash immediately after journal-ready rename', async () => {
-    const value = fixture()
+    const { value, agent } = recordFixture(true)
     value.lock.release()
     const driver = join(value.root, 'fixture-driver.cjs')
     // Public code only. Provider keys are handed privately over child stdin.
@@ -277,7 +370,7 @@ describe('bounded actual SQLite import rehearsal', { timeout: 15_000 }, () => {
         fs.renameSync=(from,to)=>{rename(from,to);if(to.endsWith('journal.enc')&&++journals===2){fs.writeSync(1,'CRASH_BOUNDARY\\n');process.kill(process.pid,'SIGKILL')}};
         const legacy=new AuthenticatedSecretStorage(Buffer.from(control.sourceKey,'base64'),'synthetic-legacy');
         const destination=new AuthenticatedSecretStorage(Buffer.from(control.destinationKey,'base64'),'synthetic-destination');
-        require(sourceModule).rehearseProfileCredentialImport({lock:acquireProfileLock(root),providers:{legacy,destination:{storage:destination,formatId:'21x.aes256gcm.v1',persistentProtection:'os-protected'}},blobInterpretations:control.blobInterpretations,resourcePaths:control.resourcePaths});
+        require(sourceModule).rehearseProfileCredentialImport({lock:acquireProfileLock(root),providers:{legacy,destination:{storage:destination,formatId:'21x.aes256gcm.v1',persistentProtection:'os-protected'}},blobInterpretations:control.blobInterpretations,recordInterpretations:control.recordInterpretations,resourcePaths:control.resourcePaths});
         process.exit(2);
       });
     `)
@@ -290,13 +383,15 @@ describe('bounded actual SQLite import rehearsal', { timeout: 15_000 }, () => {
       child.on('close', () => { clearTimeout(deadline); resolve() })
     })
     child.stdin.on('error', () => {})
-    child.stdin.end(JSON.stringify({ sourceKey: value.sourceKey.toString('base64'), destinationKey: value.destinationKey.toString('base64'), blobInterpretations: value.options.blobInterpretations, resourcePaths: value.options.resourcePaths }) + '\n')
+    child.stdin.end(JSON.stringify({ sourceKey: value.sourceKey.toString('base64'), destinationKey: value.destinationKey.toString('base64'), blobInterpretations: value.options.blobInterpretations, recordInterpretations: value.options.recordInterpretations, resourcePaths: value.options.resourcePaths }) + '\n')
     await terminated
     expect(receipt).toBe('CRASH_BOUNDARY\n')
     value.lock = acquireProfileLock(value.root)
     value.options = { ...value.options, lock: value.lock }
     const result = rehearseProfileCredentialImport(value.options)
     expect(result.recovered).toBe(true)
+    expect(result.credentialChanges).toBe(14)
     expect(query(result.candidatePath, 'PRAGMA integrity_check')).toEqual([{ integrity_check: 'ok' }])
+    expect(query(join(value.root, '21x.db'), "SELECT config FROM agents WHERE id='record-agent'")).toEqual([{ config: agent }])
   }, 10000)
 })

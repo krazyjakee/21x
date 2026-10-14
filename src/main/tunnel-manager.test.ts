@@ -1,113 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { EventEmitter } from 'node:events'
-
-// vi.mock is hoisted to the top of the file, so the factory can only reference
-// variables created with vi.hoisted() (which is hoisted alongside it).
-const mocks = vi.hoisted(() => ({ quick: vi.fn() }))
-
-vi.mock('cloudflared', () => ({
-  Tunnel: { quick: mocks.quick }
-}))
-
-// Import after the mock is registered.
-import { startTunnel, stopTunnel, getTunnelUrl, isTunnelActive } from './tunnel-manager'
-
-// Fake Tunnel that behaves like cloudflared's Tunnel EventEmitter.
-class FakeTunnel extends EventEmitter {
-  stop = vi.fn(() => true)
-}
-
-let lastTunnel: FakeTunnel | null = null
-
-const URL = 'https://random-words.trycloudflare.com'
-
-describe('tunnel-manager', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    stopTunnel() // reset module state between tests
-    lastTunnel = null
-    mocks.quick.mockReset()
-    mocks.quick.mockImplementation(() => {
-      lastTunnel = new FakeTunnel()
-      return lastTunnel
-    })
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-    stopTunnel()
-  })
-
-  it('does NOT resolve on the `url` event alone — waits for `connected`', async () => {
-    const p = startTunnel(20620)
-    const t = lastTunnel!
-
-    // Origin dials 127.0.0.1 (IPv4-only server). Passes an isolated --config so
-    // a user's ~/.cloudflared/config.yml (ingress -> http_status:404) is ignored,
-    // and --edge-ip-version 4 to avoid the slow/broken IPv6 DNS path behind VPNs.
-    expect(mocks.quick).toHaveBeenCalledWith(
-      'http://127.0.0.1:20620',
-      expect.objectContaining({ '--edge-ip-version': 4, '--config': expect.stringContaining('cloudflared') })
-    )
-
-    // URL is printed by cloudflared before the edge connection is up.
-    t.emit('url', URL)
-    await Promise.resolve()
-
-    // Must not be considered ready yet: this is the root-cause bug we fixed.
+import { describe, expect, it, vi } from 'vitest'
+const mocks = vi.hoisted(() => ({ start: vi.fn(async () => 'https://synthetic.trycloudflare.com'), stop: vi.fn(async () => {}), owner: { url: null as string | null, active: false } }))
+vi.mock('./tunnel-manager-core', () => ({ TunnelManagerCore: class {
+  start = mocks.start
+  stop = mocks.stop
+  get url() { return mocks.owner.url }
+  get active() { return mocks.owner.active }
+} }))
+vi.mock('node:fs', () => ({ mkdirSync: vi.fn() }))
+import { getTunnelUrl, isTunnelActive, startTunnel, stopTunnel, stopTunnelAcknowledged } from './tunnel-manager'
+describe('Electron tunnel compatibility wrapper', () => {
+  it('retains the original control results and delegates actual close to the same portable owner', async () => {
     expect(getTunnelUrl()).toBeNull()
-    expect(isTunnelActive()).toBe(false)
-
-    // Now the connection registers.
-    t.emit('connected', { id: 'c1', ip: '1.2.3.4', location: 'SIN' })
-
-    await expect(p).resolves.toBe(URL)
-    expect(getTunnelUrl()).toBe(URL)
-    expect(isTunnelActive()).toBe(true)
-  })
-
-  it('rejects if a URL is produced but the tunnel never connects (timeout)', async () => {
-    const p = startTunnel(20620)
-    const t = lastTunnel!
-    t.emit('url', URL)
-
-    vi.advanceTimersByTime(120_000)
-
-    await expect(p).rejects.toThrow(/never connected/i)
-    expect(t.stop).toHaveBeenCalled()
-    expect(getTunnelUrl()).toBeNull()
-    expect(isTunnelActive()).toBe(false)
-  })
-
-  it('rejects on the `error` event', async () => {
-    const p = startTunnel(20620)
-    const t = lastTunnel!
-    t.emit('error', new Error('spawn cloudflared ENOENT'))
-
-    await expect(p).rejects.toThrow(/ENOENT/)
-    expect(isTunnelActive()).toBe(false)
-  })
-
-  it('clears cached state when cloudflared exits so a dead URL is not reused', async () => {
-    const p = startTunnel(20620)
-    const t = lastTunnel!
-    t.emit('url', URL)
-    t.emit('connected', { id: 'c1', ip: '1.2.3.4', location: 'SIN' })
-    await p
-
-    expect(isTunnelActive()).toBe(true)
-
-    // cloudflared process dies.
-    t.emit('exit', 1, null)
-
-    expect(getTunnelUrl()).toBeNull()
-    expect(isTunnelActive()).toBe(false)
-
-    // A fresh start spins up a new tunnel instead of returning the dead URL.
-    const p2 = startTunnel(20620)
-    expect(mocks.quick).toHaveBeenCalledTimes(2)
-    lastTunnel!.emit('url', URL)
-    lastTunnel!.emit('connected', { id: 'c2', ip: '1.2.3.4', location: 'SIN' })
-    await expect(p2).resolves.toBe(URL)
+    expect(await startTunnel(20620)).toBe('https://synthetic.trycloudflare.com')
+    expect(mocks.start).toHaveBeenCalledWith(20620)
+    mocks.owner.url = 'https://synthetic.trycloudflare.com'; mocks.owner.active = true
+    expect(isTunnelActive()).toBe(true); expect(getTunnelUrl()).toBe(mocks.owner.url)
+    expect(stopTunnel()).toBeUndefined()
+    await stopTunnelAcknowledged(); expect(mocks.stop).toHaveBeenCalledTimes(2)
   })
 })

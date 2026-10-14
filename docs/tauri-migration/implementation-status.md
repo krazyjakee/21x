@@ -6,24 +6,27 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
-The October 14 session context and Claude plugin continuation binds the two
-context controls and eleven plugin marketplace controls to the actual protected
-profile owners. There are 127 finite production command contracts; profiles
-with connectors explicitly disabled expose 120 actual owner handlers. Session
-context reads use the real ledger and policy service with independent
-conversation/project/setting grants and bounded legacy storage. Plugin edits
-join affected task/Claude agents and active chat, Commander and briefing work.
-Catalog, redirect and nested file requests recheck current transport grants.
-Downloads authorize the actual contained resource plan before publication and
-materialization; failed creation rolls back database resources and cleans only
-the exact owned published tree. Arbitrary local marketplace reads remain
-unavailable in the private staged host until a native path grant is reviewed.
-These controls do not establish installed plugin, OAuth callback or all-platform
-migration acceptance. See [session context controls](session-context-production.md),
-[Claude plugin controls](claude-plugin-production.md) and
-[batch evidence](evidence/issue-closing-20261014-context-marketplace.json).
-The earlier [plugin form and connector controls](evidence/issue-closing-20261014-connector-plugin-forms.json)
-retain their implementation revision and validation scope.
+The October 14 mobile and credential continuation connects ten mobile controls
+and two notifier events to the actual optional production HTTP/WebSocket owner.
+There are 137 finite production command contracts and 19 events. New private
+staging includes the mobile web build and verifies its entire resource closure;
+older artifacts without that reviewed entry keep mobile controls unavailable.
+Mobile access and LAN exposure remain opt-in. Pairing, hashed sessions, revocation,
+projection and task/session control share the actual database, agents and task
+schedulers; PIN reads require management write authority. Native quick tunnels
+remain unavailable until a binary is explicitly staged, while the portable
+process owner retains raw child close and configuration ownership.
+
+The copied-profile credential rehearsal now converts every currently protected
+JSON field with explicit leaf provenance, exact noncredential representation
+preservation and authenticated recovery. It uses the existing credential formats;
+installed arbitrary historical profiles, native scalar setting-envelope import,
+nonempty connector configurations, final identity and live cutover remain open.
+See [mobile ownership](mobile-production.md),
+[record credential conversion](profile-record-credential-conversion.md) and
+[batch evidence](evidence/issue-closing-20261014-mobile-record-credentials.json).
+The prior [context and marketplace controls](evidence/issue-closing-20261014-context-marketplace.json)
+retain their tested revision and platform limits.
 
 
 - Installed artifact policy v3 and the twenty-receipt synthetic-agent diagnostic passed on all four targets, completing [#204](https://github.com/krazyjakee/21x/issues/204). See [artifact provenance](evidence/installed-artifact-v3-four-target-scenarios.json) and [agent provenance](evidence/installed-agent-08d495f-four-target-scenarios.json).

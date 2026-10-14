@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SecretStorage } from './secret-storage'
+import { AuthenticatedSecretStorage } from './authenticated-secret-storage'
 import {
   CREDENTIAL_MIGRATION_LIMITS,
   CredentialMigrationError,
@@ -62,6 +63,50 @@ function errorCode(action: () => unknown, code: CredentialMigrationErrorCode): C
 }
 
 describe('legacy credential rehearsal preparation', () => {
+  it('does not double-wrap a native or unsupported API-key setting as guessed plaintext', () => {
+    const p = providers()
+    for (const value of ['21x-credential:21x.aes256gcm.v1:Y2lwaGVy', '21x-credential:unknown.v1:private', '21x-record-credential:v1:private']) {
+      errorCode(() => prepareCredentialMigration([setting(value)], p.injected), 'INVALID_SOURCE_FORMAT')
+    }
+    expect(p.target.storage.encryptString).not.toHaveBeenCalled()
+  })
+  it('converts explicitly proven JSON plaintext and authenticated records through the existing record format', () => {
+    const legacy = new AuthenticatedSecretStorage(Buffer.alloc(32, 81), 'record-planner-source')
+    const destination = new AuthenticatedSecretStorage(Buffer.alloc(32, 82), 'record-planner-destination')
+    try {
+      const path = ['api_keys', 'openai'] as const, prefix = `21x-record-credential:v1:21x-credential:${legacy.formatId}:`
+      const inputs: LegacyCredentialInput[] = [
+        { location: { table: 'agents', column: 'config', rowId: 'agent', jsonPath: path }, source: { kind: 'record', interpretation: 'plaintext-utf8', value: '\uFEFFrecord-雪\nkey' } },
+        { location: { table: 'mcp_servers', column: 'oauth_metadata', rowId: 'server', jsonPath: ['client_secret'] }, source: { kind: 'record', interpretation: 'authenticated-record', formatId: legacy.formatId, value: prefix + legacy.encryptString('protected-original').toString('base64') } }
+      ]
+      const plan = prepareCredentialMigration(inputs, { legacy, destination: { storage: destination, formatId: destination.formatId, persistentProtection: 'os-protected' } })
+      expect(plan.changes.map(change => destination.decryptString(Buffer.from(change.ciphertextBase64, 'base64')))).toEqual(['\uFEFFrecord-雪\nkey', 'protected-original'])
+      expect(JSON.stringify(plan)).not.toContain('protected-original')
+      expect(Object.isFrozen((plan.changes[0].location as { jsonPath: readonly string[] }).jsonPath)).toBe(true)
+      Reflect.set(path, 1, 'cursor')
+      expect((plan.changes[0].location as { jsonPath: readonly string[] }).jsonPath).toEqual(['api_keys', 'openai'])
+    } finally { legacy.dispose(); destination.dispose() }
+  })
+
+  it('never treats reserved record prefixes or missing/wrong protected owners as trusted source provenance', () => {
+    const legacy = new AuthenticatedSecretStorage(Buffer.alloc(32, 83), 'record-refusal-source')
+    const wrong = new AuthenticatedSecretStorage(Buffer.alloc(32, 84), 'record-refusal-source')
+    const destination = new AuthenticatedSecretStorage(Buffer.alloc(32, 85), 'record-refusal-destination')
+    const prefix = `21x-record-credential:v1:21x-credential:${legacy.formatId}:`
+    const input: LegacyCredentialInput = { location: { table: 'task_sources', column: 'config', rowId: 'source', jsonPath: ['api_token'] },
+      source: { kind: 'record', interpretation: 'authenticated-record', formatId: legacy.formatId, value: prefix + legacy.encryptString('private-source-key').toString('base64') } }
+    const target = { storage: destination, formatId: destination.formatId, persistentProtection: 'os-protected' as const }
+    try {
+      errorCode(() => prepareCredentialMigration([input], { destination: target }), 'LEGACY_UNAVAILABLE')
+      errorCode(() => prepareCredentialMigration([input], { legacy: wrong, destination: target }), 'LEGACY_DECRYPT_FAILED')
+      errorCode(() => prepareCredentialMigration([{ ...input, source: { kind: 'record', value: input.source.value as string, interpretation: 'plaintext-utf8' } }], { legacy, destination: target }), 'INVALID_SOURCE_FORMAT')
+      errorCode(() => prepareCredentialMigration([{ ...input, source: { kind: 'record', value: '21x-record-credential:v2:private', interpretation: 'authenticated-record', formatId: legacy.formatId } }], { legacy, destination: target }), 'INVALID_SOURCE_FORMAT')
+      errorCode(() => prepareCredentialMigration([input], { legacy, destination: { ...target, formatId: 'unsupported.v1' } }), 'DESTINATION_NOT_SECURE')
+      destination.dispose()
+      errorCode(() => prepareCredentialMigration([input], { legacy, destination: target }), 'DESTINATION_UNAVAILABLE')
+    } finally { legacy.dispose(); wrong.dispose(); destination.dispose() }
+  })
+
   it('accepts a bounded numeric application namespace for the native destination format', () => {
     const p = providers()
     const plan = prepareCredentialMigration([setting('synthetic')], { ...p.injected, destination: { ...p.injected.destination, formatId: '21x.aes256gcm.v1' } })

@@ -6,12 +6,12 @@
  * See docs/mobile-api-spec.md for the full API specification.
  */
 import { createServer, type IncomingMessage, type ServerResponse, type Server as HttpServer } from 'http'
-import { join, sep } from 'path'
-import { existsSync, readFileSync, statSync } from 'fs'
+import { join, sep, resolve, isAbsolute } from 'path'
+import { existsSync, readFileSync, statSync, lstatSync, realpathSync } from 'fs'
 import { WebSocketServer, WebSocket } from 'ws'
 import { randomUUID, createHash, randomInt } from 'crypto'
 import type { CreateTaskData, DatabaseManager, UpdateTaskData } from './database'
-import type { AgentManager } from './agent-manager'
+import type { AgentManager } from './agent-manager-core'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
 import type { ForgejoManager } from './forgejo-manager'
@@ -27,12 +27,19 @@ import { buildProjectOverview } from './project-overview'
 import { guardStream } from './child-stream-guards'
 import { bearerToken, readJsonBody } from './http-utils'
 import { completeTaskAtSource, updateTaskFromUser } from './session-feedback'
-import { afterTaskCreated, afterTaskUpdated, prepareUserTaskUpdate, startPreparedTask } from './task-updates'
+import { afterTaskCreated, afterTaskUpdated, assertTaskLifecycleOwners, prepareUserTaskUpdate, startPreparedTask } from './task-updates'
+import type { RecurrenceSchedulerCore } from './recurrence-scheduler-core'
+import type { HeartbeatSchedulerCore } from './heartbeat-scheduler-core'
+import type { TaskAutomationScheduler } from './task-automation-scheduler'
 import { mimeTypeForPath } from './mime'
+import { hasExactKeys, isRecord } from '../shared/service-protocol'
+import { TASK_LIFECYCLE_CODECS, isTaskLifecycleCreate, isTaskLifecycleUpdate } from '../shared/task-lifecycle-codecs'
+import { isDatabaseId } from '../shared/database-desktop-codecs'
 
 // ── State ────────────────────────────────────────────────────
 interface MobileServerOwner {
   db: DatabaseManager
+  deps: MobileApiDeps
   http: HttpServer
   websocket: WebSocketServer
   requests: Set<Promise<void>>
@@ -42,6 +49,7 @@ interface MobileServerOwner {
   nativeClosed: Promise<void>
   websocketClosed: Promise<void>
   drain: Promise<void> | null
+  expiryTimer: ReturnType<typeof setInterval>
 }
 const mobileOwners = new Set<MobileServerOwner>()
 const closedMobileSources = new WeakSet<DatabaseManager>()
@@ -70,6 +78,8 @@ export function getPendingPin(): { pin: string; pairCodeId: string; expiresAt: n
 }
 
 const wsClients = new Set<WebSocket>()
+const wsTokens = new Map<WebSocket, string>()
+let mobileDistRoot: string | null = null
 
 const PIN_EXPIRY_SECONDS = 60
 const PIN_MAX_ATTEMPTS = 3
@@ -118,9 +128,11 @@ export function getMobileSessionIdleDays(db: DatabaseManager): number {
   return Number.isFinite(days) && days > 0 ? days : DEFAULT_MOBILE_SESSION_IDLE_DAYS
 }
 
-function validateSession(provided: string | null | undefined): boolean {
+function validateSession(provided: string | null | undefined, touch = true): boolean {
   if (!provided || !dbRef) return false
+  if (provided.length > 128 || /[\u0000-\u0020\u007f]/.test(provided)) return false
   const hash = hashToken(provided)
+  if (dbRef.db.prepare('SELECT 1 FROM mobile_sessions WHERE token_hash=? AND (length(CAST(id AS BLOB))>128 OR length(CAST(device_name AS BLOB))>256) LIMIT 1').get(hash)) return false
   const session = dbRef.getMobileSessionByTokenHash(hash)
   if (!session) return false
   const idleSeconds = Math.floor(Date.now() / 1000) - session.last_seen
@@ -129,7 +141,7 @@ function validateSession(provided: string | null | undefined): boolean {
     dbRef.revokeMobileSession(session.id)
     return false
   }
-  dbRef.touchMobileSession(hash)
+  if (touch) dbRef.touchMobileSession(hash)
   return true
 }
 
@@ -144,12 +156,22 @@ export function startMobileApiServer(
   pluginRegistry?: PluginRegistry | null,
   gitlabManager?: GitLabManager | null,
   forgejoManager?: ForgejoManager | null,
-  host = '127.0.0.1'
+  host = '127.0.0.1',
+  distRoot?: string,
+  taskOwners?: MobileApiDeps['taskOwners']
 ): Promise<number> {
   if (closedMobileSources.has(db)) return Promise.reject(new Error('MOBILE_API_CLOSED'))
-  if (currentOwner) return currentOwner.db === db ? currentOwner.startup : Promise.reject(new Error('MOBILE_API_ALREADY_STARTED'))
+  const deps: MobileApiDeps = { db, agentManager, githubManager, syncManager, pluginRegistry, gitlabManager, forgejoManager, mobileDistRoot: distRoot, taskOwners: taskOwners ? { ...taskOwners } : undefined }
+  if (currentOwner) return sameMobileDeps(currentOwner.deps, deps) ? currentOwner.startup : Promise.reject(new Error('MOBILE_API_ALREADY_STARTED'))
   if (mobileOwners.size) return stopMobileApiServer().then(() => startMobileApiServer(
-    db, agentManager, githubManager, port, syncManager, pluginRegistry, gitlabManager, forgejoManager, host))
+    db, agentManager, githubManager, port, syncManager, pluginRegistry, gitlabManager, forgejoManager, host, distRoot, taskOwners))
+
+  if (distRoot !== undefined) {
+    try {
+      if (!isAbsolute(distRoot) || realpathSync(distRoot) !== resolve(distRoot) || !statSync(distRoot).isDirectory() || !taskOwners) throw new Error()
+      assertTaskLifecycleOwners(taskOwners.recurrence, taskOwners.heartbeat, taskOwners.automation)
+    } catch { return Promise.reject(new Error('MOBILE_API_RESOURCES_UNAVAILABLE')) }
+  }
 
   dbRef = db
   agentRef = agentManager
@@ -158,6 +180,7 @@ export function startMobileApiServer(
   forgejoRef = forgejoManager ?? null
   syncManagerRef = syncManager ?? null
   pluginRegistryRef = pluginRegistry ?? null
+  mobileDistRoot = distRoot ?? null
   pairWindowStart = 0
   pairWindowCount = 0
 
@@ -174,7 +197,7 @@ export function startMobileApiServer(
     })
 
     // WebSocket upgrade
-    wss = new WebSocketServer({ noServer: true })
+    wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
     const http = server
     const websocket = wss
     const nativeClosed = new Promise<void>(done => http.once('close', () => {
@@ -182,7 +205,9 @@ export function startMobileApiServer(
       done()
     }))
     const websocketClosed = new Promise<void>(done => websocket.once('close', done))
-    owner = { db, http, websocket, requests: new Set(), closing: false, startup: Promise.resolve(0),
+    const expiryTimer = setInterval(() => revalidateMobileClients(), 30_000)
+    expiryTimer.unref()
+    owner = { db, deps, http, websocket, requests: new Set(), closing: false, startup: Promise.resolve(0), expiryTimer,
       rejectStartup: reject, nativeClosed, websocketClosed, drain: null }
     currentOwner = owner
     mobileOwners.add(owner)
@@ -206,9 +231,11 @@ export function startMobileApiServer(
         websocket.handleUpgrade(req, socket, head, (ws) => {
           if (owner.closing) { ws.terminate(); return }
           wsClients.add(ws)
+          wsTokens.set(ws, token!)
           console.log(`[MobileAPI] WebSocket client connected (total: ${wsClients.size})`)
 
           ws.on('message', (data) => {
+            if (!validateSession(wsTokens.get(ws) ?? null)) { ws.terminate(); return }
             try {
               const msg = JSON.parse(String(data))
               if (msg.type === 'ping') {
@@ -223,11 +250,13 @@ export function startMobileApiServer(
 
           ws.on('close', () => {
             wsClients.delete(ws)
+            wsTokens.delete(ws)
             console.log(`[MobileAPI] WebSocket client disconnected (total: ${wsClients.size})`)
           })
 
           ws.on('error', () => {
             wsClients.delete(ws)
+            wsTokens.delete(ws)
           })
         })
       } else {
@@ -264,13 +293,34 @@ export interface MobileApiDeps {
   pluginRegistry?: PluginRegistry | null
   gitlabManager?: GitLabManager | null
   forgejoManager?: ForgejoManager | null
+  /** Trusted host-selected physical SPA root; never supplied by a renderer. */
+  mobileDistRoot?: string
+  taskOwners?: { recurrence: RecurrenceSchedulerCore; heartbeat: HeartbeatSchedulerCore; automation: TaskAutomationScheduler }
 }
 
 let mobileDeps: MobileApiDeps | null = null
 let applyQueue: Promise<unknown> = Promise.resolve()
+let applying = 0
+
+function sameMobileDeps(left: MobileApiDeps, right: MobileApiDeps): boolean {
+  return left.db === right.db && left.agentManager === right.agentManager && left.githubManager === right.githubManager &&
+    (left.syncManager ?? null) === (right.syncManager ?? null) && (left.pluginRegistry ?? null) === (right.pluginRegistry ?? null) &&
+    (left.gitlabManager ?? null) === (right.gitlabManager ?? null) && (left.forgejoManager ?? null) === (right.forgejoManager ?? null) &&
+    (left.mobileDistRoot ?? null) === (right.mobileDistRoot ?? null) && left.taskOwners?.recurrence === right.taskOwners?.recurrence && left.taskOwners?.heartbeat === right.taskOwners?.heartbeat && left.taskOwners?.automation === right.taskOwners?.automation
+}
+
+/** Proves the installed singleton is the borrowed production owner's exact lease. */
+export function assertMobileApiDeps(deps: MobileApiDeps): void {
+  if (!mobileDeps || !sameMobileDeps(mobileDeps, deps) || closedMobileSources.has(deps.db) ||
+    [...mobileOwners].some(owner => !sameMobileDeps(owner.deps, deps))) throw new Error('MOBILE_API_OWNER_MISMATCH')
+  if (deps.mobileDistRoot) { if (!deps.taskOwners) throw new Error('MOBILE_API_OWNER_MISMATCH'); assertTaskLifecycleOwners(deps.taskOwners.recurrence, deps.taskOwners.heartbeat, deps.taskOwners.automation) }
+}
 
 export function setMobileApiDeps(deps: MobileApiDeps): void {
-  mobileDeps = deps
+  if (mobileDeps && !sameMobileDeps(mobileDeps, deps) && mobileDeps.db.db.open && !closedMobileSources.has(mobileDeps.db)) throw new Error('MOBILE_API_OWNER_MISMATCH')
+  if ((mobileOwners.size || applying) && (!mobileDeps || !sameMobileDeps(mobileDeps, deps) || [...mobileOwners].some(owner => !sameMobileDeps(owner.deps, deps)))) throw new Error('MOBILE_API_OWNER_MISMATCH')
+  if (!mobileDeps || !sameMobileDeps(mobileDeps, deps)) pendingPin = null
+  mobileDeps = { ...deps, taskOwners: deps.taskOwners ? { ...deps.taskOwners } : undefined }
 }
 
 /**
@@ -292,10 +342,11 @@ export function applyMobileAccessSettings(port = MOBILE_API_PORT): Promise<numbe
     await stopMobileApiServer()
     return startMobileApiServer(
       deps.db, deps.agentManager, deps.githubManager, port, deps.syncManager,
-      deps.pluginRegistry, deps.gitlabManager, deps.forgejoManager, host
+      deps.pluginRegistry, deps.gitlabManager, deps.forgejoManager, host, deps.mobileDistRoot, deps.taskOwners
     )
   }
-  const result = applyQueue.then(run, run)
+  applying++
+  const result = applyQueue.then(run, run).finally(() => { applying-- })
   applyQueue = result.catch(() => {})
   return result
 }
@@ -317,9 +368,11 @@ export function stopMobileApiServer(): Promise<void> {
   boundHost = null
   boundPort = null
   wsClients.clear()
+  wsTokens.clear()
   for (const owner of mobileOwners) {
     if (owner.closing) continue
     owner.closing = true
+    clearInterval(owner.expiryTimer)
     owner.rejectStartup(new Error('MOBILE_API_CLOSED'))
     for (const ws of owner.websocket.clients) ws.terminate()
     owner.websocket.close()
@@ -340,6 +393,7 @@ export async function closeMobileApiServer(timeoutMs = 2000): Promise<void> {
     throw new RangeError('Mobile API shutdown deadline must be an integer from 1 to 3000 ms')
   }
   if (mobileDeps) closedMobileSources.add(mobileDeps.db)
+  pendingPin = null
   if (dbRef) closedMobileSources.add(dbRef)
   for (const owner of mobileOwners) closedMobileSources.add(owner.db)
   const drain = stopMobileApiServer()
@@ -360,10 +414,19 @@ export function broadcastToMobileClients(channel: string, data: unknown): void {
 
   const message = JSON.stringify({ type: channel, payload: data })
   for (const ws of wsClients) {
+    if (!validateSession(wsTokens.get(ws) ?? null, false)) { ws.terminate(); continue }
     if (ws.readyState === WebSocket.OPEN) {
+      // Backpressure is a disconnected projection, never silently omitted data.
+      // The phone rehydrates from the durable HTTP snapshot on reconnect.
+      if (Buffer.byteLength(message) > 1024 * 1024 || ws.bufferedAmount > 1024 * 1024) { ws.terminate(); continue }
       ws.send(message)
     }
   }
+}
+
+/** Credential revocation closes admitted sockets immediately. */
+export function revalidateMobileClients(): void {
+  for (const ws of wsClients) if (!validateSession(wsTokens.get(ws) ?? null, false)) ws.terminate()
 }
 
 // ── HTTP request handler ─────────────────────────────────────
@@ -437,17 +500,43 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
   try {
     const body = req.method === 'POST' ? await readJsonBody(req, MAX_BODY_BYTES) : undefined
     if (isClosing()) return
+    if (pathname !== '/api/auth/pair/initiate' && pathname !== '/api/auth/pair/verify' && !validateSession(bearerToken(req))) throw Object.assign(new Error('Unauthorized'), { status: 401 })
+    if (mobileDistRoot) { assertMobileApiDeps(currentOwner!.deps); preflightMobileData(pathname) }
     const result = body ? await routePost(pathname, body, req) : await routeGet(pathname, url)
     if (res.destroyed) return
+    const encoded = JSON.stringify(result)
+    if (mobileDistRoot && Buffer.byteLength(encoded) > 8 * 1024 * 1024) throw Object.assign(new Error('Mobile response exceeds the supported size.'), { status: 413 })
     res.writeHead(200)
-    res.end(JSON.stringify(result))
+    res.end(encoded)
   } catch (err: unknown) {
     if (res.destroyed) return
     const status = (err as { status?: number }).status || 500
-    const message = err instanceof Error ? err.message : String(err)
+    const message = mobileDistRoot && status >= 500 ? 'Mobile request failed.' : err instanceof Error ? err.message : String(err)
     res.writeHead(status)
     res.end(JSON.stringify({ error: message }))
   }
+}
+
+/** Reject oversized legacy rows before their JSON deserializers are entered.
+ * This keeps the existing unpaginated HTTP contract honest; no truncation. */
+function preflightMobileData(pathname: string): void {
+  const db = dbRef!.db
+  const check = (table: string, columns: string[], limit: number, maxRow: number): void => {
+    const existing = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name))
+    const fields = columns.filter(column => existing.has(column)).map(column => `COALESCE(length(CAST(${column} AS BLOB)),0)`)
+    const size = fields.join('+') || '0'
+    const stats = db.prepare(`SELECT COUNT(*) AS count, COALESCE(MAX(${size}),0) AS largest, COALESCE(SUM(${size}),0) AS bytes FROM ${table}`).get() as { count: number; largest: number; bytes: number }
+    if (stats.count > limit || stats.largest > maxRow || stats.bytes > 8 * 1024 * 1024) throw Object.assign(new Error('Mobile data exceeds the supported size.'), { status: 413 })
+  }
+  if (/^\/api\/(tasks|projects|sessions)(\/|$)/.test(pathname)) {
+    check('tasks', ['id', 'title', 'description', 'labels', 'attachments', 'repos', 'output_fields', 'recurrence_pattern', 'result', 'session_id'], 4096, 1024 * 1024)
+    check('agents', ['id', 'name', 'server_url', 'config'], 256, 512 * 1024)
+  }
+  if (pathname.includes('/transcript')) check('transcript_parts', ['task_id', 'part_id', 'content', 'payload'], 4096, 1024 * 1024)
+  if (pathname.startsWith('/api/agents')) check('agents', ['id', 'name', 'server_url', 'config'], 256, 512 * 1024)
+  if (pathname.startsWith('/api/task-sources')) check('task_sources', ['id', 'name', 'config'], 256, 512 * 1024)
+  if (pathname.startsWith('/api/task-sources')) check('tasks', ['id', 'project_id', 'source_id', 'role', 'group_id', 'external_id'], 4096, 1024 * 1024)
+  if (pathname.startsWith('/api/skills')) check('skills', ['id', 'name', 'description', 'content', 'tags'], 512, 512 * 1024)
 }
 
 // ── GET routes ───────────────────────────────────────────────
@@ -751,17 +840,18 @@ async function routeGet(pathname: string, url: URL): Promise<unknown> {
 async function routePost(pathname: string, params: Record<string, unknown>, req?: IncomingMessage): Promise<unknown> {
   const agent = agentRef!
   const db = dbRef!
+  if (mobileDistRoot && !isRecord(params)) throw Object.assign(new Error('Invalid request.'), { status: 400 })
 
   // POST /api/auth/pair/initiate — phone sends init code, server generates PIN
   if (pathname === '/api/auth/pair/initiate') {
     const { code } = params as { code?: string }
-    if (!code) throw Object.assign(new Error('code is required'), { status: 400 })
+    if (typeof code !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(code)) throw Object.assign(new Error('code is required'), { status: 400 })
 
     const now = Math.floor(Date.now() / 1000)
     // Validate init code exists and not expired
     const validCode = db.getSetting(`mobile_init_code_${code}`)
     const validUntil = db.getSetting(`mobile_init_code_${code}_exp`)
-    if (!validCode || !validUntil || now > parseInt(validUntil)) {
+    if (!validCode || !validUntil || !/^\d{1,16}$/.test(validUntil) || now > Number(validUntil)) {
       throw Object.assign(new Error('Invalid or expired QR code. Please scan a new QR code.'), { status: 401 })
     }
     // Delete init code — single use
@@ -769,6 +859,9 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     db.deleteSetting(`mobile_init_code_${code}_exp`)
 
     // Generate PIN and pair code ID
+    db.db.prepare('DELETE FROM mobile_pair_codes WHERE expires_at<?').run(now)
+    const pairCount = db.db.prepare('SELECT COUNT(*) AS count FROM mobile_pair_codes').get() as { count: number }
+    if (pairCount.count >= 128) throw Object.assign(new Error('Pairing capacity reached. Try again after existing codes expire.'), { status: 429 })
     const pin = String(randomInt(100000, 1000000))
     const pairCodeId = randomUUID()
     db.createMobilePairCode(pairCodeId, pin, now + PIN_EXPIRY_SECONDS)
@@ -787,7 +880,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   // POST /api/auth/pair/verify — phone submits PIN
   if (pathname === '/api/auth/pair/verify') {
     const { pairCodeId, pin } = params as { pairCodeId?: string; pin?: string }
-    if (!pairCodeId || !pin) throw Object.assign(new Error('pairCodeId and pin are required'), { status: 400 })
+    if (typeof pairCodeId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(pairCodeId) || typeof pin !== 'string' || !/^\d{6}$/.test(pin.trim())) throw Object.assign(new Error('pairCodeId and pin are required'), { status: 400 })
 
     const now = Math.floor(Date.now() / 1000)
     const record = db.getMobilePairCode(pairCodeId)
@@ -810,6 +903,8 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     }
 
     // PIN correct — issue session token
+    const sessionCount = db.db.prepare('SELECT COUNT(*) AS count FROM mobile_sessions WHERE revoked=0').get() as { count: number }
+    if (sessionCount.count >= 128) throw Object.assign(new Error('Device capacity reached. Revoke an existing device first.'), { status: 429 })
     pendingPin = null
     db.deleteMobilePairCode(pairCodeId)
     const sessionToken = randomUUID()
@@ -830,6 +925,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   // POST /api/plugins/:id/resolve-options — resolve dynamic options for a plugin config field
   const pluginResolveMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/resolve-options$/)
   if (pluginResolveMatch) {
+    if (mobileDistRoot) throw Object.assign(new Error('Configure integration options on the desktop.'), { status: 503 })
     if (!pluginRegistryRef) throw Object.assign(new Error('Plugin registry not available'), { status: 503 })
     const pluginId = pluginResolveMatch[1]
     const plugin = pluginRegistryRef.get(pluginId)
@@ -843,6 +939,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 
   // POST /api/task-sources — create a new task source
   if (pathname === '/api/task-sources') {
+    if (mobileDistRoot) throw Object.assign(new Error('Create task sources on the desktop.'), { status: 503 })
     const { name, plugin_id, config, mcp_server_id } = params as {
       name?: string; plugin_id?: string; config?: Record<string, unknown>; mcp_server_id?: string | null
     }
@@ -853,22 +950,24 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 
   // POST /api/task-sources/sync-all — sync all enabled task sources (must be before :id routes)
   if (pathname === '/api/task-sources/sync-all') {
+    if (mobileDistRoot && !hasExactKeys(params, [])) throw Object.assign(new Error('Invalid sync request.'), { status: 400 })
     if (!syncManagerRef) throw Object.assign(new Error('Sync manager not available'), { status: 503 })
     const sources = db.getTaskSources().filter((s: { enabled: boolean }) => s.enabled)
     const results = await Promise.allSettled(
       sources.map((s: { id: string }) => syncManagerRef!.importTasks(s.id))
     )
     return results.map((r) =>
-      r.status === 'fulfilled' ? r.value : { error: String((r as PromiseRejectedResult).reason) }
+      r.status === 'fulfilled' ? (mobileDistRoot ? fixedMobileSyncResult(r.value) : r.value) : { error: mobileDistRoot ? 'Task source sync failed.' : String((r as PromiseRejectedResult).reason) }
     )
   }
 
   // POST /api/task-sources/:id/sync — sync a single task source
   const sourceSyncMatch = pathname.match(/^\/api\/task-sources\/([^/]+)\/sync$/)
   if (sourceSyncMatch) {
+    if (mobileDistRoot && (!isDatabaseId(sourceSyncMatch[1]) || !hasExactKeys(params, []))) throw Object.assign(new Error('Invalid sync request.'), { status: 400 })
     if (!syncManagerRef) throw Object.assign(new Error('Sync manager not available'), { status: 503 })
     const result = await syncManagerRef.importTasks(sourceSyncMatch[1])
-    return result
+    return mobileDistRoot ? fixedMobileSyncResult(result) : result
   }
 
   // POST /api/task-sources/:id — update a task source
@@ -877,6 +976,17 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const sourceId = sourceUpdateMatch[1]
     const source = db.getTaskSource(sourceId)
     if (!source) throw Object.assign(new Error('Task source not found'), { status: 404 })
+    if (mobileDistRoot) {
+      if (!isDatabaseId(sourceId) || !hasExactKeys(params, [], ['name', 'enabled']) || Object.keys(params).length === 0 || params.name !== undefined && (typeof params.name !== 'string' || !params.name.trim() || Buffer.byteLength(params.name) > 512 || /[\u0000-\u001f\u007f]/.test(params.name)) || params.enabled !== undefined && typeof params.enabled !== 'boolean') throw Object.assign(new Error('Change task source credentials and bindings on the desktop.'), { status: 400 })
+      if (!syncManagerRef) throw Object.assign(new Error('Task source owner unavailable.'), { status: 503 })
+      const snapshot = (): string => JSON.stringify({ source: db.db.prepare('SELECT * FROM task_sources WHERE id=?').get(sourceId), tasks: db.db.prepare('SELECT id,project_id,source_id,role,group_id,external_id FROM tasks WHERE source_id=? ORDER BY id').all(sourceId) })
+      const expected = snapshot()
+      const updated = await syncManagerRef.runSourceMutation(sourceId, () => {
+        if (!currentOwner || currentOwner.closing || currentOwner.db !== db || !validateSession(req ? bearerToken(req) : null, false) || snapshot() !== expected) throw Object.assign(new Error('Task source changed or access ended.'), { status: 409 })
+        return db.updateTaskSource(sourceId, params as Parameters<DatabaseManager['updateTaskSource']>[1])
+      })
+      return withoutSourceConfig(updated)
+    }
     const updated = db.updateTaskSource(sourceId, params as Parameters<DatabaseManager['updateTaskSource']>[1])
     return withoutSourceConfig(updated)
   }
@@ -887,7 +997,14 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     if (!parentId || !Array.isArray(orderedIds)) {
       throw Object.assign(new Error('parentId and orderedIds are required'), { status: 400 })
     }
-    db.reorderSubtasks(parentId, orderedIds)
+    if (mobileDistRoot) {
+      if (!hasExactKeys(params, ['parentId', 'orderedIds']) || !TASK_LIFECYCLE_CODECS['db:reorderSubtasks'].validateArguments([parentId, orderedIds])) throw Object.assign(new Error('Invalid task order.'), { status: 400 })
+      assertProductionOrdinaryTask(db, parentId)
+      const children = db.getSubtasks(parentId)
+      if (children.length !== orderedIds.length || children.some(task => task.group_id || task.role !== 'task' || !orderedIds.includes(task.id))) throw Object.assign(new Error('Task order must include only the current subtasks.'), { status: 409 })
+    }
+    if (mobileDistRoot) await runMobileTaskMutation(db, agent, [parentId, ...orderedIds], req, async () => { db.reorderSubtasks(parentId, orderedIds) })
+    else db.reorderSubtasks(parentId, orderedIds)
     broadcastToMobileClients('task:subtasks-reordered', { parentId, orderedIds })
     if (notifyDesktop) notifyDesktop('task:subtasks-reordered', { parentId, orderedIds })
     return { success: true }
@@ -895,6 +1012,16 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 
   // POST /api/tasks — create task (must be checked before the :id update route)
   if (pathname === '/api/tasks') {
+    if (mobileDistRoot) {
+      if (!isTaskLifecycleCreate(params) || Object.hasOwn(params, 'recurrence_parent_id') || Object.hasOwn(params, 'next_subtask_ids') || params.status !== undefined && params.status !== TaskStatus.NotStarted) throw Object.assign(new Error('Invalid task fields.'), { status: 400 })
+      if (!hasExactKeys(params, ['title'], CREATE_TASK_FIELDS.filter(key => key !== 'title'))) throw Object.assign(new Error('Create this task configuration on the desktop.'), { status: 400 })
+      assertProductionTaskFields(db, params)
+      if (typeof params.parent_task_id === 'string') {
+        assertProductionOrdinaryTask(db, params.parent_task_id)
+        const parent = db.getTask(params.parent_task_id)!
+        if (params.project_id != null && params.project_id !== parent.project_id) throw Object.assign(new Error('A subtask must keep its parent project.'), { status: 400 })
+      }
+    }
     if (!params.title) throw Object.assign(new Error('title is required'), { status: 400 })
     const data = pickCreateTaskFields(params)
     if (data.project_id !== undefined && data.project_id !== null) {
@@ -907,7 +1034,8 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       // anything else lands in the desktop's current project.
       data.project_id = resolveDefaultProjectId(db)
     }
-    const created = db.createTask(data)
+    const created = mobileDistRoot && data.parent_task_id
+      ? await runMobileTaskMutation(db, agent, [data.parent_task_id, ...db.getSubtasks(data.parent_task_id).map(child => child.id)], req, async () => db.createTask(data)) : db.createTask(data)
     if (!created) throw Object.assign(new Error('Failed to create task'), { status: 500 })
     afterTaskCreated(created)
     const task = db.getTask(created.id) ?? created
@@ -923,6 +1051,13 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const taskId = taskCompleteMatch[1]
     const task = db.getTask(taskId)
     if (!task) throw Object.assign(new Error('Task not found'), { status: 404 })
+    if (mobileDistRoot) {
+      if (!hasExactKeys(params, [], ['completeAtSource']) || params.completeAtSource !== undefined && typeof params.completeAtSource !== 'boolean') throw Object.assign(new Error('Invalid completion choice.'), { status: 400 })
+      assertProductionOrdinaryTask(db, taskId)
+      if (task.source_id && params.completeAtSource !== false) throw Object.assign(new Error('Complete this task at its source on the desktop.'), { status: 503 })
+      if (agent.hasTaskStartOwnership(taskId) || task.status === TaskStatus.AgentLearning) throw Object.assign(new Error('Stop the task before completing it on mobile.'), { status: 409 })
+      if (db.getSubtasks(taskId).some(child => ![TaskStatus.Completed, TaskStatus.ReadyForReview].includes(child.status as TaskStatus))) throw Object.assign(new Error('Finish the subtasks before completing this task.'), { status: 409 })
+    }
     const completeAtSource = (params as { completeAtSource?: boolean }).completeAtSource !== false
     // A second explicit completion while feedback learning is pending cancels
     // that learning cycle first. Without clearing its durable marker, the
@@ -932,7 +1067,10 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     }
     if (!task.source_id || !completeAtSource) {
       const data: UpdateTaskData = { status: TaskStatus.Completed, ...(task.source_id ? { complete_at_source: false } : {}) }
-      const fresh = db.updateTask(taskId, data)
+      const fresh = mobileDistRoot ? await runMobileTaskMutation(db, agent, [taskId], req, async () => {
+        if (agent.hasTaskStartOwnership(taskId)) throw Object.assign(new Error('Stop the task before completing it on mobile.'), { status: 409 })
+        return db.updateTask(taskId, data)
+      }) : db.updateTask(taskId, data)
       if (fresh) {
         broadcastToMobileClients('task:updated', { taskId, updates: fresh })
         if (notifyDesktop) notifyDesktop('task:updated', { taskId, updates: fresh })
@@ -962,10 +1100,21 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const taskId = taskUpdateMatch[1]
     const existing = db.getTask(taskId)
     if (!existing) throw Object.assign(new Error('Task not found'), { status: 404 })
-    const prepared = await prepareUserTaskUpdate(agent, existing, params as UpdateTaskData)
-    const updated = Object.keys(prepared.data).length > 0
-      ? updateTaskFromUser(db, taskId, prepared.data)
-      : db.getTask(taskId)
+    if (mobileDistRoot) {
+      assertProductionOrdinaryTask(db, taskId)
+      if (!isTaskLifecycleUpdate(params) || ['parent_task_id', 'next_subtask_ids', 'last_occurrence_at', 'next_occurrence_at', 'heartbeat_last_check_at', 'heartbeat_next_check_at'].some(key => Object.hasOwn(params, key))) throw Object.assign(new Error('Invalid task fields.'), { status: 400 })
+      if (params.status === TaskStatus.Completed && (existing.source_id || agent.findSessionByTaskId(taskId))) throw Object.assign(new Error('Use the task completion controls after stopping this task.'), { status: 409 })
+    }
+    if (mobileDistRoot) assertProductionTaskFields(db, params, existing)
+    const update = async () => {
+      const previous = db.getTask(taskId)!
+      if (mobileDistRoot && params.agent_id !== undefined && params.agent_id !== previous.agent_id) await agent.stopByTaskId(taskId)
+      const prepared = await prepareUserTaskUpdate(agent, previous, params as UpdateTaskData)
+      if (mobileDistRoot && (!currentOwner || !validateSession(req ? bearerToken(req) : null, false))) throw Object.assign(new Error('Mobile access ended.'), { status: 401 })
+      const updated = Object.keys(prepared.data).length > 0 ? updateTaskFromUser(db, taskId, prepared.data) : db.getTask(taskId)
+      return { prepared, updated }
+    }
+    const { prepared, updated } = mobileDistRoot ? await runMobileTaskMutation(db, agent, [taskId, ...db.getSubtasks(taskId).map(task => task.id)], req, update) : await update()
     if (updated && Object.keys(prepared.data).length > 0) {
       broadcastToMobileClients('task:updated', { taskId, updates: updated })
       if (notifyDesktop) notifyDesktop('task:updated', { taskId, updates: updated })
@@ -978,6 +1127,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   // POST /api/sessions/start
   if (pathname === '/api/sessions/start') {
     const { agentId, taskId, skipInitialPrompt } = params as { agentId?: string; taskId: string; skipInitialPrompt?: boolean }
+    if (mobileDistRoot && (!hasExactKeys(params, ['taskId'], ['agentId', 'skipInitialPrompt']) || !isDatabaseId(taskId) || agentId !== undefined && !isDatabaseId(agentId) || skipInitialPrompt !== undefined && typeof skipInitialPrompt !== 'boolean')) throw Object.assign(new Error('Invalid session start.'), { status: 400 })
     if (!taskId) throw Object.assign(new Error('taskId is required'), { status: 400 })
     if (!agentId) {
       // No explicit agent: the same routing as the desktop's Start button and
@@ -1008,6 +1158,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   if (resumeMatch) {
     const sessionId = resumeMatch[1]
     const { agentId, taskId } = params as { agentId: string; taskId: string }
+    if (mobileDistRoot && (!hasExactKeys(params, ['agentId', 'taskId']) || !isDatabaseId(agentId) || !isDatabaseId(taskId) || db.getTask(taskId)?.session_id !== sessionId || db.getTask(taskId)?.agent_id !== agentId)) throw Object.assign(new Error('Session binding changed.'), { status: 409 })
     if (!agentId || !taskId) throw Object.assign(new Error('agentId and taskId are required'), { status: 400 })
     const newSessionId = await agent.resumeSession(agentId, taskId, sessionId)
     return { sessionId: newSessionId }
@@ -1022,6 +1173,10 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       taskId?: string
       agentId?: string
       attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }>
+    }
+    if (mobileDistRoot) {
+      const live = agent.getSession(sessionId)
+      if (!hasExactKeys(params, ['message'], ['taskId', 'agentId', 'attachments']) || typeof message !== 'string' || !message.trim() || Buffer.byteLength(message) > 65_536 || message.includes('\0') || !live || taskId !== undefined && taskId !== live.taskId || aid !== undefined && aid !== live.agentId || attachments !== undefined && (!Array.isArray(attachments) || attachments.length !== 0)) throw Object.assign(new Error('Invalid session message or attachment binding.'), { status: 400 })
     }
     if (!message) throw Object.assign(new Error('message is required'), { status: 400 })
     const result = await agent.sendMessage(sessionId, message, taskId, aid, attachments)
@@ -1038,6 +1193,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       responseType?: 'permission' | 'question'
       requestId?: string
     }
+    if (mobileDistRoot && (!hasExactKeys(params, ['approved', 'responseType', 'requestId'], ['message']) || !agent.getSession(sessionId) || !['permission', 'question'].includes(responseType as string) || typeof requestId !== 'string' || !requestId || Buffer.byteLength(requestId) > 512 || message !== undefined && (typeof message !== 'string' || Buffer.byteLength(message) > 65_536 || message.includes('\0')))) throw Object.assign(new Error('Invalid current approval request.'), { status: 400 })
     if (typeof approved !== 'boolean') throw Object.assign(new Error('approved (boolean) is required'), { status: 400 })
     await agent.respondToPermission(sessionId, approved, message, undefined, responseType, requestId)
     return { success: true }
@@ -1048,6 +1204,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   // /api/tasks/:taskId/transcript + `transcript:changed` deltas).
   const syncMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/sync$/)
   if (syncMatch) {
+    if (mobileDistRoot && !hasExactKeys(params, [])) throw Object.assign(new Error('Invalid sync request.'), { status: 400 })
     const status = agent.getSessionStatus(syncMatch[1])
     if (!status) throw Object.assign(new Error('Session not found or not running'), { status: 404 })
     return { success: true, status: status.status }
@@ -1056,6 +1213,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   // POST /api/sessions/:sessionId/abort
   const abortMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/abort$/)
   if (abortMatch) {
+    if (mobileDistRoot && (!hasExactKeys(params, []) || !agent.getSession(abortMatch[1]))) throw Object.assign(new Error('Session is not running.'), { status: 409 })
     await agent.abortSession(abortMatch[1])
     return { success: true }
   }
@@ -1063,6 +1221,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   // POST /api/sessions/:sessionId/stop
   const stopMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/stop$/)
   if (stopMatch) {
+    if (mobileDistRoot && (!hasExactKeys(params, []) || !agent.getSession(stopMatch[1]))) throw Object.assign(new Error('Session is not running.'), { status: 409 })
     await agent.stopSession(stopMatch[1])
     return { success: true }
   }
@@ -1114,6 +1273,44 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 }
 
 // ── Helpers ──────────────────────────────────────────────────
+
+function assertProductionOrdinaryTask(db: DatabaseManager, id: string): void {
+  const task = isDatabaseId(id) ? db.getTask(id) : undefined
+  if (!task || task.role !== 'task' || task.group_id) throw Object.assign(new Error('Use the desktop controls for Captain and grouped tasks.'), { status: 409 })
+}
+
+/** Complex resource/role edits need the desktop's complete reference and effect
+ * service. Ordinary phone edits keep the real scheduler semantics and owners. */
+function assertProductionTaskFields(db: DatabaseManager, data: Record<string, unknown>, previous?: ReturnType<DatabaseManager['getTask']>): void {
+  const desktopFields = ['agent_id', 'skill_ids', 'source_id', 'external_id', 'source', 'secret_ids', 'next_subtask_ids', 'recurrence_parent_id', 'feedback_rating', 'feedback_comment', 'learn_from_feedback', 'is_heartbeat', 'heartbeat_enabled', 'heartbeat_interval_minutes', 'heartbeat_active_hours_start', 'heartbeat_active_hours_end', 'heartbeat_instructions']
+  if (desktopFields.some(key => Object.hasOwn(data, key)) || previous && ['project_id', 'parent_task_id', 'repos', 'attachments'].some(key => Object.hasOwn(data, key)) ||
+    !previous && [data.repos, data.attachments].some(value => Array.isArray(value) && value.length > 0) || data.status === TaskStatus.AgentLearning || previous?.heartbeat_enabled)
+    throw Object.assign(new Error('Change task resources, learning and heartbeat configuration on the desktop.'), { status: 503 })
+  if (previous?.source_id && data.status === TaskStatus.Completed && previous.status !== TaskStatus.Completed && data.complete_at_source !== false)
+    throw Object.assign(new Error('Choose app-only completion or complete at the source on the desktop.'), { status: 503 })
+  if (previous && data.status === TaskStatus.Completed && db.getSubtasks(previous.id).some(child => ![TaskStatus.Completed, TaskStatus.ReadyForReview].includes(child.status as TaskStatus)))
+    throw Object.assign(new Error('Finish the subtasks before completing this task.'), { status: 409 })
+  const recurring = data.is_recurring ?? previous?.is_recurring
+  const pattern = data.recurrence_pattern === undefined ? previous?.recurrence_pattern : data.recurrence_pattern
+  if (recurring && (!pattern || !mobileDeps?.taskOwners?.recurrence.calculateNextOccurrence(pattern as Parameters<RecurrenceSchedulerCore['calculateNextOccurrence']>[0], new Date().toISOString())))
+    throw Object.assign(new Error('Invalid recurring task pattern.'), { status: 400 })
+}
+
+function fixedMobileSyncResult(value: { source_id: string; imported: number; updated: number; errors: string[] }) {
+  return { source_id: value.source_id, imported: value.imported, updated: value.updated, errors: value.errors.length ? ['Task source sync failed.'] : [] }
+}
+async function runMobileTaskMutation<T>(db: DatabaseManager, agent: AgentManager, ids: string[], req: IncomingMessage | undefined, effect: () => Promise<T>): Promise<T> {
+  if (ids.length > 128) throw Object.assign(new Error('Task change exceeds supported size.'), { status: 413 })
+  const binding = (): string => JSON.stringify(ids.map(id => {
+    assertProductionOrdinaryTask(db, id)
+    return db.db.prepare('SELECT id,project_id,source_id,role,group_id,external_id,agent_id,parent_task_id,next_subtask_ids FROM tasks WHERE id=?').get(id)
+  }))
+  const expected = binding()
+  return agent.runTaskLifecycleMutation(ids, async () => {
+    if (!currentOwner || currentOwner.closing || currentOwner.db !== db || !validateSession(req ? bearerToken(req) : null, false) || binding() !== expected) throw Object.assign(new Error('Task binding changed or access ended.'), { status: 409 })
+    return effect()
+  })
+}
 
 // A phone creates local tasks only: the source link (source_id, external_id,
 // source) and recurrence-instance fields are owned by sync and the scheduler.
@@ -1213,7 +1410,7 @@ function artifactFromFileEntry(taskId: string, entry: ArtifactFileEntry): Artifa
 
 function serveMobileSPA(res: ServerResponse, pathname: string): void {
   // Resolve static file from out/mobile/
-  const mobileDir = join(__dirname, '../mobile')
+  const mobileDir = mobileDistRoot ?? join(__dirname, '../mobile')
   const resolved = join(mobileDir, pathname === '/' ? 'index.html' : pathname)
 
   // Guard against path traversal — ensure resolved path stays inside mobileDir
@@ -1235,6 +1432,22 @@ function serveMobileSPA(res: ServerResponse, pathname: string): void {
     return
   }
 
+  if (mobileDistRoot) {
+    // Portable assets are physical host-owned resources. Reject every symlink
+    // component, including a leaf changed after the initial existence check.
+    const safe = (): boolean => {
+      try {
+        if (!filePath.startsWith(mobileDir + sep) || realpathSync(mobileDir) !== mobileDir) return false
+        let cursor = mobileDir
+        for (const part of filePath.slice(mobileDir.length + 1).split(sep)) { cursor = join(cursor, part); if (lstatSync(cursor).isSymbolicLink()) return false }
+        return realpathSync(filePath) === filePath && statSync(filePath).isFile() && statSync(filePath).size <= 8 * 1024 * 1024
+      } catch { return false }
+    }
+    if (!safe()) { res.writeHead(404); res.end('Mobile resource unavailable.'); return }
+    const content = readFileSync(filePath)
+    if (content.length > 8 * 1024 * 1024 || !safe()) { res.writeHead(404); res.end('Mobile resource unavailable.'); return }
+    res.writeHead(200, { 'Content-Type': mimeTypeForPath(filePath) }); res.end(content); return
+  }
   res.writeHead(200, { 'Content-Type': mimeTypeForPath(filePath) })
   res.end(readFileSync(filePath))
 }

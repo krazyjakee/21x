@@ -4,7 +4,8 @@ import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, op
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { PROFILE_LOCK_FILE, type ProfileLock } from './profile-lock'
-import { CredentialMigrationError, prepareCredentialMigration, type CredentialLocation, type CredentialMigrationProviders, type LegacyCredentialInput } from './credential-migration'
+import { CredentialMigrationError, isRecordCredentialLocation, prepareCredentialMigration, type CredentialLocation, type CredentialMigrationProviders, type LegacyCredentialInput, type RecordCredentialLocation } from './credential-migration'
+import { applyRecordCredentialChanges, collectRecordCredentialInputs, normalizedRecordCredentialText, recordCredentialColumnKey, recordCredentialProvenanceHash, RecordCredentialConversionError, type RecordCredentialProvenance } from './record-credential-conversion'
 
 export const REHEARSAL_MAX_BYTES = 8 * 1024 * 1024
 const CHUNK_BYTES = 512 * 1024
@@ -16,7 +17,7 @@ const JOURNAL = 'journal.enc'
 const SETTING_PREFIX = '21x-credential:'
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex')
 const quote = (name: string) => '"' + name.replaceAll('"', '""') + '"'
-const keyOf = (location: CredentialLocation) => JSON.stringify([location.table, location.rowId, location.column])
+const keyOf = (location: CredentialLocation) => JSON.stringify([location.table, location.rowId, location.column, ...('jsonPath' in location ? location.jsonPath : [])])
 
 export type RehearsalErrorCode = 'REHEARSAL_SCOPE_INVALID' | 'REHEARSAL_LOCK_INVALID' | 'REHEARSAL_SOURCE_BUSY' | 'REHEARSAL_SOURCE_INVALID' | 'REHEARSAL_BOUNDS_EXCEEDED' | 'REHEARSAL_COVERAGE_INCOMPLETE' | 'REHEARSAL_PROVIDER_UNAVAILABLE' | 'REHEARSAL_SNAPSHOT_CORRUPT' | 'REHEARSAL_STATE_CONFLICT' | 'REHEARSAL_RESOURCE_CHANGED' | 'REHEARSAL_PRESERVATION_FAILED' | 'REHEARSAL_INTERRUPTED' | 'REHEARSAL_ROLLBACK_PLAINTEXT' | 'REHEARSAL_IO_FAILED'
 export class ProfileMigrationRehearsalError extends Error {
@@ -30,6 +31,8 @@ export interface RehearsalOptions {
   readonly providers: CredentialMigrationProviders
   /** Each BLOB needs trusted source provenance, never a ciphertext guess. */
   readonly blobInterpretations: readonly { location: CredentialLocation; interpretation: 'safeStorage' | 'plaintext-utf8' }[]
+  /** App-issued exact JSON-leaf provenance, never inferred from its prefix. */
+  readonly recordInterpretations?: readonly RecordCredentialProvenance[]
   /** Explicit fixture resources; no external path or live-profile discovery. */
   readonly resourcePaths?: readonly string[]
   readonly maxBytes?: number
@@ -39,7 +42,7 @@ export interface RehearsalOptions {
 interface Resource { path: string; bytes: number; sha256: string }
 interface SnapshotManifest { type: 'original-sqlite-snapshot'; version: 1; fixtureId: string; snapshotId: string; format: string; bytes: number; sha256: string; chunks: number; resources: Resource[] }
 interface Capsule { version: 1; manifest: string; chunks: string[] }
-interface Journal { type: 'credential-import-rehearsal'; version: 1; fixtureId: string; snapshotId: string; backupHash: string; sourceHash: string; format: string; state: 'prepared' | 'candidate-ready' | 'committed'; candidateHash: string | null; preservedHash: string }
+interface Journal { type: 'credential-import-rehearsal'; version: 1; fixtureId: string; snapshotId: string; backupHash: string; sourceHash: string; format: string; state: 'prepared' | 'candidate-ready' | 'committed'; candidateHash: string | null; preservedHash: string; recordProvenanceHash?: string }
 interface Context { root: string; output: string; source: string; fixtureId: string; maxBytes: number; options: RehearsalOptions }
 export interface RehearsalResult { readonly state: 'committed'; readonly candidatePath: string; readonly encryptedOriginalPath: string; readonly recovered: boolean; readonly credentialChanges: number }
 
@@ -214,16 +217,6 @@ function parseObject(value: unknown): Record<string, unknown> {
 }
 function inputs(db: Database.Database, options: RehearsalOptions): LegacyCredentialInput[] {
   const tables = new Set((db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as { name: string }[]).map((row) => row.name))
-  for (const table of ['secrets', 'settings', 'oauth_tokens', 'connector_instances']) if (!tables.has(table)) fail('REHEARSAL_COVERAGE_INCOMPLETE')
-  // Unsupported known plaintext-bearing configurations cannot be copied into
-  // a supposedly converted candidate. This harness does not sweep typed JSON.
-  if (tables.has('agents')) for (const row of db.prepare('SELECT config FROM agents').all() as { config: string }[]) {
-    const config = parseObject(row.config)
-    if (config.api_keys != null && Object.keys(parseObject(JSON.stringify(config.api_keys))).length) fail('REHEARSAL_COVERAGE_INCOMPLETE')
-  }
-  if (tables.has('mcp_servers')) for (const row of db.prepare('SELECT headers, environment FROM mcp_servers').all() as { headers: string; environment: string }[]) {
-    if (Object.keys(parseObject(row.headers)).length || Object.keys(parseObject(row.environment)).length) fail('REHEARSAL_COVERAGE_INCOMPLETE')
-  }
   const provenance = new Map<string, 'safeStorage' | 'plaintext-utf8'>()
   if (!Array.isArray(options.blobInterpretations) || options.blobInterpretations.length > 10000) fail('REHEARSAL_COVERAGE_INCOMPLETE')
   for (const entry of options.blobInterpretations) {
@@ -239,21 +232,26 @@ function inputs(db: Database.Database, options: RehearsalOptions): LegacyCredent
     provenance.delete(key)
     result.push({ location, source: { kind: 'blob', value: value as Buffer, interpretation }, connectorAuthType: authType })
   }
-  for (const row of db.prepare('SELECT id, value FROM secrets ORDER BY id').all() as { id: string; value: Buffer }[]) blob({ table: 'secrets', rowId: row.id, column: 'value' }, row.value)
-  for (const row of db.prepare("SELECT key, value FROM settings WHERE substr(key,-8)='_api_key' AND value<>'' ORDER BY key").all() as { key: string; value: string }[]) result.push({ location: { table: 'settings', rowId: row.key, column: 'value' }, source: { kind: 'setting', value: row.value } })
-  for (const row of db.prepare('SELECT id, access_token, refresh_token FROM oauth_tokens ORDER BY id').all() as { id: string; access_token: Buffer; refresh_token: Buffer | null }[]) {
+  if (tables.has('secrets')) for (const row of db.prepare('SELECT id, value FROM secrets ORDER BY id').all() as { id: string; value: Buffer }[]) blob({ table: 'secrets', rowId: row.id, column: 'value' }, row.value)
+  if (tables.has('settings')) for (const row of db.prepare("SELECT key, value FROM settings WHERE substr(key,-8)='_api_key' AND value<>'' ORDER BY key").all() as { key: string; value: string }[]) result.push({ location: { table: 'settings', rowId: row.key, column: 'value' }, source: { kind: 'setting', value: row.value } })
+  if (tables.has('oauth_tokens')) for (const row of db.prepare('SELECT id, access_token, refresh_token FROM oauth_tokens ORDER BY id').all() as { id: string; access_token: Buffer; refresh_token: Buffer | null }[]) {
     blob({ table: 'oauth_tokens', rowId: row.id, column: 'access_token' }, row.access_token)
     if (row.refresh_token !== null) blob({ table: 'oauth_tokens', rowId: row.id, column: 'refresh_token' }, row.refresh_token)
   }
-  for (const row of db.prepare('SELECT id, auth, auth_type, config FROM connector_instances ORDER BY id').all() as { id: string; auth: Buffer | null; auth_type: LegacyCredentialInput['connectorAuthType']; config: string }[]) {
+  if (tables.has('connector_instances')) for (const row of db.prepare('SELECT id, auth, auth_type, config FROM connector_instances ORDER BY id').all() as { id: string; auth: Buffer | null; auth_type: LegacyCredentialInput['connectorAuthType']; config: string }[]) {
     if (Object.keys(parseObject(row.config)).length) fail('REHEARSAL_COVERAGE_INCOMPLETE')
     if (row.auth !== null) blob({ table: 'connector_instances', rowId: row.id, column: 'auth' }, row.auth, row.auth_type)
   }
   if (provenance.size) fail('REHEARSAL_COVERAGE_INCOMPLETE')
+  result.push(...collectRecordCredentialInputs(db, options.recordInterpretations))
   return result
 }
 function preservedHash(db: Database.Database, locations: readonly CredentialLocation[]): string {
-  const excluded = new Set(locations.map(keyOf))
+  const excluded = new Set(locations.filter(location => !isRecordCredentialLocation(location)).map(keyOf))
+  const recordColumns = new Map<string, RecordCredentialLocation[]>()
+  for (const location of locations) if (isRecordCredentialLocation(location)) {
+    const key = recordCredentialColumnKey(location), group = recordColumns.get(key) ?? []; group.push(location); recordColumns.set(key, group)
+  }
   const tables = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type='table' AND (name NOT LIKE 'sqlite_%' OR name='sqlite_sequence') ORDER BY name").all() as { name: string; sql: string }[]
   const digest = createHash('sha256')
   for (const table of tables) {
@@ -262,7 +260,10 @@ function preservedHash(db: Database.Database, locations: readonly CredentialLoca
     catch { rows = db.prepare(`SELECT * FROM ${quote(table.name)}`).safeIntegers().all() as Record<string, unknown>[] }
     const serialized = rows.map((row) => {
       const id = String(table.name === 'settings' ? row.key : row.id)
-      return JSON.stringify(Object.entries(row).filter(([column]) => !excluded.has(JSON.stringify([table.name, id, column]))), (_key, value) => typeof value === 'bigint' ? { integer: value.toString() } : value)
+      return JSON.stringify(Object.entries(row).filter(([column]) => !excluded.has(JSON.stringify([table.name, id, column]))).map(([column, value]) => {
+        const paths = recordColumns.get(JSON.stringify([table.name, id, column]))
+        return [column, paths ? normalizedRecordCredentialText(value as string, paths) : value]
+      }), (_key, value) => typeof value === 'bigint' ? { integer: value.toString() } : value)
     }).sort()
     digest.update(JSON.stringify([table.name, table.sql, serialized]))
   }
@@ -285,6 +286,7 @@ function applyCandidate(ctx: Context, snapshot: Buffer): { bytes: Buffer; change
     db.transaction(() => {
       for (const change of plan.changes) {
         const location = change.location
+        if (isRecordCredentialLocation(location)) continue
         const keyColumn = location.table === 'settings' ? 'key' : 'id'
         const bytes = Buffer.from(change.ciphertextBase64, 'base64')
         try {
@@ -292,6 +294,15 @@ function applyCandidate(ctx: Context, snapshot: Buffer): { bytes: Buffer; change
           const update = db.prepare(`UPDATE ${quote(location.table)} SET ${quote(location.column)}=? WHERE ${quote(keyColumn)}=?`).run(value, location.rowId)
           if (update.changes !== 1) fail('REHEARSAL_PRESERVATION_FAILED')
         } finally { bytes.fill(0) }
+      }
+      applyRecordCredentialChanges(db, plan.changes, plan.destinationFormat)
+      for (const change of plan.changes) if (!isRecordCredentialLocation(change.location)) {
+        const location = change.location, keyColumn = location.table === 'settings' ? 'key' : 'id'
+        const row = db.prepare(`SELECT ${quote(location.column)} AS value FROM ${quote(location.table)} WHERE ${quote(keyColumn)}=?`).get(location.rowId) as { value: string | Buffer } | undefined
+        const expected = location.table === 'settings' ? SETTING_PREFIX + plan.destinationFormat + ':' + change.ciphertextBase64 : Buffer.from(change.ciphertextBase64, 'base64')
+        try {
+          if (!row || (Buffer.isBuffer(expected) ? !Buffer.isBuffer(row.value) || !expected.equals(row.value) : row.value !== expected)) fail('REHEARSAL_PRESERVATION_FAILED')
+        } finally { if (Buffer.isBuffer(expected)) expected.fill(0) }
       }
       integrity(db)
       if (preservedHash(db, locations) !== preserved) fail('REHEARSAL_PRESERVATION_FAILED')
@@ -313,6 +324,7 @@ function readJournal(ctx: Context, manifest: SnapshotManifest, backupHash: strin
   try {
     const value = JSON.parse(decrypt(ctx, encrypted)) as Journal
     if (value.type !== 'credential-import-rehearsal' || value.version !== 1 || value.fixtureId !== ctx.fixtureId || value.snapshotId !== manifest.snapshotId || value.backupHash !== backupHash || value.sourceHash !== manifest.sha256 || value.format !== manifest.format || !['prepared', 'candidate-ready', 'committed'].includes(value.state) || !/^[0-9a-f]{64}$/.test(value.preservedHash) || value.state === 'prepared' && value.candidateHash !== null || value.state !== 'prepared' && (typeof value.candidateHash !== 'string' || !/^[0-9a-f]{64}$/.test(value.candidateHash))) fail('REHEARSAL_STATE_CONFLICT')
+    if ((value.recordProvenanceHash ?? recordCredentialProvenanceHash()) !== recordCredentialProvenanceHash(ctx.options.recordInterpretations)) fail('REHEARSAL_STATE_CONFLICT')
     return value
   } catch (error) { if (error instanceof ProfileMigrationRehearsalError) throw error; fail('REHEARSAL_STATE_CONFLICT') }
   finally { encrypted.fill(0) }
@@ -381,7 +393,7 @@ export function rehearseProfileCredentialImport(options: RehearsalOptions): Rehe
       const pending = candidate + '.pending'
       if (!journal) {
         if (existsSync(candidate) || existsSync(pending)) fail('REHEARSAL_STATE_CONFLICT')
-        journal = { type: 'credential-import-rehearsal', version: 1, fixtureId: ctx.fixtureId, snapshotId: original.manifest.snapshotId, backupHash: original.backupHash, sourceHash: original.manifest.sha256, format: original.manifest.format, state: 'prepared', candidateHash: null, preservedHash: originalPreserved }
+        journal = { type: 'credential-import-rehearsal', version: 1, fixtureId: ctx.fixtureId, snapshotId: original.manifest.snapshotId, backupHash: original.backupHash, sourceHash: original.manifest.sha256, format: original.manifest.format, state: 'prepared', candidateHash: null, preservedHash: originalPreserved, recordProvenanceHash: recordCredentialProvenanceHash(options.recordInterpretations) }
         writeJournal(ctx, journal)
         boundary(ctx, 'journal-prepared')
       }
@@ -417,6 +429,7 @@ export function rehearseProfileCredentialImport(options: RehearsalOptions): Rehe
     } finally { original.snapshot.fill(0) }
   } catch (error) {
     if (error instanceof ProfileMigrationRehearsalError) throw error
+    if (error instanceof RecordCredentialConversionError) fail(error.code === 'RECORD_COVERAGE_INCOMPLETE' ? 'REHEARSAL_COVERAGE_INCOMPLETE' : error.code === 'RECORD_BOUNDS_EXCEEDED' ? 'REHEARSAL_BOUNDS_EXCEEDED' : error.code === 'RECORD_PRESERVATION_FAILED' ? 'REHEARSAL_PRESERVATION_FAILED' : 'REHEARSAL_SOURCE_INVALID')
     if (error instanceof CredentialMigrationError) fail(error.code === 'LEGACY_UNAVAILABLE' || error.code === 'DESTINATION_UNAVAILABLE' ? 'REHEARSAL_PROVIDER_UNAVAILABLE' : 'REHEARSAL_SOURCE_INVALID')
     const code = (error as { code?: string }).code
     return fail(code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' ? 'REHEARSAL_SOURCE_BUSY' : 'REHEARSAL_IO_FAILED')
@@ -432,7 +445,7 @@ export function rehearseProfileCredentialRollback(options: RehearsalOptions): st
     const db = new Database(original.snapshot)
     try {
       integrity(db)
-      for (const input of inputs(db, options)) if (input.source.kind === 'setting' ? !input.source.value.startsWith('safeStorage:v1:') : input.source.interpretation !== 'safeStorage') fail('REHEARSAL_ROLLBACK_PLAINTEXT')
+      for (const input of inputs(db, options)) if (input.source.kind === 'setting' ? !input.source.value.startsWith('safeStorage:v1:') : input.source.kind === 'record' ? input.source.interpretation !== 'authenticated-record' : input.source.interpretation !== 'safeStorage') fail('REHEARSAL_ROLLBACK_PLAINTEXT')
     } finally { db.close() }
     held(ctx); verifyResources(ctx, original.manifest.resources)
     const path = join(ctx.output, 'rollback-original.sqlite')
