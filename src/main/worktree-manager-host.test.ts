@@ -1,14 +1,59 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WorktreeManager } from './worktree-manager-core'
+import { WorktreeManager, type WorktreeHost } from './worktree-manager-core'
+import { WorktreeDirectoryAuthority } from './worktree-directory-authority'
 
 const command = vi.hoisted(() => ({ execFile: vi.fn() }))
 vi.mock('child_process', () => ({ execFile: command.execFile }))
 afterEach(() => { vi.restoreAllMocks(); command.execFile.mockReset() })
 
 describe('portable worktree host and command lifetime', () => {
+  it('uses only captured execution and refuses unsafe repo inputs before creating task directories', async () => {
+    const root = mkdtempSync(join(tmpdir(), '21x-worktree-authority-'))
+    const reposRoot = join(root, 'repos'), workspaceRoot = join(root, 'workspaces')
+    mkdirSync(reposRoot); mkdirSync(workspaceRoot)
+    const paths = new WorktreeDirectoryAuthority([reposRoot, workspaceRoot], () => {})
+    const exec = vi.fn<NonNullable<WorktreeHost['exec']>>(async () => ({ stdout: '', stderr: '' }))
+    const owner = new WorktreeManager({ reposRoot, workspaceRoot, emitProgress: vi.fn(), exec, assertPath: path => paths.assertPath(path) })
+    const repo = { fullName: 'fixture-org/repo', defaultBranch: 'main' }
+    try {
+      await expect(owner.setupWorkspaceForTask('../outside', [repo], 'fixture-org')).rejects.toThrow('WORKTREE_PATH_UNAUTHORIZED')
+      await expect(owner.setupWorkspaceForTask('fixture-task', [{ ...repo, fullName: 'other/repo' }], 'fixture-org')).rejects.toThrow('WORKTREE_PATH_UNAUTHORIZED')
+      await expect(owner.setupWorkspaceForTask('fixture-task', [{ ...repo, cloneUrl: 'file:///outside/repo' }], 'fixture-org')).rejects.toThrow('WORKTREE_CLONE_SCOPE_INVALID')
+      await expect(owner.setupWorkspaceForTask('fixture-task', [{ ...repo, defaultBranch: '--help' }], 'fixture-org')).rejects.toThrow('WORKTREE_REF_INVALID')
+      expect(existsSync(join(workspaceRoot, 'fixture-task'))).toBe(false)
+      await owner.setupWorkspaceForTask('fixture-task', [repo], 'fixture-org')
+      expect(exec.mock.calls[0]).toEqual(['gh', ['repo', 'clone', 'https://github.com/fixture-org/repo.git', join(reposRoot, 'fixture-org', 'repo.git'), '--', '--bare'], { timeout: 300000, cwd: reposRoot }])
+      expect(command.execFile).not.toHaveBeenCalled()
+    } finally { await owner.close(); rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it.each(['link', 'directory'] as const)('preserves a replacement %s after an awaited cleanup command fails', async kind => {
+    const root = mkdtempSync(join(tmpdir(), '21x-worktree-link-'))
+    const reposRoot = join(root, 'repos'), workspaceRoot = join(root, 'workspaces'), outside = join(root, 'outside')
+    const target = join(workspaceRoot, 'fixture-task', 'repo')
+    mkdirSync(join(reposRoot, 'fixture-org', 'repo.git'), { recursive: true }); mkdirSync(target, { recursive: true }); mkdirSync(outside)
+    writeFileSync(join(outside, 'personal.txt'), 'Keep this file')
+    const paths = new WorktreeDirectoryAuthority([reposRoot, workspaceRoot], () => {})
+    let finish!: () => void, entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const exec = vi.fn(() => new Promise<{ stdout: string; stderr: string }>((_resolve, reject) => { finish = () => reject(new Error('fixture git refusal')); entered() }))
+    const owner = new WorktreeManager({ reposRoot, workspaceRoot, emitProgress: vi.fn(), exec, assertPath: path => paths.assertPath(path) })
+    const work = owner.cleanupTaskWorkspace('fixture-task', [{ fullName: 'fixture-org/repo' }], 'fixture-org')
+    const failed = expect(work).rejects.toThrow(kind === 'link' ? 'WORKTREE_PATH_UNAUTHORIZED' : 'WORKTREE_DIRECTORY_CHANGED')
+    try {
+      await started; renameSync(target, target + '.retained')
+      if (kind === 'link') symlinkSync(outside, target, 'junction')
+      else { mkdirSync(target); writeFileSync(join(target, 'personal.txt'), 'Keep replacement') }
+      finish()
+      await failed
+      expect(readFileSync(join(outside, 'personal.txt'), 'utf8')).toBe('Keep this file')
+      if (kind === 'directory') expect(readFileSync(join(target, 'personal.txt'), 'utf8')).toBe('Keep replacement')
+      expect(command.execFile).not.toHaveBeenCalled()
+    } finally { finish?.(); await failed; await owner.close(); rmSync(root, { recursive: true, force: true }) }
+  })
   it('uses the trusted workspace root for actual files and refuses new work after close', async () => {
     const root = mkdtempSync(join(tmpdir(), '21x-worktree-host-'))
     const workspaceRoot = join(root, 'workspaces')

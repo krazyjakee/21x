@@ -1,4 +1,5 @@
-import { execFile } from 'child_process'
+import { execFile, type ExecFileOptions } from 'child_process'
+import { GitProviderProcessOwner, GitProviderProcessError, type GitProviderManagerHost } from './git-provider-process-owner'
 import { promisify } from 'util'
 import {
   PullRequestCheckState,
@@ -146,10 +147,56 @@ function parseActiveGhAccount(output: string): string | undefined | null {
 }
 
 /**
- * All GitHub operations go through the user's authenticated gh CLI. 20x never
- * logs in, reads, stores, or forwards GitHub credentials itself.
+ * GitHub operations use the user's authenticated gh CLI. The portable owner
+ * preserves only finite host-captured CLI auth environment; credential values
+ * are never projected to the renderer, logged, or persisted by this manager.
  */
 export class GitHubManager {
+  constructor(private readonly host?: GitProviderManagerHost) {
+    if (!host) return
+    if (!(host.process instanceof GitProviderProcessOwner)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS')
+    for (const name of ['checkGhCli','fetchUserOrgs','fetchOrgRepos','fetchUserRepos','fetchPullRequestDetails','fetchIssues','updateIssue','addIssueComment','fetchRepoCollaborators'] as const) {
+      const original = this[name].bind(this) as (...args: unknown[]) => Promise<unknown>
+      ;(this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[name] = (...args) => {
+        try { this.current(); return host.process.retain(original(...args).then(value => { this.current(); return value }).catch(cause => { this.current(); if (cause instanceof GitProviderProcessError) throw cause; throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT') })) }
+        catch (cause) { return Promise.reject(cause) }
+      }
+    }
+  }
+  assertOwners(owner: GitProviderProcessOwner): void { if (!this.host || this.host.process !== owner) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS'); owner.assertOpen() }
+  withRequestGuard<T>(effect: () => T | Promise<T>, guard: () => void, signal?: AbortSignal): Promise<T> {
+    if (!this.host) return Promise.reject(new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS'))
+    return this.host.process.withRequestGuard(effect, guard, signal)
+  }
+  private current(): void { this.host?.process.assertCurrent(); this.host?.assertCurrent?.() }
+  private async exec(command: 'gh', args: string[], options?: ExecFileOptions): Promise<{ stdout: string; stderr: string }> {
+    if (!this.host) {
+      const result = options ? await execFileAsync(command, args, options) : await execFileAsync(command, args)
+      return { stdout: String(result.stdout), stderr: String(result.stderr) }
+    }
+    this.current()
+    const result = await this.host.process.exec(command, args, { maxBuffer: options?.maxBuffer ?? (args[0] === 'api' || args[0] === 'pr' ? GH_API_MAX_BUFFER : 65536), timeout: options?.timeout, allowNonzero: args[0] === 'auth' && args[1] === 'status' })
+    this.current(); return result
+  }
+  private array<T>(stdout: string): T[] {
+    const raw = JSON.parse(stdout) as T[]
+    if (this.host && (!Array.isArray(raw) || raw.length > 4096)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
+    return raw
+  }
+  private async paginate<T>(path: string): Promise<T[]> {
+    const results: T[] = []; let bytes = 0
+    for (let page = 1; page <= 40; page++) {
+      this.current()
+      const { stdout } = await this.exec('gh', ['api', `${path}${path.includes('?') ? '&' : '?'}page=${page}`], { maxBuffer: GH_API_MAX_BUFFER })
+      bytes += Buffer.byteLength(stdout, 'utf8')
+      const batch = this.array<T>(stdout)
+      if (batch.length > 100 || results.length + batch.length > 4096 || bytes > GH_API_MAX_BUFFER) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
+      results.push(...batch)
+      if (batch.length < 100) return results
+    }
+    throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
+  }
+
   private mapRepo(raw: Record<string, unknown>): GitHubRepo {
     return {
       name: raw.name as string,
@@ -162,12 +209,13 @@ export class GitHubManager {
   }
 
   private async fetchAccessibleRepos(): Promise<GitHubRepo[]> {
-    const { stdout } = await execFileAsync('gh', [
-      'api', '--paginate',
-      '/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member'
-    ], { maxBuffer: GH_API_MAX_BUFFER })
-
-    const raw = JSON.parse(stdout) as Record<string, unknown>[]
+    const path = '/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member'
+    let raw: Record<string, unknown>[]
+    if (this.host) raw = await this.paginate<Record<string, unknown>>(path)
+    else {
+      const { stdout } = await this.exec('gh', ['api', '--paginate', path], { maxBuffer: GH_API_MAX_BUFFER })
+      raw = JSON.parse(stdout) as Record<string, unknown>[]
+    }
     const deduped = new Map<string, GitHubRepo>()
 
     for (const repo of raw) {
@@ -180,8 +228,10 @@ export class GitHubManager {
 
   async checkGhCli(): Promise<GhCliStatus> {
     try {
-      await execFileAsync('gh', ['--version'])
-    } catch {
+      await this.exec('gh', ['--version'])
+    } catch (cause) {
+      this.current()
+      if (this.host && (!(cause instanceof GitProviderProcessError) || cause.code !== 'GIT_PROVIDER_CLI_MISSING')) throw cause
       return { installed: false, authenticated: false }
     }
 
@@ -189,9 +239,11 @@ export class GitHubManager {
     // Some versions write status to stderr, and a stale inactive account can make it exit 1.
     let output: string
     try {
-      const { stdout, stderr } = await execFileAsync('gh', ['auth', 'status', '--hostname', 'github.com'])
+      const { stdout, stderr } = await this.exec('gh', ['auth', 'status', '--hostname', 'github.com'])
       output = `${stdout}\n${stderr}`
     } catch (error: unknown) {
+      this.current()
+      if (this.host) throw error
       const execErr = error as { stderr?: string; stdout?: string }
       output = `${execErr?.stdout || ''}\n${execErr?.stderr || ''}`
     }
@@ -236,12 +288,13 @@ export class GitHubManager {
     if (!match) throw new Error('A valid GitHub pull request URL is required')
 
     const [, owner, repo, number] = match
-    const { stdout } = await execFileAsync('gh', [
+    const { stdout } = await this.exec('gh', [
       'pr', 'view', url,
       '--json',
       'url,number,title,body,state,isDraft,mergeStateStatus,reviewDecision,author,baseRefName,headRefName,additions,deletions,changedFiles,comments,reviews,createdAt,updatedAt,mergedAt,closedAt,statusCheckRollup'
     ], { maxBuffer: GH_API_MAX_BUFFER })
     const raw = JSON.parse(stdout) as RawPullRequestDetails
+    if (this.host && (!raw || typeof raw !== 'object' || Array.isArray(raw) || [raw.comments, raw.reviews, raw.statusCheckRollup].some(value => value !== undefined && (!Array.isArray(value) || value.length > 4096)))) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
 
     return {
       url: raw.url || url,
@@ -285,12 +338,13 @@ export class GitHubManager {
     if (opts.assignee) params.set('assignee', opts.assignee)
     if (opts.labels) params.set('labels', opts.labels)
 
-    const { stdout } = await execFileAsync('gh', [
-      'api', '--paginate',
-      `/repos/${owner}/${repo}/issues?${params.toString()}`
-    ], { maxBuffer: 10 * 1024 * 1024 })
-
-    const raw = JSON.parse(stdout) as GitHubIssue[]
+    const path = `/repos/${owner}/${repo}/issues?${params.toString()}`
+    let raw: GitHubIssue[]
+    if (this.host) raw = await this.paginate<GitHubIssue>(path)
+    else {
+      const { stdout } = await this.exec('gh', ['api', '--paginate', path], { maxBuffer: GH_API_MAX_BUFFER })
+      raw = JSON.parse(stdout) as GitHubIssue[]
+    }
     // Filter out pull requests (GitHub issues API includes them)
     return raw.filter((issue) => !issue.pull_request)
   }
@@ -311,11 +365,11 @@ export class GitHubManager {
         args.push('-f', `${key}=${val}`)
       }
     }
-    await execFileAsync('gh', args)
+    await this.exec('gh', args)
   }
 
   async addIssueComment(owner: string, repo: string, number: number, body: string): Promise<void> {
-    await execFileAsync('gh', [
+    await this.exec('gh', [
       'api', '-X', 'POST',
       `/repos/${owner}/${repo}/issues/${number}/comments`,
       '-f', `body=${body}`
@@ -323,10 +377,9 @@ export class GitHubManager {
   }
 
   async fetchRepoCollaborators(owner: string, repo: string): Promise<GitHubCollaborator[]> {
-    const { stdout } = await execFileAsync('gh', [
-      'api', '--paginate',
-      `/repos/${owner}/${repo}/collaborators?per_page=100`
-    ])
+    const path = `/repos/${owner}/${repo}/collaborators?per_page=100`
+    if (this.host) return this.paginate<GitHubCollaborator>(path)
+    const { stdout } = await this.exec('gh', ['api', '--paginate', path])
     return JSON.parse(stdout) as GitHubCollaborator[]
   }
 }

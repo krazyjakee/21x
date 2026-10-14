@@ -1,3 +1,4 @@
+import { GIT_PROVIDER_CODECS, GIT_PROVIDER_OPERATIONS } from '@shared/git-provider-codecs'
 import { VOICE_MANAGEMENT_CODECS, VOICE_MANAGEMENT_EVENT_CODECS } from '@shared/voice-management-codecs'
 import { AGENT_INSTALLER_CODECS } from '@shared/agent-installer-codecs'
 import { ARTIFACT_CODECS } from '@shared/artifact-codecs'
@@ -26,12 +27,15 @@ import { DesktopClient, type DesktopClientState } from './desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...VOICE_MANAGEMENT_CODECS }
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS }
 const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
 /** Explicit binding is separate from codec validation and native/service authorization. */
 export const NATIVE_COMMAND_BINDINGS = {
+  'github:checkCli': 'github.checkCli', 'github:fetchOrgs': 'github.fetchOrgs', 'github:fetchOrgRepos': 'github.fetchOrgRepos', 'github:fetchUserRepos': 'github.fetchUserRepos', 'github:fetchPullRequestDetails': 'github.fetchPullRequestDetails',
+  'gitlab:checkCli': 'gitlab.checkCli', 'gitlab:fetchOrgs': 'gitlab.fetchOrgs', 'gitlab:fetchOrgRepos': 'gitlab.fetchOrgRepos', 'gitlab:fetchUserRepos': 'gitlab.fetchUserRepos',
+  'forgejo:checkCli': 'forgejo.checkCli', 'forgejo:setLogin': 'forgejo.setLogin', 'forgejo:fetchOrgs': 'forgejo.fetchOrgs', 'forgejo:fetchOrgRepos': 'forgejo.fetchOrgRepos', 'forgejo:fetchUserRepos': 'forgejo.fetchUserRepos', 'git:recordRepoProviders': 'git.recordRepoProviders',
   'voice:getSnapshot': 'voice.getSnapshot',
   'voice:setEnabled': 'voice.setEnabled',
   'voice:getRuntime': 'voice.getRuntime',
@@ -106,7 +110,7 @@ export const NATIVE_EVENT_BINDINGS = {
   'mobile:pairing-initiated': 'mobile.onPairingInitiated', 'mobile:device-connected': 'mobile.onDeviceConnected'
   // Recovery-state codec exists, but there is no production API binding yet.
 } as const satisfies Partial<Record<keyof typeof events, ApiPath<DesktopApi>>>
-const reads = new Set<keyof typeof commands>(['voice:getSnapshot', 'voice:getRuntime', 'voice:tts:getSnapshot', 'db:getTasks', 'db:getTask', 'project:getAll', 'project:get', 'project:getDefault', 'settings:get', 'settings:getAll', 'agent:getAll', 'skills:getAll', 'projectRepo:list', 'projectResource:list', 'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage', 'agentConfig:getProviders', 'agentConfig:listModels', 'db:getSubtasks', 'tasks:getCoordinatorTaskId', 'agent:getStartQueue',
+const reads = new Set<keyof typeof commands>(['github:checkCli', 'github:fetchOrgs', 'github:fetchOrgRepos', 'github:fetchUserRepos', 'github:fetchPullRequestDetails', 'gitlab:checkCli', 'gitlab:fetchOrgs', 'gitlab:fetchOrgRepos', 'gitlab:fetchUserRepos', 'forgejo:checkCli', 'forgejo:fetchOrgs', 'forgejo:fetchOrgRepos', 'forgejo:fetchUserRepos', 'voice:getSnapshot', 'voice:getRuntime', 'voice:tts:getSnapshot', 'db:getTasks', 'db:getTask', 'project:getAll', 'project:get', 'project:getDefault', 'settings:get', 'settings:getAll', 'agent:getAll', 'skills:getAll', 'projectRepo:list', 'projectResource:list', 'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage', 'agentConfig:getProviders', 'agentConfig:listModels', 'db:getSubtasks', 'tasks:getCoordinatorTaskId', 'agent:getStartQueue',
   'agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'captainRuntime:get', 'commander:listSessions',
   'commander:listMessages', 'commander:getImage', 'commander:getActivity', 'secrets:getAll', 'env:get', 'terminal:getCwd', 'terminal:getBuffer',
   'mcp:getAll', 'mcp:getOAuthStatus', 'mcp:probeForAuth', 'taskSource:getAll', 'taskSource:getUsers', 'connectors:bridgePieces', 'connectors:credentialStatus', 'connectors:syncStatus', 'plugin:list', 'plugin:getDocumentation', 'plugin:resolveOptions',
@@ -158,7 +162,7 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
       let result: unknown
       try { result = await client.invoke(operation, args as DesktopCommandMap[typeof operation]['apiArguments']) }
       catch (error) {
-        if ((operation.startsWith('connectors:') || operation.startsWith('mobile:') || operation.startsWith('voice:')) && error instanceof ServiceProtocolError && error.code === 'UNKNOWN_OPERATION') {
+        if ((operation.startsWith('connectors:') || operation.startsWith('mobile:') || operation.startsWith('voice:') || GIT_PROVIDER_OPERATIONS.some(name => name === operation)) && error instanceof ServiceProtocolError && error.code === 'UNKNOWN_OPERATION') {
           unavailableCapability = path; notify()
         }
         throw error

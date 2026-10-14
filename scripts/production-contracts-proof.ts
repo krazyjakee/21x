@@ -1,4 +1,5 @@
 import { VOICE_MANAGEMENT_CODECS } from '../src/shared/voice-management-codecs'
+import { GIT_PROVIDER_CODECS } from '../src/shared/git-provider-codecs'
 import { AGENT_INSTALLER_CODECS } from '../src/shared/agent-installer-codecs'
 import { ARTIFACT_CODECS } from '../src/shared/artifact-codecs'
 /** Pure codec corpus: no service/SDK imports, profiles, mutations or credentials. */
@@ -25,7 +26,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -35,6 +36,10 @@ const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }
 
 /** One explicit valid API argument tuple for every finite production command. */
 export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
+  'github:checkCli': [], 'github:fetchOrgs': [], 'github:fetchOrgRepos': ['fixture-org'], 'github:fetchUserRepos': [], 'github:fetchPullRequestDetails': ['https://github.com/fixture/repo/pull/42'],
+  'gitlab:checkCli': [], 'gitlab:fetchOrgs': [], 'gitlab:fetchOrgRepos': ['team/subgroup'], 'gitlab:fetchUserRepos': [],
+  'forgejo:checkCli': [], 'forgejo:setLogin': ['fixture account'], 'forgejo:fetchOrgs': [], 'forgejo:fetchOrgRepos': ['fixture-org'], 'forgejo:fetchUserRepos': [],
+  'git:recordRepoProviders': [['fixture/repo'], 'github'],
   'voice:getSnapshot': [], 'voice:setEnabled': [false], 'voice:getRuntime': [], 'voice:installRuntime': [], 'voice:removeRuntime': [],
   'voice:installModel': ['nemo-parakeet-tdt-0.6b-v3'], 'voice:removeModel': ['sherpa-streaming-zipformer-en'], 'voice:removeAllModels': [], 'voice:selectModel': ['nemo-fast-conformer-en-480ms'], 'voice:setEndpointSilence': [1.5],
   'voice:tts:getSnapshot': [], 'voice:tts:setEnabled': [false], 'voice:tts:setEngine': ['local'], 'voice:tts:setVoice': ['local:kitten-nano-en-v0_2:0'], 'voice:tts:setSpeed': [1.25], 'voice:tts:setMaxChars': [1200], 'voice:tts:setSpeakActionResults': [false], 'voice:tts:setOnlyVoiceTurns': [true],
@@ -102,6 +107,9 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
 
 type Variant = { operation: string; case: string; args: unknown[] }
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  { operation: 'forgejo:setLogin', case: 'clear-forgejo-login', args: [null] },
+  { operation: 'github:fetchPullRequestDetails', case: 'configured-forgejo-pr', args: ['https://forgejo.example.test/fixture/repo/pulls/42'] },
+  ...['github', 'gitlab', 'forgejo'].map(provider => ({ operation: 'git:recordRepoProviders', case: `provider-map-${provider}`, args: [['team/subgroup/repo', 'fixture/other'], provider] })),
   ...['nemo-parakeet-tdt-0.6b-v3', 'sherpa-streaming-zipformer-en', 'nemo-fast-conformer-en-480ms', 'nemotron-streaming-en-560ms'].map(id => ({ operation: 'voice:selectModel', case: `finite-stt-${id}`, args: [id] })),
   ...['kitten-nano-en-v0_2', 'kokoro-en-v0_19'].map(id => ({ operation: 'voice:tts:selectModel', case: `finite-tts-${id}`, args: [id] })),
   { operation: 'voice:setEndpointSilence', case: 'seconds-upper-bound', args: [10] },
@@ -203,7 +211,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 161 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 176 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

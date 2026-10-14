@@ -137,7 +137,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 163 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 178 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -146,7 +146,7 @@ it('binds the 163 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(163)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(178)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -606,4 +606,90 @@ it('routes exact CLI detection metadata without enabling installer execution', a
   expect(f.invoke.mock.calls.length).toBe(before)
   f.results.set('agent-installer:detect', { ...snapshot, codex: { installed: false, version: null, stdout: 'Private inherited output' } })
   await expect(f.host.api.agentInstaller.detect()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+function gitRepoRow() {
+  return { name: 'repo', fullName: 'fixture/repo', defaultBranch: 'release/main', cloneUrl: 'https://git.example/fixture/repo.git', description: 'Public repository\nDescription', isPrivate: true }
+}
+function gitPullRequest() {
+  return { url: 'https://github.com/fixture/repo/pull/42', repository: 'fixture/repo', number: 42, title: 'Public change', body: 'Human\nbody', state: 'open', isDraft: false, reviewDecision: 'review_required', author: { login: 'fixture', avatarUrl: 'https://git.example/avatar' }, baseRefName: 'main', headRefName: 'feature/change', additions: 1, deletions: 0, changedFiles: 1, commentsCount: 0, reviewsCount: 0, createdAt: '2026-10-14', updatedAt: '2026-10-14', checks: [{ name: 'CI', state: 'pending', url: 'https://git.example/checks/42' }] }
+}
+it('binds all fifteen provider operations to finite codecs and preserves actual status, repository, PR and void results', async () => {
+  const f = fixture(), cli = { installed: true, authenticated: true, username: 'fixture' }, tea = { installed: false, authenticated: false, logins: [], code: 'not-installed', message: 'The tea CLI is unavailable.' }, repo = gitRepoRow(), pr = gitPullRequest()
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const cases: Array<[string, () => Promise<unknown>, Record<string, unknown>, unknown]> = [
+    ['github:checkCli', () => f.host.api.github.checkCli(), {}, cli],
+    ['github:fetchOrgs', () => f.host.api.github.fetchOrgs(), {}, ['fixture']],
+    ['github:fetchOrgRepos', () => f.host.api.github.fetchOrgRepos('fixture'), { org: 'fixture' }, [repo]],
+    ['github:fetchUserRepos', () => f.host.api.github.fetchUserRepos(), {}, [repo]],
+    ['github:fetchPullRequestDetails', () => f.host.api.github.fetchPullRequestDetails(pr.url), { url: pr.url }, pr],
+    ['gitlab:checkCli', () => f.host.api.gitlab.checkCli(), {}, cli],
+    ['gitlab:fetchOrgs', () => f.host.api.gitlab.fetchOrgs(), {}, ['fixture/subgroup']],
+    ['gitlab:fetchOrgRepos', () => f.host.api.gitlab.fetchOrgRepos('fixture/subgroup'), { org: 'fixture/subgroup' }, [repo]],
+    ['gitlab:fetchUserRepos', () => f.host.api.gitlab.fetchUserRepos(), {}, [repo]],
+    ['forgejo:checkCli', () => f.host.api.forgejo.checkCli(), {}, tea],
+    ['forgejo:setLogin', () => f.host.api.forgejo.setLogin(null), { loginName: null }, tea],
+    ['forgejo:fetchOrgs', () => f.host.api.forgejo.fetchOrgs(), {}, ['fixture']],
+    ['forgejo:fetchOrgRepos', () => f.host.api.forgejo.fetchOrgRepos('fixture'), { org: 'fixture' }, [repo]],
+    ['forgejo:fetchUserRepos', () => f.host.api.forgejo.fetchUserRepos(), {}, [repo]],
+    ['git:recordRepoProviders', () => f.host.api.git.recordRepoProviders(['fixture/repo'], 'forgejo'), { repoFullNames: ['fixture/repo'], provider: 'forgejo' }, undefined]
+  ]
+  for (const [operation, call, payload, result] of cases) {
+    f.results.set(operation, result)
+    expect(await call()).toEqual(result)
+    expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation, payload, engineEpoch: 'engine-1' })
+  }
+  expect(f.host.unavailableCapability).toBeNull()
+})
+it('allows provider reads during recovery but fences login and provider-map writes until hydration', async () => {
+  const f = fixture(); f.results.set('github:fetchOrgs', [])
+  await f.host.reconnect()
+  expect(await f.host.api.github.fetchOrgs()).toEqual([])
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.forgejo.setLogin('Work login')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.git.recordRepoProviders([], 'github')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+})
+it('refuses provider URL credentials, namespaces, secret markers and extra scope fields before transport', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const before = f.invoke.mock.calls.length
+  for (const org of ['fixture/subgroup', '--help', '../private', 'ghp_private', 'fixture\u0000']) await expect(f.host.api.github.fetchOrgRepos(org)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  for (const url of ['https://user:secret@github.com/fixture/repo/pull/42', 'https://github.com/fixture/repo/pull/42?token=private', 'file:///private', 'http://github.com/fixture/repo/pull/42']) await expect(f.host.api.github.fetchPullRequestDetails(url)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.forgejo.setLogin({ loginName: 'Work', caller: 'trusted-desktop-main' } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.forgejo.setLogin('__21x_api_key_set__')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.git.recordRepoProviders(['fixture/repo', 'fixture/repo'], 'github')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.git.recordRepoProviders(['fixture/repo'], 'program' as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+})
+it.each(['forgejo:setLogin', 'git:recordRepoProviders'] as const)('never replays accepted %s when its epoch disconnects', async operation => {
+  const f = fixture(), pending = deferred<unknown>(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === operation ? pending.promise : original(command, args))
+  const writing = operation === 'forgejo:setLogin' ? f.host.api.forgejo.setLogin('Work') : f.host.api.git.recordRepoProviders(['fixture/repo'], 'github')
+  const rejected = expect(writing).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); await f.host.reconnect(); await rejected
+  pending.resolve({ engineEpoch: 'engine-1', result: operation === 'forgejo:setLogin' ? { defined: true, value: { installed: true, authenticated: false, logins: [], code: 'no-login' } } : { defined: false } }); await Promise.resolve()
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === operation)).toHaveLength(1)
+})
+it('records explicitly unavailable provider capability without replacing it with fabricated CLI success', async () => {
+  const f = fixture(); await f.host.reconnect(); const original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === 'forgejo:checkCli' ? Promise.reject({ code: 'UNKNOWN_OPERATION' }) : original(command, args))
+  await expect(f.host.api.forgejo.checkCli()).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+  expect(f.host.unavailableCapability).toBe('forgejo.checkCli')
+})
+it.each([
+  { rows: [{ ...gitRepoRow(), cloneUrl: 'https://user:secret@git.example/fixture/repo.git' }] },
+  { rows: [{ ...gitRepoRow(), credential: '__21x_api_key_set__' }] },
+  { rows: [{ ...gitRepoRow(), description: 'x'.repeat(4097) }] },
+  { rows: [gitRepoRow(), gitRepoRow()] }
+])('rejects unprojected or oversized repository wire results', async ({ rows }) => {
+  const f = fixture(); f.results.set('github:fetchUserRepos', rows); await f.host.reconnect()
+  await expect(f.host.api.github.fetchUserRepos()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+it('rejects raw Tea errors and private pull request author fields on the wire', async () => {
+  const f = fixture(); await f.host.reconnect()
+  f.results.set('forgejo:checkCli', { installed: true, authenticated: false, logins: [], code: 'error', message: 'private subprocess stderr' })
+  await expect(f.host.api.forgejo.checkCli()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.set('github:fetchPullRequestDetails', { ...gitPullRequest(), author: { login: 'fixture', token: 'private' } })
+  await expect(f.host.api.github.fetchPullRequestDetails('https://github.com/fixture/repo/pull/42')).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })

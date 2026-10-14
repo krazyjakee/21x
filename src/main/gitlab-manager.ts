@@ -1,4 +1,5 @@
-import { execFile } from 'child_process'
+import { execFile, type ExecFileOptions } from 'child_process'
+import { GitProviderProcessOwner, GitProviderProcessError, type GitProviderManagerHost } from './git-provider-process-owner'
 import { promisify } from 'util'
 import type { GitHubRepo } from './github-manager'
 
@@ -13,6 +14,33 @@ export interface GlabCliStatus {
 }
 
 export class GitLabManager {
+
+  constructor(private readonly host?: GitProviderManagerHost) {
+    if (!host) return
+    if (!(host.process instanceof GitProviderProcessOwner)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS')
+    for (const name of ['checkGlabCli','fetchUserOrgs','fetchOrgRepos','fetchUserRepos'] as const) {
+      const original = this[name].bind(this) as (...args: unknown[]) => Promise<unknown>
+      ;(this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[name] = (...args) => {
+        try { this.current(); return host.process.retain(original(...args).then(value => { this.current(); return value }).catch(cause => { this.current(); if (cause instanceof GitProviderProcessError) throw cause; throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT') })) }
+        catch (cause) { return Promise.reject(cause) }
+      }
+    }
+  }
+  assertOwners(owner: GitProviderProcessOwner): void { if (!this.host || this.host.process !== owner) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS'); owner.assertOpen() }
+  withRequestGuard<T>(effect: () => T | Promise<T>, guard: () => void, signal?: AbortSignal): Promise<T> {
+    if (!this.host) return Promise.reject(new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS'))
+    return this.host.process.withRequestGuard(effect, guard, signal)
+  }
+  private current(): void { this.host?.process.assertCurrent(); this.host?.assertCurrent?.() }
+  private async exec(command: 'glab', args: string[], options?: ExecFileOptions): Promise<{ stdout: string; stderr: string }> {
+    if (!this.host) {
+      const result = options ? await execFileAsync(command, args, options) : await execFileAsync(command, args)
+      return { stdout: String(result.stdout), stderr: String(result.stderr) }
+    }
+    this.current()
+    const result = await this.host.process.exec(command, args, { maxBuffer: options?.maxBuffer ?? 65536, timeout: options?.timeout, allowNonzero: args[0] === 'auth' && args[1] === 'status' })
+    this.current(); return result
+  }
 
   /**
    * Maps a raw GitLab API project object to the shared GitHubRepo interface
@@ -41,12 +69,23 @@ export class GitLabManager {
     const separator = basePath.includes('?') ? '&' : '?'
     const url = `${basePath}${separator}per_page=100&order_by=updated_at&sort=desc${extraParams ? '&' + extraParams : ''}`
 
-    console.log(`[GitLabManager] Fetching: glab api ${url} --paginate`)
-    const { stdout } = await execFileAsync('glab', [
-      'api', url, '--paginate'
-    ], { maxBuffer: GLAB_API_MAX_BUFFER, timeout: 60000 })
-
-    const raw = JSON.parse(stdout) as Record<string, unknown>[]
+    let raw: Record<string, unknown>[]
+    if (this.host) {
+      raw = []; let bytes = 0; let complete = false
+      for (let page = 1; page <= 40; page++) {
+        const { stdout } = await this.exec('glab', ['api', `${url}&page=${page}`], { maxBuffer: GLAB_API_MAX_BUFFER, timeout: 60000 })
+        bytes += Buffer.byteLength(stdout, 'utf8')
+        const batch = JSON.parse(stdout) as Record<string, unknown>[]
+        if (!Array.isArray(batch) || batch.length > 100 || raw.length + batch.length > 4096 || bytes > GLAB_API_MAX_BUFFER) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
+        raw.push(...batch)
+        if (batch.length < 100) { complete = true; break }
+      }
+      if (!complete) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
+    } else {
+      console.log(`[GitLabManager] Fetching: glab api ${url} --paginate`)
+      const { stdout } = await this.exec('glab', ['api', url, '--paginate'], { maxBuffer: GLAB_API_MAX_BUFFER, timeout: 60000 })
+      raw = JSON.parse(stdout) as Record<string, unknown>[]
+    }
 
     // Deduplicate by fullName
     const deduped = new Map<string, GitHubRepo>()
@@ -54,7 +93,7 @@ export class GitLabManager {
       const mapped = this.mapRepo(project)
       deduped.set(mapped.fullName, mapped)
     }
-    console.log(`[GitLabManager] Fetched ${deduped.size} projects from ${basePath}`)
+    if (!this.host) console.log(`[GitLabManager] Fetched ${deduped.size} projects from ${basePath}`)
     return Array.from(deduped.values())
   }
 
@@ -68,18 +107,24 @@ export class GitLabManager {
 
   async checkGlabCli(): Promise<GlabCliStatus> {
     try {
-      await execFileAsync('glab', ['--version'])
-    } catch {
+      await this.exec('glab', ['--version'])
+    } catch (cause) {
+      this.current()
+      if (this.host && (!(cause instanceof GitProviderProcessError) || cause.code !== 'GIT_PROVIDER_CLI_MISSING')) throw cause
       return { installed: false, authenticated: false }
     }
 
     try {
-      const { stdout } = await execFileAsync('glab', ['auth', 'status'])
+      const { stdout, stderr } = await this.exec('glab', ['auth', 'status'])
+      const output = this.host ? `${stdout}\n${stderr}` : stdout
+      if (this.host && !output.includes('Logged in')) return { installed: true, authenticated: false }
       // glab auth status outputs "Logged in to <hostname> as <username>"
-      const match = stdout.match(/Logged in to .+ as (\S+)/) ||
-                    stdout.match(/as (\S+)/)
+      const match = output.match(/Logged in to .+ as (\S+)/) ||
+                    output.match(/as (\S+)/)
       return { installed: true, authenticated: true, username: match?.[1] }
     } catch (error: unknown) {
+      this.current()
+      if (this.host) throw error
       const execErr = error as { stderr?: string; stdout?: string }
       const output = (execErr?.stderr || '') + (execErr?.stdout || '')
       if (output.includes('Logged in')) {
@@ -130,11 +175,13 @@ export class GitLabManager {
         `/groups/${encodedGroup}/projects`,
         'include_subgroups=true'
       )
-      console.log(`[GitLabManager] fetchOrgRepos via Groups API: ${repos.length} repos for "${org}"`)
+      if (!this.host) console.log(`[GitLabManager] fetchOrgRepos via Groups API: ${repos.length} repos for "${org}"`)
       return repos
     } catch (error) {
+      this.current()
+      if (this.host && (!(error instanceof GitProviderProcessError) || error.code !== 'GIT_PROVIDER_COMMAND_FAILED')) throw error
       // Group lookup can fail for personal namespaces — fall back to general search
-      console.log(`[GitLabManager] Groups API failed for "${org}", falling back to /projects:`, (error as Error).message)
+      if (!this.host) console.log(`[GitLabManager] Groups API failed for "${org}", falling back to /projects:`, (error as Error).message)
       const repos = await this.fetchAccessibleRepos()
       return repos.filter((repo) => repo.fullName.startsWith(`${org}/`))
     }

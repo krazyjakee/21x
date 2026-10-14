@@ -1,5 +1,7 @@
 import { homedir, networkInterfaces } from 'node:os'
 import { PortableAgentDetectionOwner } from '../main/agent-installer/portable-detection'
+import { createProductionGitProviderOwner } from './production-git-provider-owner'
+import { GitProviderProcessOwner, type GitProviderProcessOwnerOptions } from '../main/git-provider-process-owner'
 import { createProductionVoiceOwner, type ProductionVoiceOwner, type ProductionVoiceResources } from './production-voice-owner'
 import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobileAccessSettings, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, type MobileApiDeps } from '../main/mobile-api-server'
 import { TunnelManagerCore } from '../main/tunnel-manager-core'
@@ -120,9 +122,14 @@ export interface ProductionOwnerExternalBoundaries {
   terminalProcessHost?: TerminalProcessHost
   mobileTunnel?: TunnelManagerCore
   agentDetection?: PortableAgentDetectionOwner
+  gitProviderProcess?: (options: GitProviderProcessOwnerOptions) => GitProviderProcessOwner
 }
 
 export interface ProductionServices {
+  github: GitHubManager
+  gitlab: GitLabManager
+  forgejo: ForgejoManager
+  gitProviderProcess: GitProviderProcessOwner
   voice: ProductionVoiceOwner | null
   agentDetection: PortableAgentDetectionOwner
   sessionContext: SessionContextService
@@ -284,6 +291,18 @@ export class ProductionOwner {
       if (this.services !== services || this.services.voice !== owned || owners.voice !== owned.voice || owners.speech !== owned.speech) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
       owned.assertOwners(services.db, services.agents, this.storage!)
     } }
+  }
+
+  getGitProviderBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!, { github, gitlab, forgejo, gitProviderProcess: processOwner, db: database } = services
+    return { database, github, gitlab, forgejo, processOwner,
+      assertGitProviderOwners: (owners: { database: DatabaseManager; github: GitHubManager; gitlab: GitLabManager; forgejo: ForgejoManager; processOwner: GitProviderProcessOwner }): void => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || owners.database !== database || owners.github !== github || owners.gitlab !== gitlab || owners.forgejo !== forgejo || owners.processOwner !== processOwner ||
+          services.github !== github || services.gitlab !== gitlab || services.forgejo !== forgejo || services.gitProviderProcess !== processOwner) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        processOwner.assertOpen(); github.assertOwners(processOwner); gitlab.assertOwners(processOwner); forgejo.assertOwners(processOwner)
+      } }
   }
 
   getIntegrationBindingLease(): { secretStorage: AuthenticatedSecretStorage; configuredMcp: 'enabled' | 'disabled'; oauthBrowser: 'available' | 'unavailable'; assertOwners(owners: {
@@ -505,10 +524,15 @@ export class ProductionOwner {
     this.stopOwners.push(() => { void this.own(agents.stopAllSessions()).catch(() => undefined) })
     this.drains.set('agents', async () => { await agents.stopAllSessions(); await agents.stopServer() })
     agents.addExternalListener((channel, data) => this.emit(channel, data))
-    const github = new GitHubManager()
-    const gitlab = new GitLabManager()
-    const forgejo = new ForgejoManager(key => db.getSetting(key))
-    const worktrees = new WorktreeManager({ reposRoot: this.bootstrap.paths.reposRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, emitProgress: data => this.emit('worktree:progress', data) })
+    const gitProviders = createProductionGitProviderOwner({ database: db, profileRoot, reposRoot: this.bootstrap.paths.reposRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, tempRoot: this.bootstrap.paths.tempRoot,
+      createProcess: this.boundaries.gitProviderProcess, assertCurrent: () => {
+        if (this.abort.signal.aborted || !['starting', 'ready'].includes(this.phase) || processRegistry[registryKey] !== this.identity) throw new ProductionOwnerError('OWNER_CLOSING')
+        this.lock!.assertHeld()
+      } })
+    const { github, gitlab, forgejo, processOwner: gitProviderProcess } = gitProviders
+    this.register('git-provider-process', () => gitProviderProcess.stop(), () => gitProviderProcess.close())
+    const worktrees = new WorktreeManager({ reposRoot: this.bootstrap.paths.reposRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot,
+      exec: gitProviders.exec, assertPath: gitProviders.assertPath, emitProgress: data => this.emit('worktree:progress', data) })
     worktrees.setForgejoManager(forgejo)
     agents.setManagers(github, worktrees, gitlab, forgejo)
     this.register('worktrees', () => worktrees.shutdown(), () => worktrees.close())
@@ -621,7 +645,7 @@ export class ProductionOwner {
         this.lock!.assertHeld()
       }, notify: (channel, payload) => this.emit(channel, payload) }) : null
     if (voice) this.register('voice', () => voice.shutdown(), () => voice.close())
-    this.services = { voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    this.services = { github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)

@@ -24,6 +24,9 @@ import { MCP_CODECS } from '../shared/mcp-codecs'
 import { TASK_SOURCE_CODECS } from '../shared/task-source-codecs'
 import { TASK_SOURCE_PLUGIN_CODECS } from '../shared/task-source-plugin-codecs'
 import { CONNECTOR_CODECS } from '../shared/connector-codecs'
+import { GIT_PROVIDER_CODECS } from '../shared/git-provider-codecs'
+import { execFile, type ExecFileException } from 'node:child_process'
+import type { ProductionOwnerExternalBoundaries } from './production-owner'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
 let ownerModule: typeof import('./production-owner')
@@ -40,7 +43,7 @@ afterEach(async () => {
   for (const root of new Set(completed.map(value => value.root))) rmSync(root, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
-async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false, voice = false) {
+async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false, voice = false, gitProviderProcess?: ProductionOwnerExternalBoundaries['gitProviderProcess']) {
   const { ProductionOwner } = ownerModule
   const { ProductionDesktopBindings } = bindingModule
   const root = mkdtempSync(join(tmpdir(), '21x-production-bindings-')), resourceRoot = join(root, 'resources')
@@ -62,6 +65,7 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
       prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }) }
   }
   const boundaries = { createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end' as const, stopReason: 'end_turn' } } }),
+    ...(gitProviderProcess ? { gitProviderProcess } : {}),
     ...(connectors ? { connectorTransport: () => { throw new Error('Credential form fixture must not create a worker') } } : {}) }
   const owner = new ProductionOwner(bootstrap, boundaries)
   owned.push({ owner, root }); const services = await owner.start(), epoch = owner.snapshot().epoch
@@ -97,6 +101,46 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('borrows the same actual Git managers and retains a late CLI callback with the protected database lease', async () => {
+    const { GitProviderProcessOwner } = await import('../main/git-provider-process-owner')
+    const node = process.env.TAURI_NODE_RUNTIME ?? (!process.versions.electron ? process.execPath : ['/usr/bin/node', '/usr/local/bin/node'].find(existsSync))
+    if (!node) throw new Error('STANDALONE_NODE_FIXTURE_REQUIRED')
+    let finish!: () => void, receipt!: () => void
+    const completed = new Promise<void>(resolve => { receipt = resolve })
+    let defer = false
+    const factory: NonNullable<ProductionOwnerExternalBoundaries['gitProviderProcess']> = options => {
+      const script = join(options.cwd, 'provider-fixture.cjs')
+      writeFileSync(script, `const program=process.argv[2],args=process.argv.slice(3);if(args[0]==='--version')process.stdout.write('fixture cli');else if(program==='gh'&&args[0]==='auth')process.stderr.write('Logged in to github.com account fixture-user\\n - Active account: true');else if(program==='glab'&&args[0]==='auth')process.stdout.write('Logged in to gitlab.fixture.invalid as fixture-user');else if(program==='tea'&&args[0]==='login')process.stdout.write(JSON.stringify([{name:'fixture',url:'https://forgejo.fixture.invalid',user:'fixture-user',default:true,token:'synthetic-private-token'}]));else if(program==='tea'){process.stderr.write('HTTP/1.1 200 OK');process.stdout.write(JSON.stringify({login:'fixture-user'}))}else process.stdout.write('[]')`)
+      const captured = ((file: string, args: string[], config: object, callback: (error: ExecFileException | null, out: string, err: string) => void) => execFile(file, args, config, (error, out, err) => {
+        if (defer) { finish = () => callback(error, String(out), String(err)); finishers.push(finish); receipt() }
+        else callback(error, String(out), String(err))
+      })) as typeof execFile
+      return new GitProviderProcessOwner({ ...options, execFile: captured, environment: {}, fixture: { executables: Object.fromEntries(['gh', 'glab', 'tea'].map(program => [program, { file: node, prefix: [script, program] }])) } })
+    }
+    const f = await fixture(undefined, false, false, false, factory), lease = f.owner.getGitProviderBindingLease()
+    expect(lease.database).toBe(f.services.db); expect(lease.github).toBe(f.services.github); expect(lease.gitlab).toBe(f.services.gitlab); expect(lease.forgejo).toBe(f.services.forgejo); expect(lease.processOwner).toBe(f.services.gitProviderProcess)
+    lease.assertGitProviderOwners(lease)
+    for (const operation of ['github:checkCli', 'gitlab:checkCli', 'forgejo:checkCli'] as const) expect(await f.backend.invoke(operation, GIT_PROVIDER_CODECS[operation].encodeArguments([]), f.caller, f.signal)).toMatchObject({ defined: true, value: { installed: true, authenticated: true, username: 'fixture-user' } })
+    await f.backend.invoke('forgejo:setLogin', { loginName: 'fixture' }, f.caller, f.signal)
+    expect(f.services.db.getSetting('forgejo_login')).toBe('fixture')
+    expect(await f.backend.invoke('git:recordRepoProviders', { repoFullNames: ['fixture/repo'], provider: 'forgejo' }, f.caller, f.signal)).toEqual({ defined: false })
+    const grant = f.options.authority.canManageGlobalConfiguration
+    f.options.authority.canManageGlobalConfiguration = (_caller, access) => access === 'read'
+    await expect(f.backend.invoke('forgejo:setLogin', { loginName: null }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    f.options.authority.canManageGlobalConfiguration = grant
+    defer = true
+    const control = new AbortController()
+    const work = f.backend.invoke('github:checkCli', {}, f.caller, control.signal)
+    // Owner shutdown closes ingress before the retained callback acknowledges;
+    // that current lifecycle refusal takes precedence over request cancellation.
+    const result = expect(work).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    await completed; control.abort()
+    await expect(f.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(f.services.db.db.open).toBe(true); expect(f.owner.snapshot().owned).toBe(true)
+    finish(); await result; await f.owner.close()
+    expect(f.services.db.db.open).toBe(false); expect(lease.processOwner.childCount).toBe(0)
+    expect(() => lease.assertGitProviderOwners(lease)).toThrow()
+  })
   it('authenticates local model publication across actual protected-profile owner restarts and preserves added user files', async () => {
     const { findTtsManifestEntry } = await import('../main/voice/voice-tts-manifest')
     const id = 'kitten-nano-en-v0_2', entry = findTtsManifestEntry(id)!, original = structuredClone(entry)
@@ -183,7 +227,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
 
   it('pairs against the actual mobile HTTP owner and sends a phone start through shared admission', async () => {
     const f = await fixture(undefined, false, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(133)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(148)
     const lease = f.owner.getMobileBindingLease()!
     expect(lease.deps.db).toBe(f.services.db); expect(lease.deps.agentManager).toBe(f.services.agents)
     expect(lease.deps.taskOwners?.automation).toBe(f.services.automation)
@@ -218,7 +262,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(130)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(145)
     const lease = f.owner.getConnectorBindingLease()!
     const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
     const id = (ensured as { value: { instanceId: string } }).value.instanceId
@@ -330,7 +374,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(123)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(138)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

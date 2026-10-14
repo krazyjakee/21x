@@ -3,6 +3,21 @@
 use serde_json::Value;
 
 pub const COMMANDS: &[&str] = &[
+    "github:checkCli",
+    "github:fetchOrgs",
+    "github:fetchOrgRepos",
+    "github:fetchUserRepos",
+    "github:fetchPullRequestDetails",
+    "gitlab:checkCli",
+    "gitlab:fetchOrgs",
+    "gitlab:fetchOrgRepos",
+    "gitlab:fetchUserRepos",
+    "forgejo:checkCli",
+    "forgejo:setLogin",
+    "forgejo:fetchOrgs",
+    "forgejo:fetchOrgRepos",
+    "forgejo:fetchUserRepos",
+    "git:recordRepoProviders",
     "voice:getSnapshot",
     "voice:setEnabled",
     "voice:getRuntime",
@@ -2779,7 +2794,332 @@ fn voice_result(op: &str, v: &Value) -> bool {
     }
 }
 
+const GIT_PROVIDER_COMMANDS: &[&str] = &[
+    "github:checkCli",
+    "github:fetchOrgs",
+    "github:fetchOrgRepos",
+    "github:fetchUserRepos",
+    "github:fetchPullRequestDetails",
+    "gitlab:checkCli",
+    "gitlab:fetchOrgs",
+    "gitlab:fetchOrgRepos",
+    "gitlab:fetchUserRepos",
+    "forgejo:checkCli",
+    "forgejo:setLogin",
+    "forgejo:fetchOrgs",
+    "forgejo:fetchOrgRepos",
+    "forgejo:fetchUserRepos",
+    "git:recordRepoProviders",
+];
+fn git_text(v: &Value, max: usize, multiline: bool) -> bool {
+    v.as_str().is_some_and(|s| {
+        let lower = s.to_ascii_lowercase();
+        let token = [
+            "ghp_",
+            "gho_",
+            "ghu_",
+            "ghs_",
+            "ghr_",
+            "github_pat_",
+            "glpat-",
+            "__21x_",
+        ]
+        .iter()
+        .any(|p| lower.starts_with(*p))
+            || lower.strip_prefix("bearer").is_some_and(|tail| {
+                tail.chars()
+                    .next()
+                    .is_some_and(|c| c == '\u{feff}' || (c.is_whitespace() && c != '\u{0085}'))
+            });
+        s.len() <= max
+            && !token
+            && !s.chars().any(|c| {
+                c == '\u{007f}'
+                    || (c <= '\u{001f}' && !(multiline && matches!(c, '\t' | '\n' | '\r')))
+            })
+    })
+}
+fn git_segment(s: &str) -> bool {
+    !matches!(s, "." | ".." | "__proto__" | "constructor" | "prototype")
+        && !s.is_empty()
+        && s.len() <= 128
+        && s.bytes()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_')
+        && s.bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'-'))
+}
+fn git_path(v: &Value, repository: bool) -> bool {
+    git_text(v, 512, false)
+        && v.as_str().is_some_and(|s| {
+            let parts: Vec<_> = s.split('/').collect();
+            parts.len() >= (if repository { 2 } else { 1 })
+                && parts.len() <= (if repository { 16 } else { 15 })
+                && parts.iter().all(|p| git_segment(p))
+        })
+}
+fn git_login(v: &Value) -> bool {
+    git_text(v, 128, false)
+        && v.as_str().is_some_and(|s| {
+            s == js_trim(s)
+                && !matches!(s, "__proto__" | "constructor" | "prototype")
+                && s.bytes().next().is_some_and(|c| c.is_ascii_alphanumeric())
+                && s.bytes().all(|c| {
+                    c.is_ascii_alphanumeric() || matches!(c, b' ' | b'.' | b'_' | b'@' | b'-')
+                })
+        })
+}
+fn git_address(v: &Value) -> bool {
+    git_text(v, 2048, false)
+        && v.as_str().is_some_and(|s| {
+            s == js_trim(s)
+                && url::Url::parse(s).is_ok_and(|u| {
+                    matches!(u.scheme(), "http" | "https")
+                        && u.username().is_empty()
+                        && u.password().is_none_or(|p| p.is_empty())
+                        && u.query().is_none_or(|q| q.is_empty())
+                        && u.fragment().is_none_or(|f| f.is_empty())
+                })
+        })
+}
+fn git_pr_address(v: &Value) -> bool {
+    git_address(v)
+        && v.as_str().is_some_and(|s| {
+            url::Url::parse(s).is_ok_and(|u| {
+                let parts: Vec<_> = u.path().split('/').filter(|p| !p.is_empty()).collect();
+                parts.len() == 4
+                    && git_segment(parts[0])
+                    && git_segment(parts[1])
+                    && (if u.host_str() == Some("github.com") {
+                        u.scheme() == "https" && u.port().is_none() && parts[2] == "pull"
+                    } else {
+                        parts[2] == "pulls"
+                    })
+                    && !parts[3].is_empty()
+                    && parts[3].len() <= 10
+                    && parts[3].as_bytes()[0] != b'0'
+                    && parts[3].bytes().all(|c| c.is_ascii_digit())
+            })
+        })
+}
+fn git_unique(v: &Value, max: usize, key: Option<&str>, valid: fn(&Value) -> bool) -> bool {
+    v.as_array().is_some_and(|rows| {
+        let mut seen = std::collections::HashSet::new();
+        rows.len() <= max
+            && rows.iter().all(|row| {
+                valid(row)
+                    && seen.insert(if let Some(k) = key {
+                        row[k].as_str().unwrap()
+                    } else {
+                        row.as_str().unwrap()
+                    })
+            })
+    })
+}
+fn git_organization(v: &Value) -> bool {
+    git_path(v, false)
+}
+fn git_repository(v: &Value) -> bool {
+    git_path(v, true)
+}
+fn git_cli(v: &Value, tea: bool) -> bool {
+    object(
+        v,
+        if tea {
+            &["installed", "authenticated", "logins", "code"]
+        } else {
+            &["installed", "authenticated"]
+        },
+        if tea {
+            &["username", "login", "serverUrl", "message"]
+        } else {
+            &["username"]
+        },
+    ) && v["installed"].is_boolean()
+        && v["authenticated"].is_boolean()
+        && (v["authenticated"] != true || v["installed"] == true)
+        && v.get("username")
+            .is_none_or(|n| git_text(n, 128, false) && n.as_str().is_some_and(git_segment))
+        && (!tea
+            || (v.get("login").is_none_or(git_login)
+                && v.get("serverUrl").is_none_or(git_address)
+                && git_unique(&v["logins"], 64, Some("name"), git_login_row)
+                && match v["code"].as_str() {
+                    Some("ready") => v.get("message").is_none(),
+                    Some("not-installed") => v
+                        .get("message")
+                        .is_none_or(|m| m == "The tea CLI is unavailable."),
+                    Some("no-login") => v
+                        .get("message")
+                        .is_none_or(|m| m == "No tea login is configured."),
+                    Some("login-selection-required") => v
+                        .get("message")
+                        .is_none_or(|m| m == "Choose a configured tea login."),
+                    Some("login-not-found") => v
+                        .get("message")
+                        .is_none_or(|m| m == "The selected tea login is unavailable."),
+                    Some("unauthorized") => v
+                        .get("message")
+                        .is_none_or(|m| m == "The configured tea login was not authorized."),
+                    Some("unreachable") => v
+                        .get("message")
+                        .is_none_or(|m| m == "The configured Forgejo server could not be reached."),
+                    Some("error") => v
+                        .get("message")
+                        .is_none_or(|m| m == "The Forgejo request failed."),
+                    _ => false,
+                }))
+}
+fn git_login_row(v: &Value) -> bool {
+    object(v, &["name", "url", "sshHost", "user", "isDefault"], &[])
+        && git_login(&v["name"])
+        && git_address(&v["url"])
+        && git_text(&v["sshHost"], 512, false)
+        && v["sshHost"].as_str().is_some_and(|s| {
+            s.bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'[' | b']' | b':' | b'-'))
+        })
+        && git_text(&v["user"], 128, false)
+        && v["isDefault"].is_boolean()
+}
+fn git_repo(v: &Value) -> bool {
+    object(
+        v,
+        &[
+            "name",
+            "fullName",
+            "defaultBranch",
+            "cloneUrl",
+            "description",
+            "isPrivate",
+        ],
+        &[],
+    ) && git_text(&v["name"], 128, false)
+        && v["name"].as_str().is_some_and(git_segment)
+        && git_repository(&v["fullName"])
+        && v["fullName"]
+            .as_str()
+            .is_some_and(|s| s.rsplit('/').next() == v["name"].as_str())
+        && git_text(&v["defaultBranch"], 256, false)
+        && v["defaultBranch"] != ""
+        && git_address(&v["cloneUrl"])
+        && git_text(&v["description"], 4096, true)
+        && v["isPrivate"].is_boolean()
+}
+fn git_pr(v: &Value) -> bool {
+    object(
+        v,
+        &[
+            "url",
+            "repository",
+            "number",
+            "title",
+            "body",
+            "state",
+            "isDraft",
+            "reviewDecision",
+            "author",
+            "baseRefName",
+            "headRefName",
+            "additions",
+            "deletions",
+            "changedFiles",
+            "commentsCount",
+            "reviewsCount",
+            "createdAt",
+            "updatedAt",
+            "checks",
+        ],
+        &["mergeStateStatus", "mergedAt", "closedAt"],
+    ) && git_pr_address(&v["url"])
+        && git_repository(&v["repository"])
+        && integer(&v["number"])
+        && v["number"].as_u64().is_some_and(|n| n > 0)
+        && git_text(&v["title"], 1024, false)
+        && git_text(&v["body"], 131072, true)
+        && matches!(v["state"].as_str(), Some("open" | "closed" | "merged"))
+        && v["isDraft"].is_boolean()
+        && matches!(
+            v["reviewDecision"].as_str(),
+            Some("approved" | "changes_requested" | "review_required" | "none")
+        )
+        && object(&v["author"], &["login"], &["avatarUrl", "url"])
+        && git_text(&v["author"]["login"], 128, false)
+        && v["author"]["login"].as_str().is_some_and(git_segment)
+        && ["avatarUrl", "url"]
+            .iter()
+            .all(|&k| v["author"].get(k).is_none_or(git_address))
+        && ["baseRefName", "headRefName"]
+            .iter()
+            .all(|&k| git_text(&v[k], 256, false))
+        && [
+            "additions",
+            "deletions",
+            "changedFiles",
+            "commentsCount",
+            "reviewsCount",
+        ]
+        .iter()
+        .all(|&k| integer(&v[k]))
+        && ["createdAt", "updatedAt"]
+            .iter()
+            .all(|&k| git_text(&v[k], 64, false))
+        && v.get("mergeStateStatus")
+            .is_none_or(|x| git_text(x, 128, false))
+        && ["mergedAt", "closedAt"]
+            .iter()
+            .all(|&k| v.get(k).is_none_or(|x| git_text(x, 64, false)))
+        && v["checks"].as_array().is_some_and(|rows| {
+            rows.len() <= 128
+                && rows.iter().all(|r| {
+                    object(r, &["name", "state"], &["url"])
+                        && git_text(&r["name"], 256, false)
+                        && matches!(
+                            r["state"].as_str(),
+                            Some("passed" | "failed" | "pending" | "skipped")
+                        )
+                        && r.get("url").is_none_or(git_address)
+                })
+        })
+}
+fn git_request(op: &str, v: &Value) -> bool {
+    match op {
+        "git:recordRepoProviders" => {
+            object(v, &["repoFullNames", "provider"], &[])
+                && matches!(
+                    v["provider"].as_str(),
+                    Some("github" | "gitlab" | "forgejo")
+                )
+                && git_unique(&v["repoFullNames"], 128, None, git_repository)
+        }
+        "forgejo:setLogin" => {
+            object(v, &["loginName"], &[])
+                && (v["loginName"].is_null() || git_login(&v["loginName"]))
+        }
+        "github:fetchPullRequestDetails" => object(v, &["url"], &[]) && git_pr_address(&v["url"]),
+        _ if op.ends_with(":fetchOrgRepos") => {
+            object(v, &["org"], &[])
+                && git_organization(&v["org"])
+                && (op.starts_with("gitlab:")
+                    || v["org"].as_str().is_some_and(|s| !s.contains('/')))
+        }
+        _ => object(v, &[], &[]),
+    }
+}
+fn git_result(op: &str, v: &Value) -> bool {
+    match op {
+        "forgejo:checkCli" | "forgejo:setLogin" => git_cli(v, true),
+        "github:checkCli" | "gitlab:checkCli" => git_cli(v, false),
+        "github:fetchPullRequestDetails" => git_pr(v),
+        _ if op.ends_with(":fetchOrgs") => git_unique(v, 512, None, git_organization),
+        _ => git_unique(v, 2048, Some("fullName"), git_repo),
+    }
+}
+
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if GIT_PROVIDER_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 1024 * 1024) && git_request(operation, value);
+    }
     if VOICE_COMMANDS.contains(&operation) {
         return bounded_bytes(value, 8192) && voice_request(operation, value);
     }
@@ -2902,6 +3242,16 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if GIT_PROVIDER_COMMANDS.contains(&operation) {
+        return if operation == "git:recordRepoProviders" {
+            object(value, &["defined"], &[]) && value["defined"] == false
+        } else {
+            object(value, &["defined", "value"], &[])
+                && value["defined"] == true
+                && bounded_bytes(value, 889_999)
+                && git_result(operation, &value["value"])
+        };
+    }
     if VOICE_COMMANDS.contains(&operation) {
         return object(value, &["defined", "value"], &[])
             && value["defined"] == true
@@ -3481,6 +3831,229 @@ fn commander_event(value: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn git_test_repo() -> Value {
+        json!({"name":"repo","fullName":"fixture/repo","defaultBranch":"release/main","cloneUrl":"https://git.example/fixture/repo.git","description":"Public\nDescription","isPrivate":true})
+    }
+    fn git_test_pr() -> Value {
+        json!({"url":"https://github.com/fixture/repo/pull/42","repository":"fixture/repo","number":42,"title":"Public change","body":"Human\nbody","state":"open","isDraft":false,"reviewDecision":"review_required","author":{"login":"fixture","avatarUrl":"https://git.example/avatar"},"baseRefName":"main","headRefName":"feature/change","additions":1,"deletions":0,"changedFiles":1,"commentsCount":0,"reviewsCount":0,"createdAt":"2026-10-14","updatedAt":"2026-10-14","checks":[{"name":"CI","state":"pending","url":"https://git.example/checks/42"}]})
+    }
+    #[test]
+    fn git_provider_finite_requests_and_results_match_each_operation() {
+        for op in GIT_PROVIDER_COMMANDS {
+            let request = match *op {
+                "git:recordRepoProviders" => {
+                    json!({"repoFullNames":["fixture/repo"],"provider":"forgejo"})
+                }
+                "forgejo:setLogin" => json!({"loginName":null}),
+                "github:fetchPullRequestDetails" => {
+                    json!({"url":"https://github.com/fixture/repo/pull/42"})
+                }
+                _ if op.ends_with(":fetchOrgRepos") => {
+                    json!({"org":if op.starts_with("gitlab:") {"fixture/subgroup"} else {"fixture"}})
+                }
+                _ => json!({}),
+            };
+            assert!(COMMANDS.contains(op));
+            assert!(valid_request(op, &request), "{op}");
+            let result = match *op {
+                "git:recordRepoProviders" => json!({"defined":false}),
+                "forgejo:checkCli" | "forgejo:setLogin" => {
+                    json!({"defined":true,"value":{"installed":true,"authenticated":true,"username":"fixture","login":"Work login","serverUrl":"https://git.example/","logins":[{"name":"Work login","url":"https://git.example/","sshHost":"[::1]:2222","user":"Fixture User","isDefault":true}],"code":"ready"}})
+                }
+                "github:checkCli" | "gitlab:checkCli" => {
+                    json!({"defined":true,"value":{"installed":true,"authenticated":true,"username":"fixture"}})
+                }
+                "github:fetchPullRequestDetails" => json!({"defined":true,"value":git_test_pr()}),
+                _ if op.ends_with(":fetchOrgs") => {
+                    json!({"defined":true,"value":["fixture","fixture/subgroup"]})
+                }
+                _ => json!({"defined":true,"value":[git_test_repo()]}),
+            };
+            assert!(valid_result(op, &result), "{op}");
+            for key in [
+                "caller",
+                "engineEpoch",
+                "permission",
+                "program",
+                "workspaceDir",
+                "token",
+            ] {
+                let mut injected = request.clone();
+                injected[key] = json!("untrusted authority");
+                assert!(!valid_request(op, &injected), "{op}: {key}");
+            }
+            assert!(
+                !valid_result(op, &json!({"defined":true,"value":null})),
+                "{op}"
+            );
+        }
+        assert!(!valid_request("github:spawn", &json!({})));
+        assert!(!valid_result(
+            "git:recordRepoProviders",
+            &json!({"defined":false,"value":null})
+        ));
+    }
+    #[test]
+    fn git_provider_request_authority_and_utf8_bounds_are_finite() {
+        for org in [
+            "../private",
+            "--help",
+            "constructor",
+            "ghp_private",
+            "__21x_api_key_set__",
+            "fixture\u{0000}",
+        ] {
+            assert!(!valid_request("github:fetchOrgRepos", &json!({"org":org})));
+        }
+        assert!(valid_request(
+            "gitlab:fetchOrgRepos",
+            &json!({"org":"fixture/group"})
+        ));
+        assert!(!valid_request(
+            "github:fetchOrgRepos",
+            &json!({"org":"fixture/group"})
+        ));
+        assert!(!valid_request(
+            "forgejo:fetchOrgRepos",
+            &json!({"org":"fixture/group"})
+        ));
+        assert!(valid_request(
+            "forgejo:setLogin",
+            &json!({"loginName":"Work user@example"})
+        ));
+        assert!(valid_request(
+            "forgejo:setLogin",
+            &json!({"loginName":null})
+        ));
+        for name in [
+            " Work",
+            "Work ",
+            "glpat-private",
+            "__21x_api_key_set__",
+            "Work\nlogin",
+        ] {
+            assert!(!valid_request(
+                "forgejo:setLogin",
+                &json!({"loginName":name})
+            ));
+        }
+        for url in [
+            "https://user:secret@github.com/fixture/repo/pull/42",
+            "https://github.com/fixture/repo/pull/42?token=private",
+            "http://github.com/fixture/repo/pull/42",
+            "https://github.com:444/fixture/repo/pull/42",
+            "file:///private",
+            "https://git.example/fixture/repo/pulls/0",
+        ] {
+            assert!(
+                !valid_request("github:fetchPullRequestDetails", &json!({"url":url})),
+                "{url}"
+            );
+        }
+        for url in [
+            "https://github.com/fixture/repo/pull/42",
+            "https://github.com:443/fixture/repo/pull/42",
+            "https://github.com/fixture/repo/pull/42?#",
+            "http://git.example:8080/fixture/repo/pulls/42",
+        ] {
+            assert!(
+                valid_request("github:fetchPullRequestDetails", &json!({"url":url})),
+                "{url}"
+            );
+        }
+        assert!(!valid_request(
+            "git:recordRepoProviders",
+            &json!({"repoFullNames":["fixture/repo","fixture/repo"],"provider":"github"})
+        ));
+        assert!(!valid_request(
+            "git:recordRepoProviders",
+            &json!({"repoFullNames":[],"provider":"program"})
+        ));
+        assert!(valid_request(
+            "git:recordRepoProviders",
+            &json!({"repoFullNames":[],"provider":"gitlab"})
+        ));
+        assert!(!valid_request(
+            "git:recordRepoProviders",
+            &json!({"repoFullNames":(0..129).map(|i|format!("fixture/repo{i}")).collect::<Vec<_>>(),"provider":"github"})
+        ));
+        assert!(!git_text(&json!("é".repeat(2049)), 4096, true));
+    }
+    #[test]
+    fn git_provider_wire_projection_cannot_publish_credentials_or_private_fields() {
+        let wrap = |v: Value| json!({"defined":true,"value":v});
+        let mut repo = git_test_repo();
+        for url in [
+            "https://user:secret@git.example/repo.git",
+            "https://git.example/repo.git?token=private",
+            "https://git.example/repo.git#private",
+        ] {
+            repo["cloneUrl"] = json!(url);
+            assert!(!valid_result("github:fetchUserRepos", &wrap(json!([repo]))));
+        }
+        repo = git_test_repo();
+        repo["token"] = json!("private");
+        assert!(!valid_result("gitlab:fetchUserRepos", &wrap(json!([repo]))));
+        repo = git_test_repo();
+        repo["description"] = json!("x".repeat(4097));
+        assert!(!valid_result(
+            "forgejo:fetchUserRepos",
+            &wrap(json!([repo]))
+        ));
+        assert!(!valid_result(
+            "github:fetchUserRepos",
+            &wrap(json!([git_test_repo(), git_test_repo()]))
+        ));
+        assert!(!valid_result(
+            "github:checkCli",
+            &wrap(json!({"installed":false,"authenticated":true}))
+        ));
+        assert!(!valid_result(
+            "github:checkCli",
+            &wrap(json!({"installed":true,"authenticated":true,"username":"ghp_private"}))
+        ));
+        assert!(!valid_result(
+            "github:fetchOrgs",
+            &wrap(json!((0..513)
+                .map(|i| format!("org{i}"))
+                .collect::<Vec<_>>()))
+        ));
+        let large_repos: Vec<_> = (0..240)
+            .map(|i| {
+                let mut row = git_test_repo();
+                row["name"] = json!(format!("repo{i}"));
+                row["fullName"] = json!(format!("fixture/repo{i}"));
+                row["description"] = json!("x".repeat(4096));
+                row
+            })
+            .collect();
+        assert!(!valid_result(
+            "github:fetchUserRepos",
+            &wrap(json!(large_repos))
+        ));
+        assert!(valid_result(
+            "forgejo:checkCli",
+            &wrap(
+                json!({"installed":false,"authenticated":false,"logins":[],"code":"not-installed","message":"The tea CLI is unavailable."})
+            )
+        ));
+        assert!(!valid_result(
+            "forgejo:checkCli",
+            &wrap(
+                json!({"installed":true,"authenticated":false,"logins":[],"code":"error","message":"private subprocess stderr"})
+            )
+        ));
+        let mut pr = git_test_pr();
+        pr["author"]["token"] = json!("private");
+        assert!(!valid_result("github:fetchPullRequestDetails", &wrap(pr)));
+        pr = git_test_pr();
+        pr["body"] = json!("x".repeat(131073));
+        assert!(!valid_result("github:fetchPullRequestDetails", &wrap(pr)));
+        pr = git_test_pr();
+        pr["checks"] = json!(vec![json!({"name":"CI","state":"passed"}); 129]);
+        assert!(!valid_result("github:fetchPullRequestDetails", &wrap(pr)));
+    }
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
@@ -4319,7 +4892,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 161);
+        assert_eq!(COMMANDS.len(), 176);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

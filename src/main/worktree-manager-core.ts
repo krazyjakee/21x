@@ -1,7 +1,7 @@
 import { OwnedOperationLifetime } from './owned-operation-lifetime'
 import { execFile, type ExecFileOptions } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, type Stats } from 'fs'
 import { readdir } from 'fs/promises'
 import { isAbsolute, join, relative, resolve, sep, win32 } from 'path'
 import type { ForgejoManager } from './forgejo-manager'
@@ -77,6 +77,9 @@ export interface WorktreeHost {
   workspaceRoot: string
   emitProgress(data: { taskId: string; repo: string; step: string; done: boolean; error?: string }): void
   bindWindow?(window: { isDestroyed(): boolean; webContents: { send(channel: string, ...args: unknown[]): void } }): void
+  /** Trusted captured process owner; absent only for the legacy host. */
+  exec?(program: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions): Promise<{ stdout: string; stderr: string }>
+  assertPath?(path: string): void
 }
 
 export class WorktreeManager {
@@ -104,17 +107,46 @@ export class WorktreeManager {
     this.host.emitProgress({ taskId, repo, step, done, error })
   }
 
-  private execOwned(file: string, args: string[], options: ExecFileOptions = {}): Promise<{ stdout: string; stderr: string }> {
+  private execOwned(file: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions = {}): Promise<{ stdout: string; stderr: string }> {
     this.lifetime.assertOpen()
+    if (this.host.exec) return this.host.exec(file, args, { ...options, cwd: options.cwd ?? this.host.reposRoot })
     return execFileAsync(file, args, options).then(({ stdout, stderr }) => ({ stdout: stdout.toString(), stderr: stderr.toString() }))
   }
 
   private bareClonePath(org: string, repoName: string): string {
-    return join(this.host.reposRoot, org, `${repoName}.git`)
+    if (this.host.assertPath && (!this.validNamespace(org) || !this.validSegment(repoName))) throw new Error('WORKTREE_PATH_UNAUTHORIZED')
+    return this.directory(join(this.host.reposRoot, org, `${repoName}.git`))
   }
 
   private worktreePath(taskId: string, repoName: string): string {
-    return join(this.host.workspaceRoot, taskId, repoName)
+    if (this.host.assertPath && !this.validSegment(repoName)) throw new Error('WORKTREE_PATH_UNAUTHORIZED')
+    return this.directory(join(this.taskDirectory(taskId), repoName))
+  }
+
+  private validSegment(value: string): boolean { return value !== '.' && value !== '..' && /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}$/.test(value) }
+  private validNamespace(value: string): boolean { return value.length <= 2048 && value.split('/').length <= 15 && value.split('/').every(part => this.validSegment(part)) }
+  private directory(path: string): string { this.host.assertPath?.(path); return path }
+  private taskDirectory(taskId: string): string {
+    if (this.host.assertPath && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(taskId)) throw new Error('WORKTREE_PATH_UNAUTHORIZED')
+    return this.directory(join(this.host.workspaceRoot, taskId))
+  }
+  private assertRemoval(path: string, captured: Stats | null): void {
+    this.directory(path)
+    if (captured) {
+      const current = lstatSync(path)
+      if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== captured.dev || current.ino !== captured.ino) throw new Error('WORKTREE_DIRECTORY_CHANGED')
+    }
+  }
+  private assertRepo(org: string, repo: WorktreeRepo, provider?: string): void {
+    if (!this.host.assertPath) return
+    const name = repo.fullName.split('/').pop() ?? ''
+    if (!this.validNamespace(org) || !this.validSegment(name) || repo.fullName !== `${org}/${name}` || provider !== undefined && !['github', 'gitlab', 'forgejo'].includes(provider)) throw new Error('WORKTREE_PATH_UNAUTHORIZED')
+    const branch = repo.defaultBranch
+    if (!branch || branch.length > 1024 || /^[-/]/.test(branch) || /[\u0000-\u0020\u007f~^:?*\[\\]/.test(branch) || branch.includes('..') || branch.includes('@{') || branch.includes('//') || branch.split('/').some(part => !part || part.startsWith('.') || part.endsWith('.') || part.endsWith('.lock'))) throw new Error('WORKTREE_REF_INVALID')
+    if ((!provider || provider === 'github') && repo.cloneUrl) {
+      const expected = `https://github.com/${repo.fullName}.git`
+      if (repo.cloneUrl !== expected) throw new Error('WORKTREE_CLONE_SCOPE_INVALID')
+    }
   }
 
   /** Read one selected file on demand while keeping renderer-provided paths
@@ -126,6 +158,7 @@ export class WorktreeManager {
     if (normalized.split('/').some((segment) => !segment || segment === '.' || segment === '..')) return null
 
     try {
+      this.taskDirectory(taskId)
       const workspacesRoot = realpathSync(this.host.workspaceRoot)
       const workspaceRoot = realpathSync(join(workspacesRoot, taskId))
       if (!isWithinRoot(workspacesRoot, workspaceRoot)) return null
@@ -170,7 +203,8 @@ export class WorktreeManager {
     org: string,
     provider?: string
   ): Promise<string> {
-    const taskDir = join(this.host.workspaceRoot, taskId)
+    const taskDir = this.taskDirectory(taskId)
+    for (const repo of repos) this.assertRepo(org, repo, provider)
     console.log(`[WorktreeManager] Setting up workspace for task ${taskId}`)
     console.log(`[WorktreeManager]   Task directory: ${taskDir}`)
     console.log(`[WorktreeManager]   Organization: ${org}`)
@@ -216,7 +250,7 @@ export class WorktreeManager {
 
     console.log(`[WorktreeManager]   Bare clone not found, creating: ${barePath}`)
     this.sendProgress('', repoName, 'cloning', false)
-    const orgDir = join(this.host.reposRoot, org)
+    const orgDir = this.directory(join(this.host.reposRoot, org))
     this.lifetime.assertOpen()
     mkdirSync(orgDir, { recursive: true })
 
@@ -305,6 +339,7 @@ export class WorktreeManager {
         cwd: barePath
       })
       if (stdout.trim()) {
+        this.directory(wtPath)
         // Branch exists — create worktree from existing branch
         console.log(`[WorktreeManager]   Branch ${branchName} exists, creating worktree from existing branch`)
         console.log(`[WorktreeManager]   Executing: git worktree add ${wtPath} ${branchName}`)
@@ -321,6 +356,7 @@ export class WorktreeManager {
     }
 
     const startRef = await this.resolveStartRef(barePath, defaultBranch)
+    this.directory(wtPath)
     console.log(`[WorktreeManager]   Resolved start ref: ${startRef}`)
 
     // Create worktree with new branch from resolved ref
@@ -360,10 +396,13 @@ export class WorktreeManager {
     org: string,
     removeTaskDir = true
   ): Promise<void> {
+    const taskDir = this.taskDirectory(taskId)
+    const taskIdentity = this.host.assertPath && existsSync(taskDir) ? lstatSync(taskDir) : null
     for (const repo of repos) {
       const repoName = repo.fullName.split('/').pop() || repo.fullName
       const barePath = this.bareClonePath(org, repoName)
       const wtPath = this.worktreePath(taskId, repoName)
+      const worktreeIdentity = this.host.assertPath && existsSync(wtPath) ? lstatSync(wtPath) : null
 
       if (existsSync(barePath) && existsSync(wtPath)) {
         try {
@@ -374,21 +413,23 @@ export class WorktreeManager {
           // If git worktree remove fails, remove directory manually
           if (existsSync(wtPath)) {
             this.lifetime.assertOpen()
+            this.assertRemoval(wtPath, worktreeIdentity)
             rmSync(wtPath, { recursive: true, force: true })
           }
         }
       } else if (existsSync(wtPath)) {
         this.lifetime.assertOpen()
+        this.assertRemoval(wtPath, worktreeIdentity)
         rmSync(wtPath, { recursive: true, force: true })
       }
     }
 
     // Remove task directory if requested (skip when session is still active)
     if (removeTaskDir) {
-      const taskDir = join(this.host.workspaceRoot, taskId)
       if (existsSync(taskDir)) {
         try {
           this.lifetime.assertOpen()
+          this.assertRemoval(taskDir, taskIdentity)
           rmSync(taskDir, { recursive: true, force: true })
         } catch {
           // Ignore
@@ -634,7 +675,7 @@ export class WorktreeManager {
   }
 
   private async listNonRepositoryWorkspaceFiles(taskId: string, repos: { fullName: string }[]): Promise<string[]> {
-    const workspacePath = join(this.host.workspaceRoot, taskId)
+    const workspacePath = this.taskDirectory(taskId)
     if (!existsSync(workspacePath)) return []
 
     const repositoryDirectories = new Set(repos.map((repo) => repo.fullName.split('/').pop() || repo.fullName))
@@ -643,7 +684,9 @@ export class WorktreeManager {
     const visit = async (directory: string, relativeDirectory = ''): Promise<void> => {
       let entries
       try {
+        this.directory(directory)
         entries = await readdir(directory, { withFileTypes: true })
+        this.directory(directory)
       } catch {
         return
       }

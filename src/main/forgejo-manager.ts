@@ -1,4 +1,5 @@
-import { execFile } from 'child_process'
+import { execFile, type ExecFileOptions } from 'child_process'
+import { GitProviderProcessOwner, GitProviderProcessError, type GitProviderManagerHost } from './git-provider-process-owner'
 import { promisify } from 'util'
 import type { GitHubCollaborator, GitHubIssue, GitHubRepo } from './github-manager'
 import {
@@ -222,8 +223,38 @@ function mapPullRequestState(raw: RawPullRequest): PullRequestState {
  * and tokens stay in tea's own config; 20x only remembers which tea login name
  * to use when several are configured.
  */
+export interface ForgejoManagerHost extends GitProviderManagerHost {
+  cloneBare?(request: { fullName: string; barePath: string; cloneUrl?: string; login: TeaLogin }): Promise<void>
+}
+
 export class ForgejoManager {
-  constructor(private getSetting: (key: string) => string | null | undefined = () => null) {}
+  constructor(private getSetting: (key: string) => string | null | undefined = () => null, private readonly host?: ForgejoManagerHost) {
+    if (!host) return
+    if (!(host.process instanceof GitProviderProcessOwner)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS')
+    for (const name of ['isInstalled','listLogins','api','checkTeaCli','fetchUsername','fetchUserOrgs','fetchOrgRepos','fetchUserRepos','fetchIssues','updateIssue','addIssueComment','fetchRepoCollaborators','findLoginForUrl','isForgejoUrl','fetchPullRequestDetails','getBranchPullRequest','cloneBare'] as const) {
+      const original = this[name].bind(this) as (...args: unknown[]) => Promise<unknown>
+      ;(this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[name] = (...args) => {
+        try { this.current(); return host.process.retain(original(...args).then(value => { this.current(); return value }).catch(cause => { this.current(); if (cause instanceof GitProviderProcessError || cause instanceof ForgejoError) throw cause; throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT') })) }
+        catch (cause) { return Promise.reject(cause) }
+      }
+    }
+  }
+  assertOwners(owner: GitProviderProcessOwner): void { if (!this.host || this.host.process !== owner) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS'); owner.assertOpen() }
+  withRequestGuard<T>(effect: () => T | Promise<T>, guard: () => void, signal?: AbortSignal): Promise<T> {
+    if (!this.host) return Promise.reject(new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS'))
+    return this.host.process.withRequestGuard(effect, guard, signal)
+  }
+  private current(): void { this.host?.process.assertCurrent(); this.host?.assertCurrent?.() }
+  private async exec(command: 'tea', args: string[], options?: ExecFileOptions): Promise<{ stdout: string; stderr: string }> {
+    if (!this.host) {
+      const result = options ? await execFileAsync(command, args, options) : await execFileAsync(command, args)
+      return { stdout: String(result.stdout), stderr: String(result.stderr) }
+    }
+    this.current()
+    const result = await this.host.process.exec(command, args, { maxBuffer: options?.maxBuffer ?? 65536, timeout: options?.timeout })
+    this.current(); return result
+  }
+
 
   private mapRepo(raw: Record<string, unknown>): GitHubRepo {
     return {
@@ -238,21 +269,24 @@ export class ForgejoManager {
 
   async isInstalled(): Promise<boolean> {
     try {
-      await execFileAsync('tea', ['--version'])
+      await this.exec('tea', ['--version'])
       return true
-    } catch {
+    } catch (cause) {
+      this.current()
+      if (this.host && (!(cause instanceof GitProviderProcessError) || cause.code !== 'GIT_PROVIDER_CLI_MISSING')) throw cause
       return false
     }
   }
 
   async listLogins(): Promise<TeaLogin[]> {
-    const { stdout } = await execFileAsync('tea', ['login', 'list', '--output', 'json'], {
+    const { stdout } = await this.exec('tea', ['login', 'list', '--output', 'json'], {
       maxBuffer: TEA_MAX_BUFFER,
       timeout: TEA_API_TIMEOUT
     })
     const text = stdout.trim()
     if (!text || !text.startsWith('[')) return []
     const raw = JSON.parse(text) as RawTeaLogin[]
+    if (this.host && (!Array.isArray(raw) || raw.length > 256)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
     return raw
       .filter((login) => login.name && login.url)
       .map((login) => ({
@@ -270,6 +304,7 @@ export class ForgejoManager {
    * default the user must choose explicitly.
    */
   resolveLogin(logins: TeaLogin[]): TeaLogin {
+    this.current()
     if (logins.length === 0) {
       throw new ForgejoError('no-login', 'tea has no logins configured. Run `tea login add` in your terminal to connect a Forgejo server, then re-check.')
     }
@@ -277,11 +312,13 @@ export class ForgejoManager {
     if (selected) {
       const match = logins.find((login) => login.name === selected)
       if (match) return match
+      if (this.host) throw new ForgejoError('login-not-found', 'The selected tea login is unavailable.')
       throw new ForgejoError('login-not-found', `The tea login "${selected}" selected in 21x no longer exists. Choose one of: ${logins.map((login) => login.name).join(', ')}.`)
     }
     if (logins.length === 1) return logins[0]
     const teaDefault = logins.filter((login) => login.isDefault)
     if (teaDefault.length === 1) return teaDefault[0]
+    if (this.host) throw new ForgejoError('login-selection-required', 'Select a configured tea login.')
     throw new ForgejoError('login-selection-required', `Multiple tea logins are configured (${logins.map((login) => login.name).join(', ')}). Choose which one 21x should use.`)
   }
 
@@ -289,6 +326,7 @@ export class ForgejoManager {
     const logins = await this.listLogins()
     if (loginName) {
       const match = logins.find((login) => login.name === loginName)
+      if (!match && this.host) throw new ForgejoError('login-not-found', 'The selected tea login is unavailable.')
       if (!match) throw new ForgejoError('login-not-found', `tea login "${loginName}" does not exist. Run \`tea login list\` to see configured logins.`)
       return match
     }
@@ -309,7 +347,7 @@ export class ForgejoManager {
     let stdout: string
     let stderr: string
     try {
-      ({ stdout, stderr } = await execFileAsync('tea', args, { maxBuffer: TEA_MAX_BUFFER, timeout: TEA_API_TIMEOUT }))
+      ({ stdout, stderr } = await this.exec('tea', args, { maxBuffer: TEA_MAX_BUFFER, timeout: TEA_API_TIMEOUT }))
     } catch (error) {
       throw this.classifyExecError(error, login)
     }
@@ -317,6 +355,7 @@ export class ForgejoManager {
     const statusMatch = stderr.match(/HTTP\/[\d.]+\s+(\d{3})/)
     const status = statusMatch ? Number(statusMatch[1]) : 200
     if (status >= 400) {
+      if (this.host) throw new ForgejoError(status === 401 || status === 403 ? 'unauthorized' : 'error', status === 401 || status === 403 ? 'The configured tea login was rejected.' : 'The Forgejo API request failed.', status)
       let detail = ''
       try { detail = (JSON.parse(stdout) as { message?: string }).message || '' } catch { detail = stdout.trim().slice(0, 200) }
       if (status === 401 || status === 403) {
@@ -326,10 +365,24 @@ export class ForgejoManager {
     }
 
     const text = stdout.trim()
-    return (text ? JSON.parse(text) : undefined) as T
+    const parsed = (text ? JSON.parse(text) : undefined) as T
+    if (this.host && Array.isArray(parsed) && parsed.length > 4096) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
+    if (this.host && endpoint.split('?')[0].endsWith('/reviews') && parsed !== null && !Array.isArray(parsed)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
+    if (this.host && endpoint.split('?')[0].endsWith('/status')) {
+      const statuses = (parsed as RawCombinedStatus | null)?.statuses
+      if (statuses !== undefined && statuses !== null && (!Array.isArray(statuses) || statuses.length > 4096)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
+    }
+    return parsed
   }
 
   private classifyExecError(error: unknown, login: TeaLogin): ForgejoError {
+    this.current()
+    if (this.host) {
+      if (error instanceof GitProviderProcessError && ['GIT_PROVIDER_CLOSED','GIT_PROVIDER_CANCELLED','GIT_PROVIDER_BUSY','GIT_PROVIDER_CWD_REFUSED','GIT_PROVIDER_OUTPUT_LIMIT'].includes(error.code)) throw error
+      if (error instanceof GitProviderProcessError && error.code === 'GIT_PROVIDER_CLI_MISSING') return new ForgejoError('not-installed', 'The tea CLI is unavailable.')
+      if (error instanceof GitProviderProcessError && error.code === 'GIT_PROVIDER_TIMEOUT') return new ForgejoError('unreachable', 'The tea CLI request timed out.')
+      return new ForgejoError('error', 'The tea CLI request failed.')
+    }
     const execErr = error as { code?: string | number; killed?: boolean; stderr?: string; stdout?: string; message?: string }
     if (execErr?.code === 'ENOENT') {
       return new ForgejoError('not-installed', 'tea CLI is not installed or not on PATH.')
@@ -348,11 +401,16 @@ export class ForgejoManager {
   private async paginate<T>(login: TeaLogin, path: string): Promise<T[]> {
     const separator = path.includes('?') ? '&' : '?'
     const results: T[] = []
+    let bytes = 0
     for (let page = 1; page <= MAX_PAGES; page++) {
       const batch = await this.api<T[] | null>(login, `${path}${separator}limit=${PAGE_LIMIT}&page=${page}`)
+      this.current()
+      if (this.host && batch !== null && !Array.isArray(batch)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
       if (!Array.isArray(batch) || batch.length === 0) break
+      if (this.host) { bytes += Buffer.byteLength(JSON.stringify(batch), 'utf8'); if (batch.length > PAGE_LIMIT || results.length + batch.length > 4096 || bytes > TEA_MAX_BUFFER) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT') }
       results.push(...batch)
       if (batch.length < PAGE_LIMIT) break
+      if (this.host && page === MAX_PAGES) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
     }
     return results
   }
@@ -384,10 +442,16 @@ export class ForgejoManager {
           code: 'ready'
         }
       } catch (error) {
+        this.current()
+        if (this.host && error instanceof GitProviderProcessError) throw error
+        if (this.host && !(error instanceof ForgejoError)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
         const err = error instanceof ForgejoError ? error : new ForgejoError('error', (error as Error).message)
         return { installed: true, authenticated: false, login: login.name, serverUrl: login.url, logins, code: err.code, message: err.message }
       }
     } catch (error) {
+      this.current()
+      if (this.host && error instanceof GitProviderProcessError) throw error
+      if (this.host && !(error instanceof ForgejoError)) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_RESULT')
       const err = error instanceof ForgejoError ? error : new ForgejoError('error', (error as Error).message)
       return { installed: true, authenticated: false, logins, code: err.code, message: err.message }
     }
@@ -439,6 +503,7 @@ export class ForgejoManager {
       const raw = await this.paginate<Record<string, unknown>>(login, `/orgs/${encodeURIComponent(org)}/repos`)
       return raw.map((repo) => this.mapRepo(repo))
     } catch (error) {
+      this.current()
       // Personal namespaces and collaborator-only owners are not orgs.
       if (!(error instanceof ForgejoError) || error.httpStatus !== 404) throw error
       const repos = await this.fetchAccessibleRepos(login)
@@ -526,6 +591,7 @@ export class ForgejoManager {
       if (!(await this.isInstalled())) return false
       return (await this.findLoginForUrl(url)) !== null
     } catch {
+      this.current()
       return false
     }
   }
@@ -541,13 +607,14 @@ export class ForgejoManager {
     const match = parsed?.path.match(FORGEJO_PULL_REQUEST_PATH)
     if (!parsed || !match) throw new Error('A valid Forgejo pull request URL is required')
     const login = await this.findLoginForUrl(url)
+    if (!login && this.host) throw new ForgejoError('no-login', 'No configured tea login serves this repository.')
     if (!login) throw new ForgejoError('no-login', `No tea login is configured for ${parsed.host}. Run \`tea login add\` for that server.`)
 
     const [, owner, repo, number] = match
     const raw = await this.api<RawPullRequest>(login, `/repos/${owner}/${repo}/pulls/${number}`)
     const [reviews, checks] = await Promise.all([
-      this.api<RawReview[] | null>(login, `/repos/${owner}/${repo}/pulls/${number}/reviews`).catch(() => []),
-      this.fetchChecks(login, owner, repo, raw.head?.sha).catch(() => [])
+      this.api<RawReview[] | null>(login, `/repos/${owner}/${repo}/pulls/${number}/reviews`).catch(error => { this.current(); if (this.host && error instanceof GitProviderProcessError) throw error; return [] }),
+      this.fetchChecks(login, owner, repo, raw.head?.sha).catch(error => { this.current(); if (this.host && error instanceof GitProviderProcessError) throw error; return [] })
     ])
     const reviewList = reviews || []
 
@@ -605,7 +672,7 @@ export class ForgejoManager {
     const pull = (await findIn('open')) || (await findIn('closed'))
     if (!pull?.number) return null
 
-    const checks = await this.fetchChecks(login, owner, repo, pull.head?.sha).catch(() => [])
+    const checks = await this.fetchChecks(login, owner, repo, pull.head?.sha).catch(error => { this.current(); if (this.host && error instanceof GitProviderProcessError) throw error; return [] })
     return {
       number: pull.number,
       url: pull.html_url || '',
@@ -621,6 +688,13 @@ export class ForgejoManager {
    * tea rather than any credentials stored elsewhere.
    */
   async cloneBare(fullName: string, barePath: string, cloneUrl?: string): Promise<void> {
+    if (this.host) {
+      if (!this.host.cloneBare) throw new GitProviderProcessError('GIT_PROVIDER_INVALID_OPTIONS')
+      const login = await this.getLogin()
+      this.current()
+      await this.host.cloneBare({ fullName, barePath, cloneUrl, login })
+      this.current(); return
+    }
     const login = await this.getLogin()
     const url = cloneUrl || `${login.url}/${fullName}.git`
     console.log(`[ForgejoManager] Executing: git clone --bare ${url} ${barePath} (tea login "${login.name}")`)

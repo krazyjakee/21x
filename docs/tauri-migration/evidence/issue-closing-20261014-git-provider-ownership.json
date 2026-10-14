@@ -1,0 +1,389 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    213
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "67b18fa1ac05f7b08ae80d5c1e44f0fd5aa064dc",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/git-provider-bindings.md": "60c4e1839f0376ede5b9cbe478a419d6c1626e9c001e36e4ba8752864b65e6b7",
+      "docs/tauri-migration/git-provider-native-contracts.md": "fa5e71fc4a3bcac5e8e99e83e622247f011e87f81785a9533f6ba7855f9ba9bb",
+      "docs/tauri-migration/git-provider-owner.md": "d515eda2d4224f155f68eb1f575ca6c8d4d25946fde9e697c6e9c51740eb3f53",
+      "docs/tauri-migration/implementation-status.md": "798af20a466854b012d86d2c2a1a1a48ede8f2b4e410b4033d0b1f11db8b26b4",
+      "docs/tauri-migration/inventory.json": "2720f7c29706e96e0629e88952b8c55334ffc4aaeb05b066c212cb271f1f265f",
+      "scripts/production-contracts-proof.test.ts": "333c2f0d5be882425c3a3b6962e1c41da4351e5e01db7c5c6a00adabf5c1a4e5",
+      "scripts/production-contracts-proof.ts": "0980c80de5f30374b16f09a56889368c711ff1ac0d3893163b4778b2952c760a",
+      "src-tauri/engine/src/production_contracts.rs": "b4c8e22aa9a493d6ce88a571855116aafd6b571478ea1007cf53aaa3cf2e75f8",
+      "src/main/forgejo-manager.ts": "4d762d3f3757c049cb04de8be81e5ec40f6b361cab11f9617e3d203b27e04b67",
+      "src/main/git-provider-process-owner.test.ts": "3e4c634a28743011988a2f5ac51c6aa68480c3ca51c4c2317ed3eddc062c5f88",
+      "src/main/git-provider-process-owner.ts": "73ef3416d430d930619ef9e87194b1ff244a50fa52cf6f5c9d356c87a822044a",
+      "src/main/github-manager.ts": "5ecc16b94443d48d8d4766ce4f3f377e08425536ef72f982029f32fb92d6f1f0",
+      "src/main/gitlab-manager.ts": "4f40301e0007af5fbb9bf613e9f2472cff69fec84293bbbb570298c569910bc7",
+      "src/main/worktree-directory-authority.test.ts": "b041e3072edbdbdcaecc4381a2ba7b13731461f828a0ffc924dec022523bf5a6",
+      "src/main/worktree-directory-authority.ts": "59938bebdfebee637d342d20c4556bf3d2fe6d9b420d34daa84ce79d91bde86d",
+      "src/main/worktree-manager-core.ts": "64dd20de0a7d5dfd659e01de210d7949fc8c0bb3fc7428e4169ae3fc6a27e346",
+      "src/main/worktree-manager-host.test.ts": "6d5f6fe356638662f0b01bf5d5d150c38a43c4ed22f64c07f578658a4ccf5c6d",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "f13f4dbd88ba4664ec543f766b14efc50d36b4a88d12a7c44ce4c7b7f2026cec",
+      "src/renderer/src/lib/native-desktop-host.ts": "e140f3fdd9f160ec6592daf58aa67e684b1e64e5565654e779066f731e8e81a0",
+      "src/service/git-provider-backend.test.ts": "4b38ec77ed8283f47cd1d54596a0a2e636724711d23ad04777a6d7fd613a5d59",
+      "src/service/git-provider-backend.ts": "69bd5e5cab701d8c5334b7e5fa35cb75619b59a20e7cc399d27e2f4a8ac3b802",
+      "src/service/production-desktop-bindings.test.ts": "6f6a724163570863523e4459680c8fcc53e2bff3b107e65150c582ffde1e2249",
+      "src/service/production-desktop-bindings.ts": "9247f13815acbb1f08145f1931f164582a529a52d18854c855f73ea63a06ad16",
+      "src/service/production-git-provider-owner.test.ts": "f1d3dcdaea4ab65add1829df28e7e091fb9a669790f0fa7b19995ec62d5c4e4c",
+      "src/service/production-git-provider-owner.ts": "5d5477180b9333bde52e92832eac480855c6f3485131df8108873914962d4990",
+      "src/service/production-owner.ts": "2a340669e50f6851f8eb8ed0a70de6734795ca8ae7e58b2f181573c5aeb984f4",
+      "src/shared/git-provider-codecs.test.ts": "9bbfd5445f8718c321aad739b4816a1d4600935743399833dbf99c1bc8e4d686",
+      "src/shared/git-provider-codecs.ts": "92d27896b49cb2415ba0e9495a80422f564a79eb35f9fe907b11b73f4af0ee5e",
+      "vitest.tauri.config.ts": "909eaedb843d32d74744f98eb4ff79022b97bdf0fb8a8a355a2e8a88c93fa749"
+    }
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "One actual application-owned GitHub/GitLab/Forgejo CLI boundary, fifteen retained provider/account/repository controls and captured worktree execution/filesystem guards. No CLI installation, native OAuth flow or new events.",
+  "bindings": {
+    "finiteServiceCommandContracts": 176,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 178,
+    "events": 23,
+    "newCommands": 15,
+    "newEvents": 0
+  },
+  "implemented": [
+    "The actual protected-profile ProductionOwner creates and retains one GitProviderProcessOwner and the existing three managers. AgentManager, WorktreeManager, SyncManager, task-source plugins, mobile API and provider backends borrow those exact objects. The process owner drains before database/key/profile-lock release.",
+    "Captured execution permits only finite trusted programs, environment keys and physical home/cwd/worktree roots. Provider auth environment remains opaque inside actual trusted CLI children; model, broker/task tokens, arbitrary shell/askpass programs and inherited environment are refused. PATH removes empty, relative and duplicate lookup components without changing the parent.",
+    "Raw execFile callback and actual child/stdout/stderr close receipts all remain owned. Deadline, error, cancellation and TERM/KILL alone never acknowledge completion. Scoped guards join accepted parallel siblings, recheck owner/current grants before every nested command and after raw completion, and refuse late fallbacks/mutations without replay.",
+    "Actual GitHub/GitLab/Forgejo managers preserve CLI-based discovery, pagination and authenticated accounts, using bounded explicit pages, rows and JSON/output capacity. Legacy constructors retain existing Electron behavior. Portable public errors contain fixed codes/messages and omit raw diagnostics and credentials.",
+    "Fifteen retained commands preserve exact existing DTO/argument/undefined contracts and current trusted-main read/write grants. Forgejo login selection validates the actual configured login list before the existing database write; provider mapping uses the existing SQLite writer, bounded exact map and current configuration snapshot.",
+    "Production worktrees use the same captured CLI owner. Trusted roots, task/repository/ref inputs and Forgejo clone addresses are checked before effects. Awaited cleanup rechecks captured directory device/inode identity and refuses replacement directories/links, preserving unrelated user files. Forgejo clones retain the fixed tea credential-helper and existing Git refspec setup.",
+    "The production native policy and desktop facade mirror all fifteen exact codecs. Reads may run during recovery; login/map writes wait for hydration and do not replay after disconnect. Useful unavailable capability states remain explicit. Actual TypeScript golden payloads are exported and checked against Rust policy."
+  ],
+  "artifact": {
+    "buildIdentity": "production-9b5e0f6c32fd9a77f53cf91ad453fbf9",
+    "resourceManifestSha256": "dafcfcd8b2096dfb5cd610f5ed78ba6356314bf59a222663e98b5b8f200677f4",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "cargoLockUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 176,
+    "requests": 370,
+    "sha256": "d3fae2e6c2966f4d6099895293b655bad300a0c97148e8bbde09e66660c5d111"
+  },
+  "tests": {
+    "app": {
+      "passed": 6561,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "bae1871397a1e956e1656da5c42e3bf0b56dcf5eb9388376a24ec15e53503913",
+      "logSha256": "c85771f96e3251234ae98478723b1cafc6265bcc06fc09a87969c54c0c5067c3"
+    },
+    "standalone": {
+      "passed": 3067,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "e9353e0032453621ee663dca3c60f9d0f32de262b3ba56ef96cdd172972c93a8",
+      "logSha256": "96a5ce68cea20e318724595c7feaa6e59a2b78529bb03485ec0dbe33d1beee04"
+    },
+    "focused": {
+      "passed": 193,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "af128d315069d113bab69b2de05d14a536be36cde9297a231778d06aa6ca45b7",
+      "logSha256": "d39e3dd2e089eda4faaa4b55779c78d2ace5c2f0851ddc9d27b631c092b6bff0"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "79dd431788d9203eefd7cef53d18eff4182b5d22d0d4a93929f3e9848d138962",
+      "logSha256": "4a00271473b21fd1394b565a122e18b96198e307d0deeaac2854c5a1bdbef02e"
+    },
+    "corpus-export": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "4869852c41ee8db26afb62db742168fa4f9793ca6d46445df33f4cc09cb76211",
+      "logSha256": "dc617c404598c04e8cc33bfe04c388d5d0954db98fc01b83c178121c7d0ad1d9"
+    }
+  },
+  "standaloneOptionalInstalledInference": [
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "VoiceWorkerClient with the installed runtime loads the real recogniser, so the config shape cannot drift",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "Parakeet v3 with the installed runtime loads the offline recogniser and transcribes a complete turn",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "a single-shot turn reports a final and never a segment, so dictation cannot send by itself",
+      "reason": "requires an installed local recognition runtime/model"
+    }
+  ],
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 41.368,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 13.25,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 22.347,
+      "logSha256": "b59b6b6876458b1c53464ffe1edfcff00079b4694e7b6c2e8f6cbed9ac96b439"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.477,
+      "logSha256": "96b11b8223411303d5e627387a11cca910ebb37d192ad145938d75be89e73ec9"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.709,
+      "logSha256": "da5edb6adba5335dcd32c00cdd3de072720039c7b962ad0f6506171330c021b7"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.931,
+      "logSha256": "5fdf62196041a5ebb87b5047eb04830607a7c17acd5f2a00d04ea34288273cdc"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.308,
+      "logSha256": "cb06c237189c0a5caf951efe77155b2d009b6dc32094ade6ecacb7a6ce8eaf40"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.059,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.524,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.598,
+      "logSha256": "eca395916574496e06a9218c47509d9dee6c511270ffdb0e067c0ebd7ebf130b",
+      "passed": 29,
+      "failed": 0,
+      "ignored": 4
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.942,
+      "logSha256": "917f1480a84588228f608dce569dcf1e898e75fcd40e095d6e2a95e31a6bdf25"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.117,
+      "logSha256": "41d7e74f5a9f9d5cb8bbe910150112f876362fd64ed6560cc7ff73c98de3f746",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch17-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.252,
+      "logSha256": "04e6cf88f50df9a2c45099efccd67486991fda40604aca118d59841f89b6155f",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.045,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "retainedFailures": {
+    "focused-initial": {
+      "passed": 188,
+      "failed": 5,
+      "skipped": 0,
+      "success": false,
+      "reportSha256": "67aecb8429750fc6083cccf999306dc91eea0a25e691a7840b38112cde3d5e7e",
+      "logSha256": "f72e30f39e7c20cb011eac344d0bc641ea79d516c4caba18ba19ed55d76f12c9"
+    }
+  },
+  "initialCompiler": {
+    "command": [
+      "rtk",
+      "pnpm",
+      "exec",
+      "tsc",
+      "--build",
+      "--noEmit",
+      "--force"
+    ],
+    "exitCode": 2,
+    "elapsedSeconds": 26.425,
+    "logSha256": "a42c9463a248724fbac49780ef5892dbcaaf975359a34545d3da7ac5ac659baf"
+  },
+  "initialLint": {
+    "command": [
+      "rtk",
+      "pnpm",
+      "lint"
+    ],
+    "exitCode": 1,
+    "elapsedSeconds": 27.038,
+    "logSha256": "937a8fb0c6e08f9a22d5039aa2aabd569d99cb31172a85aaea1fa04228f746ad",
+    "errors": 2,
+    "existingWarnings": 165
+  },
+  "validationCorrections": [
+    "Initial focused188pass/5fail: four codec tests asserted internal code strings as public Error messages; now they check exact code fields. Actual singleton cancellation followed by owner shutdown correctly reports DISCONNECTED before its late raw callback acknowledges; the regression now asserts that lifecycle precedence and retained open database/profile lease. Existing request-only cancellation coverage remains intact.",
+    "Initial compiler errors concerned optional AsyncLocalStorage scope typing, two overloaded execFile test-spy types and the trusted worktree cwd string/URL union. Scope type now models absence explicitly, fixture-only spies preserve the actual execFile boundary and non-string cwd refuses before filesystem/process effects.",
+    "Initial full application suite passed6561/0/30optional. Lint then required two single-assignment declarations to use const; the final full application suite, forced compiler and lint were rerun after that source correction."
+  ],
+  "remainingAcceptance": [
+    "#213 actual CLI installation, native external OAuth registration/callback ownership, installed provider authentication/networking and supported-target cleanup remain open.",
+    "#202 and #208 full retained/native feature parity, installed signed resources/redistribution, macOS/Windows production process containment and live-profile/cutover/Electron-retirement gates remain open.",
+    "Synthetic standalone Node children, real pipes, controlled callbacks and SQLite fixtures prove only their exercised command/lifecycle/path/authority behavior. No live provider request, real credential login or live Forgejo clone is claimed. Application suite child fixtures use systemNode18.19.1; standalone suite and private production proofs use pinnedNode22.23.2.",
+    "Physical-root and identity checks reduce cooperative filesystem races without claiming atomic kernel containment against every concurrent same-user replacement or all-platform acceptance. Only captured actual child objects are signalled; final native process-scope acknowledgement remains part of ProductionOwner teardown.",
+    "Three standalone optional installed recognition tests require absent local runtime/models. Hosted voice #92 remains deferred by the user."
+  ]
+}

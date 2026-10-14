@@ -6,6 +6,21 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The repository-control continuation shares one captured CLI process owner across
+the actual GitHub, GitLab and Forgejo managers, task sources and worktrees. It adds
+fifteen retained provider discovery, login selection and repository-map controls.
+Accepted commands retain their raw callbacks and child/stream close receipts;
+shutdown holds the protected profile until these finish. Worktree paths are checked
+against captured directory identities before commands and fallback removals.
+The current surface has 176 finite service commands, two separate native commands
+and 23 events. See [provider ownership](git-provider-owner.md),
+[bindings](git-provider-bindings.md) and
+[native contracts](git-provider-native-contracts.md).
+CLI installation, native authentication flows and installed cross-platform
+acceptance remain open. This continuation does not complete #202, #208 or #213.
+
+The previous local-model continuation retains its tested revision:
+
 The next local model continuation adds authenticated synthesis publication
 receipts using the production profile's existing protected key. Committed
 receipts survive an owner restart and authorize removal only when the exact

@@ -11,10 +11,10 @@ import { SESSION_CONTEXT_GENERATION_STATES, SESSION_CONTEXT_HANDOFF_STATES } fro
 import { MOBILE_EVENTS, MOBILE_EVENT_CODECS } from '../src/shared/mobile-codecs'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 161 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 176 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(161)
+    expect(corpus.operations).toHaveLength(176)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -191,6 +191,6 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(161)
+    expect(corpus.operations).toHaveLength(176)
   })
 })
