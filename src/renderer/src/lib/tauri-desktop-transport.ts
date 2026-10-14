@@ -11,6 +11,7 @@ export interface TauriDesktopApi {
     options: { target: { kind: 'WebviewWindow'; label: 'main' } }) => Promise<() => void> }
 }
 
+const bootstrapGenerations = new WeakMap<TauriDesktopApi, number>()
 const uiDocuments = new WeakMap<TauriDesktopApi, Readonly<{ engineEpoch: string; leaseId: string }>>()
 export function getTauriUiDocument(native: TauriDesktopApi): Readonly<{ engineEpoch: string; leaseId: string }> | undefined { return uiDocuments.get(native) }
 
@@ -43,9 +44,9 @@ export function createTauriDesktopTransport(native: TauriDesktopApi): DesktopTra
       try {
         // Paths, native identity and caller authority never originate in renderer arguments.
         const document = uiDocuments.get(native)
-        if (operation === 'ui:publishState' && (!document || document.engineEpoch !== engineEpoch)) throw new ServiceProtocolError('DISCONNECTED')
+        if ((operation === 'ui:publishState' || operation === 'agent-installer:install') && (!document || document.engineEpoch !== engineEpoch)) throw new ServiceProtocolError('DISCONNECTED')
         return await native.core.invoke('desktop_invoke', { operation, payload, engineEpoch,
-          ...(operation === 'ui:publishState' ? { uiLease: document!.leaseId } : {}) })
+          ...((operation === 'ui:publishState' || operation === 'agent-installer:install') ? { uiLease: document!.leaseId } : {}) })
       } catch (error) { throw nativeError(error) }
     },
     async listen(receive) {
@@ -59,6 +60,8 @@ export function createTauriDesktopTransport(native: TauriDesktopApi): DesktopTra
 
 /** Bootstrap metadata is read from the native-owned engine, before installing the client listener. */
 export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<string> {
+  const generation = (bootstrapGenerations.get(native) ?? 0) + 1
+  bootstrapGenerations.set(native, generation)
   uiDocuments.delete(native)
   let status: unknown
   try {
@@ -69,6 +72,7 @@ export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<stri
     }
   }
   catch (error) { throw nativeError(error) }
+  if (bootstrapGenerations.get(native) !== generation) throw new ServiceProtocolError('STALE_EPOCH')
   const failure = productionBootstrapMessage(status)
   if (failure) throw new NativeBootstrapUnavailableError(failure)
   if (!isRecord(status) || status.available !== true || status.protocolVersion !== 1 ||

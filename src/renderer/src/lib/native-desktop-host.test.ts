@@ -16,6 +16,7 @@ afterEach(() => { for (const release of releases.splice(0)) release(); for (cons
 function deferred<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(done => { resolve = done }), resolve: (value: T) => resolve(value) } }
 function fixture(ui = false) {
   let uiLease = 'document-1'
+  const progressReceivers = new Set<(event: { payload: unknown }) => void>(), progressHistory: Array<(event: { payload: unknown }) => void> = []
   const uiReceivers = new Set<(event: { payload: unknown }) => void>(), uiHistory: Array<(event: { payload: unknown }) => void> = []
   let epoch = 'engine-1', sequence = 0
   const receivers = new Set<(event: { payload: unknown }) => void>(), history: Array<(event: { payload: unknown }) => void> = []
@@ -27,11 +28,13 @@ function fixture(ui = false) {
     return { engineEpoch: epoch, result: result === undefined ? { defined: false } : { defined: true, value: result } }
   })
   const listen = vi.fn(async (_name: string, receive: (event: { payload: unknown }) => void) => {
+    if (_name === 'desktop:agent-installation-progress') { progressReceivers.add(receive); progressHistory.push(receive); return () => { progressReceivers.delete(receive); unlisten() } }
     if (_name === 'desktop:ui-command') { uiReceivers.add(receive); uiHistory.push(receive); return () => { uiReceivers.delete(receive); unlisten() } }
     receivers.add(receive); history.push(receive); return () => { receivers.delete(receive); unlisten() } })
   const host = createNativeDesktopHost({ core: { invoke }, event: { listen } } as unknown as TauriDesktopApi); hosts.push(host)
   const emit = (operation: ServiceEvent['operation'], payload: ServiceEvent['payload']) => { const event = { protocolVersion: 1, kind: 'event', operation, payload, engineEpoch: epoch, sequence: ++sequence }; for (const receive of [...receivers]) receive({ payload: event }) }
-  return { host, invoke, listen, unlisten, results, history, emit, uiHistory,
+  return { host, invoke, listen, unlisten, results, history, emit, uiHistory, progressHistory,
+    emitProgress: (value: unknown) => { for (const receive of [...progressReceivers]) receive({ payload: value }) },
     emitUi: (value: unknown) => { for (const receive of [...uiReceivers]) receive({ payload: value }) },
     changeUiLease: () => { uiLease = 'document-2' }, changeEpoch: () => { epoch = 'engine-2'; sequence = 0 } }
 }
@@ -279,7 +282,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 224 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 225 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -288,7 +291,7 @@ it('binds the 224 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(224)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(225)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -733,7 +736,7 @@ it('binds bounded artifact reads while native file/clipboard effects stay unavai
 })
 
 
-it('routes exact CLI detection metadata without enabling installer execution', async () => {
+it('routes exact CLI detection and refuses installation without a current native document', async () => {
   const f = fixture()
   const snapshot = Object.fromEntries(AGENT_INSTALLER_DETECTION_KEYS.map(key => [key, { installed: false, version: null }]))
   Object.assign(snapshot, { pi: { installed: false, version: null, supported: false, reason: 'Pi CLI is not installed.' },
@@ -744,7 +747,7 @@ it('routes exact CLI detection metadata without enabling installer execution', a
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'agent-installer:detect', payload: {}, engineEpoch: 'engine-1' })
   f.host.setRehydrator(async () => {}); await f.host.rehydrate()
   const before = f.invoke.mock.calls.length
-  await expect(f.host.api.agentInstaller.install('codex')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
+  await expect(f.host.api.agentInstaller.install('codex')).rejects.toMatchObject({ code: 'DISCONNECTED' })
   expect(f.invoke.mock.calls.length).toBe(before)
   f.results.set('agent-installer:detect', { ...snapshot, codex: { installed: false, version: null, stdout: 'Private inherited output' } })
   await expect(f.host.api.agentInstaller.detect()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
@@ -865,4 +868,34 @@ it('does not publish UI state without native document authority or replay an old
   f.changeEpoch(); f.changeUiLease(); await f.host.reconnect(); await rejected
   pending.resolve({ engineEpoch: 'engine-1', result: { defined: false } })
   expect(f.invoke.mock.calls.filter(([, args]) => args?.operation === 'ui:publishState')).toHaveLength(1)
+})
+
+it('uses finite leased installer receipts and refuses retired or private progress payloads', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const progress = vi.fn(), off = f.host.api.agentInstaller.onProgress(progress)
+  const detection = Object.fromEntries(['nodejs','npm','pnpm','git','gh','glab','tea','rtk','claudeCode','opencode','codex','cursor','pi'].map(key => [key, key === 'pi' ? { installed: false, version: null, supported: false, reason: 'Pi CLI is not installed.' } : key === 'rtk' ? { installed: false, version: null, configured: false, integrations: { claudeCode: false, opencode: false, codex: false, cursor: false, pi: false } } : { installed: false, version: null }]))
+  f.results.set('agent-installer:install', { success: false, error: 'This CLI does not have a portable installation plan.', newStatus: detection })
+  await f.host.api.agentInstaller.install('cursor')
+  expect(f.invoke.mock.calls.at(-1)?.[1]).toEqual({ operation: 'agent-installer:install', payload: { agentName: 'cursor' }, engineEpoch: 'engine-1', uiLease: 'document-1' })
+  const receipt = { engineEpoch: 'engine-1', leaseId: 'document-1', progress: { agentName: 'opencode', stage: 'starting', output: 'Preparing CLI installation.', percent: 5 } }
+  f.emitProgress(receipt); expect(progress).toHaveBeenCalledTimes(1)
+  for (const invalid of [{ ...receipt, leaseId: 'retired' }, { ...receipt, caller: '*' }, { ...receipt, progress: { ...receipt.progress, output: 'private stderr' } }]) f.emitProgress(invalid)
+  expect(progress).toHaveBeenCalledTimes(1)
+  const retired = f.progressHistory[0]; f.changeUiLease(); await f.host.reconnect()
+  retired({ payload: receipt }); f.emitProgress(receipt); expect(progress).toHaveBeenCalledTimes(1)
+  f.emitProgress({ ...receipt, leaseId: 'document-2' }); expect(progress).toHaveBeenCalledTimes(2)
+  off(); f.emitProgress({ ...receipt, leaseId: 'document-2' }); expect(progress).toHaveBeenCalledTimes(2)
+})
+it('does not let a late bootstrap response replace a newer document or dispose its listeners', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {})
+  const gate = deferred<unknown>(), original = f.invoke.getMockImplementation()!; let first = true
+  f.invoke.mockImplementation((command, args) => { if (command === 'engine_status' && first) { first = false; return gate.promise } return original(command, args) })
+  const old = f.host.reconnect(), failure = expect(old).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  await f.host.reconnect(); gate.resolve({ available: true, protocolVersion: 1, engineEpoch: 'engine-old', uiLeaseId: 'document-old' }); await failure
+  expect(f.host.connection.status).toBe('ready')
+  const commands = vi.fn(); f.host.api.ui.onCommand(commands)
+  f.emitUi({ engineEpoch: 'engine-1', leaseId: 'document-1', command: { kind: 'navigate', view: 'tasks' } })
+  expect(commands).toHaveBeenCalledOnce()
+  await f.host.api.ui.publishState(publishedUi)
+  expect(f.invoke.mock.calls.at(-1)?.[1]).toMatchObject({ engineEpoch: 'engine-1', uiLease: 'document-1' })
 })

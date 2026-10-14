@@ -1,5 +1,7 @@
+import type { DesktopEventMap } from '../shared/desktop-operations'
+import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
-import { UI_NATIVE_CALLBACK_SCHEMAS, isNativeUiSnapshot, isNativeUiAcknowledgement, isPrivateUiPublication } from '../shared/ui-native-callbacks'
+import { UI_NATIVE_CALLBACK_SCHEMAS, isNativeUiSnapshot, isNativeUiAcknowledgement, isPrivateUiPublication, isPrivateAgentInstallation } from '../shared/ui-native-callbacks'
 import type { ProductionUiNativeHost } from '../main/production-ui-owner'
 import type { ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { isProductionLaunchDescriptor, isProductionInitialize, PRODUCTION_HOST_SCHEMAS } from '../shared/production-bootstrap'
@@ -15,6 +17,7 @@ import { ServicePeer, type OperationSchema } from './transport/peer'
 
 export interface ProductionPrivateCallbacks {
   ui: ProductionUiNativeHost
+  emitInstallationProgress(progress: DesktopEventMap['agent-installer:progress'], leaseId: string): Promise<void>
   prepare(signal: AbortSignal): Promise<void>
   drain(): Promise<{ acknowledged: true }>
   openExternal(url: string): Promise<void>
@@ -84,6 +87,13 @@ export class ProductionService {
           return result
         }
       },
+      emitInstallationProgress: async (progress, leaseId) => {
+        if (descriptor.capabilities.ui !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
+        const acknowledgement = await this.retain(this.peer.request('host.ui.installerProgress', { progress: progress as unknown as JsonValue, leaseId }, { timeoutMs: 5000 }))
+        if (!isNativeUiAcknowledgement(acknowledgement) || acknowledgement.ok && acknowledgement.leaseId !== leaseId) throw new ServiceProtocolError('INVALID_RESULT')
+        // A retired document suppresses this phase receipt without redirecting
+        // it to a replacement. The installation remains application-owned.
+      },
       prepare: async signal => {
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
         const result = await this.peer.request('host.production.prepare', { launchId: descriptor.launchId, resourceManifestSha256: descriptor.resourceManifestSha256 })
@@ -149,6 +159,13 @@ export class ProductionService {
       handle: (payload, signal) => {
         if (!this.initialized || this.closing || !this.bindings || !isRecord(payload) || typeof payload.leaseId !== 'string') throw new ServiceProtocolError('DISCONNECTED')
         return this.retain(this.bindings.invoke('ui:publishState', { state: payload.state }, { ...this.caller, uiLeaseId: payload.leaseId }, signal))
+      } }
+    operations['agent-installer:install'].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
+    operations['engine.agent.install'] = { validatePayload: isPrivateAgentInstallation,
+      validateResult: AGENT_INSTALLER_CODECS['agent-installer:install'].validateWireResult,
+      handle: (payload, signal) => {
+        if (!this.initialized || this.closing || !this.bindings || !isRecord(payload) || typeof payload.leaseId !== 'string') throw new ServiceProtocolError('DISCONNECTED')
+        return this.retain(this.bindings.invoke('agent-installer:install', { agentName: payload.agentName }, { ...this.caller, uiLeaseId: payload.leaseId }, signal))
       } }
     operations['engine.ping'] = { validatePayload: empty, validateResult: isBootstrapResult, handle: () => { this.pinged = true; return result } }
     operations['engine.initialize'] = { validatePayload: isProductionInitialize, validateResult: isBootstrapResult, handle: async (payload, signal) => {
@@ -292,7 +309,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
   }
   const host = sealProductionServiceHost({ descriptor, authority, caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' },
     unbridgedOwnerEvent: () => { process.stderr.write('PRODUCTION_NATIVE_EVENT_UNSUPPORTED\n') },
-    constructBootstrap: callbacks => ({ profileId: descriptor.profileId, paths: descriptor.paths,
+    constructBootstrap: callbacks => ({ agentInstallation: { nodeExecutable: resources.node }, profileId: descriptor.profileId, paths: descriptor.paths,
       credentials: { store: new NativeApplicationKeyStore(resources.credentialHelper), mode: descriptor.profileIntent === 'create-new' ? 'create' : 'load' },
       ...(resources.mobileDistRoot === undefined ? {} : { mobile: { distRoot: resources.mobileDistRoot } }),
       ...(resources.voice === undefined ? {} : { voice: { ...resources.voice, node: resources.node } }),
@@ -304,7 +321,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         ...(descriptor.capabilities.workspaceFiles === 'host' ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}),
         // Browser opening alone does not register or own OAuth deep-link callbacks.
         oauthBrowser: 'unavailable',
-        ...(descriptor.capabilities.ui === 'host' ? { ui: callbacks.ui } : {}),
+        ...(descriptor.capabilities.ui === 'host' ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         notify: callbacks.notify, emit: callbacks.emitOwnerEvent,
         sendUiCommand: () => ({ ok: false, detail: 'Private production launch has no reviewed UI command callback' }) }
     }) })

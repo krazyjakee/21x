@@ -1,6 +1,8 @@
 //! Finite production ingress/egress policy, independent of diagnostic grants.
 //! Native bounds/outer DTO checks complement the service's exact domain codecs.
 use serde_json::Value;
+#[path = "production_agent_installer.rs"]
+pub mod agent_installer;
 #[path = "production_cli_attachments.rs"]
 mod cli_attachments;
 #[path = "production_project_groups.rs"]
@@ -92,6 +94,7 @@ pub const COMMANDS: &[&str] = &[
     "voice:tts:selectModel",
     "voice:tts:removeModel",
     "agent-installer:detect",
+    "agent-installer:install",
     "artifacts:scan",
     "artifacts:read",
     "mobile:getInfo",
@@ -233,6 +236,7 @@ pub const COMMANDS: &[&str] = &[
     "taskSource:reassign",
 ];
 pub const EVENTS: &[&str] = &[
+    "agent-installer:progress",
     "ui:command",
     "heartbeat:alert",
     "heartbeat:disabled",
@@ -3199,6 +3203,9 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if operation == agent_installer::OPERATION {
+        return agent_installer::request(value);
+    }
     if operation == "ui:publishState" {
         return crate::production_ui_contracts::publish_request(value);
     }
@@ -3343,6 +3350,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if operation == agent_installer::OPERATION {
+        return agent_installer::result(value);
+    }
     if operation == "ui:publishState" {
         return crate::production_ui_contracts::void_result(value);
     }
@@ -3661,6 +3671,9 @@ fn transcript_page_request(value: &Value) -> bool {
             || value["after"].as_u64() <= value["watermark"].as_u64())
 }
 pub fn valid_event(operation: &str, value: &Value) -> bool {
+    if operation == agent_installer::EVENT {
+        return agent_installer::progress(value);
+    }
     if operation == "ui:command" {
         return crate::production_ui_contracts::command(value);
     }
@@ -4198,7 +4211,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 29);
+        assert_eq!(EVENTS.len(), 30);
         let requests = [
             ("mobile:getInfo", json!({})),
             (
@@ -5033,7 +5046,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 222);
+        assert_eq!(COMMANDS.len(), 223);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

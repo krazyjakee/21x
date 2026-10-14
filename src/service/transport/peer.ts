@@ -1,5 +1,5 @@
 import {
-  SERVICE_LIMITS, SERVICE_PROTOCOL_VERSION, ServiceProtocolError, isBootstrapOperation,
+  serviceOperationTimeoutMs, SERVICE_LIMITS, SERVICE_PROTOCOL_VERSION, ServiceProtocolError, isBootstrapOperation,
   isBootstrapResult, isRecord, isRequestId, hasExactKeys, isJsonValue, serviceError,
   type JsonValue, type RequestId, type ServiceErrorCode, type ServiceEvent,
   type ServiceFrame, type ServiceRequest, type ServiceResponse, type ServiceRole
@@ -158,8 +158,8 @@ export class ServicePeer {
       return Promise.reject(new ServiceProtocolError('BACKPRESSURE'))
     }
     if (options.signal?.aborted) return Promise.reject(new ServiceProtocolError('CANCELLED'))
-    const timeoutMs = options.timeoutMs ?? SERVICE_LIMITS.requestTimeoutMs
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > SERVICE_LIMITS.requestTimeoutMs) {
+    const timeoutMs = options.timeoutMs ?? serviceOperationTimeoutMs(operation)
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > serviceOperationTimeoutMs(operation)) {
       return Promise.reject(new ServiceProtocolError('INVALID_ARGUMENTS'))
     }
     const requestId: RequestId = `${this.options.role}:${++this.nextId}`
@@ -299,7 +299,7 @@ export class ServicePeer {
           active.replied = true
           try { this.replyError(frame.requestId, 'TIMEOUT') } catch { this.disconnect('BACKPRESSURE') }
         }
-      }, SERVICE_LIMITS.requestTimeoutMs)
+      }, serviceOperationTimeoutMs(frame.operation))
     }
     this.active.set(frame.requestId, active)
     void Promise.resolve().then(() => {

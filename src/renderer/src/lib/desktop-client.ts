@@ -1,7 +1,7 @@
 import { DESKTOP_OPERATION_MANIFEST, type DesktopCommandMap, type DesktopEventMap } from '@shared/desktop-operations'
 import { isOptionalResult } from '@shared/host-services'
 import {
-  SERVICE_LIMITS, ServiceProtocolError, hasExactKeys, isJsonValue, isRecord,
+  serviceOperationTimeoutMs, SERVICE_LIMITS, ServiceProtocolError, hasExactKeys, isJsonValue, isRecord,
   validateServiceFrame, type JsonValue, type ServiceErrorCode, type ServiceEvent
 } from '@shared/service-protocol'
 
@@ -112,8 +112,8 @@ export class DesktopClient {
     if (this.disposed || this.state.status !== 'ready' || !this.state.engineEpoch) throw new ServiceProtocolError('DISCONNECTED')
     if (this.pending.size >= SERVICE_LIMITS.pendingRequests) throw new ServiceProtocolError('BACKPRESSURE')
     if (options.signal?.aborted) throw new ServiceProtocolError('CANCELLED')
-    const timeoutMs = options.timeoutMs ?? SERVICE_LIMITS.requestTimeoutMs
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > SERVICE_LIMITS.requestTimeoutMs) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    const timeoutMs = options.timeoutMs ?? serviceOperationTimeoutMs(operation)
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > serviceOperationTimeoutMs(operation)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     let payload: JsonValue
     try {
       payload = codec.encodeArguments(args)

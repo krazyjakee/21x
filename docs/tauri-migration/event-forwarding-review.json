@@ -7,7 +7,7 @@
       "id": "agent-host-dispatch",
       "source": {
         "file": "src/main/agent-manager-core.ts",
-        "line": 6816,
+        "line": 6864,
         "column": 52,
         "target": "reviewed-event-wrapper",
         "method": "send",
@@ -46,7 +46,7 @@
       "id": "agent-broadcast",
       "source": {
         "file": "src/main/agent-manager-core.ts",
-        "line": 6821,
+        "line": 6869,
         "column": 7,
         "target": "reviewed-event-wrapper",
         "method": "send",
@@ -83,7 +83,7 @@
       "id": "agent-persist-or-broadcast",
       "source": {
         "file": "src/main/agent-manager-core.ts",
-        "line": 6852,
+        "line": 6900,
         "column": 5,
         "target": "reviewed-event-wrapper",
         "method": "send",

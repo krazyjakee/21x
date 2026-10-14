@@ -8,6 +8,11 @@ export const SERVICE_LIMITS = {
   queuedBytes: 4 * 1024 * 1024,
   requestTimeoutMs: 30_000
 } as const
+/** Long installation work has a finite deadline without widening ordinary calls. */
+export function serviceOperationTimeoutMs(operation: string): number {
+  return operation === 'agent-installer:install' || operation === 'engine.agent.install' ? 180_000 : SERVICE_LIMITS.requestTimeoutMs
+}
+
 
 export const SERVICE_ERROR_MESSAGES = {
   INVALID_FRAME: 'Invalid protocol frame.',

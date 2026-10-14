@@ -18,7 +18,7 @@ import { GitProviderBackend } from './git-provider-backend'
 import { GIT_PROVIDER_CODECS } from '../shared/git-provider-codecs'
 import { WORKSPACE_FILE_CODECS } from '../shared/workspace-file-codecs'
 import { WorkspaceFileBackend } from './workspace-file-backend'
-import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
+import { AGENT_INSTALLER_CODECS, AGENT_INSTALLER_EVENT_CODECS } from '../shared/agent-installer-codecs'
 import { ArtifactBackend } from './artifact-backend'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { VoiceManagementBackend } from './voice-management-backend'
@@ -97,7 +97,7 @@ export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
   ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
-  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS }
+  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS }
 
 /** Validate actual wire payload, including explicit binary envelopes. */
 export function validateProductionEventWire(operation: string, payload: unknown): boolean {
@@ -256,8 +256,39 @@ export class ProductionDesktopBindings {
     this.mobile = mobileLease ? new MobileBackend({ ...mobileLease, engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageMobile: dynamicAuthority.canManageMobile,
       canAccessSession: dynamicAuthority.canAccessMobileSession }) : null
-    this.agentInstaller = new AgentInstallerBackend({ ...owner.getAgentInstallerBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
-      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration })
+    const installationLease = owner.getAgentInstallerBindingLease()
+    let installationBinding: { name: string; signature: string } | null = null
+    const installationSignature = (name: string): string => JSON.stringify({ agents: services.agents.getAgentInstallationAffectedAgents(name), projects: services.agents.getAgentInstallationAffectedProjects(name) })
+    const installationGrants = (name: string, caller: DesktopCallerContext): boolean => {
+      if (!dynamicAuthority.canManageGlobalConfiguration(caller, 'read') || !dynamicAuthority.canManageGlobalConfiguration(caller, 'write')) return false
+      if (installationBinding && (installationBinding.name !== name || installationBinding.signature !== installationSignature(name))) throw new ServiceProtocolError('INVALID_REQUEST')
+      if (!installationLease.installation?.canInstall(name)) return true // finite unsupported plans retain read-only evidence
+      return services.agents.getAgentInstallationAffectedAgents(name).every(id => dynamicAuthority.canAccessAgent(id, caller, 'read') && dynamicAuthority.canAccessAgent(id, caller, 'write')) &&
+        services.agents.getAgentInstallationAffectedProjects(name).every(id => dynamicAuthority.canAccessProject(id, caller, 'read') && dynamicAuthority.canAccessProject(id, caller, 'write'))
+    }
+    this.agentInstaller = new AgentInstallerBackend({ ...installationLease, engineEpoch: this.epoch, assertAvailable: available,
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration,
+      ...(installationLease.installation ? { canInstallBackend: installationGrants,
+        runInstallation: async (name, caller, effect, beforeEffect, signal) => {
+          available(); beforeEffect()
+          if (signal.aborted || !installationGrants(name, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
+          if (!installationLease.installation!.canInstall(name)) return effect()
+          const initial = installationSignature(name)
+          const guard = (): void => {
+            beforeEffect()
+            if (initial !== installationSignature(name)) throw new ServiceProtocolError('INVALID_REQUEST')
+          }
+          return services.agents.runAgentInstallationMutation(name, async () => {
+            installationBinding = { name, signature: initial }
+            try {
+              guard(); const result = await effect(); guard()
+              if (result.success) owner.applyVerifiedManagedPi()
+              return result
+            } finally { installationBinding = null }
+          })
+        } } : {}),
+      ...(installationLease.emitProgress ? { isCurrentProgressRecipient: caller => !!services.ui && services.ui.observedLeaseId === caller.uiLeaseId,
+        emitProgress: (progress, caller) => installationLease.emitProgress!(progress, caller.uiLeaseId!) } : { emitProgress: undefined }) })
     this.artifacts = new ArtifactBackend({ database: services.db, ...owner.getArtifactBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask, canAccessProject: dynamicAuthority.canAccessProject })
     const voiceLease = owner.getVoiceBindingLease()

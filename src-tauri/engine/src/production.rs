@@ -22,11 +22,21 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::ChildStdin,
     sync::{oneshot, watch, Mutex as AsyncMutex, Semaphore},
-    time::timeout,
+    time::{timeout, timeout_at, Instant},
 };
 
 const MAX_FRAME: usize = 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
+fn request_deadline_at(operation: &str, started: Instant) -> Instant {
+    // This private operation has a bounded <=150s owned installation plan.
+    // No caller-provided duration or namespace changes other request budgets.
+    started
+        + if operation == "engine.agent.install" {
+            Duration::from_secs(180)
+        } else {
+            DEADLINE
+        }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductionPaths {
@@ -98,11 +108,17 @@ pub struct ProductionNativeHost {
     pub notification: Option<Arc<dyn Fn(String, String) -> HostFuture<bool> + Send + Sync>>,
     pub ui_snapshot: Option<Arc<dyn Fn(String) -> HostFuture<Value> + Send + Sync>>,
     pub ui_command: Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
+    pub installer_progress:
+        Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
 }
 fn ui_host_matches(capability: &HostCapability, host: &ProductionNativeHost) -> bool {
     match capability {
         HostCapability::Host => host.ui_snapshot.is_some() && host.ui_command.is_some(),
-        HostCapability::Unsupported => host.ui_snapshot.is_none() && host.ui_command.is_none(),
+        HostCapability::Unsupported => {
+            host.ui_snapshot.is_none()
+                && host.ui_command.is_none()
+                && host.installer_progress.is_none()
+        }
     }
 }
 async fn ui_callback(
@@ -134,6 +150,27 @@ async fn ui_callback(
             }
             let result = host.ui_command.as_ref().unwrap()(
                 payload["command"].clone(),
+                payload["leaseId"].as_str().unwrap().to_owned(),
+                epoch,
+            )
+            .await?;
+            if !ui::command_result(&result)
+                || result["ok"] == true && result["leaseId"] != payload["leaseId"]
+            {
+                return Err(EngineError::new("INVALID_RESULT"));
+            }
+            result
+        }
+        "host.ui.installerProgress" => {
+            if !contracts::agent_installer::progress_request(payload) {
+                return Err(EngineError::new("INVALID_ARGUMENTS"));
+            }
+            let callback = host
+                .installer_progress
+                .as_ref()
+                .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?;
+            let result = callback(
+                payload["progress"].clone(),
                 payload["leaseId"].as_str().unwrap().to_owned(),
                 epoch,
             )
@@ -593,6 +630,47 @@ impl ProductionEngine {
         }
         self.request("engine.ui.publish", payload).await
     }
+    /// Only the trusted native ingress attaches the captured current document
+    /// receipt. The renderer cannot supply private pipe operations or grants.
+    pub async fn install_agent(
+        &self,
+        epoch: &str,
+        payload: Value,
+        lease_id: &str,
+    ) -> Result<Value, EngineError> {
+        if !contracts::agent_installer::request(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let payload = json!({"agentName":payload["agentName"],"leaseId":lease_id});
+        if !contracts::agent_installer::private_request(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.ui != HostCapability::Host
+            || self.0.host.installer_progress.is_none()
+        {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        let result = self.request("engine.agent.install", payload).await?;
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        Ok(result)
+    }
     async fn write(&self, frame: &Value) -> Result<(), EngineError> {
         let mut bytes =
             serde_json::to_vec(frame).map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
@@ -618,9 +696,12 @@ impl ProductionEngine {
             .map_err(|_| EngineError::new("DISCONNECTED"))
     }
     async fn request(&self, operation: &str, payload: Value) -> Result<Value, EngineError> {
-        timeout(DEADLINE, self.request_raw(operation, payload))
-            .await
-            .unwrap_or_else(|_| Err(EngineError::new("TIMEOUT")))
+        timeout_at(
+            request_deadline_at(operation, Instant::now()),
+            self.request_raw(operation, payload),
+        )
+        .await
+        .unwrap_or_else(|_| Err(EngineError::new("TIMEOUT")))
     }
     async fn request_raw(&self, operation: &str, payload: Value) -> Result<Value, EngineError> {
         let _slot = self
@@ -739,6 +820,7 @@ impl ProductionEngine {
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
                         "engine.ui.publish" => crate::production_ui_contracts::void_result(result),
+                        "engine.agent.install" => contracts::agent_installer::result(result),
                         operation => contracts::valid_result(operation, result),
                     };
                     if !valid {
@@ -889,22 +971,30 @@ impl ProductionEngine {
         let payload = &frame["payload"];
         let operation = frame["operation"].as_str().unwrap_or("");
         match operation {
-            "host.ui.snapshot" | "host.ui.command" => {
+            "host.ui.snapshot" | "host.ui.command" | "host.ui.installerProgress" => {
                 if self.0.closed.load(Ordering::SeqCst)
                     || self.0.stopping.load(Ordering::SeqCst)
                     || !self.0.prepared.load(Ordering::SeqCst)
-                    || operation == "host.ui.command" && !self.0.ready.load(Ordering::SeqCst)
+                    || operation != "host.ui.snapshot" && !self.0.ready.load(Ordering::SeqCst)
                 {
                     return Err(EngineError::new("DISCONNECTED"));
                 }
-                ui_callback(
+                let epoch = self.epoch();
+                let result = ui_callback(
                     &self.0.host,
                     &self.0.descriptor.capabilities.ui,
-                    self.epoch(),
+                    epoch.clone(),
                     operation,
                     payload,
                 )
-                .await
+                .await?;
+                if epoch != self.epoch() {
+                    return Err(EngineError::new("STALE_EPOCH"));
+                }
+                if self.0.closed.load(Ordering::SeqCst) || self.0.stopping.load(Ordering::SeqCst) {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                Ok(result)
             }
             "host.production.prepare" => {
                 if !contracts::object(payload, &["launchId", "resourceManifestSha256"], &[])
@@ -1938,6 +2028,7 @@ mod tests {
             notification: None,
             ui_snapshot: None,
             ui_command: None,
+            installer_progress: None,
         }
     }
     #[test]
@@ -2119,6 +2210,192 @@ mod tests {
             .code,
             "INVALID_RESULT"
         );
+    }
+    #[tokio::test]
+    async fn installer_progress_requires_its_actual_callback_and_exact_document_ack() {
+        let mut host = ui_host();
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        let payload = json!({"progress":{"agentName":"codex","stage":"starting","output":"Preparing CLI installation.","percent":5},"leaseId":"ui:1"});
+        assert!(ui_host_matches(&HostCapability::Host, &host));
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.installerProgress",
+                &payload
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "UNKNOWN_OPERATION"
+        );
+        let count = Arc::new(AtomicU64::new(0));
+        let calls = count.clone();
+        host.installer_progress = Some(Arc::new(move |progress, lease, epoch| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(progress["agentName"], "codex");
+            assert_eq!(lease, "ui:1");
+            assert_eq!(epoch, "epoch-fixture");
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        assert!(!ui_host_matches(&HostCapability::Unsupported, &host));
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Unsupported,
+                "epoch-fixture".into(),
+                "host.ui.installerProgress",
+                &payload
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "UNKNOWN_OPERATION"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        let mut bad = payload.clone();
+        bad["progress"]["output"] = json!("token=private");
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.installerProgress",
+                &bad
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INVALID_ARGUMENTS"
+        );
+        bad = payload.clone();
+        bad["caller"] = json!("main");
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.installerProgress",
+                &bad
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INVALID_ARGUMENTS"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.installerProgress",
+                &payload
+            )
+            .await
+            .unwrap(),
+            json!({"ok":true,"leaseId":"ui:1"})
+        );
+        host.installer_progress = Some(Arc::new(|_, _, _| {
+            Box::pin(async { Ok(json!({"ok":true,"leaseId":"other-document"})) })
+        }));
+        assert_eq!(
+            ui_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                "host.ui.installerProgress",
+                &payload
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INVALID_RESULT"
+        );
+    }
+    #[tokio::test]
+    async fn installer_progress_raw_callback_remains_owned_after_its_waiter_is_dropped() {
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let entered = Arc::new(Mutex::new(Some(entered_tx)));
+        let release = Arc::new(Mutex::new(Some(release_rx)));
+        let mut host = ui_host();
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        host.installer_progress = Some(Arc::new(move |_, lease, _| {
+            let entered = entered.lock().unwrap().take().unwrap();
+            let release = release.lock().unwrap().take().unwrap();
+            Box::pin(async move {
+                let _ = entered.send(());
+                release.await.unwrap();
+                Ok(json!({"ok":true,"leaseId":lease}))
+            })
+        }));
+        let completed = Arc::new(AtomicBool::new(false));
+        let finished = completed.clone();
+        let raw = tokio::spawn(async move {
+            let result=ui_callback(&host,&HostCapability::Host,"epoch-fixture".into(),"host.ui.installerProgress",&json!({"progress":{"agentName":"codex","stage":"verifying","output":"Checking the installed CLI.","percent":90},"leaseId":"ui:1"})).await;
+            assert_eq!(result.unwrap(), json!({"ok":true,"leaseId":"ui:1"}));
+            finished.store(true, Ordering::SeqCst);
+        });
+        entered_rx.await.unwrap();
+        assert!(!completed.load(Ordering::SeqCst));
+        drop(raw);
+        assert!(!completed.load(Ordering::SeqCst));
+        release_tx.send(()).unwrap();
+        timeout(Duration::from_secs(1), async {
+            while !completed.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    #[tokio::test]
+    async fn only_the_private_installer_operation_survives_the_normal_request_deadline() {
+        // An aged origin exercises the actual Tokio timeout enforcement without
+        // sleeping for either production budget or accepting a public duration.
+        let aged = Instant::now() - Duration::from_secs(31);
+        for operation in [
+            "engine.ping",
+            "engine.ui.publish",
+            "host.ui.installerProgress",
+            "agent-installer:install",
+            "engine.agent.install.extra",
+        ] {
+            let result = timeout_at(
+                request_deadline_at(operation, aged),
+                std::future::pending::<()>(),
+            )
+            .await;
+            assert!(
+                result.is_err(),
+                "unexpected extended budget for {operation}"
+            );
+        }
+        let installer = timeout_at(request_deadline_at("engine.agent.install", aged), async {
+            tokio::task::yield_now().await;
+            "actual acknowledgement"
+        })
+        .await;
+        assert_eq!(installer.unwrap(), "actual acknowledgement");
+        let expired = Instant::now() - Duration::from_secs(181);
+        assert!(timeout_at(
+            request_deadline_at("engine.agent.install", expired),
+            std::future::pending::<()>()
+        )
+        .await
+        .is_err());
     }
     #[test]
     fn native_request_identity_is_scoped_and_monotonic_decimal() {

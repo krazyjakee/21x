@@ -14,6 +14,7 @@ use twentyonex_engine::{
 };
 
 pub const COMMAND_EVENT: &str = "desktop:ui-command";
+pub const INSTALLER_PROGRESS_EVENT: &str = "desktop:agent-installation-progress";
 const UNAVAILABLE: &str = "The current desktop document is unavailable.";
 
 #[derive(Default)]
@@ -398,6 +399,63 @@ impl NativeUiOwner {
             .map_err(|_| EngineError::new("DISCONNECTED"))?;
         Ok(json!({"ok":true,"leaseId":lease}))
     }
+    fn installer_progress(
+        &self,
+        app: &tauri::AppHandle,
+        progress: Value,
+        lease: &str,
+        epoch: &str,
+    ) -> Result<Value, EngineError> {
+        if !twentyonex_engine::production::contracts::agent_installer::progress(&progress)
+            || !contracts::lease_id(&json!(lease))
+        {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let Ok(captured) = self.captured(app, epoch) else {
+            return Ok(json!({"ok":false,"detail":UNAVAILABLE}));
+        };
+        // This is the same captured physical document as the installation
+        // request. A replacement main label never inherits its progress.
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        if !state.matches(&captured)
+            || state
+                .document
+                .current(&captured.key, epoch, Some(lease), true)
+                .is_none()
+        {
+            return Ok(json!({"ok":false,"detail":UNAVAILABLE}));
+        }
+        captured
+            .window
+            .emit_to(
+                EventTarget::WebviewWindow {
+                    label: "main".into(),
+                },
+                INSTALLER_PROGRESS_EVENT,
+                json!({"engineEpoch":epoch,"leaseId":lease,"progress":progress}),
+            )
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        Ok(json!({"ok":true,"leaseId":lease}))
+    }
+    pub fn installer_progress_callback(
+        &self,
+        app: tauri::AppHandle,
+        work: NativeWorkOwner,
+    ) -> Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync> {
+        let owner = self.clone();
+        Arc::new(move |progress, lease, epoch| {
+            let (owner, app, work) = (owner.clone(), app.clone(), work.clone());
+            Box::pin(async move {
+                owned_result(work, move || {
+                    owner.installer_progress(&app, progress, &lease, &epoch)
+                })
+                .await
+            })
+        })
+    }
     pub fn snapshot_callback(
         &self,
         app: tauri::AppHandle,
@@ -589,6 +647,55 @@ mod tests {
         release.send(()).unwrap();
         drain.await.unwrap().unwrap();
         assert_eq!(work.active().unwrap(), 0);
+    }
+    #[tokio::test]
+    async fn installer_progress_cancelled_waiter_retains_raw_work_and_rechecks_reload_before_emit()
+    {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let (mut document, ticket) = ready();
+        let lease = document.activate("physical-A", "epoch", true).unwrap();
+        let document = Arc::new(Mutex::new(document));
+        let captured = document.clone();
+        let emitted = Arc::new(AtomicU64::new(0));
+        let emissions = emitted.clone();
+        let work = NativeWorkOwner::default();
+        let owned = work.clone();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let progress = json!({"agentName":"codex","stage":"installing","output":"Installing the selected CLI.","percent":50});
+        assert!(twentyonex_engine::production::contracts::agent_installer::progress(&progress));
+        let public = tokio::spawn(async move {
+            owned_result(owned, move || {
+                let _ = entered.send(());
+                held.recv().unwrap();
+                let document = captured.lock().unwrap();
+                if document
+                    .current("physical-A", "epoch", Some(&lease), true)
+                    .is_none()
+                {
+                    return Ok(json!({"ok":false,"detail":UNAVAILABLE}));
+                }
+                // Controlled external boundary: physical delivery is tested by
+                // the native host fixture; this tests its retained lease fence.
+                emissions.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({"ok":true,"leaseId":lease}))
+            })
+            .await
+        });
+        started.await.unwrap();
+        public.abort();
+        assert_eq!(work.active().unwrap(), 1);
+        document.lock().unwrap().navigation(ticket).unwrap();
+        let drain_owner = work.clone();
+        let drain = tokio::spawn(async move { drain_owner.drain().await });
+        tokio::task::yield_now().await;
+        assert!(!drain.is_finished());
+        release.send(()).unwrap();
+        drain.await.unwrap().unwrap();
+        assert_eq!(work.active().unwrap(), 0);
+        assert_eq!(emitted.load(Ordering::SeqCst), 0);
+        assert_ne!(INSTALLER_PROGRESS_EVENT, COMMAND_EVENT);
+        assert_ne!(INSTALLER_PROGRESS_EVENT, "desktop:event");
     }
     #[tokio::test]
     async fn callback_rechecks_document_after_queued_raw_work_and_never_claims_applied() {

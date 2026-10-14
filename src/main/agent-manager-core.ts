@@ -1417,12 +1417,55 @@ export class AgentManager extends EventEmitter {
     return this.cliConfigurationAgents().filter(agent => targets.has(agent.backend)).map(agent => agent.id)
   }
 
+  private agentInstallationTargets(name: string): Set<string> {
+    const mapping: Record<string, string> = { claudeCode: 'claude-code', opencode: 'opencode', codex: 'codex', cursor: 'cursor', pi: 'pi' }
+    if (name === 'pnpm') return new Set(['claude-code', 'opencode', 'codex', 'cursor', 'pi'])
+    if (!Object.hasOwn(mapping, name)) throw new Error('Select a supported agent installation target.')
+    return new Set([mapping[name]])
+  }
+  getAgentInstallationAffectedAgents(name: string): string[] {
+    const targets = this.agentInstallationTargets(name)
+    return this.cliConfigurationAgents().filter(agent => targets.has(agent.backend)).map(agent => agent.id)
+  }
+  getAgentInstallationAffectedProjects(name: string): string[] {
+    const ids = this.getAgentInstallationAffectedAgents(name)
+    const bounds = this.db.db.prepare(`SELECT COUNT(*) AS count, COALESCE(MAX(length(CAST(id AS BLOB))),0) AS id_bytes,
+      COALESCE(MAX(length(CAST(captain_agent_id AS BLOB))),0) AS captain_bytes, COALESCE(MAX(length(CAST(default_agent_id AS BLOB))),0) AS default_bytes FROM projects`).get() as Record<string, number>
+    if (Object.values(bounds).some(value => !Number.isSafeInteger(value) || value < 0) || bounds.count > 128 || bounds.id_bytes > 128 || bounds.captain_bytes > 128 || bounds.default_bytes > 128) throw new Error('Agent installation project metadata requires reconciliation.')
+    const rows = this.db.db.prepare('SELECT id,captain_agent_id,default_agent_id FROM projects ORDER BY id LIMIT 129').all() as Array<{ id: string; captain_agent_id: string | null; default_agent_id: string | null }>
+    const valid = (id: string) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)
+    if (rows.some(row => !valid(row.id) || row.captain_agent_id !== null && !valid(row.captain_agent_id) || row.default_agent_id !== null && !valid(row.default_agent_id))) throw new Error('Agent installation project metadata requires reconciliation.')
+    const fallback = this.db.db.prepare('SELECT id FROM agents WHERE is_default=1 ORDER BY id LIMIT 2').all() as Array<{ id: string }>
+    if (fallback.length > 1 || fallback.some(row => !valid(row.id))) throw new Error('Agent installation default metadata requires reconciliation.')
+    const settings = this.db.db.prepare("SELECT length(CAST(value AS BLOB)) AS bytes FROM settings WHERE key='default_agent_id'").get() as { bytes: number } | undefined
+    if (settings && (!Number.isSafeInteger(settings.bytes) || settings.bytes > 128)) throw new Error('Agent installation default metadata requires reconciliation.')
+    const configured = settings ? (this.db.db.prepare("SELECT value FROM settings WHERE key='default_agent_id'").get() as { value: string }).value : null
+    if (configured && !valid(configured)) throw new Error('Agent installation default metadata requires reconciliation.')
+    const globalDefault = configured || fallback[0]?.id || this.cliConfigurationAgents()[0]?.id
+    const projects = new Set(rows.filter(row => ids.includes(row.captain_agent_id ?? row.default_agent_id ?? globalDefault ?? '') || row.default_agent_id && ids.includes(row.default_agent_id)).map(row => row.id))
+    for (const id of ids) {
+      const size = this.db.db.prepare('SELECT COALESCE(MAX(length(CAST(project_id AS BLOB))),0) AS bytes FROM tasks WHERE agent_id=?').get(id) as { bytes: number }
+      if (!Number.isSafeInteger(size.bytes) || size.bytes > 128) throw new Error('Agent installation task metadata requires reconciliation.')
+      const scopes = this.db.db.prepare('SELECT DISTINCT project_id FROM tasks WHERE agent_id=? LIMIT 129').all(id) as Array<{ project_id: string | null }>
+      if (scopes.length > 128 || scopes.some(row => row.project_id === null || !valid(row.project_id) || !rows.some(project => project.id === row.project_id))) throw new Error('Agent installation task metadata requires reconciliation.')
+      for (const scope of scopes) projects.add(scope.project_id!)
+    }
+    return [...projects].sort()
+  }
+  runAgentInstallationMutation<T extends { success: boolean }>(name: string, mutation: () => Promise<T>): Promise<T> {
+    return this.runCliRuntimeMutation(this.agentInstallationTargets(name), mutation, true)
+  }
+
   /** Actual configuration effects never stop a session implicitly. All
    * startup ownership must be settled before global CLI files are changed. */
   runCliConfigurationMutation<T>(clis: readonly ('claude-code' | 'opencode' | 'codex')[], mutation: () => Promise<T>): Promise<T> {
     this.taskGroupRequests.assertCurrent()
     if (typeof mutation !== 'function') return Promise.reject(new Error('A CLI configuration mutation is required.'))
-    const targets = this.cliConfigurationTargets(clis)
+    return this.runCliRuntimeMutation(this.cliConfigurationTargets(clis), mutation, false)
+  }
+  private runCliRuntimeMutation<T>(targets: Set<string>, mutation: () => Promise<T>, installation: boolean): Promise<T> {
+    this.taskGroupRequests.assertCurrent()
+    if (typeof mutation !== 'function') return Promise.reject(new Error('A CLI mutation is required.'))
     if (this.shuttingDown || this.productionCredentialMutation || this.productionAdmissionMutation || this.agentConfigurationMutations.size || this.backendConfigurationMutations.size
       || this.rawTaskStarts.size || this.sessionStarts.size || this.captainSwitches.size || this.taskGroupMutations.size || this.taskLifecycleMutations.size || this.sessionStops.size)
       return Promise.reject(new Error('Wait for agent lifecycle work to finish before changing CLI configuration.'))
@@ -1431,7 +1474,7 @@ export class AgentManager extends EventEmitter {
     if ([...this.sessions.values()].some(session => ids.has(session.agentId) || !allIds.has(session.agentId))
       || [...this.admittedStarts.values()].some(id => ids.has(id) || !allIds.has(id)))
       return Promise.reject(new Error('Stop affected agent sessions and admitted starts before changing CLI configuration.'))
-    if ([...targets].some(backend => this.adapters.has(backend) && typeof this.adapters.get(backend)?.notifyConfigChanged !== 'function'))
+    if ([...targets].some(backend => this.adapters.has(backend) && (installation || typeof this.adapters.get(backend)?.notifyConfigChanged !== 'function')))
       return Promise.reject(new Error('A cached affected adapter cannot acknowledge configuration refresh. Restart before changing this CLI configuration.'))
     // Read only bounded ownership scalars. Full queue getters also load saved
     // workspace/error payloads and are intentionally excluded from preflight.
@@ -1455,6 +1498,11 @@ export class AgentManager extends EventEmitter {
         if (this.shuttingDown) throw new Error('The app is shutting down.')
         effectStarted = true
         const result = await this.ownShutdownWork(mutation())
+        this.taskGroupRequests.assertCurrent()
+        if (installation && (typeof result !== 'object' || result === null || !('success' in result) || result.success !== true)) {
+          for (const backend of targets) this.failedBackendConfigurations.add(backend)
+          return result
+        }
         this.taskGroupRequests.assertCurrent()
         if (this.shuttingDown) throw new Error('The app is shutting down.')
         for (const backend of targets) {

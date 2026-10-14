@@ -1,3 +1,6 @@
+import { PortableAgentInstallationOwner, type PortableAgentInstallationOwnerOptions } from '../main/agent-installer/portable-installation'
+import { resolveProductionNpmCli } from './production-installation-host'
+import type { DesktopEventMap } from '../shared/desktop-operations'
 import { ProductionUiOwner, assertUiStateReferences, assertUiCommandReferences, type ProductionUiNativeHost } from '../main/production-ui-owner'
 import { CliMcpConfigManager } from '../main/cli-mcp-config/core'
 import { CliMcpFileOwner, type CliMcpFileOwnerOptions } from '../main/cli-mcp-config/portable-file-owner'
@@ -24,7 +27,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { McpProbeService } from '../main/agent-manager/mcp-probe-service'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync, statSync } from 'node:fs'
-import { isAbsolute, join, relative } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DatabaseManager, type DatabaseRuntimeOptions } from '../main/database/manager'
 import { decryptSettingValue, decryptRecordCredential } from '../main/database/serializers'
 import { acquireProfileLock, type ProfileLock } from '../main/platform/profile-lock'
@@ -107,6 +110,7 @@ export interface ProductionOwnerBootstrap {
   mobile?: { distRoot: string; port?: number }
   /** Verified optional worker pair and selected standalone runtime, never RPC paths. */
   voice?: ProductionVoiceResources
+  agentInstallation?: { nodeExecutable: string }
   native: {
     agents: Pick<AgentManagerHost, 'renderer' | 'notifications' | 'energy' | 'configuredMcp'>
     /** PATH/native supervision readiness, before any adapter or scheduler starts. */
@@ -119,6 +123,7 @@ export interface ProductionOwnerBootstrap {
     notify(title: string, body: string): void
     emit(channel: string, data: unknown): void
     ui?: ProductionUiNativeHost
+    emitInstallationProgress?(progress: DesktopEventMap['agent-installer:progress'], leaseId: string): Promise<void>
     sendUiCommand(command: UiCommand): { ok: true } | { ok: false; detail: string }
     /** Join only this launch's supervised children. Failure retains the lease. */
     drainOwnedProcesses(): Promise<{ acknowledged: true }>
@@ -135,6 +140,7 @@ export interface ProductionOwnerExternalBoundaries {
   terminalProcessHost?: TerminalProcessHost
   mobileTunnel?: TunnelManagerCore
   agentDetection?: PortableAgentDetectionOwner
+  agentInstallation?: { nodeExecutable: string; homeDir: string; environment: NodeJS.ProcessEnv; npmCliPath?: string | null; create?: (options: PortableAgentInstallationOwnerOptions) => PortableAgentInstallationOwner }
   gitProviderProcess?: (options: GitProviderProcessOwnerOptions) => GitProviderProcessOwner
   workspaceFiles?: (options: WorkspaceFileOwnerOptions) => WorkspaceFileOwner
   heartbeatFiles?: (options: HeartbeatFileOwnerOptions) => HeartbeatFileOwner
@@ -155,6 +161,7 @@ export interface ProductionServices {
   gitProviderProcess: GitProviderProcessOwner
   voice: ProductionVoiceOwner | null
   agentDetection: PortableAgentDetectionOwner
+  agentInstallation: PortableAgentInstallationOwner | null
   sessionContext: SessionContextService
   db: DatabaseManager
   agents: AgentManager
@@ -189,6 +196,8 @@ const processRegistry = globalThis as typeof globalThis & { [registryKey]?: obje
 /** One application lifetime independent of any renderer/window attachment. */
 export class ProductionOwner {
   private mobile: { deps: MobileApiDeps; tunnel: TunnelManagerCore | null; port?: number } | null = null
+  private ownedPath: { previous: string | undefined; installed: string } | null = null
+  private ownedPiEnvironment: { previous: string | undefined; installed: string } | null = null
   private phase: ProductionOwnerPhase = 'new'
   private stage = 'new'
   private code: string | undefined
@@ -485,13 +494,15 @@ export class ProductionOwner {
     } }
   }
 
-  getAgentInstallerBindingLease(): { detection: PortableAgentDetectionOwner; assertOwners(owners: { detection: PortableAgentDetectionOwner }): void } {
+  getAgentInstallerBindingLease(): { detection: PortableAgentDetectionOwner; installation?: PortableAgentInstallationOwner; emitProgress?: (progress: DesktopEventMap['agent-installer:progress'], leaseId: string) => Promise<void>; assertOwners(owners: { detection: PortableAgentDetectionOwner; installation?: PortableAgentInstallationOwner }): void } {
     this.getDatabaseBindingLease()
-    const services = this.services!, detection = services.agentDetection
-    return { detection, assertOwners: owners => {
+    const services = this.services!, detection = services.agentDetection, installation = services.agentInstallation
+    return { detection, ...(installation ? { installation } : {}),
+      ...(installation && services.ui && this.bootstrap.native.emitInstallationProgress ? { emitProgress: this.bootstrap.native.emitInstallationProgress.bind(this.bootstrap.native) } : {}), assertOwners: owners => {
       this.getDatabaseBindingLease()
-      if (this.services !== services || owners.detection !== detection) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      if (this.services !== services || owners.detection !== detection || owners.installation !== (installation ?? undefined)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
       detection.assertOpen()
+      installation?.assertOwners({ detection, home: installation.home, cwd: this.bootstrap.paths.profileRoot })
     } }
   }
 
@@ -616,6 +627,13 @@ export class ProductionOwner {
     this.drains.set('task-api', () => closeTaskApiServer())
     await apiStartup
     this.assertStarting()
+    const installationBootstrap = this.boundaries.agentInstallation ?? this.bootstrap.agentInstallation
+    const managedPrefix = join(profileRoot, 'agent-cli')
+    if (installationBootstrap) {
+      const previous = process.env.PATH
+      const installed = [join(managedPrefix, 'bin'), dirname(installationBootstrap.nodeExecutable), ...(previous ?? '').split(delimiter).filter(path => isAbsolute(path))].join(delimiter)
+      process.env.PATH = installed; this.ownedPath = { previous, installed }
+    }
     const native = this.bootstrap.native
     const providerFactory = this.boundaries.createProvider ?? createChatProviderFromSettings
     const provider: typeof createChatProviderFromSettings = (...args) => this.providers.wrap(providerFactory(...args))
@@ -822,15 +840,35 @@ export class ProductionOwner {
     this.register('reminders', () => reminders.shutdown(), async () => { reminders.shutdown() })
     // Installed CLI probing uses a captured finite host environment. No key,
     // inherited runtime options or renderer-selected command reaches the child.
+    const installationBoundary = this.boundaries.agentInstallation
+    const detectionHome = installationBoundary?.homeDir ?? realpathSync(homedir())
     const detectionEnvironment: NodeJS.ProcessEnv = {}
     for (const key of ['PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']) {
-      const value = process.env[key]
+      const value = (installationBoundary?.environment ?? process.env)[key]
       if (value !== undefined) detectionEnvironment[key] = value
     }
-    const agentDetection = this.boundaries.agentDetection ?? new PortableAgentDetectionOwner({ environment: Object.freeze(detectionEnvironment), home: homedir(), cwd: profileRoot })
+    const agentDetection = this.boundaries.agentDetection ?? new PortableAgentDetectionOwner({ environment: Object.freeze(detectionEnvironment), home: detectionHome, cwd: profileRoot,
+      ...(installationBootstrap ? { preferredPaths: [join(managedPrefix, 'bin'), dirname(installationBootstrap.nodeExecutable)] } : {}) })
     if (!(agentDetection instanceof PortableAgentDetectionOwner)) throw new ProductionOwnerError('CLI_DETECTION_OWNER_INVALID')
     agentDetection.assertOpen()
     this.register('agent-detection', () => agentDetection.stop(), () => agentDetection.close())
+    let agentInstallation: PortableAgentInstallationOwner | null = null
+    if (installationBootstrap) {
+      const npmCli = installationBoundary?.npmCliPath === null ? null : installationBoundary?.npmCliPath ?? resolveProductionNpmCli(detectionEnvironment)
+      const legacyPi = process.env.PI_CODING_AGENT_DIR
+      const options: PortableAgentInstallationOwnerOptions = { home: detectionHome, cwd: profileRoot,
+        environment: Object.freeze(detectionEnvironment), detection: agentDetection, nodeExecutable: installationBootstrap.nodeExecutable,
+        ...(npmCli ? { npm: { cliPath: npmCli, prefix: managedPrefix } } : {}),
+        ...(legacyPi ? { legacyPiConfigRoot: resolve(legacyPi) } : {}), assertCurrent: fileOptions.assertCurrent }
+      agentInstallation = installationBoundary?.create ? installationBoundary.create(options) : new PortableAgentInstallationOwner(options)
+      if (!(agentInstallation instanceof PortableAgentInstallationOwner)) throw new ProductionOwnerError('CLI_INSTALLATION_OWNER_INVALID')
+      agentInstallation.assertOwners({ detection: agentDetection, home: detectionHome, cwd: profileRoot })
+      const installation = agentInstallation
+      this.register('agent-installation', () => installation.shutdown(), () => installation.close())
+      const piRoot = await this.own(installation.verifyManagedPiRuntime({ beforeEffect: fileOptions.assertCurrent, signal: this.abort.signal }))
+      this.assertStarting()
+      if (piRoot && (!legacyPi || legacyPi === piRoot)) this.applyManagedPiEnvironment(piRoot)
+    }
     const sessionContext = new SessionContextService(db)
     const voice = this.bootstrap.voice ? createProductionVoiceOwner({ resources: this.bootstrap.voice, profileRoot, tempRoot: this.bootstrap.paths.tempRoot, db, agents, storage: this.storage!,
       assertCurrent: () => {
@@ -838,7 +876,7 @@ export class ProductionOwner {
         this.lock!.assertHeld()
       }, notify: (channel, payload) => this.emit(channel, payload) }) : null
     if (voice) this.register('voice', () => voice.shutdown(), () => voice.close())
-    this.services = { ui, cliMcp, cliMcpFiles, taskAttachmentFiles, workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    this.services = { ui, cliMcp, cliMcpFiles, taskAttachmentFiles, workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, agentInstallation, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)
@@ -865,6 +903,18 @@ export class ProductionOwner {
     this.connector?.startPolling({ db, onSynced: () => this.emit('tasks:refresh', undefined) })
     for (const scheduler of [recurrence, heartbeat, automation, wakeups, coordination, cleanup]) { this.assertStarting(); scheduler.start() }
     if (this.mobile) { await applyMobileAccessSettings(this.mobile.port); this.assertStarting() }
+  }
+
+  applyVerifiedManagedPi(): void {
+    this.getDatabaseBindingLease()
+    const root = this.services?.agentInstallation?.piConfigRoot
+    if (root) this.applyManagedPiEnvironment(root)
+  }
+  private applyManagedPiEnvironment(root: string): void {
+    if (root !== join(this.bootstrap.paths.profileRoot, 'agent-cli', '.pi-agent')) throw new ProductionOwnerError('CLI_INSTALLATION_OWNER_INVALID')
+    const previous = this.ownedPiEnvironment ? this.ownedPiEnvironment.previous : process.env.PI_CODING_AGENT_DIR
+    if (previous && previous !== root) throw new ProductionOwnerError('CLI_INSTALLATION_OWNER_INVALID')
+    process.env.PI_CODING_AGENT_DIR = root; this.ownedPiEnvironment = { previous, installed: root }
   }
 
   private register(name: string, stop: () => void, drain: () => Promise<void>): void { this.stopOwners.push(stop); this.drains.set(name, drain) }
@@ -929,8 +979,16 @@ export class ProductionOwner {
   }
 
   private release(): void {
-    // A different owner must never be cleared by an obsolete teardown.
+    // No obsolete owner may restore process-global runtime selection.
     if (processRegistry[registryKey] !== this.identity && this.phase !== 'new') throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    if (this.ownedPath && process.env.PATH === this.ownedPath.installed) {
+      if (this.ownedPath.previous === undefined) delete process.env.PATH; else process.env.PATH = this.ownedPath.previous
+    }
+    if (this.ownedPiEnvironment && process.env.PI_CODING_AGENT_DIR === this.ownedPiEnvironment.installed) {
+      if (this.ownedPiEnvironment.previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = this.ownedPiEnvironment.previous
+    }
+    this.ownedPath = null; this.ownedPiEnvironment = null
+
     if (this.apiOwned) {
       setTaskApiAgentController(null); setTaskApiTaskGroupService(null); setTaskApiNotifier(null); setTranscriptProvider(null); setTaskApiUiState(null); setTaskApiUiOwner(null)
       setTaskSchedulers({ recurrence: null, heartbeat: null }); setTaskAutomationTrigger(null)

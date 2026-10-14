@@ -1,4 +1,5 @@
-import { UI_NATIVE_CALLBACK_SCHEMAS, isPrivateUiPublication } from '../shared/ui-native-callbacks'
+import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
+import { UI_NATIVE_CALLBACK_SCHEMAS, isPrivateUiPublication, isPrivateAgentInstallation } from '../shared/ui-native-callbacks'
 import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
@@ -40,14 +41,18 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false) {
   let uiLease: string | null = 'document_fixture_1'
   let uiAcknowledgement: Promise<void> | null = null
-  const acceptedUi: JsonValue[] = []
+  const acceptedUi: JsonValue[] = [], installationProgress: JsonValue[] = []
   const root = mkdtempSync(join(tmpdir(), '21x-private-production-')); roots.push(root)
   const launch = descriptor(root); mkdirSync(launch.paths.resourceRoot)
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   if (ui) launch.capabilities.ui = 'host'
+  const selectedNode = process.env.TAURI_NODE_RUNTIME ?? join(process.cwd(), 'src-tauri', 'resources', 'node', process.platform === 'win32' ? 'node.exe' : 'node')
+  const fixtureNpm = join(root, 'npm-cli.js')
+  if (installation) writeFileSync(fixtureNpm, `const fs=require('node:fs'),p=require('node:path');const prefix=process.argv[process.argv.indexOf('--prefix')+1];const pkg=p.join(prefix,'lib','node_modules','opencode-ai');fs.mkdirSync(pkg,{recursive:true});fs.mkdirSync(p.join(prefix,'bin'),{recursive:true});fs.writeFileSync(p.join(pkg,'package.json'),JSON.stringify({name:'opencode-ai',version:'1.0.0',bin:{opencode:'index.js'}}));fs.writeFileSync(p.join(pkg,'index.js'), '#!'+process.execPath+${JSON.stringify("\nconsole.log('1.0.0')\n")});fs.chmodSync(p.join(pkg,'index.js'),0o700);fs.symlinkSync(p.join(pkg,'index.js'),p.join(prefix,'bin','opencode'));`)
+
   let permitted = true, badDrain = false, preparation: Promise<void> | null = null
   const nativeCalls: string[] = [], wireEvents: Array<{ operation: string; payload: JsonValue }> = []
   const keys = new Map<string, Buffer>()
@@ -90,9 +95,14 @@ function fixture(workspaceFiles = false, ui = false) {
     nativeCalls.push(operation); fileReceipts.push((payload as { receipt: JsonValue }).receipt)
     await fileAcknowledgement; return {}
   } }
+  schemas['engine.agent.install'] = { validatePayload: isPrivateAgentInstallation, validateResult: AGENT_INSTALLER_CODECS['agent-installer:install'].validateWireResult }
   schemas['engine.ui.publish'] = { validatePayload: isPrivateUiPublication, validateResult: UI_DESKTOP_CODECS['ui:publishState'].validateWireResult }
   if (ui) {
     schemas['host.ui.snapshot'] = { ...UI_NATIVE_CALLBACK_SCHEMAS['host.ui.snapshot'], handle: (): JsonValue => uiLease ? { available: true, leaseId: uiLease } : { available: false } }
+    schemas['host.ui.installerProgress'] = { ...UI_NATIVE_CALLBACK_SCHEMAS['host.ui.installerProgress'], handle: (payload): JsonValue => {
+      if (!isRecord(payload) || payload.leaseId !== uiLease || !uiLease) return { ok: false, detail: 'No current document' }
+      installationProgress.push(structuredClone(payload.progress)); return { ok: true, leaseId: uiLease }
+    } }
     schemas['host.ui.command'] = { ...UI_NATIVE_CALLBACK_SCHEMAS['host.ui.command'], handle: async (payload): Promise<JsonValue> => {
       nativeCalls.push('host.ui.command')
       await uiAcknowledgement
@@ -107,13 +117,13 @@ function fixture(workspaceFiles = false, ui = false) {
   hosts.push(host)
   const service = new ProductionService(sealProductionServiceHost({ descriptor: launch, authority,
     caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' }, unbridgedOwnerEvent: vi.fn(),
-    boundaries: { cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider },
+    boundaries: { ...(installation ? { agentInstallation: { nodeExecutable: selectedNode, homeDir: root, environment: {}, npmCliPath: fixtureNpm } } : {}), cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider },
     constructBootstrap: callbacks => ({ profileId: launch.profileId, paths: launch.paths,
       credentials: { mode: 'create', store: { create: async (id, key) => { keys.set(id, Buffer.from(key)) }, load: async id => Buffer.from(keys.get(id)!) } },
       connectors: { kind: 'disabled', reason: 'Controlled fixture has no packaged connectors' }, managedTaskMcp: { disabled: true },
       native: { agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, configuredMcp: 'disabled' },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, emit: callbacks.emitOwnerEvent,
-        ...(ui ? { ui: callbacks.ui } : {}),
+        ...(ui ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } })
   }), { write: async bytes => { deliver(host, bytes) } }); services.push(service)
   const initialize = async (): Promise<void> => {
@@ -122,7 +132,7 @@ function fixture(workspaceFiles = false, ui = false) {
     await host.request('engine.initialize', { protocolVersion: 1, launchId: launch.launchId })
   }
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
-    acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
+    installationProgress, acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
     fileReceipts, holdFileAcknowledgement: (raw: Promise<void>) => { fileAcknowledgement = raw },
     holdPreparation: (raw: Promise<void>) => { preparation = raw } }
 }
@@ -333,4 +343,18 @@ describe('private native document publication into the actual production singlet
     expect(f.acceptedUi).toEqual([])
     await f.service.owner.close(); expect(f.service.owner.snapshot().owned).toBe(false)
   })
+})
+
+it.skipIf(process.platform === 'win32')('installs a controlled real package through private native ingress and the actual singleton, preserving external files', async () => {
+  const f = fixture(false, true, true); await f.initialize()
+  const services = f.service.getReadyServices()!, state = { view: 'settings', projectId: services.db.getDefaultProject()!.id, modal: 'settings', selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: 'agents', waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } }
+  await f.host.request('engine.ui.publish', { state, leaseId: 'document_fixture_1' })
+  const external = join(f.root, 'external-user-cli.txt'); writeFileSync(external, 'preserve external installation')
+  await expect(f.host.request('agent-installer:install', { agentName: 'opencode' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  const result = await f.host.request('engine.agent.install', { agentName: 'opencode', leaseId: 'document_fixture_1' })
+  expect(result).toMatchObject({ defined: true, value: { success: true, error: null, newStatus: { opencode: { installed: true, version: '1.0.0' } } } })
+  expect(readFileSync(external, 'utf8')).toBe('preserve external installation')
+  expect(f.installationProgress.map(value => (value as { stage: string }).stage)).toEqual(['starting', 'installing', 'verifying', 'complete'])
+  expect(services.agentInstallation!.childCount).toBe(0)
+  expect(existsSync(join(f.launch.paths.profileRoot, 'agent-cli', 'lib', 'node_modules', 'opencode-ai', 'index.js'))).toBe(true)
 })

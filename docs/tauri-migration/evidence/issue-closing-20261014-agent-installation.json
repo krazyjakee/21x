@@ -1,0 +1,378 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    213
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "46e05996a321fd5b472d804495b9608dc8b527d4",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/agent-installation-bindings.md": "b1d88d83a7dcf82ab6bbc60b8f7602015e15bc32e45986845590d7952fdd72f6",
+      "docs/tauri-migration/event-forwarding-review.json": "c814dbd8dd61102fc1069ca1775c76d7483f21680cbd9179b0879c8e176736fb",
+      "docs/tauri-migration/implementation-status.md": "e70d2e77257a6e5542bfc008e836fe04350dcfbe02a472b176a731ec2d1cd54b",
+      "docs/tauri-migration/inventory.json": "8c5f23e3aa89eac85432ad0a46738882765d1ab6e1b99a7d67e9f3b5cf80fe8c",
+      "docs/tauri-migration/operations.json": "6fa67b767e232df4b1ec87b02016f86bb4af25d9fa529f3d2886dbd93e6bd26c",
+      "scripts/production-contracts-proof.test.ts": "2640a5a68664bc5ea8af7326553bbe2f8c2fe7473cce5a795526bf5b2bf5a145",
+      "scripts/production-contracts-proof.ts": "e2b14aa7993333ebdd0d3d3c7faa52862fa0ac82b85c0274e92115b72537764f",
+      "src-tauri/engine/src/production.rs": "64a6ed6de7df37f467c7e48da8b9b459def650e5b0e43a3b030b3538e24db747",
+      "src-tauri/engine/src/production_agent_installer.rs": "fa86f0974a800d15d71b641bf02c537bd2ee1a8ffbde7e67baca875d77d1b96a",
+      "src-tauri/engine/src/production_contracts.rs": "8fd3fecc8e87d531547a45d0f209d6c69b8e02305d261ae83ff25bb5c2d51778",
+      "src-tauri/src/production_host.rs": "c645d72fe3cc1bce7a0769b16a8d04d1cb7c4b6790bf950324cc29e9b4831da8",
+      "src-tauri/src/production_ui.rs": "e161391be8f92f523b5ccc96826a90dcb53a517f9706c7e8576202ce77f6deef",
+      "src/main/agent-installer/portable-detection-controls.test.ts": "f71e2299f717ba2de736be1c188d8fbdea365ef3cdfc9f039f5b0dcf75689a76",
+      "src/main/agent-installer/portable-detection.ts": "6505f54ca41eb34e63b5f936a965fe4be52f313b902c4f5a83c4e2157b4a5b9b",
+      "src/main/agent-installer/portable-installation.test.ts": "1f9c3d1c25a08d4647d2a2030441b274a47f87c69cdf1199c64e6e48c053a69b",
+      "src/main/agent-installer/portable-installation.ts": "096edb245f39cf47c953d4fbc42fc7bc418a6b9d91c50465e96ef5f3a34966be",
+      "src/main/agent-manager-cli-configuration.test.ts": "6f2cc76ffa68cc80711cff4db9b819def14c5c8799849f2f266638cd00705202",
+      "src/main/agent-manager-core.ts": "6774bbd72a1e511815d831148afd1ef72fa516f820807e8a84b2e8d1a771cd4c",
+      "src/renderer/src/lib/desktop-client.ts": "b701556310aec21e513c9370aea1c14950c242543b340b334823bbd9470a3845",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "1c84e8d5f003a0ab72bf27b83322a0df46b6f5373c81e297571a00a49b5871f0",
+      "src/renderer/src/lib/native-desktop-host.ts": "29a6e5ee093d4ac1910b5da76ce0570413658a9bc26d4501d25c2d3f166be79a",
+      "src/renderer/src/lib/tauri-desktop-transport.ts": "18f49aa6cd8300548c9d78f8b7cc785a694945f3860b3cc828c3c771e75869a0",
+      "src/service/agent-installer-backend.test.ts": "cbbe6e7c20b6fceabffe991349f7ad97a2db24d0afb65ed5b908396ab818c0da",
+      "src/service/agent-installer-backend.ts": "05f71a263ea33623abafb16b2562d780dbf4472af7ed5feaf0b17d5f6a1168d6",
+      "src/service/production-desktop-bindings.ts": "7e2047f50aca60796352eec16d66f459bcd51aef6ff00043f1e46d0de00f6b77",
+      "src/service/production-installation-host.test.ts": "03440aa99a6ab27e9dc27abc4b9e0ce9299b8a69221d53f674900fd217a3c7b0",
+      "src/service/production-installation-host.ts": "4586991caca35c1bc49f5a5e25d050586641f448d65f519dfcf5106fb3ffab5b",
+      "src/service/production-owner.ts": "5e1588006ddcc1193fca43169675517a1abda357e03e6b51d2bbd5a2bbf75b08",
+      "src/service/production-service.test.ts": "c0291a014fb97607987b029fa1d550662bc48c9e05fc3cf29bc82a7d422e1534",
+      "src/service/production-service.ts": "dce76bc5eed110a573593f8937662ff3a4ee8249934814ad9825d589f296dfd3",
+      "src/service/transport/installer-deadline.test.ts": "c2f87182a02c7ff397a37a138b8137b61a9965a0c199b619b0b13c78109562c5",
+      "src/service/transport/peer.ts": "d63757506424501e3c0531458ffa215893587bdfa6e17b863cb49e20c7527ded",
+      "src/shared/agent-installer-codecs.test.ts": "18ed6158a84144640693fe36345a4c216cc6eb1767d6cb60d3ae59b1e16cd48f",
+      "src/shared/agent-installer-codecs.ts": "259b49c8d7276c2627d23c3c9adbfbb36444dfa12aa5d7babf2064fd8514209e",
+      "src/shared/desktop-event-forwarding.ts": "02aff4f21c64752b1277af163efb6923ac47c761f2f471e0da9ae094d6b40324",
+      "src/shared/service-protocol.ts": "a944c62500059b054610dbdb0e95460fac6d67498f2a138a09dd949df73d8093",
+      "src/shared/ui-native-callbacks.ts": "27e9d722e02efca6fafc824f0daadd3feca4a6aef2b73427d9afcd76bb058fab",
+      "vitest.tauri.config.ts": "7739ce1554fe98d3347746315207e7e9025dc24fa63a58320b5452720e82bfd7"
+    },
+    "runtimeImplementationUnchangedThroughFinalBehaviorSuites": true,
+    "testAndMetadataCorrectionsCoveredByAffectedChecks": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Actual profile-owned CLI installation, selected backend admission/configuration guards, private document-bound installation ingress and phase delivery; shipping application remains Electron.",
+  "bindings": {
+    "finiteServiceCommandContracts": 223,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 225,
+    "events": 30,
+    "newCommands": 1,
+    "newEvents": 1,
+    "privateInstallation": "engine.agent.install",
+    "privateProgress": "host.ui.installerProgress",
+    "nativeProgressEvent": "desktop:agent-installation-progress"
+  },
+  "implemented": [
+    "Five fixed Unix npm plans use selected standalone Node and a captured npm CLI entry. Managed prefix/cache and fixed registry/config arguments stay outside caller DTOs; no shell/elevation/global host install fallback.",
+    "Actual package name/version/bin metadata, no-follow manifest handles, physical executable receipts, selected Node version output and captured detection must agree before success. Unsupported targets retain honest finite detection results.",
+    "Explicit external Pi configuration overrides and nonempty first-install legacy preferences refuse redirection. Managed Pi MCP adapter registration/help/runtime startup proof uses the owned profile root. Existing auth/preferences are never copied or moved.",
+    "Actual AgentManager admission/configuration mutation refuses affected live/idle/cached/admitted/queued ownership, rechecks finite affected agent/project metadata/grants through effects and retains a failure fence for uncertain accepted changes.",
+    "Accepted process, pipe, file/directory close and callback work remains owned through raw completion; failed exact closes retain handles. Unsafe retired process-group identities are not signalled.",
+    "Native physical document ingress stamps a private lease separate from public payloads. Private fixed progress uses matching epoch/document receipts and cannot redirect to a replacement window. Expired bootstrap/listener attempts cannot replace the current receipt.",
+    "Exact install requests have 180-second transport deadlines, owner work 150 seconds, child phases 90 seconds and private progress callbacks five seconds. Other transport operations retain 30 seconds.",
+    "Default standalone coverage now includes installation and detection-control fixtures; Root verified their real Node children and temporary package trees under bundled Node."
+  ],
+  "artifact": {
+    "buildIdentity": "production-5d78eccf74b4dedbfee70225c1290e7b",
+    "resourceManifestSha256": "215d5e22074c8330ecab1b7700301bcaafa707c56e08c130c7cf2d2202c8067a",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "packageAndRuntimePinsUnchanged": true,
+    "cargoVersionsAndChecksumsUnchanged": true,
+    "npmEntry": "trusted host capability, outside the bundled resource closure"
+  },
+  "contractCorpus": {
+    "operations": 223,
+    "actualTypeScriptRequests": 462,
+    "sha256": "359c8784b4e3e37e91b5b481247cf5c0dfc03639d2505898ea6532ecef0b3320",
+    "nativeParity": "all accepted by exact native golden-request test"
+  },
+  "tests": {
+    "app": {
+      "passed": 6923,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "6f9dc6cf3f22c2dff5848a52796f7ef51bff04caa6c5c708598d7459bd2425b2",
+      "logSha256": "85e7af61fec4b160f2b66bf3b2436684e84989bc07973b6ce53b7fd180a5222d"
+    },
+    "standalone": {
+      "passed": 3436,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "5ea4de54975cd1f8fc7e16f4f08501de6afa9dbed7d4509ae1308895113487f4",
+      "logSha256": "9639e8eda44290b9290dffcb61497791b4a9dd90784b230105e19611b45e5dbd"
+    },
+    "standalone-installer": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "2f3a4e189a8b91dc43a58d3cdfd8d5344c332728f62e4522ae7a992b5ac34114",
+      "logSha256": "38f9093f9024bcc6cfcae0fcaf0cb2b8447c1c6ead8165d1366cd47a32487315"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "f36bc618394a5cec061c395ef349da9fa86fff1a20cb7f6fe613238a2ff2fb5e",
+      "logSha256": "30dba13b1f14204775e169e2ab14a9bd0201f62939e2e5158b2d699e188e83ae"
+    },
+    "installer-correction": {
+      "passed": 67,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "00d37f60be5adc20953c11ffa9fc398bb5770733be6a7d98f887cedd22ee4b93",
+      "logSha256": "bc0f49100e5e25712c8f2c5d04755a7146b827fe55129dc48fb80ace13bf204e"
+    },
+    "owner-correction": {
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "0364e3cbd310a1253e32625be4ac28d8719a911550ca33b04b65a685ccfe07e3",
+      "logSha256": "979e0ad70cf5ac28d3ff4b88ccaad95e46a33ebee6d851cac970bee80af826c4"
+    },
+    "const-correction": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 16,
+      "success": true,
+      "reportSha256": "17bbc8b33a4028f04a4c64b7c1c71ef7e9eefe31a954d6915330ec6fce1dd3ae",
+      "logSha256": "002f521feb4622a424174d3733ef9133df8af03bb1106d2132ce1d1daf6da4e9"
+    },
+    "metadata-correction": {
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "e3430804d2b63404edbcfa3ac18c05f87fb6d031640f4b2d019c4c3d4826e21f",
+      "logSha256": "952361ddeeaded51f9cfd6cda5a20c01668c56d72f1c596440883bea845225e5"
+    },
+    "corpus-export": {
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "5c44adc6385b545cb623ad8da8594d6327cb842d7b2b53925d6975643b077e3e",
+      "logSha256": "147ec971c617b2761c18defad24284cff61207b036011bda1afb2741d6a79acb"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 29.474,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.39,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 22.196,
+      "logSha256": "c4eebd51e82c04d70c851cecc6831a65d83559eb4e282efa3261a17dd3721cea"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.793,
+      "logSha256": "e464ae731fa0c757d3b2767fd2f33fa00f337f622e14d1f6b49797bd66f1e57e"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.718,
+      "logSha256": "8049946452bffa1cc0b58e20b8d06f224df6b4e5b4ba2f8773e231b0da15bd3d"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.633,
+      "logSha256": "57154d114ab77a8589400b6d89fb0a86d593cfe3a8320b677eac26910fae41d1"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.294,
+      "logSha256": "d6706f7e62be463d3087c764e85f9ada48be46c91cc40694f336b9d56d44cf6c"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.503,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.589,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.636,
+      "logSha256": "701ddf224fe59d22d34dd5e5d2fc372bc30cd3d8f9041c7b0c799a7dd970d304"
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.925,
+      "logSha256": "8439b1f251b3f421110b2889297da27caa9c9623353c96959b79d595827f7eae"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 5.026,
+      "logSha256": "c467f53aadaae412e723d22ab012d9f1a9a02a38bb75f53b2bdae513306809d9"
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch23-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.66,
+      "logSha256": "bbf403559e7a81a8d3b4ecd291315a3eb7588f507f49c1121d965c0a65f621b0"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.077,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "validationCorrections": [
+    "Initial TypeScript rejected fixture circular inference/mock casts and a missing private name narrowing. Corrected types and runtime guard; final full typecheck passed.",
+    "Initial focused run passed 218 and failed one obsolete unavailable-install renderer expectation. Corrected to require a current native document; all 67 renderer host tests and the full app suite passed.",
+    "Lint required const for a late-open fixture capture. Corrected without runtime implementation changes; affected exact descriptor test, owner fixture suite, bundled fixture suite, full typecheck and lint passed.",
+    "Generated forwarding review caught three shifted AgentManager source locations. Actual unchanged forwarding sites were inspected; only line receipts were updated, with no allowed-name or authority change. Contracts, inventory and all 22 metadata tests passed.",
+    "The default standalone suite passed 3436 cases; after registering two additional owner fixture files, their 19 cases passed in a separate bundled-runtime run. No existing selected tests were removed."
+  ],
+  "remainingAcceptance": [
+    "No actual live npm publisher/vendor installation, installed production GUI interaction or hosted/provider acceptance is claimed.",
+    "Windows command-wrapper installation, Cursor/system-tool plans and external Pi credential/preferences conversion remain unavailable.",
+    "Full supported-platform process containment and escaped daemon ownership remain separate gates; uncertain raw closure retains the profile.",
+    "Bundled npm acquisition, redistribution review, remaining desktop feature parity, historical profile/cutover and G0-G5 gates remain open.",
+    "Hosted voice #92 remains deferred by user decision; all-platform manual voice acceptance remains open.",
+    "Issues #202, #208 and #213 remain open for their complete acceptance."
+  ]
+}

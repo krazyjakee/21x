@@ -6,6 +6,22 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The installation continuation adds five fixed, profile-owned npm CLI plans using
+selected standalone Node and a captured npm entry. Actual package metadata,
+physical executable receipts and detection must agree before success. Backend
+installation borrows admission/configuration ownership and retains a failure
+fence after partial writes. Fixed progress receipts target the native document
+that requested the work; reload cannot redirect them to a replacement window.
+
+The finite surface has 223 service commands, two direct native commands and
+30 events. See [installation ownership](agent-installation-bindings.md) and
+the [verification record](evidence/issue-closing-20261014-agent-installation.json).
+Windows execution, unsupported system-tool plans, external Pi configuration
+conversion and live vendor installation remain open. The shipping application
+still uses Electron; hosted voice remains deferred by user decision.
+
+The preceding UI continuation retains its tested revision:
+
 The UI continuation binds passive state publication and the seven retained UI
 intents to the actual production service and native main document. Physical
 window attachment, document generation, engine epoch and visibility gate each

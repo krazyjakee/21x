@@ -11,6 +11,8 @@ export interface PortableAgentDetectionOwnerOptions {
   environment: Readonly<NodeJS.ProcessEnv>
   home: string
   cwd: string
+  /** Trusted preferred CLI roots, never request paths. */
+  preferredPaths?: readonly string[]
   platform?: NodeJS.Platform
   maxConcurrency?: number
   probeTimeoutMs?: number
@@ -32,6 +34,7 @@ export class PortableAgentDetectionOwner {
   private readonly cwd: string
   private readonly concurrency: number
   private readonly timeoutMs: number
+  private readonly preferredPaths: readonly string[]
   private closing = false
   private active = 0
   private readonly queue: Job[] = []
@@ -43,7 +46,8 @@ export class PortableAgentDetectionOwner {
     const validPath = (path: unknown): path is string => typeof path === 'string' && path.length <= 4096 && isAbsolute(path) && !/[\u0000-\u001f]/.test(path)
     if (!options || !validPath(options.home) || !validPath(options.cwd) || options.platform !== undefined && options.platform !== process.platform ||
       options.maxConcurrency !== undefined && (!Number.isInteger(options.maxConcurrency) || options.maxConcurrency < 1 || options.maxConcurrency > AGENT_DETECTION_LIMITS.children) ||
-      options.probeTimeoutMs !== undefined && (!Number.isInteger(options.probeTimeoutMs) || options.probeTimeoutMs < 10 || options.probeTimeoutMs > AGENT_DETECTION_LIMITS.probeMs)) throw new AgentDetectionError('AGENT_DETECTION_INVALID_OPTIONS')
+      options.probeTimeoutMs !== undefined && (!Number.isInteger(options.probeTimeoutMs) || options.probeTimeoutMs < 10 || options.probeTimeoutMs > AGENT_DETECTION_LIMITS.probeMs) ||
+      options.preferredPaths !== undefined && (!Array.isArray(options.preferredPaths) || options.preferredPaths.length > 8 || !options.preferredPaths.every(validPath))) throw new AgentDetectionError('AGENT_DETECTION_INVALID_OPTIONS')
     const environment: NodeJS.ProcessEnv = {}
     if (!options.environment || typeof options.environment !== 'object' || Array.isArray(options.environment)) throw new AgentDetectionError('AGENT_DETECTION_INVALID_OPTIONS')
     for (const [key, value] of Object.entries(options.environment)) {
@@ -53,7 +57,8 @@ export class PortableAgentDetectionOwner {
     this.home = normalize(options.home); this.cwd = normalize(options.cwd)
     const paths = (environment.PATH ?? '').split(delimiter).filter(path => path && validPath(path)).map(normalize)
     // Same well-known directories as Electron detection, in this private copy.
-    environment.PATH = [...new Set([join(this.home, '.local', 'bin'), join(this.home, '.opencode', 'bin'), ...paths])].join(delimiter)
+    this.preferredPaths = Object.freeze((options.preferredPaths ?? []).map(normalize))
+    environment.PATH = [...new Set([...this.preferredPaths, join(this.home, '.local', 'bin'), join(this.home, '.opencode', 'bin'), ...paths])].join(delimiter)
     environment.HOME = this.home
     if (process.platform === 'win32') environment.USERPROFILE = this.home
     this.environment = Object.freeze(environment)
@@ -63,29 +68,43 @@ export class PortableAgentDetectionOwner {
   get childCount(): number { return this.children.size }
   get inflightCount(): number { return this.work.size + this.jobs.size }
   assertOpen(): void { if (this.closing) throw new AgentDetectionError('AGENT_DETECTION_CLOSED') }
-  detect(signal?: AbortSignal): ReturnType<typeof detectInstalledAgents> {
+  assertOwners(owners: { home: string; cwd: string }): void {
     this.assertOpen()
+    if (normalize(owners.home) !== this.home || normalize(owners.cwd) !== this.cwd) throw new AgentDetectionError('AGENT_DETECTION_INVALID_OPTIONS')
+  }
+  detect(signal?: AbortSignal, controls?: { beforeEffect(): void }): ReturnType<typeof detectInstalledAgents> {
+    this.assertOpen()
+    if (controls !== undefined && typeof controls.beforeEffect !== 'function') throw new AgentDetectionError('AGENT_DETECTION_INVALID_OPTIONS')
+    controls?.beforeEffect()
     if (signal?.aborted) return Promise.reject(new AgentDetectionError('AGENT_DETECTION_CANCELLED'))
     if (this.work.size >= AGENT_DETECTION_LIMITS.snapshots) return Promise.reject(new AgentDetectionError('AGENT_DETECTION_BACKPRESSURE'))
     const controller = new AbortController(); this.controllers.add(controller)
     const abort = () => controller.abort(); signal?.addEventListener('abort', abort, { once: true })
     let timedOut = false
     const timer = setTimeout(() => { timedOut = true; controller.abort() }, AGENT_DETECTION_LIMITS.snapshotMs)
+    const beforeEffect = (): void => {
+      this.assertOpen()
+      if (timedOut) throw new AgentDetectionError('AGENT_DETECTION_TIMEOUT')
+      if (controller.signal.aborted) throw new AgentDetectionError('AGENT_DETECTION_CANCELLED')
+      controls?.beforeEffect()
+    }
     const failures = new Map<string, ProbeError['kind']>()
     const raw = (async () => {
       const result = await detectInstalledAgents({ portable: true, home: this.home, platform: process.platform,
         exec: async (command, args = [], options = {}) => {
-          try { return await this.schedule(() => this.probe(command, args, controller.signal, Number((options as { timeout?: number }).timeout) || this.timeoutMs)) }
+          try { return await this.schedule(() => this.probe(command, args, controller.signal, Number((options as { timeout?: number }).timeout) || this.timeoutMs, beforeEffect)) }
           catch (error) { if (error instanceof ProbeError) failures.set(basename(command).replace(/\.(cmd|exe|bat)$/i, ''), error.kind); throw error }
         },
         integrations: async () => {
           const entries = await Promise.all(rtkIntegrationFiles(this.environment, this.home).map(file => this.schedule(async () => {
-            if (controller.signal.aborted) throw new AgentDetectionError('AGENT_DETECTION_CANCELLED')
-            return [file.key, await this.integration(file.path, file.text)] as const
+            beforeEffect()
+            const value = await this.integration(file.path, file.text, beforeEffect)
+            beforeEffect(); return [file.key, value] as const
           })))
           return Object.fromEntries(entries)
         }
       })
+      beforeEffect()
       if (this.closing) throw new AgentDetectionError('AGENT_DETECTION_CLOSED')
       if (signal?.aborted) throw new AgentDetectionError('AGENT_DETECTION_CANCELLED')
       if (timedOut) throw new AgentDetectionError('AGENT_DETECTION_TIMEOUT')
@@ -114,13 +133,14 @@ export class PortableAgentDetectionOwner {
       void raw.finally(() => { this.jobs.delete(raw); this.active--; this.pump() })
     }
   }
-  private async windowsCommand(command: string): Promise<{ command: string; prefix: string[] }> {
+  private async windowsCommand(command: string, beforeEffect: () => void): Promise<{ command: string; prefix: string[] }> {
     const names = /\.(exe|cmd|bat|com)$/i.test(command) ? [command] : ['.exe', '.cmd', '.bat', '.com'].map(ext => command + ext)
     const paths = isAbsolute(command) ? [''] : (this.environment.PATH ?? '').split(';')
     for (const path of paths) for (const name of names) {
       const candidate = path ? join(path, name) : name
       try {
-        if (!(await lstat(candidate)).isFile()) continue
+        beforeEffect(); const entry = await lstat(candidate); beforeEffect()
+        if (!entry.isFile()) continue
         if (/\.(cmd|bat)$/i.test(candidate)) {
           if (/[\u0000-\u001f"%!^&|<>]/.test(candidate)) throw new ProbeError('failed')
           const systemRoot = this.environment.SystemRoot ?? this.environment.WINDIR
@@ -132,7 +152,8 @@ export class PortableAgentDetectionOwner {
     }
     throw new ProbeError('missing')
   }
-  private async probe(command: string, args: string[], signal: AbortSignal, requestedTimeout: number): Promise<{ stdout: string; stderr: string }> {
+  private async probe(command: string, args: string[], signal: AbortSignal, requestedTimeout: number, beforeEffect: () => void): Promise<{ stdout: string; stderr: string }> {
+    beforeEffect()
     if (signal.aborted || this.closing) throw new AgentDetectionError('AGENT_DETECTION_CANCELLED')
     const version = args.length === 1 && args[0] === '--version', prefix = args.length === 2 && args[0] === 'prefix' && args[1] === '-g'
     const known = ['node', 'npm', 'npm.cmd', 'pnpm', 'git', 'gh', 'glab', 'tea', 'rtk', 'claude', 'opencode', 'codex', 'cursor-agent', 'pi', 'pi.cmd', 'pi.exe']
@@ -142,13 +163,14 @@ export class PortableAgentDetectionOwner {
     if ((!version || !known.includes(command) && !absolutePi) && !(prefix && ['npm', 'npm.cmd'].includes(command))) throw new ProbeError('failed')
     let program = command, arguments_ = args
     if (process.platform === 'win32') {
-      const resolved = await this.windowsCommand(command); program = resolved.command
+      const resolved = await this.windowsCommand(command, beforeEffect); program = resolved.command
       arguments_ = resolved.prefix.length ? [...resolved.prefix.slice(0, 3), `""${resolved.prefix[3]}" ${args.join(' ')}"`] : args
     }
+    beforeEffect()
     if (signal.aborted || this.closing) throw new AgentDetectionError('AGENT_DETECTION_CANCELLED')
     return new Promise((resolve, reject) => {
       let child: ChildProcess
-      try { child = spawn(program, arguments_, { cwd: this.cwd, env: this.environment, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }
+      try { beforeEffect(); child = spawn(program, arguments_, { cwd: this.cwd, env: this.environment, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }
       catch { reject(new ProbeError('failed')); return }
       let failure: ProbeError | undefined, stopped = false, bytes = 0
       const stdout: Buffer[] = [], stderr: Buffer[] = []
@@ -175,41 +197,42 @@ export class PortableAgentDetectionOwner {
       child.once('close', code => {
         clearTimeout(timer); if (escalation) clearTimeout(escalation); signal.removeEventListener('abort', abort); this.children.delete(owned)
         try {
+          beforeEffect()
           if (signal.aborted || this.closing) reject(new AgentDetectionError('AGENT_DETECTION_CANCELLED'))
           else if (failure || code !== 0) reject(failure ?? new ProbeError('failed'))
           else resolve({ stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') })
-        } finally { for (const value of [...stdout, ...stderr]) value.fill(0) }
+        } catch (error) { reject(error) } finally { for (const value of [...stdout, ...stderr]) value.fill(0) }
       })
     })
   }
-  private async integration(path: string, marker: string): Promise<boolean> {
+  private async integration(path: string, marker: string, beforeEffect: () => void): Promise<boolean> {
     let handle: Awaited<ReturnType<typeof open>> | undefined, bytes: Buffer | undefined
     try {
       const inside = relative(this.home, path)
       if (!inside || inside.startsWith('..' + sep) || isAbsolute(inside)) return false
       const anchors: Array<{ path: string; dev: bigint; ino: bigint }> = []
       const anchor = async (path: string): Promise<boolean> => {
-        const entry = await lstat(path, { bigint: true })
+        beforeEffect(); const entry = await lstat(path, { bigint: true }); beforeEffect()
         if (!entry.isDirectory() || entry.isSymbolicLink()) return false
         anchors.push({ path, dev: entry.dev, ino: entry.ino }); return true
       }
       let cursor = this.home
       if (!await anchor(cursor)) return false
       for (const part of inside.split(sep).slice(0, -1)) { cursor = join(cursor, part); if (!await anchor(cursor)) return false }
-      const entry = await lstat(path, { bigint: true })
+      beforeEffect(); const entry = await lstat(path, { bigint: true }); beforeEffect()
       if (!entry.isFile() || entry.isSymbolicLink()) return false
-      handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW || 0))
-      const stat = await handle.stat({ bigint: true })
+      beforeEffect(); handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW || 0))
+      beforeEffect(); const stat = await handle.stat({ bigint: true })
       if (!stat.isFile() || stat.dev !== entry.dev || stat.ino !== entry.ino || stat.size > BigInt(AGENT_DETECTION_LIMITS.fileBytes)) return false
       bytes = Buffer.alloc(Number(stat.size) + 1)
-      const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)
-      const after = await handle.stat({ bigint: true }), current = await lstat(path, { bigint: true })
+      beforeEffect(); const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)
+      beforeEffect(); const after = await handle.stat({ bigint: true }), current = await lstat(path, { bigint: true })
       if (!current.isFile() || current.isSymbolicLink() || current.dev !== stat.dev || current.ino !== stat.ino || after.size !== stat.size || after.mtimeNs !== stat.mtimeNs || after.ctimeNs !== stat.ctimeNs) return false
       for (const anchor of anchors) {
-        const current = await lstat(anchor.path, { bigint: true })
+        beforeEffect(); const current = await lstat(anchor.path, { bigint: true }); beforeEffect()
         if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== anchor.dev || current.ino !== anchor.ino) return false
       }
-      return bytesRead <= Number(stat.size) && bytes.subarray(0, bytesRead).toString('utf8').includes(marker)
+      beforeEffect(); return bytesRead <= Number(stat.size) && bytes.subarray(0, bytesRead).toString('utf8').includes(marker)
     } catch { return false }
     finally { bytes?.fill(0); await handle?.close() }
   }

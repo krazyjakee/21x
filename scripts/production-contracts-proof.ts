@@ -67,7 +67,7 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'voice:installModel': ['nemo-parakeet-tdt-0.6b-v3'], 'voice:removeModel': ['sherpa-streaming-zipformer-en'], 'voice:removeAllModels': [], 'voice:selectModel': ['nemo-fast-conformer-en-480ms'], 'voice:setEndpointSilence': [1.5],
   'voice:tts:getSnapshot': [], 'voice:tts:setEnabled': [false], 'voice:tts:setEngine': ['local'], 'voice:tts:setVoice': ['local:kitten-nano-en-v0_2:0'], 'voice:tts:setSpeed': [1.25], 'voice:tts:setMaxChars': [1200], 'voice:tts:setSpeakActionResults': [false], 'voice:tts:setOnlyVoiceTurns': [true],
   'voice:tts:installModel': ['kitten-nano-en-v0_2'], 'voice:tts:selectModel': ['kokoro-en-v0_19'], 'voice:tts:removeModel': ['kitten-nano-en-v0_2'],
-  'agent-installer:detect': [], 'artifacts:scan': [task], 'artifacts:read': [task, 'artifacts/fixture/report.md'],
+  'agent-installer:detect': [], 'agent-installer:install': ['opencode'], 'artifacts:scan': [task], 'artifacts:read': [task, 'artifacts/fixture/report.md'],
   'db:getTasks': [project], 'db:getTask': [task], 'db:createTask': [{ title: 'Fixture task', project_id: project }],
   'db:updateTask': [task, { title: 'Updated fixture', status: 'ready_for_review' }], 'db:deleteTask': [task],
   'db:getSubtasks': [task], 'db:reorderSubtasks': [task, ['subtask_one', 'subtask_two']], 'project:moveTask': [task, project],
@@ -177,6 +177,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   ...['github', 'gitlab', 'forgejo'].map(provider => ({ operation: 'git:recordRepoProviders', case: `provider-map-${provider}`, args: [['team/subgroup/repo', 'fixture/other'], provider] })),
   ...['nemo-parakeet-tdt-0.6b-v3', 'sherpa-streaming-zipformer-en', 'nemo-fast-conformer-en-480ms', 'nemotron-streaming-en-560ms'].map(id => ({ operation: 'voice:selectModel', case: `finite-stt-${id}`, args: [id] })),
   ...['kitten-nano-en-v0_2', 'kokoro-en-v0_19'].map(id => ({ operation: 'voice:tts:selectModel', case: `finite-tts-${id}`, args: [id] })),
+  ...['claudeCode', 'opencode', 'codex', 'pi', 'cursor', 'nodejs', 'npm', 'pnpm', 'git', 'gh', 'glab', 'tea', 'rtk'].map(name => ({ operation: 'agent-installer:install', case: `finite-installer-${name}`, args: [name] })),
   { operation: 'voice:setEndpointSilence', case: 'seconds-upper-bound', args: [10] },
   { operation: 'voice:tts:setSpeed', case: 'speed-lower-bound', args: [0.5] },
   { operation: 'voice:tts:setSpeed', case: 'speed-upper-bound', args: [2] },
@@ -276,7 +277,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 222 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 223 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

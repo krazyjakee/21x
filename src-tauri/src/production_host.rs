@@ -229,17 +229,27 @@ async fn desktop_invoke(
         .engine
         .as_ref()
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
-    if operation == "ui:publishState" {
-        if !twentyonex_engine::production_ui_contracts::publish_request(&payload) {
+    if matches!(
+        operation.as_str(),
+        "ui:publishState" | "agent-installer:install"
+    ) {
+        if !twentyonex_engine::production::contracts::valid_request(&operation, &payload) {
             return Err(EngineError::new("INVALID_ARGUMENTS"));
         }
         let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
         state.ui.assert_publish(&window, &engine_epoch, &lease)?;
-        // The lease is captured at native ingress, never reacquired after an
-        // await. Source receives it only through the private pipe operation.
-        let result = engine
-            .publish_ui(&engine_epoch, payload["state"].clone(), &lease)
-            .await?;
+        // Capture once at native ingress. Never mint or reacquire a document
+        // receipt after an accepted installation or UI publication.
+        let result = if operation == "ui:publishState" {
+            engine
+                .publish_ui(&engine_epoch, payload["state"].clone(), &lease)
+                .await?
+        } else {
+            engine.install_agent(&engine_epoch, payload, &lease).await?
+        };
+        authorize(&window)?;
+        available_engine(window.app_handle(), Some(&engine_epoch))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
         return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
     }
     if ui_lease.is_some() {
@@ -397,6 +407,7 @@ async fn start(
     let workspace_file = workspace_file_host(app, native_work.clone(), &descriptor)?;
     let ui_snapshot = ui.snapshot_callback(app.clone(), native_work.clone());
     let ui_command = ui.command_callback(app.clone(), native_work.clone());
+    let installer_progress = ui.installer_progress_callback(app.clone(), native_work.clone());
     ProductionEngine::start(
         TrustedProductionLaunch {
             descriptor,
@@ -429,6 +440,7 @@ async fn start(
             notification: None,
             ui_snapshot: Some(ui_snapshot),
             ui_command: Some(ui_command),
+            installer_progress: Some(installer_progress),
         },
     )
     .await
