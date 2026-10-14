@@ -1,3 +1,5 @@
+import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
+import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { MOBILE_CODECS } from '../shared/mobile-codecs'
 import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
@@ -89,9 +91,34 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('borrows real CLI detection and artifact workspace ownership without exposing unbound installs or native file effects', async () => {
+    const f = await fixture(), { db, agentDetection } = f.services
+    expect(f.owner.getAgentInstallerBindingLease().detection).toBe(agentDetection)
+    expect(agentDetection.childCount).toBe(0)
+    const grant = f.options.authority.canManageGlobalConfiguration
+    f.options.authority.canManageGlobalConfiguration = () => false
+    await expect(f.backend.invoke('agent-installer:detect', AGENT_INSTALLER_CODECS['agent-installer:detect'].encodeArguments([]), f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(agentDetection.childCount).toBe(0)
+    f.options.authority.canManageGlobalConfiguration = grant
+    await expect(f.backend.invoke('agent-installer:install', { agentName: 'codex' }, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    const task = db.createTask({ title: 'Actual owned report' })!
+    const directory = db.getWorkspaceDir(task.id)
+    writeFileSync(join(directory, 'report.md'), 'Owned report\n')
+    const scan = await f.backend.invoke('artifacts:scan', ARTIFACT_CODECS['artifacts:scan'].encodeArguments([task.id]), f.caller, f.signal)
+    expect(scan).toMatchObject({ defined: true, value: [{ path: 'report.md' }] })
+    const content = await f.backend.invoke('artifacts:read', ARTIFACT_CODECS['artifacts:read'].encodeArguments([task.id, 'report.md']), f.caller, f.signal)
+    expect(content).toMatchObject({ defined: true, value: { kind: 'text', content: 'Owned report\n' } })
+    f.options.authority.canAccessTask = () => false
+    await expect(f.backend.invoke('artifacts:read', { taskId: task.id, relativePath: 'report.md' }, f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(f.backend.invoke('shell:openExternal', { url: 'https://example.test' }, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    await f.owner.close()
+    expect(() => agentDetection.assertOpen()).toThrow()
+    expect(db.db.open).toBe(false)
+  })
+
   it('pairs against the actual mobile HTTP owner and sends a phone start through shared admission', async () => {
     const f = await fixture(undefined, false, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(130)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(133)
     const lease = f.owner.getMobileBindingLease()!
     expect(lease.deps.db).toBe(f.services.db); expect(lease.deps.agentManager).toBe(f.services.agents)
     expect(lease.deps.taskOwners?.automation).toBe(f.services.automation)
@@ -126,7 +153,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(127)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(130)
     const lease = f.owner.getConnectorBindingLease()!
     const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
     const id = (ensured as { value: { instanceId: string } }).value.instanceId
@@ -238,7 +265,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(120)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(123)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

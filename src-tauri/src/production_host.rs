@@ -10,6 +10,7 @@ use std::{
     },
 };
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow};
+use tauri_plugin_opener::OpenerExt;
 use twentyonex_engine::{
     production::{
         DelegatedCgroup, HostCapability, OptionalCapability, ProductionCapabilities,
@@ -18,31 +19,71 @@ use twentyonex_engine::{
     },
     EngineError,
 };
+#[path = "native_services.rs"]
+pub(crate) mod native_services;
+use native_services::NativeWorkOwner;
 
 struct ProductionState {
     engine: Option<ProductionEngine>,
     failure: Option<EngineError>,
+    native_work: NativeWorkOwner,
 }
 
 fn trusted_origin(url: &tauri::Url) -> bool {
-    url.username().is_empty()
-        && url.password().is_none()
-        && (url.port().is_none()
-            && (url.scheme() == "tauri" && url.host_str() == Some("localhost")
-                || matches!(url.scheme(), "http" | "https")
-                    && url.host_str() == Some("tauri.localhost"))
-            || tauri::is_dev()
-                && url.scheme() == "http"
-                && url.host_str() == Some("localhost")
-                && url.port() == Some(1421))
+    native_services::trusted_origin(url, tauri::is_dev())
 }
 fn authorize(window: &WebviewWindow) -> Result<(), EngineError> {
-    if window.label() != "main"
-        || !trusted_origin(&window.url().map_err(|_| EngineError::new("UNAUTHORIZED"))?)
-    {
+    if !native_services::trusted_main(
+        window.label(),
+        &window.url().map_err(|_| EngineError::new("UNAUTHORIZED"))?,
+        tauri::is_dev(),
+    ) {
         return Err(EngineError::new("UNAUTHORIZED"));
     }
     Ok(())
+}
+fn available_engine(
+    app: &tauri::AppHandle,
+    epoch: Option<&str>,
+) -> Result<ProductionEngine, EngineError> {
+    let state = app
+        .try_state::<ProductionState>()
+        .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+    state.native_work.assert_open()?;
+    let engine = state
+        .engine
+        .as_ref()
+        .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+    native_services::lifecycle(
+        epoch,
+        &engine.epoch(),
+        engine.snapshot()["available"] == true,
+    )?;
+    Ok(engine.clone())
+}
+async fn open_external(
+    app: tauri::AppHandle,
+    work: NativeWorkOwner,
+    window: WebviewWindow,
+    epoch: String,
+    url: String,
+    callback: bool,
+) -> Result<(), EngineError> {
+    if !native_services::external_url(&url, callback) {
+        return Err(EngineError::new("INVALID_ARGUMENTS"));
+    }
+    authorize(&window)?;
+    available_engine(&app, Some(&epoch))?;
+    work.run(move || {
+        // Recheck after entering the blocking worker. A queued launch cannot
+        // cross shutdown, engine replacement or main-window navigation.
+        authorize(&window)?;
+        available_engine(&app, Some(&epoch))?;
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|_| EngineError::new("INTERNAL_ERROR"))
+    })
+    .await
 }
 #[tauri::command]
 fn engine_status(
@@ -53,6 +94,8 @@ fn engine_status(
     if let Some(engine) = &state.engine {
         let mut snapshot = engine.snapshot();
         snapshot["protocolVersion"] = json!(1);
+        snapshot["available"] =
+            json!(snapshot["available"] == true && state.native_work.assert_open().is_ok());
         return Ok(snapshot);
     }
     Ok(
@@ -70,10 +113,41 @@ async fn desktop_invoke(
     payload: Value,
 ) -> Result<Value, EngineError> {
     authorize(&window)?;
+    state.native_work.assert_open()?;
     let engine = state
         .engine
         .as_ref()
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+    if native_services::OPERATIONS.contains(&operation.as_str()) {
+        if !native_services::request(&operation, &payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let app = window.app_handle().clone();
+        available_engine(&app, Some(&engine_epoch))?;
+        let result = match operation.as_str() {
+            "app:getVersion" => {
+                let version = app.package_info().version.to_string();
+                if !native_services::version(&version) {
+                    return Err(EngineError::new("INVALID_RESULT"));
+                }
+                json!({"defined":true,"value":version})
+            }
+            "shell:openExternal" => {
+                open_external(
+                    app,
+                    state.native_work.clone(),
+                    window,
+                    engine_epoch,
+                    payload["url"].as_str().unwrap().to_owned(),
+                    false,
+                )
+                .await?;
+                json!({"defined":false})
+            }
+            _ => return Err(EngineError::new("UNKNOWN_OPERATION")),
+        };
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
+    }
     let result = engine.invoke(&engine_epoch, &operation, payload).await?;
     Ok(json!({"engineEpoch":engine.epoch(),"result":result}))
 }
@@ -83,7 +157,10 @@ fn unavailable(code: &'static str, phase: &'static str) -> EngineError {
     error.startup_phase = Some(phase);
     error
 }
-async fn start(app: &tauri::AppHandle) -> Result<ProductionEngine, EngineError> {
+async fn start(
+    app: &tauri::AppHandle,
+    native_work: NativeWorkOwner,
+) -> Result<ProductionEngine, EngineError> {
     // Developer/native provisioning only. Never accept a scope path via IPC;
     // absence of a real delegated scope prevents Node/key/profile startup.
     let delegation = std::env::var_os("TWENTYONEX_PRODUCTION_CGROUP_ROOT")
@@ -172,7 +249,7 @@ async fn start(app: &tauri::AppHandle) -> Result<ProductionEngine, EngineError> 
             resource_root: resources,
         },
         capabilities: ProductionCapabilities {
-            external_urls: HostCapability::Unsupported,
+            external_urls: HostCapability::Host,
             notifications: HostCapability::Unsupported,
             energy: HostCapability::Unsupported,
             ui: HostCapability::Unsupported,
@@ -183,6 +260,7 @@ async fn start(app: &tauri::AppHandle) -> Result<ProductionEngine, EngineError> 
         },
     };
     let handle = app.clone();
+    let external_app = app.clone();
     ProductionEngine::start(
         TrustedProductionLaunch {
             descriptor,
@@ -200,7 +278,17 @@ async fn start(app: &tauri::AppHandle) -> Result<ProductionEngine, EngineError> 
                     )
                     .map_err(|_| EngineError::new("DISCONNECTED"))
             }),
-            open_external: None,
+            open_external: Some(Arc::new(move |url| {
+                let app = external_app.clone();
+                let work = native_work.clone();
+                Box::pin(async move {
+                    let engine = available_engine(&app, None)?;
+                    let window = app
+                        .get_webview_window("main")
+                        .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                    open_external(app, work, window, engine.epoch().to_owned(), url, true).await
+                })
+            })),
             notification: None,
         },
     )
@@ -209,17 +297,27 @@ async fn start(app: &tauri::AppHandle) -> Result<ProductionEngine, EngineError> 
 
 pub fn run() {
     let app = tauri::Builder::default()
+        // Native Rust uses this plugin; WebViews receive no direct plugin
+        // permission and no injected link interception script.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![engine_status, desktop_invoke])
         .setup(|app| {
-            let started = tauri::async_runtime::block_on(start(app.handle()));
+            let native_work = NativeWorkOwner::default();
+            let started = tauri::async_runtime::block_on(start(app.handle(), native_work.clone()));
             let state = match started {
                 Ok(engine) => ProductionState {
                     engine: Some(engine),
                     failure: None,
+                    native_work: native_work.clone(),
                 },
                 Err(error) => ProductionState {
                     engine: None,
                     failure: Some(error),
+                    native_work,
                 },
             };
             app.manage(state);
@@ -251,11 +349,27 @@ pub fn run() {
             {
                 return;
             }
-            let engine = handle.state::<ProductionState>().engine.clone();
+            let state = handle.state::<ProductionState>();
+            // Fence synchronously before another native command/callback can
+            // reserve work; failed drains never allow application exit.
+            if state.native_work.close().is_err() {
+                eprintln!("PRODUCTION_NATIVE_WORK_DRAIN_BLOCKED");
+                quitting.store(0, Ordering::SeqCst);
+                return;
+            }
+            let engine = state.engine.clone();
+            let native_work = state.native_work.clone();
             let handle = handle.clone();
             let quitting = quitting.clone();
             tauri::async_runtime::spawn(async move {
                 let mut code = 0;
+                // Join native invocations before Node may release its profile
+                // and stores, as well as before the application exits.
+                if native_work.drain().await.is_err() {
+                    eprintln!("PRODUCTION_NATIVE_WORK_DRAIN_BLOCKED");
+                    quitting.store(0, Ordering::SeqCst);
+                    return;
+                }
                 if let Some(engine) = engine {
                     if engine.shutdown().await.is_err() {
                         code = 1;

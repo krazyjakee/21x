@@ -1,3 +1,4 @@
+import { AGENT_INSTALLER_DETECTION_KEYS } from '@shared/agent-installer-codecs'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { TauriDesktopApi } from './tauri-desktop-transport'
 import { createNativeDesktopHost, NATIVE_COMMAND_BINDINGS, type NativeDesktopHost } from './native-desktop-host'
@@ -116,7 +117,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 137 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 142 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -125,7 +126,7 @@ it('binds the 137 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(137)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(142)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -523,4 +524,66 @@ it.each(mobileMutations)('never replays accepted $operation after a native disco
   f.changeEpoch(); await f.host.reconnect(); await rejected
   pending.resolve({ engineEpoch: 'engine-1', result: { defined: true, value: row.result } }); await Promise.resolve()
   expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === row.operation)).toHaveLength(1)
+})
+
+
+it('routes reviewed native URLs with a hydration fence and validates native version replies', async () => {
+  const f = fixture()
+  f.results.set('app:getVersion', '0.1.0')
+  await f.host.reconnect()
+  expect(await f.host.api.app.getVersion()).toBe('0.1.0')
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.shell.openExternal('https://example.test/help')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  await f.host.api.shell.openExternal('https://example.test/help')
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'shell:openExternal', payload: { url: 'https://example.test/help' }, engineEpoch: 'engine-1' })
+  const accepted = f.invoke.mock.calls.length
+  for (const url of ['file:///private', 'javascript:alert(1)', 'https://user:secret@example.test', 'https://example.test/\n']) {
+    await expect(f.host.api.shell.openExternal(url)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  }
+  expect(f.invoke.mock.calls.length).toBe(accepted)
+  f.results.set('app:getVersion', { version: '0.1.0', privatePath: '/private' })
+  await expect(f.host.api.app.getVersion()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('never replays an accepted native URL opening after an epoch change', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const raw = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === 'shell:openExternal' ? raw.promise : original(command, args))
+  const opening = f.host.api.shell.openExternal('https://example.test/help'), rejected = expect(opening).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); await f.host.reconnect(); await rejected
+  raw.resolve({ engineEpoch: 'engine-1', result: { defined: false } }); await Promise.resolve()
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'shell:openExternal')).toHaveLength(1)
+})
+
+it('binds bounded artifact reads while native file/clipboard effects stay unavailable', async () => {
+  const f = fixture()
+  f.results.set('artifacts:scan', [{ path: 'report.md', title: 'report.md', type: 'markdown', updatedAt: 100, size: 10 }])
+  f.results.set('artifacts:read', { kind: 'text', content: 'Owned report\n', mimeType: 'text/markdown' })
+  f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(await f.host.api.artifacts.scan('task_fixture')).toEqual(f.results.get('artifacts:scan'))
+  expect(await f.host.api.artifacts.read('task_fixture', 'report.md')).toEqual(f.results.get('artifacts:read'))
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.artifacts.read('task_fixture', '../private.txt')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.artifacts.copyFile!('task_fixture', 'report.md')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+})
+
+
+it('routes exact CLI detection metadata without enabling installer execution', async () => {
+  const f = fixture()
+  const snapshot = Object.fromEntries(AGENT_INSTALLER_DETECTION_KEYS.map(key => [key, { installed: false, version: null }]))
+  Object.assign(snapshot, { pi: { installed: false, version: null, supported: false, reason: 'Pi CLI is not installed.' },
+    rtk: { installed: false, version: null, configured: false, integrations: { claudeCode: false, opencode: false, codex: false, cursor: false, pi: false } } })
+  f.results.set('agent-installer:detect', snapshot)
+  await f.host.reconnect()
+  expect(await f.host.api.agentInstaller.detect()).toEqual(snapshot)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'agent-installer:detect', payload: {}, engineEpoch: 'engine-1' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.agentInstaller.install('codex')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.results.set('agent-installer:detect', { ...snapshot, codex: { installed: false, version: null, stdout: 'Private inherited output' } })
+  await expect(f.host.api.agentInstaller.detect()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })

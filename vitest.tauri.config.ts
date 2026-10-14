@@ -37,6 +37,7 @@ const mainFiles = [
   'src/main/adapters/pi-adapter.test.ts',
   'src/main/adapters/claude-code-history.test.ts',
   'src/main/adapters/permission-mode.test.ts',
+  'src/main/artifacts.test.ts',
   'src/main/agent-installer/installer-network.test.ts',
   'src/main/agent-installer/installer-process.test.ts',
   'src/main/task-api-server.test.ts', 'src/main/task-api/skill-routes.test.ts',
@@ -127,6 +128,7 @@ export default defineConfig({
       { resolve: resolveOptions, esbuild: { jsx: 'automatic' }, test: { name: 'portable-renderer', environment: 'happy-dom',
         include: ['src/renderer/src/lib/desktop-client.test.ts', 'src/renderer/src/lib/transcript-pagination.test.ts', 'src/renderer/src/lib/tauri-task-slice.test.ts',
           'src/renderer/src/lib/terminal-session.test.ts', 'src/renderer/src/lib/tauri-desktop-transport.test.ts', 'src/renderer/src/lib/desktop-api.test.ts', 'src/renderer/src/lib/native-desktop-host.test.ts', 'src/renderer/src/lib/shared-ipc-listeners.test.ts',
+          'src/renderer/src/components/artifacts/viewers/HtmlArtifactView.test.tsx',
           'src/renderer/src/components/layout/DesktopHostStatus.test.tsx', 'src/renderer/src/stores/commander-desktop-recovery.test.ts'], setupFiles: [join(root, 'test/setup-renderer.ts')] } }
     ]
   }

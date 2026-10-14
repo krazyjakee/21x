@@ -1,3 +1,7 @@
+import { AgentInstallerBackend } from './agent-installer-backend'
+import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
+import { ArtifactBackend } from './artifact-backend'
+import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { MobileBackend, type MobileBackendOptions } from './mobile-backend'
 import { MOBILE_CODECS, MOBILE_EVENT_CODECS } from '../shared/mobile-codecs'
 import { SessionContextBackend } from './session-context-backend'
@@ -69,7 +73,7 @@ export interface ProductionDesktopBindingOptions {
 export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
   ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS }
 
@@ -104,6 +108,8 @@ export class ProductionDesktopBindings {
   private readonly sessionContext: SessionContextBackend
   private readonly claudePlugins: ClaudePluginBackend
   private readonly mobile: MobileBackend | null
+  private readonly agentInstaller: AgentInstallerBackend
+  private readonly artifacts: ArtifactBackend
   private readonly epoch: string
   private constructor(private readonly owner: ProductionOwner, private readonly services: Awaited<ReturnType<ProductionOwner['start']>>, private readonly options: ProductionDesktopBindingOptions) {
     const lease = owner.getDatabaseBindingLease()
@@ -187,10 +193,14 @@ export class ProductionDesktopBindings {
     this.mobile = mobileLease ? new MobileBackend({ ...mobileLease, engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageMobile: dynamicAuthority.canManageMobile,
       canAccessSession: dynamicAuthority.canAccessMobileSession }) : null
+    this.agentInstaller = new AgentInstallerBackend({ ...owner.getAgentInstallerBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageConfiguration: dynamicAuthority.canManageGlobalConfiguration })
+    this.artifacts = new ArtifactBackend({ database: services.db, ...owner.getArtifactBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask, canAccessProject: dynamicAuthority.canAccessProject })
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown()
+      this.closed = true; this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown()
       void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close(), this.sessionContext.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close()]).then(() => undefined))
+    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close()]).then(() => undefined))
   }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
@@ -265,7 +275,7 @@ export class ProductionDesktopBindings {
     const schemas = { ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
       ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
       ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller), ...this.mcp.operationSchemas(caller), ...this.sources.operationSchemas(caller),
-      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller) }
+      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller) }
     return Object.fromEntries(Object.entries(schemas).map(([operation, schema]) => [operation, {
       ...schema, handle: (payload: JsonValue, signal: AbortSignal) => this.invoke(operation, payload, caller, signal)
     }]))
@@ -284,6 +294,8 @@ export class ProductionDesktopBindings {
           if (!this.mobile) throw new ServiceProtocolError('UNKNOWN_OPERATION')
           return await this.mobile.registry.invoke(operation, payload, caller, combined.signal)
         }
+        if (Object.hasOwn(AGENT_INSTALLER_CODECS, operation)) return await this.agentInstaller.registry.invoke(operation, payload, caller, combined.signal)
+        if (Object.hasOwn(ARTIFACT_CODECS, operation)) return await this.artifacts.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(SESSION_CONTEXT_CODECS, operation)) return await this.sessionContext.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(CLAUDE_PLUGIN_CODECS, operation)) return await this.claudePlugins.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(TASK_SOURCE_PLUGIN_CODECS, operation)) return await this.sourcePlugins.registry.invoke(operation, payload, caller, combined.signal)

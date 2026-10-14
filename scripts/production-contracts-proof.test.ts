@@ -1,3 +1,5 @@
+import { AGENT_INSTALLER_CODECS, AGENT_INSTALLER_DETECTION_KEYS } from '../src/shared/agent-installer-codecs'
+import { ARTIFACT_CODECS } from '../src/shared/artifact-codecs'
 import { describe, expect, it } from 'vitest'
 import { createProductionRequestCorpus, PROOF_COMMAND_CODECS, writeProductionRequestCorpus } from './production-contracts-proof'
 import { isRecord } from '../src/shared/service-protocol'
@@ -9,10 +11,10 @@ import { SESSION_CONTEXT_GENERATION_STATES, SESSION_CONTEXT_HANDOFF_STATES } fro
 import { MOBILE_EVENTS, MOBILE_EVENT_CODECS } from '../src/shared/mobile-codecs'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 137 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 140 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(137)
+    expect(corpus.operations).toHaveLength(140)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -174,10 +176,21 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     expect(MOBILE_EVENT_CODECS['mobile:device-connected'].validatePayload({ sessionId: row.id, deviceName: row.device_name, sessionToken: 'private' })).toBe(false)
     expect(() => MOBILE_EVENT_CODECS['mobile:device-connected'].decodePayload({ sessionId: row.id, deviceName: 'bad\0name' })).toThrow()
   })
+  it('keeps CLI metadata and artifact DTOs exact without exposing raw child output or arbitrary file authority', () => {
+    const codec = AGENT_INSTALLER_CODECS['agent-installer:detect']
+    const snapshot = Object.fromEntries(AGENT_INSTALLER_DETECTION_KEYS.map(key => [key, { installed: false, version: null }]))
+    Object.assign(snapshot, { pi: { installed: false, version: null, supported: false, reason: 'Pi CLI is not installed.' },
+      rtk: { installed: false, version: null, configured: false, integrations: { claudeCode: false, opencode: false, codex: false, cursor: false, pi: false } } })
+    expect(codec.encodeResult(snapshot)).toEqual({ defined: true, value: snapshot })
+    expect(() => codec.encodeResult({ ...snapshot, codex: { installed: false, version: null, stdout: 'private child output' } })).toThrow()
+    expect(() => ARTIFACT_CODECS['artifacts:read'].decodeArguments({ taskId: 'task_fixture', relativePath: '../private.txt' })).toThrow()
+    expect(() => ARTIFACT_CODECS['artifacts:read'].encodeResult({ kind: 'text', content: 'x'.repeat(128 * 1024 + 1) })).toThrow()
+    expect(ARTIFACT_CODECS['artifacts:read'].encodeResult({ kind: 'text', content: 'Owned YAML', mimeType: 'application/yaml' })).toEqual({ defined: true, value: { kind: 'text', content: 'Owned YAML', mimeType: 'application/yaml' } })
+  })
   it('exports the validated corpus only when the coordinator selects an artifact path', async () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(137)
+    expect(corpus.operations).toHaveLength(140)
   })
 })

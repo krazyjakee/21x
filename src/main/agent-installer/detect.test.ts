@@ -98,4 +98,17 @@ describe('detectInstalledAgents', () => {
     expect(getInstalledBackends(status)).toEqual([])
     expect(status.pi.reason).toBe('Pi CLI is not installed.')
   })
+
+  it('keeps the portable path private and retains semantic versions without reflecting arbitrary command text', async () => {
+    const path = process.env.PATH
+    const status = await detectInstalledAgents({ portable: true, home: '/controlled-fixture-home',
+      exec: fakeExec({ node: 'v22.1.0', git: 'git version 2.53.0.windows.1', claude: 'PRIVATE_TOKEN /private/path', pi: '0.80.5' }),
+      integrations: async () => ({ claudeCode: false, opencode: false, codex: false, cursor: false, pi: false }) })
+    expect(status.nodejs).toEqual({ installed: true, version: '22.1.0' })
+    expect(status.git).toEqual({ installed: true, version: '2.53.0.windows.1' })
+    expect(status.claudeCode).toEqual({ installed: true, version: null })
+    expect(status.pi).toMatchObject({ installed: true, supported: true, reason: null })
+    expect(JSON.stringify(status)).not.toMatch(/PRIVATE_TOKEN|\/private\/path/)
+    expect(process.env.PATH).toBe(path)
+  })
 })

@@ -1,3 +1,5 @@
+import { AGENT_INSTALLER_CODECS } from '../src/shared/agent-installer-codecs'
+import { ARTIFACT_CODECS } from '../src/shared/artifact-codecs'
 /** Pure codec corpus: no service/SDK imports, profiles, mutations or credentials. */
 import { writeFile } from 'node:fs/promises'
 import { DATABASE_COMMAND_CODECS } from '../src/shared/database-desktop-codecs'
@@ -22,7 +24,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -32,6 +34,7 @@ const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }
 
 /** One explicit valid API argument tuple for every finite production command. */
 export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
+  'agent-installer:detect': [], 'artifacts:scan': [task], 'artifacts:read': [task, 'artifacts/fixture/report.md'],
   'db:getTasks': [project], 'db:getTask': [task], 'db:createTask': [{ title: 'Fixture task', project_id: project }],
   'db:updateTask': [task, { title: 'Updated fixture', status: 'ready_for_review' }], 'db:deleteTask': [task],
   'db:getSubtasks': [task], 'db:reorderSubtasks': [task, ['subtask_one', 'subtask_two']], 'project:moveTask': [task, project],
@@ -94,6 +97,8 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
 
 type Variant = { operation: string; case: string; args: unknown[] }
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  { operation: 'artifacts:read', case: 'retained-unicode-relative-path', args: [task, 'reports/café/readme.md'] },
+  { operation: 'artifacts:read', case: 'relative-path-byte-boundary', args: [task, 'x'.repeat(2048)] },
   ...['15', '0', '', '0.5'].map(poll_interval_minutes => ({ operation: 'taskSource:update', case: `stored-bridge-interval-${poll_interval_minutes || 'default'}`, args: ['source_fixture', { plugin_id: 'connector-bridge', config: { poll_interval_minutes } }] })),
   { operation: 'agentSession:getTranscriptPage', case: 'snapshot-watermark-limit', args: [task, { version: 1, mode: 'snapshot', after: 10, watermark: 100, limit: 64 }] },
   { operation: 'agentSession:getTranscriptPage', case: 'delta-watermark-limit', args: [task, { version: 1, mode: 'delta', after: 10, watermark: 100, limit: 1 }] },
@@ -184,7 +189,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 137 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 140 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

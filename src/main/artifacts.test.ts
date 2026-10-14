@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ArtifactContentKind, ArtifactType } from '../shared/artifacts'
 import {
   ARTIFACT_FILE_LIMITS,
+  ArtifactReadLimitError,
   createRegisteredTaskArtifact,
   editRegisteredTaskArtifactFile,
   inspectTaskArtifact,
@@ -306,5 +307,35 @@ describe('task artifact files', () => {
 
   it('returns an empty scan for a missing workspace', async () => {
     await expect(scanTaskArtifacts(join(testRoot, 'missing'))).resolves.toEqual([])
+  })
+  it('preserves Electron image limits while strict portable reads reject their smaller capacity explicitly', async () => {
+    const bytes = Buffer.alloc(512 * 1024 + 1, 7)
+    await writeFile(join(workspaceDir, 'image.png'), bytes)
+    expect((await readTaskArtifact(workspaceDir, 'image.png'))?.kind).toBe(ArtifactContentKind.DATA_URL)
+    await expect(readTaskArtifact(workspaceDir, 'image.png', { strict: true, maxImageBytes: 512 * 1024 })).rejects.toBeInstanceOf(ArtifactReadLimitError)
+    expect(await readFile(join(workspaceDir, 'image.png'))).toEqual(bytes)
+  })
+  it('rejects oversized registry bytes before parsing and preserves an unsupported saved registry unchanged', async () => {
+    await mkdir(join(workspaceDir, '.20x'))
+    const registry = join(workspaceDir, '.20x', 'artifacts.json'), bytes = 'x'.repeat(1024 * 1024 + 1)
+    await writeFile(registry, bytes)
+    await expect(listTaskArtifactEntries(workspaceDir, 'task-1', { strict: true })).rejects.toBeInstanceOf(ArtifactReadLimitError)
+    expect(await readFile(registry, 'utf8')).toBe(bytes)
+    const future = JSON.stringify({ version: 999, artifacts: [], retiredBrowserUrl: 'https://inactive.example' })
+    await writeFile(registry, future)
+    await expect(listTaskArtifactEntries(workspaceDir, 'task-1', { strict: true })).rejects.toThrow('Unsupported artifact registry')
+    expect(await readFile(registry, 'utf8')).toBe(future)
+  })
+  it('does not let a different task registration authorize private binary reads', async () => {
+    const registered = await createRegisteredTaskArtifact(workspaceDir, 'task-1', { title: 'Owned bundle', type: ArtifactType.FILE })
+    const artifact = await writeRegisteredTaskArtifactFile(workspaceDir, 'task-1', { artifactId: registered.artifactId, filename: 'bundle.zip', content: 'UEsDBA==', encoding: 'base64' })
+    expect((await readTaskArtifact(workspaceDir, artifact.path!, { strict: true, taskId: 'task-1' }))?.kind).toBe(ArtifactContentKind.DATA_URL)
+    expect(await readTaskArtifact(workspaceDir, artifact.path!, { strict: true, taskId: 'task-2' })).toBeNull()
+  })
+  it('rejects strict scan capacity instead of presenting a silently truncated file inventory', async () => {
+    await mkdir(join(workspaceDir, 'reports'))
+    for (let i = 0; i < ARTIFACT_FILE_LIMITS.maxScanFiles + 1; i++) await writeFile(join(workspaceDir, 'reports', `report-${i}.md`), '# Bounded report')
+    await expect(scanTaskArtifacts(workspaceDir, { strict: true })).rejects.toBeInstanceOf(ArtifactReadLimitError)
+    expect((await readdir(join(workspaceDir, 'reports'))).length).toBe(ARTIFACT_FILE_LIMITS.maxScanFiles + 1)
   })
 })

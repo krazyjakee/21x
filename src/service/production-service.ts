@@ -253,7 +253,8 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         command: resources.node, args: [resources.taskMcp], environment: {}, tools: listToolsForScope(FULL_ACCESS_SCOPE).map(tool => ({ name: tool.name, description: tool.description ?? '' })) },
       native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: descriptor.capabilities.configuredMcp },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, openExternal: callbacks.openExternal,
-        oauthBrowser: descriptor.capabilities.externalUrls === 'host' ? 'available' : 'unavailable',
+        // Browser opening alone does not register or own OAuth deep-link callbacks.
+        oauthBrowser: 'unavailable',
         notify: callbacks.notify, emit: callbacks.emitOwnerEvent,
         sendUiCommand: () => ({ ok: false, detail: 'Private production launch has no reviewed UI command callback' }) }
     }) })

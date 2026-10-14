@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { dirname, join } from 'path'
+import { dirname, join, isAbsolute } from 'path'
 import { homedir } from 'os'
 import { existsSync } from 'fs'
 import { detectRtkIntegrations } from './rtk-integrations.js'
@@ -50,9 +50,10 @@ function ensurePathDirectory(dir) {
  * Return common locations used by global npm and Node version managers.
  * @param {ExecRunner} [exec]
  */
-export async function getPiCommandCandidates(exec = /** @type {ExecRunner} */ (execFileAsync)) {
-  const home = homedir()
-  const candidates = process.platform === 'win32'
+export async function getPiCommandCandidates(exec = /** @type {ExecRunner} */ (execFileAsync), context = {}) {
+  const home = context.home || homedir()
+  const platform = context.platform || process.platform
+  const candidates = platform === 'win32'
     ? [
         'pi.cmd',
         'pi.exe',
@@ -69,15 +70,15 @@ export async function getPiCommandCandidates(exec = /** @type {ExecRunner} */ (e
       ]
 
   try {
-    const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+    const npmCommand = platform === 'win32' ? 'npm.cmd' : 'npm'
     const { stdout } = await exec(npmCommand, ['prefix', '-g'], {
       timeout: 5000,
-      shell: process.platform === 'win32',
+      shell: platform === 'win32',
       windowsHide: true
     })
     const prefix = stdout.trim()
-    if (prefix) {
-      candidates.push(process.platform === 'win32'
+    if (prefix && (!context.portable || prefix.length <= 4096 && isAbsolute(prefix) && !/[\u0000-\u001f]/.test(prefix))) {
+      candidates.push(platform === 'win32'
         ? join(prefix, 'pi.cmd')
         : join(prefix, 'bin', 'pi'))
     }
@@ -125,16 +126,16 @@ function ensureAgentPaths() {
  * re-running detection reflects backends installed or removed since the last
  * run. The result is a snapshot — nothing is cached between calls.
  *
- * @param {{ exec?: ExecRunner }} [options] - `exec` overrides the
+ * @param {{ exec?: ExecRunner, home?: string, platform?: string, portable?: boolean, integrations?: () => Promise<Record<string, boolean>> }} [options] - `exec` overrides the
  *   command runner (used by tests to simulate installs and removals).
  * @returns {Promise<Record<string, BackendStatus>>}
  */
 export async function detectInstalledAgents(options = {}) {
-  const isWin = process.platform === 'win32'
+  const isWin = (options.platform || process.platform) === 'win32'
   const exec = options.exec || /** @type {ExecRunner} */ (execFileAsync)
 
   // Ensure well-known install dirs are on PATH before probing
-  ensureAgentPaths()
+  if (!options.portable) ensureAgentPaths()
 
   /**
    * Run a command and extract a version string from stdout.
@@ -152,18 +153,20 @@ export async function detectInstalledAgents(options = {}) {
       })
       const raw = `${stdout}\n${stderr}`.trim()
       // Extract version-like string (e.g. "v22.1.0", "2.44.0", "1.0.3")
-      const match = raw.match(/(\d+\.\d+[\w.\-]*)/)
-      return { installed: true, version: match ? match[1] : raw.split('\n')[0] }
+      const match = options.portable
+        ? raw.match(/\b[vV]?(\d{1,6}\.\d{1,6}(?:\.\d{1,6})?(?:\.windows\.\d{1,6}|-(?:alpha|beta|rc|dev|next)(?:[.-]\d{1,6})?)?)(?=$|[\s,+)])/i)
+        : raw.match(/(\d+\.\d+[\w.\-]*)/)
+      return { installed: true, version: match ? match[1] : options.portable ? null : raw.split('\n')[0] }
     } catch {
       return { installed: false, version: null }
     }
   }
 
   async function probePi() {
-    for (const command of await getPiCommandCandidates(exec)) {
+    for (const command of await getPiCommandCandidates(exec, options)) {
       const status = await probe(command, ['--version'])
       if (!status.installed) continue
-      if (existsSync(command)) ensurePathDirectory(dirname(command))
+      if (!options.portable && existsSync(command)) ensurePathDirectory(dirname(command))
       const supported = status.version
         ? isVersionAtLeast(status.version, MINIMUM_PI_VERSION)
         : false
@@ -197,7 +200,7 @@ export async function detectInstalledAgents(options = {}) {
     probePi()
   ])
 
-  const integrations = detectRtkIntegrations()
+  const integrations = options.integrations ? await options.integrations() : detectRtkIntegrations()
   const requiredIntegrations = AGENT_BACKEND_KEYS.filter((key) =>
     isBackendReady({ claudeCode, opencode, codex, cursor, pi }[key]))
   const rtk = {

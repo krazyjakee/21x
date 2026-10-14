@@ -6,6 +6,28 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The next October 14 local continuation adds actual portable installed-CLI detection
+and retained task artifact scan/read services, plus two direct native host routes
+for system URL opening and the actual native package version. There are 140
+finite service command contracts, two separate native service commands and 19
+events. Detection retains raw child/stream/file work under captured host paths
+and a finite environment; installer execution stays unavailable. Artifact reads
+retain the requested task workspace and exact current task/group/repository
+bindings, with bounded no-follow file reads and explicit preview capacity errors.
+Tauri HTML previews show an unavailable state until the separate native viewer is
+bound; the main-window iframe does not activate HTML content.
+
+The production preview uses the pinned native opener without direct plugin IPC
+grants or injected link handlers. Native launch invocations drain before Node
+profile release and application exit; the externally launched browser has its
+own lifetime. OAuth flows remain unavailable until the native callback receiver
+and scheme registration are implemented. See [CLI detection](agent-installer-production.md),
+[artifact services](artifact-production.md), [native services](native-services-production.md)
+and [batch evidence](evidence/issue-closing-20261014-cli-artifact-native-services.json).
+Full native/retained-viewer/installer and installed platform criteria remain open.
+
+The preceding mobile and record-credential batch retains its tested revision:
+
 The October 14 mobile and credential continuation connects ten mobile controls
 and two notifier events to the actual optional production HTTP/WebSocket owner.
 There are 137 finite production command contracts and 19 events. New private

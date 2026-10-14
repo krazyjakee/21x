@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs'
+import { constants, openSync, fstatSync, readSync, closeSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
@@ -35,24 +35,35 @@ export function getRtkInitPlans(status) {
 }
 
 function fileContains(path, text) {
+  let descriptor
+  let bytes
   try {
-    return existsSync(path) && readFileSync(path, 'utf8').includes(text)
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW || 0))
+    const stat = fstatSync(descriptor)
+    if (!stat.isFile() || stat.size > 262144) return false
+    bytes = Buffer.alloc(stat.size + 1)
+    const read = readSync(descriptor, bytes, 0, bytes.length, 0)
+    return read <= stat.size && bytes.subarray(0, read).toString('utf8').includes(text)
   } catch {
     return false
-  }
+  } finally { bytes?.fill(0); if (descriptor !== undefined) closeSync(descriptor) }
 }
 
 /** Inspect the global files written by RTK's own setup commands. */
-export function detectRtkIntegrations(env = process.env, home = homedir()) {
+export function rtkIntegrationFiles(env = process.env, home = homedir()) {
   const claudeDir = env.CLAUDE_CONFIG_DIR || join(home, '.claude')
   const codexDir = env.CODEX_HOME || join(home, '.codex')
   const piDir = env.PI_CODING_AGENT_DIR || join(home, '.pi', 'agent')
 
-  return {
-    claudeCode: fileContains(join(claudeDir, 'settings.json'), 'rtk hook claude'),
-    opencode: fileContains(join(home, '.config', 'opencode', 'plugins', 'rtk.ts'), 'rtk'),
-    codex: fileContains(join(codexDir, 'hooks.json'), 'rtk hook codex'),
-    cursor: fileContains(join(home, '.cursor', 'hooks.json'), 'rtk hook cursor'),
-    pi: fileContains(join(piDir, 'extensions', 'rtk.ts'), 'rtk')
-  }
+  return [
+    { key: 'claudeCode', path: join(claudeDir, 'settings.json'), text: 'rtk hook claude' },
+    { key: 'opencode', path: join(home, '.config', 'opencode', 'plugins', 'rtk.ts'), text: 'rtk' },
+    { key: 'codex', path: join(codexDir, 'hooks.json'), text: 'rtk hook codex' },
+    { key: 'cursor', path: join(home, '.cursor', 'hooks.json'), text: 'rtk hook cursor' },
+    { key: 'pi', path: join(piDir, 'extensions', 'rtk.ts'), text: 'rtk' }
+  ]
+}
+
+export function detectRtkIntegrations(env = process.env, home = homedir()) {
+  return Object.fromEntries(rtkIntegrationFiles(env, home).map(file => [file.key, fileContains(file.path, file.text)]))
 }

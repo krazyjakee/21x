@@ -1,0 +1,332 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    213,
+    214,
+    215,
+    217
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "0bb792c645a0a6e08615f7d289c29fc73dcaafb5",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/agent-installer-production.md": "4ef09435cdce9bb570688280a180d88312483fb4664eba1c703584b8a8c23269",
+      "docs/tauri-migration/artifact-production.md": "f391b0c2c7eaed6c777c11e3f32ba66e0a756d9dc64c4cb8acc560df44e81ac2",
+      "docs/tauri-migration/implementation-status.md": "0b5e66ce2e80c491ff2907fd557eeac1749d69e16a3ddc682edfb3daa843a496",
+      "docs/tauri-migration/inventory.json": "6ad96623fff93619377c1fef6ee4b9aff6fac17f7b36586b19efce6b900de301",
+      "docs/tauri-migration/native-services-production.md": "a237435d2fb4482716ac35eff7d9c37e86eda8ab89cad69b6d3a9bae9ae5a3a5",
+      "scripts/production-contracts-proof.test.ts": "c86682bf375a048613e11a39bb40b863123f8b8ef7c777600c7065cd8d83e373",
+      "scripts/production-contracts-proof.ts": "ff3ebae705ce865bbe5d7b6ae1b9cd33310993b53edd65cb40f2c2e3640a2ced",
+      "src-tauri/Cargo.lock": "a435dcbaadb443de561d05050d55bd79fbbc00df10b7a262c9859a952e72190c",
+      "src-tauri/Cargo.toml": "37a39005eae3a141c3ce2fec43f1e4681492f6217dcce9785d81829c69afb024",
+      "src-tauri/engine/src/production_contracts.rs": "7e7f31ab0da914329f1e0d69e420409678783230ce238f9c1f3bfde6626cbb8d",
+      "src-tauri/src/native_services.rs": "b2e9fa35d0f21b5e8603557d66864d9161ce110a2a758ba9347322f1d9c00de6",
+      "src-tauri/src/production_host.rs": "fb15ca8795da6b02d4c0c99efdf3d149e1624e5f658d5a011abe4c30e6c9aae6",
+      "src/main/agent-installer/detect.js": "536f076ced15423cb09d9e0b8d7eba923a7d63c600d715e96680a104631d43c5",
+      "src/main/agent-installer/detect.test.ts": "9777d3ad734cd8d4af55eab36dd4fc8daab6866c698ac9d5c02e9505fa249678",
+      "src/main/agent-installer/portable-detection.ts": "33cbe40fd729ed34a47be2d3bd6f6ed3811e6548a0114fd5e86ffcac82eb80d4",
+      "src/main/agent-installer/rtk-integrations.js": "3df22bcd7e5fbd7a988ae0128b7eaf663613b280b7be7396c47d1d7284a224c0",
+      "src/main/artifacts.test.ts": "300a23258663fb9cac0e9847caf3ef45c5567b7d00e8fb3b5df45fb6cf471daf",
+      "src/main/artifacts.ts": "f31167a0155e00819c5f4cd39d3a1a126f2de0b4b9c78c28f316566c50a59dc9",
+      "src/renderer/src/components/artifacts/viewers/HtmlArtifactView.test.tsx": "68ca84d7a4cc850b589aeb64627954ac7d3e490e053a464ce98366c5fa015b61",
+      "src/renderer/src/components/artifacts/viewers/HtmlArtifactView.tsx": "70ff0f90d32b09d73c1208a243ecfec31ed4c04c989a66f11d9cf27f84db8c2f",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "f74505ec644ffa77fc67a3b78f60417a38b86e73fd8e1bc64b126108e942fcb4",
+      "src/renderer/src/lib/native-desktop-host.ts": "bd140ccbfbcc52fc00bab537f6cdd2bc25d3bb633fbd94b2eaacff197ffb6ccf",
+      "src/service/agent-installer-backend.test.ts": "69f3cf4fe8569dc3efc0a7223e1438fac3acc97b953a94d21c4fbf844fcb7ed2",
+      "src/service/agent-installer-backend.ts": "86cbb1789b00e0a55cc586128b44ffe6384b8678512eb8f32ba3d8c8f7505567",
+      "src/service/artifact-backend.test.ts": "ed30dbe1efd14b1f41740cdade08db1c716557c6a50f1bd6292b8b4e54021a39",
+      "src/service/artifact-backend.ts": "868c77fdb8d76412da4b76015251d87f447c2f8e0366f49ad288311e1976adc4",
+      "src/service/production-desktop-bindings.test.ts": "c5e4be97684aeb8d10954b6c5aa075bfce5c5341fa335f4c05aa18b4f0cb3f8b",
+      "src/service/production-desktop-bindings.ts": "e7fb695da415f89e46921dcbe0578c077751697af7e86b0b9f554436f6702231",
+      "src/service/production-owner.ts": "7e4297376e9179735d9634fb58440c2fe59ede9fff46a6fa86e907950801664b",
+      "src/service/production-service.ts": "56407c175b867aafab67654bf3f932ace40f45716465c57e632c2538a05d14dc",
+      "src/shared/agent-installer-codecs.test.ts": "04f0ded336cb118f624296fcddc4811e9064719de20f6ec7cf8a93df61083394",
+      "src/shared/agent-installer-codecs.ts": "8d0ddd7e3d9e13ea377a59da47f84bc7d5f14985e590a24be7cccb042987dd88",
+      "src/shared/artifact-codecs.test.ts": "d946a6a1a78c12a91fe1f2d8d0ce44598951bc991d622740b2cb982cd7c24726",
+      "src/shared/artifact-codecs.ts": "18742972c57ba3b568223639415f19ffd3f7c6b437379852c1247d630c307f1c",
+      "src/shared/native-services-codecs.test.ts": "66f42c992ef5b43e7d1ff479cd8b5f981dbaca70e3c0cf6921a7450202834a8d",
+      "src/shared/native-services-codecs.ts": "af4f1998c7b64bdccd934782a4151e8a17ec662a28bdaf14bd2f70ac80d84412",
+      "vitest.tauri.config.ts": "c8ddd31579e398a8f595feb1eafa4aa8c0343bb4f175749ab2335e1f9cc5145b"
+    }
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Actual portable installed-CLI detection, retained artifact reads, two native URL/version routes and explicit unavailable native HTML preview. Full migration acceptance remains open.",
+  "bindings": {
+    "finiteServiceCommandContracts": 140,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 142,
+    "events": 19,
+    "newCliDetectionCommands": 1,
+    "newArtifactReadCommands": 2,
+    "ownerHandlersMobileAndConnectorsEnabled": 140,
+    "ownerHandlersMobileEnabledConnectorsDisabled": 133,
+    "ownerHandlersWithoutMobileConnectorsEnabled": 130,
+    "ownerHandlersWithoutMobileConnectorsDisabled": 123
+  },
+  "implemented": [
+    "Actual finite installed CLI detector with captured approved home/cwd/environment, private PATH, Pi minimum/RTK readiness metadata, bounded raw child/stream/file work and independent current read authority. Installer execution remains unbound before effects.",
+    "Actual DatabaseManager/task/group/project/repository-scoped artifact scan/read, literal retained member/anchor directories, read-only missing workspaces, physical root/file identities, bounded no-follow file/directory receipts retained through cancellation and failed drains.",
+    "Artifact text128KiB/images512KiB/serialized900000-byte portable bounds preserve retained files and report explicit capacity failures; finite data DTOs confer no viewer/OS-open/clipboard capability.",
+    "Actual production-only pinned Tauri system opener and native package-version routes enforce trusted main/origin/current epoch/availability and finite URL/DTO policy. No injected link handler or direct plugin IPC permission. Native invocations join independently before Node profile release/application exit; browser lifetime remains external.",
+    "Native HTML previews show a visible unavailable state before reading or creating a main-window iframe; legacy Electron preview remains unchanged. No privileged-main iframe isolation claim.",
+    "Exact native ingress/egress and facade codecs, hydration fence for native URL effects, optional/unavailable services and accepted-mutation no-replay; existing full service golden corpus extended with actual artifact paths."
+  ],
+  "artifact": {
+    "buildIdentity": "production-d3fc89683b12432e0aaa44f90259b89e",
+    "resourceManifestSha256": "11279c9694d732ad81e4e1528f5f75a60bff4269777fe6d734e0213db968f61f",
+    "verifiedClosureFiles": 6888,
+    "mobileEntry": "mobile/index.html",
+    "mobileFiles": 66,
+    "redistributionReviewComplete": false
+  },
+  "nativeDependencyResolution": {
+    "pinnedOpener": "2.5.4",
+    "existingLockedVersionsPreserved": true,
+    "addedVersions": [
+      {
+        "name": "async-executor",
+        "version": "1.14.0"
+      },
+      {
+        "name": "is-docker",
+        "version": "0.2.0"
+      },
+      {
+        "name": "is-wsl",
+        "version": "0.4.0"
+      },
+      {
+        "name": "open",
+        "version": "5.4.4"
+      },
+      {
+        "name": "tauri-plugin",
+        "version": "2.7.1"
+      },
+      {
+        "name": "tauri-plugin-opener",
+        "version": "2.5.4"
+      },
+      {
+        "name": "windows",
+        "version": "0.61.3"
+      },
+      {
+        "name": "windows-collections",
+        "version": "0.2.0"
+      },
+      {
+        "name": "windows-core",
+        "version": "0.61.2"
+      },
+      {
+        "name": "windows-future",
+        "version": "0.2.1"
+      },
+      {
+        "name": "windows-link",
+        "version": "0.1.3"
+      },
+      {
+        "name": "windows-numerics",
+        "version": "0.2.0"
+      },
+      {
+        "name": "windows-result",
+        "version": "0.3.4"
+      },
+      {
+        "name": "windows-strings",
+        "version": "0.4.2"
+      },
+      {
+        "name": "windows-threading",
+        "version": "0.1.0"
+      },
+      {
+        "name": "zbus",
+        "version": "5.19.0"
+      },
+      {
+        "name": "zbus_macros",
+        "version": "5.19.0"
+      },
+      {
+        "name": "zbus_names",
+        "version": "4.3.4"
+      },
+      {
+        "name": "zcheapstr",
+        "version": "1.1.0"
+      },
+      {
+        "name": "zvariant",
+        "version": "5.15.0"
+      },
+      {
+        "name": "zvariant_derive",
+        "version": "5.15.0"
+      },
+      {
+        "name": "zvariant_utils",
+        "version": "4.2.0"
+      }
+    ]
+  },
+  "contractCorpus": {
+    "operations": 140,
+    "requests": 316,
+    "sha256": "06540e29a82e1d93b6fdc977ac54d2d0bd42f3ff96aef518d968be09d848b0cb"
+  },
+  "tests": {
+    "application": {
+      "command": "rtk proxy pnpm test:run --reporter=default --reporter=json",
+      "passed": 6363,
+      "failed": 0,
+      "skipped": 28,
+      "reportSha256": "fdda3a4f752fecd7750196da1247b2d0735c06a8d5f76f6b638cf115197fd94f"
+    },
+    "standalone": {
+      "command": "rtk node scripts/tauri-test.mjs --reporter=default --reporter=json",
+      "passed": 2675,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "546a3774bff8d7121ffa4dce92f88d5dee7b4dd7cd328999a408019f10b4b102"
+    },
+    "focusedCorrections": {
+      "command": "rtk pnpm test:run src/service/agent-installer-backend.test.ts src/shared/agent-installer-codecs.test.ts src/shared/native-services-codecs.test.ts",
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "d5eef1a164b34cac532cf1c22700cf36cf22229476237a9a75e641d97c0f194a"
+    },
+    "privateStagedNode": {
+      "command": "rtk node scripts/tauri-test.mjs --production-proofs scripts/production-service-proof.test.ts",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "4abc7cbd993569e6f488c087e837f4c4758526ba3d21b3d2bae167888dc00a6d"
+    },
+    "actualContractCorpusExport": {
+      "command": "rtk env TWENTYONEX_PRODUCTION_CONTRACTS_OUT=<artifact> pnpm test:run scripts/production-contracts-proof.test.ts",
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "cb0a1b47de81b2c69080d014785180ed96099c275c7ca3fb3656a2bf56f4c801"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": "rtk pnpm lint",
+      "exitCode": 0,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "shippingBuild": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "logSha256": "a545539e4afcffe75a921b0e564ecb019aa169481033f52102099ac63166a687"
+    },
+    "productionRendererBuild": {
+      "command": "rtk pnpm tauri:production:frontend:build",
+      "exitCode": 0,
+      "logSha256": "850838eacf84828fc6be2105985e9056f99ee4c7d2c2a53a17905b4d7338343b"
+    },
+    "diagnosticRendererBuild": {
+      "command": "rtk pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "logSha256": "3668862695e7c3a2f7bad084069a6fcf0e85a1f5dd0cfd03fa9077a05e29d40b"
+    },
+    "productionStage": {
+      "command": "rtk pnpm tauri:prepare:production",
+      "exitCode": 0,
+      "logSha256": "c1bf32da58a26bec00f3a64891ff0c23c959847cb4aec116beec9dc15c1303a2"
+    },
+    "inventoryFreshness": {
+      "command": "rtk node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "logSha256": "c1ed2672d3aef77daaf451c6052589592e81fdefa6e95d2d31370101aceea3cd"
+    },
+    "contractFreshness": {
+      "command": "rtk node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rustFormat": {
+      "command": "rtk cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "nativeHostCompile": {
+      "command": "rtk python3 loads production TAURI_CONFIG JSON and invokes rtk cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+      "exitCode": 0,
+      "logSha256": "8a1a9631ec047995c804864064fce9e3dd58842c1f1cf2e5abc25ae82533a240"
+    },
+    "nativeProductionUnit": {
+      "command": "rtk cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service",
+      "exitCode": 0,
+      "logSha256": "d50de2559fc48f3eff78b822a8f1230c0dbe15090e792c50b2e1af8b67597a17",
+      "passed": 25,
+      "ignored": 4
+    },
+    "nativeHostUnit": {
+      "command": "rtk python3 loads production TAURI_CONFIG JSON and invokes rtk cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -p twentyonex-tauri-feasibility",
+      "exitCode": 0,
+      "logSha256": "41d7e74f5a9f9d5cb8bbe910150112f876362fd64ed6560cc7ff73c98de3f746",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "nativeContractParity": {
+      "command": "rtk env TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=<artifact> cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants -- --exact",
+      "exitCode": 0,
+      "logSha256": "8cf7e5b5d543b1d7c948b30419cc15c3036e012897fed40db358c8343f2c6408",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "diffWhitespace": {
+      "command": "rtk git diff --check",
+      "exitCode": 0,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "validationCorrections": [
+    "Initial focused run passed127 and failed3: two real-child/file identity fixtures attempted to spy on immutable Node ESM namespaces; explicit spy modules with actual original implementations corrected those harnesses. Explicit request abort now retains CANCELLED classification during simultaneous owner shutdown, after raw joins.",
+    "Corrected negative JSON fixture typing, native empty-object encoder return inference and the actual created-task fixture assertion without weakening finite codecs. Corrected native lifecycle String borrowing after the root host compiler rejected it.",
+    "Initial offline Cargo resolution proposed unrelated baseline downgrades. Preserved that rejected artifact, restored only the batch lock changes and resolved online; every pre-existing package/version remains pinned."
+  ],
+  "initialFocusedRun": {
+    "passed": 127,
+    "failed": 3,
+    "skipped": 0,
+    "reportSha256": "0a05098d8a870b3e8ab23f0496ef31e1a3d469ec61d694ef3e0afad29007e50b",
+    "logSha256": "3ccf6d7b087f333920e4eed2f231feedf2d13b5748b1db3337f151c99dc0d26c"
+  },
+  "remainingAcceptance": [
+    "Full #213 installer execution/catalog/CLI integration, native OAuth callback registration and installed real provider/platform evidence remain open. Browser opening alone does not admit OAuth flows.",
+    "Full #214/#217 attachment/canvas/native separate-WebView viewer integration, hostile installed navigation/command tests, larger payloads and platform/drag-drop/retired-data acceptance remain open.",
+    "Full #215 native file/dialog/clipboard/window/tray/login/notification/energy/shortcut services, callback authority and installed default-handler/all-platform evidence remain open.",
+    "No new installed GUI/input, actual OS browser window, live provider or all-platform proof; real-child fixtures emulate finite version commands and native work tests use controlled blocking effects.",
+    "Hosted voice #92 remains explicitly deferred. Release, live-profile cutover, distribution approval and Electron retirement gates remain open."
+  ]
+}

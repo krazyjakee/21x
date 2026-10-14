@@ -1,4 +1,5 @@
-import { lstat, mkdir, readdir, readFile, realpath, rename, stat, writeFile } from 'fs/promises'
+import { lstat, mkdir, readdir, open, opendir, realpath, rename, stat, writeFile } from 'fs/promises'
+import { constants } from 'fs'
 import { extname, isAbsolute, relative, resolve, sep, win32 } from 'path'
 import { randomUUID } from 'crypto'
 import {
@@ -16,6 +17,8 @@ const MAX_SCAN_DEPTH = 10
 const MAX_SCAN_FILES = 500
 const MAX_TEXT_BYTES = 1024 * 1024
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_REGISTRY_BYTES = 1024 * 1024
+const MAX_SCAN_ENTRIES = 4096
 const REGISTRY_VERSION = 1
 const REGISTRY_DIRECTORY = '.20x'
 const REGISTRY_FILENAME = 'artifacts.json'
@@ -57,6 +60,92 @@ interface ArtifactRegistryFile {
   artifacts: RegisteredArtifact[]
 }
 
+export class ArtifactReadLimitError extends Error {
+  constructor() { super('Artifact exceeds the supported read capacity.'); this.name = 'ArtifactReadLimitError' }
+}
+export interface ArtifactReadControls {
+  /** Portable callers require physical roots/components; Electron keeps its
+   * existing internally-contained symlink read semantics. */
+  strict?: boolean
+  taskId?: string
+  signal?: AbortSignal
+  maxTextBytes?: number
+  maxImageBytes?: number
+  beforeRead?(): void
+}
+function observeRead(controls?: ArtifactReadControls): void {
+  if (controls?.signal?.aborted) throw new Error('ARTIFACT_READ_CANCELLED')
+  controls?.beforeRead?.()
+}
+function artifactBytes(controls: ArtifactReadControls | undefined, image: boolean): number {
+  const maximum = image ? MAX_IMAGE_BYTES : MAX_TEXT_BYTES
+  const value = (image ? controls?.maxImageBytes : controls?.maxTextBytes) ?? maximum
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) throw new RangeError('Invalid artifact read bound')
+  return value
+}
+async function assertPhysicalPath(root: string, filePath: string, controls?: ArtifactReadControls): Promise<void> {
+  observeRead(controls)
+  if (!isWithinRoot(root, filePath) || await realpath(root) !== root || (await lstat(root)).isSymbolicLink()) throw new Error('Unsafe artifact path')
+  let current = root
+  for (const segment of relative(root, filePath).split(sep).filter(Boolean)) {
+    current = resolve(current, segment)
+    const info = await lstat(current)
+    if (info.isSymbolicLink()) throw new Error('Unsafe artifact path')
+  }
+  if (await realpath(filePath) !== filePath) throw new Error('Unsafe artifact path')
+  observeRead(controls)
+}
+
+/** A bounded opened-file receipt, retained through actual close. Capture and
+ * compare inode/device to reject a leaf or ancestor swapped during open/read. */
+async function readArtifactBytes(filePath: string, maxBytes: number, controls?: ArtifactReadControls, root?: string): Promise<Buffer> {
+  observeRead(controls)
+  if (controls?.strict && root) await assertPhysicalPath(root, filePath, controls)
+  const expected = await lstat(filePath)
+  if (!expected.isFile() || expected.isSymbolicLink()) throw new Error('Unsafe artifact file')
+  if (expected.size > maxBytes) throw new ArtifactReadLimitError()
+  // A regular leaf replaced by a FIFO must not block admission indefinitely.
+  const handle = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+  try {
+    observeRead(controls)
+    const initial = await handle.stat()
+    if (!initial.isFile() || initial.dev !== expected.dev || initial.ino !== expected.ino || initial.size !== expected.size || initial.mtimeMs !== expected.mtimeMs) throw new Error('Artifact file changed')
+    const chunks: Buffer[] = []; let total = 0
+    for (;;) {
+      observeRead(controls)
+      const chunk = Buffer.alloc(Math.min(64 * 1024, maxBytes + 1 - total))
+      const result = await handle.read(chunk, 0, chunk.length, total)
+      observeRead(controls)
+      if (result.bytesRead === 0) break
+      total += result.bytesRead
+      if (total > maxBytes) throw new ArtifactReadLimitError()
+      chunks.push(chunk.subarray(0, result.bytesRead))
+    }
+    const final = await handle.stat(), current = await lstat(filePath)
+    if (final.dev !== initial.dev || final.ino !== initial.ino || final.size !== initial.size || final.mtimeMs !== initial.mtimeMs || current.isSymbolicLink() || current.dev !== initial.dev || current.ino !== initial.ino || current.size !== initial.size || total !== initial.size) throw new Error('Artifact file changed')
+    if (controls?.strict && root) await assertPhysicalPath(root, filePath, controls)
+    observeRead(controls)
+    return Buffer.concat(chunks, total)
+  } finally { await handle.close() }
+}
+
+function validateRegistry(registry: Partial<ArtifactRegistryFile>, controls?: ArtifactReadControls): void {
+  if (registry.version !== REGISTRY_VERSION || !Array.isArray(registry.artifacts)) throw new Error('Unsupported artifact registry')
+  if (!controls?.strict) return
+  if (registry.artifacts.length > MAX_SCAN_FILES) throw new ArtifactReadLimitError()
+  let files = 0
+  const ids = new Set<string>()
+  for (const record of registry.artifacts) {
+    if (!record || typeof record !== 'object' || Object.keys(record).some(key => !['artifactId', 'taskId', 'title', 'type', 'files', 'entryFile', 'createdAt', 'updatedAt'].includes(key)) ||
+      typeof record.artifactId !== 'string' || !validateArtifactId(record.artifactId) || ids.has(record.artifactId) || typeof record.taskId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.taskId) ||
+      typeof record.title !== 'string' || !record.title.trim() || Buffer.byteLength(record.title) > 512 || ![ArtifactType.FILE, ArtifactType.HTML, ArtifactType.IMAGE, ArtifactType.MARKDOWN].includes(record.type) ||
+      !Array.isArray(record.files) || new Set(record.files).size !== record.files.length || !record.files.every(file => typeof file === 'string' && Buffer.byteLength(file) <= 2048 && normalizeArtifactFileName(file) === file) ||
+      record.entryFile !== undefined && (typeof record.entryFile !== 'string' || !record.files.includes(record.entryFile)) || !Number.isFinite(record.createdAt) || record.createdAt < 0 || !Number.isFinite(record.updatedAt) || record.updatedAt < 0) throw new Error('Unsafe artifact registry')
+    ids.add(record.artifactId); files += record.files.length
+    if (files > MAX_SCAN_FILES) throw new ArtifactReadLimitError()
+  }
+}
+
 const registryWrites = new Map<string, Promise<unknown>>()
 
 function normalizeArtifactFileName(filename: string): string | null {
@@ -75,9 +164,11 @@ function slugifyArtifactTitle(title: string): string {
   return title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'output'
 }
 
-async function readArtifactRegistry(workspaceDir: string): Promise<ArtifactRegistryFile> {
+async function readArtifactRegistry(workspaceDir: string, controls?: ArtifactReadControls): Promise<ArtifactRegistryFile> {
+  observeRead(controls)
   const workspaceRoot = await realpath(workspaceDir)
-  return readArtifactRegistryFromRoot(workspaceRoot)
+  if (controls?.strict && workspaceRoot !== resolve(workspaceDir)) throw new Error('Unsafe artifact directory')
+  return readArtifactRegistryFromRoot(workspaceRoot, controls)
 }
 
 /** Walk one directory segment at a time so recursive mkdir never follows a
@@ -111,16 +202,18 @@ async function resolveSafeDirectory(
   return directory
 }
 
-async function readArtifactRegistryFromRoot(workspaceRoot: string): Promise<ArtifactRegistryFile> {
+async function readArtifactRegistryFromRoot(workspaceRoot: string, controls?: ArtifactReadControls): Promise<ArtifactRegistryFile> {
+  observeRead(controls)
   const directory = await resolveSafeDirectory(workspaceRoot, [REGISTRY_DIRECTORY], false)
   if (!directory) return { version: REGISTRY_VERSION, artifacts: [] }
   const filePath = resolve(directory, REGISTRY_FILENAME)
   try {
     const info = await lstat(filePath)
     if (info.isSymbolicLink() || !info.isFile()) throw new Error('Unsafe artifact registry')
-    const parsed = JSON.parse(await readFile(filePath, 'utf8')) as Partial<ArtifactRegistryFile>
-    if (parsed.version !== REGISTRY_VERSION || !Array.isArray(parsed.artifacts)) throw new Error('Unsupported artifact registry')
-    return { version: REGISTRY_VERSION, artifacts: parsed.artifacts }
+    const bytes = await readArtifactBytes(filePath, MAX_REGISTRY_BYTES, controls, workspaceRoot)
+    const parsed = JSON.parse(bytes.toString('utf8')) as Partial<ArtifactRegistryFile>
+    validateRegistry(parsed, controls)
+    return { version: REGISTRY_VERSION, artifacts: parsed.artifacts! }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: REGISTRY_VERSION, artifacts: [] }
     throw error
@@ -238,8 +331,8 @@ export async function createRegisteredTaskArtifact(
   })
 }
 
-export async function listRegisteredTaskArtifacts(workspaceDir: string, taskId: string): Promise<RegisteredArtifact[]> {
-  const registry = await readArtifactRegistry(workspaceDir)
+export async function listRegisteredTaskArtifacts(workspaceDir: string, taskId: string, controls?: ArtifactReadControls): Promise<RegisteredArtifact[]> {
+  const registry = await readArtifactRegistry(workspaceDir, controls)
   return registry.artifacts.filter((artifact) => artifact.taskId === taskId)
 }
 
@@ -284,7 +377,7 @@ export async function editRegisteredTaskArtifactFile(
 ): Promise<Artifact> {
   const target = await resolveRegisteredArtifactFile(workspaceDir, input.artifactId, input.filename, false)
   if (!target) throw new Error('Invalid artifact ID or filename')
-  const existing = await readFile(target.absolutePath, 'utf8')
+  const existing = (await readArtifactBytes(target.absolutePath, MAX_TEXT_BYTES)).toString('utf8')
   const first = existing.indexOf(input.textToReplace)
   if (first < 0) throw new Error('text_to_replace was not found')
   if (existing.indexOf(input.textToReplace, first + input.textToReplace.length) >= 0) {
@@ -312,7 +405,7 @@ export async function readRegisteredTaskArtifactFile(
   const target = await resolveRegisteredArtifactFile(workspaceDir, artifactId, filename, false)
   if (!target) throw new Error('Invalid artifact ID or filename')
   const type = artifactTypeForPath(target.relativeName)
-  const bytes = await readFile(target.absolutePath)
+  const bytes = await readArtifactBytes(target.absolutePath, type === ArtifactType.IMAGE ? MAX_IMAGE_BYTES : MAX_TEXT_BYTES)
   if (type === ArtifactType.IMAGE) {
     if (bytes.length > MAX_IMAGE_BYTES) throw new Error('Artifact image exceeds the read limit')
     return { content: bytes.toString('base64'), encoding: 'base64', mimeType: mimeTypeForPath(target.relativeName) }
@@ -336,14 +429,17 @@ function previewPriorityForPath(path: string, type: ArtifactType): number {
 
 /** Explicit registry is authoritative. The bounded directory scan remains as
  * an import/recovery path for artifacts created by older agents. */
-export async function listTaskArtifactEntries(workspaceDir: string, taskId: string): Promise<ArtifactFileEntry[]> {
-  const registered = await listRegisteredTaskArtifacts(workspaceDir, taskId)
+export async function listTaskArtifactEntries(workspaceDir: string, taskId: string, controls?: ArtifactReadControls): Promise<ArtifactFileEntry[]> {
+  const registered = await listRegisteredTaskArtifacts(workspaceDir, taskId, controls)
   const registeredRoots = new Set(registered.map((artifact) => `${ARTIFACT_FILES_DIRECTORY}/${artifact.artifactId}/`))
   const explicitEntries = registered.map(registeredArtifactToEntry).filter((entry): entry is ArtifactFileEntry => entry !== null)
-  const legacyEntries = (await scanTaskArtifacts(workspaceDir)).filter(
+  const legacyEntries = (await scanTaskArtifacts(workspaceDir, controls)).filter(
     (entry) => ![...registeredRoots].some((root) => entry.path.startsWith(root))
   )
-  return [...explicitEntries, ...legacyEntries].sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path))
+  const result = [...explicitEntries, ...legacyEntries]
+  if (controls?.strict && (result.length > MAX_SCAN_FILES || result.reduce((count, entry) => count + (entry.files?.length ?? 1), 0) > MAX_SCAN_FILES)) throw new ArtifactReadLimitError()
+  observeRead(controls)
+  return result.sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path))
 }
 
 function isWithinRoot(rootPath: string, candidatePath: string): boolean {
@@ -351,7 +447,8 @@ function isWithinRoot(rootPath: string, candidatePath: string): boolean {
   return pathFromRoot === '' || (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== '..' && !isAbsolute(pathFromRoot))
 }
 
-async function resolveArtifactPath(workspaceDir: string, artifactPath: string, allowAbsolute = false): Promise<string | null> {
+async function resolveArtifactPath(workspaceDir: string, artifactPath: string, allowAbsolute = false, controls?: ArtifactReadControls): Promise<string | null> {
+  observeRead(controls)
   if (!artifactPath || artifactPath.includes('\0') || (!allowAbsolute && (isAbsolute(artifactPath) || win32.isAbsolute(artifactPath)))) {
     return null
   }
@@ -360,6 +457,10 @@ async function resolveArtifactPath(workspaceDir: string, artifactPath: string, a
   let candidatePath: string
   try {
     rootPath = await realpath(workspaceDir)
+    if (controls?.strict) {
+      if (rootPath !== resolve(workspaceDir) || normalizeArtifactFileName(artifactPath) !== artifactPath) return null
+      await assertPhysicalPath(rootPath, resolve(rootPath, artifactPath), controls)
+    }
     candidatePath = await realpath(allowAbsolute && isAbsolute(artifactPath) ? artifactPath : resolve(rootPath, artifactPath))
   } catch {
     return null
@@ -401,32 +502,53 @@ export async function inspectTaskArtifact(workspaceDir: string, artifactPath: st
  * Discover previewable files in a task workspace. The scan is deliberately
  * bounded and does not traverse symlinks or dependency/build directories.
  */
-export async function scanTaskArtifacts(workspaceDir: string): Promise<ArtifactFileEntry[]> {
+export async function scanTaskArtifacts(workspaceDir: string, controls?: ArtifactReadControls): Promise<ArtifactFileEntry[]> {
+  observeRead(controls)
   let rootPath: string
   try {
     rootPath = await realpath(workspaceDir)
+    if (controls?.strict && rootPath !== resolve(workspaceDir)) throw new Error('Unsafe artifact directory')
   } catch {
     return []
   }
 
   const artifacts = new Map<string, ArtifactFileEntry>()
   let discoveredFiles = 0
+  let examinedEntries = 0
 
   const previewPriority = (entry: ArtifactFileEntry): number => previewPriorityForPath(entry.path, entry.type)
 
   const visit = async (directory: string, depth: number): Promise<void> => {
-    if (depth > MAX_SCAN_DEPTH || discoveredFiles >= MAX_SCAN_FILES) return
+    observeRead(controls)
+    if (depth > MAX_SCAN_DEPTH) { if (controls?.strict) throw new ArtifactReadLimitError(); return }
+    if (!controls?.strict && discoveredFiles >= MAX_SCAN_FILES) return
 
     let entries
     try {
-      entries = await readdir(directory, { withFileTypes: true })
-    } catch {
+      if (controls?.strict) {
+        await assertPhysicalPath(rootPath, directory, controls)
+        entries = []
+        const handle = await opendir(directory)
+        try {
+          for (;;) {
+            observeRead(controls)
+            const entry = await handle.read()
+            if (!entry) break
+            if (++examinedEntries > MAX_SCAN_ENTRIES) throw new ArtifactReadLimitError()
+            entries.push(entry)
+          }
+        } finally { await handle.close() }
+        await assertPhysicalPath(rootPath, directory, controls)
+      } else entries = await readdir(directory, { withFileTypes: true })
+    } catch (error) {
+      if (controls?.strict) { observeRead(controls); if (error instanceof ArtifactReadLimitError) throw error; throw new Error('Artifact directory unavailable') }
       return
     }
 
     entries.sort((a, b) => a.name.localeCompare(b.name))
     for (const entry of entries) {
-      if (discoveredFiles >= MAX_SCAN_FILES) break
+      observeRead(controls)
+      if (!controls?.strict && discoveredFiles >= MAX_SCAN_FILES) break
       if (entry.isSymbolicLink()) continue
 
       const absolutePath = resolve(directory, entry.name)
@@ -447,9 +569,11 @@ export async function scanTaskArtifacts(workspaceDir: string): Promise<ArtifactF
       if (!workpiece) continue
 
       try {
+        if (controls?.strict) await assertPhysicalPath(rootPath, absolutePath, controls)
         const fileStat = await stat(absolutePath)
         if (!fileStat.isFile()) continue
         discoveredFiles++
+        if (controls?.strict && discoveredFiles > MAX_SCAN_FILES) throw new ArtifactReadLimitError()
         const candidate: ArtifactFileEntry = {
           path: relativePath,
           title: workpiece.title,
@@ -471,7 +595,9 @@ export async function scanTaskArtifacts(workspaceDir: string): Promise<ArtifactF
           // its entry point or creating another top-level tab.
           artifacts.set(workpiece.key, { ...previous, files, updatedAt: Math.max(previous.updatedAt, fileStat.mtimeMs) })
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof ArtifactReadLimitError) throw error
+        observeRead(controls)
         // A file can disappear while an agent is replacing it. Ignore it and
         // let the next hydration/refresh discover the replacement.
       }
@@ -479,16 +605,17 @@ export async function scanTaskArtifacts(workspaceDir: string): Promise<ArtifactF
   }
 
   await visit(rootPath, 0)
+  observeRead(controls)
   return [...artifacts.values()].sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path))
 }
 
 /** Unknown file formats are available only when explicitly owned by a
  * registered artifact. The scanner still excludes arbitrary binary files. */
-async function isRegisteredFile(workspaceDir: string, filePath: string): Promise<boolean> {
+async function isRegisteredFile(workspaceDir: string, filePath: string, controls?: ArtifactReadControls): Promise<boolean> {
   const workspaceRoot = await realpath(workspaceDir)
   const path = relative(workspaceRoot, filePath).split(sep).join('/')
-  const registry = await readArtifactRegistryFromRoot(workspaceRoot)
-  return registry.artifacts.some((artifact) => artifact.files.some((file) =>
+  const registry = await readArtifactRegistryFromRoot(workspaceRoot, controls)
+  return registry.artifacts.some((artifact) => (!controls?.taskId || artifact.taskId === controls.taskId) && artifact.files.some((file) =>
     path === `${ARTIFACT_FILES_DIRECTORY}/${artifact.artifactId}/${file}`
   ))
 }
@@ -507,12 +634,12 @@ export async function resolveTaskArtifactFilePath(workspaceDir: string, artifact
 }
 
 /** Read a previewable artifact while enforcing task-workspace containment. */
-export async function readTaskArtifact(workspaceDir: string, artifactPath: string): Promise<ArtifactContent | null> {
-  const filePath = await resolveArtifactPath(workspaceDir, artifactPath)
+export async function readTaskArtifact(workspaceDir: string, artifactPath: string, controls?: ArtifactReadControls): Promise<ArtifactContent | null> {
+  const filePath = await resolveArtifactPath(workspaceDir, artifactPath, false, controls)
   if (!filePath) return null
 
   const type = artifactTypeForPath(filePath)
-  if (!type && !await isRegisteredFile(workspaceDir, filePath)) return null
+  if (!type && !await isRegisteredFile(workspaceDir, filePath, controls)) return null
 
   let fileStat
   try {
@@ -524,14 +651,16 @@ export async function readTaskArtifact(workspaceDir: string, artifactPath: strin
 
   try {
     if (!type) {
-      if (fileStat.size > MAX_IMAGE_BYTES) return null
-      const data = await readFile(filePath)
+      const maximum = artifactBytes(controls, true)
+      if (fileStat.size > maximum) { if (controls?.strict) throw new ArtifactReadLimitError(); return null }
+      const data = await readArtifactBytes(filePath, maximum, controls, resolve(workspaceDir))
       const mimeType = 'application/octet-stream'
       return { kind: ArtifactContentKind.DATA_URL, content: `data:${mimeType};base64,${data.toString('base64')}`, mimeType }
     }
     if (type === ArtifactType.IMAGE) {
-      if (fileStat.size > MAX_IMAGE_BYTES) return null
-      const data = await readFile(filePath)
+      const maximum = artifactBytes(controls, true)
+      if (fileStat.size > maximum) { if (controls?.strict) throw new ArtifactReadLimitError(); return null }
+      const data = await readArtifactBytes(filePath, maximum, controls, resolve(workspaceDir))
       const mimeType = mimeTypeForPath(filePath)
       return {
         kind: ArtifactContentKind.DATA_URL,
@@ -540,11 +669,14 @@ export async function readTaskArtifact(workspaceDir: string, artifactPath: strin
       }
     }
 
-    if (fileStat.size > MAX_TEXT_BYTES) return null
-    const content = await readFile(filePath, 'utf8')
+    const maximum = artifactBytes(controls, false)
+    if (fileStat.size > maximum) { if (controls?.strict) throw new ArtifactReadLimitError(); return null }
+    const content = (await readArtifactBytes(filePath, maximum, controls, resolve(workspaceDir))).toString('utf8')
     const mimeType = mimeTypeForPath(filePath)
     return { kind: ArtifactContentKind.TEXT, content, mimeType }
-  } catch {
+  } catch (error) {
+    if (controls?.strict && error instanceof ArtifactReadLimitError) throw error
+    observeRead(controls)
     return null
   }
 }

@@ -1,4 +1,5 @@
-import { networkInterfaces } from 'node:os'
+import { homedir, networkInterfaces } from 'node:os'
+import { PortableAgentDetectionOwner } from '../main/agent-installer/portable-detection'
 import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobileAccessSettings, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, type MobileApiDeps } from '../main/mobile-api-server'
 import { TunnelManagerCore } from '../main/tunnel-manager-core'
 import SQLite from 'better-sqlite3'
@@ -115,9 +116,11 @@ export interface ProductionOwnerExternalBoundaries {
   connectorTransport?: ConnectorRuntimeHost['createTransport']
   terminalProcessHost?: TerminalProcessHost
   mobileTunnel?: TunnelManagerCore
+  agentDetection?: PortableAgentDetectionOwner
 }
 
 export interface ProductionServices {
+  agentDetection: PortableAgentDetectionOwner
   sessionContext: SessionContextService
   db: DatabaseManager
   agents: AgentManager
@@ -324,6 +327,25 @@ export class ProductionOwner {
       if (this.services !== services || owners.database !== services.db || owners.manager !== services.plugins || owners.agents !== services.agents || owners.sync !== services.sync)
         throw new ProductionOwnerError('SERVICE_OWNER_LOST')
       services.plugins.assertSource(services.db)
+    } }
+  }
+
+  getAgentInstallerBindingLease(): { detection: PortableAgentDetectionOwner; assertOwners(owners: { detection: PortableAgentDetectionOwner }): void } {
+    this.getDatabaseBindingLease()
+    const services = this.services!, detection = services.agentDetection
+    return { detection, assertOwners: owners => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services || owners.detection !== detection) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      detection.assertOpen()
+    } }
+  }
+
+  getArtifactBindingLease(): { workspaceRoot: string; assertArtifactOwners(database: DatabaseManager, workspaceRoot: string): void } {
+    this.getDatabaseBindingLease()
+    const services = this.services!, workspaceRoot = this.bootstrap.paths.workspaceRoot
+    return { workspaceRoot, assertArtifactOwners: (database, actualRoot) => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services || database !== services.db || actualRoot !== workspaceRoot || this.databaseRuntime?.paths.workspaceRoot !== workspaceRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
     } }
   }
 
@@ -566,8 +588,19 @@ export class ProductionOwner {
     }
     const reminders = new OverdueNotifier(() => this.emit('overdue:check', undefined))
     this.register('reminders', () => reminders.shutdown(), async () => { reminders.shutdown() })
+    // Installed CLI probing uses a captured finite host environment. No key,
+    // inherited runtime options or renderer-selected command reaches the child.
+    const detectionEnvironment: NodeJS.ProcessEnv = {}
+    for (const key of ['PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']) {
+      const value = process.env[key]
+      if (value !== undefined) detectionEnvironment[key] = value
+    }
+    const agentDetection = this.boundaries.agentDetection ?? new PortableAgentDetectionOwner({ environment: Object.freeze(detectionEnvironment), home: homedir(), cwd: profileRoot })
+    if (!(agentDetection instanceof PortableAgentDetectionOwner)) throw new ProductionOwnerError('CLI_DETECTION_OWNER_INVALID')
+    agentDetection.assertOpen()
+    this.register('agent-detection', () => agentDetection.stop(), () => agentDetection.close())
     const sessionContext = new SessionContextService(db)
-    this.services = { db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    this.services = { agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)

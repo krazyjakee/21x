@@ -1,3 +1,4 @@
+import { createElectronHost, installDesktopHost } from '@/lib/desktop-api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { ArtifactContentKind, ArtifactType, type Artifact, type ArtifactApi } from '@shared/artifacts'
@@ -16,6 +17,20 @@ const artifact: Artifact = {
 afterEach(cleanup)
 
 describe('HtmlArtifactView', () => {
+  it('shows an unavailable native preview without reading or activating HTML in the privileged window', () => {
+    const release = installDesktopHost({ ...createElectronHost(), kind: 'tauri' })
+    try {
+      const artifactApi: ArtifactApi = { scan: vi.fn(), read: vi.fn().mockResolvedValue({ kind: ArtifactContentKind.TEXT, content: '<script>parent.privateBridge()</script>' }) }
+      const onMessage = vi.fn()
+      const { container } = render(<HtmlArtifactView artifact={artifact} artifactApi={artifactApi} onMessage={onMessage} />)
+      expect(screen.getByRole('status')).toHaveTextContent('HTML previews are unavailable in this desktop build.')
+      expect(container.querySelector('iframe')).toBeNull()
+      expect(artifactApi.read).not.toHaveBeenCalled()
+      window.dispatchEvent(new MessageEvent('message', { data: 'untrusted artifact', origin: 'null' }))
+      expect(onMessage).not.toHaveBeenCalled()
+    } finally { release() }
+  })
+
   it('renders HTML in a sandbox with a restrictive CSP and blocked window.open', async () => {
     const artifactApi: ArtifactApi = {
       scan: vi.fn(),

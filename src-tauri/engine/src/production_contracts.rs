@@ -3,6 +3,9 @@
 use serde_json::Value;
 
 pub const COMMANDS: &[&str] = &[
+    "agent-installer:detect",
+    "artifacts:scan",
+    "artifacts:read",
     "mobile:getInfo",
     "mobile:setAccess",
     "mobile:startTunnel",
@@ -2079,7 +2082,310 @@ pub fn images(value: &Value) -> bool {
                     <= 384 * 1024
         })
 }
+const DETECTION_KEYS: &[&str] = &[
+    "nodejs",
+    "npm",
+    "pnpm",
+    "git",
+    "gh",
+    "glab",
+    "tea",
+    "rtk",
+    "claudeCode",
+    "opencode",
+    "codex",
+    "cursor",
+    "pi",
+];
+const DETECTION_BACKENDS: &[&str] = &["claudeCode", "opencode", "codex", "cursor", "pi"];
+fn detection_digits(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 6 && value.bytes().all(|b| b.is_ascii_digit())
+}
+fn detection_version(value: &Value) -> bool {
+    let Some(version) = value.as_str() else {
+        return false;
+    };
+    if version.len() > 128 {
+        return false;
+    }
+    let lower = version.to_ascii_lowercase();
+    let core = if let Some((core, suffix)) = lower.split_once('-') {
+        let channel = suffix.split(['.', '-']).next().unwrap_or("");
+        if !["alpha", "beta", "rc", "dev", "next"].contains(&channel)
+            || suffix.len() != channel.len() && !detection_digits(&suffix[channel.len() + 1..])
+        {
+            return false;
+        }
+        core
+    } else if let Some((core, build)) = lower.split_once(".windows.") {
+        if !detection_digits(build) {
+            return false;
+        }
+        core
+    } else {
+        lower.as_str()
+    };
+    let parts = core.split('.').collect::<Vec<_>>();
+    (parts.len() == 2 || parts.len() == 3) && parts.iter().all(|s| detection_digits(s))
+}
+fn detection_pi_supported(value: &Value) -> bool {
+    let Some(version) = value.as_str() else {
+        return false;
+    };
+    let mut parts = version
+        .split('.')
+        .take(3)
+        .map(|p| {
+            p.bytes()
+                .take_while(u8::is_ascii_digit)
+                .fold(0u32, |n, b| n * 10 + u32::from(b - b'0'))
+        })
+        .collect::<Vec<_>>();
+    parts.resize(3, 0);
+    parts.as_slice() >= &[0, 80, 5]
+}
+fn detection_result(value: &Value) -> bool {
+    if !object(value, DETECTION_KEYS, &[]) || !bounded_bytes(value, 8192) {
+        return false;
+    }
+    for key in DETECTION_KEYS {
+        let row = &value[*key];
+        let Some(installed) = row["installed"].as_bool() else {
+            return false;
+        };
+        if !(row["version"].is_null() || detection_version(&row["version"]))
+            || !installed && !row["version"].is_null()
+        {
+            return false;
+        }
+        if *key == "pi" {
+            if !object(row, &["installed", "version", "supported", "reason"], &[]) {
+                return false;
+            }
+            let supported = installed && detection_pi_supported(&row["version"]);
+            if row["supported"] != supported {
+                return false;
+            }
+            if supported {
+                if !row["reason"].is_null() {
+                    return false;
+                }
+            } else {
+                let reason = if !installed {
+                    "Pi CLI is not installed.".to_owned()
+                } else if let Some(version) = row["version"].as_str() {
+                    format!("Pi {version} is unsupported. Update to 0.80.5 or newer.")
+                } else {
+                    "Could not determine the Pi version. Pi 0.80.5 or newer is required.".to_owned()
+                };
+                if row["reason"] != reason {
+                    return false;
+                }
+            }
+        } else if *key == "rtk" {
+            if !object(
+                row,
+                &["installed", "version", "configured", "integrations"],
+                &["reason"],
+            ) || !object(&row["integrations"], DETECTION_BACKENDS, &[])
+                || !DETECTION_BACKENDS
+                    .iter()
+                    .all(|key| row["integrations"][*key].is_boolean())
+            {
+                return false;
+            }
+            let required = DETECTION_BACKENDS
+                .iter()
+                .filter(|key| {
+                    value[**key]["installed"] == true && value[**key]["supported"] != false
+                })
+                .copied()
+                .collect::<Vec<&str>>();
+            let configured = installed
+                && !required.is_empty()
+                && required.iter().all(|key| row["integrations"][*key] == true);
+            if row["configured"] != configured {
+                return false;
+            }
+        } else if !object(row, &["installed", "version"], &["reason"]) {
+            return false;
+        }
+        if *key != "pi"
+            && row.get("reason").is_some_and(|reason| {
+                installed
+                    || !matches!(
+                        reason.as_str(),
+                        Some("CLI detection timed out." | "CLI detection failed.")
+                    )
+            })
+        {
+            return false;
+        }
+    }
+    true
+}
+const ARTIFACT_COMMANDS: &[&str] = &["artifacts:scan", "artifacts:read"];
+fn artifact_path(value: &Value) -> bool {
+    value.as_str().is_some_and(|path| {
+        !path.is_empty()
+            && path.len() <= 2048
+            && !path.starts_with('/')
+            && !path
+                .chars()
+                .any(|c| c <= '\u{001f}' || c == '\u{007f}' || c == '\\' || c == ':')
+            && path
+                .split('/')
+                .all(|part| !part.is_empty() && part != "." && part != "..")
+    })
+}
+fn artifact_label(value: &Value, maximum: usize) -> bool {
+    value.as_str().is_some_and(|text| {
+        text.len() <= maximum && !text.chars().any(|c| c <= '\u{001f}' || c == '\u{007f}')
+    })
+}
+fn artifact_entry(value: &Value) -> bool {
+    object(
+        value,
+        &["path", "title", "type", "updatedAt", "size"],
+        &["workpieceKey", "files"],
+    ) && artifact_path(&value["path"])
+        && artifact_label(&value["title"], 512)
+        && value["title"]
+            .as_str()
+            .is_some_and(|s| !s.trim().is_empty())
+        && matches!(
+            value["type"].as_str(),
+            Some("markdown" | "html" | "image" | "file")
+        )
+        && value["updatedAt"]
+            .as_f64()
+            .is_some_and(|n| n.is_finite() && n >= 0.0)
+        && value["size"]
+            .as_u64()
+            .is_some_and(|n| n <= 9007199254740991)
+        && value
+            .get("workpieceKey")
+            .is_none_or(|key| artifact_label(key, 2048) && key != "")
+        && value.get("files").is_none_or(|files| {
+            files.as_array().is_some_and(|rows| {
+                rows.len() <= 500
+                    && rows.iter().all(artifact_path)
+                    && rows.contains(&value["path"])
+                    && rows
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        == rows.len()
+            })
+        })
+}
+fn artifact_content(value: &Value) -> bool {
+    if value.is_null() {
+        return true;
+    }
+    if !object(value, &["kind", "content"], &["mimeType"]) {
+        return false;
+    }
+    let Some(content) = value["content"].as_str() else {
+        return false;
+    };
+    let mime = value.get("mimeType").and_then(Value::as_str);
+    let mimes = [
+        "text/markdown",
+        "text/html",
+        "text/plain",
+        "text/css",
+        "text/csv",
+        "text/javascript",
+        "text/typescript",
+        "application/json",
+        "application/xml",
+        "application/yaml",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/svg+xml",
+        "image/webp",
+        "application/octet-stream",
+    ];
+    if value.get("mimeType").is_some() && !mime.is_some_and(|s| mimes.contains(&s)) {
+        return false;
+    }
+    if value["kind"] == "text" {
+        return content.len() <= 128 * 1024
+            && mime.is_none_or(|m| !m.starts_with("image/") && m != "application/octet-stream");
+    }
+    if value["kind"] != "data_url" {
+        return false;
+    }
+    let Some(mime) = mime else {
+        return false;
+    };
+    if ![
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/svg+xml",
+        "image/webp",
+        "application/octet-stream",
+    ]
+    .contains(&mime)
+    {
+        return false;
+    }
+    let prefix = format!("data:{mime};base64,");
+    let Some(body) = content.strip_prefix(&prefix) else {
+        return false;
+    };
+    let padding = body.bytes().rev().take_while(|b| *b == b'=').count();
+    body.len() <= (512usize * 1024).div_ceil(3) * 4
+        && body.len() % 4 == 0
+        && padding <= 2
+        && body[..body.len() - padding]
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/'))
+        && body.len() / 4 * 3 >= padding
+        && body.len() / 4 * 3 - padding <= 512 * 1024
+}
+fn artifact_request(operation: &str, value: &Value) -> bool {
+    match operation {
+        "artifacts:scan" => object(value, &["taskId"], &[]) && id(&value["taskId"]),
+        "artifacts:read" => {
+            object(value, &["taskId", "relativePath"], &[])
+                && id(&value["taskId"])
+                && artifact_path(&value["relativePath"])
+        }
+        _ => false,
+    }
+}
+fn artifact_result(operation: &str, value: &Value) -> bool {
+    if operation == "artifacts:read" {
+        return artifact_content(value);
+    }
+    value.as_array().is_some_and(|rows| {
+        rows.len() <= 500
+            && rows.iter().all(artifact_entry)
+            && rows
+                .iter()
+                .filter_map(|r| r["path"].as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == rows.len()
+            && rows
+                .iter()
+                .map(|r| r.get("files").and_then(Value::as_array).map_or(1, Vec::len))
+                .sum::<usize>()
+                <= 500
+    })
+}
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if ARTIFACT_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 8192) && artifact_request(operation, value);
+    }
+    if operation == "agent-installer:detect" {
+        return object(value, &[], &[]);
+    }
     if MOBILE_COMMANDS.contains(&operation) {
         return bounded_bytes(value, 1024 * 1024) && mobile_request(operation, value);
     }
@@ -2193,6 +2499,19 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if operation == "agent-installer:detect" {
+        return object(value, &["defined", "value"], &[])
+            && value["defined"] == true
+            && bounded_bytes(value, 8256)
+            && detection_result(&value["value"]);
+    }
+    if ARTIFACT_COMMANDS.contains(&operation) {
+        return object(value, &["defined", "value"], &[])
+            && value["defined"] == true
+            && bounded_bytes(value, 900_064)
+            && bounded_bytes(&value["value"], 900_000)
+            && artifact_result(operation, &value["value"]);
+    }
     if MOBILE_COMMANDS.contains(&operation) {
         return object(value, &["defined", "value"], &[])
             && value["defined"] == true
@@ -3569,7 +3888,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 137);
+        assert_eq!(COMMANDS.len(), 140);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})
@@ -3756,6 +4075,120 @@ mod tests {
     }
     /// Coordinator emits this artifact through actual TS encodeArguments after
     /// all workers freeze; source-only runs without the artifact make no parity claim.
+    #[test]
+    fn artifact_wire_bounds_and_paths_do_not_create_generic_file_authority() {
+        assert!(valid_request(
+            "artifacts:read",
+            &json!({"taskId":"task_fixture","relativePath":"artifacts/report.md"})
+        ));
+        for path in [
+            "../private",
+            "/private",
+            "C:/private",
+            "artifacts/./report.md",
+            "artifacts//report.md",
+            "artifacts\\report.md",
+            "artifacts/bad\0name",
+        ] {
+            assert!(!valid_request(
+                "artifacts:read",
+                &json!({"taskId":"task_fixture","relativePath":path})
+            ));
+        }
+        assert!(!valid_request(
+            "artifacts:scan",
+            &json!({"taskId":"task_fixture","root":"/private"})
+        ));
+        for mime in ["text/markdown", "text/typescript", "application/yaml"] {
+            assert!(valid_result(
+                "artifacts:read",
+                &json!({"defined":true,"value":{"kind":"text","content":"Owned report\n","mimeType":mime}})
+            ));
+        }
+        assert!(valid_result(
+            "artifacts:read",
+            &json!({"defined":true,"value":null})
+        ));
+        assert!(!valid_result(
+            "artifacts:read",
+            &json!({"defined":true,"value":{"kind":"text","content":"x".repeat(128*1024+1)}})
+        ));
+        assert!(!valid_result(
+            "artifacts:read",
+            &json!({"defined":true,"value":{"kind":"text","content":"Owned report","privatePath":"/private"}})
+        ));
+        assert!(valid_result(
+            "artifacts:read",
+            &json!({"defined":true,"value":{"kind":"data_url","content":"data:image/png;base64,AA==","mimeType":"image/png"}})
+        ));
+        assert!(!valid_result(
+            "artifacts:read",
+            &json!({"defined":true,"value":{"kind":"data_url","content":"data:text/html;base64,AA==","mimeType":"text/html"}})
+        ));
+        let row = json!({"path":"report.md","title":"Report","type":"markdown","updatedAt":100.0,"size":42});
+        assert!(valid_result(
+            "artifacts:scan",
+            &json!({"defined":true,"value":[row.clone()]})
+        ));
+        assert!(!valid_result(
+            "artifacts:scan",
+            &json!({"defined":true,"value":[row.clone(),row]})
+        ));
+        assert!(!valid_result(
+            "artifacts:scan",
+            &json!({"defined":true,"value":[],"authority":"*"})
+        ));
+    }
+    #[test]
+    fn detection_snapshots_keep_exact_metadata_without_child_output_or_credentials() {
+        let mut snapshot = serde_json::Map::new();
+        for key in DETECTION_KEYS {
+            snapshot.insert((*key).to_owned(), json!({"installed":false,"version":null}));
+        }
+        snapshot.insert("pi".into(),json!({"installed":false,"version":null,"supported":false,"reason":"Pi CLI is not installed."}));
+        snapshot.insert("rtk".into(),json!({"installed":false,"version":null,"configured":false,"integrations":{"claudeCode":false,"opencode":false,"codex":false,"cursor":false,"pi":false}}));
+        let mut snapshot = Value::Object(snapshot);
+        assert!(valid_result(
+            "agent-installer:detect",
+            &json!({"defined":true,"value":snapshot.clone()})
+        ));
+        assert!(!valid_request(
+            "agent-installer:detect",
+            &json!({"command":"arbitrary"})
+        ));
+        snapshot["claudeCode"] = json!({"installed":true,"version":"2.1.0"});
+        snapshot["rtk"]["installed"] = json!(true);
+        snapshot["rtk"]["version"] = json!("0.31.1");
+        snapshot["rtk"]["configured"] = json!(true);
+        snapshot["rtk"]["integrations"]["claudeCode"] = json!(true);
+        assert!(valid_result(
+            "agent-installer:detect",
+            &json!({"defined":true,"value":snapshot.clone()})
+        ));
+        snapshot["rtk"]["configured"] = json!(false);
+        assert!(!valid_result(
+            "agent-installer:detect",
+            &json!({"defined":true,"value":snapshot.clone()})
+        ));
+        snapshot["rtk"]["configured"] = json!(true);
+        snapshot["codex"]["stdout"] = json!("private child output");
+        assert!(!valid_result(
+            "agent-installer:detect",
+            &json!({"defined":true,"value":snapshot})
+        ));
+        for version in ["2.51.0.windows.2", "0.113.0-alpha.25", "0.80.5", "1.2"] {
+            assert!(detection_version(&json!(version)));
+        }
+        for version in [
+            "private-token",
+            "1.2.3+private",
+            "1.2.3.4",
+            "1.2.3-dev-private",
+            "1.2.3.windows.1.2",
+        ] {
+            assert!(!detection_version(&json!(version)));
+        }
+    }
     #[test]
     fn actual_typescript_golden_requests_are_accepted_without_payload_grants() {
         let Some(path) = std::env::var_os("TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS") else {
