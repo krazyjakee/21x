@@ -51,6 +51,12 @@ describe('desktop contract generation', () => {
     for (const name of ['shell:openPath', 'shell:showItemInFolder']) expect(manifest.operations.find((row: { name: string }) => row.name === name)).toMatchObject({ owner: 'service', nativeCallback: true })
     expect(manifest.operations.find((row: { name: string }) => row.name === 'shell:openExternal')).toMatchObject({ owner: 'native-host' })
   })
+  it('keeps clipboard acquisition in the native host while saved image publication belongs to the service', () => {
+    const source = `import { ipcMain } from 'electron'; ipcMain.handle('chatImages:readClipboard', fn); ipcMain.handle('chatImages:saveToTask', fn);`
+    const manifest = buildOperationManifest(createInventory({ sources: [{ file: 'src/main/chat.ts', source }] }), '')
+    expect(manifest.operations.find((row: { name: string }) => row.name === 'chatImages:readClipboard')).toMatchObject({ owner: 'native-host' })
+    expect(manifest.operations.find((row: { name: string }) => row.name === 'chatImages:saveToTask')).toMatchObject({ owner: 'service' })
+  })
 
   it('attaches finite authoritative source ownership without hiding dynamic AST evidence', () => {
     const source = { file: 'src/main/relay.ts', line: 2, column: 3, target: 'guardedIpcSend', method: 'send', channelExpression: 'channel' }

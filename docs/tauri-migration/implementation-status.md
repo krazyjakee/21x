@@ -6,6 +6,21 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The clipboard continuation adds document-bound native PNG reading for Linux.
+GTK target and content callbacks stay owned through their actual completion;
+empty and text clipboards return no images, while copied-file offers return a
+fixed message without reading paths. Native byte bounds and a strict renderer
+codec limit each result to one PNG of at most 512 KiB. Reload and hydration fence
+delivery and prevent replay.
+
+The finite surface has 224 service commands, three direct native commands and
+30 events. See [clipboard image ownership](clipboard-image-bindings.md).
+Copied-file import, other formats/platforms, installed graphical clipboard
+acceptance and complete migration gates remain open. Hosted voice remains
+deferred; the shipping application still uses Electron.
+
+The preceding attachment continuation retains its tested revision:
+
 The attachment opening continuation resolves the exact saved file through the
 production task/group scope and a separate native attachment-root descriptor.
 Read grants suffice while the task agent is active. The service retains its

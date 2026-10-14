@@ -1,0 +1,317 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    209,
+    214,
+    215
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "ee473692ca74e52593d386bde7e6e39046d93393",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/clipboard-image-bindings.md": "066cfd3a2035c3a6a0462e45a1fa684bcb5bf02ff3cb84edf46a5a6f8012d41a",
+      "docs/tauri-migration/implementation-status.md": "e1d49adfbe3d6d4e20541fb2f1f183c9ce459c001f6f3d909040d2a742eb456d",
+      "docs/tauri-migration/inventory.json": "1432f35e2f06e57587883e9977e1844cf9517c627470d766ac08ab183a5800d4",
+      "docs/tauri-migration/native-services-production.md": "88d9cfe8578a6c6808ba6cae9d8e85dd03e50e0af0e4927216e961fa1404d7c1",
+      "scripts/tauri-contracts.test.ts": "0ac52aa67deb289fc6a8a04a2af1ab70ef36135c4f4c908af68f38b9f79e7dfb",
+      "src-tauri/Cargo.lock": "e8f6dd13149b243d724400c2619fb03ff6c52d5d21c3fe0530773cffaa6a0777",
+      "src-tauri/Cargo.toml": "d5c1c5ef8b3e39a1751017bbdb7233b8698d89e167f2380a9ece80b3083a42c5",
+      "src-tauri/src/native_clipboard.rs": "afa457ebfc6ac523c765d5ce4a4b68a5fde00beeb400961630ae96017ce7c46d",
+      "src-tauri/src/native_services.rs": "fef565b6b9dfd34a46f0c5dffc884383f73398f2027f3f376236a7a8795ebb43",
+      "src-tauri/src/production_host.rs": "a261bef675a6f398a81dd2bf9f47bfa25b74398b00797225266c5a98243d6290",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "7f252dfcde8e7fe4395886af6e9666ebe5b1cc6990edb7b59f86196a3d159e8e",
+      "src/renderer/src/lib/native-desktop-host.ts": "1c5c4efeb8215702aa62c627f486356d71be4b2a971c3f396b67d42a84bca9ec",
+      "src/renderer/src/lib/tauri-desktop-transport.test.ts": "c3142fca0ba3e43fbc580092ac79796a68a3835de9940a97fd57bad4e8aadd78",
+      "src/renderer/src/lib/tauri-desktop-transport.ts": "74be4d1622dc3c0c97bdb04c828255b843c59771c3ac88eeba54cc9d5934458c",
+      "src/shared/native-clipboard-codecs.test.ts": "d83aa0aa63defa5a72c6d2e2e05ccf419aecd381186a4be555d41f49be6fce8b",
+      "src/shared/native-clipboard-codecs.ts": "56d93c32b0d7fca1438b5b520a6d366a64adcab8555b099dfe8bedf87ff457f3"
+    },
+    "frozenInputs": 16,
+    "frozenSourcesUnchangedThroughFinalSuites": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Direct Linux native PNG clipboard acquisition bound to current physical main document. Shipping application remains Electron.",
+  "bindings": {
+    "finiteServiceCommandContracts": 224,
+    "separateNativeServiceCommands": 3,
+    "facadeCommandBindings": 227,
+    "events": 30,
+    "newCommands": 1,
+    "newEvents": 0,
+    "directNativeOperation": "chatImages:readClipboard",
+    "publicPayload": {},
+    "decodedImageByteCap": 524288,
+    "wireByteCapExclusive": 890000
+  },
+  "implemented": [
+    "Retained empty renderer arguments map to exact native empty payload; no clipboard target, URI, path, caller or permission can be chosen in public arguments. Node service receives no clipboard content or route.",
+    "Native ingress requires trusted main label/origin, current engine epoch and opaque current physical-document authority. GTK requests and callback processing recheck the captured document before effects and delivery.",
+    "Linux GTK target/content requests run asynchronously on the main thread. Target count is finite; fixed atoms avoid materializing arbitrary target names. Copied-file offers take priority and return a fixed message before content requests or filesystem effects.",
+    "Empty/text clipboards return empty image/error arrays. Other known image formats return fixed unsupported wording. Non-Linux returns fixed unavailable wording.",
+    "Successful output has one fixed-name PNG with canonical plain base64 and at most 512 KiB decoded bytes. Reported native length is checked before copying; strict codecs reject ambiguous envelopes, malformed base64, foreign fields and private diagnostics.",
+    "Raw GTK callbacks remain retained under native work ownership despite timeout or dropped public waiters. Retired public requests cannot start subsequent content acquisition or copy bytes. Shutdown drains actual completion.",
+    "Renderer hydration fences clipboard acquisition. Reload/disconnect reject pending results without replaying them into a replacement document."
+  ],
+  "artifact": {
+    "buildIdentity": "production-1dc21a803737dba9423fd4b45a4b39ec",
+    "resourceManifestSha256": "26580a60c05feb47ce5412719888be9c42b6e76532c638ea8d54be1500394095",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "packageAndRuntimePinsUnchanged": true,
+    "cargoVersionsAndChecksumsUnchanged": true,
+    "dependencyEdge": "Linux production host directly uses already-locked gtk 0.18.2; no new package/version/checksum"
+  },
+  "contractCorpus": {
+    "operations": 224,
+    "actualTypeScriptRequests": 464,
+    "sha256": "0b550d3d6acc74920508612a9190fcc4e210555c9741d180bcfc3085291629cc",
+    "nativeParity": "Existing 224 service operations accepted by actual native golden-request test; clipboard is separately native-owned"
+  },
+  "tests": {
+    "app": {
+      "passed": 6964,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "1ff91a6e4c90554a2832899f79b0134a885a6a1782b698ab37b3dd1da3e4f110",
+      "logSha256": "a4193fb8f361dd8d9ceb36b50a1ea4c0f217f9b6fe4693dd8b9199e12ec106b9"
+    },
+    "standalone": {
+      "passed": 3496,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "5147cacf1e3aa5cb896a461e91589fc6ac5d9d21738ee9399e1f4ed9059bba93",
+      "logSha256": "fc626b5fae2c78b6f6dad366125f2742836f9130e621f1db1ca7a09b059fd48f"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "0e3c5d40bcd50fa2a1950142f60e36b9687094b7502597e34400cbc1ba94f9eb",
+      "logSha256": "4662c8890f74d02d75c62958fa44cd084c57370203da3e7327a437e87e84a248"
+    },
+    "focused": {
+      "passed": 101,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "741e03e41c405ff05337950c8c33417077a29523f4c1f95efb28c0eaf8ea893b",
+      "logSha256": "6c652fc47639de7a6f8d23cd98e6abbe89f4407560600ab0db751f31f56693ec"
+    },
+    "corpus-export": {
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "dbfef2ef1527753899f5ac1d706a4854fff036a521bc01e176c450f1540e3d3f",
+      "logSha256": "8fb2dc866371f33e3b11deef3c10a45c8f5b66143405f1b90516f95ad0eca6b0"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 29.19,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.198,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 22.648,
+      "logSha256": "2d83bc699a1caddf68fe9ee12f1f653e850cac7cf69750873e72d5529257fc22"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.942,
+      "logSha256": "6902ed5d14ce2da6d1771989ce6f82e564a09a7395ba5d2b9fe8342c40d02914"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.702,
+      "logSha256": "27378c8d53dfa636ea3e940b4b76215d5d21c5c8dc26cdf2d48a7b2c2bfcf28d"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.759,
+      "logSha256": "71bcc68e550a2947e535549ce8273a0ab530d0dd473260371bdb444349100de3"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.393,
+      "logSha256": "1bb107581ca2043b7e23f6fab1e086c83ec5f1de6ff7bacce6fbd20f11dd74e8"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.373,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.593,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.499,
+      "logSha256": "a9cbc07ea78416d7ffa9fcdc9cc7820a0d5a748c48e39dd24807754c3cc85e58"
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.62,
+      "logSha256": "98a045e6925c7872f0918baa6c4615d509d257604fcb673b13654ac2d016d2cc"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 7.2,
+      "logSha256": "21e1cd7df22cfc2e3c104229d5c519d23a6144cd582560de69658a302a2650c2"
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch25-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.698,
+      "logSha256": "08a335c9c72ec915430b001cb8956bb276dbf01a82be1cdd1964915bd50a6e3c"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.043,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "remainingAcceptance": [
+    "Installed graphical production clipboard/paste behavior has not been exercised; display-free codec and callback ownership fixtures cover only their stated scope.",
+    "Copied image file imports, other MIME formats and macOS/Windows clipboard acquisition remain separate implementation work.",
+    "GTK owns the raw selection transfer before reported-length validation. The cap bounds Rust copying and RPC output; it does not establish a hard memory cap inside the OS/GTK clipboard transport.",
+    "Remaining platform controls, full backend/provider/profile/release/cutover and G0-G5 gates remain open. Hosted voice is deferred by user decision.",
+    "Issues #202/#209/#214/#215 remain open for complete acceptance."
+  ]
+}

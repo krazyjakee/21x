@@ -4,7 +4,11 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 use twentyonex_engine::EngineError;
 
-pub const OPERATIONS: &[&str] = &["shell:openExternal", "app:getVersion"];
+pub const OPERATIONS: &[&str] = &[
+    "shell:openExternal",
+    "app:getVersion",
+    "chatImages:readClipboard",
+];
 pub const MAX_URL_BYTES: usize = 8192;
 pub const MAX_NATIVE_WORK: usize = 4;
 pub fn trusted_origin(url: &tauri::Url, development: bool) -> bool {
@@ -73,7 +77,7 @@ pub fn request(operation: &str, value: &Value) -> bool {
                     .and_then(Value::as_str)
                     .is_some_and(|url| external_url(url, false))
         }
-        "app:getVersion" => map.is_empty(),
+        "app:getVersion" | "chatImages:readClipboard" => map.is_empty(),
         _ => false,
     }
 }

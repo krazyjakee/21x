@@ -1,6 +1,6 @@
 # Production native URL and version services
 
-The opt-in production host owns two existing desktop operations directly:
+This slice of the opt-in production host owns two existing desktop operations directly:
 `shell:openExternal` and `app:getVersion`. They are separate from the Node
 service registry. Both use the current native engine epoch and the existing
 trusted main-window label/origin policy; an unavailable, stopping or replaced
@@ -12,7 +12,8 @@ is a renderer availability guard, not a native authorization receipt. The native
 host independently checks the fixed trusted main identity, current epoch and
 live owner before admitting work, then rechecks lifecycle/origin immediately
 before a blocking native launch. Payloads cannot select a program, file path,
-profile, callback identity or capability.
+profile, callback identity or capability. Later direct native clipboard reading
+uses a distinct document receipt; see [clipboard image ownership](clipboard-image-bindings.md).
 
 UI opening admits bounded HTTP(S) and mailto URLs. The reviewed service callback
 `host.shell.openExternal` uses the same actual native owner with HTTP(S) only.

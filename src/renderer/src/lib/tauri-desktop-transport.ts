@@ -44,9 +44,12 @@ export function createTauriDesktopTransport(native: TauriDesktopApi): DesktopTra
       try {
         // Paths, native identity and caller authority never originate in renderer arguments.
         const document = uiDocuments.get(native)
-        if ((operation === 'ui:publishState' || operation === 'agent-installer:install' || operation === 'attachments:open') && (!document || document.engineEpoch !== engineEpoch)) throw new ServiceProtocolError('DISCONNECTED')
-        return await native.core.invoke('desktop_invoke', { operation, payload, engineEpoch,
-          ...((operation === 'ui:publishState' || operation === 'agent-installer:install' || operation === 'attachments:open') ? { uiLease: document!.leaseId } : {}) })
+        const requiresDocument = operation === 'ui:publishState' || operation === 'agent-installer:install' || operation === 'attachments:open' || operation === 'chatImages:readClipboard'
+        if (requiresDocument && (!document || document.engineEpoch !== engineEpoch)) throw new ServiceProtocolError('DISCONNECTED')
+        const result = await native.core.invoke('desktop_invoke', { operation, payload, engineEpoch,
+          ...(requiresDocument ? { uiLease: document!.leaseId } : {}) })
+        if (requiresDocument && uiDocuments.get(native) !== document) throw new ServiceProtocolError('STALE_EPOCH')
+        return result
       } catch (error) { throw nativeError(error) }
     },
     async listen(receive) {
@@ -84,6 +87,7 @@ export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<stri
 }
 
 function nativeError(error: unknown): ServiceProtocolError {
+  if (error instanceof ServiceProtocolError) return error
   const code = isRecord(error) && typeof error.code === 'string' && Object.hasOwn(SERVICE_ERROR_MESSAGES, error.code)
     ? error.code as ServiceErrorCode : 'DISCONNECTED'
   return new ServiceProtocolError(code)

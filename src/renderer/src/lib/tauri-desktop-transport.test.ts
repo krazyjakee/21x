@@ -30,8 +30,28 @@ it('waits for native page completion before capturing a private publication rece
     expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'ui:publishState', payload: { state: {} }, engineEpoch: 'engine-1', uiLease: 'document:1' })
     await transport.invoke('project:getAll', {}, { engineEpoch: 'engine-1', signal: new AbortController().signal })
     expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'project:getAll', payload: {}, engineEpoch: 'engine-1' })
+    await transport.invoke('chatImages:readClipboard', {}, { engineEpoch: 'engine-1', signal: new AbortController().signal })
+    expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'chatImages:readClipboard', payload: {}, engineEpoch: 'engine-1', uiLease: 'document:1' })
     invoke.mockResolvedValue({ available: true, protocolVersion: 1, engineEpoch: 'engine-2' })
     expect(await getTauriEngineEpoch(native)).toBe('engine-2'); expect(getTauriUiDocument(native)).toBeUndefined()
     await expect(transport.invoke('ui:publishState', { state: {} }, { engineEpoch: 'engine-2', signal: new AbortController().signal })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    await expect(transport.invoke('chatImages:readClipboard', {}, { engineEpoch: 'engine-2', signal: new AbortController().signal })).rejects.toMatchObject({ code: 'DISCONNECTED' })
   } finally { vi.useRealTimers() }
+})
+
+it('revokes clipboard delivery as soon as replacement bootstrap starts, before its response arrives', async () => {
+  let finishRead!: (value: unknown) => void, finishBootstrap!: (value: unknown) => void
+  const read = new Promise(resolve => { finishRead = resolve }), bootstrap = new Promise(resolve => { finishBootstrap = resolve })
+  const invoke = vi.fn().mockResolvedValueOnce({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document:1' })
+    .mockImplementation((command: string) => command === 'engine_status' ? bootstrap : read)
+  const native = { core: { invoke }, event: { listen: vi.fn() } } as unknown as TauriDesktopApi
+  await getTauriEngineEpoch(native)
+  const old = createTauriDesktopTransport(native).invoke('chatImages:readClipboard', {}, { engineEpoch: 'engine-1', signal: new AbortController().signal })
+  const failure = expect(old).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  const replacement = getTauriEngineEpoch(native)
+  finishRead({ engineEpoch: 'engine-1', result: { defined: true, value: { images: [], errors: [] } } })
+  await failure
+  finishBootstrap({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document:2' })
+  await replacement
+  expect(invoke.mock.calls.filter(([command]) => command === 'desktop_invoke')).toHaveLength(1)
 })

@@ -1,4 +1,5 @@
 import { AGENT_INSTALLER_DETECTION_KEYS } from '@shared/agent-installer-codecs'
+import { NATIVE_CLIPBOARD_ERRORS } from '@shared/native-clipboard-codecs'
 import { VOICE_MANAGEMENT_UNAVAILABLE } from '@shared/voice-management-codecs'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { TauriDesktopApi } from './tauri-desktop-transport'
@@ -282,7 +283,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 226 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 227 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -291,7 +292,7 @@ it('binds the 226 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(226)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(227)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -924,4 +925,38 @@ it('joins an accepted attachment open after disconnect without replaying it into
   f.changeEpoch(); f.changeUiLease(); await f.host.reconnect(); await failure
   held.resolve({ engineEpoch: 'engine-1', result: { defined: false } })
   expect(f.invoke.mock.calls.filter(([, args]) => args?.operation === 'attachments:open')).toHaveLength(1)
+})
+
+it('reads finite clipboard images only with a current document after hydration', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const value = { images: [{ name: 'image.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }], errors: [] }
+  f.results.set('chatImages:readClipboard', value)
+  expect(await f.host.api.chatImages.readClipboard()).toEqual(value)
+  expect(f.invoke.mock.calls.at(-1)?.[1]).toEqual({ operation: 'chatImages:readClipboard', payload: {}, engineEpoch: 'engine-1', uiLease: 'document-1' })
+  const gate = deferred<void>(); f.host.setRehydrator(() => gate.promise); const recovery = f.host.rehydrate()
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.chatImages.readClipboard()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  gate.resolve(); await recovery
+  f.results.set('chatImages:readClipboard', { images: [], errors: [NATIVE_CLIPBOARD_ERRORS.copiedFiles] })
+  expect(await f.host.api.chatImages.readClipboard()).toEqual({ images: [], errors: [NATIVE_CLIPBOARD_ERRORS.copiedFiles] })
+  const absent = fixture(); absent.host.setRehydrator(async () => {}); await absent.host.reconnect()
+  const calls = absent.invoke.mock.calls.length
+  await expect(absent.host.api.chatImages.readClipboard()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(absent.invoke.mock.calls.length).toBe(calls)
+})
+it('refuses private clipboard results and does not export or replay old document results', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  for (const value of [undefined, { images: [], errors: ['private stderr /profile'] }, { images: [], errors: [], path: '/private' },
+    { images: [{ name: 'image.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA', path: '/private' }], errors: [] }]) {
+    f.results.set('chatImages:readClipboard', value)
+    await expect(f.host.api.chatImages.readClipboard()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  }
+  const held = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => args?.operation === 'chatImages:readClipboard' ? held.promise : original(command, args))
+  const count = f.invoke.mock.calls.filter(([, args]) => args?.operation === 'chatImages:readClipboard').length
+  const work = f.host.api.chatImages.readClipboard(), failure = expect(work).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeUiLease(); await f.host.reconnect(); await failure
+  held.resolve({ engineEpoch: 'engine-1', result: { defined: true, value: { images: [], errors: [] } } })
+  expect(f.invoke.mock.calls.filter(([, args]) => args?.operation === 'chatImages:readClipboard')).toHaveLength(count + 1)
 })

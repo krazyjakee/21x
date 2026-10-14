@@ -4305,6 +4305,7 @@ dependencies = [
 name = "twentyonex-tauri-feasibility"
 version = "0.1.0"
 dependencies = [
+ "gtk",
  "raw-window-handle",
  "serde_json",
  "sha2",

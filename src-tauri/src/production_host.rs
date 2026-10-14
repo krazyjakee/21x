@@ -24,6 +24,8 @@ use twentyonex_engine::{
 #[path = "native_services.rs"]
 pub(crate) mod native_services;
 use native_services::NativeWorkOwner;
+#[path = "native_clipboard.rs"]
+pub(crate) mod native_clipboard;
 #[path = "production_ui.rs"]
 pub(crate) mod production_ui;
 use production_ui::NativeUiOwner;
@@ -348,6 +350,29 @@ async fn desktop_invoke(
         authorize(&window)?;
         available_engine(window.app_handle(), Some(&engine_epoch))?;
         state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
+    }
+    if operation == native_clipboard::OPERATION {
+        if !native_clipboard::request(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        let result = native_clipboard::read(
+            window.app_handle().clone(),
+            state.native_work.clone(),
+            state.ui.clone(),
+            window.clone(),
+            engine_epoch.clone(),
+            lease.clone(),
+        )
+        .await?;
+        authorize(&window)?;
+        available_engine(window.app_handle(), Some(&engine_epoch))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        if !native_clipboard::result(&result) {
+            return Err(EngineError::new("INVALID_RESULT"));
+        }
         return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
     }
     if ui_lease.is_some() {
