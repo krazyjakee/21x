@@ -4,6 +4,8 @@ import { closeConnectorRuntime, ConnectorRuntimeClosedError, disposeConnectorRun
 import { PieceHostShutdownIncompleteError } from '../piece-host/client'
 import { PieceCancelledError } from '../piece-host/errors'
 import { ConnectorCredentialStoreClosedError } from '../credentials'
+import { ConnectorCredentialMutationBusyError } from '../credential-admission'
+import { ConnectorBridgeEngine } from './engine'
 
 const host = {
   createTransport: () => { throw new Error('Lifetime controls must not start a worker') },
@@ -72,5 +74,65 @@ describe('connector runtime ownership', () => {
     expect(getConnectorRuntime(source.db)).toBe(runtime)
     await closeConnectorRuntime(source.db)
     expect(runtime.client.starts).toBe(0)
+  })
+
+  it('shares the edit fence with real direct calls, OAuth refresh and bridge admission', async () => {
+    const source = fixture()
+    const runtime = getConnectorRuntime(source.db)
+    const instance = runtime.store.createInstance({ pieceName: '@activepieces/piece-trello', pieceVersion: '0.6.0' })
+    const engine = new ConnectorBridgeEngine({ runtime })
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    const edit = runtime.runCredentialMutation(instance.id, async () => {
+      runtime.credentialStore.set(instance.id, { type: 'basic', username: 'fixture-key', password: 'fixture-token' }, 'session')
+      await held
+    })
+    await expect(runtime.client.runAction({ instanceId: instance.id, pieceName: instance.pieceName, pieceVersion: instance.pieceVersion, actionName: 'get_board' })).rejects.toBeInstanceOf(ConnectorCredentialMutationBusyError)
+    await expect(runtime.credentials.get(instance.id)).rejects.toBeInstanceOf(ConnectorCredentialMutationBusyError)
+    await expect(engine.sync('fixture-source', { piece_name: instance.pieceName, connector_instance_id: instance.id, props: { board_id: 'fixture-board' } }, { db: source.db })).rejects.toBeInstanceOf(ConnectorCredentialMutationBusyError)
+    await expect(runtime.runCredentialMutation(instance.id, () => runtime.credentialStore.clear(instance.id))).rejects.toBeInstanceOf(ConnectorCredentialMutationBusyError)
+    expect(runtime.client.starts).toBe(0)
+    finish()
+    await edit
+    await runtime.runCredentialMutation(instance.id, () => runtime.credentialStore.clear(instance.id))
+    expect(runtime.credentialStore.get(instance.id)).toBeNull()
+    await engine.close()
+  })
+
+  it('refuses a credential edit after public cancellation until its raw credential read settles', async () => {
+    const source = fixture()
+    const runtime = getConnectorRuntime(source.db)
+    const instance = runtime.store.createInstance({ pieceName: '@activepieces/piece-trello', pieceVersion: '0.6.0' })
+    let finish!: (value: null) => void
+    const held = new Promise<null>(resolve => { finish = resolve })
+    const read = vi.spyOn(runtime.credentials, 'get').mockReturnValue(held)
+    const cancel = new AbortController()
+    const result = expect(runtime.client.runAction({ instanceId: instance.id, pieceName: instance.pieceName, pieceVersion: instance.pieceVersion, actionName: 'get_board', signal: cancel.signal })).rejects.toBeInstanceOf(PieceCancelledError)
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+    cancel.abort()
+    await result
+    await expect(runtime.runCredentialMutation(instance.id, () => runtime.credentialStore.clear(instance.id))).rejects.toBeInstanceOf(ConnectorCredentialMutationBusyError)
+    finish(null)
+    await vi.waitFor(async () => { await runtime.runCredentialMutation(instance.id, () => runtime.credentialStore.clear(instance.id)) })
+    expect(runtime.client.starts).toBe(0)
+  })
+
+  it('retains a killed worker exit receipt after public cancellation before admitting an edit', async () => {
+    const source = fixture()
+    let exit!: (code: number | null) => void
+    const postMessage = vi.fn(), kill = vi.fn()
+    const runtime = resolveRuntime(source.db, { openExternal: host.openExternal, createTransport: () => ({ postMessage, kill,
+      onMessage(handler) { queueMicrotask(() => handler({ kind: 'ready' })) }, onExit(handler) { exit = handler } }) })
+    const instance = runtime.store.createInstance({ pieceName: '@activepieces/piece-trello', pieceVersion: '0.6.0' })
+    const cancel = new AbortController()
+    const result = expect(runtime.client.runAction({ instanceId: instance.id, pieceName: instance.pieceName, pieceVersion: instance.pieceVersion, actionName: 'get_board', signal: cancel.signal })).rejects.toBeInstanceOf(PieceCancelledError)
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledOnce())
+    cancel.abort()
+    await result
+    expect(kill).toHaveBeenCalledOnce()
+    await expect(runtime.runCredentialMutation(instance.id, () => runtime.credentialStore.clear(instance.id))).rejects.toBeInstanceOf(ConnectorCredentialMutationBusyError)
+    exit(null)
+    await vi.waitFor(async () => { await runtime.runCredentialMutation(instance.id, () => runtime.credentialStore.clear(instance.id)) })
+    expect(runtime.client.starts).toBe(1)
   })
 })

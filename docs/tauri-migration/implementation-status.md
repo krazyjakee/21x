@@ -6,6 +6,25 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The October 14 production form continuation binds three task-source plugin form
+controls and seven connector controls to the actual protected-profile owners.
+There are 114 finite production command contracts; profiles with connectors
+explicitly disabled expose 107 actual owner handlers and refuse the seven
+connector effects. Plugin option resolution borrows saved credentials only
+with explicit source/plugin authorization. Connector credential mutations hold
+source admission and a shared runtime fence covering bridge jobs, direct piece
+calls, raw credential/KV callbacks, retiring worker exits and OAuth work.
+Outstanding runtime work conservatively refuses an edit; the boundary never
+uses a public timeout as proof that the worker stopped. OAuth checks captured
+scope and identity immediately before storing the exchanged token. The existing
+task-action owner rechecks the external task/source binding before dispatch and
+local reconciliation. These controls do not establish packaged connector,
+native OAuth callback or all-platform migration acceptance. See
+[plugin form controls](task-source-plugin-production.md),
+[connector controls](connector-production.md) and [batch evidence](evidence/issue-closing-20261014-connector-plugin-forms.json)
+recorded with the implementation revision.
+
+
 - Installed artifact policy v3 and the twenty-receipt synthetic-agent diagnostic passed on all four targets, completing [#204](https://github.com/krazyjakee/21x/issues/204). See [artifact provenance](evidence/installed-artifact-v3-four-target-scenarios.json) and [agent provenance](evidence/installed-agent-08d495f-four-target-scenarios.json).
 - [Recurrence](recurrence-owner.md), [scheduled coordination](scheduled-coordination-owner.md), [heartbeat](heartbeat-owner.md), [workspace cleanup](workspace-cleanup-owner.md) and [overdue reminders](overdue-notifier.md) have portable owners and explicit host boundaries. The [four-target scheduler matrix](evidence/schedulers-four-target-scenarios.json) passed 1,436 default standalone cases with zero skips in 92 files per target at `251685c`; it predates terminal and chat ownership.
 - [Terminal ownership](terminal-owner.md) retains native close and cwd work, bounds replay, supports host reattachment and applies trusted IPC checks. The staged native PTY fixture passed on hosted Linux and both Macs at `97c7054`; Windows resize then passed at `e247073` after enabling raw TTY input and resampling when the notification races input; installed behavior and descendant cleanup remain open. The [matrix and failed Windows assertion](evidence/commander-terminal-platform-scenarios.json) retain their exact source and artifact provenance.

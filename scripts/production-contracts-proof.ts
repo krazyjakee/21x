@@ -10,6 +10,8 @@ import { PRODUCTION_SETTINGS_CODECS, PRODUCTION_SETTINGS_KEYS, PRODUCTION_ENV_KE
 import { TERMINAL_COMMAND_CODECS } from '../src/shared/terminal-desktop-codecs'
 import { MCP_CODECS } from '../src/shared/mcp-codecs'
 import { TASK_SOURCE_CODECS } from '../src/shared/task-source-codecs'
+import { CONNECTOR_CODECS } from '../src/shared/connector-codecs'
+import { TASK_SOURCE_PLUGIN_CODECS } from '../src/shared/task-source-plugin-codecs'
 import type { JsonValue } from '../src/shared/service-protocol'
 
 // Preserve the production binding's override order; older diagnostic task,
@@ -17,7 +19,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 let deepOutput: JsonValue = 'fixture leaf'
@@ -69,7 +71,13 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'taskSource:getAll': [project], 'taskSource:create': [{ name: 'Fixture issues', plugin_id: 'github-issues', mcp_server_id: null, project_id: project, config: { owner: 'fixture', repo: 'codec-proof', state: 'open', labels: 'proof' } }],
   'taskSource:update': ['source_fixture', { name: 'Updated fixture source', enabled: false }], 'taskSource:delete': ['source_fixture'],
   'taskSource:sync': ['source_fixture'], 'taskSource:exportUpdate': [task, { title: 'Fixture title', description: 'Multiline\nfixture context', status: 'ready_for_review', priority: 'urgent', assignee: 'Fixture User', due_date: null, labels: ['proof'], complete_at_source: false }],
-  'taskSource:getUsers': ['source_fixture'], 'taskSource:reassign': [task, ['external:user-one', 'external:user-two'], 'Fixture Users']
+  'taskSource:getUsers': ['source_fixture'], 'taskSource:reassign': [task, ['external:user-one', 'external:user-two'], 'Fixture Users'],
+  'connectors:bridgePieces': [], 'connectors:ensureInstance': ['@activepieces/piece-trello', 'connector.fixture:one'],
+  'connectors:credentialStatus': ['connector.fixture:one'], 'connectors:setCredentials': ['connector.fixture:one', { username: 'fixture-user', password: 'synthetic-fixture-password' }, 'session'],
+  'connectors:clearCredentials': ['connector.fixture:one'], 'connectors:oauthConnect': ['connector.fixture:one', { clientId: 'fixture-client', clientSecret: 'synthetic-fixture-secret' }, 'persistent'],
+  'connectors:syncStatus': ['connector.fixture:one'],
+  'plugin:list': [], 'plugin:getDocumentation': ['notion'],
+  'plugin:resolveOptions': ['notion', 'status_options', { data_source_id: 'external:database', api_token: '__21x_api_key_set__' }, 'server_fixture', 'source_fixture']
 }
 
 type Variant = { operation: string; case: string; args: unknown[] }
@@ -122,6 +130,17 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'taskSource:update', case: 'finite-source-credential-write', args: ['source_fixture', { plugin_id: 'notion', config: { api_token: 'synthetic\nfixture-credential' } }] },
   { operation: 'taskSource:update', case: 'finite-source-credential-boundary', args: ['source_fixture', { config: { api_token: 'x'.repeat(16384) } }] },
   { operation: 'taskSource:reassign', case: 'clear-assignees', args: [task, [], ''] },
+  { operation: 'connectors:ensureInstance', case: 'new-mapped-todoist-instance', args: ['@activepieces/piece-todoist'] },
+  { operation: 'connectors:setCredentials', case: 'secret-text-default-storage', args: ['connector.fixture:one', { secret: 'synthetic-fixture-secret' }] },
+  { operation: 'connectors:setCredentials', case: 'field-byte-boundary', args: ['connector.fixture:one', { secret: 'x'.repeat(4096) }, 'persistent'] },
+  { operation: 'connectors:oauthConnect', case: 'public-client-without-secret', args: ['connector.fixture:one', { clientId: 'fixture-client' }] },
+  { operation: 'connectors:oauthConnect', case: 'registered-client-owned-input', args: ['connector.fixture:one', {}] },
+  { operation: 'connectors:oauthConnect', case: 'typed-omitted-client-secret', args: ['connector.fixture:one', { clientId: 'fixture-client', clientSecret: undefined }, 'persistent'] },
+  { operation: 'connectors:setCredentials', case: 'typed-omitted-unused-secret', args: ['connector.fixture:one', { username: 'fixture-user', password: 'synthetic-fixture-password', secret: undefined }, 'session'] },
+  { operation: 'plugin:resolveOptions', case: 'fifth-only-source-scope', args: ['linear', 'users', {}, undefined, 'source_fixture'] },
+  { operation: 'plugin:resolveOptions', case: 'raw-declared-resolver-credential', args: ['notion', 'data_sources', { api_token: 'synthetic\nfixture-credential' }] },
+  { operation: 'plugin:resolveOptions', case: 'resolver-credential-byte-boundary', args: ['youtrack', 'users', { api_token: 'x'.repeat(16384) }] },
+  ...Object.entries({ linear: ['users'], hubspot: ['owners', 'pipelines'], 'github-issues': ['owners', 'repos'], 'forgejo-issues': ['logins', 'owners', 'repos'], notion: ['data_sources', 'status_options', 'data_source_properties'], youtrack: ['projects', 'users', 'states', 'priorities', 'types'], 'connector-bridge': ['pieces'] }).flatMap(([pluginId, resolvers]) => resolvers.map(resolverKey => ({ operation: 'plugin:resolveOptions', case: `resolver-${pluginId}-${resolverKey}`, args: [pluginId, resolverKey, {}] }))),
   { operation: 'chat:start', case: 'tool-history', args: [{ messages: [{ role: 'user', content: 'Fixture request' }, { role: 'assistant', content: '', toolCalls: [{ id: 'call_fixture', name: 'fixture_tool', input: { projectId: project } }] }, { role: 'tool', toolCallId: 'call_fixture', name: 'fixture_tool', content: 'Fixture result', isError: false }], maxToolCalls: 32 }] },
   ...PRODUCTION_SETTINGS_KEYS.map(key => ({ operation: 'settings:get', case: `setting-${key}`, args: [key] })),
   ...PRODUCTION_ENV_KEYS.map(key => ({ operation: 'env:get', case: `marker-${key}`, args: [key] })),
@@ -131,7 +150,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 104 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 114 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

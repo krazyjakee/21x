@@ -12,6 +12,19 @@ function held() {
 afterEach(() => vi.restoreAllMocks())
 
 describe('portable OAuth owner', () => {
+  it('does not log provider credential text when a saved source token refresh fails', async () => {
+    const source = createPortableDbFixture()
+    const owner = new OAuthManager(source.db, { openExternal: vi.fn(), notify: vi.fn() })
+    const taskSource = source.db.createTaskSource({ name: 'Fixture OAuth', plugin_id: 'linear', mcp_server_id: null, config: { client_id: 'fixture', client_secret: 'fixture-secret' } })!
+    source.db.createOAuthToken({ provider: 'linear', source_id: taskSource.id, access_token: 'fixture-access', refresh_token: 'fixture-refresh', expires_in: -1, scope: null })
+    vi.spyOn(LinearProvider.prototype, 'refreshToken').mockRejectedValue(new Error('fixture-access fixture-refresh fixture-secret'))
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await owner.getValidToken(taskSource.id)).toBeNull()
+      expect(log).toHaveBeenCalledWith('[OAuthManager] Source token refresh failed')
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/fixture-access|fixture-refresh|fixture-secret/)
+    } finally { await owner.close(); source.rawDb.close() }
+  })
   it('joins an ignored-abort refresh and preserves the accepted rotated token before the database closes', async () => {
     const source = createPortableDbFixture()
     const gate = held(), entered = held()

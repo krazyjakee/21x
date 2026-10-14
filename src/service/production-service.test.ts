@@ -54,6 +54,7 @@ function fixture() {
     canAccessGlobalSkills: check, canChangeSkillScope: check, canReorderProjects: check, canReadSetting: check, canWriteSetting: check, canAccessSecret: check,
     canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessTerminal: check, canAccessMcpServer: check,
     canUseTransport: check, canUseEnvironmentName: check, canAccessConnector: check, canUseSourcePlugin: check,
+    canCreateInstance: check, canUsePiece: check, canBorrowSourceCredentials: check, canResolveUnsavedConfig: check,
     resolveTerminalDirectory: () => ({ cwd: launch.paths.workspaceRoot, root: launch.paths.workspaceRoot }) }
   const schemas: Record<string, OperationSchema> = Object.fromEntries(Object.entries(PRODUCTION_COMMAND_CODECS).map(([operation, codec]) => [operation, {
     validatePayload: (value: unknown) => { try { return codec.validateArguments(codec.decodeArguments(value as JsonValue)) } catch { return false } }, validateResult: codec.validateWireResult

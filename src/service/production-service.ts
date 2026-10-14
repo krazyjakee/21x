@@ -222,6 +222,10 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
     canUseTransport: (_input, caller) => trusted(caller) && descriptor.capabilities.configuredMcp === 'enabled',
     canUseEnvironmentName: (_name, caller) => trusted(caller),
     canAccessConnector: (_id, caller) => trusted(caller) && descriptor.capabilities.connectors === 'enabled',
+    canCreateInstance: (_piece, caller) => trusted(caller) && descriptor.capabilities.connectors === 'enabled',
+    canUsePiece: (_piece, caller) => trusted(caller) && descriptor.capabilities.connectors === 'enabled',
+    canBorrowSourceCredentials: (_source, _plugin, caller) => trusted(caller),
+    canResolveUnsavedConfig: (_plugin, caller) => trusted(caller),
     canUseSourcePlugin: (id, caller) => trusted(caller) && !!service.getReadyServices()?.registry.get(id) &&
       (id !== 'connector-bridge' || descriptor.capabilities.connectors === 'enabled')
   }

@@ -135,17 +135,15 @@ export class ConnectorBridgeService {
    * stores the token set. The client id / secret travel caller -> service once
    * and, like every other credential, never come back.
    */
-  async oauthConnect(instanceId: string, input: ConnectorBridgeOAuthConnectInput, storage?: ConnectorCredentialStorage): Promise<ConnectorBridgeSetCredentialsResult> {
+  async oauthConnect(instanceId: string, input: ConnectorBridgeOAuthConnectInput, storage?: ConnectorCredentialStorage, admission?: import('../credential-admission').ConnectorCredentialMutationToken, beforeCredentialWrite?: () => void): Promise<ConnectorBridgeSetCredentialsResult> {
     const rt = this.runtime()
     try {
       const { id, mapping } = requireBridgeInstance(rt, instanceId)
       if (mapping.auth.type !== 'oauth2') throw new Error(`${mapping.label} does not use OAuth`)
       const mode: ConnectorCredentialStorage = storage === 'session' ? 'session' : 'persistent'
-      await rt.credentials.connect(
-        id,
-        { clientId: input?.clientId, clientSecret: input?.clientSecret, scopes: mapping.auth.scopes },
-        mode
-      )
+      const registration = { clientId: input?.clientId, clientSecret: input?.clientSecret, scopes: mapping.auth.scopes }
+      if (admission) await rt.credentials.connect(id, registration, mode, admission, beforeCredentialWrite)
+      else await rt.credentials.connect(id, registration, mode)
       return { ok: true, storage: mode }
     } catch (err) {
       if (err instanceof ConnectorCredentialsUnavailableError) {

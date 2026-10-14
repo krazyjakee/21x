@@ -15,6 +15,8 @@ import { PRODUCTION_SETTINGS_CODECS } from '../shared/production-settings-codecs
 import { COMMANDER_COMMAND_CODECS } from '../shared/commander-desktop-codecs'
 import { MCP_CODECS } from '../shared/mcp-codecs'
 import { TASK_SOURCE_CODECS } from '../shared/task-source-codecs'
+import { TASK_SOURCE_PLUGIN_CODECS } from '../shared/task-source-plugin-codecs'
+import { CONNECTOR_CODECS } from '../shared/connector-codecs'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
 let ownerModule: typeof import('./production-owner')
@@ -29,7 +31,7 @@ afterEach(async () => {
   for (const { owner, root } of owned.splice(0)) { await owner.close(); rmSync(root, { recursive: true, force: true }) }
   vi.restoreAllMocks()
 })
-async function fixture(providerOverride?: ChatProvider) {
+async function fixture(providerOverride?: ChatProvider, connectors = false) {
   const { ProductionOwner } = ownerModule
   const { ProductionDesktopBindings } = bindingModule
   const root = mkdtempSync(join(tmpdir(), '21x-production-bindings-')), resourceRoot = join(root, 'resources')
@@ -42,11 +44,12 @@ async function fixture(providerOverride?: ChatProvider) {
       if (!key) throw Object.assign(new Error('KEYSTORE_NO_ENTRY'), { code: 'KEYSTORE_NO_ENTRY' })
       return Buffer.from(key)
     } } },
-    managedTaskMcp: { disabled: true }, connectors: { kind: 'disabled', reason: 'No connector resources in this fixture.' },
+    managedTaskMcp: { disabled: true }, connectors: connectors ? { kind: 'enabled' } : { kind: 'disabled', reason: 'No connector resources in this fixture.' },
     native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: 'disabled' },
       prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }) }
   }
-  const owner = new ProductionOwner(bootstrap, { createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end', stopReason: 'end_turn' } } }) })
+  const owner = new ProductionOwner(bootstrap, { createAdapter: () => adapter, createProvider: () => providerOverride ?? ({ id: 'fixture', model: 'fixture', async *stream() { yield { type: 'message_end', stopReason: 'end_turn' } } }),
+    ...(connectors ? { connectorTransport: () => { throw new Error('Credential form fixture must not create a worker') } } : {}) })
   owned.push({ owner, root }); const services = await owner.start(), epoch = owner.snapshot().epoch
   const caller: DesktopCallerContext = { principal: 'trusted-desktop-main', engineEpoch: epoch, webviewId: 'main', origin: 'tauri://localhost' }
   const events: Array<{ operation: string; payload: unknown }> = []
@@ -62,6 +65,8 @@ async function fixture(providerOverride?: ChatProvider) {
     canAccessMcpServer: (_id, value) => trusted(value),
     canUseTransport: (_input, value) => trusted(value), canUseEnvironmentName: (_name, value) => trusted(value),
     canAccessConnector: (_id, value) => trusted(value), canUseSourcePlugin: (_id, value) => trusted(value),
+    canCreateInstance: (_piece, value) => trusted(value), canUsePiece: (_piece, value) => trusted(value),
+    canBorrowSourceCredentials: (_id, _plugin, value) => trusted(value), canResolveUnsavedConfig: (_plugin, value) => trusted(value),
     canUseSecretEnvironment: (_name, value) => trusted(value), canReadEnvironment: (_key, value) => trusted(value),
     canAccessTerminal: (_id, value) => trusted(value), resolveTerminalDirectory: (_id, value) => trusted(value)
       ? { cwd: bootstrap.paths.workspaceRoot, root: bootstrap.paths.workspaceRoot } : null },
@@ -71,6 +76,33 @@ async function fixture(providerOverride?: ChatProvider) {
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
+    const f = await fixture(undefined, true)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(114)
+    const lease = f.owner.getConnectorBindingLease()!
+    const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
+    const id = (ensured as { value: { instanceId: string } }).value.instanceId
+    expect(await f.backend.invoke('connectors:setCredentials', CONNECTOR_CODECS['connectors:setCredentials'].encodeArguments([id, { username: 'fixture-key', password: 'fixture-token' }, 'persistent']), f.caller, f.signal)).toEqual({ defined: true, value: { ok: true, storage: 'persistent' } })
+    expect(lease.credentialStore.get(id)).toEqual({ type: 'basic', username: 'fixture-key', password: 'fixture-token' })
+    const row = f.services.db.db.prepare('SELECT auth FROM connector_instances WHERE id=?').get(id) as { auth: Buffer }
+    expect(row.auth.toString()).not.toContain('fixture-token')
+    expect(await f.backend.invoke('connectors:credentialStatus', { instanceId: id }, f.caller, f.signal)).toEqual({ defined: true, value: { storage: 'persistent', persistentAvailable: true } })
+    expect(f.owner.getConnectorBindingLease()!.runtime).toBe(lease.runtime)
+    expect(lease.runtime.client.starts).toBe(0)
+    await f.backend.invoke('connectors:clearCredentials', { instanceId: id }, f.caller, f.signal)
+    expect(lease.credentialStore.get(id)).toBeNull()
+  })
+  it('borrows the actual plugin registry and refuses absent connector ownership', async () => {
+    const f = await fixture()
+    const result = await f.backend.invoke('plugin:list', TASK_SOURCE_PLUGIN_CODECS['plugin:list'].encodeArguments([]), f.caller, f.signal)
+    expect(result).toEqual({ defined: true, value: f.services.registry.list() })
+    const doc = await f.backend.invoke('plugin:getDocumentation', TASK_SOURCE_PLUGIN_CODECS['plugin:getDocumentation'].encodeArguments(['notion']), f.caller, f.signal)
+    expect(doc).toEqual({ defined: true, value: f.services.registry.getDocumentation('notion') })
+    expect(f.owner.getConnectorBindingLease()).toBeNull()
+    await expect(f.backend.invoke('connectors:bridgePieces', CONNECTOR_CODECS['connectors:bridgePieces'].encodeArguments([]), f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    f.options.authority.canUseSourcePlugin = () => false
+    expect(await f.backend.invoke('plugin:list', {}, f.caller, f.signal)).toEqual({ defined: true, value: [] })
+  })
   it('binds protected agent, MCP and source records to the same actual singleton without enabling missing transports', async () => {
     const f = await fixture(), { db } = f.services
     const agent = await f.backend.invoke('agent:create', AGENT_CONFIGURATION_CODECS['agent:create'].encodeArguments([
@@ -130,7 +162,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(104)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(107)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)

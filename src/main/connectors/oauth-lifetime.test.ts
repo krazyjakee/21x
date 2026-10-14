@@ -4,6 +4,7 @@ import {
   type ConnectorOAuthServiceOptions
 } from './oauth'
 import type { ConnectorOAuth2Credentials } from './credentials'
+import { ConnectorCredentialAdmission, ConnectorCredentialMutationBusyError } from './credential-admission'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -27,6 +28,37 @@ function fixture() {
 }
 
 describe('connector OAuth shutdown ownership', () => {
+  it('retains raw refresh admission and refuses an edit until its token endpoint settles', async () => {
+    const f = fixture(), guard = new ConnectorCredentialAdmission()
+    const service = new ConnectorOAuthService({ ...f.options, credentialAdmission: guard })
+    const refresh = service.get('instance')
+    expect(() => guard.begin('instance')).toThrow(ConnectorCredentialMutationBusyError)
+    f.response.resolve(new Response(JSON.stringify({ access_token: 'new-fixture' })))
+    await refresh
+    const lease = guard.begin('instance')
+    await expect(service.get('instance')).rejects.toBeInstanceOf(ConnectorCredentialMutationBusyError)
+    lease.release()
+    await service.close()
+  })
+
+  it('uses the exact admitted OAuth path and checks scope before persisting the exchanged token', async () => {
+    const f = fixture(), guard = new ConnectorCredentialAdmission()
+    const callback = deferred<{ code: string; state: string }>()
+    const lease = guard.begin('instance')
+    const beforeWrite = vi.fn(() => { throw new Error('Fixture scope withdrawn') })
+    const service = new ConnectorOAuthService({ ...f.options, credentialAdmission: guard,
+      createServer: () => ({ start: async () => 'http://localhost:3000/callback', waitForCallback: () => callback.promise, stop: vi.fn() }),
+      openExternal: url => callback.resolve({ code: 'fixture-code', state: new URL(url).searchParams.get('state')! }) })
+    await expect(service.connect('instance', { clientId: 'fixture', clientSecret: 'fixture' }, 'session')).rejects.toBeInstanceOf(ConnectorCredentialMutationBusyError)
+    const result = expect(service.connect('instance', { clientId: 'fixture-client', clientSecret: 'fixture-secret' }, 'session', lease.token, beforeWrite)).rejects.toThrow('Fixture scope withdrawn')
+    await vi.waitFor(() => expect(f.fetch).toHaveBeenCalledOnce())
+    f.response.resolve(new Response(JSON.stringify({ access_token: 'new-fixture' })))
+    await result
+    expect(beforeWrite).toHaveBeenCalledOnce()
+    expect(f.credentials.set).not.toHaveBeenCalled()
+    lease.release()
+    await service.close()
+  })
   it('redacts cached access and refresh credentials from a failed renewal message', async () => {
     const f = fixture()
     f.token.clientSecret = 'fixture-client-secret+/123456'

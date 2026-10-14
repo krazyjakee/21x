@@ -90,6 +90,7 @@ const mainFiles = [
   'src/main/connectors/piece-host/node-transport.test.ts',
   'src/main/connectors/piece-host/packaged-resources.test.ts',
   'src/main/connectors/oauth-lifetime.test.ts',
+  'src/main/connectors/credential-admission.test.ts',
   'src/main/connectors/connector-store.test.ts', 'src/main/connectors/credentials.test.ts',
   'src/main/connectors/ssrf.test.ts', 'src/main/connectors/piece-host/tls-guard.test.ts',
   'src/main/connectors/bridge/scheduler-lifetime.test.ts',

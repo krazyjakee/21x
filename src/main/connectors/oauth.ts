@@ -87,6 +87,7 @@ export interface ConnectorOAuthServiceOptions {
   now?: () => number
   /** Loopback server factory; tests inject one on a known port. */
   createServer?: () => LoopbackCallbackServer
+  credentialAdmission?: import('./credential-admission').ConnectorCredentialAdmission
 }
 
 const MAX_CLIENT_FIELD_CHARS = 4096
@@ -125,15 +126,16 @@ export class ConnectorOAuthService implements PieceCredentialSource {
    * keychain fails fast with ConnectorCredentialsUnavailableError and the
    * caller can offer session-only storage.
    */
-  async connect(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage = 'persistent'): Promise<void> {
+  async connect(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage = 'persistent', admission?: import('./credential-admission').ConnectorCredentialMutationToken, beforeCredentialWrite?: () => void): Promise<void> {
     this.requireOpen()
-    return this.ownWork(this.connectInternal(instanceId, input, storage).catch(error => {
+    const release = this.options.credentialAdmission?.enter(instanceId, admission)
+    return this.ownWork(this.connectInternal(instanceId, input, storage, beforeCredentialWrite).catch(error => {
       this.requireOpen()
       throw error
-    }))
+    }).finally(() => release?.()))
   }
 
-  private async connectInternal(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage): Promise<void> {
+  private async connectInternal(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage, beforeCredentialWrite?: () => void): Promise<void> {
     const instance = this.store.getInstance(instanceId)
     if (!instance) throw new Error(`Connector instance not found: ${instanceId}`)
     const spec = this.oauthSpec(instance.pieceName)
@@ -170,6 +172,7 @@ export class ConnectorOAuthService implements PieceCredentialSource {
       tokenType: token.token_type ?? 'Bearer',
       scope: token.scope ?? (scopes.length ? scopes.join(' ') : null)
     }
+    beforeCredentialWrite?.()
     this.credentials.set(instanceId, creds, storage)
   }
 
@@ -195,8 +198,12 @@ export class ConnectorOAuthService implements PieceCredentialSource {
     if (this.closing) return Promise.reject(new ConnectorOAuthClosedError())
     const inflight = this.refreshing.get(instanceId)
     if (inflight) return inflight
+    let release: (() => void) | undefined
+    try { release = this.options.credentialAdmission?.enter(instanceId) }
+    catch (error) { return Promise.reject(error) }
     const run = this.ownWork(this.resolve(instanceId).finally(() => {
       if (this.refreshing.get(instanceId) === run) this.refreshing.delete(instanceId)
+      release?.()
     }))
     this.refreshing.set(instanceId, run)
     return run

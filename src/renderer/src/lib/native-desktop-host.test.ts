@@ -3,6 +3,7 @@ import type { TauriDesktopApi } from './tauri-desktop-transport'
 import { createNativeDesktopHost, NATIVE_COMMAND_BINDINGS, type NativeDesktopHost } from './native-desktop-host'
 import { PRODUCTION_API_KEY_SET_MARKER } from '@shared/production-settings-codecs'
 import { MCP_SECRET_SET_MARKER } from '@shared/mcp-codecs'
+import { CONNECTOR_WRITE_ERROR, CONNECTOR_STORAGE_REMEDIATION, CONNECTOR_SYNC_ERROR } from '@shared/connector-codecs'
 import { desktopApi, installDesktopHost } from './desktop-api'
 import type { ServiceEvent } from '@shared/service-protocol'
 const hosts: NativeDesktopHost[] = [], releases: Array<() => void> = []
@@ -103,7 +104,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 104 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 114 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -112,7 +113,7 @@ it('binds the 104 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(104)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(114)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -279,4 +280,78 @@ it('admits finite agent key writes while masking configuration results and denyi
   expect(f.invoke.mock.calls.length).toBe(before)
   f.results.set('agent:getAll', [{ ...row, config: { api_keys: { openai: 'synthetic-private-stored-value' } } }])
   await expect(f.host.api.agents.getAll()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('binds connector instances and credential operations without inventing ownership or leaking secrets', async () => {
+  const f = fixture(), id = 'connector.fixture:one', pieceName = '@activepieces/piece-todoist'
+  const pieces = [{ pieceName, label: 'Todoist', authType: 'oauth2', authLabels: { clientId: 'Client ID', clientSecret: 'Client secret' }, configProps: [{ key: 'filter_query', label: 'Filter' }], oauth: { mode: 'user-supplied', pkce: true, clientSecretRequired: false, scopes: ['data:read'], redirectUriHint: 'twentyonex://oauth/callback' } }]
+  f.results.set('connectors:bridgePieces', pieces); f.results.set('connectors:ensureInstance', { instanceId: id, pieceName })
+  f.results.set('connectors:credentialStatus', { storage: null, persistentAvailable: false, oauth: { state: 'none', expiresAt: null } })
+  f.results.set('connectors:setCredentials', { ok: true, storage: 'session' })
+  f.results.set('connectors:oauthConnect', { ok: false, error: CONNECTOR_WRITE_ERROR, remediation: CONNECTOR_STORAGE_REMEDIATION, sessionOnlyAvailable: true })
+  const sync = { lastError: CONNECTOR_SYNC_ERROR, lastSyncedAt: null, attemptCount: 1, nextRetryAt: 1000, deadLetterCount: 0 }
+  f.results.set('connectors:syncStatus', sync)
+  await f.host.reconnect()
+  expect(await f.host.api.connectors.bridgePieces()).toEqual(pieces)
+  expect(await f.host.api.connectors.credentialStatus(id)).toMatchObject({ storage: null, persistentAvailable: false })
+  expect(await f.host.api.connectors.syncStatus(id)).toEqual(sync)
+  await expect(f.host.api.connectors.ensureInstance(pieceName)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  await expect(f.host.api.connectors.setCredentials(id, { secret: 'synthetic' })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  expect(await f.host.api.connectors.ensureInstance(pieceName, id)).toEqual({ instanceId: id, pieceName })
+  expect(await f.host.api.connectors.setCredentials(id, { secret: 'synthetic-fixture-secret' }, 'session')).toEqual({ ok: true, storage: 'session' })
+  expect(await f.host.api.connectors.oauthConnect(id, { clientId: 'fixture-client', clientSecret: undefined }, 'persistent')).toEqual({ ok: false, error: CONNECTOR_WRITE_ERROR, remediation: CONNECTOR_STORAGE_REMEDIATION, sessionOnlyAvailable: true })
+  await f.host.api.connectors.clearCredentials(id)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'connectors:oauthConnect', payload: { instanceId: id, input: { clientId: 'fixture-client' }, storage: 'persistent' }, engineEpoch: 'engine-1' })
+  const before = f.invoke.mock.calls.length
+  for (const secret of [PRODUCTION_API_KEY_SET_MARKER, MCP_SECRET_SET_MARKER, 'bad\0value', 'bad\nvalue', 'x'.repeat(4097)]) await expect(f.host.api.connectors.setCredentials(id, { secret })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.connectors.ensureInstance('@activepieces/piece-foreign')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.connectors.oauthConnect(id, { accessToken: 'foreign' } as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.results.set('connectors:credentialStatus', { storage: 'session', persistentAvailable: true, accessToken: 'private' })
+  await expect(f.host.api.connectors.credentialStatus(id)).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+
+it('marks disabled connector capabilities unavailable while preserving the exact native error without fallback', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && String(args?.operation).startsWith('connectors:') ? Promise.reject({ code: 'UNKNOWN_OPERATION', privateDetail: 'runtime disabled' }) : original(command, args))
+  await expect(f.host.api.connectors.ensureInstance('@activepieces/piece-trello')).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+  expect(f.host.unavailableCapability).toBe('connectors.ensureInstance')
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'connectors:ensureInstance')).toHaveLength(1)
+  expect(f.host.connection.status).toBe('ready')
+})
+
+it('never replays an accepted connector OAuth mutation after a lost native result', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const pending = deferred<unknown>(), original = f.invoke.getMockImplementation()!
+  f.invoke.mockImplementation((command, args) => command === 'desktop_invoke' && args?.operation === 'connectors:oauthConnect' ? pending.promise : original(command, args))
+  const oauth = f.host.api.connectors.oauthConnect('connector.fixture:one', { clientId: 'fixture-client' }), rejected = expect(oauth).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  f.changeEpoch(); await f.host.reconnect(); await rejected
+  pending.resolve({ engineEpoch: 'engine-1', result: { defined: true, value: { ok: true, storage: 'session' } } }); await Promise.resolve()
+  expect(f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'connectors:oauthConnect')).toHaveLength(1)
+})
+
+it('binds plugin metadata and finite resolver scopes with the fifth argument preserved during hydration', async () => {
+  const f = fixture(), metadata = [{ id: 'linear', displayName: 'Linear', description: 'Fixture\nmetadata', icon: 'linear' }]
+  const options = [{ value: 'external:user-one', label: 'Fixture User' }]
+  f.results.set('plugin:list', metadata); f.results.set('plugin:getDocumentation', 'Fixture\nsetup documentation'); f.results.set('plugin:resolveOptions', options)
+  await f.host.reconnect()
+  expect(await f.host.api.plugins.list()).toEqual(metadata)
+  expect(await f.host.api.plugins.getDocumentation('linear')).toBe('Fixture\nsetup documentation')
+  expect(await f.host.api.plugins.resolveOptions('linear', 'users', {}, undefined, 'source_fixture')).toEqual(options)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'plugin:resolveOptions', payload: { pluginId: 'linear', resolverKey: 'users', config: {}, sourceId: 'source_fixture' }, engineEpoch: 'engine-1' })
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS).filter(operation => operation === 'plugin:executeAction')).toHaveLength(1)
+  await expect(f.host.api.plugins.executeAction('fixture_action', 'task_fixture', 'source_fixture')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.results.set('plugin:getDocumentation', null); expect(await f.host.api.plugins.getDocumentation('notion')).toBeNull()
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.plugins.getDocumentation('unknown-plugin')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.plugins.resolveOptions('notion', 'owners', {})).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.plugins.resolveOptions('linear', 'users', { path: '/foreign/path' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.plugins.resolveOptions('notion', 'data_sources', { api_token: 'bad\0secret' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  f.results.set('plugin:resolveOptions', [{ value: 'external:user', label: 'Fixture', config: { api_token: 'private' } }])
+  await expect(f.host.api.plugins.resolveOptions('linear', 'users', {})).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  f.results.set('plugin:list', [...metadata, ...metadata])
+  await expect(f.host.api.plugins.list()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })

@@ -126,8 +126,8 @@ export class YouTrackPlugin implements TaskSourcePlugin {
           value: p.shortName,
           label: `${p.name} (${p.shortName})`
         }))
-      } catch (err) {
-        console.error('[youtrack] Failed to fetch projects:', err)
+      } catch {
+        console.error('[task-source] Option resolution failed')
         return []
       }
     }
@@ -139,8 +139,8 @@ export class YouTrackPlugin implements TaskSourcePlugin {
           value: u.login,
           label: u.fullName || u.login
         }))
-      } catch (err) {
-        console.error('[youtrack] Failed to fetch users:', err)
+      } catch {
+        console.error('[task-source] Option resolution failed')
         return []
       }
     }
@@ -192,11 +192,8 @@ export class YouTrackPlugin implements TaskSourcePlugin {
           value: v.name,
           label: v.name
         }))
-      } catch (err) {
-        console.error(
-          `[youtrack] Failed to fetch ${resolverKey}:`,
-          err
-        )
+      } catch {
+        console.error('[task-source] Option resolution failed')
         return []
       }
     }

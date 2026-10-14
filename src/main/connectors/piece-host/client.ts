@@ -84,6 +84,7 @@ export interface PieceHostClientOptions {
   credentials: PieceCredentialSource
   defaultTimeoutMs?: number
   allowlist?: ConnectorPieceAllowlist
+  credentialAdmission?: import('../credential-admission').ConnectorCredentialAdmission
 }
 
 export interface PieceCallRequest {
@@ -115,6 +116,7 @@ interface ActiveCall {
 interface HostHandle {
   transport: PieceHostTransport
   ready: Promise<void>
+  closed: Promise<void>
 }
 
 export class PieceHostClient {
@@ -149,7 +151,10 @@ export class PieceHostClient {
     } catch (err) {
       return Promise.reject(err)
     }
-    const run = this.queue.then(() => this.execute(req))
+    let release: (() => void) | undefined
+    try { release = this.options.credentialAdmission?.enter(req.instanceId) }
+    catch (error) { return Promise.reject(error) }
+    const run = this.queue.then(() => this.execute(req)).finally(() => release?.())
     this.queue = run.catch(() => undefined)
     return run
   }
@@ -181,9 +186,11 @@ export class PieceHostClient {
     } finally { if (timer) clearTimeout(timer) }
   }
 
-  private ownWork<T>(work: Promise<T>): Promise<T> {
+  private ownWork<T>(work: Promise<T>, instanceId?: string): Promise<T> {
+    const release = instanceId === undefined ? undefined : this.options.credentialAdmission?.enter(instanceId)
     this.pendingWork.add(work)
-    void work.then(() => this.pendingWork.delete(work), () => this.pendingWork.delete(work))
+    const finished = (): void => { this.pendingWork.delete(work); release?.() }
+    void work.then(finished, finished)
     return work
   }
 
@@ -235,7 +242,7 @@ export class PieceHostClient {
           } catch (err) {
             this.failActive(call, err)
           }
-        })())
+        })(), req.instanceId)
       })
     } catch (err) {
       throw this.redact(err, resolved.creds)
@@ -270,10 +277,11 @@ export class PieceHostClient {
     })
     // Avoid an unhandled rejection when the host dies before anyone awaits ready.
     ready.catch(() => undefined)
-    const handle: HostHandle = { transport, ready }
-    this.host = handle
     let exited!: () => void
-    this.ownWork(new Promise<void>(resolve => { exited = resolve }))
+    const closed = new Promise<void>(resolve => { exited = resolve })
+    const handle: HostHandle = { transport, ready, closed }
+    this.host = handle
+    this.ownWork(closed)
 
     transport.onMessage((message) => {
       if (this.host !== handle) return
@@ -294,6 +302,9 @@ export class PieceHostClient {
     const handle = this.host
     this.host = null
     if (!handle) return
+    // The idle worker itself has no credential authority. After a kill request,
+    // retain its actual exit receipt so a public timeout cannot admit an edit.
+    this.ownWork(handle.closed, '__retiring_connector_worker__')
     try {
       handle.transport.kill()
     } catch {
@@ -330,7 +341,7 @@ export class PieceHostClient {
         }
         void this.ownWork(this.handleStore(call.instanceId, message)
           .then((value) => reply({ kind: 'store-result', storeId: message.storeId, ok: true, value }))
-          .catch((err) => reply({ kind: 'store-result', storeId: message.storeId, ok: false, error: serializePieceError(err) })))
+          .catch((err) => reply({ kind: 'store-result', storeId: message.storeId, ok: false, error: serializePieceError(err) })), call.instanceId)
         return
       }
     }

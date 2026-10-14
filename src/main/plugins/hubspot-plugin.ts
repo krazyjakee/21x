@@ -132,9 +132,8 @@ export class HubSpotPlugin implements TaskSourcePlugin {
       }
 
       return []
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error'
-      console.error(`[hubspot-plugin] Failed to resolve options for ${resolverKey}:`, errorMsg)
+    } catch {
+      console.error('[task-source] Option resolution failed')
       return []
     }
   }

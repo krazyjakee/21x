@@ -36,6 +36,9 @@ export interface TaskLifecycleBackendOptions {
   canAccessProject(projectId: string, caller: DesktopCallerContext, access: Access): boolean
   canAccessAgent(agentId: string, caller: DesktopCallerContext, access: Access): boolean
   canAccessSource(sourceId: string, caller: DesktopCallerContext, access: Access): boolean
+  canUseSourcePlugin?(pluginId: string, caller: DesktopCallerContext, operation: 'plugin:executeAction'): boolean
+  canAccessMcpServer?(id: string, caller: DesktopCallerContext, access: 'read'): boolean
+  canAccessConnector?(id: string, caller: DesktopCallerContext, access: Access): boolean
   emit(operation: TaskLifecycleEvent, payload: JsonValue): void
   onFatalEvent(error: ServiceProtocolError): void
 }
@@ -172,15 +175,19 @@ export class TaskLifecycleBackend {
     try { new TaskGroups(this.options.database).guardUpdate(task, data) } catch { return false }
     return true
   }
-  private sourceActionAllowed(action: string, id: string, sourceId: string, caller: DesktopCallerContext): boolean {
+  private sourceActionAllowed(action: string, id: string, sourceId: string, caller: DesktopCallerContext, input?: string): boolean {
     const db = this.options.database, task = db.getTask(id), source = db.getTaskSource(sourceId)
-    if (!task || !source || task.role !== 'task' || task.group_id || task.source_id !== sourceId || source.project_id !== task.project_id ||
+    if (!task || !source || !task.external_id || task.role !== 'task' || task.group_id || task.source_id !== sourceId || source.project_id !== task.project_id ||
       !this.taskAllowed(id, caller, 'write') || !this.rowsAllowed(this.mutationRows(id), caller) || !this.options.canAccessSource(sourceId, caller, 'write') || !this.projectAllowed(source.project_id, caller, 'write')) return false
     const plugin = this.options.registry.get(source.plugin_id)
-    if (!plugin) return false
+    if (!plugin || this.options.canUseSourcePlugin && !this.options.canUseSourcePlugin(source.plugin_id, caller, 'plugin:executeAction')) return false
+    if (source.mcp_server_id && !this.options.canAccessMcpServer?.(source.mcp_server_id, caller, 'read')) return false
+    if (source.plugin_id === 'connector-bridge' && (typeof source.config.connector_instance_id !== 'string' || !this.options.canAccessConnector?.(source.config.connector_instance_id, caller, 'write'))) return false
     const actions = plugin.getActions({ ...source.config })
     if (!Array.isArray(actions) || actions.length > 128 || !actions.every(item => item && typeof item.id === 'string' && item.id.length <= 512) ||
       action !== PluginActionId.Complete && !actions.some(item => item.id === action)) return false
+    const selected = actions.find(item => item.id === action)
+    if (selected?.requiresInput && (!input?.trim() || selected.inputOptions && !selected.inputOptions.some(option => option.value === input))) return false
     const completes = action === getTaskCompletionAction(task.output_fields) || [PluginActionId.Complete, PluginActionId.CloseIssue, PluginActionId.Approve, PluginActionId.Reject].includes(action as PluginActionId)
     return !completes || db.getSubtasks(id).every(child => [TaskStatus.Completed, TaskStatus.ReadyForReview].includes(child.status as TaskStatus))
   }
@@ -200,7 +207,7 @@ export class TaskLifecycleBackend {
   private bind<K extends TaskLifecycleOperation>(operation: K, authorize: (args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext) => boolean,
     effect: (args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal) => unknown | Promise<unknown>, read = false): void {
     const codec = TASK_LIFECYCLE_CODECS[operation] as TaskLifecycleCodec<K>
-    this.registry.bindCommand(operation, { decodeRequest: codec.decodeArguments, validateArguments: codec.validateArguments,
+    this.registry.bindCommand(operation, { decodeRequest: payload => codec.decodeArguments(structuredClone(payload)), validateArguments: codec.validateArguments,
       authorize: (args, caller) => { this.available(); return authorize(args, caller) },
       invoke: (args, caller, signal) => this.retain((async () => {
         this.available(signal)
@@ -342,13 +349,13 @@ export class TaskLifecycleBackend {
         return result
       })
     })
-    this.bind('plugin:executeAction', ([action, id, source], caller) => this.sourceActionAllowed(action, id, source, caller), async ([action, id, source, input], caller, signal) => {
+    this.bind('plugin:executeAction', ([action, id, source, input], caller) => this.sourceActionAllowed(action, id, source, caller, input), async ([action, id, source, input], caller, signal) => {
       this.ownersReady()
       const ids = this.mutationRows(id).map(task => task.id)
       const { result, effects } = await manager.runTaskLifecycleMutation(ids, async () => {
         this.available(signal)
         const previous = db.getTask(id)!
-        if (!this.sourceActionAllowed(action, id, source, caller) || !this.sameRows(this.mutationRows(id), ids)) throw new ServiceProtocolError('INVALID_REQUEST')
+        if (!this.sourceActionAllowed(action, id, source, caller, input) || !this.sameRows(this.mutationRows(id), ids)) throw new ServiceProtocolError('INVALID_REQUEST')
         if (action !== PluginActionId.AddComment) {
           const live = manager.findSessionByTaskId(id)
           if (live) await manager.stopSession(live.sessionId, false, true)
@@ -356,8 +363,20 @@ export class TaskLifecycleBackend {
         }
         this.available(signal)
         const current = db.getTask(id)!
-        if (!current || !this.sourceActionAllowed(action, id, source, caller) || !this.sameRows(this.mutationRows(id), ids)) throw new ServiceProtocolError('INVALID_REQUEST')
-        const result = await this.options.sync.executeAction(action, current, input, source)
+        if (!current || !this.sourceActionAllowed(action, id, source, caller, input) || !this.sameRows(this.mutationRows(id), ids)) throw new ServiceProtocolError('INVALID_REQUEST')
+        const sourceSnapshot = JSON.stringify(db.getTaskSource(source))
+        const exactBinding = (): void => {
+          this.ownersReady()
+          const task = db.getTask(id)
+          if (!task || task.external_id !== current.external_id || task.source_id !== source || task.project_id !== current.project_id || task.role !== current.role || task.group_id !== current.group_id ||
+            JSON.stringify(db.getTaskSource(source)) !== sourceSnapshot || !this.sourceActionAllowed(action, id, source, caller, input)) throw new ServiceProtocolError('INVALID_REQUEST')
+        }
+        const result = await this.options.sync.executeAction(action, current, input, source, 'task-source-action', {
+          beforeEffect: () => { this.available(signal); exactBinding() },
+          // Accepted external effects may finish after cancellation, but cannot
+          // apply to a different task/source binding or a withdrawn grant.
+          beforeLocalWrite: exactBinding
+        })
         // Accepted source work is reconciled even if its reply was cancelled.
         return { result, effects: result.success ? { previous, updated: db.getTask(id)! } : undefined }
       })
@@ -365,7 +384,7 @@ export class TaskLifecycleBackend {
         try { afterTaskUpdated(db, manager, effects.previous, effects.previous.status === effects.updated.status ? {} : { status: effects.updated.status }, effects.updated) }
         finally { this.updated(ids) }
       }
-      return result
+      return result.error === undefined ? result : { ...result, error: 'The task source action could not be completed' }
     })
   }
 }

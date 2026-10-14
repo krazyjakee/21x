@@ -78,6 +78,33 @@ function sourced() {
   return { source, task }
 }
 describe('actual owner task lifecycle bindings', () => {
+  it('checks actual plugin capability and required picker input before dispatch', async () => {
+    const { source, task } = sourced()
+    options.canUseSourcePlugin = () => false
+    await expect(call('plugin:executeAction', [PluginActionId.Complete, task.id, source.id])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    options.canUseSourcePlugin = () => true
+    plugin.getActions = () => [{ id: PluginActionId.AddComment, label: 'Comment', requiresInput: true, inputOptions: [{ value: 'approved', label: 'Approved' }] }]
+    await expect(call('plugin:executeAction', [PluginActionId.AddComment, task.id, source.id, 'other'])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(call('plugin:executeAction', [PluginActionId.AddComment, task.id, source.id])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(execute).not.toHaveBeenCalled()
+    await call('plugin:executeAction', [PluginActionId.AddComment, task.id, source.id, 'approved'])
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
+  it('does not write an accepted action into a task whose external binding changed', async () => {
+    const { source, task } = sourced()
+    let finish!: (value: ActionResult) => void
+    execute.mockImplementation(() => new Promise<ActionResult>(resolve => { finish = resolve }))
+    const pending = call('plugin:executeAction', [PluginActionId.Complete, task.id, source.id])
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce())
+    db.db.prepare('UPDATE tasks SET external_id=? WHERE id=?').run('changed-external', task.id)
+    finish({ success: true, taskUpdate: { status: TaskStatus.Completed } })
+    await rejected
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.ReadyForReview)
+    expect(events.some(event => event.operation === 'task:updated')).toBe(false)
+  })
+
   it('persists complete public task data and invokes the real recurrence owner', async () => {
     const task = await call('db:createTask', [{ title: 'Recurring work', description: 'Full description', type: 'coding', priority: 'high', is_recurring: true,
       recurrence_pattern: '0 9 * * 1', due_date: '2026-11-01', labels: ['weekly'], output_fields: [{ id: 'notes', name: 'Notes', type: 'text', value: { nested: ['kept'] } }], complete_at_source: false }])
@@ -128,7 +155,7 @@ describe('actual owner task lifecycle bindings', () => {
     const { source, task } = sourced()
     execute.mockResolvedValueOnce({ success: false, error: 'Controlled source refused completion' })
     const failure = await call('plugin:executeAction', [PluginActionId.Complete, task.id, source.id])
-    expect(failure).toEqual({ success: false, error: 'Controlled source refused completion' })
+    expect(failure).toEqual({ success: false, error: 'The task source action could not be completed' })
     expect(db.getTask(task.id)?.status).toBe(TaskStatus.ReadyForReview)
     await expect(call('db:updateTask', [task.id, { status: TaskStatus.Completed, complete_at_source: true }])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     expect(execute).toHaveBeenCalledOnce()

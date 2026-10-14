@@ -107,8 +107,8 @@ export class LinearPlugin implements TaskSourcePlugin {
       if (!token) return []
       const users = await new LinearClient(token).getUsers()
       return users.map(u => ({ value: u.id, label: u.displayName || u.name || u.email }))
-    } catch (error) {
-      console.error('[linear-plugin] Failed to fetch users:', error)
+    } catch {
+      console.error('[task-source] Option resolution failed')
       return []
     }
   }

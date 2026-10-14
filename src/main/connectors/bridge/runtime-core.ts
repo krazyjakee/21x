@@ -5,6 +5,7 @@ import { ConnectorOAuthService } from '../oauth'
 import { kvBackendFromConnectorStore, PieceHostClient } from '../piece-host/client'
 import type { BridgeRuntime } from './engine'
 import type { PieceHostTransportFactory } from '../piece-host/client'
+import { ConnectorCredentialAdmission, type ConnectorCredentialMutationToken } from '../credential-admission'
 
 /**
  * The app's single connector runtime: one ConnectorStore, one credential
@@ -22,6 +23,7 @@ export interface ConnectorRuntime extends BridgeRuntime {
   /** Refresh-aware credential source (BridgeRuntime.credentials) plus connect / disconnect / status. */
   credentials: ConnectorOAuthService
   client: PieceHostClient
+  runCredentialMutation<T>(instanceId: string, effect: (admission: ConnectorCredentialMutationToken) => T | Promise<T>): Promise<T>
 }
 
 export type DbSource = { db: Database.Database }
@@ -44,18 +46,28 @@ export function getConnectorRuntime(source: DbSource, host: ConnectorRuntimeHost
   const existing = runtimes.get(source)
   if (existing) return existing
   const store = new ConnectorStore(source)
+  const credentialAdmission = new ConnectorCredentialAdmission()
   const credentialStore = new ConnectorCredentialStore(store)
   const credentials = new ConnectorOAuthService({
     store,
     credentials: credentialStore,
+    credentialAdmission,
     openExternal: host.openExternal
   })
   const client = new PieceHostClient({
     createTransport: host.createTransport,
     kv: kvBackendFromConnectorStore(store),
-    credentials
+    credentials,
+    credentialAdmission
   })
-  const runtime: ConnectorRuntime = { store, credentialStore, credentials, client }
+  const runtime: ConnectorRuntime = { store, credentialStore, credentials, client, credentialAdmission,
+    runCredentialMutation: async (instanceId, effect) => {
+      if (closingSources.has(source)) throw new ConnectorRuntimeClosedError()
+      if (!store.getInstance(instanceId)) throw new Error('Connector not found')
+      const lease = credentialAdmission.begin(instanceId)
+      try { return await effect(lease.token) }
+      finally { lease.release() }
+    } }
   runtimes.set(source, runtime)
   return runtime
 }

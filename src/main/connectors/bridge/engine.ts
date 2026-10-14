@@ -64,6 +64,8 @@ export interface BridgeRuntime {
   store: ConnectorStore
   credentials: PieceCredentialSource
   client: BridgePieceRunner
+  /** Real runtimes share this fence with direct client and OAuth work. */
+  credentialAdmission?: import('../credential-admission').ConnectorCredentialAdmission
 }
 
 export interface BridgeSourceConfig {
@@ -577,12 +579,15 @@ export class ConnectorBridgeEngine {
 
   /** Serialises work per connector instance. */
   private withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    let release: (() => void) | undefined
+    try { release = this.runtime.credentialAdmission?.enter(key) }
+    catch (error) { return Promise.reject(error) }
     const prev = this.chains.get(key) ?? Promise.resolve()
     const execute = () => {
       if (this.closing) throw new ConnectorBridgeClosedError()
       return fn()
     }
-    const run = prev.then(execute, execute)
+    const run = prev.then(execute, execute).finally(() => release?.())
     const tail = run.catch(() => undefined)
     this.chains.set(key, tail)
     void tail.then(() => {

@@ -35,7 +35,8 @@ import { ForgejoIssuesPlugin } from '../main/plugins/forgejo-issues-plugin'
 import { NotionPlugin } from '../main/plugins/notion-plugin'
 import { YouTrackPlugin } from '../main/plugins/youtrack-plugin'
 import { ConnectorBridgeCore } from '../main/plugins/connector-bridge-core'
-import { getConnectorRuntime, disposeConnectorRuntime, closeConnectorRuntime, type ConnectorRuntimeHost } from '../main/connectors/bridge/runtime-core'
+import { getConnectorRuntime, disposeConnectorRuntime, closeConnectorRuntime, type ConnectorRuntimeHost, type ConnectorRuntime } from '../main/connectors/bridge/runtime-core'
+import { ConnectorBridgeService } from '../main/connectors/bridge/service'
 import { createPackagedConnectorTransport, validateConnectorResources } from '../main/connectors/piece-host/packaged-resources'
 import { SyncManager } from '../main/sync-manager'
 import { TaskGroupService } from '../main/task-groups/service'
@@ -162,6 +163,8 @@ export class ProductionOwner {
   private broker: SecretBroker | null = null
   private services: ProductionServices | null = null
   private connector: ConnectorBridgeCore | null = null
+  private connectorRuntime: ConnectorRuntime | null = null
+  private connectorService: ConnectorBridgeService | null = null
   private removeReportBridge: (() => void) | null = null
   private apiOwned = false
   private readonly stopOwners: Array<() => void> = []
@@ -271,6 +274,24 @@ export class ProductionOwner {
           owners.recurrence !== undefined && owners.recurrence !== services.recurrence || owners.heartbeat !== undefined && owners.heartbeat !== services.heartbeat ||
           owners.automation !== undefined && owners.automation !== services.automation)
           throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      } }
+  }
+
+  getConnectorBindingLease(): { runtime: ConnectorRuntime; service: ConnectorBridgeService; engine: ReturnType<ConnectorBridgeCore['engineFor']>; credentialStore: ConnectorRuntime['credentialStore']; secretStorage: AuthenticatedSecretStorage; oauthBrowser: 'available' | 'unavailable'; assertConnectorOwners(owners: {
+    database: DatabaseManager; sync: SyncManager; service: ConnectorBridgeService; runtime: ConnectorRuntime; engine: ReturnType<ConnectorBridgeCore['engineFor']>; credentialStore: ConnectorRuntime['credentialStore']; secretStorage: unknown
+  }): void } | null {
+    this.getDatabaseBindingLease()
+    const services = this.services!, runtime = this.connectorRuntime, service = this.connectorService, connector = this.connector, storage = this.storage!
+    if (!runtime || !service || !connector) return null
+    const engine = connector.engineFor(services.db)
+    return { runtime, service, engine, credentialStore: runtime.credentialStore, secretStorage: storage,
+      oauthBrowser: this.bootstrap.native.oauthBrowser ?? 'unavailable', assertConnectorOwners: owners => {
+        this.getDatabaseBindingLease()
+        if (this.services !== services || this.connectorRuntime !== runtime || this.connectorService !== service || this.connector !== connector || this.storage !== storage ||
+          owners.database !== services.db || owners.sync !== services.sync || owners.service !== service || owners.runtime !== runtime || owners.engine !== engine ||
+          owners.credentialStore !== runtime.credentialStore || owners.secretStorage !== storage || connector.engineFor(services.db) !== engine)
+          throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        connector.assertSourceLifecycle(services.sync)
       } }
   }
 
@@ -426,7 +447,12 @@ export class ProductionOwner {
       const connectorHost: ConnectorRuntimeHost = { openExternal: url => native.openExternal(url),
         createTransport: this.boundaries.connectorTransport ?? (() => createPackagedConnectorTransport(this.bootstrap.paths.resourceRoot)) }
       // Construct real credential/OAuth/runtime ownership now, even if no piece is active.
-      getConnectorRuntime(db, connectorHost)
+      this.connectorRuntime = getConnectorRuntime(db, connectorHost)
+      const runtime = this.connectorRuntime
+      this.connectorService = new ConnectorBridgeService(() => {
+        if (this.connectorRuntime !== runtime || getConnectorRuntime(db, connectorHost) !== runtime) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        return runtime
+      })
       this.register('connector-runtime', () => disposeConnectorRuntime(db), () => closeConnectorRuntime(db))
       this.connector = new ConnectorBridgeCore({ runtime: source => getConnectorRuntime(source, connectorHost) })
       const connector = this.connector

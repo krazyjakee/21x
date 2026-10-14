@@ -3,6 +3,16 @@
 use serde_json::Value;
 
 pub const COMMANDS: &[&str] = &[
+    "connectors:bridgePieces",
+    "connectors:ensureInstance",
+    "connectors:credentialStatus",
+    "connectors:setCredentials",
+    "connectors:clearCredentials",
+    "connectors:oauthConnect",
+    "connectors:syncStatus",
+    "plugin:list",
+    "plugin:getDocumentation",
+    "plugin:resolveOptions",
     "db:getTasks",
     "db:getTask",
     "db:createTask",
@@ -211,6 +221,258 @@ const SOURCE_COMMANDS: &[&str] = &[
     "taskSource:getUsers",
     "taskSource:reassign",
 ];
+const CONNECTOR_COMMANDS: &[&str] = &[
+    "connectors:bridgePieces",
+    "connectors:ensureInstance",
+    "connectors:credentialStatus",
+    "connectors:setCredentials",
+    "connectors:clearCredentials",
+    "connectors:oauthConnect",
+    "connectors:syncStatus",
+];
+const PLUGIN_COMMANDS: &[&str] = &[
+    "plugin:list",
+    "plugin:getDocumentation",
+    "plugin:resolveOptions",
+];
+fn js_trim(value: &str) -> &str {
+    value.trim_matches(|c| matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'))
+}
+fn plugin_resolver(plugin: &str, resolver: &str) -> bool {
+    match plugin {
+        "linear" => resolver == "users",
+        "hubspot" => ["owners", "pipelines"].contains(&resolver),
+        "github-issues" => ["owners", "repos"].contains(&resolver),
+        "forgejo-issues" => ["logins", "owners", "repos"].contains(&resolver),
+        "notion" => {
+            ["data_sources", "status_options", "data_source_properties"].contains(&resolver)
+        }
+        "youtrack" => ["projects", "users", "states", "priorities", "types"].contains(&resolver),
+        "connector-bridge" => resolver == "pieces",
+        _ => false,
+    }
+}
+fn plugin_request(operation: &str, value: &Value) -> bool {
+    match operation {
+        "plugin:list" => object(value, &[], &[]),
+        "plugin:getDocumentation" => {
+            object(value, &["pluginId"], &[]) && source_plugin(&value["pluginId"])
+        }
+        "plugin:resolveOptions" => {
+            object(
+                value,
+                &["pluginId", "resolverKey", "config"],
+                &["mcpServerId", "sourceId"],
+            ) && value["pluginId"].as_str().is_some_and(|plugin| {
+                value["resolverKey"]
+                    .as_str()
+                    .is_some_and(|resolver| plugin_resolver(plugin, resolver))
+                    && source_config(plugin, &value["config"], true)
+            }) && value.get("mcpServerId").is_none_or(id)
+                && value.get("sourceId").is_none_or(id)
+        }
+        _ => false,
+    }
+}
+fn plugin_text(value: &Value, limit: usize) -> bool {
+    text(value, limit) && value.as_str().is_some_and(|s| s.len() <= limit)
+}
+fn plugin_result(operation: &str, value: &Value) -> bool {
+    match operation {
+        "plugin:list" => value.as_array().is_some_and(|items| {
+            items.len() <= 7
+                && items.iter().all(|item| {
+                    object(item, &["id", "displayName", "description", "icon"], &[])
+                        && source_plugin(&item["id"])
+                        && plugin_text(&item["displayName"], 512)
+                        && item["displayName"]
+                            .as_str()
+                            .is_some_and(|s| !js_trim(s).is_empty())
+                        && plugin_text(&item["description"], 8192)
+                        && plugin_text(&item["icon"], 128)
+                })
+                && items
+                    .iter()
+                    .filter_map(|item| item["id"].as_str())
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    == items.len()
+        }),
+        "plugin:getDocumentation" => value.is_null() || plugin_text(value, 128_000),
+        "plugin:resolveOptions" => value.as_array().is_some_and(|items| {
+            items.len() <= 512
+                && items.iter().all(|item| {
+                    object(item, &["value", "label"], &[])
+                        && plugin_text(&item["value"], 65_536)
+                        && plugin_text(&item["label"], 4096)
+                })
+        }),
+        _ => false,
+    }
+}
+fn connector_piece(value: &Value) -> bool {
+    value == "@activepieces/piece-trello" || value == "@activepieces/piece-todoist"
+}
+fn connector_storage(value: &Value) -> bool {
+    value == "persistent" || value == "session"
+}
+fn connector_time(value: &Value) -> bool {
+    value.is_null() || integer(value)
+}
+fn connector_request(operation: &str, value: &Value) -> bool {
+    match operation {
+        "connectors:bridgePieces" => object(value, &[], &[]),
+        "connectors:ensureInstance" => {
+            object(value, &["pieceName"], &["instanceId"])
+                && connector_piece(&value["pieceName"])
+                && value.get("instanceId").is_none_or(mcp_id)
+        }
+        "connectors:setCredentials" | "connectors:oauthConnect" => {
+            let fields: &[&str] = if operation == "connectors:oauthConnect" {
+                &["clientId", "clientSecret"]
+            } else {
+                &["username", "password", "secret"]
+            };
+            object(value, &["instanceId", "input"], &["storage"])
+                && mcp_id(&value["instanceId"])
+                && value.get("storage").is_none_or(connector_storage)
+                && object(&value["input"], &[], fields)
+                && value["input"].as_object().is_some_and(|map| {
+                    map.values().all(|entry| {
+                        mcp_text(entry, 4096)
+                            && entry.as_str().is_some_and(|s| {
+                                !js_trim(s).is_empty()
+                                    && js_trim(s) != "__21x_api_key_set__"
+                                    && js_trim(s) != "__21x_mcp_secret_set__"
+                            })
+                    })
+                })
+        }
+        _ => object(value, &["instanceId"], &[]) && mcp_id(&value["instanceId"]),
+    }
+}
+fn connector_piece_row(value: &Value) -> bool {
+    object(
+        value,
+        &[
+            "pieceName",
+            "label",
+            "authType",
+            "authLabels",
+            "configProps",
+        ],
+        &["authHelp", "oauth"],
+    ) && connector_piece(&value["pieceName"])
+        && mcp_text(&value["label"], 256)
+        && value["authType"]
+            .as_str()
+            .is_some_and(|s| ["basic", "secret_text", "oauth2"].contains(&s))
+        && value["authLabels"].as_object().is_some_and(|map| {
+            map.len() <= 3
+                && map.iter().all(|(key, entry)| {
+                    ["username", "password", "secret", "clientId", "clientSecret"]
+                        .contains(&key.as_str())
+                        && mcp_text(entry, 256)
+                })
+        })
+        && value
+            .get("authHelp")
+            .is_none_or(|entry| mcp_text(entry, 4096))
+        && value["configProps"].as_array().is_some_and(|items| {
+            items.len() <= 32
+                && items.iter().all(|item| {
+                    object(
+                        item,
+                        &["key", "label"],
+                        &["required", "description", "placeholder"],
+                    ) && mcp_text(&item["key"], 128)
+                        && mcp_text(&item["label"], 256)
+                        && item.get("required").is_none_or(Value::is_boolean)
+                        && item
+                            .get("description")
+                            .is_none_or(|entry| mcp_text(entry, 4096))
+                        && item
+                            .get("placeholder")
+                            .is_none_or(|entry| mcp_text(entry, 4096))
+                })
+        })
+        && value.get("oauth").is_none_or(|oauth| {
+            object(
+                oauth,
+                &[
+                    "mode",
+                    "pkce",
+                    "clientSecretRequired",
+                    "scopes",
+                    "redirectUriHint",
+                ],
+                &[],
+            ) && (oauth["mode"] == "registered" || oauth["mode"] == "user-supplied")
+                && oauth["pkce"].is_boolean()
+                && oauth["clientSecretRequired"].is_boolean()
+                && oauth["scopes"].as_array().is_some_and(|items| {
+                    items.len() <= 32 && items.iter().all(|entry| mcp_text(entry, 256))
+                })
+                && mcp_text(&oauth["redirectUriHint"], 1024)
+        })
+}
+fn connector_write_result(value: &Value) -> bool {
+    if value["ok"] == true {
+        return object(value, &["ok", "storage"], &[]) && connector_storage(&value["storage"]);
+    }
+    object(value, &["ok", "error"], &["remediation", "sessionOnlyAvailable"]) && value["ok"] == false && value["error"] == "Connector credentials could not be saved." && value.get("remediation").is_none_or(|entry| entry == "Secure persistent storage is unavailable. Use session storage or restore secure storage.") && value.get("sessionOnlyAvailable").is_none_or(Value::is_boolean)
+}
+fn connector_result(operation: &str, value: &Value) -> bool {
+    match operation {
+        "connectors:bridgePieces" => value.as_array().is_some_and(|items| {
+            items.len() <= 2
+                && items.iter().all(connector_piece_row)
+                && items
+                    .iter()
+                    .filter_map(|entry| entry["pieceName"].as_str())
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    == items.len()
+        }),
+        "connectors:ensureInstance" => {
+            object(value, &["instanceId", "pieceName"], &[])
+                && mcp_id(&value["instanceId"])
+                && connector_piece(&value["pieceName"])
+        }
+        "connectors:credentialStatus" => {
+            object(value, &["storage", "persistentAvailable"], &["oauth"])
+                && (value["storage"].is_null() || connector_storage(&value["storage"]))
+                && value["persistentAvailable"].is_boolean()
+                && value.get("oauth").is_none_or(|oauth| {
+                    object(oauth, &["state", "expiresAt"], &[])
+                        && oauth["state"]
+                            .as_str()
+                            .is_some_and(|s| ["none", "connected", "revoked"].contains(&s))
+                        && connector_time(&oauth["expiresAt"])
+                })
+        }
+        "connectors:setCredentials" | "connectors:oauthConnect" => connector_write_result(value),
+        "connectors:syncStatus" => {
+            object(
+                value,
+                &[
+                    "lastError",
+                    "lastSyncedAt",
+                    "attemptCount",
+                    "nextRetryAt",
+                    "deadLetterCount",
+                ],
+                &[],
+            ) && (value["lastError"].is_null()
+                || value["lastError"] == "Connector sync failed. Open the task source for details.")
+                && connector_time(&value["lastSyncedAt"])
+                && integer(&value["attemptCount"])
+                && connector_time(&value["nextRetryAt"])
+                && integer(&value["deadLetterCount"])
+        }
+        _ => false,
+    }
+}
 const SOURCE_PLUGINS: &[&str] = &[
     "linear",
     "hubspot",
@@ -1130,6 +1392,12 @@ pub fn images(value: &Value) -> bool {
         })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if PLUGIN_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 512_000) && plugin_request(operation, value);
+    }
+    if CONNECTOR_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 1024 * 1024) && connector_request(operation, value);
+    }
     if MCP_COMMANDS.contains(&operation) {
         return bounded_bytes(value, 1024 * 1024) && mcp_request(operation, value);
     }
@@ -1217,6 +1485,25 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if PLUGIN_COMMANDS.contains(&operation) {
+        return object(value, &["defined", "value"], &[])
+            && value["defined"] == true
+            && bounded_bytes(value, 1024 * 1024)
+            && bounded_bytes(&value["value"], 512_000)
+            && plugin_result(operation, &value["value"]);
+    }
+    if CONNECTOR_COMMANDS.contains(&operation) {
+        if !object(value, &["defined"], &["value"]) || !bounded_bytes(value, 1024 * 1024) {
+            return false;
+        }
+        if value["defined"] == false {
+            return operation == "connectors:clearCredentials" && value.get("value").is_none();
+        }
+        return value["defined"] == true
+            && value.get("value").is_some_and(|result| {
+                bounded_bytes(result, 64 * 1024) && connector_result(operation, result)
+            });
+    }
     if MCP_COMMANDS.contains(&operation) || SOURCE_COMMANDS.contains(&operation) {
         if !bounded_bytes(value, 1024 * 1024) || !object(value, &["defined"], &["value"]) {
             return false;
@@ -1697,6 +1984,206 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn plugin_metadata_and_resolvers_have_exact_domain_shapes_and_scope() {
+        assert!(valid_request("plugin:list", &json!({})));
+        assert!(valid_request(
+            "plugin:getDocumentation",
+            &json!({"pluginId":"notion"})
+        ));
+        assert!(valid_request(
+            "plugin:resolveOptions",
+            &json!({"pluginId":"linear","resolverKey":"users","config":{},"sourceId":"source_fixture"})
+        ));
+        for (plugin, resolvers) in [
+            ("linear", vec!["users"]),
+            ("hubspot", vec!["owners", "pipelines"]),
+            ("github-issues", vec!["owners", "repos"]),
+            ("forgejo-issues", vec!["logins", "owners", "repos"]),
+            (
+                "notion",
+                vec!["data_sources", "status_options", "data_source_properties"],
+            ),
+            (
+                "youtrack",
+                vec!["projects", "users", "states", "priorities", "types"],
+            ),
+            ("connector-bridge", vec!["pieces"]),
+        ] {
+            for resolver in resolvers {
+                let mut request = json!({"pluginId":plugin,"resolverKey":resolver,"config":{}});
+                assert!(valid_request("plugin:resolveOptions", &request));
+                request["authority"] = json!({"namespace":"*"});
+                assert!(!valid_request("plugin:resolveOptions", &request));
+            }
+        }
+        assert!(valid_request(
+            "plugin:resolveOptions",
+            &json!({"pluginId":"youtrack","resolverKey":"users","config":{"api_token":"x".repeat(16_384)}})
+        ));
+        for request in [
+            json!({"pluginId":"notion","resolverKey":"owners","config":{}}),
+            json!({"pluginId":"unknown","resolverKey":"users","config":{}}),
+            json!({"pluginId":"notion","resolverKey":"data_sources","config":{"api_token":"bad\0secret"}}),
+            json!({"pluginId":"notion","resolverKey":"data_sources","config":{"api_token":"x".repeat(16_385)}}),
+            json!({"pluginId":"notion","resolverKey":"data_sources","config":{"command":"arbitrary"}}),
+            json!({"pluginId":"linear","resolverKey":"users","config":{},"mcpServerId":"native/foreign"}),
+        ] {
+            assert!(!valid_request("plugin:resolveOptions", &request));
+        }
+        assert!(!valid_request(
+            "plugin:getDocumentation",
+            &json!({"pluginId":"notion","path":"/private"})
+        ));
+        let metadata = json!({"id":"notion","displayName":"Notion","description":"Multiline\ndescription","icon":"notion"});
+        assert!(valid_result(
+            "plugin:list",
+            &json!({"defined":true,"value":[metadata.clone()]})
+        ));
+        assert!(!valid_result(
+            "plugin:list",
+            &json!({"defined":true,"value":[metadata.clone(),metadata]})
+        ));
+        assert!(valid_result(
+            "plugin:getDocumentation",
+            &json!({"defined":true,"value":null})
+        ));
+        assert!(valid_result(
+            "plugin:getDocumentation",
+            &json!({"defined":true,"value":"x".repeat(128_000)})
+        ));
+        assert!(!valid_result(
+            "plugin:getDocumentation",
+            &json!({"defined":true,"value":"x".repeat(128_001)})
+        ));
+        assert!(!valid_result(
+            "plugin:getDocumentation",
+            &json!({"defined":false})
+        ));
+        assert!(valid_result(
+            "plugin:resolveOptions",
+            &json!({"defined":true,"value":[{"value":"x".repeat(65_536),"label":"Multiline\noption"}]})
+        ));
+        assert!(!valid_result(
+            "plugin:resolveOptions",
+            &json!({"defined":true,"value":[{"value":"external:value","label":"Fixture","secret":"private"}]})
+        ));
+        assert!(!valid_result(
+            "plugin:resolveOptions",
+            &json!({"defined":true,"value":[{"value":"bad\0value","label":"Fixture"}]})
+        ));
+        assert!(!valid_result(
+            "plugin:resolveOptions",
+            &json!({"defined":true,"value":[{"value":"external:value","label":"é".repeat(2049)}]})
+        ));
+    }
+
+    #[test]
+    fn connector_contracts_bind_only_mapped_instances_and_masked_outcomes() {
+        let requests = [
+            ("connectors:bridgePieces", json!({})),
+            (
+                "connectors:ensureInstance",
+                json!({"pieceName":"@activepieces/piece-trello","instanceId":"connector.fixture:one"}),
+            ),
+            (
+                "connectors:credentialStatus",
+                json!({"instanceId":"connector.fixture:one"}),
+            ),
+            (
+                "connectors:setCredentials",
+                json!({"instanceId":"connector.fixture:one","input":{"username":"fixture","password":"synthetic"},"storage":"session"}),
+            ),
+            (
+                "connectors:clearCredentials",
+                json!({"instanceId":"connector.fixture:one"}),
+            ),
+            (
+                "connectors:oauthConnect",
+                json!({"instanceId":"connector.fixture:one","input":{"clientId":"fixture","clientSecret":"synthetic"},"storage":"persistent"}),
+            ),
+            (
+                "connectors:syncStatus",
+                json!({"instanceId":"connector.fixture:one"}),
+            ),
+        ];
+        for (operation, mut request) in requests {
+            assert!(valid_request(operation, &request), "{operation}");
+            request["profileRoot"] = json!("/foreign/profile");
+            assert!(!valid_request(operation, &request), "{operation}");
+        }
+        for secret in [
+            "__21x_api_key_set__",
+            "__21x_mcp_secret_set__",
+            " __21x_api_key_set__ ",
+            "bad\0secret",
+            "bad\nsecret",
+            "",
+        ] {
+            assert!(!valid_request(
+                "connectors:setCredentials",
+                &json!({"instanceId":"connector.fixture:one","input":{"secret":secret}})
+            ));
+        }
+        assert!(!valid_request(
+            "connectors:ensureInstance",
+            &json!({"pieceName":"@activepieces/piece-foreign"})
+        ));
+        assert!(!valid_request(
+            "connectors:oauthConnect",
+            &json!({"instanceId":"connector.fixture:one","input":{"accessToken":"synthetic"}})
+        ));
+        assert!(valid_request(
+            "connectors:setCredentials",
+            &json!({"instanceId":"connector.fixture:one","input":{"secret":"x".repeat(4096)}})
+        ));
+        assert!(!valid_request(
+            "connectors:setCredentials",
+            &json!({"instanceId":"connector.fixture:one","input":{"secret":"x".repeat(4097)}})
+        ));
+        assert!(valid_result(
+            "connectors:credentialStatus",
+            &json!({"defined":true,"value":{"storage":null,"persistentAvailable":false,"oauth":{"state":"revoked","expiresAt":null}}})
+        ));
+        assert!(!valid_result(
+            "connectors:credentialStatus",
+            &json!({"defined":true,"value":{"storage":"session","persistentAvailable":true,"accessToken":"private"}})
+        ));
+        assert!(valid_result(
+            "connectors:setCredentials",
+            &json!({"defined":true,"value":{"ok":true,"storage":"session"}})
+        ));
+        assert!(valid_result(
+            "connectors:oauthConnect",
+            &json!({"defined":true,"value":{"ok":false,"error":"Connector credentials could not be saved.","sessionOnlyAvailable":true,"remediation":"Secure persistent storage is unavailable. Use session storage or restore secure storage."}})
+        ));
+        assert!(!valid_result(
+            "connectors:setCredentials",
+            &json!({"defined":true,"value":{"ok":false,"error":"private provider details"}})
+        ));
+        assert!(valid_result(
+            "connectors:clearCredentials",
+            &json!({"defined":false})
+        ));
+        assert!(!valid_result(
+            "connectors:clearCredentials",
+            &json!({"defined":true,"value":null})
+        ));
+        assert!(valid_result(
+            "connectors:syncStatus",
+            &json!({"defined":true,"value":{"lastError":"Connector sync failed. Open the task source for details.","lastSyncedAt":null,"attemptCount":2,"nextRetryAt":1000,"deadLetterCount":1}})
+        ));
+        let piece = json!({"pieceName":"@activepieces/piece-todoist","label":"Todoist","authType":"oauth2","authLabels":{"clientId":"Client ID","clientSecret":"Client secret"},"configProps":[{"key":"filter_query","label":"Filter","required":false}],"oauth":{"mode":"user-supplied","pkce":true,"clientSecretRequired":false,"scopes":["data:read"],"redirectUriHint":"twentyonex://oauth/callback"}});
+        assert!(valid_result(
+            "connectors:bridgePieces",
+            &json!({"defined":true,"value":[piece.clone()]})
+        ));
+        assert!(!valid_result(
+            "connectors:bridgePieces",
+            &json!({"defined":true,"value":[piece.clone(),piece]})
+        ));
+    }
+
+    #[test]
     fn mcp_contracts_scope_crud_probes_and_live_oauth_requests() {
         let requests = [
             ("mcp:getAll", json!({})),
@@ -1923,7 +2410,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 104);
+        assert_eq!(COMMANDS.len(), 114);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

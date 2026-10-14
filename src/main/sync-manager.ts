@@ -167,9 +167,10 @@ export class SyncManager {
     task: TaskRecord,
     input: string | undefined,
     sourceId: string,
-    origin: 'task-source-action' | 'task-group' = 'task-source-action'
+    origin: 'task-source-action' | 'task-group' = 'task-source-action',
+    controls?: { beforeEffect(): void; beforeLocalWrite(): void }
   ): Promise<ActionResult> {
-    return this.runSourceWork(sourceId, () => this.executeActionInternal(actionId, task, input, sourceId, origin))
+    return this.runSourceWork(sourceId, () => this.executeActionInternal(actionId, task, input, sourceId, origin, controls))
   }
 
   private async executeActionInternal(
@@ -177,8 +178,10 @@ export class SyncManager {
     task: TaskRecord,
     input: string | undefined,
     sourceId: string,
-    origin: 'task-source-action' | 'task-group'
+    origin: 'task-source-action' | 'task-group',
+    controls?: { beforeEffect(): void; beforeLocalWrite(): void }
   ): Promise<ActionResult> {
+    controls?.beforeEffect()
     if (origin !== 'task-group' && actionId !== PluginActionId.AddComment && this.db.getTask(task.id)?.group_id) {
       return { success: false, error: 'Use the task-group review controls for source actions on a grouped task.' }
     }
@@ -192,6 +195,7 @@ export class SyncManager {
     const config = this.getConfig(source)
 
     const result = await plugin.executeAction(actionId, task, input, config, ctx)
+    controls?.beforeLocalWrite()
 
     if (result.success && result.taskUpdate && Object.keys(result.taskUpdate).length > 0) {
       this.db.updateTask(task.id, result.taskUpdate, origin)

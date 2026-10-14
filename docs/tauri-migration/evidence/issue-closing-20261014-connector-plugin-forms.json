@@ -1,0 +1,225 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    210,
+    216
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "9576f56757b40df536f8448cd21bf4d0bd30bba4",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/connector-production.md": "66ff1535cb670fb1ebb84cb7b66b6050bf6d586ee14e9b923582eab477d1b154",
+      "docs/tauri-migration/implementation-status.md": "cb9d3ea538a35fdffd38e28775ed089ab42fc5fa8690aab5b5022a2d10c4d257",
+      "docs/tauri-migration/inventory.json": "fd3f3da2459c69d42e0bbd40887e894c6572efd169771046a3557908af6958b3",
+      "docs/tauri-migration/task-source-plugin-production.md": "a8edf66f64ef4b0afb2487171ee1e5c60cb10bbd61cb24b8540f2d1197bfb8c0",
+      "scripts/production-contracts-proof.test.ts": "b1fb74fa46c115d40acb75c47be2716a05d485c0159666a495f398fdad6c4dc4",
+      "scripts/production-contracts-proof.ts": "39563e2aab489053cb70bb015dcf5a47fcc443d2bed1736e6a18a3f001decb92",
+      "src-tauri/engine/src/production_contracts.rs": "fc5c37727f7c8a81c1317df93caaadaa011549cd1fdf7f59a489801f967da8e9",
+      "src/main/connectors/bridge/engine.ts": "b30f3cc1703ae2633c4e65e233b77554eab6b37c687d3a26d33c52f25952829c",
+      "src/main/connectors/bridge/runtime-core.ts": "8bdef42b314747081018c4918798cadb15c274e2d88f91ed119a532bae9f2d0c",
+      "src/main/connectors/bridge/runtime-lifetime.test.ts": "0cf7234c9879854aaed7660e3c08b1f248f6b5d5248b42e1607238561b89c2a8",
+      "src/main/connectors/bridge/service.ts": "9010f46db5b40a9edaf2d7a27677db05c027a157e75937151dca5591bdf348e3",
+      "src/main/connectors/credential-admission.test.ts": "494d6b2d7cd0d94d3c0c49963800f536710878cc3e688eb603ce7519e11b95b1",
+      "src/main/connectors/credential-admission.ts": "fb1088267cccd8a168f4234802416c96a353270ccef75de86285a1fd05e626f9",
+      "src/main/connectors/oauth-lifetime.test.ts": "1b4fc47775ed3518223716184b80142f43bd5506aae95346d9303e1b3a3a4614",
+      "src/main/connectors/oauth.ts": "48c4367c041af43f4fa51dd52c9b47714485d16790b0649a5b14e0ab7561780d",
+      "src/main/connectors/piece-host/client.ts": "6b7fa2db740d34a1fda5686a2443b369e56b3070a618447f1d7fe2ff6a7e94a1",
+      "src/main/oauth/oauth-manager-core.ts": "5b614edeac1195c8ad9dd41226f10c2381ff018243fc3ca192f5b1dc2ad70a8b",
+      "src/main/oauth/oauth-manager-host.test.ts": "896e0a10fd4d6086cb13cf87a0581a6d228483d40cd9c3436553e2725b3599a0",
+      "src/main/plugins/hubspot-plugin.ts": "7e6e09e7f255c6952886a58d17413114f26cb4c983bc869ce93f3c0188042d47",
+      "src/main/plugins/linear-plugin.ts": "55623ae7e236c95d89c8e8cf0c054cab0541441ee618fdd91c108a09d5040ca5",
+      "src/main/plugins/notion-plugin.ts": "2b9e413d6f83adfdc701d991f70e4f73ad372209b73da06b448f808b3db0037f",
+      "src/main/plugins/youtrack-plugin.ts": "cf05e88e25ee2acbcdae68cff9e37f190b3797ede3d8998419cd5b3654bf7811",
+      "src/main/sync-manager.ts": "128ff8210a5bdd7f34d9135ead16c20cb5922dc0fb8cccb93833ca4c99389a19",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "01134b48aac4ecc9b69f2e56a35b89787d8be9ca799ec83b4aff1250b2f0dba7",
+      "src/renderer/src/lib/native-desktop-host.ts": "e3484ea4bb09f3e887a83717d36541f5da4f2d46bc04f0ce6b0f324a9bea685a",
+      "src/service/connector-backend.test.ts": "8a780a09fed23e7dbf8f873d27018f7dc910fc18ae96f3e61cac609ed1b59a33",
+      "src/service/connector-backend.ts": "53714ffc074f7ae65c80e01fb7fad75e2a72048d5cefa9866971cc89ffd7a4cb",
+      "src/service/production-desktop-bindings.test.ts": "78273ea56689681704c37d1a5dfd31e978d82d13f1c0f84b0656ffb7229151c1",
+      "src/service/production-desktop-bindings.ts": "0de93cf3185ab2af30856337948f2404d35b4fa678d3b6fc41d33d54948607ed",
+      "src/service/production-owner.ts": "826acf287287e79a436aa3f6b452edb473196925a1494e3b1874a49d8bb60fef",
+      "src/service/production-service.test.ts": "f0b076931164ce44f30bd4453266e7327774453c396c4e76483a240270d03d5f",
+      "src/service/production-service.ts": "4f300eaa9a7860eeb3195fa53126fdbea0dc1eba52a6f6bc3264cc9aaee05ac1",
+      "src/service/task-lifecycle-backend.test.ts": "b63dea4bae348b5a687d10e29c8ebfa49828434ba5522734912a8a60bb887a81",
+      "src/service/task-lifecycle-backend.ts": "8d7bb4f9f6464d63c46c34911ad5fb66d71a9fec02da536f60b2899b79b4da69",
+      "src/service/task-source-plugin-backend.test.ts": "78b8c45560a61bff2a59f3d3deaa8b9be4df4067d5d1f051bd2604f4340bfd44",
+      "src/service/task-source-plugin-backend.ts": "9e3e32f837dc1d4b9696d7acda69e7bafcc6d6357f72f87e634e1fc96485c0ca",
+      "src/shared/connector-codecs.test.ts": "8637feca2edd5eb9746a506c5eaa1cada02111d034a9d77f646eb71b1da97ece",
+      "src/shared/connector-codecs.ts": "30990cce5a63d3f74881d464df525283b384f9d8d57d0a1771eb70cfc1515208",
+      "src/shared/task-source-plugin-codecs.test.ts": "0c959283542e133490addfa945d99f6a2b8a19a0ef6cea638f23db54e8e40a89",
+      "src/shared/task-source-plugin-codecs.ts": "594a9cc6d7872dfb3e8286ce6376098d6b53498eaed004fbb63993d04b2b2041",
+      "vitest.tauri.config.ts": "a422c272fb347e985fd2f2c8e48c71cae92425cec7cced139022a1d5145e1195"
+    }
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "nativeInputDisplay": "owned Xephyr :199",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "bindings": {
+    "finiteCommandContracts": 114,
+    "ownerHandlersConnectorsDisabled": 107,
+    "ownerHandlersConnectorsEnabled": 114,
+    "events": 17,
+    "newPluginFormCommands": 3,
+    "newConnectorCommands": 7
+  },
+  "scope": "Actual protected-profile plugin form and connector controls; full migration gates remain open.",
+  "implemented": [
+    "Actual PluginRegistry metadata/docs/resolvers with independent grants, finite config and explicit saved credential borrowing; positional optional arguments retained.",
+    "Real source admission and raw resolver ownership, bounded storage/results, exact context/owner/scope rechecks, refreshed-token redaction and no mutation or replay by form controls.",
+    "Actual ConnectorBridgeService/runtime/credential/store/sync owners; exact mapped pins, scoped existing IDs and no foreign replacement, encrypted persistent/session/clear semantics.",
+    "Credential mutation source drains and shared runtime admission for bridge/direct piece/OAuth/raw credential/KV/retiring worker exit work; conservative busy refusal without cancelling unrelated work.",
+    "Actual admitted OAuth flow with prewrite cancellation/scope/context checks; unavailable native browser refuses before effects; controlled real loopback/token fixtures do not establish native OS callback parity.",
+    "Existing task-action owner rechecks external task/source binding before dispatch and local write; current plugin/input/reference gates and fixed errors; normal source/scheduler ownership retained.",
+    "Native/facade finite schemas, hydration fences, unavailable connector capability and actual TypeScript request parity; no mutation replay."
+  ],
+  "artifact": {
+    "buildIdentity": "production-fa25e36cd7ac4ac94e479e9f8b2ea62d",
+    "resourceManifestSha256": "b6c9646ed1f9c43becc8a3a6babd8f1198b06663ee0572be66ff2bf6e15a8465",
+    "redistributionReviewComplete": false
+  },
+  "contractCorpus": {
+    "operations": 114,
+    "requests": 264,
+    "sha256": "d5e518104d3227ad5269fe66534aa09cea70aa2393317387c2404f9ad8c121ef"
+  },
+  "tests": {
+    "application": {
+      "command": "rtk pnpm test:run",
+      "passed": 6204,
+      "failed": 0,
+      "skipped": 28,
+      "reportSha256": "d1dccdc8f837d64c5ecf6292fcb6cdcfc3e6beaea931abd5eeb2add164c23054"
+    },
+    "standalone": {
+      "command": "rtk node scripts/tauri-test.mjs",
+      "passed": 2447,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "83f974b3ffabbf2e576c347338b54aa296318eb5f8889b5c911caa5b77c965da"
+    },
+    "privateStagedNode": {
+      "command": "rtk node scripts/tauri-test.mjs --production-proofs scripts/production-service-proof.test.ts",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "496bbe493436ed80dbfecb0d09a1022a7a3c0e87056e5898a09cab8715a3e860"
+    },
+    "actualContractCorpusExport": {
+      "command": "rtk env TWENTYONEX_PRODUCTION_CONTRACTS_OUT=<artifact> pnpm test:run scripts/production-contracts-proof.test.ts",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "448e33163cb22082a941a64c9668f7ad4eb7c07066098b8f3d0d8c1cc9763eba"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": "rtk pnpm lint",
+      "exitCode": 0,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "shippingBuild": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "logSha256": "33243b6f6a9f2b349220678c5194f34576811a0998aa84bfde5652b9ebb777f6"
+    },
+    "productionRendererBuild": {
+      "command": "rtk pnpm tauri:production:frontend:build",
+      "exitCode": 0,
+      "logSha256": "b3ccab2b95014cfc4986c5ea491c0645313dcb15b751a9cc5b04ed8b83f5c3a9"
+    },
+    "diagnosticRendererBuild": {
+      "command": "rtk pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "logSha256": "1eb83499d412d6d878ef43d4a00279bd7224bd01bdd2245d5a71c8c6f153e369"
+    },
+    "productionStage": {
+      "command": "rtk pnpm tauri:prepare:production",
+      "exitCode": 0,
+      "logSha256": "e2702fd139098bb483fe72937a7d3d21e7cc85c8669aaba89068e97581ba63b8"
+    },
+    "inventoryCheck": {
+      "command": "rtk node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "logSha256": "66fbb88c4197b2a4fd13efaf6ce15b4fb2f8feeaa325125da912e92276d60c9e"
+    },
+    "contractsCheck": {
+      "command": "rtk node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rustFormat": {
+      "command": "rtk cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "nativeProductionHostCompile": {
+      "command": "rtk python3 loads production TAURI_CONFIG JSON and invokes rtk cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+      "exitCode": 0,
+      "logSha256": "00e358892879d4bbcd58f89fde6866de0b479ee4129bb7756743bff1154cb2ad",
+      "capture": "Complete filtered tool output recorded after command completion."
+    },
+    "nativeProductionUnit": {
+      "command": "rtk cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service",
+      "exitCode": 0,
+      "logSha256": "8eba8c5ebf58dd2629fda1dd3e9bbb895625c64e8eeb771eb10fdd65300dcb43",
+      "passed": 20,
+      "ignored": 4
+    },
+    "nativeContractParity": {
+      "command": "rtk env TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=<artifact> cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants -- --exact",
+      "exitCode": 0,
+      "logSha256": "2d0a0eb9fc44d979b38b5dac050e4673b2d87c7a78165489ddae4c6fcac02934",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "nativeGroups": {
+      "command": "rtk env DISPLAY=:199 node scripts/task-group-input/run.mjs",
+      "exitCode": 0,
+      "logSha256": "2cbd6b85d66d9768bdd7d43c9cafcbc1586c6e7ac637fbf3efd482e6771d08b1",
+      "checks": 5,
+      "passedCases": [
+        "one distinct group card, no independently draggable members, keyboard disclosure",
+        "shared Start and HITL target only the hidden execution task",
+        "native pointer drag moves one group unit through the group API",
+        "selected source failure stays selected; app-only approval affects one member",
+        "queued membership refusal is visible; removal preserves shared history"
+      ],
+      "scope": "Actual Electron/X11 input and production renderer with controlled IPC; no installed Tauri GUI or live provider claim."
+    },
+    "diffWhitespace": {
+      "command": "rtk git diff --check",
+      "exitCode": 0,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "validationCorrections": [
+    "Initial typecheck exposed literal discriminant inference and a Node-only metadata test imported into the shared renderer test project. Corrected the literal typing and moved real metadata coverage to the actual backend suite; did not weaken TypeScript project boundaries.",
+    "Final full application/standalone suites, forced typecheck and normal commit hooks validate the integrated source."
+  ],
+  "remainingAcceptance": [
+    "Packaged connector worker containment/KV/cursor/restart and representative connector evidence on supported targets.",
+    "Native OAuth warm/cold callbacks and final app identity, native browser/dialog/file/voice services and remaining production domain parity.",
+    "Installed historical-profile/credential conversion and signing/update/rollback/platform gates.",
+    "Hosted voice issue #92 remains deferred by explicit user decision."
+  ]
+}

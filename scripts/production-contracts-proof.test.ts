@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { createProductionRequestCorpus, PROOF_COMMAND_CODECS, writeProductionRequestCorpus } from './production-contracts-proof'
 import { isRecord } from '../src/shared/service-protocol'
 import { PRODUCTION_COMMAND_CODECS } from '../src/service/production-desktop-bindings'
+import { CONNECTOR_WRITE_ERROR, CONNECTOR_STORAGE_REMEDIATION, CONNECTOR_SYNC_ERROR } from '../src/shared/connector-codecs'
+import { TASK_SOURCE_RESOLVER_KEYS } from '../src/shared/task-source-plugin-codecs'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 104 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 114 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(104)
+    expect(corpus.operations).toHaveLength(114)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -68,10 +70,46 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     expect(PROOF_COMMAND_CODECS['taskSource:sync'].decodeResult(sync)).toEqual(sync)
     expect(PROOF_COMMAND_CODECS['taskSource:reassign'].decodeResult({ success: false, error: 'Explicit source refusal' })).toEqual({ success: false, error: 'Explicit source refusal' })
   })
+  it('rejects malformed connector credentials, storage/scope grants and field byte overflows', () => {
+    const set = PROOF_COMMAND_CODECS['connectors:setCredentials'], oauth = PROOF_COMMAND_CODECS['connectors:oauthConnect']
+    for (const secret of ['__21x_api_key_set__', '__21x_mcp_secret_set__', ' __21x_api_key_set__ ', 'bad\0value', 'bad\nvalue', '', 'x'.repeat(4097), 'é'.repeat(2049)]) expect(() => set.encodeArguments(['connector.fixture:one', { secret }]), secret.slice(0, 20)).toThrow()
+    expect(() => set.decodeArguments({ instanceId: 'connector.fixture:one', input: { secret: 'fixture', authority: { namespace: '*' } } })).toThrow()
+    expect(() => set.decodeArguments({ instanceId: 'connector.fixture:one', input: { secret: 'fixture' }, storage: 'file', profileRoot: '/foreign/profile' })).toThrow()
+    expect(() => oauth.decodeArguments({ instanceId: 'connector.fixture:one', input: { accessToken: 'foreign' } })).toThrow()
+    expect(() => PROOF_COMMAND_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-foreign'])).toThrow()
+    const failure = set.encodeResult({ ok: false, error: 'private backend details', remediation: 'private path', sessionOnlyAvailable: true })
+    expect(failure).toEqual({ defined: true, value: { ok: false, error: CONNECTOR_WRITE_ERROR, remediation: CONNECTOR_STORAGE_REMEDIATION, sessionOnlyAvailable: true } })
+    expect(set.validateWireResult({ defined: true, value: { ok: false, error: 'private backend details' } })).toBe(false)
+    const sync = PROOF_COMMAND_CODECS['connectors:syncStatus'].encodeResult({ lastError: 'private connector response', lastSyncedAt: null, attemptCount: 1, nextRetryAt: 500, deadLetterCount: 0 })
+    expect(sync).toMatchObject({ defined: true, value: { lastError: CONNECTOR_SYNC_ERROR } })
+    expect(PROOF_COMMAND_CODECS['connectors:clearCredentials'].encodeResult(undefined)).toEqual({ defined: false })
+    expect(PROOF_COMMAND_CODECS['connectors:credentialStatus'].validateWireResult({ defined: true, value: { storage: 'session', persistentAvailable: true, secret: 'private' } })).toBe(false)
+    const corpus = createProductionRequestCorpus()
+    expect(corpus.requests.find(row => row.case === 'typed-omitted-client-secret')?.payload).toEqual({ instanceId: 'connector.fixture:one', input: { clientId: 'fixture-client' }, storage: 'persistent' })
+    expect(corpus.requests.find(row => row.case === 'typed-omitted-unused-secret')?.payload).toEqual({ instanceId: 'connector.fixture:one', input: { username: 'fixture-user', password: 'synthetic-fixture-password' }, storage: 'session' })
+    expect(() => oauth.encodeArguments(['connector.fixture:one', { clientId: 'fixture', foreign: undefined }] as never)).toThrow()
+  })
+  it('covers every retained plugin resolver pair and keeps source identity in the fifth argument', () => {
+    const corpus = createProductionRequestCorpus(), expected = Object.entries(TASK_SOURCE_RESOLVER_KEYS).flatMap(([plugin, resolvers]) => resolvers.map(resolver => `resolver-${plugin}-${resolver}`))
+    expect(corpus.requests.filter(row => row.operation === 'plugin:resolveOptions' && row.case.startsWith('resolver-') && row.case !== 'resolver-credential-byte-boundary').map(row => row.case).sort()).toEqual(expected.sort())
+    const scoped = corpus.requests.find(row => row.case === 'fifth-only-source-scope')!
+    expect(scoped.payload).toEqual({ pluginId: 'linear', resolverKey: 'users', config: {}, sourceId: 'source_fixture' })
+    const resolver = PROOF_COMMAND_CODECS['plugin:resolveOptions']
+    expect(resolver.decodeArguments(scoped.payload)).toEqual(['linear', 'users', {}, undefined, 'source_fixture'])
+    for (const args of [ ['notion', 'owners', {}], ['unknown-plugin', 'users', {}], ['linear', 'users', { authority: '*' }], ['notion', 'data_sources', { api_token: 'bad\0secret' }], ['notion', 'data_sources', { api_token: 'x'.repeat(16385) }], ['linear', 'users', {}, '/foreign/path'] ]) expect(() => resolver.encodeArguments(args as never)).toThrow()
+    expect(() => resolver.decodeArguments({ pluginId: 'linear', resolverKey: 'users', config: {}, profileRoot: '/private' })).toThrow()
+    expect(PROOF_COMMAND_CODECS['plugin:getDocumentation'].encodeResult(null)).toEqual({ defined: true, value: null })
+    expect(() => PROOF_COMMAND_CODECS['plugin:getDocumentation'].encodeResult(undefined)).toThrow()
+    expect(() => PROOF_COMMAND_CODECS['plugin:getDocumentation'].encodeResult('x'.repeat(128001))).toThrow()
+    expect(resolver.validateWireResult({ defined: true, value: [{ value: 'external:user', label: 'Fixture\nUser' }] })).toBe(true)
+    expect(resolver.validateWireResult({ defined: true, value: [{ value: 'external:user', label: 'Fixture', secret: 'private' }] })).toBe(false)
+    expect(resolver.validateWireResult({ defined: true, value: [{ value: 'external:user', label: 'é'.repeat(2049) }] })).toBe(false)
+    expect(PROOF_COMMAND_CODECS['plugin:list'].validateWireResult({ defined: true, value: [{ id: 'linear', displayName: 'Linear', description: '', icon: 'linear' }, { id: 'linear', displayName: 'Duplicate', description: '', icon: 'linear' }] })).toBe(false)
+  })
   it('exports the validated corpus only when the coordinator selects an artifact path', async () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(104)
+    expect(corpus.operations).toHaveLength(114)
   })
 })

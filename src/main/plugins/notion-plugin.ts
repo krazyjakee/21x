@@ -164,8 +164,8 @@ export class NotionPlugin implements TaskSourcePlugin {
           value: name,
           label: name
         }))
-      } catch (err) {
-        console.error('[notion] Failed to fetch status options:', err)
+      } catch {
+        console.error('[task-source] Option resolution failed')
         return []
       }
     }
@@ -219,8 +219,8 @@ export class NotionPlugin implements TaskSourcePlugin {
         }
 
         return result
-      } catch (err) {
-        console.error('[notion] Failed to fetch data source properties:', err)
+      } catch {
+        console.error('[task-source] Option resolution failed')
         return []
       }
     }

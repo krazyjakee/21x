@@ -172,9 +172,9 @@ export class OAuthManager {
         // Fetch the refreshed token
         const refreshedToken = this.db.getOAuthTokenBySource(sourceId)
         return refreshedToken?.access_token || null
-      } catch (error) {
+      } catch {
         // If refresh fails (e.g., missing credentials), log and return null
-        console.error(`[OAuthManager] Failed to refresh token for source ${sourceId}:`, error)
+        console.error('[OAuthManager] Source token refresh failed')
         return null
       }
     }
@@ -521,7 +521,7 @@ export class OAuthManager {
         return refreshed?.access_token || null
       } catch (error) {
         const serverName = this.db.getMcpServer(mcpServerId)?.name || mcpServerId
-        console.error(`[OAuthManager] Failed to refresh MCP server token for "${serverName}" (${mcpServerId}):`, error)
+        console.error('[OAuthManager] MCP token refresh failed')
 
         // If the refresh token is permanently invalid, clean up the stale record
         // so UI correctly shows "disconnected" instead of a false "connected" badge
