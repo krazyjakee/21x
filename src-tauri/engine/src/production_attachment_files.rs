@@ -3,7 +3,8 @@
 use crate::{
     production::contracts::{attachment_filename, attachment_uuid, id, object},
     production_files::{
-        NativeWorkspaceFileGuard, NativeWorkspaceFileOwner, NativeWorkspaceReceipt,
+        NativePinnedFileReader, NativeWorkspaceFileGuard, NativeWorkspaceFileOwner,
+        NativeWorkspaceReceipt,
     },
     production_ui_contracts, EngineError,
 };
@@ -16,6 +17,9 @@ fn failure(code: &'static str) -> EngineError {
         message: match code {
             "ATTACHMENT_INVALID_ARGUMENTS" => "Invalid attachment file receipt.",
             "ATTACHMENT_PATH_CHANGED" => "The attachment file identity changed.",
+            "ATTACHMENT_DOWNLOAD_UNAVAILABLE" => {
+                "The selected destination does not support secure downloads."
+            }
             "ATTACHMENT_NATIVE_UNAVAILABLE" => {
                 "Native attachment file authority is unavailable on this platform."
             }
@@ -48,11 +52,21 @@ pub fn callback_request(value: &Value) -> bool {
         && production_ui_contracts::lease_id(&value["leaseId"])
         && NativeAttachmentReceipt::from_value(&value["receipt"]).is_ok()
 }
+pub fn download_callback_request(value: &Value) -> bool {
+    object(value, &["receipt", "leaseId", "authorizationId"], &[])
+        && production_ui_contracts::lease_id(&value["leaseId"])
+        && attachment_uuid(&value["authorizationId"])
+        && NativeAttachmentReceipt::from_value(&value["receipt"]).is_ok()
+}
 #[derive(Clone, Debug)]
 pub struct NativeAttachmentReceipt {
     workspace: NativeWorkspaceReceipt,
+    filename: String,
 }
 impl NativeAttachmentReceipt {
+    pub fn filename(&self) -> &str {
+        &self.filename
+    }
     /// Decode without opening or reading any producer-controlled file.
     pub fn from_value(value: &Value) -> Result<Self, EngineError> {
         if value.to_string().len() > 300_000
@@ -102,7 +116,10 @@ impl NativeAttachmentReceipt {
             "version":value["version"],"taskId":value["taskId"],"workspaceRoot":value["attachmentRoot"],
             "path":value["path"],"root":value["root"],"ancestors":value["ancestors"],"target":value["target"]
         })).map_err(workspace_error)?;
-        Ok(Self { workspace })
+        Ok(Self {
+            workspace,
+            filename: value["filename"].as_str().unwrap().to_owned(),
+        })
     }
 }
 pub struct NativeAttachmentFileOwner {
@@ -128,12 +145,183 @@ pub struct NativeAttachmentFileGuard {
     guard: NativeWorkspaceFileGuard,
 }
 impl NativeAttachmentFileGuard {
+    pub fn open_pinned_reader(self) -> Result<NativePinnedFileReader, EngineError> {
+        self.guard
+            .open_pinned_reader(MAX_BYTES)
+            .map_err(workspace_error)
+    }
     pub fn path(&self) -> &Path {
         self.guard.path()
     }
     pub fn recheck(&self) -> Result<(), EngineError> {
         self.guard.recheck().map_err(workspace_error)
     }
+}
+
+/// Destination is selected solely by the actual native save callback. The
+/// service never accepts or returns this path. No existing target is replaced.
+#[cfg(target_os = "linux")]
+pub fn copy_new_attachment(
+    mut source: NativePinnedFileReader,
+    destination: PathBuf,
+    before_effect: impl Fn() -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    use std::{
+        ffi::CString,
+        fs::File,
+        io::Write,
+        os::{
+            fd::{AsRawFd, FromRawFd},
+            unix::{ffi::OsStrExt, fs::MetadataExt},
+        },
+    };
+    let refused = || failure("ATTACHMENT_PATH_REFUSED");
+    before_effect()?;
+    source.recheck().map_err(workspace_error)?;
+    let path = destination
+        .to_str()
+        .filter(|path| {
+            path.len() <= 4096
+                && path.starts_with('/')
+                && !path.ends_with('/')
+                && !path.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
+                && path[1..]
+                    .split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..")
+        })
+        .ok_or_else(refused)?;
+    let destination = Path::new(path);
+    let name = CString::new(destination.file_name().ok_or_else(refused)?.as_bytes())
+        .map_err(|_| refused())?;
+    if name.as_bytes().len() > 255 {
+        return Err(refused());
+    }
+    let parent =
+        NativeWorkspaceFileOwner::open(destination.parent().ok_or_else(refused)?.to_path_buf())
+            .map_err(workspace_error)?
+            .into_pinned_directory();
+    parent.recheck().map_err(workspace_error)?;
+    before_effect()?;
+    // Anonymous staging has no pathname an attacker can substitute and needs
+    // no unlink cleanup. Unsupported filesystems fail before destination effects.
+    let fd = unsafe {
+        libc::openat(
+            parent.raw_fd(),
+            c".".as_ptr(),
+            libc::O_TMPFILE | libc::O_RDWR | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        return Err(failure("ATTACHMENT_DOWNLOAD_UNAVAILABLE"));
+    }
+    let mut staged = unsafe { File::from_raw_fd(fd) };
+    let initial = staged.metadata().map_err(|_| refused())?;
+    if !initial.is_file() || initial.nlink() != 0 {
+        return Err(refused());
+    }
+    let mut buffer = vec![0u8; 256 * 1024];
+    loop {
+        before_effect()?;
+        parent.recheck().map_err(workspace_error)?;
+        let count = source.read_chunk(&mut buffer).map_err(workspace_error)?;
+        if count == 0 {
+            break;
+        }
+        before_effect()?;
+        staged.write_all(&buffer[..count]).map_err(|_| refused())?;
+    }
+    source.finish().map_err(workspace_error)?;
+    before_effect()?;
+    staged.sync_all().map_err(|_| refused())?;
+    let ready = staged.metadata().map_err(|_| refused())?;
+    if !ready.is_file()
+        || ready.nlink() != 0
+        || ready.dev() != initial.dev()
+        || ready.ino() != initial.ino()
+        || ready.size() != source.size()
+    {
+        return Err(refused());
+    }
+    source.recheck().map_err(workspace_error)?;
+    parent.recheck().map_err(workspace_error)?;
+    before_effect()?;
+    // linkat creates exactly one new name atomically and never overwrites. Only
+    // our held kernel FD link is followed; no attacker-controlled source path.
+    let own_fd =
+        CString::new(format!("/proc/self/fd/{}", staged.as_raw_fd())).map_err(|_| refused())?;
+    if unsafe {
+        libc::linkat(
+            libc::AT_FDCWD,
+            own_fd.as_ptr(),
+            parent.raw_fd(),
+            name.as_ptr(),
+            libc::AT_SYMLINK_FOLLOW,
+        )
+    } != 0
+    {
+        return Err(refused());
+    }
+    // Publication is accepted here. Late loss is reported; no unsafe pathname
+    // rollback can delete a user file substituted after this atomic effect.
+    parent.recheck().map_err(workspace_error)?;
+    source.recheck().map_err(workspace_error)?;
+    before_effect()?;
+    let check_published = || -> Result<(), EngineError> {
+        let mut published: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe {
+            libc::fstatat(
+                parent.raw_fd(),
+                name.as_ptr(),
+                &mut published,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+            || published.st_dev != ready.dev()
+            || published.st_ino != ready.ino()
+            || published.st_size < 0
+            || published.st_size as u64 != ready.size()
+            || published.st_mode & libc::S_IFMT != libc::S_IFREG
+            || published.st_nlink != 1
+        {
+            return Err(refused());
+        }
+        Ok(())
+    };
+    check_published()?;
+    before_effect()?;
+    if unsafe { libc::fsync(parent.raw_fd()) } != 0 {
+        // O_PATH parent cannot fsync: reopen only its held kernel FD for sync.
+        let directory =
+            CString::new(format!("/proc/self/fd/{}", parent.raw_fd())).map_err(|_| refused())?;
+        before_effect()?;
+        let fd = unsafe {
+            libc::open(
+                directory.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(refused());
+        }
+        let directory = unsafe { File::from_raw_fd(fd) };
+        parent.recheck().map_err(workspace_error)?;
+        before_effect()?;
+        directory.sync_all().map_err(|_| refused())?;
+    }
+    parent.recheck().map_err(workspace_error)?;
+    source.recheck().map_err(workspace_error)?;
+    before_effect()?;
+    check_published()?;
+    Ok(())
+}
+#[cfg(not(target_os = "linux"))]
+pub fn copy_new_attachment(
+    _source: NativePinnedFileReader,
+    _destination: PathBuf,
+    _before_effect: impl Fn() -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    Err(failure("ATTACHMENT_NATIVE_UNAVAILABLE"))
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -361,6 +549,203 @@ mod tests {
         owner
             .validate(&NativeAttachmentReceipt::from_value(&observed).unwrap())
             .unwrap();
+    }
+    fn reader(f: &Fixture) -> NativePinnedFileReader {
+        let owner = NativeAttachmentFileOwner::open(f.root.clone()).unwrap();
+        owner
+            .validate(&NativeAttachmentReceipt::from_value(&f.receipt()).unwrap())
+            .unwrap()
+            .open_pinned_reader()
+            .unwrap()
+    }
+    #[test]
+    fn pinned_binary_and_empty_downloads_create_only_new_synced_files() {
+        let f = Fixture::new();
+        let destination = f.base.join("download.bin");
+        let bytes = (0..65537)
+            .map(|index| (index % 256) as u8)
+            .collect::<Vec<_>>();
+        fs::write(&f.file, &bytes).unwrap();
+        copy_new_attachment(reader(&f), destination.clone(), || Ok(())).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), bytes);
+        assert_eq!(fs::metadata(&destination).unwrap().nlink(), 1);
+        fs::write(&f.file, b"").unwrap();
+        let empty = f.base.join("empty.bin");
+        copy_new_attachment(reader(&f), empty.clone(), || Ok(())).unwrap();
+        assert_eq!(fs::metadata(empty).unwrap().size(), 0);
+        assert_eq!(
+            fs::read(f.base.join("private.txt")).unwrap(),
+            b"unrelated private content"
+        );
+    }
+    #[test]
+    fn every_existing_target_kind_and_racing_user_file_is_preserved() {
+        use std::{ffi::CString, os::unix::ffi::OsStrExt};
+        let f = Fixture::new();
+        let ordinary = f.base.join("existing.bin");
+        fs::write(&ordinary, b"user-owned").unwrap();
+        assert!(copy_new_attachment(reader(&f), ordinary.clone(), || Ok(())).is_err());
+        assert_eq!(fs::read(&ordinary).unwrap(), b"user-owned");
+        let link = f.base.join("link.bin");
+        symlink(&ordinary, &link).unwrap();
+        assert!(copy_new_attachment(reader(&f), link.clone(), || Ok(())).is_err());
+        assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
+        let hard = f.base.join("hard.bin");
+        fs::hard_link(&ordinary, &hard).unwrap();
+        assert!(copy_new_attachment(reader(&f), hard, || Ok(())).is_err());
+        assert_eq!(fs::read(&ordinary).unwrap(), b"user-owned");
+        let fifo = f.base.join("fifo.bin");
+        let name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(copy_new_attachment(reader(&f), fifo, || Ok(())).is_err());
+        let directory = f.base.join("directory.bin");
+        fs::create_dir(&directory).unwrap();
+        assert!(copy_new_attachment(reader(&f), directory, || Ok(())).is_err());
+        let racing = f.base.join("racing.bin");
+        let count = std::cell::Cell::new(0);
+        assert!(copy_new_attachment(reader(&f), racing.clone(), || {
+            let turn = count.get() + 1;
+            count.set(turn);
+            if turn == 4 {
+                fs::write(&racing, b"racing user file").unwrap();
+            }
+            Ok(())
+        })
+        .is_err());
+        assert_eq!(fs::read(racing).unwrap(), b"racing user file");
+    }
+    #[test]
+    fn late_target_replacement_reports_failure_without_deleting_user_or_accepted_files() {
+        let f = Fixture::new();
+        let destination = f.base.join("saved.bin");
+        let accepted = f.base.join("accepted.bin");
+        let changed = std::cell::Cell::new(false);
+        assert!(copy_new_attachment(reader(&f), destination.clone(), || {
+            if destination.exists() && !changed.replace(true) {
+                fs::rename(&destination, &accepted).unwrap();
+                fs::write(&destination, b"replacement user file").unwrap();
+            }
+            Ok(())
+        })
+        .is_err());
+        assert_eq!(fs::read(&destination).unwrap(), b"replacement user file");
+        assert_eq!(fs::read(&accepted).unwrap(), b"public attachment");
+        assert_eq!(fs::read(&f.file).unwrap(), b"public attachment");
+    }
+    #[test]
+    fn source_same_size_changes_and_replacement_are_refused_by_pinned_reader() {
+        let f = Fixture::new();
+        let mut source = reader(&f);
+        fs::write(&f.file, b"changed attachmen").unwrap(); // same 17-byte size
+        use std::os::fd::AsRawFd;
+        let changed = fs::File::open(&f.file).unwrap();
+        let times = [
+            libc::timespec {
+                tv_sec: 0,
+                tv_nsec: libc::UTIME_OMIT,
+            },
+            libc::timespec {
+                tv_sec: 1,
+                tv_nsec: 0,
+            },
+        ];
+        assert_eq!(
+            unsafe { libc::futimens(changed.as_raw_fd(), times.as_ptr()) },
+            0
+        );
+        assert!(source.read_chunk(&mut [0u8; 64]).is_err());
+        let old = f.task.join("old-source");
+        let source = reader(&f);
+        fs::rename(&f.file, &old).unwrap();
+        fs::write(&f.file, b"changed attachmen").unwrap();
+        assert!(copy_new_attachment(source, f.base.join("replacement.bin"), || Ok(())).is_err());
+        assert!(!f.base.join("replacement.bin").exists());
+        fs::remove_file(&f.file).unwrap();
+        fs::rename(old, &f.file).unwrap();
+        let file = fs::OpenOptions::new().write(true).open(&f.file).unwrap();
+        file.set_len(MAX_BYTES + 1).unwrap();
+        assert!(NativeAttachmentReceipt::from_value(&f.receipt()).is_err());
+    }
+    #[test]
+    fn revoked_copy_and_replaced_destination_tree_leave_no_named_partial_file() {
+        let f = Fixture::new();
+        let destination = f.base.join("cancelled.bin");
+        let effects = std::cell::Cell::new(0);
+        assert!(copy_new_attachment(reader(&f), destination.clone(), || {
+            let count = effects.get() + 1;
+            effects.set(count);
+            if count == 4 {
+                Err(EngineError::new("CANCELLED"))
+            } else {
+                Ok(())
+            }
+        })
+        .is_err());
+        assert!(!destination.exists());
+        assert_eq!(fs::read_dir(&f.base).unwrap().count(), 2); // root + private.txt only
+        let folder = f.base.join("chosen");
+        fs::create_dir(&folder).unwrap();
+        let destination = folder.join("tree.bin");
+        let moved = f.base.join("moved");
+        let effects = std::cell::Cell::new(0);
+        assert!(copy_new_attachment(reader(&f), destination.clone(), || {
+            let count = effects.get() + 1;
+            effects.set(count);
+            if count == 4 {
+                fs::rename(&folder, &moved).unwrap();
+                fs::create_dir(&folder).unwrap();
+            }
+            Ok(())
+        })
+        .is_err());
+        assert!(!destination.exists());
+        assert!(!moved.join("tree.bin").exists());
+        let alias = f.base.join("alias");
+        symlink(&folder, &alias).unwrap();
+        assert!(copy_new_attachment(reader(&f), alias.join("bad.bin"), || Ok(())).is_err());
+        assert!(!folder.join("bad.bin").exists());
+    }
+    #[test]
+    fn download_callback_requires_exact_receipt_lease_and_nonce_without_open_grants() {
+        let f = Fixture::new();
+        let valid = json!({"receipt":f.receipt(),"leaseId":"ui:1","authorizationId":UUID});
+        assert!(download_callback_request(&valid));
+        assert!(!callback_request(&valid));
+        assert!(!download_callback_request(
+            &json!({"receipt":f.receipt(),"leaseId":"ui:1"})
+        ));
+        for field in ["receipt", "leaseId", "authorizationId"] {
+            let mut missing = valid.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(!download_callback_request(&missing));
+        }
+        for nonce in [
+            Value::Null,
+            json!(1),
+            json!(""),
+            json!("../foreign"),
+            json!("ui:1"),
+            json!("61f07006-c85b-038e-83a7-497c77b0dcae"),
+        ] {
+            let mut invalid = valid.clone();
+            invalid["authorizationId"] = nonce;
+            assert!(!download_callback_request(&invalid));
+        }
+        let mut foreign_lease = valid.clone();
+        foreign_lease["leaseId"] = json!("../foreign");
+        assert!(!download_callback_request(&foreign_lease));
+        let mut foreign_receipt = valid.clone();
+        foreign_receipt["receipt"]["taskId"] = json!("foreign_task");
+        assert!(!download_callback_request(&foreign_receipt));
+        for field in ["filePath", "destination", "epoch", "authorized"] {
+            let mut extra = valid.clone();
+            extra[field] = json!("foreign");
+            assert!(!download_callback_request(&extra));
+        }
+        // UUID syntax is not authorization: the source checks its live nonce map.
+        let mut other_nonce = valid;
+        other_nonce["authorizationId"] = json!("61f07006-c85b-438e-83a7-497c77b0dca0");
+        assert!(download_callback_request(&other_nonce));
     }
     #[test]
     fn public_private_and_callback_shapes_never_supply_a_general_native_path_grant() {

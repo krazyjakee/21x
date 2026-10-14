@@ -32,10 +32,13 @@ it('waits for native page completion before capturing a private publication rece
     expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'project:getAll', payload: {}, engineEpoch: 'engine-1' })
     await transport.invoke('chatImages:readClipboard', {}, { engineEpoch: 'engine-1', signal: new AbortController().signal })
     expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'chatImages:readClipboard', payload: {}, engineEpoch: 'engine-1', uiLease: 'document:1' })
+    await transport.invoke('attachments:download', { taskId: 'task_1', attachmentId: '00000000-0000-4000-8000-000000000001' }, { engineEpoch: 'engine-1', signal: new AbortController().signal })
+    expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: 'attachments:download', payload: { taskId: 'task_1', attachmentId: '00000000-0000-4000-8000-000000000001' }, engineEpoch: 'engine-1', uiLease: 'document:1' })
     invoke.mockResolvedValue({ available: true, protocolVersion: 1, engineEpoch: 'engine-2' })
     expect(await getTauriEngineEpoch(native)).toBe('engine-2'); expect(getTauriUiDocument(native)).toBeUndefined()
     await expect(transport.invoke('ui:publishState', { state: {} }, { engineEpoch: 'engine-2', signal: new AbortController().signal })).rejects.toMatchObject({ code: 'DISCONNECTED' })
     await expect(transport.invoke('chatImages:readClipboard', {}, { engineEpoch: 'engine-2', signal: new AbortController().signal })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    await expect(transport.invoke('attachments:download', { taskId: 'task_1', attachmentId: '00000000-0000-4000-8000-000000000001' }, { engineEpoch: 'engine-2', signal: new AbortController().signal })).rejects.toMatchObject({ code: 'DISCONNECTED' })
   } finally { vi.useRealTimers() }
 })
 

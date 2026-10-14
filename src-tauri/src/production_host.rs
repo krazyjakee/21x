@@ -24,6 +24,8 @@ use twentyonex_engine::{
 #[path = "native_services.rs"]
 pub(crate) mod native_services;
 use native_services::NativeWorkOwner;
+#[path = "native_attachment_download.rs"]
+pub(crate) mod native_attachment_download;
 #[path = "native_clipboard.rs"]
 pub(crate) mod native_clipboard;
 #[path = "production_ui.rs"]
@@ -327,7 +329,7 @@ async fn desktop_invoke(
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
     if matches!(
         operation.as_str(),
-        "ui:publishState" | "agent-installer:install" | "attachments:open"
+        "ui:publishState" | "agent-installer:install" | "attachments:open" | "attachments:download"
     ) {
         if !twentyonex_engine::production::contracts::valid_request(&operation, &payload) {
             return Err(EngineError::new("INVALID_ARGUMENTS"));
@@ -342,9 +344,13 @@ async fn desktop_invoke(
                 .await?
         } else if operation == "agent-installer:install" {
             engine.install_agent(&engine_epoch, payload, &lease).await?
-        } else {
+        } else if operation == "attachments:open" {
             engine
                 .open_attachment(&engine_epoch, payload, &lease)
+                .await?
+        } else {
+            engine
+                .download_attachment(&engine_epoch, payload, &lease)
                 .await?
         };
         authorize(&window)?;
@@ -520,6 +526,11 @@ async fn start(
             } else {
                 HostCapability::Unsupported
             },
+            attachment_downloads: if cfg!(target_os = "linux") {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             external_urls: HostCapability::Host,
             notifications: HostCapability::Unsupported,
             energy: HostCapability::Unsupported,
@@ -534,6 +545,12 @@ async fn start(
     let external_app = app.clone();
     let workspace_file = workspace_file_host(app, native_work.clone(), &descriptor)?;
     let attachment_file = attachment_file_host(app, native_work.clone(), ui.clone(), &descriptor)?;
+    let attachment_download = native_attachment_download::host(
+        app,
+        native_work.clone(),
+        ui.clone(),
+        descriptor.paths.attachment_root.clone(),
+    )?;
     let ui_snapshot = ui.snapshot_callback(app.clone(), native_work.clone());
     let ui_command = ui.command_callback(app.clone(), native_work.clone());
     let installer_progress = ui.installer_progress_callback(app.clone(), native_work.clone());
@@ -545,6 +562,7 @@ async fn start(
         ProductionNativeHost {
             workspace_file,
             attachment_file,
+            attachment_download,
             event_sink: Arc::new(move |frame| {
                 handle
                     .emit_to(

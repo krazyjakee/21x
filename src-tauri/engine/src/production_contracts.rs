@@ -22,6 +22,7 @@ pub const COMMANDS: &[&str] = &[
     "chatImages:saveToTask",
     "attachments:remove",
     "attachments:open",
+    "attachments:download",
     "heartbeat:enable",
     "heartbeat:disable",
     "heartbeat:runNow",
@@ -3205,7 +3206,7 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
-    if operation == "attachments:open" {
+    if matches!(operation, "attachments:open" | "attachments:download") {
         return crate::production_attachment_files::request(value);
     }
     if operation == agent_installer::OPERATION {
@@ -3355,7 +3356,7 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
-    if operation == "attachments:open" {
+    if matches!(operation, "attachments:open" | "attachments:download") {
         return crate::production_ui_contracts::void_result(value);
     }
     if operation == agent_installer::OPERATION {
@@ -5054,7 +5055,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 224);
+        assert_eq!(COMMANDS.len(), 225);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

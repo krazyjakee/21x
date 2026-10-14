@@ -23,3 +23,24 @@ it('retains exact installer work beyond ordinary deadlines and aborts it at its 
   await expect(host.request('agent-installer:install.extra', {}, { timeoutMs: 180000 })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   expect(serviceOperationTimeoutMs('engine.agent.install.extra')).toBe(30000)
 })
+
+it.each(['attachments:download', 'engine.attachment.download', 'host.attachment.download'])('retains %s through a bounded save-dialog wait without extending related operations', async operation => {
+  vi.useFakeTimers()
+  const handlers = new Map<string, { signal: AbortSignal; finish(value: { ok: boolean }): void }>()
+  const extra = `${operation}.extra`
+  const operations = Object.fromEntries([operation, extra].map(name => [name, { validatePayload: isRecord, validateResult: isRecord,
+    handle: (_value: unknown, signal: AbortSignal) => new Promise<{ ok: boolean }>(finish => { handlers.set(name, { signal, finish }) }) }]))
+  const host = new ServicePeer({ role: 'host', engineEpoch: 'deadline-epoch', operations, write: async bytes => service.receive(bytes) })
+  const service = new ServicePeer({ role: 'service', engineEpoch: 'deadline-epoch', operations, write: async bytes => host.receive(bytes) }); peers.push(host, service)
+  const origin = operation.startsWith('host.') ? service : host
+  const exact = origin.request(operation, {}), ordinary = origin.request(extra, {}), ordinaryFailure = expect(ordinary).rejects.toMatchObject({ code: 'TIMEOUT' })
+  await vi.advanceTimersByTimeAsync(31000); await ordinaryFailure
+  expect(handlers.get(operation)!.signal.aborted).toBe(false); expect(handlers.get(extra)!.signal.aborted).toBe(true)
+  handlers.get(operation)!.finish({ ok: true }); expect(await exact).toEqual({ ok: true })
+  const bounded = origin.request(operation, {}), failure = expect(bounded).rejects.toMatchObject({ code: 'TIMEOUT' })
+  await vi.advanceTimersByTimeAsync(180001); await failure
+  expect(handlers.get(operation)!.signal.aborted).toBe(true)
+  handlers.get(operation)!.finish({ ok: true }); handlers.get(extra)!.finish({ ok: true }); await vi.advanceTimersByTimeAsync(0)
+  await expect(origin.request(extra, {}, { timeoutMs: 180000 })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(serviceOperationTimeoutMs(extra)).toBe(30000)
+})

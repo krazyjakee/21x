@@ -128,6 +128,7 @@ export interface ProductionOwnerBootstrap {
     ui?: ProductionUiNativeHost
     emitInstallationProgress?(progress: DesktopEventMap['agent-installer:progress'], leaseId: string): Promise<void>
     openAttachment?(receipt: AttachmentPathReceipt, leaseId: string): Promise<void>
+    downloadAttachment?(receipt: AttachmentPathReceipt, leaseId: string, beforeEffect: () => void): Promise<void>
     sendUiCommand(command: UiCommand): { ok: true } | { ok: false; detail: string }
     /** Join only this launch's supervised children. Failure retains the lease. */
     drainOwnedProcesses(): Promise<{ acknowledged: true }>
@@ -365,7 +366,7 @@ export class ProductionOwner {
   getTaskAttachmentBindingLease() {
     this.getDatabaseBindingLease()
     const services = this.services!, { db: database, agents: manager, taskAttachmentFiles: files } = services, attachmentRoot = this.bootstrap.paths.attachmentRoot
-    const native = this.bootstrap.native, openAttachment = native.openAttachment
+    const native = this.bootstrap.native, openAttachment = native.openAttachment, downloadAttachment = native.downloadAttachment
     return { database, manager, files, attachmentRoot,
       ...(openAttachment ? { openAttachment: async (receipt: AttachmentPathReceipt, caller: DesktopCallerContext, signal: AbortSignal): Promise<void> => {
         this.getDatabaseBindingLease()
@@ -374,10 +375,21 @@ export class ProductionOwner {
         this.getDatabaseBindingLease()
         if (signal.aborted || this.bootstrap.native !== native || native.openAttachment !== openAttachment) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
       } } : {}),
+      ...(downloadAttachment ? { downloadAttachment: async (receipt: AttachmentPathReceipt, caller: DesktopCallerContext, signal: AbortSignal, beforeEffect: () => void): Promise<void> => {
+        this.getDatabaseBindingLease()
+        if (signal.aborted || !isUiLeaseId(caller.uiLeaseId) || this.bootstrap.native !== native || native.downloadAttachment !== downloadAttachment) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        const current = (): void => {
+          beforeEffect(); this.getDatabaseBindingLease()
+          if (signal.aborted || this.bootstrap.native !== native || native.downloadAttachment !== downloadAttachment) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        }
+        current(); await this.own(downloadAttachment.call(native, receipt, caller.uiLeaseId, current))
+        this.getDatabaseBindingLease()
+        if (signal.aborted || this.bootstrap.native !== native || native.downloadAttachment !== downloadAttachment) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      } } : {}),
       onTaskUpdated: (taskId: string, attachments: FileAttachmentRecord[]): void => { this.emit('task:updated', { taskId, updates: { attachments } }) },
       assertTaskAttachmentOwners: (owners: { database: DatabaseManager; manager: AgentManager; files: TaskAttachmentFileOwner; attachmentRoot: string }): void => {
         this.getDatabaseBindingLease()
-        if (this.services !== services || this.bootstrap.native !== native || native.openAttachment !== openAttachment || services.db !== database || services.agents !== manager || services.taskAttachmentFiles !== files || owners.database !== database || owners.manager !== manager || owners.files !== files || owners.attachmentRoot !== attachmentRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        if (this.services !== services || this.bootstrap.native !== native || native.openAttachment !== openAttachment || native.downloadAttachment !== downloadAttachment || services.db !== database || services.agents !== manager || services.taskAttachmentFiles !== files || owners.database !== database || owners.manager !== manager || owners.files !== files || owners.attachmentRoot !== attachmentRoot) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
         files.assertOwners(attachmentRoot)
       } }
   }

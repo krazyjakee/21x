@@ -28,10 +28,13 @@ use tokio::{
 const MAX_FRAME: usize = 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
 fn request_deadline_at(operation: &str, started: Instant) -> Instant {
-    // This private operation has a bounded <=150s owned installation plan.
+    // Private installation/download operations have bounded owned plans.
     // No caller-provided duration or namespace changes other request budgets.
     started
-        + if operation == "engine.agent.install" {
+        + if matches!(
+            operation,
+            "engine.agent.install" | "engine.attachment.download"
+        ) {
             Duration::from_secs(180)
         } else {
             DEADLINE
@@ -73,6 +76,8 @@ pub struct ProductionCapabilities {
     pub workspace_files: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub attachment_files: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
+    pub attachment_downloads: HostCapability,
     pub external_urls: HostCapability,
     pub notifications: HostCapability,
     pub energy: HostCapability,
@@ -107,9 +112,14 @@ pub struct ProductionAttachmentHost {
     pub invoke: Arc<dyn Fn(Value, String, String) -> HostFuture<()> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
 }
+pub struct ProductionAttachmentDownloadHost {
+    pub invoke: Arc<dyn Fn(Value, String, String, String) -> HostFuture<()> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionNativeHost {
     pub workspace_file: Option<ProductionWorkspaceHost>,
     pub attachment_file: Option<ProductionAttachmentHost>,
+    pub attachment_download: Option<ProductionAttachmentDownloadHost>,
     pub event_sink: Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>,
     pub open_external: Option<Arc<dyn Fn(String) -> HostFuture<()> + Send + Sync>>,
     pub notification: Option<Arc<dyn Fn(String, String) -> HostFuture<bool> + Send + Sync>>,
@@ -201,6 +211,38 @@ fn attachment_host_matches(capability: &HostCapability, host: &ProductionNativeH
         HostCapability::Unsupported => host.attachment_file.is_none(),
     }
 }
+fn attachment_download_host_matches(
+    capability: &HostCapability,
+    host: &ProductionNativeHost,
+) -> bool {
+    match capability {
+        HostCapability::Host => {
+            host.attachment_download.is_some() && ui_host_matches(&HostCapability::Host, host)
+        }
+        HostCapability::Unsupported => host.attachment_download.is_none(),
+    }
+}
+async fn attachment_download_callback(
+    host: &ProductionNativeHost,
+    capability: &HostCapability,
+    epoch: String,
+    payload: &Value,
+) -> Result<Value, EngineError> {
+    if *capability != HostCapability::Host || !attachment_download_host_matches(capability, host) {
+        return Err(EngineError::new("UNKNOWN_OPERATION"));
+    }
+    if !crate::production_attachment_files::download_callback_request(payload) {
+        return Err(EngineError::new("INVALID_ARGUMENTS"));
+    }
+    (host.attachment_download.as_ref().unwrap().invoke)(
+        payload["receipt"].clone(),
+        payload["leaseId"].as_str().unwrap().to_owned(),
+        epoch,
+        payload["authorizationId"].as_str().unwrap().to_owned(),
+    )
+    .await?;
+    Ok(json!({}))
+}
 async fn attachment_callback(
     host: &ProductionNativeHost,
     capability: &HostCapability,
@@ -278,6 +320,8 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || capabilities.energy != HostCapability::Unsupported
         || capabilities.voice != HostCapability::Unsupported
         || capabilities.attachment_files == HostCapability::Host
+            && capabilities.ui != HostCapability::Host
+        || capabilities.attachment_downloads == HostCapability::Host
             && capabilities.ui != HostCapability::Host
         || [
             &value.paths.profile_root,
@@ -592,6 +636,10 @@ impl ProductionEngine {
                 && host.workspace_file.is_none())
             || !ui_host_matches(&launch.descriptor.capabilities.ui, &host)
             || !attachment_host_matches(&launch.descriptor.capabilities.attachment_files, &host)
+            || !attachment_download_host_matches(
+                &launch.descriptor.capabilities.attachment_downloads,
+                &host,
+            )
         {
             return Err(problem(
                 "INVALID_ARGUMENTS",
@@ -717,6 +765,67 @@ impl ProductionEngine {
         payload: Value,
         lease_id: &str,
     ) -> Result<Value, EngineError> {
+        self.attachment_request(epoch, payload, lease_id, false)
+            .await
+    }
+    pub async fn download_attachment(
+        &self,
+        epoch: &str,
+        payload: Value,
+        lease_id: &str,
+    ) -> Result<Value, EngineError> {
+        self.attachment_request(epoch, payload, lease_id, true)
+            .await
+    }
+    pub async fn check_attachment_download(
+        &self,
+        epoch: &str,
+        authorization_id: &str,
+    ) -> Result<(), EngineError> {
+        if !contracts::attachment_uuid(&json!(authorization_id)) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.attachment_downloads != HostCapability::Host
+            || !attachment_download_host_matches(&HostCapability::Host, &self.0.host)
+        {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        let result = self
+            .request(
+                "engine.attachment.download.check",
+                json!({"authorizationId":authorization_id}),
+            )
+            .await?;
+        if result != json!({"authorized":true}) {
+            return Err(EngineError::new("INVALID_RESULT"));
+        }
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        Ok(())
+    }
+    async fn attachment_request(
+        &self,
+        epoch: &str,
+        payload: Value,
+        lease_id: &str,
+        download: bool,
+    ) -> Result<Value, EngineError> {
         if !crate::production_attachment_files::request(&payload) {
             return Err(EngineError::new("INVALID_ARGUMENTS"));
         }
@@ -727,10 +836,14 @@ impl ProductionEngine {
         if epoch != self.epoch() {
             return Err(EngineError::new("STALE_EPOCH"));
         }
-        if self.0.descriptor.capabilities.attachment_files != HostCapability::Host
-            || self.0.descriptor.capabilities.ui != HostCapability::Host
-            || !attachment_host_matches(&HostCapability::Host, &self.0.host)
-        {
+        let supported = if download {
+            self.0.descriptor.capabilities.attachment_downloads == HostCapability::Host
+                && attachment_download_host_matches(&HostCapability::Host, &self.0.host)
+        } else {
+            self.0.descriptor.capabilities.attachment_files == HostCapability::Host
+                && attachment_host_matches(&HostCapability::Host, &self.0.host)
+        };
+        if !supported || self.0.descriptor.capabilities.ui != HostCapability::Host {
             return Err(EngineError::new("UNKNOWN_OPERATION"));
         }
         if !self.0.ready.load(Ordering::SeqCst)
@@ -739,7 +852,16 @@ impl ProductionEngine {
         {
             return Err(EngineError::new("DISCONNECTED"));
         }
-        let result = self.request("engine.attachment.open", payload).await?;
+        let result = self
+            .request(
+                if download {
+                    "engine.attachment.download"
+                } else {
+                    "engine.attachment.open"
+                },
+                payload,
+            )
+            .await?;
         if epoch != self.epoch() {
             return Err(EngineError::new("STALE_EPOCH"));
         }
@@ -899,10 +1021,13 @@ impl ProductionEngine {
                                 && result["nodeVersion"] == "v22.23.2"
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
-                        "engine.ui.publish" | "engine.attachment.open" => {
+                        "engine.ui.publish"
+                        | "engine.attachment.open"
+                        | "engine.attachment.download" => {
                             crate::production_ui_contracts::void_result(result)
                         }
                         "engine.agent.install" => contracts::agent_installer::result(result),
+                        "engine.attachment.download.check" => result == &json!({"authorized":true}),
                         operation => contracts::valid_result(operation, result),
                     };
                     if !valid {
@@ -1078,7 +1203,7 @@ impl ProductionEngine {
                 }
                 Ok(result)
             }
-            "host.attachment.open" => {
+            "host.attachment.open" | "host.attachment.download" => {
                 if self.0.closed.load(Ordering::SeqCst)
                     || self.0.stopping.load(Ordering::SeqCst)
                     || !self.0.ready.load(Ordering::SeqCst)
@@ -1087,13 +1212,23 @@ impl ProductionEngine {
                     return Err(EngineError::new("DISCONNECTED"));
                 }
                 let epoch = self.epoch();
-                let result = attachment_callback(
-                    &self.0.host,
-                    &self.0.descriptor.capabilities.attachment_files,
-                    epoch.clone(),
-                    payload,
-                )
-                .await?;
+                let result = if operation == "host.attachment.download" {
+                    attachment_download_callback(
+                        &self.0.host,
+                        &self.0.descriptor.capabilities.attachment_downloads,
+                        epoch.clone(),
+                        payload,
+                    )
+                    .await?
+                } else {
+                    attachment_callback(
+                        &self.0.host,
+                        &self.0.descriptor.capabilities.attachment_files,
+                        epoch.clone(),
+                        payload,
+                    )
+                    .await?
+                };
                 if epoch != self.epoch() {
                     return Err(EngineError::new("STALE_EPOCH"));
                 }
@@ -1142,6 +1277,9 @@ impl ProductionEngine {
                     (files.close)().await?;
                 }
                 if let Some(files) = &self.0.host.attachment_file {
+                    (files.close)().await?;
+                }
+                if let Some(files) = &self.0.host.attachment_download {
                     (files.close)().await?;
                 }
                 #[cfg(target_os = "linux")]
@@ -2056,6 +2194,7 @@ mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+    static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
     pub(super) struct Temporary(pub(super) PathBuf);
     impl Temporary {
         pub(super) fn new() -> Self {
@@ -2064,8 +2203,9 @@ mod tests {
                 .unwrap()
                 .as_nanos();
             let root = std::env::temp_dir().join(format!(
-                "21x-production-native-{}-{stamp}",
-                std::process::id()
+                "21x-production-native-{}-{stamp}-{}",
+                std::process::id(),
+                TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
             ));
             std::fs::create_dir(&root).unwrap();
             Self(root)
@@ -2096,6 +2236,7 @@ mod tests {
             capabilities: ProductionCapabilities {
                 workspace_files: HostCapability::Unsupported,
                 attachment_files: HostCapability::Unsupported,
+                attachment_downloads: HostCapability::Unsupported,
                 external_urls: HostCapability::Unsupported,
                 notifications: HostCapability::Unsupported,
                 energy: HostCapability::Unsupported,
@@ -2134,6 +2275,7 @@ mod tests {
         ProductionNativeHost {
             workspace_file: None,
             attachment_file: None,
+            attachment_download: None,
             event_sink: Arc::new(|_| Ok(())),
             open_external: None,
             notification: None,
@@ -2473,7 +2615,7 @@ mod tests {
         .unwrap();
     }
     #[tokio::test]
-    async fn only_the_private_installer_operation_survives_the_normal_request_deadline() {
+    async fn only_private_installer_and_download_operations_survive_the_normal_request_deadline() {
         // An aged origin exercises the actual Tokio timeout enforcement without
         // sleeping for either production budget or accepting a public duration.
         let aged = Instant::now() - Duration::from_secs(31);
@@ -2483,6 +2625,8 @@ mod tests {
             "host.ui.installerProgress",
             "agent-installer:install",
             "engine.agent.install.extra",
+            "attachments:download",
+            "engine.attachment.download.extra",
         ] {
             let result = timeout_at(
                 request_deadline_at(operation, aged),
@@ -2494,19 +2638,21 @@ mod tests {
                 "unexpected extended budget for {operation}"
             );
         }
-        let installer = timeout_at(request_deadline_at("engine.agent.install", aged), async {
-            tokio::task::yield_now().await;
-            "actual acknowledgement"
-        })
-        .await;
-        assert_eq!(installer.unwrap(), "actual acknowledgement");
-        let expired = Instant::now() - Duration::from_secs(181);
-        assert!(timeout_at(
-            request_deadline_at("engine.agent.install", expired),
-            std::future::pending::<()>()
-        )
-        .await
-        .is_err());
+        for operation in ["engine.agent.install", "engine.attachment.download"] {
+            let installer = timeout_at(request_deadline_at(operation, aged), async {
+                tokio::task::yield_now().await;
+                "actual acknowledgement"
+            })
+            .await;
+            assert_eq!(installer.unwrap(), "actual acknowledgement");
+            let expired = Instant::now() - Duration::from_secs(181);
+            assert!(timeout_at(
+                request_deadline_at(operation, expired),
+                std::future::pending::<()>()
+            )
+            .await
+            .is_err());
+        }
     }
     #[cfg(target_os = "linux")]
     fn attachment_fixture() -> (Temporary, Value) {
@@ -2563,6 +2709,138 @@ mod tests {
             Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
         }));
         assert!(attachment_host_matches(&HostCapability::Host, &host));
+    }
+    #[test]
+    fn attachment_download_capability_is_independent_and_requires_current_ui_owners() {
+        let temporary = Temporary::new();
+        let mut value = descriptor(&temporary.0);
+        value.capabilities.attachment_downloads = HostCapability::Host;
+        assert!(descriptor_bytes(&value).is_err());
+        value.capabilities.ui = HostCapability::Host;
+        assert!(descriptor_bytes(&value).is_ok());
+        let mut wire = serde_json::to_value(&value).unwrap();
+        wire["capabilities"]
+            .as_object_mut()
+            .unwrap()
+            .remove("attachmentDownloads");
+        assert_eq!(
+            serde_json::from_value::<ProductionDescriptor>(wire)
+                .unwrap()
+                .capabilities
+                .attachment_downloads,
+            HostCapability::Unsupported
+        );
+        let mut host = ui_host();
+        assert!(attachment_download_host_matches(
+            &HostCapability::Unsupported,
+            &host
+        ));
+        host.attachment_download = Some(ProductionAttachmentDownloadHost {
+            invoke: Arc::new(|_, _, _, _| Box::pin(async { Ok(()) })),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        assert!(!attachment_download_host_matches(
+            &HostCapability::Host,
+            &host
+        ));
+        assert!(!attachment_download_host_matches(
+            &HostCapability::Unsupported,
+            &host
+        ));
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        assert!(attachment_download_host_matches(
+            &HostCapability::Host,
+            &host
+        ));
+        assert!(attachment_host_matches(&HostCapability::Unsupported, &host));
+        assert!(!attachment_host_matches(&HostCapability::Host, &host));
+    }
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn download_callback_refuses_private_destinations_and_joins_actual_host_acknowledgement()
+    {
+        let (_temporary, mut payload) = attachment_fixture();
+        payload["authorizationId"] = json!("00000000-0000-4000-8000-000000000001");
+        let mut host = ui_host();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = calls.clone();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let entered = Arc::new(Mutex::new(Some(entered)));
+        let (release, released) = tokio::sync::oneshot::channel();
+        let released = Arc::new(Mutex::new(Some(released)));
+        host.attachment_download = Some(ProductionAttachmentDownloadHost {
+            invoke: Arc::new(move |receipt, lease, epoch, authorization_id| {
+                let (count, entered, released) = (count.clone(), entered.clone(), released.clone());
+                Box::pin(async move {
+                    assert_eq!(receipt["taskId"], "task_1");
+                    assert_eq!(lease, "ui:1");
+                    assert_eq!(epoch, "epoch-fixture");
+                    assert_eq!(authorization_id, "00000000-0000-4000-8000-000000000001");
+                    count.fetch_add(1, Ordering::SeqCst);
+                    let response = released.lock().unwrap().take().unwrap();
+                    entered.lock().unwrap().take().unwrap().send(()).unwrap();
+                    response
+                        .await
+                        .map_err(|_| EngineError::new("DISCONNECTED"))?;
+                    Ok(())
+                })
+            }),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        assert!(attachment_download_callback(
+            &host,
+            &HostCapability::Host,
+            "epoch-fixture".into(),
+            &payload
+        )
+        .await
+        .is_err());
+        host.ui_snapshot = Some(Arc::new(|_| {
+            Box::pin(async { Ok(json!({"available":false})) })
+        }));
+        host.ui_command = Some(Arc::new(|_, lease, _| {
+            Box::pin(async move { Ok(json!({"ok":true,"leaseId":lease})) })
+        }));
+        for key in ["destination", "path", "caller", "program"] {
+            let mut invalid = payload.clone();
+            invalid[key] = json!("forged");
+            assert!(attachment_download_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                &invalid
+            )
+            .await
+            .is_err());
+        }
+        assert!(attachment_download_callback(
+            &host,
+            &HostCapability::Unsupported,
+            "epoch-fixture".into(),
+            &payload
+        )
+        .await
+        .is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let operation = tokio::spawn(async move {
+            attachment_download_callback(
+                &host,
+                &HostCapability::Host,
+                "epoch-fixture".into(),
+                &payload,
+            )
+            .await
+        });
+        started.await.unwrap();
+        assert!(!operation.is_finished());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        release.send(()).unwrap();
+        assert_eq!(operation.await.unwrap().unwrap(), json!({}));
     }
     #[cfg(target_os = "linux")]
     #[tokio::test]

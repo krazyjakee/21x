@@ -4,7 +4,7 @@ import { isDatabaseId } from './database-desktop-codecs'
 import { base64ByteLength, isChatImageMimeType, validateChatImageInputs } from './chat-images'
 import { hasExactKeys, isRecord, isJsonValue, ServiceProtocolError, type JsonValue } from './service-protocol'
 
-export const TASK_ATTACHMENT_OPERATIONS = ['chatImages:saveToTask', 'attachments:remove', 'attachments:open'] as const
+export const TASK_ATTACHMENT_OPERATIONS = ['chatImages:saveToTask', 'attachments:remove', 'attachments:open', 'attachments:download'] as const
 export type TaskAttachmentOperation = typeof TASK_ATTACHMENT_OPERATIONS[number]
 export const TASK_ATTACHMENT_LIMITS = Object.freeze({ imageBytes: 512 * 1024, totalBytes: 512 * 1024, images: 5, records: 128, metadataBytes: 128 * 1024, wireBytes: 890000, filenameBytes: 216, requests: 16, openBytes: 64 * 1024 * 1024 })
 function fail(code: 'INVALID_ARGUMENTS' | 'INVALID_RESULT' | 'FRAME_TOO_LARGE'): never { throw new ServiceProtocolError(code) }

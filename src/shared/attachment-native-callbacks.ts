@@ -32,6 +32,10 @@ export function isAttachmentPathReceipt(value: unknown): value is AttachmentPath
   try { return new TextEncoder().encode(JSON.stringify(value)).byteLength<=WORKSPACE_NATIVE_LIMITS.receiptBytes } catch { return false }
 }
 export const ATTACHMENT_NATIVE_CALLBACK_SCHEMAS = {
+  'host.attachment.download': {
+    validatePayload(value: unknown): boolean { return isRecord(value) && hasExactKeys(value,['receipt','leaseId','authorizationId']) && isAttachmentPathReceipt(value.receipt) && isUiLeaseId(value.leaseId) && taskAttachmentId(value.authorizationId) },
+    validateResult(value: unknown): boolean { return isRecord(value) && hasExactKeys(value,[]) }
+  },
   'host.attachment.open': {
     validatePayload(value: unknown): boolean { return isRecord(value) && hasExactKeys(value,['receipt','leaseId']) && isAttachmentPathReceipt(value.receipt) && isUiLeaseId(value.leaseId) },
     validateResult(value: unknown): boolean { return isRecord(value) && hasExactKeys(value,[]) }
@@ -40,4 +44,12 @@ export const ATTACHMENT_NATIVE_CALLBACK_SCHEMAS = {
 /** Native-stamped private command, distinct from public attachment ID args. */
 export function isPrivateAttachmentOpen(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value,['taskId','attachmentId','leaseId']) && isDatabaseId(value.taskId) && taskAttachmentId(value.attachmentId) && isUiLeaseId(value.leaseId)
+}
+
+/** Save-dialog command uses the same exact source identity, with no destination. */
+export function isPrivateAttachmentDownload(value: unknown): boolean {
+  return isPrivateAttachmentOpen(value)
+}
+export function isPrivateAttachmentDownloadCheck(value: unknown): value is { authorizationId: string } {
+  return isRecord(value) && hasExactKeys(value, ['authorizationId']) && taskAttachmentId(value.authorizationId)
 }

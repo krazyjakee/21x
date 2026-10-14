@@ -312,6 +312,9 @@ mod platform {
             owner.recheck()?;
             Ok(Self { owner })
         }
+        pub(crate) fn into_pinned_directory(self) -> NativePinnedDirectory {
+            NativePinnedDirectory { owner: self.owner }
+        }
         pub fn validate(
             &self,
             receipt: &NativeWorkspaceReceipt,
@@ -358,6 +361,68 @@ mod platform {
             Ok(guard)
         }
     }
+    /// Internal native save-target parent capability; no RPC obtains a raw FD.
+    pub(crate) struct NativePinnedDirectory {
+        owner: Arc<Owner>,
+    }
+    impl NativePinnedDirectory {
+        pub(crate) fn raw_fd(&self) -> std::os::fd::RawFd {
+            self.owner.chain.last().unwrap().file.as_raw_fd()
+        }
+        pub(crate) fn recheck(&self) -> Result<(), EngineError> {
+            self.owner.recheck()
+        }
+    }
+    pub struct NativePinnedFileReader {
+        file: File,
+        guard: NativeWorkspaceFileGuard,
+        expected: std::fs::Metadata,
+        read: u64,
+    }
+    impl NativePinnedFileReader {
+        pub fn recheck(&self) -> Result<(), EngineError> {
+            self.guard.recheck()?;
+            let now = metadata(&self.file)?;
+            if !now.is_file()
+                || now.nlink() != 1
+                || now.dev() != self.expected.dev()
+                || now.ino() != self.expected.ino()
+                || now.size() != self.expected.size()
+                || now.mtime() != self.expected.mtime()
+                || now.mtime_nsec() != self.expected.mtime_nsec()
+                || now.ctime() != self.expected.ctime()
+                || now.ctime_nsec() != self.expected.ctime_nsec()
+            {
+                return Err(failure("WORKSPACE_PATH_CHANGED"));
+            }
+            Ok(())
+        }
+        pub fn size(&self) -> u64 {
+            self.expected.size()
+        }
+        pub fn read_chunk(&mut self, buffer: &mut [u8]) -> Result<usize, EngineError> {
+            use std::io::Read;
+            self.recheck()?;
+            let count = self
+                .file
+                .read(buffer)
+                .map_err(|_| failure("WORKSPACE_PATH_REFUSED"))?;
+            self.read = self
+                .read
+                .checked_add(count as u64)
+                .filter(|total| *total <= self.expected.size())
+                .ok_or_else(|| failure("WORKSPACE_PATH_CHANGED"))?;
+            self.recheck()?;
+            Ok(count)
+        }
+        pub fn finish(&self) -> Result<(), EngineError> {
+            self.recheck()?;
+            if self.read != self.expected.size() {
+                return Err(failure("WORKSPACE_PATH_CHANGED"));
+            }
+            Ok(())
+        }
+    }
     /// Holds exact owner/root, task ancestor and target descriptors through an OS call.
     pub struct NativeWorkspaceFileGuard {
         owner: Arc<Owner>,
@@ -365,6 +430,36 @@ mod platform {
         chain: Vec<Held>,
     }
     impl NativeWorkspaceFileGuard {
+        pub fn open_pinned_reader(
+            self,
+            max_bytes: u64,
+        ) -> Result<NativePinnedFileReader, EngineError> {
+            use std::os::unix::fs::OpenOptionsExt;
+            self.recheck()?;
+            let held = self
+                .chain
+                .last()
+                .ok_or_else(|| failure("WORKSPACE_PATH_REFUSED"))?;
+            let expected = metadata(&held.file)?;
+            if !expected.is_file() || expected.nlink() != 1 || expected.size() > max_bytes {
+                return Err(failure("WORKSPACE_PATH_REFUSED"));
+            }
+            // Keep the O_PATH handle alive while opening its own kernel FD link.
+            // Never resolve an attacker-controlled source pathname for reading.
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_CLOEXEC | libc::O_NONBLOCK)
+                .open(format!("/proc/self/fd/{}", held.file.as_raw_fd()))
+                .map_err(|_| failure("WORKSPACE_PATH_REFUSED"))?;
+            let result = NativePinnedFileReader {
+                file,
+                guard: self,
+                expected,
+                read: 0,
+            };
+            result.recheck()?;
+            Ok(result)
+        }
         pub fn path(&self) -> &Path {
             &self.receipt.path
         }
@@ -778,7 +873,26 @@ mod platform {
     }
 }
 #[cfg(target_os = "linux")]
-pub use platform::{NativeWorkspaceFileGuard, NativeWorkspaceFileOwner};
+pub use platform::{NativePinnedFileReader, NativeWorkspaceFileGuard, NativeWorkspaceFileOwner};
+#[cfg(not(target_os = "linux"))]
+pub struct NativePinnedFileReader {
+    _private: (),
+}
+#[cfg(not(target_os = "linux"))]
+impl NativePinnedFileReader {
+    pub fn recheck(&self) -> Result<(), EngineError> {
+        Err(failure("WORKSPACE_NATIVE_UNAVAILABLE"))
+    }
+    pub fn size(&self) -> u64 {
+        0
+    }
+    pub fn read_chunk(&mut self, _buffer: &mut [u8]) -> Result<usize, EngineError> {
+        Err(failure("WORKSPACE_NATIVE_UNAVAILABLE"))
+    }
+    pub fn finish(&self) -> Result<(), EngineError> {
+        Err(failure("WORKSPACE_NATIVE_UNAVAILABLE"))
+    }
+}
 #[cfg(not(target_os = "linux"))]
 pub struct NativeWorkspaceFileOwner {
     _private: (),
@@ -801,6 +915,12 @@ impl NativeWorkspaceFileOwner {
 }
 #[cfg(not(target_os = "linux"))]
 impl NativeWorkspaceFileGuard {
+    pub fn open_pinned_reader(
+        self,
+        _max_bytes: u64,
+    ) -> Result<NativePinnedFileReader, EngineError> {
+        Err(failure("WORKSPACE_NATIVE_UNAVAILABLE"))
+    }
     pub fn path(&self) -> &Path {
         &self.path
     }

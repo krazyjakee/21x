@@ -1,0 +1,341 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    214,
+    215,
+    217
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "85b5f0af53c37a56f4345596d681989129ae73fe",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/attachment-download-bindings.md": "5d3da9b0846889f00a2fc4f73de8d93d6526131de93d85286c0d96b37f20231f",
+      "docs/tauri-migration/implementation-status.md": "2681770d37f24e1d32f5569fe9fad6510e46e0a0caddde93e3312f9f11de1e72",
+      "scripts/production-contracts-proof.test.ts": "876335aaf91f684090fcfc8440c26e207cb0e0ce9f922a40a8b29d5e8fd1340b",
+      "scripts/production-contracts-proof.ts": "d6b8a55356a56e20d9d4142069fbcd5439ff1c2db9b15d84ecffd5f89f1781b1",
+      "src-tauri/engine/src/production.rs": "1ed2cd8c35b9b61e7d95b1d5009e23d5cc3dab3641623ee21bf44c1ac5259fc1",
+      "src-tauri/engine/src/production_attachment_files.rs": "2fcae2061aa2f53380fe5e89c39658b4c1d48d5701bb945e76cf77cb7d34293f",
+      "src-tauri/engine/src/production_contracts.rs": "3b09c0c8945e9ba8613c9b061347739a611bad80e15cf4bdaa380b14d3caa94b",
+      "src-tauri/engine/src/production_files.rs": "902a2d488ea5438431186f9dbc4f47bed42710c279090e0679c1dcb9bc82d860",
+      "src-tauri/src/native_attachment_download.rs": "50eddc74d62ec09adf8621b758f32f3e4722c8ff04f2b77e578c21f2299e9d96",
+      "src-tauri/src/production_host.rs": "d7d74f447ea161c3e7e460502dac1a8198c6c899ea679334de13735f6f3c6371",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "1717379f7e7d1c7a69ee202cb89fc2c7cb8363a72ed31dc5eaa0b54ef306e036",
+      "src/renderer/src/lib/native-desktop-host.ts": "bebe5dbd2a7911987bbb85eec444476878e32d087d6b404c51577f68b24605b1",
+      "src/renderer/src/lib/tauri-desktop-transport.test.ts": "86669745db2a34d47f83cbc08c1cc8c0e35cffba7b002a6c96cf636791480e2c",
+      "src/renderer/src/lib/tauri-desktop-transport.ts": "ac43770bb9204fb3cb1d49104229ec04b7dc846acc7e28dd6708f059f5e23da1",
+      "src/service/production-owner.ts": "508c56a11f3718c0cd3017abf40675f2055f21271f124df2e00f8eba34bf9916",
+      "src/service/production-service.test.ts": "998a5bedd0d0b007eae72810589887423d864e1453c07ba5a938a1ebefaea656",
+      "src/service/production-service.ts": "ef3b2d2f1e85b777a2a5fc65d97cadc4bde3246b4704cb0834d944091ecc7317",
+      "src/service/task-attachment-backend.test.ts": "58ee5899c6ccb24476b1bb2209fe7c0f773d4898638da31f17ca6b2cc5cb70ce",
+      "src/service/task-attachment-backend.ts": "67adad0576045ab07c038eeb459e6536adc2c562b3b4def3958b1ba6692b7c63",
+      "src/service/transport/installer-deadline.test.ts": "01a312914d4051619ce83e5ab774db2477b26675f2ea1358c8f8402fb44c042b",
+      "src/shared/attachment-native-callbacks.test.ts": "c56b3f7f0530691db636cfcd82548f21b8419604298b80e19107ad200c5080d0",
+      "src/shared/attachment-native-callbacks.ts": "44022ace0d68aa91ede089bdd13aba88b892e73805ca981e980594510d8ccdc7",
+      "src/shared/production-bootstrap.test.ts": "9e2b8105dda50fa8e70fcfb08788c2f5f7427cdc199b827c9b24b0f27eaa6bf4",
+      "src/shared/production-bootstrap.ts": "25e4767d595ff8d80ab51312c8c87d41424d20c14055e81101bc9799982daec3",
+      "src/shared/service-protocol.ts": "7f8a4a9c8b9b640e03252bcf17a3eb5097f7910d7af814e5ea51c4dfc3b56500",
+      "src/shared/task-attachment-codecs.test.ts": "aa3c476ed2eea9b8643aca279f64a1b886b11dd58b3d58342686652b84c20736",
+      "src/shared/task-attachment-codecs.ts": "08eb2a3a55cd2daa32ca5f62c875e2ff8c9f0502bfc7b0cb4d0aa67e1923c4e6"
+    },
+    "frozenInputs": 27,
+    "frozenSourcesUnchangedThroughFinalSuites": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Linux saved attachment downloads through the actual native Save dialog, current Source/document authority and no-replace descriptor-owned publication. Shipping application remains Electron.",
+  "bindings": {
+    "finiteServiceCommandContracts": 225,
+    "separateNativeServiceCommands": 3,
+    "facadeCommandBindings": 228,
+    "events": 30,
+    "newCommands": 1,
+    "newEvents": 0,
+    "publicOperation": "attachments:download",
+    "privateOperation": "engine.attachment.download",
+    "privateCallback": "host.attachment.download",
+    "privateSourceCheck": "engine.attachment.download.check",
+    "capability": "attachmentDownloads",
+    "fileByteCap": 67108864,
+    "copyChunkBytes": 262144,
+    "publicPrivateCallbackBudgetMs": 180000,
+    "nativeBudgetMs": 120000,
+    "sourceCheckBudgetMs": 30000
+  },
+  "implemented": [
+    "Public arguments are exact saved task/attachment IDs. Only native bootstrap ingress can stamp physical-document authority; public Source calls reject document injection and no destination or general file grant is accepted.",
+    "Open and Download have independent actual callback availability. Actual task/project/group/anchor/former/independent group-agent read grants and bounded scalar metadata permit active agents without lifecycle mutation, metadata writes or credential/full task getters.",
+    "Source retains its exact no-follow source FD through private native acknowledgement; native opens a readable version from its held kernel descriptor, captures size/mtime/ctime before the dialog and checks identity around bounded copy.",
+    "A private generated UUID refers to the original active beforeEffect scope. Native worker effects call the private Source check to reread bindings and permissions after the dialog and throughout copying. Forged, missing, cancelled and retired tickets refuse; GTK callbacks never block on RPC.",
+    "Linux GTK Save dialog uses the actual parent window and current physical document. Fixed text explains no-overwrite behavior; selection paths stay native. No application filesystem inspection runs in the GTK response; accepted dialogs and timer/signal captures remain owned until actual retirement.",
+    "Native holds destination ancestor/directory FDs, copies bounded chunks to an unnamed O_TMPFILE and publishes using its held FD with atomic no-replace linkat. Existing targets, links/FIFO and changed source/parent identities refuse. No cleanup unlinks user pathnames; late failures preserve accepted output.",
+    "Exact download/public/private/callback request budgets allow180s, native stops further effects at120s and GUI authority checks run every200ms. Timeout/cancellation does not release raw dialog/copy/FD work; profile/root drainage waits for actual ownership retirement.",
+    "Renderer hydration and replacement document checks fence download delivery. Accepted or uncertain effects are not replayed; dialog cancellation retains void semantics without claiming a save."
+  ],
+  "artifact": {
+    "buildIdentity": "production-b8448accace780d843ba31a404f990a2",
+    "resourceManifestSha256": "f11a589dfae1344b4e4b3637396c28c348d997e3f0ad6c8eb4bb34ce477f2a9a",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "packageAndRuntimePinsUnchanged": true,
+    "cargoVersionsAndChecksumsUnchanged": true,
+    "dependencyManifestsUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 225,
+    "actualTypeScriptRequests": 466,
+    "sha256": "2a42aa4e52a1cd77a8271e445ce9ae936dba79d653463cd2668437cccc9c92ef",
+    "nativeParity": "All466 actual TypeScript requests across225 service contracts accepted by actual native corpus test"
+  },
+  "tests": {
+    "app": {
+      "passed": 7010,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "52ac7e47331eeea3a441ee5b006c93c1a75e560179790899581e2ad21420269a",
+      "logSha256": "6b8e37b43346297477356bc453e3cf5e0342e0b8423989a938583b0b0faf4ce0"
+    },
+    "standalone": {
+      "passed": 3542,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "c2e29bd911fd3f4e5ea24d10cd473779732fcfb7ef4909f3c77a9535e53f58e4",
+      "logSha256": "bee9f0fead5b1a3bd283ae0ff89d2da9b3892da9f3d022e38d2c417a9435afec"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "77a98f482e7dc9b20423f28aed50a6aee16503e65d1dfd54aece801746414337",
+      "logSha256": "033d37475938749150361f91cfb84478bc71ef5470859ae0342f87645b1abd70"
+    },
+    "focused": {
+      "passed": 211,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "7036a0b78dc05ff0a48b8393c5b81b391d356e159df43200e6f243029902356d",
+      "logSha256": "5b583764c5b88a087262750e2749dc44869bafb0848f6f0efd520922ba38ca5a"
+    },
+    "corpus-export": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "52379b4f4bf0cb6afbe78c553054dbf04b821823bc7e14f75256c02971cd4268",
+      "logSha256": "18fbdf8ed0d496805ec4b4f4a3c04112290a829ab4b9ccb25ea876eec65815de"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 34.031,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.772,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 24.577,
+      "logSha256": "78446ae2c2d1d9648cd48bcad635c147fe28c7ebf86ba3aaae3ddbbac3c99a51"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 11.183,
+      "logSha256": "a57b1b2e2b2c848db98fbd46689d2f40d4cec2a0da4a270803cdf4434c858a19"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.709,
+      "logSha256": "8b9b59667f317e73f9ca09caff97d307dfec11ddbeb118d449d18060a106a2a7"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.326,
+      "logSha256": "c2339913171e1a08a9e2a75542186718af9d2a41c7c91a0945314e7339904b7d"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.321,
+      "logSha256": "1bb107581ca2043b7e23f6fab1e086c83ec5f1de6ff7bacce6fbd20f11dd74e8"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.366,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.66,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.119,
+      "logSha256": "3138ea9ec050e856104e22f776ecec7fc6587bef31396535fd85e8df37226b5b"
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.022,
+      "logSha256": "cd7973ba768a8320467fe4e5b3504b4841f31988e3024277b1e2534d357b38f6"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 5.827,
+      "logSha256": "a6d633021baebc323b0e4e117997d553b6e2e512c1de129213a58f385b9bb6da"
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch26-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.811,
+      "logSha256": "295e828887dfac12b68f931ba98841cfd0fefe979f035c294eaa365cc161d7ec"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.046,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "remainingAcceptance": [
+    "Installed graphical Save dialog, interactive downloads and OS integration have not been exercised; display-free real-FD and raw callback fixtures establish their stated scope.",
+    "Destination filesystems without O_TMPFILE support fail explicitly. Existing files are never overwritten. Non-Linux download authority, picking/import and embedded viewers remain separate work.",
+    "An already-entered kernel effect cannot be atomically revoked. A file published before late scope/namespace failure is preserved and may remain despite the reported error; no unsafe pathname rollback is attempted.",
+    "Remaining platform/backend/provider/profile/release/cutover and G0-G5 gates remain open. Hosted voice remains deferred by user decision.",
+    "Issues#202/#208/#214/#215/#217 remain open for complete acceptance."
+  ],
+  "validationCorrections": [
+    "Initial typecheck found a reassignment test using an unsupported updateTask project_id field and nullable project creation result. The corrected actual SQL fixture models reassignment without changing the production API.",
+    "Initial engine run had one concurrent test fixture directory collision when two nanosecond timestamps matched. A per-process atomic sequence removes the collision; final native suites passed.",
+    "Removed an unused native reexport and named the intentionally retained dialog lifetime field with an underscore. The lifetime channel still gates actual callback retirement; final native checks have no new warnings."
+  ]
+}

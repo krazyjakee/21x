@@ -6,6 +6,22 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The download continuation binds saved attachment IDs to a native Linux Save
+dialog and descriptor-owned file copying. Its independent private capability
+requires current document authority. Read-only task/group/agent scopes keep live
+agents running; the Source service retains its attachment FD and sends metadata
+only. Native copying checks the pinned source, destination directory and current
+document around effects, then publishes a new file without replacing an existing
+destination. Cancel retains the existing void result and claims no save.
+
+The finite surface has 225 service commands, three direct native commands and
+30 events. See [attachment download ownership](attachment-download-bindings.md).
+Installed GTK interaction, unsupported target filesystems, other platforms and
+complete migration gates remain open. Hosted voice remains deferred; Electron
+is still the shipping application.
+
+The preceding clipboard continuation retains its tested revision:
+
 The clipboard continuation adds document-bound native PNG reading for Linux.
 GTK target and content callbacks stay owned through their actual completion;
 empty and text clipboards return no images, while copied-file offers return a

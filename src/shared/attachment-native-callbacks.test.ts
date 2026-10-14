@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAttachmentPathReceipt, isPrivateAttachmentOpen, ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, type AttachmentPathReceipt } from './attachment-native-callbacks'
+import { isAttachmentPathReceipt, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck, ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, type AttachmentPathReceipt } from './attachment-native-callbacks'
 function receipt(): AttachmentPathReceipt {
   const attachmentRoot='/protected/attachments',taskId='task_fixture',attachmentId='61f07006-c85b-438e-83a7-497c77b0dcae',filename='報告.txt',taskPath=`${attachmentRoot}/${taskId}`,path=`${taskPath}/${attachmentId}-${filename}`
   return {version:1,taskId,attachmentId,filename,attachmentRoot,path,root:{path:attachmentRoot,dev:'1',ino:'100',kind:'directory',size:'4096',nlink:'2'},ancestors:[{path:taskPath,dev:'1',ino:'101',kind:'directory',size:'4096',nlink:'2'}],target:{path,dev:'1',ino:'102',kind:'file',size:String(64*1024*1024),nlink:'1'}}
@@ -21,13 +21,24 @@ describe('browser-pure exact attachment/native identities',()=>{
       {...receipt(),target:{...receipt().target,path:'/foreign/file'}}, {...receipt(),root:{...receipt().root,mtime:'private'}}
     ])expect(isAttachmentPathReceipt(value)).toBe(false)
   })
-  it('requires an exact current native document stamp outside the owner-produced receipt',()=>{
-    const callback=ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.open'],value=receipt()
-    expect(callback.validatePayload({receipt:value,leaseId:'document:one'})).toBe(true)
+  it.each([
+    ['host.attachment.open',isPrivateAttachmentOpen],
+    ['host.attachment.download',isPrivateAttachmentDownload]
+  ] as const)('requires an exact current native document stamp for %s outside the owner-produced receipt',(operation,privateCommand)=>{
+    const callback=ATTACHMENT_NATIVE_CALLBACK_SCHEMAS[operation],value=receipt()
+    expect(callback.validatePayload({receipt:value,leaseId:'document:one',...(operation==='host.attachment.download'?{authorizationId:'00000000-0000-4000-8000-000000000001'}:{})})).toBe(true)
     expect(callback.validateResult({})).toBe(true)
-    for(const payload of [{receipt:value},{receipt:value,leaseId:'forged whitespace'},{receipt:value,leaseId:'document:one',authority:'*'},{receipt:{...value,leaseId:'document:one'},leaseId:'document:one'}])expect(callback.validatePayload(payload)).toBe(false)
+    for(const payload of [{receipt:value},{receipt:value,leaseId:'forged whitespace'},{receipt:value,leaseId:'document:one',authority:'*'},{receipt:value,leaseId:'document:one',destination:'/foreign'},{receipt:{...value,leaseId:'document:one'},leaseId:'document:one'}])expect(callback.validatePayload(payload)).toBe(false)
     expect(callback.validateResult({success:true})).toBe(false);expect(callback.validateResult(undefined)).toBe(false)
-    expect(isPrivateAttachmentOpen({taskId:value.taskId,attachmentId:value.attachmentId,leaseId:'document:one'})).toBe(true)
-    for(const payload of [{taskId:value.taskId,attachmentId:value.attachmentId},{taskId:value.taskId,attachmentId:value.attachmentId,leaseId:'document:one',path:value.path},{taskId:'../foreign',attachmentId:value.attachmentId,leaseId:'document:one'}])expect(isPrivateAttachmentOpen(payload)).toBe(false)
+    expect(privateCommand({taskId:value.taskId,attachmentId:value.attachmentId,leaseId:'document:one'})).toBe(true)
+    for(const payload of [{taskId:value.taskId,attachmentId:value.attachmentId},{taskId:value.taskId,attachmentId:value.attachmentId,leaseId:'document:one',path:value.path},{taskId:'../foreign',attachmentId:value.attachmentId,leaseId:'document:one'},{taskId:value.taskId,attachmentId:value.attachmentId,leaseId:'document:one',destination:'/foreign'}])expect(privateCommand(payload)).toBe(false)
+  })
+  it('requires an exact independent download authorization ticket and rejects retired/open payload shapes',()=>{
+    const id='00000000-0000-4000-8000-000000000001',callback=ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.download']
+    expect(isPrivateAttachmentDownloadCheck({authorizationId:id})).toBe(true)
+    expect(callback.validatePayload({receipt:receipt(),leaseId:'document:one',authorizationId:id})).toBe(true)
+    for(const value of [{},{authorizationId:'document:one'},{authorizationId:id,leaseId:'document:one'},{authorizationId:id,receipt:receipt()},{authorizationId:'00000000-0000-0000-8000-000000000001'}])expect(isPrivateAttachmentDownloadCheck(value)).toBe(false)
+    for(const authorizationId of [undefined,null,'document:one','../file'])expect(callback.validatePayload({receipt:receipt(),leaseId:'document:one',authorizationId})).toBe(false)
+    expect(ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.open'].validatePayload({receipt:receipt(),leaseId:'document:one',authorizationId:id})).toBe(false)
   })
 })

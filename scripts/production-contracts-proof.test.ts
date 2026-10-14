@@ -12,10 +12,10 @@ import { MOBILE_EVENTS, MOBILE_EVENT_CODECS } from '../src/shared/mobile-codecs'
 import { sanitizeChatImageName, base64ByteLength } from '../src/shared/chat-images'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 224 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 225 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(224)
+    expect(corpus.operations).toHaveLength(225)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -71,7 +71,7 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     expect(() => PROOF_COMMAND_CODECS['cliMcp:setToolEnabled'].encodeArguments([{ cli: 'codex', name: 'fixture', tool: '🌱'.repeat(64) + 'x', enabled: true }])).toThrow()
   })
   it('covers plain-base64 image totals and raw name compatibility with exact metadata and undefined removal', () => {
-    const corpus = createProductionRequestCorpus(), rows = corpus.requests.filter(row => row.case.startsWith('attachment-') && row.operation !== 'attachments:open')
+    const corpus = createProductionRequestCorpus(), rows = corpus.requests.filter(row => row.case.startsWith('attachment-') && row.operation !== 'attachments:open' && row.operation !== 'attachments:download')
     expect(rows.map(row => row.case)).toEqual(['attachment-single-512k-plain-base64', 'attachment-five-total-512k', 'attachment-raw-name-sanitization', 'attachment-empty-images', 'attachment-uppercase-version-five-uuid'])
     const save = PROOF_COMMAND_CODECS['chatImages:saveToTask'], remove = PROOF_COMMAND_CODECS['attachments:remove']
     for (const row of rows) expect(Buffer.byteLength(JSON.stringify({ protocolVersion: 1, kind: 'request', id: 'fixture', engineEpoch: 'engine-fixture', operation: row.operation, payload: row.payload }))).toBeLessThan(900000)
@@ -95,9 +95,9 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     expect(remove.encodeResult(undefined)).toEqual({ defined: false }); expect(remove.decodeResult(undefined)).toBeUndefined()
     for (const value of [{ defined: true, value: true }, { defined: false, value: null }]) expect(remove.validateWireResult(value)).toBe(false)
   })
-  it('covers exact ID-only attachment opening without public path or document grants', () => {
-    const corpus = createProductionRequestCorpus(), open = PROOF_COMMAND_CODECS['attachments:open']
-    const row = corpus.requests.find(row => row.case === 'attachment-open-uppercase-version-five-uuid')!
+  it.each(['open', 'download'] as const)('covers exact ID-only attachment %s without public path or document grants', method => {
+    const corpus = createProductionRequestCorpus(), open = PROOF_COMMAND_CODECS[`attachments:${method}`]
+    const row = corpus.requests.find(row => row.case === `attachment-${method}-uppercase-version-five-uuid`)!
     expect(open.decodeArguments(row.payload)).toEqual(['t'.repeat(128), 'ABCDEFAB-CDEF-5ABC-ABCD-ABCDEFABCDEF'])
     const payload = { taskId: 'task_fixture', attachmentId: '00000000-0000-4000-8000-000000000001' }
     for (const field of ['path', 'filename', 'attachmentRoot', 'receipt', 'leaseId', 'uiLeaseId', 'caller']) expect(() => open.decodeArguments({ ...payload, [field]: 'forged' })).toThrow()
@@ -255,6 +255,6 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(224)
+    expect(corpus.operations).toHaveLength(225)
   })
 })

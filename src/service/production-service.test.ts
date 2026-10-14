@@ -1,4 +1,4 @@
-import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isPrivateAttachmentOpen } from '../shared/attachment-native-callbacks'
+import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck } from '../shared/attachment-native-callbacks'
 import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
 import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { UI_NATIVE_CALLBACK_SCHEMAS, isPrivateUiPublication, isPrivateAgentInstallation } from '../shared/ui-native-callbacks'
@@ -43,11 +43,12 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false) {
   let uiLease: string | null = 'document_fixture_1'
   let uiAcknowledgement: Promise<void> | null = null
   let attachmentAcknowledgement: Promise<void> | null = null
   const attachmentReceipts: JsonValue[] = []
+  const attachmentAuthorizations: string[] = []
   let grantWrites = true
   const acceptedUi: JsonValue[] = [], installationProgress: JsonValue[] = []
   const root = mkdtempSync(join(tmpdir(), '21x-private-production-')); roots.push(root)
@@ -55,6 +56,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   if (ui) launch.capabilities.ui = 'host'
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
+  if (attachmentDownloading) launch.capabilities.attachmentDownloads = 'host'
   const selectedNode = process.env.TAURI_NODE_RUNTIME ?? join(process.cwd(), 'src-tauri', 'resources', 'node', process.platform === 'win32' ? 'node.exe' : 'node')
   const fixtureNpm = join(root, 'npm-cli.js')
   if (installation) writeFileSync(fixtureNpm, `const fs=require('node:fs'),p=require('node:path');const prefix=process.argv[process.argv.indexOf('--prefix')+1];const pkg=p.join(prefix,'lib','node_modules','opencode-ai');fs.mkdirSync(pkg,{recursive:true});fs.mkdirSync(p.join(prefix,'bin'),{recursive:true});fs.writeFileSync(p.join(pkg,'package.json'),JSON.stringify({name:'opencode-ai',version:'1.0.0',bin:{opencode:'index.js'}}));fs.writeFileSync(p.join(pkg,'index.js'), '#!'+process.execPath+${JSON.stringify("\nconsole.log('1.0.0')\n")});fs.chmodSync(p.join(pkg,'index.js'),0o700);fs.symlinkSync(p.join(pkg,'index.js'),p.join(prefix,'bin','opencode'));`)
@@ -102,11 +104,23 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     await fileAcknowledgement; return {}
   } }
   schemas['engine.attachment.open'] = { validatePayload: isPrivateAttachmentOpen, validateResult: TASK_ATTACHMENT_CODECS['attachments:open'].validateWireResult }
+  schemas['engine.attachment.download'] = { validatePayload: isPrivateAttachmentDownload, validateResult: TASK_ATTACHMENT_CODECS['attachments:download'].validateWireResult }
+  schemas['engine.attachment.download.check'] = { validatePayload: isPrivateAttachmentDownloadCheck, validateResult: value => isRecord(value) && hasExactKeys(value,['authorized']) && value.authorized===true }
   if (attachmentOpening) schemas['host.attachment.open'] = { ...ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.open'], handle: async payload => {
     if (!isRecord(payload) || !uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
     attachmentReceipts.push(structuredClone(payload.receipt))
     await attachmentAcknowledgement
     if (!uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    return {}
+  } }
+  if (attachmentDownloading) schemas['host.attachment.download'] = { ...ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.download'], handle: async payload => {
+    if (!isRecord(payload) || !uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    attachmentReceipts.push(structuredClone(payload.receipt))
+    if (typeof payload.authorizationId !== 'string') throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    attachmentAuthorizations.push(payload.authorizationId)
+    await attachmentAcknowledgement
+    if (!uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    await host.request('engine.attachment.download.check', {authorizationId:payload.authorizationId})
     return {}
   } }
   schemas['engine.agent.install'] = { validatePayload: isPrivateAgentInstallation, validateResult: AGENT_INSTALLER_CODECS['agent-installer:install'].validateWireResult }
@@ -139,6 +153,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, emit: callbacks.emitOwnerEvent,
         ...(ui ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         ...(attachmentOpening ? { openAttachment: callbacks.openAttachment } : {}),
+        ...(attachmentDownloading ? { downloadAttachment: callbacks.downloadAttachment } : {}),
         openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } })
   }), { write: async bytes => { deliver(host, bytes) } }); services.push(service)
   const initialize = async (): Promise<void> => {
@@ -147,7 +162,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     await host.request('engine.initialize', { protocolVersion: 1, launchId: launch.launchId })
   }
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
-    attachmentReceipts, denyWrites: () => { grantWrites = false }, holdAttachmentAcknowledgement: (raw: Promise<void>) => { attachmentAcknowledgement = raw },
+    attachmentReceipts, attachmentAuthorizations, denyWrites: () => { grantWrites = false }, holdAttachmentAcknowledgement: (raw: Promise<void>) => { attachmentAcknowledgement = raw },
     installationProgress, acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
     fileReceipts, holdFileAcknowledgement: (raw: Promise<void>) => { fileAcknowledgement = raw },
     holdPreparation: (raw: Promise<void>) => { preparation = raw } }
@@ -384,8 +399,8 @@ function savedAttachment(f: ReturnType<typeof fixture>, bytes = 2 * 1024 * 1024)
   services.db.updateTask(task.id, { attachments: [attachment] })
   return { services, task, attachment, path }
 }
-it('opens real saved attachment metadata through the private document ingress while its task agent is active under read grants', async () => {
-  const f = fixture(false, true, false, true); await f.initialize()
+it.each(['open', 'download'] as const)('uses %s for real saved attachment metadata through private document ingress while its task agent is active under read grants', async method => {
+  const f = fixture(false, true, false, method === 'open', method === 'download'); await f.initialize()
   const { services, task, attachment, path } = savedAttachment(f)
   const agent = services.db.getAgents()[0]; services.db.updateAgent(agent.id, { config: { coding_agent: 'pi' } }); services.db.updateTask(task.id, { agent_id: agent.id })
   await f.host.request('agentSession:start', { agentId: agent.id, taskId: task.id })
@@ -395,14 +410,18 @@ it('opens real saved attachment metadata through the private document ingress wh
   vi.spyOn(services.db, 'getTask').mockImplementation(id => { getterTraces.push(new Error().stack!); return actualTask(id) })
   vi.spyOn(services.db, 'getAgent').mockImplementation(id => { getterTraces.push(new Error().stack!); return actualAgent(id) })
   const nativeGate = deferred(); release.push(nativeGate.finish); f.holdAttachmentAcknowledgement(nativeGate.promise)
-  await expect(f.host.request('attachments:open', { taskId: task.id, attachmentId: attachment.id })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
-  await expect(f.host.request('engine.attachment.open', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1', path: '/foreign' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
-  const opening = f.host.request('engine.attachment.open', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' })
+  await expect(f.host.request(`attachments:${method}`, { taskId: task.id, attachmentId: attachment.id })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  await expect(f.host.request(`engine.attachment.${method}`, { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1', path: '/foreign' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  const opening = f.host.request(`engine.attachment.${method}`, { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' })
   await vi.waitFor(() => expect(f.attachmentReceipts).toHaveLength(1))
   // A real live agent continues to poll while the native file callback owns
   // its descriptor. Those application-owned reads have separate authority.
   await vi.waitFor(() => expect(getterTraces.some(trace => trace.includes('agent-manager-core.ts'))).toBe(true), { timeout: 5000 })
   nativeGate.finish(); await expect(opening).resolves.toEqual({ defined: false })
+  if (method === 'download') {
+    expect(f.attachmentAuthorizations).toHaveLength(1)
+    await expect(f.host.request('engine.attachment.download.check', { authorizationId: f.attachmentAuthorizations[0] })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  }
   expect(getterTraces.filter(trace => /task-attachment|task-workspace-scope|getTaskAttachmentBindingLease/.test(trace))).toEqual([])
   expect(getterTraces.every(trace => trace.includes('agent-manager-core.ts'))).toBe(true)
   expect(f.attachmentReceipts).toEqual([expect.objectContaining({ attachmentRoot: f.launch.paths.attachmentRoot, path, taskId: task.id, attachmentId: attachment.id, filename: attachment.filename, target: expect.objectContaining({ size: String(attachment.size), nlink: '1', kind: 'file' }) })])
@@ -411,10 +430,10 @@ it('opens real saved attachment metadata through the private document ingress wh
   expect(services.db.db.prepare('SELECT attachments FROM tasks WHERE id=?').get(task.id)).toEqual({ attachments: JSON.stringify([attachment]) })
   expect(f.adapter.abortPrompt).not.toHaveBeenCalled(); expect(f.adapter.destroySession).not.toHaveBeenCalled()
 }, 15000)
-it('retains the exact attachment callback and FD after cancel, refusing namespace deletion and profile release until acknowledgement', async () => {
-  const f = fixture(false, true, false, true); await f.initialize()
+it.each(['open', 'download'] as const)('retains the exact %s callback and FD after cancel, refusing namespace deletion and profile release until acknowledgement', async method => {
+  const f = fixture(false, true, false, method === 'open', method === 'download'); await f.initialize()
   const { services, task, attachment, path } = savedAttachment(f, 12), gate = deferred(); release.push(gate.finish); f.holdAttachmentAcknowledgement(gate.promise)
-  const abort = new AbortController(), work = f.host.request('engine.attachment.open', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' }, { signal: abort.signal })
+  const abort = new AbortController(), work = f.host.request(`engine.attachment.${method}`, { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' }, { signal: abort.signal })
   const failed = expect(work).rejects.toMatchObject({ code: 'CANCELLED' })
   await vi.waitFor(() => expect(f.attachmentReceipts).toHaveLength(1))
   expect(services.taskAttachmentFiles.inflightCount).toBeGreaterThan(0)
@@ -426,9 +445,27 @@ it('retains the exact attachment callback and FD after cancel, refusing namespac
   gate.finish(); await f.service.close()
   expect(services.db.db.open).toBe(false); expect(f.attachmentReceipts).toHaveLength(1); expect(existsSync(path)).toBe(true)
 }, 15000)
-it('refuses native attachment effects when the captured launch does not advertise the callback', async () => {
+it.each(['open', 'download'] as const)('refuses native attachment %s when the captured launch does not advertise the callback', async method => {
   const f = fixture(false, true); await f.initialize()
   const { task, attachment, path } = savedAttachment(f, 12)
-  await expect(f.host.request('engine.attachment.open', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+  await expect(f.host.request(`engine.attachment.${method}`, { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
   expect(f.attachmentReceipts).toEqual([]); expect(existsSync(path)).toBe(true)
+}, 15000)
+
+it('rechecks live Source download scope after the dialog wait and retires authorization tickets without changing files', async () => {
+  const f = fixture(false, true, false, false, true); await f.initialize()
+  const { services, task, attachment, path } = savedAttachment(f, 12), gate = deferred(); release.push(gate.finish); f.holdAttachmentAcknowledgement(gate.promise)
+  const work = f.host.request('engine.attachment.download', { taskId: task.id, attachmentId: attachment.id, leaseId: 'document_fixture_1' }), failure = expect(work).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  await vi.waitFor(() => expect(f.attachmentAuthorizations).toHaveLength(1))
+  const authorizationId = f.attachmentAuthorizations[0]
+  expect(await f.host.request('engine.attachment.download.check', { authorizationId })).toEqual({ authorized: true })
+  await expect(f.host.request('engine.attachment.download.check', { authorizationId: '00000000-0000-4000-8000-000000000001' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  const reassigned = services.db.createProject({ name: 'Reassigned while choosing a destination' })!
+  services.db.db.prepare('UPDATE tasks SET project_id=? WHERE id=?').run(reassigned.id, task.id)
+  await expect(f.host.request('engine.attachment.download.check', { authorizationId })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  expect(services.taskAttachmentFiles.inflightCount).toBeGreaterThan(0)
+  gate.finish(); await failure
+  await vi.waitFor(() => expect(services.taskAttachmentFiles.inflightCount).toBe(0))
+  await expect(f.host.request('engine.attachment.download.check', { authorizationId })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  expect(readFileSync(path).length).toBe(attachment.size); expect(f.attachmentReceipts).toHaveLength(1)
 }, 15000)

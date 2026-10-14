@@ -1,4 +1,5 @@
-import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isAttachmentPathReceipt, isPrivateAttachmentOpen, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
+import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isAttachmentPathReceipt, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
+import { randomUUID } from 'node:crypto'
 import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
 import type { DesktopEventMap } from '../shared/desktop-operations'
 import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
@@ -19,6 +20,7 @@ import { ServicePeer, type OperationSchema } from './transport/peer'
 
 export interface ProductionPrivateCallbacks {
   openAttachment(receipt: AttachmentPathReceipt, leaseId: string): Promise<void>
+  downloadAttachment(receipt: AttachmentPathReceipt, leaseId: string, beforeEffect: () => void): Promise<void>
   ui: ProductionUiNativeHost
   emitInstallationProgress(progress: DesktopEventMap['agent-installer:progress'], leaseId: string): Promise<void>
   prepare(signal: AbortSignal): Promise<void>
@@ -63,6 +65,7 @@ export class ProductionService {
   private closeFlight: Promise<void> | null = null
   private initialization: Promise<void> | null = null
   private readonly domainFlights = new Set<Promise<unknown>>()
+  private readonly downloadAuthorizations = new Map<string, () => void>()
   private sequence = 0
   private readonly caller: DesktopCallerContext
 
@@ -74,6 +77,18 @@ export class ProductionService {
     if (!sealed.has(host)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const construction = host.construction, descriptor = construction.descriptor
     const callbacks: ProductionPrivateCallbacks = {
+      downloadAttachment: async (receipt, leaseId, beforeEffect) => {
+        if (descriptor.capabilities.attachmentDownloads !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
+        if (!isAttachmentPathReceipt(receipt)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+        if (typeof beforeEffect !== 'function') throw new ServiceProtocolError('INVALID_ARGUMENTS')
+        if (this.downloadAuthorizations.size >= 16) throw new ServiceProtocolError('BACKPRESSURE')
+        beforeEffect(); const authorizationId = randomUUID()
+        this.downloadAuthorizations.set(authorizationId, beforeEffect)
+        try {
+          const result = await this.retain(this.peer.request('host.attachment.download', { receipt: structuredClone(receipt) as unknown as JsonValue, leaseId, authorizationId }))
+          if (!isRecord(result) || !hasExactKeys(result, [])) throw new ServiceProtocolError('INVALID_RESULT')
+        } finally { this.downloadAuthorizations.delete(authorizationId) }
+      },
       openAttachment: async (receipt, leaseId) => {
         if (descriptor.capabilities.attachmentFiles !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
         if (!isAttachmentPathReceipt(receipt)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -147,6 +162,7 @@ export class ProductionService {
     const nativeUi = bootstrap.native.ui
     if (descriptor.capabilities.ui === 'host' ? !nativeUi || typeof nativeUi.snapshot !== 'function' || typeof nativeUi.send !== 'function' : nativeUi !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (descriptor.capabilities.attachmentFiles === 'host' ? typeof bootstrap.native.openAttachment !== 'function' || descriptor.capabilities.ui !== 'host' : bootstrap.native.openAttachment !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    if (descriptor.capabilities.attachmentDownloads === 'host' ? typeof bootstrap.native.downloadAttachment !== 'function' || descriptor.capabilities.ui !== 'host' : bootstrap.native.downloadAttachment !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     this.owner = new ProductionOwner(bootstrap, construction.boundaries)
     this.caller = { ...construction.caller, engineEpoch: this.owner.snapshot().epoch }
     const result = { protocolVersion: SERVICE_PROTOCOL_VERSION, engineEpoch: this.caller.engineEpoch, nodeVersion: process.version }
@@ -183,6 +199,21 @@ export class ProductionService {
       handle: (payload, signal) => {
         if (!this.initialized || this.closing || !this.bindings || !isRecord(payload) || typeof payload.leaseId !== 'string') throw new ServiceProtocolError('DISCONNECTED')
         return this.retain(this.bindings.invoke('attachments:open', { taskId: payload.taskId, attachmentId: payload.attachmentId }, { ...this.caller, uiLeaseId: payload.leaseId }, signal))
+      } }
+    operations['attachments:download'].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
+    operations['engine.attachment.download'] = { validatePayload: isPrivateAttachmentDownload,
+      validateResult: TASK_ATTACHMENT_CODECS['attachments:download'].validateWireResult,
+      handle: (payload, signal) => {
+        if (!this.initialized || this.closing || !this.bindings || !isRecord(payload) || typeof payload.leaseId !== 'string') throw new ServiceProtocolError('DISCONNECTED')
+        return this.retain(this.bindings.invoke('attachments:download', { taskId: payload.taskId, attachmentId: payload.attachmentId }, { ...this.caller, uiLeaseId: payload.leaseId }, signal))
+      } }
+    operations['engine.attachment.download.check'] = { validatePayload: isPrivateAttachmentDownloadCheck,
+      validateResult: value => isRecord(value) && hasExactKeys(value, ['authorized']) && value.authorized === true,
+      handle: payload => {
+        if (!this.initialized || this.closing || !isPrivateAttachmentDownloadCheck(payload)) throw new ServiceProtocolError('DISCONNECTED')
+        const current = this.downloadAuthorizations.get(payload.authorizationId)
+        if (!current) throw new ServiceProtocolError('INVALID_REQUEST')
+        current(); return { authorized: true }
       } }
     operations['engine.ping'] = { validatePayload: empty, validateResult: isBootstrapResult, handle: () => { this.pinged = true; return result } }
     operations['engine.initialize'] = { validatePayload: isProductionInitialize, validateResult: isBootstrapResult, handle: async (payload, signal) => {
@@ -228,7 +259,8 @@ export class ProductionService {
     if (descriptor.capabilities.workspaceFiles === 'host') for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.notifications === 'host') operations['host.notification.show'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.notification.show'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.notification.show'].validateResult }
     if (descriptor.capabilities.ui === 'host') for (const [operation, schema] of Object.entries(UI_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
-    if (descriptor.capabilities.attachmentFiles === 'host') for (const [operation, schema] of Object.entries(ATTACHMENT_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
+    if (descriptor.capabilities.attachmentFiles === 'host') operations['host.attachment.open'] = ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.open']
+    if (descriptor.capabilities.attachmentDownloads === 'host') operations['host.attachment.download'] = ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.download']
     this.peer = new ServicePeer({ role: 'service', engineEpoch: this.caller.engineEpoch, operations,
       eventSchemas: Object.fromEntries(Object.keys(PRODUCTION_EVENT_CODECS).map(operation => [operation, (value: unknown) => validateProductionEventWire(operation, value)])),
       write: transport.write, onDisconnect: error => {
@@ -338,6 +370,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, openExternal: callbacks.openExternal,
         ...(descriptor.capabilities.workspaceFiles === 'host' ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}),
         ...(descriptor.capabilities.attachmentFiles === 'host' ? { openAttachment: callbacks.openAttachment } : {}),
+        ...(descriptor.capabilities.attachmentDownloads === 'host' ? { downloadAttachment: callbacks.downloadAttachment } : {}),
         // Browser opening alone does not register or own OAuth deep-link callbacks.
         oauthBrowser: 'unavailable',
         ...(descriptor.capabilities.ui === 'host' ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
