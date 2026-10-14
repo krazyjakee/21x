@@ -2346,7 +2346,7 @@
     {
       "caller": "trusted-desktop-main",
       "deadline": "30000ms default; cancellation advisory; no automatic mutation replay",
-      "destination": "native-host",
+      "destination": "service",
       "disposition": "retained",
       "input": {
         "convention": "legacy-preload-api-arguments; explicit codec required for IPC transformations",
@@ -2372,7 +2372,7 @@
       "kind": "command",
       "name": "app:getMinimizeToTray",
       "nativeCallback": false,
-      "owner": "native-host",
+      "owner": "service",
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
@@ -2618,7 +2618,7 @@
     {
       "caller": "trusted-desktop-main",
       "deadline": "30000ms default; cancellation advisory; no automatic mutation replay",
-      "destination": "native-host",
+      "destination": "service",
       "disposition": "retained",
       "input": {
         "convention": "legacy-preload-api-arguments; explicit codec required for IPC transformations",
@@ -2646,7 +2646,7 @@
       "kind": "command",
       "name": "app:setMinimizeToTray",
       "nativeCallback": false,
-      "owner": "native-host",
+      "owner": "service",
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {

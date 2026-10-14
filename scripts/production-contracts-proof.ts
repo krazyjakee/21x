@@ -1,4 +1,5 @@
 import { UI_DESKTOP_CODECS } from '../src/shared/ui-desktop-codecs'
+import { TRAY_PREFERENCE_CODECS } from '../src/shared/tray-preference-codecs'
 import { CLI_MCP_CODECS } from '../src/shared/cli-mcp-codecs'
 import { TASK_ATTACHMENT_CODECS } from '../src/shared/task-attachment-codecs'
 import { HEARTBEAT_CODECS } from '../src/shared/heartbeat-codecs'
@@ -31,7 +32,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 
 // Preserve the production binding's override order; older diagnostic task,
 // settings and agent CRUD schemas must not supply these proof payloads.
-export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
+export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS, ...TRAY_PREFERENCE_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
   ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
@@ -44,6 +45,7 @@ const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }
 
 /** One explicit valid API argument tuple for every finite production command. */
 export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
+  'app:getMinimizeToTray': [], 'app:setMinimizeToTray': [true],
   'ui:publishState': [{ view: 'commander', projectId: project, modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } }],
   'cliMcp:snapshot': [], 'cliMcp:upsert': [{ name: 'fixture', targets: ['codex'], definition: { transport: 'stdio', command: 'fixture-mcp', args: [], env: {} } }],
   'cliMcp:remove': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64) }], 'cliMcp:setEnabled': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64), enabled: true }],
@@ -140,6 +142,7 @@ const cliBoundaryArgs = Array.from({ length: 128 }, (_, i) => i === 127 ? '🌱'
 const cliBoundaryEnvironment = Object.fromEntries(Array.from({ length: 128 }, (_, i) => [`FIXTURE_${i}`, i === 127 ? '🌱'.repeat(8192) : '${FIXTURE_SOURCE}']))
 const cliBoundaryHeaders = Object.fromEntries(Array.from({ length: 128 }, (_, i) => [`X-Fixture-${i}`, i === 127 ? '🌱'.repeat(8192) : 'fixture']))
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  { operation: 'app:setMinimizeToTray', case: 'tray-disabled-preference', args: [false] },
   { operation: 'ui:publishState', case: 'ui-full-finite-state', args: [{ view: 'canvas', projectId: project, modal: 'edit', selectedTaskId: task, selectedTaskTitle: 'Local🌱state', dashboardPreviewTaskId: task, captainOpen: true, settingsTab: 'voice', waitingForYou: true, visibleTaskIds: [task], canvas: { viewport: { x: -10000000, y: 10000000, zoom: 3 }, panels: [{ panelId: 'panel:fixture', type: 'task', taskId: task, title: 'Local🌱panel', x: 10000000, y: -10000000, width: 1000000, height: 1 }] } }] },
 
   { operation: 'cliMcp:upsert', case: 'cli-ecma-nonwhitespace-name-command', args: [{ name: '\u0085', targets: ['claude-code'], definition: { transport: 'stdio', command: '\u0085' } }] },
@@ -282,7 +285,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 226 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 228 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

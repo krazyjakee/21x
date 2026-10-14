@@ -12,6 +12,8 @@ mod project_groups;
 mod workspace_runtime;
 
 pub const COMMANDS: &[&str] = &[
+    "app:getMinimizeToTray",
+    "app:setMinimizeToTray",
     "ui:publishState",
     "cliMcp:snapshot",
     "cliMcp:upsert",
@@ -3238,6 +3240,9 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if crate::production_tray_contracts::COMMANDS.contains(&operation) {
+        return crate::production_tray_contracts::request(operation, value);
+    }
     if matches!(operation, "attachments:open" | "attachments:download") {
         return crate::production_attachment_files::request(value);
     }
@@ -3388,6 +3393,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if crate::production_tray_contracts::COMMANDS.contains(&operation) {
+        return crate::production_tray_contracts::result(value);
+    }
     if matches!(operation, "attachments:open" | "attachments:download") {
         return crate::production_ui_contracts::void_result(value);
     }
@@ -5087,7 +5095,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 226);
+        assert_eq!(COMMANDS.len(), 228);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

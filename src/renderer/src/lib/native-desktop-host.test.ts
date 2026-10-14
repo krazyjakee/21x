@@ -283,7 +283,20 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 232 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('hydrates the tray preference as a read but fences mutations and requires the captured native document', async () => {
+  const f = fixture(true); releases.push(installDesktopHost(f.host))
+  f.results.set('app:getMinimizeToTray', true); f.results.set('app:setMinimizeToTray', false)
+  f.host.setRehydrator(async () => {
+    expect(await desktopApi.app.getMinimizeToTray()).toBe(true)
+    await expect(desktopApi.app.setMinimizeToTray(false)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  })
+  await f.host.reconnect()
+  expect(await desktopApi.app.setMinimizeToTray(false)).toBe(false)
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'app:setMinimizeToTray', payload: { enabled: false }, engineEpoch: 'engine-1', uiLease: 'document-1' })
+  f.results.set('app:getMinimizeToTray', { enabled: true, action: 'hide' })
+  await expect(desktopApi.app.getMinimizeToTray()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
+it('binds the 234 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -292,7 +305,7 @@ it('binds the 232 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(232)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(234)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)

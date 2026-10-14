@@ -1,4 +1,6 @@
 import { UiStateBackend } from './ui-state-backend'
+import { TrayPreferenceBackend } from './tray-preference-backend'
+import { TRAY_PREFERENCE_CODECS } from '../shared/tray-preference-codecs'
 import { UI_DESKTOP_CODECS, UI_DESKTOP_EVENT_CODECS } from '../shared/ui-desktop-codecs'
 import { CliMcpBackend } from './cli-mcp-backend'
 import { TaskAttachmentBackend } from './task-attachment-backend'
@@ -92,7 +94,7 @@ export interface ProductionDesktopBindingOptions {
 }
 
 /** Source codecs are separate from native grants; each domain has actual scope. */
-export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
+export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS, ...TRAY_PREFERENCE_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
   ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
@@ -140,6 +142,7 @@ export class ProductionDesktopBindings {
   private readonly heartbeat: HeartbeatBackend
   private readonly cliMcp: CliMcpBackend
   private readonly ui: UiStateBackend | null
+  private readonly tray: TrayPreferenceBackend
   private readonly taskAttachments: TaskAttachmentBackend
   private readonly worktreeRuntime: WorktreeRuntimeBackend
   private readonly epoch: string
@@ -157,6 +160,8 @@ export class ProductionDesktopBindings {
       const check = Reflect.get(authority, key)
       return typeof check === 'function' && Reflect.apply(check, authority, args)
     }])) as Authority
+    this.tray = new TrayPreferenceBackend({ ...owner.getTrayBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageGlobalConfiguration: dynamicAuthority.canManageGlobalConfiguration })
     this.database = new DatabaseBackend({ engineEpoch: this.epoch, ...lease, database: services.db,
       assertOwnerAvailable: available, isTrustedDesktop: dynamicAuthority.isTrustedDesktop,
       canAccessProject: (id, caller, access = 'read') => authority.canAccessProject(id, caller, access),
@@ -310,15 +315,19 @@ export class ProductionDesktopBindings {
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canPublishUi: dynamicAuthority.isTrustedDesktop,
       canAccessProject: dynamicAuthority.canAccessProject, canAccessTask: dynamicAuthority.canAccessTask, canAccessAgent: dynamicAuthority.canAccessAgent }) : null
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.ui?.shutdown(); this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
+      this.closed = true; this.tray.shutdown(); this.ui?.shutdown(); this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
       void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close(), this.sessionContext.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close(), this.ui?.close()]).then(() => undefined))
+    }, () => Promise.all([this.tray.close(), this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close(), this.ui?.close()]).then(() => undefined))
   }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
     return owner.run(services => new ProductionDesktopBindings(owner, services, options))
   }
 
+  readTrayPreference(): Promise<boolean> {
+    if (this.closed) throw new ServiceProtocolError('DISCONNECTED')
+    return this.owner.run(() => this.tray.getPreference())
+  }
   hasOwnerEvent(operation: string): boolean { return Object.hasOwn(PRODUCTION_EVENT_CODECS, operation) }
   /** Raw owner events never bypass exact codecs or durable transcript projection. */
   encodeOwnerEvent(operation: string, payload: unknown): JsonValue {
@@ -395,7 +404,7 @@ export class ProductionDesktopBindings {
 
   /** Caller context is selected by trusted native ingress, never payload fields. */
   operationSchemas(caller: DesktopCallerContext): Record<string, OperationSchema> {
-    const schemas = { ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
+    const schemas = { ...this.tray.operationSchemas(caller), ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.agents.operationSchemas(caller),
       ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
       ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller), ...this.mcp.operationSchemas(caller), ...this.sources.operationSchemas(caller),
       ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller), ...this.heartbeat.operationSchemas(caller), ...this.worktreeRuntime.operationSchemas(caller), ...this.cliMcp.operationSchemas(caller), ...this.taskAttachments.operationSchemas(caller), ...this.ui?.operationSchemas(caller) }
@@ -413,6 +422,7 @@ export class ProductionDesktopBindings {
       signal.addEventListener('abort', abort, { once: true }); ownerSignal.addEventListener('abort', abort, { once: true })
       if (signal.aborted || ownerSignal.aborted) abort()
       try {
+        if (Object.hasOwn(TRAY_PREFERENCE_CODECS, operation)) return await this.tray.registry.invoke(operation, payload, caller, combined.signal)
         if (Object.hasOwn(UI_DESKTOP_CODECS, operation)) {
           if (!this.ui) throw new ServiceProtocolError('UNKNOWN_OPERATION')
           return await this.ui.registry.invoke(operation, payload, caller, combined.signal)

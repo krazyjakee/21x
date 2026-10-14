@@ -30,6 +30,8 @@ pub mod production_attachment_files;
 #[cfg(feature = "production-service")]
 pub mod production_files;
 #[cfg(feature = "production-service")]
+pub mod production_tray_contracts;
+#[cfg(feature = "production-service")]
 pub mod production_ui_contracts;
 #[cfg(feature = "synthetic-desktop")]
 pub type DesktopEventSink = Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>;

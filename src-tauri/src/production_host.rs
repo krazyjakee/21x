@@ -28,6 +28,9 @@ use native_services::NativeWorkOwner;
 #[path = "native_notifications.rs"]
 pub(crate) mod native_notifications;
 use native_notifications::{NativeNotificationOwner, Scope as NotificationScope};
+#[path = "native_tray.rs"]
+pub(crate) mod native_tray;
+use native_tray::NativeTrayOwner;
 #[path = "native_artifact_clipboard.rs"]
 pub(crate) mod native_artifact_clipboard;
 #[path = "native_attachment_download.rs"]
@@ -44,6 +47,7 @@ struct ProductionState {
     native_work: NativeWorkOwner,
     ui: NativeUiOwner,
     notifications: NativeNotificationOwner,
+    tray: Option<NativeTrayOwner>,
 }
 
 fn trusted_origin(url: &tauri::Url) -> bool {
@@ -334,6 +338,23 @@ async fn desktop_invoke(
         .engine
         .as_ref()
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+    if twentyonex_engine::production_tray_contracts::COMMANDS.contains(&operation.as_str()) {
+        if !twentyonex_engine::production_tray_contracts::request(&operation, &payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        if !state.tray.as_ref().is_some_and(|tray| tray.is_available()) {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        let result = engine
+            .invoke_tray_preference(&engine_epoch, &operation, payload, &lease)
+            .await?;
+        authorize(&window)?;
+        available_engine(window.app_handle(), Some(&engine_epoch))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
+    }
     if matches!(
         operation.as_str(),
         "ui:publishState"
@@ -485,11 +506,87 @@ fn unavailable(code: &'static str, phase: &'static str) -> EngineError {
     error.startup_phase = Some(phase);
     error
 }
+fn attach_tray_close(
+    window: &WebviewWindow,
+    tray: NativeTrayOwner,
+    work: NativeWorkOwner,
+    ui: NativeUiOwner,
+) {
+    let captured = window.clone();
+    let pending = Arc::new(AtomicU8::new(0));
+    window.on_window_event(move |event| {
+        let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+            return;
+        };
+        api.prevent_close();
+        if pending
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        let (window, tray, work, ui, pending) = (
+            captured.clone(),
+            tray.clone(),
+            work.clone(),
+            ui.clone(),
+            pending.clone(),
+        );
+        tauri::async_runtime::spawn(async move {
+            let app = window.app_handle().clone();
+            let outcome = async {
+                work.assert_open()?;
+                ui.assert_window(&window)?;
+                let engine = available_engine(&app, None)?;
+                let epoch = engine.epoch();
+                let output = Arc::new(std::sync::Mutex::new(None));
+                let stored = output.clone();
+                work.run(move || {
+                    let enabled = tauri::async_runtime::block_on(engine.tray_preference(&epoch))?;
+                    *stored
+                        .lock()
+                        .map_err(|_| EngineError::new("DISCONNECTED"))? = Some(enabled);
+                    Ok(())
+                })
+                .await?;
+                let enabled = output
+                    .lock()
+                    .map_err(|_| EngineError::new("DISCONNECTED"))?
+                    .take()
+                    .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                work.assert_open()?;
+                ui.assert_window(&window)?;
+                if enabled {
+                    let (guard_work, guard_ui, guard_window) =
+                        (work.clone(), ui.clone(), window.clone());
+                    let current: native_tray::Scope = Arc::new(move || {
+                        guard_work.assert_open()?;
+                        guard_ui.assert_window(&guard_window)
+                    });
+                    tray.hide_main(&window, current).await?;
+                    // A missing tray host keeps the main window visible and
+                    // reports locally; it never silently changes this to quit.
+                } else {
+                    app.exit(0);
+                }
+                Ok::<(), EngineError>(())
+            }
+            .await;
+            if outcome.is_err() && work.assert_open().is_ok() && ui.assert_window(&window).is_ok() {
+                // A failed Source cannot strand an app-owned Close request.
+                // Existing ExitRequested still owns all real service drainage.
+                app.exit(0);
+            }
+            pending.store(0, Ordering::SeqCst);
+        });
+    });
+}
 async fn start(
     app: &tauri::AppHandle,
     native_work: NativeWorkOwner,
     ui: NativeUiOwner,
     notifications: NativeNotificationOwner,
+    tray_available: bool,
 ) -> Result<ProductionEngine, EngineError> {
     // Developer/native provisioning only. Never accept a scope path via IPC;
     // absence of a real delegated scope prevents Node/key/profile startup.
@@ -579,6 +676,11 @@ async fn start(
             resource_root: resources,
         },
         capabilities: ProductionCapabilities {
+            tray: if tray_available {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             workspace_files: if cfg!(target_os = "linux") {
                 HostCapability::Host
             } else {
@@ -714,11 +816,22 @@ pub fn run() {
             let ui = NativeUiOwner::default();
             let notifications = NativeNotificationOwner::new(app.handle(), native_work.clone())
                 .map_err(|_| std::io::Error::other("PRODUCTION_NOTIFICATION_UNAVAILABLE"))?;
+            let (tray_app, tray_work, tray_ui) =
+                (app.handle().clone(), native_work.clone(), ui.clone());
+            let tray_scope: native_tray::Scope = Arc::new(move || {
+                tray_work.assert_open()?;
+                let window = tray_app
+                    .get_webview_window("main")
+                    .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                tray_ui.assert_window(&window)
+            });
+            let tray = NativeTrayOwner::new(app.handle(), native_work.clone(), tray_scope).ok();
             let started = tauri::async_runtime::block_on(start(
                 app.handle(),
                 native_work.clone(),
                 ui.clone(),
                 notifications.clone(),
+                tray.as_ref().is_some_and(|owner| owner.is_available()),
             ));
             let state = match started {
                 Ok(engine) => ProductionState {
@@ -727,6 +840,7 @@ pub fn run() {
                     native_work: native_work.clone(),
                     ui: ui.clone(),
                     notifications: notifications.clone(),
+                    tray: tray.clone(),
                 },
                 Err(error) => ProductionState {
                     engine: None,
@@ -734,6 +848,7 @@ pub fn run() {
                     native_work,
                     ui: ui.clone(),
                     notifications: notifications.clone(),
+                    tray: tray.clone(),
                 },
             };
             app.manage(state);
@@ -773,6 +888,14 @@ pub fn run() {
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
             ui.watch_destroy(ticket, &window)
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
+            if let Some(tray) = tray.filter(|owner| owner.is_available()) {
+                attach_tray_close(
+                    &window,
+                    tray,
+                    app.state::<ProductionState>().native_work.clone(),
+                    ui.clone(),
+                );
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -800,6 +923,7 @@ pub fn run() {
             let engine = state.engine.clone();
             let native_work = state.native_work.clone();
             let notifications = state.notifications.clone();
+            let tray = state.tray.clone();
             let handle = handle.clone();
             let quitting = quitting.clone();
             tauri::async_runtime::spawn(async move {
@@ -810,6 +934,13 @@ pub fn run() {
                     eprintln!("PRODUCTION_NATIVE_WORK_DRAIN_BLOCKED");
                     quitting.store(0, Ordering::SeqCst);
                     return;
+                }
+                if let Some(tray) = tray {
+                    if tray.close().await.is_err() {
+                        eprintln!("PRODUCTION_TRAY_DRAIN_BLOCKED");
+                        quitting.store(0, Ordering::SeqCst);
+                        return;
+                    }
                 }
                 if let Some(engine) = engine {
                     if engine.shutdown().await.is_err() {

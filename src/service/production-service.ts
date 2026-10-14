@@ -1,5 +1,7 @@
 import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isArtifactClipboardReceipt, isArtifactClipboardResult, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
+import { TRAY_PREFERENCE_CODECS } from '../shared/tray-preference-codecs'
+import { isPrivateTrayPreferenceCommand, isTrayPreference } from '../shared/tray-native-callbacks'
 import type { ArtifactCopyFileResult } from '../shared/artifacts'
 import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isAttachmentPathReceipt, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import { randomUUID } from 'node:crypto'
@@ -176,6 +178,7 @@ export class ProductionService {
     if (bootstrap.profileId !== descriptor.profileId || Object.entries(descriptor.paths).some(([key, value]) => bootstrap.paths[key as keyof typeof bootstrap.paths] !== value) ||
       bootstrap.credentials.mode !== (descriptor.profileIntent === 'create-new' ? 'create' : 'load')) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (descriptor.capabilities.notifications === 'host' ? bootstrap.native.agents.notifications.kind !== 'native' : bootstrap.native.agents.notifications.kind !== 'unsupported') throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    if ((descriptor.capabilities.tray === 'host') !== (bootstrap.native.trayAvailable === true)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const nativeUi = bootstrap.native.ui
     if (descriptor.capabilities.ui === 'host' ? !nativeUi || typeof nativeUi.snapshot !== 'function' || typeof nativeUi.send !== 'function' : nativeUi !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (descriptor.capabilities.attachmentFiles === 'host' ? typeof bootstrap.native.openAttachment !== 'function' || descriptor.capabilities.ui !== 'host' : bootstrap.native.openAttachment !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -247,6 +250,24 @@ export class ProductionService {
         const current = this.artifactCopyAuthorizations.get(payload.authorizationId)
         if (!current) throw new ServiceProtocolError('INVALID_REQUEST')
         current(); return { authorized: true }
+      } }
+    for (const operation of ['app:getMinimizeToTray', 'app:setMinimizeToTray'] as const) operations[operation].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
+    operations['engine.tray.preferenceCommand'] = { validatePayload: isPrivateTrayPreferenceCommand,
+      validateResult: TRAY_PREFERENCE_CODECS['app:getMinimizeToTray'].validateWireResult,
+      handle: (payload, signal) => {
+        if (!this.initialized || this.closing || !this.bindings || !isPrivateTrayPreferenceCommand(payload)) throw new ServiceProtocolError('DISCONNECTED')
+        const bindings = this.bindings
+        return this.retain((async () => {
+          const snapshot = await callbacks.ui.snapshot()
+          if (this.closing || signal.aborted) throw new ServiceProtocolError('CANCELLED')
+          if (!snapshot.available || snapshot.leaseId !== payload.leaseId) throw new ServiceProtocolError('STALE_EPOCH')
+          return bindings.invoke(payload.operation, payload.payload, { ...this.caller, uiLeaseId: payload.leaseId }, signal)
+        })())
+      } }
+    operations['engine.tray.preference'] = { validatePayload: empty, validateResult: isTrayPreference,
+      handle: async () => {
+        if (!this.initialized || this.closing || !this.bindings || descriptor.capabilities.tray !== 'host') throw new ServiceProtocolError('DISCONNECTED')
+        return this.retain(this.bindings.readTrayPreference().then(enabled => ({ enabled })))
       } }
     operations['engine.ping'] = { validatePayload: empty, validateResult: isBootstrapResult, handle: () => { this.pinged = true; return result } }
     operations['engine.initialize'] = { validatePayload: isProductionInitialize, validateResult: isBootstrapResult, handle: async (payload, signal) => {
@@ -410,7 +431,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
       connectors: descriptor.capabilities.connectors === 'enabled' ? { kind: 'enabled' } : { kind: 'disabled', reason: 'Private launch explicitly disables connectors' },
       managedTaskMcp: descriptor.capabilities.managedTaskMcp === 'disabled' ? { disabled: true } : {
         command: resources.node, args: [resources.taskMcp], environment: {}, tools: listToolsForScope(FULL_ACCESS_SCOPE).map(tool => ({ name: tool.name, description: tool.description ?? '' })) },
-      native: { agents: { renderer: { kind: 'unsupported' }, notifications: descriptor.capabilities.notifications === 'host' ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: descriptor.capabilities.configuredMcp },
+      native: { trayAvailable: descriptor.capabilities.tray === 'host', agents: { renderer: { kind: 'unsupported' }, notifications: descriptor.capabilities.notifications === 'host' ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: descriptor.capabilities.configuredMcp },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, openExternal: callbacks.openExternal,
         ...(descriptor.capabilities.workspaceFiles === 'host' ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}),
         ...(descriptor.capabilities.attachmentFiles === 'host' ? { openAttachment: callbacks.openAttachment } : {}),

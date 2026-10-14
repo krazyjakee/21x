@@ -80,6 +80,8 @@ pub struct ProductionCapabilities {
     pub attachment_downloads: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub artifact_clipboard: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
+    pub tray: HostCapability,
     pub external_urls: HostCapability,
     pub notifications: HostCapability,
     pub energy: HostCapability,
@@ -417,6 +419,7 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
             && capabilities.ui != HostCapability::Host
         || capabilities.artifact_clipboard == HostCapability::Host
             && capabilities.ui != HostCapability::Host
+        || capabilities.tray == HostCapability::Host && capabilities.ui != HostCapability::Host
         || [
             &value.paths.profile_root,
             &value.paths.workspace_root,
@@ -789,6 +792,51 @@ impl ProductionEngine {
             return Err(EngineError::new("DISCONNECTED"));
         }
         self.request(operation, payload).await
+    }
+    /// App-owned close lookup has no renderer-selected action or document claim.
+    pub async fn tray_preference(&self, epoch: &str) -> Result<bool, EngineError> {
+        self.assert_tray(epoch)?;
+        let result = self.request("engine.tray.preference", json!({})).await?;
+        self.assert_tray(epoch)?;
+        if !crate::production_tray_contracts::preference(&result) {
+            return Err(EngineError::new("INVALID_RESULT"));
+        }
+        Ok(result["enabled"].as_bool().unwrap())
+    }
+    fn assert_tray(&self, epoch: &str) -> Result<(), EngineError> {
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.tray != HostCapability::Host
+            || self.0.descriptor.capabilities.ui != HostCapability::Host
+        {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        Ok(())
+    }
+    pub async fn invoke_tray_preference(
+        &self,
+        epoch: &str,
+        operation: &str,
+        payload: Value,
+        lease_id: &str,
+    ) -> Result<Value, EngineError> {
+        let payload = json!({"operation":operation,"payload":payload,"leaseId":lease_id});
+        if !crate::production_tray_contracts::private_command(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        self.assert_tray(epoch)?;
+        let result = self
+            .request("engine.tray.preferenceCommand", payload)
+            .await?;
+        self.assert_tray(epoch)?;
+        Ok(result)
     }
     /// Trusted native publication carries the window owner's lease. This is
     /// private engine traffic, never a new public operation or payload grant.
@@ -1198,6 +1246,12 @@ impl ProductionEngine {
                                 && result["nodeVersion"] == "v22.23.2"
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
+                        "engine.tray.preference" => {
+                            crate::production_tray_contracts::preference(result)
+                        }
+                        "engine.tray.preferenceCommand" => {
+                            crate::production_tray_contracts::result(result)
+                        }
                         "engine.ui.publish"
                         | "engine.attachment.open"
                         | "engine.attachment.download" => {
@@ -2433,6 +2487,7 @@ mod tests {
                 attachment_files: HostCapability::Unsupported,
                 attachment_downloads: HostCapability::Unsupported,
                 artifact_clipboard: HostCapability::Unsupported,
+                tray: HostCapability::Unsupported,
                 external_urls: HostCapability::Unsupported,
                 notifications: HostCapability::Unsupported,
                 energy: HostCapability::Unsupported,

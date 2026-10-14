@@ -6,6 +6,23 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The tray continuation restores the durable close-to-tray preference through
+the actual Source database owner and adds fixed native Open/Quit actions on
+Linux. Close reads the preference independently of renderer document state;
+public preference controls require the current document. Before hiding, native
+checks a registered StatusNotifier host and its captured unique identity. An
+unavailable host leaves the main window visible with a fixed local message.
+Open and Quit remain app-owned when Source fails. Shutdown fences actions and
+joins tray/menu/dialog retirement before Source profile release.
+
+The finite surface has 228 service commands, six direct native commands and
+30 events. See [tray preference ownership](tray-preference-bindings.md).
+Building an icon and checking a registered host do not prove panel visibility.
+Installed tray/menu/close behavior, other platforms and G0–G5 acceptance remain
+open. Hosted voice remains deferred; Electron remains the shipping app.
+
+The preceding notification continuation retains its tested revision:
+
 The notification continuation restores local Linux OS alerts through an owned
 session-bus connection and captured notification server. Agent status alerts
 check the actual main window's focus; optional refusal does not stop durable

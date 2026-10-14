@@ -191,6 +191,44 @@ fn physical_key(window: &WebviewWindow) -> Result<String, EngineError> {
         .map_err(|_| EngineError::new("DISCONNECTED"))
 }
 impl NativeUiOwner {
+    /// App-owned native actions need the actual current physical window even
+    /// when the Source service has failed; they do not mint a document lease.
+    pub fn assert_window(&self, window: &WebviewWindow) -> Result<(), EngineError> {
+        authorize(window)?;
+        let key = physical_key(window)?;
+        let captured = {
+            let state = self
+                .0
+                .lock()
+                .map_err(|_| EngineError::new("DISCONNECTED"))?;
+            if state.document.closed {
+                return Err(EngineError::new("DISCONNECTED"));
+            }
+            state
+                .window
+                .clone()
+                .ok_or_else(|| EngineError::new("DISCONNECTED"))?
+        };
+        if captured.key != key {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        let actual = window
+            .app_handle()
+            .get_webview_window("main")
+            .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+        authorize(&actual)?;
+        if physical_key(&actual)? != key {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        if state.document.closed || !state.matches(&captured) {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        Ok(())
+    }
     pub fn reserve_window(&self) -> Result<u64, EngineError> {
         let mut state = self
             .0

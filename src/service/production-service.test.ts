@@ -47,13 +47,15 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false) {
   let privateCallbacks: ProductionPrivateCallbacks | null = null
   let notificationAcknowledgement: Promise<void> | null = null
   let notificationResult: 'shown' | 'denied' | 'error' | 'malformed' | 'timeout' = 'shown'
   const notificationCalls: Array<{ operation: string; payload: JsonValue }> = []
   let uiLease: string | null = 'document_fixture_1'
   let uiAcknowledgement: Promise<void> | null = null
+  let uiSnapshotAcknowledgement: Promise<void> | null = null
+  let uiSnapshots = 0
   let attachmentAcknowledgement: Promise<void> | null = null
   const attachmentReceipts: JsonValue[] = []
   const attachmentAuthorizations: string[] = []
@@ -62,6 +64,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   const root = mkdtempSync(join(tmpdir(), '21x-private-production-')); roots.push(root)
   const launch = descriptor(root); mkdirSync(launch.paths.resourceRoot)
   if (notifications) launch.capabilities.notifications = 'host'
+  if (tray) launch.capabilities.tray = 'host'
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   if (ui) launch.capabilities.ui = 'host'
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
@@ -83,7 +86,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   const check = (): boolean => permitted
   const authority: ProductionDesktopBindingOptions['authority'] = { isTrustedDesktop: check, canAccessTask: (_id, _caller, access) => permitted && (access === 'read' || grantWrites), canAccessSource: check,
     canAccessProject: (_id, _caller, access) => permitted && (access === 'read' || grantWrites), canAccessAgent: (_id, _caller, access) => permitted && (access === 'read' || grantWrites), canAccessSession: check, canAccessGlobalCommander: check,
-    canManageGlobalConfiguration: check, canQueryBackend: check, canCreateProject: check, canEditSettings: check,
+    canManageGlobalConfiguration: (_caller, access) => permitted && (access === 'read' || grantWrites), canQueryBackend: check, canCreateProject: check, canEditSettings: check,
     canAccessGlobalSkills: check, canChangeSkillScope: check, canReorderProjects: check, canReadSetting: check, canWriteSetting: check, canAccessSecret: check,
     canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessTerminal: check, canAccessMcpServer: check, canAccessCli: check,
     canUseTransport: check, canUseEnvironmentName: check, canAccessConnector: check, canUseSourcePlugin: check,
@@ -99,6 +102,8 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   schemas['engine.ping'] = { validatePayload: value => isRecord(value) && hasExactKeys(value, []), validateResult: isBootstrapResult }
   schemas['engine.initialize'] = { validatePayload: value => isRecord(value), validateResult: isBootstrapResult }
   schemas['engine.shutdown'] = { validatePayload: value => isRecord(value), validateResult: value => isRecord(value) && value.stopped === true }
+  schemas['engine.tray.preference'] = { validatePayload: value => isRecord(value) && Object.keys(value).length === 0, validateResult: value => isRecord(value) && typeof value.enabled === 'boolean' }
+  schemas['engine.tray.preferenceCommand'] = { validatePayload: value => isRecord(value), validateResult: value => isRecord(value) && value.defined === true && typeof value.value === 'boolean' }
   schemas['host.production.prepare'] = { ...PRODUCTION_HOST_SCHEMAS['host.production.prepare'], handle: async payload => {
     expect(payload).toEqual({ launchId: launch.launchId, resourceManifestSha256: launch.resourceManifestSha256 }); nativeCalls.push('prepare')
     await preparation
@@ -158,7 +163,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   schemas['engine.agent.install'] = { validatePayload: isPrivateAgentInstallation, validateResult: AGENT_INSTALLER_CODECS['agent-installer:install'].validateWireResult }
   schemas['engine.ui.publish'] = { validatePayload: isPrivateUiPublication, validateResult: UI_DESKTOP_CODECS['ui:publishState'].validateWireResult }
   if (ui) {
-    schemas['host.ui.snapshot'] = { ...UI_NATIVE_CALLBACK_SCHEMAS['host.ui.snapshot'], handle: (): JsonValue => uiLease ? { available: true, leaseId: uiLease } : { available: false } }
+    schemas['host.ui.snapshot'] = { ...UI_NATIVE_CALLBACK_SCHEMAS['host.ui.snapshot'], handle: async (): Promise<JsonValue> => { uiSnapshots++; await uiSnapshotAcknowledgement; return uiLease ? { available: true, leaseId: uiLease } : { available: false } } }
     schemas['host.ui.installerProgress'] = { ...UI_NATIVE_CALLBACK_SCHEMAS['host.ui.installerProgress'], handle: (payload): JsonValue => {
       if (!isRecord(payload) || payload.leaseId !== uiLease || !uiLease) return { ok: false, detail: 'No current document' }
       installationProgress.push(structuredClone(payload.progress)); return { ok: true, leaseId: uiLease }
@@ -181,7 +186,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     constructBootstrap: callbacks => { privateCallbacks = callbacks; return ({ profileId: launch.profileId, paths: launch.paths,
       credentials: { mode: 'create', store: { create: async (id, key) => { keys.set(id, Buffer.from(key)) }, load: async id => Buffer.from(keys.get(id)!) } },
       connectors: { kind: 'disabled', reason: 'Controlled fixture has no packaged connectors' }, managedTaskMcp: { disabled: true },
-      native: { agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: notifications ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, configuredMcp: 'disabled' },
+      native: { trayAvailable: tray, agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: notifications ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, configuredMcp: 'disabled' },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, emit: callbacks.emitOwnerEvent,
         ...(ui ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         ...(attachmentOpening ? { openAttachment: callbacks.openAttachment } : {}),
@@ -198,11 +203,46 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     notificationCalls, privateCallbacks: () => privateCallbacks!, holdNotificationAcknowledgement: (raw: Promise<void> | null) => { notificationAcknowledgement = raw }, setNotificationResult: (value: typeof notificationResult) => { notificationResult = value },
     attachmentReceipts, attachmentAuthorizations, denyWrites: () => { grantWrites = false }, holdAttachmentAcknowledgement: (raw: Promise<void>) => { attachmentAcknowledgement = raw },
     installationProgress, acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
+    uiSnapshots: () => uiSnapshots, holdUiSnapshot: (raw: Promise<void>) => { uiSnapshotAcknowledgement = raw },
     fileReceipts, holdFileAcknowledgement: (raw: Promise<void>) => { fileAcknowledgement = raw },
     holdPreparation: (raw: Promise<void>) => { preparation = raw } }
 }
 
 describe('actual private production peer', () => {
+  it('persists tray preferences through the actual owner and keeps the app-owned close lookup separate from renderer authority', async () => {
+    const f = fixture(false, true, false, false, false, false, false, true); await f.initialize()
+    const command = (operation: string, payload: JsonValue = {}, leaseId = 'document_fixture_1') => f.host.request('engine.tray.preferenceCommand', { operation, payload, leaseId })
+    expect(await f.host.request('engine.tray.preference', {})).toEqual({ enabled: false })
+    await expect(f.host.request('app:setMinimizeToTray', { enabled: true })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(await command('app:setMinimizeToTray', { enabled: true })).toEqual({ defined: true, value: true })
+    expect(f.service.getReadyServices()!.db.getSetting('minimize_to_tray')).toBe('true')
+    expect(await f.host.request('engine.tray.preference', {})).toEqual({ enabled: true })
+    f.changeUiLease('document_fixture_2')
+    await expect(command('app:setMinimizeToTray', { enabled: false })).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+    expect(await f.host.request('engine.tray.preference', {})).toEqual({ enabled: true })
+    expect(await command('app:getMinimizeToTray', {}, 'document_fixture_2')).toEqual({ defined: true, value: true })
+    f.denyWrites()
+    await expect(command('app:setMinimizeToTray', { enabled: false }, 'document_fixture_2')).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(f.service.getReadyServices()!.db.getSetting('minimize_to_tray')).toBe('true')
+  })
+  it('keeps tray controls unavailable without a captured native tray owner', async () => {
+    const f = fixture(false, true); await f.initialize()
+    await expect(f.host.request('engine.tray.preference', {})).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    await expect(f.host.request('engine.tray.preferenceCommand', { operation: 'app:setMinimizeToTray', payload: { enabled: true }, leaseId: 'document_fixture_1' })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    expect(f.service.getReadyServices()!.db.getSetting('minimize_to_tray')).not.toBe('true')
+  })
+  it('retains the actual profile during a pending tray document check and suppresses a late preference write', async () => {
+    const f = fixture(false, true, false, false, false, false, false, true); await f.initialize()
+    const actual = f.service.getReadyServices()!, gate = deferred(); release.push(gate.finish); f.holdUiSnapshot(gate.promise)
+    const work = f.host.request('engine.tray.preferenceCommand', { operation: 'app:setMinimizeToTray', payload: { enabled: true }, leaseId: 'document_fixture_1' })
+    const failed = expect(work).rejects.toMatchObject({ code: 'CANCELLED' })
+    await vi.waitFor(() => expect(f.uiSnapshots()).toBeGreaterThan(0))
+    await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(actual.db.db.open).toBe(true)
+    expect(actual.db.getSetting('minimize_to_tray')).not.toBe('true')
+    gate.finish(); await failed; await f.service.close()
+    expect(actual.db.db.open).toBe(false)
+  })
   it('exchanges exact captured file receipts only with an advertised private native callback and retains late acknowledgement', async () => {
     const f = fixture(true); await f.initialize()
     const actual = f.service.getReadyServices()!, task = actual.db.createTask(makeTask())!

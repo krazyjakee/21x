@@ -1,0 +1,354 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    212,
+    215
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "3a550610e0debf4376f37abcd931f2315b9c9d89",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/implementation-status.md": "086266ea44d4b2c1303b9765aae09522d121a4a4f3f03a578fadb2e8bc028578",
+      "docs/tauri-migration/inventory.json": "46e068a906a86971560ed9771e5e5d58b02d28c967c51b3f2d81403be0f20f8e",
+      "docs/tauri-migration/operations.json": "dbb120b1a656c5432e35b3baf031449c146f0fd1ecf5d4a6d071d85eaf254d6f",
+      "docs/tauri-migration/tray-preference-bindings.md": "3b227a67da3bcd505a0bd1b6870d5d49c1c169626664f73aff4e06e296dab506",
+      "scripts/production-contracts-proof.test.ts": "3eb4e6f5607e6bbd42661271eecd9a7005eed1bed820a97f96d3ab5729399922",
+      "scripts/production-contracts-proof.ts": "e32a772f07efb74c500c105290b0a5dd28528d5ac4b72894edf81f7ebefb5c54",
+      "scripts/tauri-contracts.mjs": "7f92af2dbcb247f147999cc3dc7148efac344f60a0c80d901a9013485159f94e",
+      "src-tauri/Cargo.toml": "b10c9bcd3c7b9c236ed05c53766808af37c4fe41482639bbc888e4e80bfbdc70",
+      "src-tauri/engine/src/lib.rs": "4e204b519ef1633cb96ccbb9281ac4d5cd914d97103f705d7f382ad959eaabbb",
+      "src-tauri/engine/src/production.rs": "b842f27f83e70b30e1593cdda61672b00815a2cc301996721e9d69e538833555",
+      "src-tauri/engine/src/production_contracts.rs": "8070f028847b37e8ab24b22a999f9e92439bad595c948bd3383e3c59805d06b0",
+      "src-tauri/engine/src/production_tray_contracts.rs": "b5d80b7a27ae795e676abd5a4f9604f4c57708632bb3805c66cb364c5f46dfa5",
+      "src-tauri/src/native_tray.rs": "758a23fd772d5e705c75094c11d2a95e9fc75e15be55e8d1343fe632ebe7339a",
+      "src-tauri/src/production_host.rs": "05a37f28171df813619a1b5194e61fe8886cdb94ec1de03740811bddb7e45fc2",
+      "src-tauri/src/production_ui.rs": "8b13c46605a053f43c465e6627ef80f0ea451d51126bd7ed023029e3ee26500c",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "f9ff958674d86ad85f6177c671f5b3135245e99d3d84ef06040b3c28ffec9640",
+      "src/renderer/src/lib/native-desktop-host.ts": "6213981133287d7b58e6c0e73316f590c2ff2cedcb92853f3acb64e7cb8ca487",
+      "src/renderer/src/lib/tauri-desktop-transport.ts": "2139e5b4c93a47bf505384d5d5db5527b9d527f0a7bc027ce6647bd99635fc40",
+      "src/service/production-desktop-bindings.ts": "6566a8697aaf87030499fdd720886e62de4c04096a8e615225e62a17ab71008f",
+      "src/service/production-owner.ts": "ac141bbbf42c967ab32bd1204b668d5cbfbc19a80393f7cd2b58ffc86176be8b",
+      "src/service/production-service.test.ts": "a24cb1682a2c766246909fa7d160a6c3dec0fddfee54319972f2002eadbef1ab",
+      "src/service/production-service.ts": "32e0fa9c516cb6d706ae2bd354ea8677642bb13c88ba67c0e71a1c306f6bdb81",
+      "src/service/tray-preference-backend.test.ts": "681c586297aa8ac76558b1e307e50672a87573b13467ed54e0edf574a99fee70",
+      "src/service/tray-preference-backend.ts": "ccea5864cd3597d4a2dbd11a81979c9e5cc4efddc4ae29121bc9d8e2c1fe78a3",
+      "src/shared/desktop-operations.ts": "ee09cc3712723f5cdf9d9c81f0fa77f23092bb833ee484db077cf5bf6c7c82dc",
+      "src/shared/production-bootstrap.test.ts": "ee4eab678dcb2093cb9f24a649f87f83a4c4f65d6a887d55519cf04eec48f7ab",
+      "src/shared/production-bootstrap.ts": "c0d238c4aba0f9818609f0ec27600db9c1925a2184a5ba74da68270d7dc6644d",
+      "src/shared/tray-native-callbacks.test.ts": "92a75128c08c15c8cc04462b03764e9866010c2fd20f22d433c989c4eb7be13e",
+      "src/shared/tray-native-callbacks.ts": "51f7a4f8cb607602321dd8518ef583479b66a26dc18bab9799dc6cb93bea1fe0",
+      "src/shared/tray-preference-codecs.test.ts": "8a10b7f58e9767eb2845732798948cafb15c1865917c827ba5349f7e0e0ad03e",
+      "src/shared/tray-preference-codecs.ts": "f7af837b88693ea8e8de6d71b8c1f2f6976292cfa1e053f242a7621c7b27be2c"
+    },
+    "frozenInputs": 28,
+    "finalImplementationHashesRevalidated": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Durable close-to-tray preference and local Linux native tray/menu/close ownership; shipping remains Electron.",
+  "bindings": {
+    "finiteServiceCommandContracts": 228,
+    "separateNativeServiceCommands": 6,
+    "facadeCommandBindings": 234,
+    "events": 30,
+    "newCommands": 2,
+    "newEvents": 0,
+    "operations": [
+      "app:getMinimizeToTray",
+      "app:setMinimizeToTray"
+    ],
+    "privateOperations": [
+      "engine.tray.preferenceCommand",
+      "engine.tray.preference"
+    ],
+    "capability": "tray",
+    "preferenceRequests": 16,
+    "nativeTrayOwnerPerApplication": 1,
+    "publicCallerSelectedActions": 0
+  },
+  "implemented": [
+    "The two retained preference commands have exact empty/boolean DTOs and defined boolean results. Source uses the existing DatabaseManager setting writer without new events, paths, window actions or session starts/stops.",
+    "A captured optional native tray launch capability binds actual database/AgentManager owners. Public operations require a trusted current engine/document and separate dynamic global read/write grants. Source verifies a native document snapshot before dispatch; native fences ingress and final delivery. Hydration permits the read and fences the write.",
+    "App-owned CloseRequested queries a distinct finite private boolean lookup under actual Source owner.run, without fabricating renderer identity. Bounded scalar SQL treats only exact stored text true as enabled, including huge malformed legacy settings without full getters/secret projection.",
+    "Linux builds a real Tauri tray with fixed Open/Quit menu actions and a private exclusive0700 icon directory. Building an icon describes owned capability, not panel visibility. One per-App reservation bounds an unavoidable global listener with only a weak owner capture.",
+    "Native CloseRequested preserves the main window while one retained preference decision runs. False enters existing owned application shutdown; true hides only the current physical main after async exact unique watcher/registered-host/unique-owner recheck. Raw GVariant type/byte bounds precede Rust projection.",
+    "Missing or changed registered tray host leaves main visible/focused and presents one owned nonblocking local message. Fixed Open/ Quit remain native app actions across Source failure; failed Source close lookup uses normal owned application shutdown.",
+    "Accepted close/menu/GIO work remains owned until actual callback retirement. Shutdown revokes admission/UI synchronously, joins raw work, independently retires tray/menu/dialog and exact icon-directory resources before Source profile release. Failed cleanup retains resources for explicit retry.",
+    "No Source task action dispatcher, generic native menu payload, arbitrary setting writer or synthetic successful OS effect is added."
+  ],
+  "artifact": {
+    "buildIdentity": "production-96d91cf819690009e15c1bf7db41a47c",
+    "resourceManifestSha256": "167f51836c6e84f9d1c2b33431c0a1a51901fad98ef6472b78b0d895d87eb9b8",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "dependencyChange": "Enable production-service tauri/tray-icon feature only; already-locked dependencies",
+    "packageAndRuntimePinsUnchanged": true,
+    "cargoVersionsAndChecksumsUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 228,
+    "actualTypeScriptRequests": 471,
+    "sha256": "c9661259c4ce41dd4cb29d37b952744b4e76ff28598f773f36cdc039f1cf0de3",
+    "nativeParity": "Actual TypeScript request corpus accepted by native golden-request test"
+  },
+  "tests": {
+    "app": {
+      "passed": 7082,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "dba03fb916fc4e740f7b1b44bdf77d18c7eee4b9015054dbd73f5af9e47dfa54",
+      "logSha256": "9b0933bf9e1eeb2d4ad95b1742018446c2f746fbf49d0406dd0c3ab57c0502d1"
+    },
+    "standalone": {
+      "passed": 3614,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "c4958df6dd0ca428a18faf867556f3df2f24bcd820f2226f89cada4e9fd44594",
+      "logSha256": "fbef3365fc8e3a3fa60291a213dcf1996712cce2867877bbc0ab7074f620276f"
+    },
+    "focused": {
+      "passed": 205,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "94f0c824c88e5b6f0dfa58f3b6cb51c4d8f4c12ca2b4dd672416cfe26d65ce2a",
+      "logSha256": "61ce71c246fdbb49e526082e0e14c087f91cfad5dc4e2a551f9bc48e68775546"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "2e6434bacc775b0a5d9c410cda5f3b1f071b0861f74e3c6d2a9008c68d52ea64",
+      "logSha256": "7c0f8199112d90795e95098d964bcb87ccb5a03916b9c48e30e05994cbfea9e0"
+    },
+    "corpus-export": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "23128506762918402a8d6f1aeb757ccda79a95b943307745dbe212101c06a265",
+      "logSha256": "5924569906733685c9143bf5a42e6fa0e130436dc978328d4ee5e5b3dfa93af0"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 29.046,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.078,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 22.462,
+      "logSha256": "3d2fda2984eb05da75761857ddc35a2670619d2a67d12eafaf6333659aaee8f0"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.57,
+      "logSha256": "43b7945f3a44374f9dff17c026a8b40fb26c5c826f03786eacab525031419a86"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.71,
+      "logSha256": "bdbb5db56c103d5f3eed0d99e4873cc552f534ba33870ef26e7c748ffd4ff092"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.088,
+      "logSha256": "6e0ad476996d6dfd570fadf1d0b6e8dae2d872e478e07a98106f64ea0a502a72"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.374,
+      "logSha256": "1a8205052ddaf17236cd7873edbf0174ee45d27c6eac12f3bac62e0151818470"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.306,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.665,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.001,
+      "logSha256": "30f92b9d4ffa624c781a98d7529f95ba411b7d4a98532e944f843390b80dff4d"
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.409,
+      "logSha256": "85c9f880885dac60777b2518abf71fc09f427eb2becbe71ae56d7cf80cf8ae94"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 7.372,
+      "logSha256": "5e1487aae52bed43ec75cd1a5ec389832dc621b578dc5595c75156ae238be81c"
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch29-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.364,
+      "logSha256": "214da390991368cbcf2528988a3306fded7e659cb7bbe28d2ce8d7a0e55a8161"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.062,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "nativeTests": {
+    "enginePassed": 81,
+    "engineIgnored": 4,
+    "hostPassed": 66
+  },
+  "validationCorrections": [
+    "Corrected the private lease validator module import during Rust integration.",
+    "The new pure corpus map now imports the actual tray codecs; malformed authority tests remain unchanged.",
+    "Real GLib variant regressions exposed tuple decoding accepting extra fields; strict exact outer variant types now precede tuple conversion.",
+    "Aligned the hydration fixture with the existing DISCONNECTED recovery error. One concurrent initial owner test hit its five-second budget; the unchanged test passed in the corrected focused rerun.",
+    "Physical window checks release their state mutex before querying native handles, then revalidate the captured attachment, avoiding a main-thread lock inversion.",
+    "Pinned tray-icon cleanup removes an icon by pathname. Native now retains the actual icon-file receipt and refuses known replacement/symlink targets before dependency Drop; actual temporary-directory replacement regressions preserve foreign bytes. This preflight does not establish atomic same-UID namespace protection."
+  ],
+  "remainingAcceptance": [
+    "Installed Linux tray visibility, menus/clicks/close/background continuity and absence/DND/window-manager behavior are not established by display-free tests.",
+    "Registered StatusNotifier host availability does not guarantee the panel rendered this icon. Legacy XEmbed-only hosts remain unavailable for hiding; no invisible-tray assumption is made.",
+    "Non-Linux native tray/window behavior, remaining native services/voice/OAuth and complete G0-G5 migration acceptance remain open.",
+    "The OS/GIO transport receives data before Rust validation; decoding bounds do not establish a hard OS/GIO allocation cap. Accepted durable preference writes are never replayed or rolled back on later caller loss.",
+    "Hosted voice remains deferred by user decision. This work does not authorize live release or profile cutover."
+  ]
+}

@@ -1,4 +1,5 @@
 import { NATIVE_NOTIFICATION_CODECS } from '@shared/native-notification-codecs'
+import { TRAY_PREFERENCE_CODECS } from '@shared/tray-preference-codecs'
 import { UI_DESKTOP_CODECS, UI_DESKTOP_EVENT_CODECS, isUiCommand, isUiLeaseId } from '@shared/ui-desktop-codecs'
 import type { UiCommand } from '@shared/ui-commands'
 import { CLI_MCP_CODECS } from '@shared/cli-mcp-codecs'
@@ -38,7 +39,7 @@ import { DesktopClient, type DesktopClientState } from './desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, getTauriUiDocument, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...TRAY_PREFERENCE_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
@@ -117,7 +118,7 @@ export const NATIVE_COMMAND_BINDINGS = {
   'claudePlugin:installPlugin': 'claudePlugins.installPlugin', 'claudePlugin:uninstallPlugin': 'claudePlugins.uninstallPlugin', 'claudePlugin:enablePlugin': 'claudePlugins.enablePlugin', 'claudePlugin:disablePlugin': 'claudePlugins.disablePlugin', 'claudePlugin:getPluginResources': 'claudePlugins.getPluginResources',
   'agent-installer:detect': 'agentInstaller.detect', 'agent-installer:install': 'agentInstaller.install', 'artifacts:scan': 'artifacts.scan', 'artifacts:read': 'artifacts.read', 'artifacts:copyFile': 'artifacts.copyFile',
   'notifications:show': 'notifications.show', 'app:getNotificationPermission': 'app.getNotificationPermission', 'app:requestNotificationPermission': 'app.requestNotificationPermission',
-  'shell:openExternal': 'shell.openExternal', 'app:getVersion': 'app.getVersion',
+  'shell:openExternal': 'shell.openExternal', 'app:getVersion': 'app.getVersion', 'app:getMinimizeToTray': 'app.getMinimizeToTray', 'app:setMinimizeToTray': 'app.setMinimizeToTray',
   'tasks:getWorkspaceDir': 'tasks.getWorkspaceDir', 'shell:readTextFile': 'shell.readTextFile', 'shell:openPath': 'shell.openPath', 'shell:showItemInFolder': 'shell.showItemInFolder',
   'mobile:getInfo': 'mobile.getInfo', 'mobile:setAccess': 'mobile.setAccess', 'mobile:startTunnel': 'mobile.startTunnel', 'mobile:stopTunnel': 'mobile.stopTunnel',
   'mobile:setCustomUrl': 'mobile.setCustomUrl', 'mobile:clearCustomUrl': 'mobile.clearCustomUrl', 'mobile:getPendingPin': 'mobile.getPendingPin', 'mobile:getSessions': 'mobile.getSessions', 'mobile:revokeSession': 'mobile.revokeSession', 'mobile:revokeAllSessions': 'mobile.revokeAllSessions'
@@ -140,7 +141,7 @@ const reads = new Set<keyof typeof commands>(['cliMcp:snapshot', 'heartbeat:getL
   'agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'captainRuntime:get', 'commander:listSessions',
   'commander:listMessages', 'commander:getImage', 'commander:getActivity', 'secrets:getAll', 'env:get', 'terminal:getCwd', 'terminal:getBuffer',
   'mcp:getAll', 'mcp:getOAuthStatus', 'mcp:probeForAuth', 'taskSource:getAll', 'taskSource:getUsers', 'connectors:bridgePieces', 'connectors:credentialStatus', 'connectors:syncStatus', 'plugin:list', 'plugin:getDocumentation', 'plugin:resolveOptions',
-  'sessionContext:getSnapshot', 'claudePlugin:getMarketplaceSources', 'claudePlugin:fetchCatalog', 'claudePlugin:discoverPlugins', 'claudePlugin:getInstalledPlugins', 'claudePlugin:getPluginResources', 'mobile:getPendingPin', 'mobile:getSessions', 'agent-installer:detect', 'artifacts:scan', 'artifacts:read', 'app:getVersion', 'app:getNotificationPermission', 'shell:readTextFile'])
+  'sessionContext:getSnapshot', 'claudePlugin:getMarketplaceSources', 'claudePlugin:fetchCatalog', 'claudePlugin:discoverPlugins', 'claudePlugin:getInstalledPlugins', 'claudePlugin:getPluginResources', 'mobile:getPendingPin', 'mobile:getSessions', 'agent-installer:detect', 'artifacts:scan', 'artifacts:read', 'app:getVersion', 'app:getMinimizeToTray', 'app:getNotificationPermission', 'shell:readTextFile'])
 
 export interface NativeDesktopHost extends DesktopHost {
   reconnect: () => Promise<void>

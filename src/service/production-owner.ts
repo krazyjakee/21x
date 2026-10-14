@@ -116,6 +116,8 @@ export interface ProductionOwnerBootstrap {
   voice?: ProductionVoiceResources
   agentInstallation?: { nodeExecutable: string }
   native: {
+    /** Captured actual native tray owner, never a renderer setting grant. */
+    trayAvailable?: boolean
     agents: Pick<AgentManagerHost, 'renderer' | 'notifications' | 'energy' | 'configuredMcp'>
     /** PATH/native supervision readiness, before any adapter or scheduler starts. */
     prepareRuntime(signal: AbortSignal): Promise<void>
@@ -321,6 +323,15 @@ export class ProductionOwner {
     } }
   }
 
+  getTrayBindingLease(): { database: DatabaseManager; manager: AgentManager; trayAvailable: boolean; assertOwners(owners: { database: DatabaseManager; manager: AgentManager }): void } {
+    this.getDatabaseBindingLease()
+    const services = this.services!, database = services.db, manager = services.agents
+    const trayAvailable = this.bootstrap.native.trayAvailable === true
+    return { database, manager, trayAvailable, assertOwners: owners => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services || owners.database !== database || owners.manager !== manager || services.db !== database || services.agents !== manager || (this.bootstrap.native.trayAvailable === true) !== trayAvailable) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    } }
+  }
   getVoiceBindingLease(): { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech']; assertVoiceOwners(owners: { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech'] }): void } | null {
     this.getDatabaseBindingLease()
     const services = this.services!, owned = services.voice

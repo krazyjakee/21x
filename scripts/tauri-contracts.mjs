@@ -7,8 +7,8 @@ import ts from 'typescript'
 import { scanRepository, serializeInventory } from './tauri-inventory.mjs'
 
 const nativeCommands = new Set([
-  'app:getLoginItemSettings', 'app:getMinimizeToTray', 'app:getNotificationPermission', 'app:getVersion',
-  'app:requestNotificationPermission', 'app:setLoginItemSettings', 'app:setMinimizeToTray', 'app:setTitleBarOverlay',
+  'app:getLoginItemSettings', 'app:getNotificationPermission', 'app:getVersion',
+  'app:requestNotificationPermission', 'app:setLoginItemSettings', 'app:setTitleBarOverlay',
   'attachments:pick', 'chatImages:readClipboard', 'notifications:show',
   'shell:openExternal',
   'updater:check', 'updater:download', 'updater:getVersion', 'updater:install',
