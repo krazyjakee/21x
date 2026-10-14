@@ -47,11 +47,14 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false) {
   let privateCallbacks: ProductionPrivateCallbacks | null = null
   let notificationAcknowledgement: Promise<void> | null = null
   let notificationResult: 'shown' | 'denied' | 'error' | 'malformed' | 'timeout' = 'shown'
   const notificationCalls: Array<{ operation: string; payload: JsonValue }> = []
+  const energyCalls: boolean[] = []
+  let energyAcknowledgement: Promise<void> | null = null
+  let energyResult: 'applied' | 'refused' | 'error' | 'malformed' = 'applied'
   let uiLease: string | null = 'document_fixture_1'
   let uiAcknowledgement: Promise<void> | null = null
   let uiSnapshotAcknowledgement: Promise<void> | null = null
@@ -65,6 +68,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   const launch = descriptor(root); mkdirSync(launch.paths.resourceRoot)
   if (notifications) launch.capabilities.notifications = 'host'
   if (tray) launch.capabilities.tray = 'host'
+  if (energy) launch.capabilities.energy = 'host'
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   if (ui) launch.capabilities.ui = 'host'
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
@@ -124,6 +128,16 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
       if (notificationResult === 'error') throw new ServiceProtocolError('INVALID_REQUEST')
       if (notificationResult === 'malformed') return { shown: 'wrong' }
       return { shown: notificationResult === 'shown' }
+    }
+  }
+  if (energy) schemas['host.sleep.set'] = {
+    validatePayload: HOST_OPERATION_SCHEMAS['host.sleep.set'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.sleep.set'].validateResult,
+    handle: async payload => {
+      const enabled = (payload as { enabled: boolean }).enabled; energyCalls.push(enabled)
+      await energyAcknowledgement
+      if (enabled && energyResult === 'error') throw new ServiceProtocolError('TIMEOUT')
+      if (enabled && energyResult === 'malformed') return { enabled: 'wrong' }
+      return { enabled: energyResult === 'refused' ? false : enabled }
     }
   }
   if (workspaceFiles) for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) schemas[operation] = { ...schema, handle: async payload => {
@@ -186,7 +200,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     constructBootstrap: callbacks => { privateCallbacks = callbacks; return ({ profileId: launch.profileId, paths: launch.paths,
       credentials: { mode: 'create', store: { create: async (id, key) => { keys.set(id, Buffer.from(key)) }, load: async id => Buffer.from(keys.get(id)!) } },
       connectors: { kind: 'disabled', reason: 'Controlled fixture has no packaged connectors' }, managedTaskMcp: { disabled: true },
-      native: { trayAvailable: tray, agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: notifications ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, configuredMcp: 'disabled' },
+      native: { trayAvailable: tray, ...(energy ? { energy: { setActive: callbacks.setSleep! } } : {}), agents: { renderer: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, notifications: notifications ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, configuredMcp: 'disabled' },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, emit: callbacks.emitOwnerEvent,
         ...(ui ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         ...(attachmentOpening ? { openAttachment: callbacks.openAttachment } : {}),
@@ -201,6 +215,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   }
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
     notificationCalls, privateCallbacks: () => privateCallbacks!, holdNotificationAcknowledgement: (raw: Promise<void> | null) => { notificationAcknowledgement = raw }, setNotificationResult: (value: typeof notificationResult) => { notificationResult = value },
+    energyCalls, holdEnergyAcknowledgement: (raw: Promise<void> | null) => { energyAcknowledgement = raw }, setEnergyResult: (value: typeof energyResult) => { energyResult = value },
     attachmentReceipts, attachmentAuthorizations, denyWrites: () => { grantWrites = false }, holdAttachmentAcknowledgement: (raw: Promise<void>) => { attachmentAcknowledgement = raw },
     installationProgress, acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
     uiSnapshots: () => uiSnapshots, holdUiSnapshot: (raw: Promise<void>) => { uiSnapshotAcknowledgement = raw },
@@ -590,6 +605,50 @@ describe('private artifact clipboard handoff', () => {
   })
 })
 
+
+describe('private native energy bridge around actual production ownership', () => {
+  async function start(f: ReturnType<typeof fixture>) {
+    const actual = f.service.getReadyServices()!, agent = actual.db.createAgent({ name: 'Owned energy session', config: { coding_agent: 'opencode' } })!, task = actual.db.createTask({ title: 'Background work' })!
+    const result = await actual.agents.requestSession(agent.id, task.id)
+    expect(result.status).toBe('started')
+    return { actual, task }
+  }
+  it('keeps energy unsupported without a captured callback and never exposes it as a public desktop command', async () => {
+    const f = fixture(); await f.initialize(); expect(f.privateCallbacks().setSleep).toBeUndefined()
+    await expect(f.service.peer.request('host.sleep.set', { enabled: true })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    expect(Object.hasOwn(PRODUCTION_COMMAND_CODECS, 'host.sleep.set')).toBe(false); expect(f.energyCalls).toEqual([])
+  })
+  it('routes actual session lifetime to the sealed native capability without a window or renderer publication', async () => {
+    const f = fixture(false, false, false, false, false, false, false, false, true); await f.initialize()
+    const { actual, task } = await start(f)
+    await vi.waitFor(() => expect(f.energyCalls).toEqual([true]))
+    f.launch.capabilities.energy = 'unsupported'
+    await actual.agents.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(f.energyCalls).toEqual([true, false]))
+    expect(f.service.owner.snapshot().phase).toBe('ready')
+  })
+  it.each(['refused', 'error', 'malformed'] as const)('keeps actual durable work alive after optional portal %s and does not replay activation', async mode => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const f = fixture(false, false, false, false, false, false, false, false, true); await f.initialize(); f.setEnergyResult(mode)
+    const { actual, task } = await start(f)
+    await vi.waitFor(() => expect(f.energyCalls.filter(value => value)).toHaveLength(1))
+    await f.host.drain(); await Promise.resolve(); await Promise.resolve()
+    expect(f.service.owner.snapshot().phase).toBe('ready'); expect(actual.agents.hasTaskStartOwnership(task.id)).toBe(true)
+    expect(isRecord(await f.host.request('db:getTasks', {}))).toBe(true)
+    await actual.agents.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(f.energyCalls.at(-1)).toBe(false))
+    expect(f.energyCalls.filter(value => value)).toHaveLength(1)
+  })
+  it('retains the real profile during late activation and joins its final release before native drain', async () => {
+    const f = fixture(false, false, false, false, false, false, false, false, true); await f.initialize()
+    const gate = deferred(); release.push(gate.finish); f.holdEnergyAcknowledgement(gate.promise)
+    const { actual } = await start(f); await vi.waitFor(() => expect(f.energyCalls).toEqual([true]))
+    await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(actual.db.db.open).toBe(true); expect(f.nativeCalls).not.toContain('drain')
+    gate.finish(); await f.service.close()
+    expect(f.energyCalls).toEqual([true, false]); expect(actual.db.db.open).toBe(false); expect(f.nativeCalls.at(-1)).toBe('drain')
+  })
+})
 
 describe('private native notification bridge around actual production ownership', () => {
   it('has no status callback or host notification operation without the captured capability', async () => {

@@ -6,6 +6,22 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The energy continuation connects the existing Manager session aggregate to a
+captured optional Linux suspend-inhibition owner. Source tickets describe
+intent; only the native portal acknowledgement describes an applied grant.
+The existing private sleep callback carries exact boolean state. Native owns
+its request and private session-bus connection, and cleanup can cancel pending
+portal interaction after ordinary admission closes. Missing/refused inhibition
+remains optional while durable work continues.
+
+The public surface remains 228 service commands, six direct native commands
+and 30 events. See [native energy ownership](native-energy-bindings.md).
+Installed permission, suspend and crash behavior and other platforms remain
+acceptance gates. Hosted voice stays deferred; Electron remains the shipping
+application.
+
+The preceding tray continuation retains its tested revision:
+
 The tray continuation restores the durable close-to-tray preference through
 the actual Source database owner and adds fixed native Open/Quit actions on
 Linux. Close reads the preference independently of renderer document state;

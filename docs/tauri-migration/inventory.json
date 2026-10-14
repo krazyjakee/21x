@@ -6047,6 +6047,7 @@
     "src/service/production-adapters.ts",
     "src/service/production-agent-backend.ts",
     "src/service/production-desktop-bindings.ts",
+    "src/service/production-energy-owner.ts",
     "src/service/production-git-provider-owner.ts",
     "src/service/production-installation-host.ts",
     "src/service/production-owner.ts",
@@ -14438,7 +14439,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 882,
+    "files": 883,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

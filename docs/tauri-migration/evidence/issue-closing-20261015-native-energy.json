@@ -1,0 +1,331 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-15",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    212,
+    215
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "83030216125067c7942929dfea0a40133a4c5740",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/implementation-status.md": "a48c88718973f9b576d5765980dcbe5b77187c0d7fb124a6bae7ca5b1225d212",
+      "docs/tauri-migration/inventory.json": "ff148eb902d51aaaacd26b93153fdab78e86061dafeb92be6061fb715b209279",
+      "docs/tauri-migration/native-energy-bindings.md": "ab78d6d08a178c3bc860866ce219383bbb3e11ce7283190997c8ea33aecd4cf3",
+      "src-tauri/engine/src/production.rs": "ef1665fd46e8bee4259baf4b691ad548bd8c1446a3acf31fc963d82448a78740",
+      "src-tauri/src/native_energy.rs": "43c260f311f664b3c6c02be19211bd6c9078b3927883de5dbe96b4dca4ac62e0",
+      "src-tauri/src/production_host.rs": "c104efdcf0304800e0389061f4d88233d617afff579964be5d1fa816cd6dee5a",
+      "src/main/agent-manager-core.ts": "4c061f9f5427ec93962bb11e7880060dd882eabcca67b1a542d429ea8d49ba3a",
+      "src/service/production-energy-owner.test.ts": "479a3715c21cdca240bd6aefbdbc5c4615c1435d25f53f56fec0d1f541a39587",
+      "src/service/production-energy-owner.ts": "8c4537ef3747f5767778c4ff4468462927d49762c282e13a657ac212f3aa1152",
+      "src/service/production-owner.ts": "4293cdef9a8c61429d04004dd74956bcac0159e01e33a3ba12e5b64171fd9053",
+      "src/service/production-service.test.ts": "d29fe19f4c69f9a68784921bd9d49c4c53ed6f5e892dcfd51fbedfbd4cee2746",
+      "src/service/production-service.ts": "e4b46f5d89be9de2c0c01f80b17fc54133299fdba7c31937e514532fa4319e36",
+      "src/shared/host-services.test.ts": "fb6d4c6da11fe89812a4448f1d338bc20f0b4a643f1411a8b664017bf36e592b",
+      "src/shared/production-bootstrap.test.ts": "6879fe0d22a5e8b1c46e07f3ee7fd1b7130b4838459a7d56f6c3eaf1701c1fae",
+      "src/shared/production-bootstrap.ts": "982d92ee622a9a1f02360558a5eef69abd8ab635b7fdfaca4d1f9e21a6ace190"
+    },
+    "frozenInputs": 14,
+    "finalImplementationHashesRevalidated": true
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "applicationSuiteSyntheticChildNode": "18.19.1",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Optional Linux suspend inhibition from actual AgentManager session lifetime, retained portal ownership and independent shutdown cleanup; shipping remains Electron.",
+  "bindings": {
+    "finiteServiceCommandContracts": 228,
+    "separateNativeServiceCommands": 6,
+    "facadeCommandBindings": 234,
+    "events": 30,
+    "newCommands": 0,
+    "newEvents": 0,
+    "privateOperations": [
+      "host.sleep.set"
+    ],
+    "capability": "energy",
+    "maxLocalIntentTickets": 16,
+    "nativeInhibitorPerApplication": 1,
+    "portalFlags": 4,
+    "publicCallerSelectedHandles": 0
+  },
+  "implemented": [
+    "Actual AgentManager retains its sessions.size aggregate, including idle/coordinator sessions. Synchronous local intent tickets do not claim an applied native grant; Source reconciles one captured optional native callback without UI/window lifetime dependence.",
+    "Existing exact private host.sleep.set boolean DTO reports applied state. True requires captured host capability and current Source scope; false retains cleanup authority after acquisition scope loss. No new public commands, cookies, paths, flags or renderer grants.",
+    "Source serializes raw activation/release, coalesces tickets, never blindly retries uncertain activation and keeps durable sessions running on optional denial. Late activation is released; failed cleanup retains ownership and blocks profile release until an explicit cleanup retry succeeds.",
+    "Linux opens a private GIO bus connection with an unpredictable token, captures the unique portal owner, subscribes before Inhibit and requires both the exact returned object-path handle and Response0 before reporting true. Fixed suspend-only flag4, fixed reason, empty parent and bounded exact GVariant decoding.",
+    "Scope loss, portal/connection loss, cancellation and pending deadlines retire the privately owned connection. Retained callbacks, signals and timer retire before cleanup acknowledgement; failed close retains ownership for retry. Private disconnect cleanup follows the reviewed portal1.20.4 request lifecycle.",
+    "Application shutdown cancels native energy before draining ordinary work, so an unanswered portal interaction cannot block its own cancellation. Source host drain independently closes energy before profile release.",
+    "No dependency, manifest, package/runtime pin, database schema or public command/event surface changes."
+  ],
+  "artifact": {
+    "buildIdentity": "production-95558d6e69118d2345f2aa27302fea96",
+    "resourceManifestSha256": "f72878aaad56d9a5539fd47f65232eda233e09ac64cf750e51ab425038c75505",
+    "verifiedClosureFiles": 6890,
+    "redistributionReviewComplete": false,
+    "dependencyChange": "None; manifests, locks and runtime pins unchanged",
+    "packageAndRuntimePinsUnchanged": true,
+    "cargoVersionsAndChecksumsUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 228,
+    "actualTypeScriptRequests": 471,
+    "sha256": "c9661259c4ce41dd4cb29d37b952744b4e76ff28598f773f36cdc039f1cf0de3",
+    "nativeParity": "Actual TypeScript request corpus accepted by native golden-request test"
+  },
+  "tests": {
+    "app": {
+      "passed": 7101,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "fbe70412bfc029f8009621cc0cfd50091d4425a12465cf94ff8ee233247bb342",
+      "logSha256": "ca63ff83f2fc5322807785d9a44147c8ccfe2adcb1e85cd3322fa1c55fd0f62f"
+    },
+    "standalone": {
+      "passed": 3633,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "5c84e5724a42d45f1c5ad30fbf470a052a7789b5ee724b819ac6ad10dd0422d3",
+      "logSha256": "1bbb02a05526d1a7a2134675c71a6870da23468ed1ca7b1e50cc99e933a43b80"
+    },
+    "focused": {
+      "passed": 122,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "945f80b2602f55e3a89b41a6511065983185d6ab5eac48b66572d2c12b584fea",
+      "logSha256": "926b6043f5edbebeabdc093140159b34c97016868de1a9255ed0c6193f80570f"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "379a841354aa06b8723e596be9df8adb29f29ff6fac96e7ceca1244c6e599cfe",
+      "logSha256": "abe88dd35470655acbe9c027d9f65d9edc6714f3797f59537df0435a477951aa"
+    },
+    "corpus-export": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "4b1295e11aafdb118d145e68492eb49aaba286c0528aebd649bfa05d05441185",
+      "logSha256": "0083251975d5186f875e6057e4226c7d2ccfec98d61fd5c58b0579793b6aaf49"
+    }
+  },
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 32.507,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.945,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 23.065,
+      "logSha256": "9b5b4a0391c66718d3a5ebd96307649be05994bc0fd3aa03df7242fd245fdc97"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 10.764,
+      "logSha256": "c1fdab697c92055fabef9a663473a64de00e2ccaec99fe5276dce5f66b157144"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.712,
+      "logSha256": "909c82d77381b502f695af97a8590c06a158cb4fc90e69873acf3d5cefa641dc"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 15.421,
+      "logSha256": "a33aacd325eb9be0f64d33081769a9358cacc382a23a3156c5da7ad268062024"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.542,
+      "logSha256": "45d3f3f794ff560ce0c72f5ac73e2458545e0fadec18634021bb8e814b3d5ba0"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.43,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.699,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 2.268,
+      "logSha256": "dad8c458bdbb445918fd4cf0e7497668ca670ae0f8fd084f031ced4357dbf3e8"
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.551,
+      "logSha256": "85c9f880885dac60777b2518abf71fc09f427eb2becbe71ae56d7cf80cf8ae94"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 5.045,
+      "logSha256": "43d3c54330263cdc67647d8bb2c6e5f3a8cab306a52e513b628cf1da76f5f8c4"
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch30-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.404,
+      "logSha256": "af6bb96aae851b79d9f62c3e494080e5afecca52772e539fa41b68fa083790e7"
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.05,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "nativeTests": {
+    "enginePassed": 83,
+    "engineIgnored": 4,
+    "hostPassed": 78
+  },
+  "validationCorrections": [],
+  "remainingAcceptance": [
+    "Installed Linux portal permission/denial/cancellation, actual hardware suspend prevention and desktop backend behavior have not been exercised. Protocol tests do not establish those effects.",
+    "No installed Source/portal/session-bus crash recovery or supported-OS acceptance claim. Non-Linux energy remains unsupported.",
+    "GIO/OS decoding happens before Rust size validation; no hard transport allocation cap is claimed. Private connection retirement follows upstream request ownership and does not prove installed backend cleanup behavior.",
+    "Complete G0-G5 migration, remaining desktop/voice/OAuth work and release/profile cutover remain open. Hosted voice stays deferred by user decision."
+  ],
+  "primaryReferences": [
+    "https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Inhibit.html",
+    "https://github.com/flatpak/xdg-desktop-portal/blob/1.20.4/src/inhibit.c",
+    "https://github.com/flatpak/xdg-desktop-portal/blob/1.20.4/src/xdg-desktop-portal.c#L227",
+    "https://github.com/flatpak/xdg-desktop-portal/blob/1.20.4/src/xdp-request.c#L283"
+  ]
+}

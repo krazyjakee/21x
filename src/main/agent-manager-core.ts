@@ -938,11 +938,11 @@ export class AgentManager extends EventEmitter {
       const hasLiveRuntime = this.sessions.size > 0
       if (hasLiveRuntime && this.powerSaveBlockerId === null) {
         this.powerSaveBlockerId = this.host.energy.start()
-        console.log('[AgentManager] App-suspension blocker started (agent session runtime alive)')
+        console.log('[AgentManager] App-suspension inhibition requested (agent session runtime alive)')
       } else if (!hasLiveRuntime && this.powerSaveBlockerId !== null) {
         this.host.energy.stop(this.powerSaveBlockerId)
         this.powerSaveBlockerId = null
-        console.log('[AgentManager] App-suspension blocker stopped (no live session runtimes)')
+        console.log('[AgentManager] App-suspension inhibition release requested (no live session runtimes)')
       }
     } catch (err) {
       console.error('[AgentManager] Failed to update app-suspension blocker:', err)

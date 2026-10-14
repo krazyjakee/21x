@@ -1,6 +1,7 @@
 import type { ArtifactCopyFileResult } from '../shared/artifacts'
 import type { AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import type { DesktopCallerContext } from './transport/desktop-registry'
+import { ProductionEnergyOwner } from './production-energy-owner'
 import { isUiLeaseId } from '../shared/ui-desktop-codecs'
 import { PortableAgentInstallationOwner, type PortableAgentInstallationOwnerOptions } from '../main/agent-installer/portable-installation'
 import { resolveProductionNpmCli } from './production-installation-host'
@@ -118,6 +119,8 @@ export interface ProductionOwnerBootstrap {
   native: {
     /** Captured actual native tray owner, never a renderer setting grant. */
     trayAvailable?: boolean
+    /** Actual optional suspend-inhibition bridge, selected at private launch. */
+    energy?: { setActive(active: boolean): Promise<boolean> }
     agents: Pick<AgentManagerHost, 'renderer' | 'notifications' | 'energy' | 'configuredMcp'>
     /** PATH/native supervision readiness, before any adapter or scheduler starts. */
     prepareRuntime(signal: AbortSignal): Promise<void>
@@ -683,6 +686,14 @@ export class ProductionOwner {
       process.env.PATH = installed; this.ownedPath = { previous, installed }
     }
     const native = this.bootstrap.native
+    const energy = native.energy ? new ProductionEnergyOwner({
+      assertCurrent: () => {
+        if (!this.lock || processRegistry[registryKey] !== this.identity || !['starting', 'ready', 'stopping', 'blocked'].includes(this.phase)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+        this.lock.assertHeld()
+      },
+      setActive: native.energy.setActive.bind(native.energy)
+    }) : null
+    if (energy) this.register('native-energy', () => energy.shutdown(), () => energy.close())
     const providerFactory = this.boundaries.createProvider ?? createChatProviderFromSettings
     const provider: typeof createChatProviderFromSettings = (...args) => this.providers.wrap(providerFactory(...args))
     this.register('providers', () => this.providers.shutdown(), () => this.providers.drain())
@@ -692,6 +703,7 @@ export class ProductionOwner {
     const factory = this.boundaries.createAdapter ?? createAdapter
     const host: AgentManagerHost = {
       ...native.agents,
+      ...(energy ? { energy: energy.host } : {}),
       secrets: { kind: 'broker', getPort: () => broker.port, register: (token, agentId, ids) => broker.register(token, agentId, ids),
         unregister: token => broker.unregister(token), writeShellWrapper: () => shellWrapper },
       managedTaskMcp: 'disabled' in runtime ? { kind: 'disabled' } : {

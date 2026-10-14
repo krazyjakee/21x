@@ -108,6 +108,11 @@ pub struct ProductionDescriptor {
     pub capabilities: ProductionCapabilities,
 }
 pub type HostFuture<T> = Pin<Box<dyn Future<Output = Result<T, EngineError>> + Send>>;
+pub type ProductionEnergyScope = Arc<dyn Fn() -> Result<(), EngineError> + Send + Sync>;
+pub struct ProductionEnergyHost {
+    pub invoke: Arc<dyn Fn(bool, ProductionEnergyScope) -> HostFuture<bool> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionWorkspaceHost {
     pub invoke: Arc<dyn Fn(bool, Value) -> HostFuture<()> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
@@ -136,10 +141,39 @@ pub struct ProductionNativeHost {
     pub event_sink: Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>,
     pub open_external: Option<Arc<dyn Fn(String) -> HostFuture<()> + Send + Sync>>,
     pub notification: Option<ProductionNotificationHost>,
+    pub energy: Option<ProductionEnergyHost>,
     pub ui_snapshot: Option<Arc<dyn Fn(String) -> HostFuture<Value> + Send + Sync>>,
     pub ui_command: Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
     pub installer_progress:
         Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
+}
+fn energy_host_matches(capability: &HostCapability, host: &ProductionNativeHost) -> bool {
+    match capability {
+        HostCapability::Host => host.energy.is_some(),
+        HostCapability::Unsupported => host.energy.is_none(),
+    }
+}
+async fn energy_callback(
+    host: &ProductionNativeHost,
+    capability: &HostCapability,
+    payload: &Value,
+    current: ProductionEnergyScope,
+) -> Result<Value, EngineError> {
+    if !contracts::object(payload, &["enabled"], &[]) || !payload["enabled"].is_boolean() {
+        return Err(EngineError::new("INVALID_ARGUMENTS"));
+    }
+    if *capability != HostCapability::Host || !energy_host_matches(capability, host) {
+        return Err(EngineError::new("UNKNOWN_OPERATION"));
+    }
+    let enabled = payload["enabled"].as_bool().unwrap();
+    if enabled {
+        current()?;
+    }
+    let applied = (host.energy.as_ref().unwrap().invoke)(enabled, current.clone()).await?;
+    if enabled {
+        current()?;
+    }
+    Ok(json!({"enabled":applied}))
 }
 fn notification_text(value: &Value, maximum: usize, multiline: bool, empty: bool) -> bool {
     value.as_str().is_some_and(|text| {
@@ -411,7 +445,6 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || !token(&value.profile_id, 1, 128, true)
         || !token(&value.build_identity, 1, 128, true)
         || !digest(&value.resource_manifest_sha256)
-        || capabilities.energy != HostCapability::Unsupported
         || capabilities.voice != HostCapability::Unsupported
         || capabilities.attachment_files == HostCapability::Host
             && capabilities.ui != HostCapability::Host
@@ -733,6 +766,7 @@ impl ProductionEngine {
                 && host.workspace_file.is_none())
             || (launch.descriptor.capabilities.notifications == HostCapability::Unsupported
                 && host.notification.is_some())
+            || !energy_host_matches(&launch.descriptor.capabilities.energy, &host)
             || !ui_host_matches(&launch.descriptor.capabilities.ui, &host)
             || !attachment_host_matches(&launch.descriptor.capabilities.attachment_files, &host)
             || !attachment_download_host_matches(
@@ -1409,6 +1443,53 @@ impl ProductionEngine {
         let payload = &frame["payload"];
         let operation = frame["operation"].as_str().unwrap_or("");
         match operation {
+            "host.sleep.set" => {
+                if !contracts::object(payload, &["enabled"], &[])
+                    || !payload["enabled"].is_boolean()
+                {
+                    return Err(EngineError::new("INVALID_ARGUMENTS"));
+                }
+                if self.0.descriptor.capabilities.energy != HostCapability::Host {
+                    return Err(EngineError::new("UNKNOWN_OPERATION"));
+                }
+                let enabled = payload["enabled"].as_bool().unwrap();
+                if !self.0.prepared.load(Ordering::SeqCst)
+                    || enabled
+                        && (self.0.closed.load(Ordering::SeqCst)
+                            || self.0.stopping.load(Ordering::SeqCst))
+                {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                let weak = Arc::downgrade(&self.0);
+                let epoch = self.epoch();
+                let current: ProductionEnergyScope = Arc::new(move || {
+                    let inner = weak
+                        .upgrade()
+                        .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                    if !inner.prepared.load(Ordering::SeqCst)
+                        || inner.closed.load(Ordering::SeqCst)
+                        || inner.stopping.load(Ordering::SeqCst)
+                    {
+                        return Err(EngineError::new("DISCONNECTED"));
+                    }
+                    if *inner
+                        .epoch
+                        .lock()
+                        .map_err(|_| EngineError::new("DISCONNECTED"))?
+                        != epoch
+                    {
+                        return Err(EngineError::new("STALE_EPOCH"));
+                    }
+                    Ok(())
+                });
+                energy_callback(
+                    &self.0.host,
+                    &self.0.descriptor.capabilities.energy,
+                    payload,
+                    current,
+                )
+                .await
+            }
             "host.ui.snapshot" | "host.ui.command" | "host.ui.installerProgress" => {
                 if self.0.closed.load(Ordering::SeqCst)
                     || self.0.stopping.load(Ordering::SeqCst)
@@ -1514,6 +1595,9 @@ impl ProductionEngine {
                 })?;
                 if let Some(files) = &self.0.host.workspace_file {
                     (files.close)().await?;
+                }
+                if let Some(energy) = &self.0.host.energy {
+                    (energy.close)().await?;
                 }
                 if let Some(files) = &self.0.host.attachment_file {
                     (files.close)().await?;
@@ -2500,6 +2584,117 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn energy_uses_only_a_captured_host_and_releases_after_acquisition_authority_retires() {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = calls.clone();
+        let mut host = ui_host();
+        assert!(energy_host_matches(&HostCapability::Unsupported, &host));
+        assert!(!energy_host_matches(&HostCapability::Host, &host));
+        host.energy = Some(ProductionEnergyHost {
+            invoke: Arc::new(move |active, _| {
+                recorded.lock().unwrap().push(active);
+                Box::pin(async move { Ok(active) })
+            }),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        let valid: ProductionEnergyScope = Arc::new(|| Ok(()));
+        assert_eq!(
+            energy_callback(
+                &host,
+                &HostCapability::Host,
+                &json!({"enabled":true}),
+                valid.clone()
+            )
+            .await
+            .unwrap(),
+            json!({"enabled":true})
+        );
+        let retired: ProductionEnergyScope = Arc::new(|| Err(EngineError::new("STALE_EPOCH")));
+        assert_eq!(
+            energy_callback(
+                &host,
+                &HostCapability::Host,
+                &json!({"enabled":true}),
+                retired.clone()
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "STALE_EPOCH"
+        );
+        assert_eq!(
+            energy_callback(
+                &host,
+                &HostCapability::Host,
+                &json!({"enabled":false}),
+                retired
+            )
+            .await
+            .unwrap(),
+            json!({"enabled":false})
+        );
+        assert!(!energy_host_matches(&HostCapability::Unsupported, &host));
+        for payload in [
+            json!({"enabled":"true"}),
+            json!({"enabled":true,"flags":8}),
+            json!({"enabled":true,"request":"/foreign"}),
+            json!({"active":true}),
+        ] {
+            assert_eq!(
+                energy_callback(&host, &HostCapability::Host, &payload, valid.clone())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "INVALID_ARGUMENTS"
+            );
+        }
+        assert_eq!(
+            energy_callback(
+                &host,
+                &HostCapability::Unsupported,
+                &json!({"enabled":true}),
+                valid
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "UNKNOWN_OPERATION"
+        );
+        assert_eq!(*calls.lock().unwrap(), vec![true, false]);
+    }
+    #[tokio::test]
+    async fn energy_does_not_publish_a_late_activation_after_its_scope_is_revoked() {
+        let live = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let revoke = live.clone();
+        let mut host = ui_host();
+        host.energy = Some(ProductionEnergyHost {
+            invoke: Arc::new(move |enabled, _| {
+                revoke.store(false, Ordering::SeqCst);
+                Box::pin(async move { Ok(enabled) })
+            }),
+            close: Arc::new(|| Box::pin(async { Ok(()) })),
+        });
+        let current: ProductionEnergyScope = Arc::new(move || {
+            if live.load(Ordering::SeqCst) {
+                Ok(())
+            } else {
+                Err(EngineError::new("STALE_EPOCH"))
+            }
+        });
+        assert_eq!(
+            energy_callback(
+                &host,
+                &HostCapability::Host,
+                &json!({"enabled":true}),
+                current
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "STALE_EPOCH"
+        );
+    }
+    #[tokio::test]
     async fn notification_callbacks_derive_inactive_policy_from_exact_private_operation_only() {
         let flags = Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured = flags.clone();
@@ -2658,7 +2853,7 @@ mod tests {
         assert!(descriptor_bytes(&bad).is_err());
         bad = value.clone();
         bad.capabilities.energy = HostCapability::Host;
-        assert!(descriptor_bytes(&bad).is_err());
+        assert!(descriptor_bytes(&bad).is_ok());
         bad = value;
         bad.paths.workspace_root = PathBuf::from("relative");
         assert!(descriptor_bytes(&bad).is_err());
@@ -2672,6 +2867,7 @@ mod tests {
             event_sink: Arc::new(|_| Ok(())),
             open_external: None,
             notification: None,
+            energy: None,
             ui_snapshot: None,
             ui_command: None,
             installer_progress: None,

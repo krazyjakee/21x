@@ -37,6 +37,8 @@ export interface ProductionPrivateCallbacks {
   notify(title: string, body: string): void
   /** Captured background-only bridge; absent when launch capability is unsupported. */
   notifyStatus?(title: string, body: string): void
+  /** Applied state, never a native cookie or a successful pending-intent claim. */
+  setSleep?(enabled: boolean): Promise<boolean>
   emitOwnerEvent(operation: string, payload: unknown): void
 }
 export interface ProductionServiceHostConstruction {
@@ -168,6 +170,13 @@ export class ProductionService {
         this.notifyHost('host.notification.show', title, body)
       },
       ...(descriptor.capabilities.notifications === 'host' ? { notifyStatus: (title: string, body: string): void => { this.notifyHost('host.notification.status', title, body) } } : {}),
+      ...(descriptor.capabilities.energy === 'host' ? { setSleep: async (enabled: boolean): Promise<boolean> => {
+        if (typeof enabled !== 'boolean') throw new ServiceProtocolError('INVALID_ARGUMENTS')
+        if (enabled && this.closing) throw new ServiceProtocolError('DISCONNECTED')
+        const result = await this.retain(this.peer.request('host.sleep.set', { enabled }))
+        if (!isRecord(result) || !hasExactKeys(result, ['enabled']) || typeof result.enabled !== 'boolean') throw new ServiceProtocolError('INVALID_RESULT')
+        return result.enabled
+      } } : {}),
       emitOwnerEvent: (operation, payload) => {
         if (!Object.hasOwn(PRODUCTION_EVENT_CODECS, operation)) { construction.unbridgedOwnerEvent(operation, payload); return }
         if (!this.initialized || this.closing || !this.bindings) return // durable hydration follows trusted initialize
@@ -179,6 +188,7 @@ export class ProductionService {
       bootstrap.credentials.mode !== (descriptor.profileIntent === 'create-new' ? 'create' : 'load')) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (descriptor.capabilities.notifications === 'host' ? bootstrap.native.agents.notifications.kind !== 'native' : bootstrap.native.agents.notifications.kind !== 'unsupported') throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if ((descriptor.capabilities.tray === 'host') !== (bootstrap.native.trayAvailable === true)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    if ((descriptor.capabilities.energy === 'host') !== (bootstrap.native.energy !== undefined) || bootstrap.native.agents.energy.kind !== 'unsupported') throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const nativeUi = bootstrap.native.ui
     if (descriptor.capabilities.ui === 'host' ? !nativeUi || typeof nativeUi.snapshot !== 'function' || typeof nativeUi.send !== 'function' : nativeUi !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (descriptor.capabilities.attachmentFiles === 'host' ? typeof bootstrap.native.openAttachment !== 'function' || descriptor.capabilities.ui !== 'host' : bootstrap.native.openAttachment !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -312,6 +322,7 @@ export class ProductionService {
     if (descriptor.capabilities.externalUrls === 'host') operations['host.shell.openExternal'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateResult }
     if (descriptor.capabilities.workspaceFiles === 'host') for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.notifications === 'host') for (const operation of ['host.notification.show', 'host.notification.status'] as const) operations[operation] = { validatePayload: HOST_OPERATION_SCHEMAS[operation].validateRequest, validateResult: HOST_OPERATION_SCHEMAS[operation].validateResult }
+    if (descriptor.capabilities.energy === 'host') operations['host.sleep.set'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.sleep.set'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.sleep.set'].validateResult }
     if (descriptor.capabilities.ui === 'host') for (const [operation, schema] of Object.entries(UI_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.attachmentFiles === 'host') operations['host.attachment.open'] = ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.open']
     if (descriptor.capabilities.attachmentDownloads === 'host') operations['host.attachment.download'] = ATTACHMENT_NATIVE_CALLBACK_SCHEMAS['host.attachment.download']
@@ -431,7 +442,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
       connectors: descriptor.capabilities.connectors === 'enabled' ? { kind: 'enabled' } : { kind: 'disabled', reason: 'Private launch explicitly disables connectors' },
       managedTaskMcp: descriptor.capabilities.managedTaskMcp === 'disabled' ? { disabled: true } : {
         command: resources.node, args: [resources.taskMcp], environment: {}, tools: listToolsForScope(FULL_ACCESS_SCOPE).map(tool => ({ name: tool.name, description: tool.description ?? '' })) },
-      native: { trayAvailable: descriptor.capabilities.tray === 'host', agents: { renderer: { kind: 'unsupported' }, notifications: descriptor.capabilities.notifications === 'host' ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: descriptor.capabilities.configuredMcp },
+      native: { trayAvailable: descriptor.capabilities.tray === 'host', ...(descriptor.capabilities.energy === 'host' ? { energy: { setActive: callbacks.setSleep! } } : {}), agents: { renderer: { kind: 'unsupported' }, notifications: descriptor.capabilities.notifications === 'host' ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: descriptor.capabilities.configuredMcp },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, openExternal: callbacks.openExternal,
         ...(descriptor.capabilities.workspaceFiles === 'host' ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}),
         ...(descriptor.capabilities.attachmentFiles === 'host' ? { openAttachment: callbacks.openAttachment } : {}),

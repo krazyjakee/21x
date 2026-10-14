@@ -14,9 +14,9 @@ use tauri_plugin_opener::OpenerExt;
 use twentyonex_engine::{
     production::{
         DelegatedCgroup, HostCapability, OptionalCapability, ProductionAttachmentHost,
-        ProductionCapabilities, ProductionDescriptor, ProductionEngine, ProductionNativeHost,
-        ProductionNotificationHost, ProductionPaths, ProductionWorkspaceHost, ProfileIntent,
-        TrustedProductionLaunch,
+        ProductionCapabilities, ProductionDescriptor, ProductionEnergyHost, ProductionEngine,
+        ProductionNativeHost, ProductionNotificationHost, ProductionPaths, ProductionWorkspaceHost,
+        ProfileIntent, TrustedProductionLaunch,
     },
     production_attachment_files::{NativeAttachmentFileOwner, NativeAttachmentReceipt},
     production_files::{NativeWorkspaceFileOwner, NativeWorkspaceReceipt},
@@ -31,6 +31,9 @@ use native_notifications::{NativeNotificationOwner, Scope as NotificationScope};
 #[path = "native_tray.rs"]
 pub(crate) mod native_tray;
 use native_tray::NativeTrayOwner;
+#[path = "native_energy.rs"]
+pub(crate) mod native_energy;
+use native_energy::NativeEnergyOwner;
 #[path = "native_artifact_clipboard.rs"]
 pub(crate) mod native_artifact_clipboard;
 #[path = "native_attachment_download.rs"]
@@ -48,6 +51,7 @@ struct ProductionState {
     ui: NativeUiOwner,
     notifications: NativeNotificationOwner,
     tray: Option<NativeTrayOwner>,
+    energy: Option<NativeEnergyOwner>,
 }
 
 fn trusted_origin(url: &tauri::Url) -> bool {
@@ -587,6 +591,7 @@ async fn start(
     ui: NativeUiOwner,
     notifications: NativeNotificationOwner,
     tray_available: bool,
+    energy: Option<NativeEnergyOwner>,
 ) -> Result<ProductionEngine, EngineError> {
     // Developer/native provisioning only. Never accept a scope path via IPC;
     // absence of a real delegated scope prevents Node/key/profile startup.
@@ -707,7 +712,11 @@ async fn start(
             } else {
                 HostCapability::Unsupported
             },
-            energy: HostCapability::Unsupported,
+            energy: if cfg!(target_os = "linux") && energy.is_some() {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             ui: HostCapability::Host,
             voice: HostCapability::Unsupported,
             configured_mcp: OptionalCapability::Disabled,
@@ -758,6 +767,34 @@ async fn start(
         None
     };
     let ui_snapshot = ui.snapshot_callback(app.clone(), native_work.clone());
+    let energy_host = if cfg!(target_os = "linux") {
+        energy.map(|owner| {
+            let closing = owner.clone();
+            let work = native_work.clone();
+            ProductionEnergyHost {
+                invoke: Arc::new(move |enabled, current| {
+                    let (owner, work) = (owner.clone(), work.clone());
+                    Box::pin(async move {
+                        if !enabled && work.assert_open().is_err() {
+                            owner.close().await?;
+                            return Ok(false);
+                        }
+                        let scope: native_energy::Scope = Arc::new(move || {
+                            work.assert_open()?;
+                            current()
+                        });
+                        owner.set_active(enabled, scope).await
+                    })
+                }),
+                close: Arc::new(move || {
+                    let owner = closing.clone();
+                    Box::pin(async move { owner.close().await })
+                }),
+            }
+        })
+    } else {
+        None
+    };
     let ui_command = ui.command_callback(app.clone(), native_work.clone());
     let installer_progress = ui.installer_progress_callback(app.clone(), native_work.clone());
     ProductionEngine::start(
@@ -793,6 +830,7 @@ async fn start(
                 })
             })),
             notification,
+            energy: energy_host,
             ui_snapshot: Some(ui_snapshot),
             ui_command: Some(ui_command),
             installer_progress: Some(installer_progress),
@@ -816,6 +854,7 @@ pub fn run() {
             let ui = NativeUiOwner::default();
             let notifications = NativeNotificationOwner::new(app.handle(), native_work.clone())
                 .map_err(|_| std::io::Error::other("PRODUCTION_NOTIFICATION_UNAVAILABLE"))?;
+            let energy = NativeEnergyOwner::new(app.handle(), native_work.clone()).ok();
             let (tray_app, tray_work, tray_ui) =
                 (app.handle().clone(), native_work.clone(), ui.clone());
             let tray_scope: native_tray::Scope = Arc::new(move || {
@@ -832,6 +871,7 @@ pub fn run() {
                 ui.clone(),
                 notifications.clone(),
                 tray.as_ref().is_some_and(|owner| owner.is_available()),
+                energy.clone(),
             ));
             let state = match started {
                 Ok(engine) => ProductionState {
@@ -841,6 +881,7 @@ pub fn run() {
                     ui: ui.clone(),
                     notifications: notifications.clone(),
                     tray: tray.clone(),
+                    energy: energy.clone(),
                 },
                 Err(error) => ProductionState {
                     engine: None,
@@ -849,6 +890,7 @@ pub fn run() {
                     ui: ui.clone(),
                     notifications: notifications.clone(),
                     tray: tray.clone(),
+                    energy: energy.clone(),
                 },
             };
             app.manage(state);
@@ -924,10 +966,20 @@ pub fn run() {
             let native_work = state.native_work.clone();
             let notifications = state.notifications.clone();
             let tray = state.tray.clone();
+            let energy = state.energy.clone();
             let handle = handle.clone();
             let quitting = quitting.clone();
             tauri::async_runtime::spawn(async move {
                 let mut code = 0;
+                // Cancel the owned portal interaction before joining normal
+                // work, which can include an unanswered permission response.
+                if let Some(energy) = energy {
+                    if energy.close().await.is_err() {
+                        eprintln!("PRODUCTION_ENERGY_DRAIN_BLOCKED");
+                        quitting.store(0, Ordering::SeqCst);
+                        return;
+                    }
+                }
                 // Join native invocations before Node may release its profile
                 // and stores, as well as before the application exits.
                 if native_work.drain().await.is_err() {

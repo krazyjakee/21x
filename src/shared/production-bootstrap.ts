@@ -20,7 +20,7 @@ export interface ProductionLaunchDescriptor {
     tray?: 'host' | 'unsupported'
     externalUrls: 'host' | 'unsupported'
     notifications: 'host' | 'unsupported'
-    energy: 'unsupported'
+    energy: 'host' | 'unsupported'
     ui: 'host' | 'unsupported'
     voice: 'unsupported'
     configuredMcp: 'enabled' | 'disabled'
@@ -48,7 +48,7 @@ export function isProductionLaunchDescriptor(value: unknown): value is Productio
     (capabilities.attachmentDownloads !== 'host' || capabilities.ui === 'host') &&
     (capabilities.artifactClipboard === undefined || choice(capabilities.artifactClipboard, ['host', 'unsupported'])) &&
     (capabilities.artifactClipboard !== 'host' || capabilities.ui === 'host') &&
-    ['externalUrls', 'notifications', 'ui'].every(key => choice(capabilities[key], ['host', 'unsupported'])) && ['energy', 'voice'].every(key => capabilities[key] === 'unsupported') &&
+    ['externalUrls', 'notifications', 'ui', 'energy'].every(key => choice(capabilities[key], ['host', 'unsupported'])) && capabilities.voice === 'unsupported' &&
     ['configuredMcp', 'connectors', 'managedTaskMcp'].every(key => choice(capabilities[key], ['enabled', 'disabled']))
 }
 export function isProductionInitialize(value: unknown): value is { protocolVersion: 1; launchId: string } {
