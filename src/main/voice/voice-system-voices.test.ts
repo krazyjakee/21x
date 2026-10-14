@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { EventEmitter } from 'events'
+import { execFile, type ChildProcess } from 'child_process'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import {
   listSystemVoices,
   parseEspeakVoices,
@@ -7,6 +11,8 @@ import {
   pickDefaultSystemVoice,
   systemVoiceId,
   systemVoiceName,
+  VoiceSystemVoicesOwner,
+  type VoiceSystemVoicesHost,
 } from './voice-system-voices'
 
 /**
@@ -46,6 +52,43 @@ describe('parseSayVoices', () => {
 
   it('ignores an empty line', () => {
     expect(parseSayVoices('\n\n')).toEqual([])
+  })
+})
+
+describe('portable system voice enumeration owner', () => {
+  it('refuses executable effects when the actual host capability is unavailable', async () => {
+    const execute = vi.fn<typeof execFile>()
+    const owner = new VoiceSystemVoicesOwner({ platform: 'linux', capability: 'unavailable', executable: null, env: {}, execFile: execute as unknown as typeof execFile, assertCurrent() {} })
+    expect(await owner.list()).toEqual([]); expect(execute).not.toHaveBeenCalled(); await owner.close()
+    expect(() => owner.list()).toThrow('VOICE_SYSTEM_VOICES_CLOSED')
+  })
+  it('retains early error callbacks until actual close, including ignored termination and retry', async () => {
+    const child = new EventEmitter() as ChildProcess
+    child.kill = vi.fn(() => true)
+    // Spawn failures can deliver execFile callback before native close. This
+    // synchronous callback also checks that child assignment is never assumed.
+    const execute = ((_file: string, _args: string[], _options: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => { callback(new Error('Private executable path'), '', ''); return child }) as VoiceSystemVoicesHost['execFile']
+    const owner = new VoiceSystemVoicesOwner({ platform: 'linux', capability: 'available', executable: process.execPath, env: {}, execFile: execute as unknown as typeof execFile, assertCurrent() {} })
+    const listing = owner.list(); const failure = listing.catch(error => error)
+    expect(owner.inflightCount).toBe(1)
+    await expect(owner.close(5)).rejects.toThrow('VOICE_SYSTEM_VOICES_SHUTDOWN_INCOMPLETE')
+    expect(owner.inflightCount).toBe(1); expect(child.kill).toHaveBeenCalled()
+    child.emit('close', -1, null); expect(await failure).toBeInstanceOf(Error)
+    await owner.close(); expect(owner.inflightCount).toBe(0)
+  })
+  it('waits for buffered output after close before accepting a list and rechecks current ownership', async () => {
+    const child = new EventEmitter() as ChildProcess; child.kill = vi.fn(() => true)
+    let callback!: (error: Error | null, stdout: string, stderr: string) => void, current = true
+    const execute = ((_file: string, _args: string[], _options: unknown, done: typeof callback) => { callback = done; return child }) as VoiceSystemVoicesHost['execFile']
+    const owner = new VoiceSystemVoicesOwner({ platform: 'darwin', capability: 'available', executable: process.execPath, env: {}, execFile: execute as unknown as typeof execFile, assertCurrent() { if (!current) throw new Error('Owner withdrawn') } })
+    const listing = owner.list(); const failure = listing.catch(error => error); child.emit('close', 0, null)
+    expect(owner.inflightCount).toBe(1); current = false; callback(null, 'Samantha en_US # Hello', '')
+    expect(await failure).toBeInstanceOf(Error); await owner.close(); expect(owner.inflightCount).toBe(0)
+  })
+  it.skipIf(Boolean(process.versions.electron))('owns a real Node execFile spawn-error through native close without exposing its path', async () => {
+    const owner = new VoiceSystemVoicesOwner({ platform: 'linux', capability: 'available', executable: join(tmpdir(), '21x-nonexistent-system-voice-command'), env: {}, execFile, assertCurrent() {} })
+    try { const listing = owner.list(); expect(owner.inflightCount).toBe(1); expect(await listing).toEqual([]); expect(owner.inflightCount).toBe(0) }
+    finally { await owner.close() }
   })
 })
 

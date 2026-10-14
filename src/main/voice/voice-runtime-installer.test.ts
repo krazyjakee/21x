@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import { mkdirSync, writeFileSync } from 'fs'
-import { mkdtemp, mkdir, writeFile, rm, stat } from 'fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, stat, symlink, readFile, realpath } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -16,6 +16,7 @@ const {
   removeVoiceRuntime,
   runtimeModulePath,
   unsupportedHardwareReason,
+  VoiceRuntimeOwner,
 } = await import('./voice-runtime-installer')
 
 /**
@@ -35,10 +36,12 @@ function fakeProcess(options: { exitCode?: number; stdout?: string; failToStart?
   setTimeout(() => {
     if (options.failToStart) {
       child.emit('error', new Error('spawn npm ENOENT'))
+      child.emit('close', null)
       return
     }
     if (options.stdout) child.stdout.emit('data', Buffer.from(options.stdout))
     child.emit('exit', options.exitCode ?? 0)
+    child.emit('close', options.exitCode ?? 0)
   }, 0)
   return child
 }
@@ -47,7 +50,7 @@ let root: string
 
 beforeEach(async () => {
   spawnMock.mockReset()
-  root = await mkdtemp(join(tmpdir(), 'voice-runtime-'))
+  root = await realpath(await mkdtemp(join(tmpdir(), 'voice-runtime-')))
 })
 
 afterEach(async () => {
@@ -118,7 +121,7 @@ describe('installVoiceRuntime', () => {
       .mockImplementationOnce(() => fakeProcess({ exitCode: 1, stdout: 'npm error\n' })) // npm install
     const progress = vi.fn()
 
-    await expect(installVoiceRuntime(root, progress)).rejects.toThrow(/exited with code 1/i)
+    await expect(installVoiceRuntime(root, progress)).rejects.toThrow('VOICE_RUNTIME_INSTALL_FAILED')
     expect((await detectVoiceRuntime(root)).installed).toBe(false)
   })
 
@@ -147,6 +150,55 @@ describe('installVoiceRuntime', () => {
     expect(options).toMatchObject({ cwd: root })
     // A private manifest keeps npm from walking up into the app directory.
     await expect(stat(join(root, 'package.json'))).resolves.toBeTruthy()
+  })
+})
+
+describe('portable runtime ownership', () => {
+  it('refuses the unpinned installer before npm or filesystem effects', async () => {
+    const owner = new VoiceRuntimeOwner({ rootDir: join(root, 'absent'), installation: 'unavailable' })
+    const progress = vi.fn()
+    await expect(owner.install(progress)).rejects.toThrow('VOICE_RUNTIME_INSTALL_UNAVAILABLE')
+    expect(spawnMock).not.toHaveBeenCalled(); expect(progress).not.toHaveBeenCalled()
+    await expect(stat(join(root, 'absent'))).rejects.toThrow()
+    await owner.close()
+  })
+  it('reads a bounded genuine package manifest without any subprocess', async () => {
+    await writeInstalledRuntime('1.12.0')
+    const owner = new VoiceRuntimeOwner({ rootDir: root, installation: 'unavailable' })
+    expect(await owner.detect()).toMatchObject({ installed: true, version: '1.12.0' })
+    expect(spawnMock).not.toHaveBeenCalled()
+    expect(() => owner.assertRoot(join(root, 'foreign'))).toThrow('OWNER_MISMATCH')
+    await owner.close(); await expect(owner.detect()).rejects.toThrow('CLOSED')
+  })
+  it('preserves installed and unrelated files when no trusted removal inventory exists', async () => {
+    await writeInstalledRuntime('1.12.0'); await writeFile(join(root, 'notes.txt'), 'user notes')
+    const owner = new VoiceRuntimeOwner({ rootDir: root, installation: 'unavailable' })
+    await expect(owner.remove()).rejects.toThrow('REMOVAL_INVENTORY_UNAVAILABLE')
+    expect(await readFile(join(root, 'notes.txt'), 'utf8')).toBe('user notes')
+    expect((await owner.detect()).installed).toBe(true)
+    await owner.close()
+  })
+  it('refuses linked parents and oversized manifests before decoding them', async () => {
+    const external = join(root, 'external'); await mkdir(external)
+    const owned = join(root, 'owned'); await mkdir(owned); await symlink(external, join(owned, 'node_modules'), 'dir')
+    const owner = new VoiceRuntimeOwner({ rootDir: owned, installation: 'unavailable' })
+    await expect(owner.detect()).rejects.toThrow('PATH_UNSAFE'); await owner.close()
+    await writeInstalledRuntime('1.12.0'); await writeFile(join(runtimeModulePath(root), 'package.json'), 'x'.repeat(16385))
+    const bounded = new VoiceRuntimeOwner({ rootDir: root, installation: 'unavailable' })
+    await expect(bounded.detect()).rejects.toThrow('MANIFEST_INVALID'); await bounded.close()
+  })
+  it('retains a failed spawn until its actual close receipt', async () => {
+    const child = new EventEmitter() as ReturnType<typeof fakeProcess>
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = vi.fn()
+    spawnMock.mockReturnValue(child)
+    const owner = new VoiceRuntimeOwner({ rootDir: root, installation: 'electron-compatibility' })
+    const install = owner.install(() => {}).catch(error => error)
+    child.emit('error', new Error('secret path must not be projected'))
+    await expect(owner.close(10)).rejects.toThrow('DRAIN_INCOMPLETE')
+    expect(owner.inflightCount).toBe(1)
+    child.emit('close', null)
+    expect((await install).message).toMatch(/npm was not found/)
+    await owner.close(); expect(owner.inflightCount).toBe(0)
   })
 })
 

@@ -1,0 +1,451 @@
+{
+  "evidenceVersion": 1,
+  "recordedLocalDate": "2026-10-14",
+  "timezone": "Europe/London",
+  "issues": [
+    202,
+    208,
+    214,
+    218
+  ],
+  "resolvedIssues": [],
+  "source": {
+    "baseRevision": "6c85cc01b4a90477c5686483ef21c13d6296f2d7",
+    "hashAlgorithm": "sha256",
+    "files": {
+      "docs/tauri-migration/implementation-status.md": "9e8c9e3997120bf8a6d6f331bb578624c1445d0779767f517073e3680470d173",
+      "docs/tauri-migration/inventory.json": "384aaf9d03d49a334b5cc680de2ec3071fac877185179739bf53ebf769c03975",
+      "docs/tauri-migration/operations.json": "504ceb4d237f26beffb383ac379b9b6dbc5399b376c60435e73eeb91f533e0f5",
+      "docs/tauri-migration/voice-management-bindings.md": "1f2a35083079c106329006a21007b92ca971f79b5b15bcc2495641f6192e1b55",
+      "docs/tauri-migration/voice-recognition-owner.md": "02094a144b3ad9f0685abae12e6b78304672b0f79e93235a031d3772927fab1f",
+      "docs/tauri-migration/voice-speech-owner.md": "deec9b7908ba5288f71096bf1b4e85ab9d198b1f25090292834d1d59ddcdf717",
+      "scripts/production-contracts-proof.test.ts": "0931f2e2c6275121d95fa27eb2306038012f67da1f31b976461167d5b3668b4c",
+      "scripts/production-contracts-proof.ts": "7097c9f9fde88601f7f8e33401db357d1fb93c018ba07d07b882fff4b854a02b",
+      "scripts/tauri-inventory.mjs": "32cf1e43c98c4ac733e5fd2f6ddf55510232553afa378672ae29f90796354a4c",
+      "scripts/tauri-stage-production.mjs": "0a52d73521fafe3c1e21cdb23ce35615e0c6273d51a0178841047f5ff9af06ce",
+      "scripts/tauri-stage-production.test.ts": "e12f5bf47b02e8c63c320f9501f3b77ab8c29fb165f93379fbfe1df2a3ec1c4d",
+      "src-tauri/engine/src/production.rs": "c44439fc578668c2dd91f944cb0918e4a83d3447127fa7321280438264e20de3",
+      "src-tauri/engine/src/production_contracts.rs": "f357e74e1e6fb9798203f07990b4e9282d7d1720fcb0a5c6693e622b41fa9511",
+      "src/main/index.ts": "0eda8a986c11d23ce1bd7b5073e8ddcb66b08b2ea35830c99ae93a75a8d3e616",
+      "src/main/voice/voice-model-manager.test.ts": "8792ad2d9ed6adfd80510a3a7ec5c88b9ce36e30eabded80f00bfe6b8910916d",
+      "src/main/voice/voice-model-manager.ts": "ce78079ddb2e946d292e68613359a115105e698e49db7ded21bb986414d5892b",
+      "src/main/voice/voice-runtime-installer.test.ts": "f02da6b2674de141ff61b85a508332d3a062b9239de16edf63bebae0f5efbfae",
+      "src/main/voice/voice-runtime-installer.ts": "add73859a98d286cb19859d7564cfac17c6210fffc3ff4b05794c1b108fe6bef",
+      "src/main/voice/voice-session-manager-core.test.ts": "165ea68a46c7a813848cd2cdebc44be4f402add1862ad89baaea1bb8df83b4df",
+      "src/main/voice/voice-session-manager-core.ts": "ba05f14cd8c6097ef2073be7c4cfdf734bb9a9a913f4cc1489a5a61e21ee8a34",
+      "src/main/voice/voice-session-manager.ts": "48757a4b4a53b68243f2517dac836f493f1901599c0d262ecb41be1191b3566c",
+      "src/main/voice/voice-setup.test.ts": "392b8fd32c11ec7a544f42a4d368c6dc2c16acf150908c8895490011db1c1fad",
+      "src/main/voice/voice-speech-service.test.ts": "33541b08b899c80730db6df0638175ddcd2d1711838fc1d326c88f6f111a0054",
+      "src/main/voice/voice-speech-service.ts": "72525166349e4ca76ecfa14d5d98ae5ed28ec4ca95dea1a11378ff3fa23eabc1",
+      "src/main/voice/voice-system-voices.test.ts": "a5c319fa6a2c51ee95187b6648388d58ccef49e568fef90a596ba1a23632d6c0",
+      "src/main/voice/voice-system-voices.ts": "dadbee477a42dc412596059cb6a2fd02a859695e1e27d6e76c85f82dd9f771d8",
+      "src/main/voice/voice-tts-model-manager.test.ts": "9089a6ddeb54fc56a81338a1069d596a4104737c669578ee133c328283415bdb",
+      "src/main/voice/voice-tts-model-manager.ts": "80257325fa1bc7c0b5e1bf1bb8417fd0ee97415a5536614cdff23248bd3930f3",
+      "src/main/voice/voice-tts-worker-client.test.ts": "2640ccec8c18765aada9f55e27f79ef18c9e39fb724543b7ae5681f280d1e286",
+      "src/main/voice/voice-tts-worker-client.ts": "d5641db3f80f1156aa4e7ebdf07e99a47c3a115ee873567177b6a70489cc18f9",
+      "src/main/voice/voice-worker-client.test.ts": "282f23dd7f998cc1bcc27b2c2068b5b6ab7394735d098afe3858841e9f3ec067",
+      "src/main/voice/voice-worker-client.ts": "3435e9ac5cabb44d348d96296307f0448003c8026b2dce6167988392d1cbf4bc",
+      "src/renderer/src/components/commander/CommanderCallHost.terminal-ownership.test.tsx": "615658f05f3ea60cd1ec3e59d1bdbae8cdfa541c3090c68af009d116f30fc022",
+      "src/renderer/src/components/orchestrator/OrchestratorPanel.test.tsx": "279ef0468603a9fc48e5038d829add8b6b47dbd31c74f6fcd105eb5703f72a02",
+      "src/renderer/src/components/orchestrator/OrchestratorPanel.tsx": "ab52072ff649f77113cd87fc6e84b453d2d83f8f72e42ac7fbf5c0d47d1def43",
+      "src/renderer/src/lib/native-desktop-host.test.ts": "39b5d6116512d8eddcf2a4357236dcf2879cc5656b952b738738a2c9059d41f8",
+      "src/renderer/src/lib/native-desktop-host.ts": "a6da5a0ed2488014a97c26e4999b72d46a5edcb41ca6ab36c3b874b5e721a9ee",
+      "src/renderer/src/stores/voice-store.test.ts": "c50322feb893f62eff0d903bfa26cec6dbaa15d2caeaaf98139d7f91d576484c",
+      "src/renderer/src/stores/voice-store.ts": "25253da6de095cfed73b452a604ececc9899eeace7a932a94970d1b1d983a340",
+      "src/service/production-desktop-bindings.test.ts": "0db1bef874e350d111e8dfa62d47b40929340b2ca5d27cf3aa89038f2c0f2067",
+      "src/service/production-desktop-bindings.ts": "3b919145dcaf85349c475da49b836b57ee53926c8569cd7e2dfa72271bf5444b",
+      "src/service/production-owner.ts": "0bed716b4eedadfd1a1b1e36db8e364195a50110d439a63df9d126aba5882da3",
+      "src/service/production-service.test.ts": "862aa099a741a1f606d427a417d4ee0c6ebd560f7af23c56ed413487ade4d677",
+      "src/service/production-service.ts": "d1afec5c5b720f75828890c493845939100d9af2b59e6feb08617cb115606529",
+      "src/service/production-stdio.ts": "c9dcf4d88a911cd27bb485d40babb9021439feb4ed411e69d917e42ce270682b",
+      "src/service/production-voice-owner.ts": "0cd2fe1be3a83d67929fbe98a16537b8f2e4948956637f1086a3ea6368f36631",
+      "src/service/voice-management-backend.test.ts": "4c9561bec09b1a231cac07233783ad824b4ccf9993e02dd6b2233167daebcd06",
+      "src/service/voice-management-backend.ts": "60e3843b2105cac31f1bda85ead66c4b6a1de18e21432be40f79852619b2c1f2",
+      "src/shared/voice-management-codecs.test.ts": "47539f82ec4615e48098961bc5cb74a72044a00f159fad827e863e8fdb51edbb",
+      "src/shared/voice-management-codecs.ts": "0e007699c8417a22c86c014ca6c55d32fd7a7c79d4d05087dd1059cd9f7414d4",
+      "vitest.tauri.config.ts": "c16db7f0b6db558139063c97ecaf7b85cab719bd7d4fa55fcf1871dfff10947b"
+    }
+  },
+  "environment": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "standaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "installedProductionTauriWebView": "not exercised"
+  },
+  "scope": "Actual portable local recognition, speech, model and optional-runtime ownership;21finite management bindings/four desktop-only events; verified staged worker pair. Native capture/playback/actions/shortcuts/runtime installation remain unavailable; hosted voice deferred.",
+  "bindings": {
+    "finiteServiceCommandContracts": 161,
+    "separateNativeServiceCommands": 2,
+    "facadeCommandBindings": 163,
+    "events": 23,
+    "newVoiceManagementCommands": 21,
+    "newVoiceManagementEvents": 4,
+    "voiceAbsentBaseHandlers": 123,
+    "voicePresentBaseHandlers": 144,
+    "allOptionalDomainsHandlers": 161
+  },
+  "implemented": [
+    "Actual host-neutral VoiceSessionManagerCore with captured real database/AgentManager/model/runtime/worker/speech references, explicit unavailable native permissions/shortcuts/actions, raw initialization/final/action/read/model ownership, current generation/setting/publication guards and shared bounded management leases.",
+    "Actual portable speech/model/worker/system enumeration owners require explicit local-only policy, captured resource/runtime/environment/model proofs and native audio capability. Hosted operations refuse before effects; unavailable audio never spawns or emits speech audio. System voice enumeration retains both native child-close and buffered callback receipts; worker replacement waits for raw close and pipes.",
+    "Finite21-command/four-management-event domain registry preserves preload argument/result keys/units, current read/write/owner grants, one mutation/16requests bounds, retained raw requests and no replay. Runtime paths are public presence markers, errors fixed, hosted account state empty/unavailable; no capture/action/custom-path/audio/native-permission grant is added.",
+    "Protected-profile roots, actual fixed-model download/hash/file owners and selected standalone Node/script/environment resources; strict response cancellation/file closure, checksummed bounded tar extraction, private staging/publication and exact inventory deletion. Unowned/historical/changed trees are preserved, removal retains quarantine after uncertainty, and exact file unlink/empty-directory removal preserves files added during retirement.",
+    "Existing recognition/speech worker CommonJS bytes join both Node and native exact resource-manifest policy, hashes and build identity as a required optional pair. Staging refuses replacement of changed/unowned/linked worker files; older artifacts without the pair keep management unavailable.",
+    "Electron compatibility wrapper retains existing native/default behavior and now awaits actual voice drain before database teardown. Renderer management initialization does not request an unsupported native microphone or admit capture.",
+    "Captain retry completion is fenced by mounted/current project-view identity; late replies cannot update an unmounted/replaced panel or refresh projects for its retired view."
+  ],
+  "artifact": {
+    "buildIdentity": "production-85cfdc75b5b14dc7016da41a023dcd63",
+    "resourceManifestSha256": "5c5d26a297e8e78160ec2d077fda23340aa9a3827154b819971bbb1b6ed7a8c0",
+    "verifiedClosureFiles": 6890,
+    "workerEntries": {
+      "voiceWorker": "service/voice-worker.cjs",
+      "voiceTtsWorker": "service/voice-tts-worker.cjs"
+    },
+    "workerFiles": {
+      "service/voice-worker.cjs": {
+        "sha256": "2156b0cc656969fd752f7cd00b93608f848b49c843ed04f76e643c31126ca3f7",
+        "bytes": 16701
+      },
+      "service/voice-tts-worker.cjs": {
+        "sha256": "e2634bbfa09521a85c370562d56fab0481409075cf6eaea9bcc6e4959d9a820e",
+        "bytes": 18210
+      }
+    },
+    "redistributionReviewComplete": false,
+    "cargoLockUnchanged": true
+  },
+  "contractCorpus": {
+    "operations": 161,
+    "requests": 350,
+    "sha256": "332243b9a9a4360675090c10bf5254b2803f45eb80f99421345adfb073df4513"
+  },
+  "tests": {
+    "app": {
+      "passed": 6426,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "342b4655ec3679ab75a50bc425f4f765853c0e1b3b83cf757077f9580671a0c2",
+      "logSha256": "cc15fd06c6a5f1c7de4598122f82e75aaf00159245882da077248ac3d174d1f9"
+    },
+    "standalone": {
+      "passed": 2897,
+      "failed": 0,
+      "skipped": 3,
+      "success": true,
+      "reportSha256": "4e3edebc03db03d7bad29ac6a0edc498c10b9f4d16d52dd13d44f0af6679bff3",
+      "logSha256": "c9237cdd94d41e2b1a29454ce894788d15506b63e7695b4a2d59fb04aeba7ba8"
+    },
+    "focused": {
+      "passed": 388,
+      "failed": 0,
+      "skipped": 5,
+      "success": true,
+      "reportSha256": "1758dba34b10d815afc11eb04888d1c1a7f525f874df19f3540b8a9b4432eaaa",
+      "logSha256": "6e3df39b783578c194efe75e057b65edb5478b5f336335acb0e40dce120c7fba"
+    },
+    "corrections": {
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "8d6251ca298ac836bde3d21aeacecaa09758a007ba42f72b82de752020929353",
+      "logSha256": "e2b828fa6d317935cc4016ef19d9a0d1cd888c8f219e2b19dd6eafbe70b91847"
+    },
+    "captain-correction": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "ddc3a5aaa6fe7309a311ffcdaa204e308730cefece21e997d6e5b6d1feb11aa5",
+      "logSha256": "f8696472eb571d6319904953aae068cadc41e8eae8279a1271a3f3bed945ea9e"
+    },
+    "private-node": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "09ecb7940501f43adf54fbb7188c3928620122aa895f763131c41aa0e5e69b28",
+      "logSha256": "6bbd7cc76c19c6033b3c55d6ab1a7f4ad1e52b6c8fa344e85d4b658c84849044"
+    },
+    "corpus-export": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "37b75d81ac115b92bba79cb9cce8a09e5b001bff1499da4166d56e3b4851ed22",
+      "logSha256": "d73207b54268845e0cb667afda0d3559dce5eccdd34d1b54345493e215b894c1"
+    }
+  },
+  "standaloneOptionalInstalledInference": [
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "VoiceWorkerClient with the installed runtime loads the real recogniser, so the config shape cannot drift",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "Parakeet v3 with the installed runtime loads the offline recogniser and transcribes a complete turn",
+      "reason": "requires an installed local recognition runtime/model"
+    },
+    {
+      "file": "src/main/voice/voice-worker-client.test.ts",
+      "test": "a single-shot turn reports a final and never a segment, so dictation cannot send by itself",
+      "reason": "requires an installed local recognition runtime/model"
+    }
+  ],
+  "verification": {
+    "typecheck": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 43.279,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 12.889,
+      "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "build": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 37.82,
+      "logSha256": "840ff5c75d9d162488ef3df5796132aab400a69080433d1eb0510f8f13732fbb"
+    },
+    "production-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 11.026,
+      "logSha256": "b299ddfd0df48c518ed9a9ee5ce77060e440a6682efe11425e6c2e01885445fc"
+    },
+    "diagnostic-frontend": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.708,
+      "logSha256": "6bda62fac52ccc6c44e289fc81eb07ef2798ad9efbd8b8028646a473bc7f0677"
+    },
+    "production-stage": {
+      "command": [
+        "rtk",
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 14.946,
+      "logSha256": "86b8b2dadd3e1475c2fd459e874fab8768af18d1166ce38e61712dcbade2b6c3"
+    },
+    "inventory-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 6.891,
+      "logSha256": "fdf81030f87a52267303b628a6ef4f987782b9fa9e7ef92c14500825cb5cb9db"
+    },
+    "contracts-check": {
+      "command": [
+        "rtk",
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 7.459,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "rust-format-check": {
+      "command": [
+        "rtk",
+        "cargo",
+        "fmt",
+        "--all",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.491,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.755,
+      "logSha256": "49f81fe879afaf226c068a4a93f8c67b75047170b75d2c813317ddfb87122a38",
+      "passed": 26,
+      "ignored": 4
+    },
+    "native-host": {
+      "command": [
+        "rtk",
+        "cargo",
+        "check",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.365,
+      "logSha256": "8a2933ae25e59188be988ea6218274cb341f13d8bc4b533f57b12ececd4be8b3"
+    },
+    "native-host-unit": {
+      "command": [
+        "rtk",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--features",
+        "production-service",
+        "-p",
+        "twentyonex-tauri-feasibility"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.287,
+      "logSha256": "41d7e74f5a9f9d5cb8bbe910150112f876362fd64ed6560cc7ff73c98de3f746",
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native-corpus": {
+      "command": [
+        "rtk",
+        "env",
+        "TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/mnt/Rusty/GitHub/21x/.git/issue-closing/batch15-contract-corpus.json",
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service",
+        "production::contracts::tests::actual_typescript_golden_requests_are_accepted_without_payload_grants",
+        "--",
+        "--exact"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.25,
+      "logSha256": "223668bc655e1e329c75c72ad515089822111e6c56c27fc82f6e205e390f4768",
+      "passed": 1,
+      "failed": 0
+    },
+    "diff": {
+      "command": [
+        "rtk",
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.065,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  },
+  "retainedFailures": {
+    "focused-initial": {
+      "passed": 372,
+      "failed": 14,
+      "skipped": 5,
+      "success": false,
+      "reportSha256": "932d1c61b169f9d14a9e73f910a61207ba862a4a73ba1ba73d569041ca74aa62",
+      "logSha256": "0f2a7d029c459a504331e5d0d4a7824e1e3a18c292ea7c67826ee26091be6436"
+    },
+    "focused-second": {
+      "passed": 386,
+      "failed": 2,
+      "skipped": 5,
+      "success": false,
+      "reportSha256": "60e0eaacb86b9603534507dd5eafe01272ccaa7eaa89a3443488be4bdabd8f29",
+      "logSha256": "f30c2f735d891b6a2659b7d02cd727abb4dcc4330a5c2b788549253a234e957f"
+    },
+    "app-initial": {
+      "passed": 6406,
+      "failed": 19,
+      "skipped": 30,
+      "success": false,
+      "reportSha256": "fd5ac272cdf02268c6c96f6d100dc8370f48a53e9a7b55c33de6fbeadb2bb0aa",
+      "logSha256": "4df11c9ef411ccdd927c78c383e68e93cef63d1faf9faf491ce2ddd095d7f983"
+    },
+    "app-second": {
+      "passed": 6425,
+      "failed": 0,
+      "skipped": 30,
+      "success": true,
+      "reportSha256": "666b70e9daa2af013ec077cd6870b78fa8637ec1c9a28a98eccc82f5f779478a",
+      "logSha256": "820c228b90840a9bcb832f5096f7644515d4b8cd31696c67a5d4d67730641f77"
+    },
+    "corrections-initial": {
+      "passed": 16,
+      "failed": 6,
+      "skipped": 0,
+      "success": false,
+      "reportSha256": "36d102507adf2a98922da2c9ec57859e171cc77b92a748cde515387720349a36",
+      "logSha256": "06ad74e93843ad34837427a27a094b481ab1862e0443f16d2621682641dbc939"
+    }
+  },
+  "validationCorrections": [
+    "Initial focused372pass/14fail/5optional plus five unhandled errors: stale140-command corpus sentinel, promise rejection timing in runtime/setup fixtures, strict archive fixture containing out-of-root AppleDouble metadata, and an unobserved destroyed entry stream. Kept strict root policy, generated a clean contained archive fixture, observed entry errors, bounded direct owned FD writes, and corrected asynchronous fixture admission.",
+    "Compiler rejected numeric write-stream flags, a Promise resolver shadowing the path resolver, literal-inferred text bounds, overloaded child mocks and shared-test imports crossing the web source boundary. Corrected actual FD writing, narrowed finite header values/types, and moved actual catalogue parity proof into the main-process backend test.",
+    "Initial full app6406pass/19fail/30optional: legacy setup acquisition mock lacked the new runtime-owner seam, and Commander restart fixtures acknowledged exit without close. Adapted controlled fixture owners and required exact close before restart;22targeted cases pass.",
+    "Subsequent full app6425pass/0fail/30optional still exited1 on a late Captain retry updating an unmounted React panel. Added mounted/project-view ownership and an actual retired-reply regression;19Captain cases and final full application6426cases pass without unhandled errors.",
+    "Final standalone suite2897pass/0fail retains three explicitly optional installed-recognition tests; no local inference, native device or all-platform acceptance is inferred from synthetic worker/model receipts."
+  ],
+  "remainingAcceptance": [
+    "#218 native microphone permission/denial/capture, focused dictation, exact task/HITL/group action leases, global shortcuts, custom directory/picker grants, native desktop playback/epochs/interruption, installed real local recognition/TTS and all-platform worker cleanup remain open.",
+    "Portable runtime installation is refused before npm/files until a reviewed exact acquisition manifest and installation inventory exist; installed runtime removal without inventory is also refused. Redirected recognition downloads refuse without a reviewed CDN destination policy.",
+    "TTS removal inventory is in memory; durable authenticated receipts across restart remain open. Historical/no-receipt model trees are preserved rather than claimed for deletion. Publication uses cooperative locks/rename rather than an adversarial atomic no-replace primitive.",
+    "Three standalone optional installed-recognition tests were skipped because their runtime/models are absent. Application optional skips include existing external gates and new unavailable transport-host-specific fixtures. No installed GUI/input/device or all-platform/live-provider proof is claimed.",
+    "Legacy Electron hosted speech transport still lacks a raw network-drain interface. Hosted voice #92 remains deferred by the user; no new hosted provider features or acceptance is claimed.",
+    "Full production parity, signed installed resources/redistribution, live-profile cutover and Electron retirement gates remain open."
+  ]
+}

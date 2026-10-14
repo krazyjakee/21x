@@ -311,7 +311,7 @@ fn resources(value: &ProductionDescriptor) -> Result<Resources, EngineError> {
     if !contracts::object(
         entries,
         &["node", "stdio", "engine", "credentialHelper", "taskMcp"],
-        &["mobile"],
+        &["mobile", "voiceWorker", "voiceTtsWorker"],
     ) || entries["node"] != node
         || entries["stdio"] != "service/production-stdio.mjs"
         || entries["engine"] != "service/production-engine.mjs"
@@ -320,6 +320,13 @@ fn resources(value: &ProductionDescriptor) -> Result<Resources, EngineError> {
         || entries
             .get("mobile")
             .is_some_and(|value| value != "mobile/index.html")
+        || entries.get("voiceWorker").is_some() != entries.get("voiceTtsWorker").is_some()
+        || entries
+            .get("voiceWorker")
+            .is_some_and(|value| value != "service/voice-worker.cjs")
+        || entries
+            .get("voiceTtsWorker")
+            .is_some_and(|value| value != "service/voice-tts-worker.cjs")
     {
         return Err(problem("INVALID_RESULT", "production-resource-entries"));
     }
@@ -354,6 +361,15 @@ fn resources(value: &ProductionDescriptor) -> Result<Resources, EngineError> {
         return Err(problem(
             "INVALID_RESULT",
             "production-mobile-resource-closure",
+        ));
+    }
+    if entries.get("voiceWorker").is_some()
+        && (!files.contains_key("service/voice-worker.cjs")
+            || !files.contains_key("service/voice-tts-worker.cjs"))
+    {
+        return Err(problem(
+            "INVALID_RESULT",
+            "production-voice-resource-closure",
         ));
     }
     // The already authenticated thin Node gate additionally verifies actual

@@ -49,6 +49,24 @@ async function writeChanged(file, bytes) {
   await writeFile(temporary, bytes, { mode: 0o600 }); await rename(temporary, file)
 }
 
+/** Only prior generated receipts or exact outputs permit worker replacement. */
+export async function stageProductionVoiceWorkers(resources, outputs) {
+  let prior = {}
+  try { prior = JSON.parse(await readFile(join(resources, 'service/PRODUCTION_RESOURCE_MANIFEST.json'), 'utf8')).files ?? {} }
+  catch (error) { if (error.code !== 'ENOENT') throw error }
+  const files = { voiceWorker: 'service/voice-worker.cjs', voiceTtsWorker: 'service/voice-tts-worker.cjs' }
+  for (const [kind, name] of Object.entries(files)) {
+    const bytes = Buffer.from(outputs[kind])
+    if (!bytes.length || bytes.length > 512 * 1024) throw new Error('Voice worker exceeds resource bounds')
+    try {
+      const actual = await signature(join(resources, name)), receipt = prior[name]
+      if (!(actual.sha256 === digest(bytes) && actual.bytes === bytes.length) &&
+        (!receipt || actual.sha256 !== receipt.sha256 || actual.bytes !== receipt.bytes)) throw new Error('Unowned voice worker staging files were preserved')
+    } catch (error) { if (error.code !== 'ENOENT') throw error }
+  }
+  for (const [kind, name] of Object.entries(files)) await writeChanged(join(resources, name), outputs[kind])
+}
+
 /** Materialize only a bounded browser build snapshot, preserving unowned files. */
 export async function stageProductionMobile(resources, outputs) {
   const files = new Map()
@@ -115,9 +133,16 @@ export async function stageProductionService(root = repository) {
     if (metadata.name !== name || metadata.version !== version) throw new Error('Physically staged production package pin changed')
   }
   const external = id => isBuiltin(id) || Object.keys(packages).some(name => id === name || id.startsWith(name + '/'))
-  const entries = { node, credentialHelper, mobile: 'mobile/index.html', stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs' }
+  const entries = { node, credentialHelper, mobile: 'mobile/index.html', stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs', voiceWorker: 'service/voice-worker.cjs', voiceTtsWorker: 'service/voice-tts-worker.cjs' }
   const sources = { stdio: 'src/service/production-stdio.ts', engine: 'src/service/production-service.ts', taskMcp: 'src/main/mcp-servers/task-management-mcp.ts' }
   const outputs = {}
+  // These existing isolated workers are CommonJS resources. Their exact bytes
+  // participate in the same trusted closure as the service and bundled Node.
+  for (const [kind, source] of Object.entries({ voiceWorker: 'src/main/voice/voice-worker.js', voiceTtsWorker: 'src/main/voice/voice-tts-worker.js' })) {
+    const file = join(root, source)
+    if ((await regular(file)).size > 512 * 1024) throw new Error('Voice worker exceeds resource bounds')
+    outputs[kind] = await readFile(file, 'utf8')
+  }
   for (const [kind, source] of Object.entries(sources)) {
     const result = await build({ configFile: false, root, logLevel: 'silent',
       plugins: [{ name: 'production-no-electron', enforce: 'pre', resolveId(id) {
@@ -136,7 +161,8 @@ export async function stageProductionService(root = repository) {
   const mobileFiles = await stageProductionMobile(resources, mobileOutputs)
   const mobileIdentity = digest(Buffer.from((await Promise.all(mobileFiles.map(async name => name + ':' + (await signature(join(resources, name))).sha256))).join('\n')))
   const buildIdentity = 'production-' + digest(Buffer.from(Object.values(outputs).join('\n') + '\n' + mobileIdentity)).slice(0, 32)
-  for (const [kind, bytes] of Object.entries(outputs)) await writeChanged(join(resources, entries[kind]), bytes)
+  await stageProductionVoiceWorkers(resources, outputs)
+  for (const [kind, bytes] of Object.entries(outputs)) if (!['voiceWorker', 'voiceTtsWorker'].includes(kind)) await writeChanged(join(resources, entries[kind]), bytes)
   const names = [...closure, ...mobileFiles, ...Object.values(entries), 'service/.native-prepared.json']
   for (const name of ['service/piece-host.cjs', 'service/CONNECTOR_WORKER_MANIFEST.json']) {
     try { await regular(join(resources, name)); names.push(name) }

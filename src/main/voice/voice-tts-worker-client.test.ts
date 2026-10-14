@@ -1,8 +1,11 @@
-import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { fork, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { VoiceTtsWorkerClient, type VoiceTtsChunk } from './voice-tts-worker-client'
+import { VoiceTtsWorkerClient, type VoiceTtsChunk, type VoiceTtsWorkerHost } from './voice-tts-worker-client'
 import type { ResolvedTtsModel } from './voice-tts-model-manager'
 import type { VoiceTtsStatus } from '../../shared/voice-tts'
 
@@ -398,4 +401,47 @@ describe('the local runtime, as Electron sees it', () => {
     const request = JSON.parse(readFileSync(recordPath, 'utf8'))
     expect(request.enableExternalBuffer).toBe(false)
   })
+})
+
+
+describe('portable speech worker native receipt ownership', () => {
+  class HeldChild extends EventEmitter {
+    stdout = new PassThrough(); stderr = new PassThrough()
+    connected = true; killed = false; exitCode: number | null = null; signalCode: NodeJS.Signals | null = null
+    send = vi.fn((_value: unknown, _a: unknown, _b: unknown, ack?: (error: Error | null) => void) => { ack?.(null); return true })
+    kill = vi.fn(() => { this.killed = true; return true })
+    finish() { this.exitCode = 0; this.stdout.end(); this.stderr.end(); this.emit('close', 0, null) }
+  }
+  it('keeps ignored kill/streams after deadline, fences late messages and replacement, and joins exact close on retry', async () => {
+    let child!: HeldChild
+    const spawn = vi.fn<VoiceTtsWorkerHost['fork']>(() => { child = new HeldChild(); return child as unknown as ChildProcess })
+    const worker = new VoiceTtsWorkerClient({ scriptPath: SCRIPT, execPath: process.execPath, env: {}, fork: spawn,
+      assertCurrent() {}, assertRuntimeModule() { throw new Error('No runtime grant') }, assertModel(value) { if (value.dir !== MODEL.dir) throw new Error('Wrong model') } })
+    const chunks: VoiceTtsChunk[] = []; worker.on('error', () => {}); worker.on('chunk', chunk => chunks.push(chunk))
+    worker.load({ engine: 'local', model: MODEL }); child.emit('message', { t: 'status', state: 'ready', sampleRate: 24000 })
+    expect(spawn).toHaveBeenCalledWith(SCRIPT, [], expect.objectContaining({ execPath: process.execPath, execArgv: [], env: {} }))
+    worker.speak({ speechId: 'owned-receipt', sentences: ['Synthetic text'], speakerId: 0, speed: 1 })
+    await expect(worker.close(5)).rejects.toThrow('VOICE_TTS_WORKER_SHUTDOWN_INCOMPLETE')
+    expect(worker.inflightCount).toBe(1); expect(child.kill).toHaveBeenCalled()
+    child.emit('message', { t: 'chunk', speechId: 'owned-receipt', pcm: 'AA==', index: 0, sampleRate: 24000, text: 'late' })
+    expect(chunks).toEqual([])
+    expect(() => worker.load({ engine: 'system' })).toThrow('VOICE_TTS_WORKER_CLOSED'); expect(spawn).toHaveBeenCalledOnce()
+    const joined = worker.close(); child.finish(); await joined; expect(worker.inflightCount).toBe(0)
+  })
+  it('keeps reusable stop pending and starts a requested replacement only after the prior raw close', async () => {
+    const children: HeldChild[] = []
+    const worker = new VoiceTtsWorkerClient({ scriptPath: SCRIPT, execPath: process.execPath, env: {}, fork: () => { const child = new HeldChild(); children.push(child); return child as unknown as ChildProcess }, assertCurrent() {}, assertRuntimeModule() { throw new Error('No runtime') }, assertModel() { throw new Error('No model') } })
+    worker.on('error', () => {}); worker.load({ engine: 'system', systemVoice: 'synthetic' })
+    const close = worker.stopAcknowledged(); worker.load({ engine: 'system', systemVoice: 'replacement' })
+    expect(children).toHaveLength(1); children[0]!.finish(); await close
+    expect(children).toHaveLength(2); expect(children[1]!.send.mock.calls[0]?.[0]).toMatchObject({ t: 'load', systemVoice: 'replacement' })
+    const final = worker.close(); children[1]!.finish(); await final
+  })
+  it.skipIf(Boolean(process.versions.electron))('runs the actual staged worker with only synthetic owned env over real Node IPC', async () => {
+    const worker = new VoiceTtsWorkerClient({ scriptPath: SCRIPT, execPath: process.execPath, env: { VOICE_TTS_ENGINE: 'mock' }, fork,
+      assertCurrent() {}, assertRuntimeModule() { throw new Error('No native runtime claim') }, assertModel(value) { if (value.dir !== MODEL.dir) throw new Error('Wrong synthetic model') } })
+    worker.on('error', () => {})
+    try { const loading = ready(worker); worker.load({ engine: 'local', model: MODEL }); expect((await loading).state).toBe('ready'); const speech = await speakAndCollect(worker, 'portable-owned', ['Synthetic speech.']); expect(speech.chunks.length).toBeGreaterThan(0); expect(speech.chunks.every(chunk => chunk.pcm.length > 0)).toBe(true) }
+    finally { await worker.close() }
+  }, 20000)
 })

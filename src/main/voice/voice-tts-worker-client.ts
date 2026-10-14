@@ -7,9 +7,9 @@
  */
 
 import { nodeWorkerRuntime } from '../node-worker-runtime'
-import { fork, type ChildProcess } from 'child_process'
+import { fork, type ChildProcess, type ForkOptions } from 'child_process'
 import { EventEmitter } from 'events'
-import { join } from 'path'
+import { isAbsolute, join } from 'path'
 import { existsSync } from 'fs'
 import type { VoiceTtsEngineId, VoiceTtsStatus } from '../../shared/voice-tts'
 import type { ResolvedTtsModel } from './voice-tts-model-manager'
@@ -69,6 +69,18 @@ export interface VoiceTtsChunk {
   text: string
 }
 
+export interface VoiceTtsWorkerHost {
+  scriptPath: string
+  execPath: string
+  env: NodeJS.ProcessEnv
+  fork(script: string, args: string[], options: ForkOptions): ChildProcess
+  assertCurrent(): void
+  /** Actual recognition runtime/model owner proofs; no renderer paths. */
+  assertRuntimeModule(modulePath: string): void
+  assertModel(model: ResolvedTtsModel): void
+}
+interface WorkerReceipt { child: ChildProcess; closed: Promise<void>; stopped: boolean }
+
 export class VoiceTtsWorkerClient extends EventEmitter {
   private child: ChildProcess | null = null
   private request: VoiceTtsLoadRequest | null = null
@@ -105,13 +117,30 @@ export class VoiceTtsWorkerClient extends EventEmitter {
    * that child was synthesising without guessing in the speech service.
    */
   private childSpeechId: string | null = null
+  private readonly receipts = new Set<WorkerReceipt>()
+  private pendingLoad: VoiceTtsLoadRequest | null = null
+  private closing = false
+  private readonly scriptPath: string
+  private readonly host: VoiceTtsWorkerHost | null
 
-  constructor(private scriptPath = defaultTtsWorkerScript()) {
+  constructor(scriptOrHost: string | VoiceTtsWorkerHost = defaultTtsWorkerScript()) {
     super()
+    this.host = typeof scriptOrHost === 'string' ? null : { ...scriptOrHost, env: { ...scriptOrHost.env } }
+    this.scriptPath = typeof scriptOrHost === 'string' ? scriptOrHost : scriptOrHost.scriptPath
+    if (this.host && (!isAbsolute(this.scriptPath) || !isAbsolute(this.host.execPath))) throw new Error('VOICE_TTS_HOST_INVALID')
+    this.host?.assertCurrent()
   }
+  get inflightCount(): number { return this.receipts.size }
+  assertHost(host: VoiceTtsWorkerHost): void {
+    if (!this.host || this.host.scriptPath !== host.scriptPath || this.host.execPath !== host.execPath || this.host.fork !== host.fork || this.host.assertCurrent !== host.assertCurrent) throw new Error('VOICE_TTS_OWNER_MISMATCH')
+    this.available()
+  }
+  private available(): void { if (this.closing) throw new Error('VOICE_TTS_WORKER_CLOSED'); this.host?.assertCurrent() }
 
   /** Points the worker at the runtime speech recognition installed on request. */
   setRuntimeModulePath(modulePath: string | null): void {
+    this.available()
+    if (modulePath !== null) this.host?.assertRuntimeModule(modulePath)
     if (this.modulePath === modulePath) return
     this.modulePath = modulePath
     // Only the local engine uses the runtime. Restarting for the system voice
@@ -129,6 +158,11 @@ export class VoiceTtsWorkerClient extends EventEmitter {
 
   /** Starts the worker if needed and loads one engine. Idempotent per engine. */
   load(request: VoiceTtsLoadRequest): void {
+    this.available()
+    if (this.host) {
+      if (request.engine !== 'system' && request.engine !== 'local') throw new Error('VOICE_TTS_ENGINE_UNAVAILABLE')
+      if (request.engine === 'local') { if (!request.model) throw new Error('VOICE_TTS_MODEL_UNAVAILABLE'); this.host.assertModel(request.model) }
+    }
     if (!existsSync(this.scriptPath)) {
       this.emit('status', {
         state: 'error',
@@ -137,6 +171,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
       return
     }
     if (this.isLoaded && sameRequest(this.request, request)) return
+    if (!this.child && this.receipts.size) { this.pendingLoad = structuredClone(request); this.lastRequest = structuredClone(request); return }
 
     this.spawn()
     this.request = request
@@ -172,6 +207,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
    * load and lost.
    */
   speak(request: VoiceTtsSpeakRequest): void {
+    this.available()
     this.clearIdleTimer()
 
     if (this.isLoaded) {
@@ -194,6 +230,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
 
   /** Adds sentences to a passage that was opened with `open`. */
   append(speechId: string, sentences: string[]): void {
+    this.available()
     if (sentences.length === 0) return
     this.clearIdleTimer()
     if (this.pendingSpeak?.speechId === speechId) {
@@ -205,6 +242,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
 
   /** Closes an open passage. It ends once the queued sentences are read. */
   finish(speechId: string): void {
+    this.available()
     if (this.pendingSpeak?.speechId === speechId) {
       this.pendingFinish = true
       return
@@ -231,15 +269,26 @@ export class VoiceTtsWorkerClient extends EventEmitter {
     this.pendingFinish = false
     this.request = null
     this.childSpeechId = null
+    this.pendingLoad = null
     const child = this.child
     this.child = null
     if (!child) return
-    child.removeAllListeners()
+    const receipt = [...this.receipts].find(item => item.child === child)
+    if (receipt) receipt.stopped = true
     try {
       child.kill()
     } catch {
       /* the process is already gone */
     }
+  }
+  /** Reusable retirement; a kill intent is never the native close receipt. */
+  stopAcknowledged(): Promise<void> { this.stop(); for (const receipt of this.receipts) if (receipt.child.exitCode === null && receipt.child.signalCode === null) { try { receipt.child.kill() } catch { /* retry keeps exact raw child */ } }; return Promise.all([...this.receipts].map(receipt => receipt.closed)).then(() => {}) }
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) throw new RangeError('Invalid speech worker shutdown deadline')
+    this.closing = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try { await Promise.race([this.stopAcknowledged(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('VOICE_TTS_WORKER_SHUTDOWN_INCOMPLETE')), timeoutMs) })]) }
+    finally { if (timer) clearTimeout(timer) }
   }
 
   // ── Internals ─────────────────────────────────────────────
@@ -256,9 +305,13 @@ export class VoiceTtsWorkerClient extends EventEmitter {
 
   private spawn(): void {
     if (this.isRunning) return
-    const runtime = nodeWorkerRuntime()
-    this.child = fork(this.scriptPath, [], {
+    this.available()
+    if (this.receipts.size) throw new Error('VOICE_TTS_WORKER_RETIRING')
+    const runtime = this.host ? { execPath: this.host.execPath, env: this.host.env } : nodeWorkerRuntime()
+    if (this.modulePath) this.host?.assertRuntimeModule(this.modulePath)
+    this.child = (this.host?.fork ?? fork)(this.scriptPath, [], {
       execPath: runtime.execPath,
+      ...(this.host ? { execArgv: [] } : {}),
       env: {
         ...runtime.env,
         ...(this.modulePath ? { VOICE_ENGINE_MODULE: this.modulePath } : {}),
@@ -266,16 +319,29 @@ export class VoiceTtsWorkerClient extends EventEmitter {
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       serialization: 'json',
     })
+    let settled!: () => void
+    const child = this.child, closed = new Promise<void>(resolve => { settled = resolve })
+    const receipt: WorkerReceipt = { child, closed, stopped: false }
+    this.receipts.add(receipt)
+    child.once('close', () => {
+      if (this.child === child) { this.child = null; this.request = null; this.childSpeechId = null }
+      this.receipts.delete(receipt); settled()
+      const load = this.pendingLoad
+      this.pendingLoad = null
+      if (load && !this.closing && this.receipts.size === 0) {
+        try { this.load(load) } catch { this.emit('error', 'The speech worker could not be started.') }
+      }
+    })
 
     for (const stream of [this.child.stdout, this.child.stderr]) {
       stream?.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') return
-        console.error('[voice-tts-worker] pipe error:', err.message)
+        if (!this.host) console.error('[voice-tts-worker] pipe error:', err.message)
       })
     }
-    const child = this.child
     this.child.on('error', (err) => {
-      console.error('[voice-tts-worker] process error:', err.message)
+      if (receipt.stopped || this.closing) return
+      if (!this.host) console.error('[voice-tts-worker] process error:', err.message)
       // Only the current child may retire the passage it owns. A late process
       // event from a replaced child is inert.
       this.emit(
@@ -285,9 +351,10 @@ export class VoiceTtsWorkerClient extends EventEmitter {
       )
     })
     this.child.stderr?.on('data', (data: Buffer) => {
-      console.error('[voice-tts-worker]', data.toString().trim())
+      if (!this.host) console.error('[voice-tts-worker]', data.toString().trim())
     })
-    this.child.on('message', (raw) => this.onMessage(raw as WorkerMessage))
+    this.child.stdout?.on('data', () => {})
+    this.child.on('message', (raw) => { if (this.child === child && !receipt.stopped && !this.closing) this.onMessage(raw as WorkerMessage) })
     this.child.on('exit', (code) => {
       if (this.child !== child) return
       const wasLoaded = this.request
@@ -301,7 +368,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
       // spawning processes in a loop.
       if (wasLoaded && this.restarts < 1) {
         this.restarts += 1
-        this.load(wasLoaded)
+        this.pendingLoad = wasLoaded
       }
     })
   }

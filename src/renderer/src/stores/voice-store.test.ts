@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { installDesktopHost } from '@/lib/desktop-api'
 
 vi.mock('@/lib/voice-capture', () => ({
   voiceCapture: {
@@ -81,6 +82,18 @@ describe('voice store — words heard while reading', () => {
 })
 
 describe('voice store — turns', () => {
+  it('hydrates management state without requesting native microphone permission or admitting capture', async () => {
+    const release = installDesktopHost({ kind: 'tauri', api: window.electronAPI, connection: { status: 'ready', engineEpoch: 'fixture' },
+      supports: path => ['voice.getSnapshot', 'voice.getRuntime', 'voice.tts.getSnapshot'].includes(path), subscribeConnection: () => () => {}, dispose: () => {} })
+    const permission = vi.mocked(voiceBridge.getPermission)
+    try {
+      vi.mocked(voiceBridge.getSnapshot).mockResolvedValueOnce({ enabled: false, state: 'disabled', turnId: null, partial: '', final: '', engine: { state: 'engine_missing', message: 'Unavailable' }, models: [], shortcut: '', runtime: { installed: false, version: null, modulePath: null, sizeBytes: 0 } })
+      await useVoiceStore.getState().initialize()
+      expect(permission).not.toHaveBeenCalled()
+      expect(useVoiceStore.getState()).toMatchObject({ available: false, permission: 'unsupported', enabled: false })
+      expect(voiceCapture.start).not.toHaveBeenCalled()
+    } finally { release() }
+  })
   it('keeps the exact recognition lease through PTT release until its final tail arrives', async () => {
     reset()
     await useVoiceStore.getState().startTurn('conversation', { deviceId: 'fixture-input' })

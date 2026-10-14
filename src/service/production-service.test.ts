@@ -174,7 +174,7 @@ describe('actual private production peer', () => {
   }, 15_000)
 })
 
-async function resourceFixture(mobile = false) {
+async function resourceFixture(mobile = false, voice = false) {
   const root = mkdtempSync(join(tmpdir(), '21x-production-resources-')); roots.push(root)
   const launch = descriptor(root), resources = launch.paths.resourceRoot
   const node = process.platform === 'win32' ? 'node/node.exe' : 'node/node'
@@ -189,8 +189,9 @@ async function resourceFixture(mobile = false) {
   put('service/node_modules/better-sqlite3/build/Release/better_sqlite3.node', 'controlled-native-boundary-not-loaded')
   put('service/.native-prepared.json', JSON.stringify({ nodeVersion: '22.23.2', platform: process.platform, arch: process.arch, dependencies: PRODUCTION_RESOURCE_PINS }))
   if (mobile) { put('mobile/index.html', '<main>actual mobile resource</main>'); put('mobile/assets/app.js', 'actual mobile script') }
+  if (voice) { put('service/voice-worker.cjs', 'controlled recognition worker'); put('service/voice-tts-worker.cjs', 'controlled synthesis worker') }
   const manifest = { version: 1, kind: 'production-resource-closure', buildIdentity: launch.buildIdentity, nodeVersion: '22.23.2', platform: process.platform, arch: process.arch,
-    entries: { ...(mobile ? { mobile: 'mobile/index.html' } : {}), node, credentialHelper: helper, stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs' },
+    entries: { ...(mobile ? { mobile: 'mobile/index.html' } : {}), ...(voice ? { voiceWorker: 'service/voice-worker.cjs', voiceTtsWorker: 'service/voice-tts-worker.cjs' } : {}), node, credentialHelper: helper, stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs' },
     packages: PRODUCTION_RESOURCE_PINS, files, redistributionReviewComplete: false }
   const bytes = JSON.stringify(manifest); writeFileSync(join(resources, 'service/PRODUCTION_RESOURCE_MANIFEST.json'), bytes)
   launch.resourceManifestSha256 = createHash('sha256').update(bytes).digest('hex')
@@ -198,6 +199,21 @@ async function resourceFixture(mobile = false) {
   return { launch, resources, runtime }
 }
 describe('production resource gate before engine loading', () => {
+  it('requires the complete pinned voice worker pair before admitting portable voice owners', async () => {
+    const old = await resourceFixture()
+    expect((await verifyProductionResources(old.launch, old.runtime)).voice).toBeUndefined()
+    const f = await resourceFixture(false, true)
+    expect((await verifyProductionResources(f.launch, f.runtime)).voice).toEqual({ recognitionWorker: join(f.resources, 'service/voice-worker.cjs'), speechWorker: join(f.resources, 'service/voice-tts-worker.cjs') })
+    writeFileSync(join(f.resources, 'service/voice-worker.cjs'), 'changed worker')
+    await expect(verifyProductionResources(f.launch, f.runtime)).rejects.toThrow('RESOURCE_BYTES_CHANGED')
+    const missing = await resourceFixture(false, true)
+    const file = join(missing.resources, 'service/PRODUCTION_RESOURCE_MANIFEST.json')
+    const manifest = JSON.parse(readFileSync(file, 'utf8'))
+    delete manifest.entries.voiceTtsWorker
+    const bytes = JSON.stringify(manifest); writeFileSync(file, bytes)
+    missing.launch.resourceManifestSha256 = createHash('sha256').update(bytes).digest('hex')
+    await expect(verifyProductionResources(missing.launch, missing.runtime)).rejects.toThrow('RESOURCE_MANIFEST_INVALID')
+  })
   it('verifies an entire physical pinned closure and rejects changed/unmanifested SDK bytes', async () => {
     const f = await resourceFixture()
     expect(await verifyProductionResources(f.launch, f.runtime)).toMatchObject({ engine: join(f.resources, 'service/production-engine.mjs') })

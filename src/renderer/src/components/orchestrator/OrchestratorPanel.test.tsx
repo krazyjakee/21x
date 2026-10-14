@@ -405,6 +405,19 @@ describe('OrchestratorPanel — the current project\'s Captain', () => {
  * previous agent, and delivers what the user said in the meantime once.
  */
 describe('OrchestratorPanel — a Captain that will not start', () => {
+  it('leaves a completed retry with its original owner after the panel is unmounted', async () => {
+    seedDefaultProject()
+    captainRuntimeApi.get.mockResolvedValue({ ...captainRuntimeApi.state(DEFAULT_PROJECT_ID, 'default-agent', 'failed'), candidateAgentId: 'other-agent', errorDetail: 'Retry this Captain.' })
+    let finish!: (value: ReturnType<typeof captainRuntimeApi.state>) => void
+    captainRuntimeApi.retry.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const view = render(<OrchestratorPanel onClose={vi.fn()} />)
+    await screen.findByRole('alert')
+    await act(async () => { screen.getByRole('button', { name: 'Retry' }).click() })
+    await waitFor(() => expect(captainRuntimeApi.retry).toHaveBeenCalled())
+    view.unmount(); projectApi.getAll.mockClear()
+    await act(async () => { finish(captainRuntimeApi.state(DEFAULT_PROJECT_ID, 'other-agent')); await Promise.resolve() })
+    expect(projectApi.getAll).not.toHaveBeenCalled()
+  })
   const failure = new Error("Error invoking remote method 'agentSession:start': Error: Sol did not come up within 90 seconds")
 
   it('shows persisted unhealthy probe state instead of calling the process healthy', async () => {

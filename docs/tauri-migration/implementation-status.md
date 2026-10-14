@@ -6,6 +6,26 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The local voice continuation adds actual portable recognition, speech, model
+and optional-runtime owners, plus 21 finite management commands and four
+desktop-only management events. Both existing isolated worker scripts join the
+verified resource closure and use the selected standalone Node runtime. Older
+artifacts without the complete worker pair keep voice management unavailable.
+Model publication and deletion retain raw download/file work and current
+management grants; service teardown retains the profile until voice owners
+acknowledge shutdown. Electron also awaits this drain before database teardown.
+
+This batch keeps native microphone capture, permission requests, playback,
+global shortcuts, command actions and arbitrary model-directory grants
+unavailable. The portable runtime installer refuses before npm or filesystem
+effects until its pinned acquisition manifest and installation inventory are
+reviewed. Hosted voice #92 remains deferred by the user. These scoped owners and
+management controls do not establish complete #218 or installed voice parity.
+See [recognition ownership](voice-recognition-owner.md),
+[speech ownership](voice-speech-owner.md),
+[management bindings](voice-management-bindings.md) and
+[batch evidence](evidence/issue-closing-20261014-local-voice-ownership.json).
+
 The next October 14 local continuation adds actual portable installed-CLI detection
 and retained task artifact scan/read services, plus two direct native host routes
 for system URL opening and the actual native package version. There are 140

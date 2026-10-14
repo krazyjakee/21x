@@ -13,8 +13,10 @@
 
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
-import { mkdir, rm, readFile, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { mkdir, rm, readFile, writeFile, lstat, realpath, open } from 'fs/promises'
+import { join, isAbsolute } from 'path'
+import { constants } from 'fs'
+import { AsyncLocalStorage } from 'async_hooks'
 import type { VoiceRuntimeStatus } from '../../shared/voice'
 
 /**
@@ -96,23 +98,30 @@ export async function detectVoiceRuntime(rootDir: string): Promise<VoiceRuntimeS
 }
 
 /** True when npm can be called. The install needs it. */
-export async function isNpmAvailable(): Promise<boolean> {
+export async function isNpmAvailable(signal?: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
+    if (signal?.aborted) { resolve(false); return }
     const child = spawn(npmCommand(), ['--version'], {
       shell: process.platform === 'win32',
       windowsHide: true,
     })
-    const timer = setTimeout(() => {
+    let failed = false
+    let escalation: ReturnType<typeof setTimeout> | undefined
+    const cancel = (): void => {
+      failed = true
       child.kill()
-      resolve(false)
-    }, 5000)
-    child.on('error', () => {
+      escalation ??= setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL') }, 200)
+    }
+    const timer = setTimeout(cancel, 5000)
+    signal?.addEventListener('abort', cancel, { once: true })
+    child.stdout?.resume?.()
+    child.stderr?.resume?.()
+    child.on('error', () => { failed = true })
+    child.on('close', (code) => {
       clearTimeout(timer)
-      resolve(false)
-    })
-    child.on('exit', (code) => {
-      clearTimeout(timer)
-      resolve(code === 0)
+      if (escalation) clearTimeout(escalation)
+      signal?.removeEventListener('abort', cancel)
+      resolve(!failed && code === 0)
     })
   })
 }
@@ -123,7 +132,8 @@ export async function isNpmAvailable(): Promise<boolean> {
  */
 export async function installVoiceRuntime(
   rootDir: string,
-  onProgress: (progress: RuntimeProgress) => void
+  onProgress: (progress: RuntimeProgress) => void,
+  signal?: AbortSignal
 ): Promise<VoiceRuntimeStatus> {
   onProgress({ stage: 'starting', output: 'Preparing the download…\n', percent: 0 })
 
@@ -133,14 +143,16 @@ export async function installVoiceRuntime(
     throw new Error(unsupported)
   }
 
-  if (!(await isNpmAvailable())) {
+  if (!(await isNpmAvailable(signal))) {
     const message =
       'npm was not found. Install Node.js first — 21x can install it from Settings → General.\n'
     onProgress({ stage: 'error', output: message, percent: 100 })
     throw new Error(message.trim())
   }
 
+  if (signal?.aborted) throw new Error('VOICE_RUNTIME_CANCELLED')
   await mkdir(rootDir, { recursive: true })
+  if (signal?.aborted) throw new Error('VOICE_RUNTIME_CANCELLED')
   // A private manifest keeps npm from walking up into the app directory.
   await writeFile(
     join(rootDir, 'package.json'),
@@ -149,6 +161,7 @@ export async function installVoiceRuntime(
   )
 
   await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error('VOICE_RUNTIME_CANCELLED')); return }
     const child = spawn(
       npmCommand(),
       ['install', VOICE_RUNTIME_PACKAGE, '--omit=dev', '--no-audit', '--no-fund', '--loglevel=info'],
@@ -164,10 +177,23 @@ export async function installVoiceRuntime(
     child.stdout?.on('data', bump)
     child.stderr?.on('data', bump)
 
-    child.on('error', (err) => reject(err))
-    child.on('exit', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`npm exited with code ${code}. See the output above.`))
+    let failed = false
+    let escalation: ReturnType<typeof setTimeout> | undefined
+    const cancel = (): void => {
+      child.kill()
+      escalation ??= setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL') }, 200)
+    }
+    signal?.addEventListener('abort', cancel, { once: true })
+    const deadline = setTimeout(cancel, 10 * 60 * 1000)
+    child.on('error', () => { failed = true })
+    child.stdout?.on('error', () => { failed = true; cancel() })
+    child.stderr?.on('error', () => { failed = true; cancel() })
+    child.on('close', (code) => {
+      clearTimeout(deadline)
+      if (escalation) clearTimeout(escalation)
+      signal?.removeEventListener('abort', cancel)
+      if (!failed && code === 0 && !signal?.aborted) resolve()
+      else reject(new Error('VOICE_RUNTIME_INSTALL_FAILED'))
     })
   })
 
@@ -188,4 +214,113 @@ export async function installVoiceRuntime(
 /** Deletes the runtime and gives the disk space back. */
 export async function removeVoiceRuntime(rootDir: string): Promise<void> {
   await rm(rootDir, { recursive: true, force: true })
+}
+
+export interface VoiceRuntimeOwnerOptions {
+  rootDir: string
+  /** The unpinned legacy npm installer is admitted only by the Electron host. */
+  installation: 'unavailable' | 'electron-compatibility'
+  assertCurrent?: () => void
+}
+
+/** Owns the optional runtime; portable installation is intentionally unavailable. */
+export class VoiceRuntimeOwner {
+  private closing = false
+  private flights = new Set<Promise<unknown>>()
+  private guards = new AsyncLocalStorage<() => void>()
+  private abort = new AbortController()
+  constructor(private readonly options: VoiceRuntimeOwnerOptions) {
+    if (!isAbsolute(options.rootDir)) throw new Error('VOICE_RUNTIME_ROOT_REQUIRED')
+  }
+  assertRoot(root: string): void {
+    if (root !== this.options.rootDir) throw new Error('VOICE_RUNTIME_OWNER_MISMATCH')
+  }
+  get inflightCount(): number { return this.flights.size }
+  private current(): void {
+    if (this.closing) throw new Error('VOICE_RUNTIME_CLOSED')
+    this.options.assertCurrent?.()
+    this.guards.getStore()?.()
+  }
+  withMutationGuard<T>(effect: () => T | Promise<T>, guard: () => void): Promise<T> {
+    return this.guards.run(guard, () => this.own(async () => effect()))
+  }
+  private own<T>(effect: () => Promise<T>): Promise<T> {
+    let raw: Promise<T>
+    try { this.current(); raw = effect() } catch (error) { return Promise.reject(error) }
+    this.flights.add(raw)
+    void raw.then(() => this.flights.delete(raw), () => this.flights.delete(raw))
+    return raw
+  }
+  detect(): Promise<VoiceRuntimeStatus> {
+    return this.own(async () => {
+      if (this.options.installation === 'electron-compatibility') return detectVoiceRuntime(this.options.rootDir)
+      const absent: VoiceRuntimeStatus = { installed: false, version: null, modulePath: null, sizeBytes: VOICE_RUNTIME_APPROX_BYTES }
+      const modulePath = runtimeModulePath(this.options.rootDir)
+      const dirs = [this.options.rootDir, join(this.options.rootDir, 'node_modules'), modulePath]
+      const receipts: Array<{ path: string; dev: number; ino: number }> = []
+      for (const path of dirs) {
+        const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return null
+          throw new Error('VOICE_RUNTIME_PATH_UNAVAILABLE')
+        })
+        if (!info) return absent
+        if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) throw new Error('VOICE_RUNTIME_PATH_UNSAFE')
+        receipts.push({ path, dev: info.dev, ino: info.ino })
+      }
+      const path = join(modulePath, 'package.json')
+      const receipt = await lstat(path).catch(() => null)
+      if (!receipt) return absent
+      if (!receipt.isFile() || receipt.isSymbolicLink() || receipt.size > 16384) throw new Error('VOICE_RUNTIME_MANIFEST_INVALID')
+      const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+      let text: string
+      try {
+        const opened = await handle.stat()
+        if (opened.dev !== receipt.dev || opened.ino !== receipt.ino || opened.size !== receipt.size) throw new Error('VOICE_RUNTIME_PATH_CHANGED')
+        const bytes = Buffer.alloc(16385)
+        const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)
+        if (bytesRead > 16384) throw new Error('VOICE_RUNTIME_MANIFEST_INVALID')
+        text = bytes.subarray(0, bytesRead).toString('utf8')
+      } finally { await handle.close() }
+      for (const item of [...receipts, { path, dev: receipt.dev, ino: receipt.ino }]) {
+        const now = await lstat(item.path)
+        if (now.isSymbolicLink() || now.dev !== item.dev || now.ino !== item.ino) throw new Error('VOICE_RUNTIME_PATH_CHANGED')
+      }
+      this.current()
+      let parsed: { name?: unknown; version?: unknown }
+      try { parsed = JSON.parse(text) } catch { throw new Error('VOICE_RUNTIME_MANIFEST_INVALID') }
+      if (parsed.name !== VOICE_RUNTIME_PACKAGE || typeof parsed.version !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?$/.test(parsed.version) || parsed.version.length > 128) throw new Error('VOICE_RUNTIME_MANIFEST_INVALID')
+      return { installed: true, version: parsed.version, modulePath, sizeBytes: VOICE_RUNTIME_APPROX_BYTES }
+    })
+  }
+  install(onProgress: (progress: RuntimeProgress) => void): Promise<VoiceRuntimeStatus> {
+    this.current()
+    if (this.options.installation === 'unavailable') return Promise.reject(new Error('VOICE_RUNTIME_INSTALL_UNAVAILABLE'))
+    return this.own(() => installVoiceRuntime(this.options.rootDir, (progress) => { if (!this.closing) onProgress(progress) }, this.abort.signal))
+  }
+  remove(): Promise<void> {
+    return this.own(async () => {
+      if (this.options.installation === 'electron-compatibility') {
+        this.current()
+        await removeVoiceRuntime(this.options.rootDir)
+        return
+      }
+      // A runtime tree contains npm-owned shared dependencies. Until the host
+      // supplies an installation inventory we cannot safely claim those bytes.
+      const status = await this.detect()
+      this.current()
+      if (status.installed) throw new Error('VOICE_RUNTIME_REMOVAL_INVENTORY_UNAVAILABLE')
+    })
+  }
+  stop(): void { this.closing = true; this.abort.abort() }
+  async close(timeoutMs = 3000): Promise<void> {
+    this.stop()
+    const deadline = Date.now() + Math.max(1, Math.min(timeoutMs, 30000))
+    while (this.flights.size) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) throw new Error('VOICE_RUNTIME_DRAIN_INCOMPLETE')
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([Promise.allSettled([...this.flights]), new Promise<void>((resolve) => { timer = setTimeout(resolve, remaining) })])
+      if (timer) clearTimeout(timer)
+    }
+  }
 }

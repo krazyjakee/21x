@@ -198,7 +198,7 @@ export class ProductionService {
 
 /** Used only by the separately staged entry after physical resource verification.
  * The private host must validate its main WebView before forwarding commands. */
-export function createStagedProductionService(descriptor: ProductionLaunchDescriptor, resources: { node: string; credentialHelper: string; taskMcp: string; mobileDistRoot?: string }, transport: ConstructorParameters<typeof ProductionService>[1]): ProductionService {
+export function createStagedProductionService(descriptor: ProductionLaunchDescriptor, resources: { node: string; credentialHelper: string; taskMcp: string; mobileDistRoot?: string; voice?: { recognitionWorker: string; speechWorker: string } }, transport: ConstructorParameters<typeof ProductionService>[1]): ProductionService {
   const trusted = (caller: DesktopCallerContext): boolean => caller.principal === 'trusted-desktop-main' && caller.webviewId === 'main' && caller.origin === 'tauri://localhost' && caller.engineEpoch === service.owner.snapshot().epoch && service.getReadyServices() !== null
   const authority: ProductionDesktopBindingOptions['authority'] = {
     isTrustedDesktop: trusted,
@@ -248,6 +248,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
     constructBootstrap: callbacks => ({ profileId: descriptor.profileId, paths: descriptor.paths,
       credentials: { store: new NativeApplicationKeyStore(resources.credentialHelper), mode: descriptor.profileIntent === 'create-new' ? 'create' : 'load' },
       ...(resources.mobileDistRoot === undefined ? {} : { mobile: { distRoot: resources.mobileDistRoot } }),
+      ...(resources.voice === undefined ? {} : { voice: { ...resources.voice, node: resources.node } }),
       connectors: descriptor.capabilities.connectors === 'enabled' ? { kind: 'enabled' } : { kind: 'disabled', reason: 'Private launch explicitly disables connectors' },
       managedTaskMcp: descriptor.capabilities.managedTaskMcp === 'disabled' ? { disabled: true } : {
         command: resources.node, args: [resources.taskMcp], environment: {}, tools: listToolsForScope(FULL_ACCESS_SCOPE).map(tool => ({ name: tool.name, description: tool.description ?? '' })) },

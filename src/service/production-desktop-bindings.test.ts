@@ -1,5 +1,6 @@
 import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
+import { VOICE_MANAGEMENT_CODECS } from '../shared/voice-management-codecs'
 import { MOBILE_CODECS } from '../shared/mobile-codecs'
 import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
@@ -36,7 +37,7 @@ afterEach(async () => {
   for (const { owner, root } of owned.splice(0)) { await owner.close(); rmSync(root, { recursive: true, force: true }) }
   vi.restoreAllMocks()
 })
-async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false) {
+async function fixture(providerOverride?: ChatProvider, connectors = false, mobile = false, voice = false) {
   const { ProductionOwner } = ownerModule
   const { ProductionDesktopBindings } = bindingModule
   const root = mkdtempSync(join(tmpdir(), '21x-production-bindings-')), resourceRoot = join(root, 'resources')
@@ -52,6 +53,7 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
       return Buffer.from(key)
     } } },
     ...(mobile ? { mobile: { distRoot: mobileRoot, port: 0 } } : {}),
+    ...(voice ? { voice: { node: process.env.TAURI_NODE_RUNTIME ?? process.execPath, recognitionWorker: join(resourceRoot, 'voice-worker.cjs'), speechWorker: join(resourceRoot, 'voice-tts-worker.cjs') } } : {}),
     managedTaskMcp: { disabled: true }, connectors: connectors ? { kind: 'enabled' } : { kind: 'disabled', reason: 'No connector resources in this fixture.' },
     native: { agents: { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: 'disabled' },
       prepareRuntime: async () => {}, openExternal: async () => {}, notify: () => {}, emit: () => {}, sendUiCommand: () => ({ ok: false, detail: 'No fixture window.' }), drainOwnedProcesses: async () => ({ acknowledged: true }) }
@@ -91,6 +93,34 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('borrows actual local voice owners while refusing unbound microphone, playback and hosted effects', async () => {
+    const f = await fixture(undefined, false, false, true)
+    const lease = f.owner.getVoiceBindingLease()!
+    expect(lease.voice).toBe(f.services.voice!.voice); expect(lease.speech).toBe(f.services.voice!.speech)
+    lease.assertVoiceOwners({ voice: lease.voice, speech: lease.speech })
+    const snapshot = await f.backend.invoke('voice:getSnapshot', {}, f.caller, f.signal)
+    expect(snapshot).toMatchObject({ defined: true, value: { enabled: false, state: 'disabled', turnId: null, runtime: { installed: false } } })
+    const saved = await f.backend.invoke('voice:setEndpointSilence', VOICE_MANAGEMENT_CODECS['voice:setEndpointSilence'].encodeArguments([1.5]), f.caller, f.signal)
+    expect(saved).toMatchObject({ defined: true, value: { success: true } })
+    const grant = f.options.authority.canManageGlobalConfiguration
+    f.options.authority.canManageGlobalConfiguration = () => false
+    await expect(f.backend.invoke('voice:setEndpointSilence', VOICE_MANAGEMENT_CODECS['voice:setEndpointSilence'].encodeArguments([2]), f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    f.options.authority.canManageGlobalConfiguration = grant
+    await expect(f.backend.invoke('voice:installRuntime', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    for (const operation of ['voice:startTurn', 'voice:pushAudio', 'voice:confirm', 'voice:setShortcut', 'voice:tts:speak', 'voice:tts:preview', 'voice:tts:elevenlabs:setKey']) {
+      await expect(f.backend.invoke(operation, {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    }
+    await f.owner.close()
+    expect(() => lease.assertVoiceOwners({ voice: lease.voice, speech: lease.speech })).toThrow()
+    expect(f.services.db.db.open).toBe(false)
+  })
+
+  it('keeps voice management absent when the trusted artifact has no worker pair', async () => {
+    const f = await fixture()
+    expect(f.owner.getVoiceBindingLease()).toBeNull()
+    expect(f.backend.operationSchemas(f.caller)['voice:getSnapshot']).toBeUndefined()
+    await expect(f.backend.invoke('voice:getSnapshot', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+  })
   it('borrows real CLI detection and artifact workspace ownership without exposing unbound installs or native file effects', async () => {
     const f = await fixture(), { db, agentDetection } = f.services
     expect(f.owner.getAgentInstallerBindingLease().detection).toBe(agentDetection)

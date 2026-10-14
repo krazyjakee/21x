@@ -10,11 +10,9 @@
  * page needs the list even when nothing is being spoken.
  */
 
-import { execFile } from 'child_process'
-import { promisify } from 'util'
+import { execFile, type ChildProcess } from 'child_process'
+import { isAbsolute } from 'path'
 import type { VoiceTtsVoice } from '../../shared/voice-tts'
-
-const run = promisify(execFile)
 
 /** Listing must never hold a settings page open. */
 const LIST_TIMEOUT_MS = 8000
@@ -45,23 +43,97 @@ export async function listSystemVoices(platform = process.platform): Promise<Voi
   return []
 }
 
+export interface VoiceSystemVoicesHost {
+  platform: NodeJS.Platform
+  capability: 'available' | 'unavailable'
+  executable: string | null
+  env: NodeJS.ProcessEnv
+  execFile: typeof execFile
+  assertCurrent(): void
+}
+/** Enumeration owns both native close and execFile's buffered-stream callback,
+ * including spawn errors, timeouts, and ignored termination. */
+export class VoiceSystemVoicesOwner {
+  private closing = false
+  private readonly flights = new Set<Promise<unknown>>()
+  private readonly children = new Set<ChildProcess>()
+  private readonly host: VoiceSystemVoicesHost
+  constructor(host: VoiceSystemVoicesHost) {
+    if (host.capability === 'available' && (!host.executable || !isAbsolute(host.executable))) throw new Error('VOICE_SYSTEM_HOST_INVALID')
+    this.host = { ...host, env: { ...host.env } }; this.host.assertCurrent()
+  }
+  get inflightCount(): number { return this.flights.size }
+  assertHost(host: VoiceSystemVoicesHost): void { if (host.execFile !== this.host.execFile || host.executable !== this.host.executable || host.assertCurrent !== this.host.assertCurrent || host.capability !== this.host.capability) throw new Error('VOICE_SYSTEM_OWNER_MISMATCH'); this.available() }
+  private available(): void { if (this.closing) throw new Error('VOICE_SYSTEM_VOICES_CLOSED'); this.host.assertCurrent() }
+  list(): Promise<VoiceTtsVoice[]> {
+    this.available()
+    if (this.host.capability === 'unavailable') return Promise.resolve([])
+    const args = systemVoiceArguments(this.host.platform)
+    if (!args) return Promise.resolve([])
+    let child: ChildProcess
+    let complete!: (result: { failed: boolean; stdout: string }) => void
+    const callback = new Promise<{ failed: boolean; stdout: string }>(resolve => { complete = resolve })
+    try {
+      child = this.host.execFile(this.host.executable!, args, { timeout: LIST_TIMEOUT_MS, maxBuffer: 256 * 1024, windowsHide: true, env: this.host.env }, (error, stdout) => {
+        complete({ failed: Boolean(error), stdout: String(stdout) })
+      })
+    } catch { return Promise.reject(new Error('VOICE_SYSTEM_LIST_FAILED')) }
+    this.children.add(child)
+    child.on('error', () => {})
+    const closed = new Promise<void>(resolve => { child.once('close', () => resolve()) })
+    const work = Promise.all([callback, closed]).then(([result]) => {
+      this.children.delete(child); this.available()
+      if (result.failed) return []
+      if (Buffer.byteLength(result.stdout) > 256 * 1024) throw new Error('VOICE_SYSTEM_LIST_FAILED')
+      return parseSystemVoices(this.host.platform, result.stdout).slice(0, 512)
+    })
+    this.flights.add(work); void work.then(() => this.flights.delete(work), () => this.flights.delete(work)); return work
+  }
+  shutdown(): void { this.closing = true; for (const child of this.children) { try { child.kill() } catch { /* keep raw callback */ } } }
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) throw new RangeError('Invalid system voice shutdown deadline')
+    this.shutdown(); let timer: ReturnType<typeof setTimeout> | undefined
+    try { await Promise.race([Promise.allSettled([...this.flights]), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('VOICE_SYSTEM_VOICES_SHUTDOWN_INCOMPLETE')), timeoutMs) })]) }
+    finally { if (timer) clearTimeout(timer) }
+  }
+}
+function systemVoiceArguments(platform: NodeJS.Platform): string[] | null {
+  if (platform === 'darwin') return ['-v', '?']
+  if (platform === 'linux') return ['--voices']
+  if (platform === 'win32') return ['-NoProfile', '-NonInteractive', '-Command', windowsVoiceScript()]
+  return null
+}
+function parseSystemVoices(platform: NodeJS.Platform, stdout: string): VoiceTtsVoice[] {
+  return sortForEnglish(platform === 'darwin' ? parseSayVoices(stdout) : platform === 'win32' ? parseWindowsVoices(stdout) : parseEspeakVoices(stdout))
+}
+// Legacy enumeration also owns its real child through close. The commands and
+// parsers are unchanged; portable hosts supply their own owner explicitly.
+const legacyChildren = new Set<ChildProcess>()
+const run = (command: string, args: string[], options: { timeout: number; windowsHide?: boolean }): Promise<{ stdout: string }> => new Promise((resolve, reject) => {
+  const child = execFile(command, args, { ...options, maxBuffer: 256 * 1024 }, (error, stdout) => { legacyChildren.delete(child); if (error) reject(error); else resolve({ stdout: String(stdout) }) })
+  legacyChildren.add(child); child.on('error', () => {})
+})
+
 async function sayList(): Promise<string> {
   const { stdout } = await run('say', ['-v', '?'], { timeout: LIST_TIMEOUT_MS })
   return stdout
 }
 
 async function windowsList(): Promise<string> {
-  const script = [
-    'Add-Type -AssemblyName System.Speech;',
-    '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;',
-    "$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name + '|' + $_.VoiceInfo.Culture.Name + '|' + $_.VoiceInfo.Gender };",
-    '$s.Dispose();',
-  ].join(' ')
+  const script = windowsVoiceScript()
   const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
     timeout: LIST_TIMEOUT_MS,
     windowsHide: true,
   })
   return stdout
+}
+function windowsVoiceScript(): string {
+  return [
+    'Add-Type -AssemblyName System.Speech;',
+    '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;',
+    "$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name + '|' + $_.VoiceInfo.Culture.Name + '|' + $_.VoiceInfo.Gender };",
+    '$s.Dispose();',
+  ].join(' ')
 }
 
 async function espeakList(): Promise<string> {

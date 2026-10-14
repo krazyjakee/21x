@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import { existsSync, readFileSync, readdirSync } from 'fs'
-import { homedir } from 'os'
+import { homedir, tmpdir } from 'os'
+import { mkdtemp, writeFile, rm } from 'fs/promises'
+import { spawn } from 'child_process'
 import { join } from 'path'
 import { VoiceWorkerClient } from './voice-worker-client'
 import type { ResolvedModel } from './voice-model-manager'
@@ -36,9 +38,57 @@ afterAll(() => {
   delete process.env.VOICE_MOCK_TEXT
 })
 
-afterEach(() => {
-  client?.stop()
+afterEach(async () => {
+  await client?.close()
   client = null
+})
+
+describe('portable worker raw process ownership', () => {
+  // The Electron application suite must not launch Electron as a Node probe.
+  const standaloneNode = process.env.TAURI_NODE_RUNTIME ?? (!process.versions.electron ? process.execPath : ['/usr/bin/node', '/usr/local/bin/node'].find(path => existsSync(path)))
+  it.skipIf(!standaloneNode || process.platform === 'win32')('retains an ignored SIGTERM until actual close and never kills an unrelated fixture child', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'voice-worker-owned-'))
+    const script = join(root, 'owned.cjs')
+    await writeFile(script, `process.on('SIGTERM',()=>{});process.stdin.resume();process.on('message',m=>{if(m.t==='load')process.send({t:'status',state:'ready',modelId:m.modelId,engine:'fixture'})});setInterval(()=>{},1000);process.stdout.write('bounded diagnostics');`)
+    const other = spawn(standaloneNode!, [script], { stdio: ['pipe','pipe','pipe'], env: {} })
+    other.stdout?.resume(); other.stderr?.resume()
+    try {
+      client = new VoiceWorkerClient({ scriptPath: script, runtime: () => ({ execPath: standaloneNode!, env: {} }) })
+      const ready = waitFor<void>(resolve => client!.on('status', status => { if (status.state === 'ready') resolve() }))
+      await client.load(MODEL); await ready
+      await expect(client.close(10)).rejects.toThrow('DRAIN_INCOMPLETE')
+      expect(client.inflightCount).toBeGreaterThan(0)
+      expect(other.exitCode).toBeNull(); expect(other.signalCode).toBeNull()
+      await client.close(1000)
+      expect(client.inflightCount).toBe(0); expect(other.exitCode).toBeNull()
+      await expect(client.load(MODEL)).rejects.toThrow('CLOSED')
+    } finally {
+      const closed = new Promise<void>(resolve => other.once('close', () => resolve()))
+      other.kill('SIGKILL'); await closed; await client?.close(); client = null
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+  it.skipIf(!standaloneNode || process.platform === 'win32')('joins a replacement child and drops the stopped child late recognition events', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'voice-worker-replacement-')), script = join(root, 'owned.cjs')
+    await writeFile(script, `process.on('SIGTERM',()=>{});process.stdin.resume();process.on('message',m=>{if(m.t==='load')process.send({t:'status',state:'ready',modelId:m.modelId,engine:'fixture'});if(m.t==='start')setTimeout(()=>process.send({t:'final',turnId:m.turnId,text:'stale recognition'}),75)});setInterval(()=>{},1000);`)
+    try {
+      client = new VoiceWorkerClient({ scriptPath: script, runtime: () => ({ execPath: standaloneNode!, env: {} }) })
+      const firstReady = waitFor<void>(resolve => client!.on('status', status => { if (status.state === 'ready') resolve() }))
+      const finals: string[] = []; client.on('final', (_id, text) => finals.push(text))
+      await client.load(MODEL); await firstReady; client.startTurn('old-turn')
+      const stop = client.stopAcknowledged()
+      const ready = waitFor<void>(resolve => client!.on('status', status => { if (status.state === 'ready') resolve() }))
+      const replacement = client.load({ ...MODEL, id: 'replacement' })
+      await stop; await replacement; await ready
+      expect(finals).toEqual([]); expect(client.isLoaded).toBe(true); expect(client.isRunning).toBe(true)
+      await client.close(); expect(client.inflightCount).toBe(0)
+    } finally { await client?.close(); client = null; await rm(root, { recursive: true, force: true }) }
+  })
+  it('refuses an Electron worker environment at the portable boundary before spawning', async () => {
+    const portable = new VoiceWorkerClient({ scriptPath: SCRIPT, runtime: () => ({ execPath: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } }) })
+    await expect(portable.load(MODEL)).rejects.toThrow('RUNTIME_INVALID')
+    expect(portable.inflightCount).toBe(0); await portable.close()
+  })
 })
 
 /**

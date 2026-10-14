@@ -3,6 +3,27 @@
 use serde_json::Value;
 
 pub const COMMANDS: &[&str] = &[
+    "voice:getSnapshot",
+    "voice:setEnabled",
+    "voice:getRuntime",
+    "voice:installRuntime",
+    "voice:removeRuntime",
+    "voice:installModel",
+    "voice:removeModel",
+    "voice:removeAllModels",
+    "voice:selectModel",
+    "voice:setEndpointSilence",
+    "voice:tts:getSnapshot",
+    "voice:tts:setEnabled",
+    "voice:tts:setEngine",
+    "voice:tts:setVoice",
+    "voice:tts:setSpeed",
+    "voice:tts:setMaxChars",
+    "voice:tts:setSpeakActionResults",
+    "voice:tts:setOnlyVoiceTurns",
+    "voice:tts:installModel",
+    "voice:tts:selectModel",
+    "voice:tts:removeModel",
     "agent-installer:detect",
     "artifacts:scan",
     "artifacts:read",
@@ -145,6 +166,10 @@ pub const COMMANDS: &[&str] = &[
     "taskSource:reassign",
 ];
 pub const EVENTS: &[&str] = &[
+    "voice:status",
+    "voice:runtimeProgress",
+    "voice:tts:status",
+    "voice:tts:modelProgress",
     "mobile:pairing-initiated",
     "mobile:device-connected",
     "task:created",
@@ -2379,7 +2404,385 @@ fn artifact_result(operation: &str, value: &Value) -> bool {
                 <= 500
     })
 }
+
+const VOICE_COMMANDS: &[&str] = &[
+    "voice:getSnapshot",
+    "voice:setEnabled",
+    "voice:getRuntime",
+    "voice:installRuntime",
+    "voice:removeRuntime",
+    "voice:installModel",
+    "voice:removeModel",
+    "voice:removeAllModels",
+    "voice:selectModel",
+    "voice:setEndpointSilence",
+    "voice:tts:getSnapshot",
+    "voice:tts:setEnabled",
+    "voice:tts:setEngine",
+    "voice:tts:setVoice",
+    "voice:tts:setSpeed",
+    "voice:tts:setMaxChars",
+    "voice:tts:setSpeakActionResults",
+    "voice:tts:setOnlyVoiceTurns",
+    "voice:tts:installModel",
+    "voice:tts:selectModel",
+    "voice:tts:removeModel",
+];
+const VOICE_ERROR: &str = "Voice management failed. Check the local runtime and model.";
+const VOICE_UNAVAILABLE: &str =
+    "Voice capture and audio playback are unavailable in this desktop host.";
+fn voice_text(value: &Value, max: usize, multiline: bool) -> bool {
+    value.as_str().is_some_and(|s| {
+        s.len() <= max
+            && !s
+                .chars()
+                .any(|c| c == '\0' || !multiline && (c <= '\u{001f}' || c == '\u{007f}'))
+    })
+}
+fn voice_number(value: &Value, min: f64, max: f64) -> bool {
+    value
+        .as_f64()
+        .is_some_and(|n| n.is_finite() && n >= min && n <= max)
+}
+fn voice_model_id(value: &Value, tts: bool) -> bool {
+    if tts {
+        matches!(
+            value.as_str(),
+            Some("kitten-nano-en-v0_2" | "kokoro-en-v0_19")
+        )
+    } else {
+        matches!(
+            value.as_str(),
+            Some(
+                "nemo-parakeet-tdt-0.6b-v3"
+                    | "sherpa-streaming-zipformer-en"
+                    | "nemo-fast-conformer-en-480ms"
+                    | "nemotron-streaming-en-560ms"
+            )
+        )
+    }
+}
+fn voice_id(value: &Value) -> bool {
+    if value == "" {
+        return true;
+    }
+    if !voice_text(value, 512, false) {
+        return false;
+    }
+    let Some(s) = value.as_str() else {
+        return false;
+    };
+    if s.starts_with("system:") {
+        return s.len() > 7;
+    }
+    let pieces: Vec<_> = s.split(':').collect();
+    pieces.len() == 3
+        && pieces[0] == "local"
+        && voice_model_id(&Value::String(pieces[1].into()), true)
+        && (pieces[2] == "0"
+            || !pieces[2].starts_with('0')
+                && pieces[2].len() <= 3
+                && !pieces[2].is_empty()
+                && pieces[2].bytes().all(|c| c.is_ascii_digit()))
+}
+fn voice_runtime(v: &Value) -> bool {
+    object(
+        v,
+        &["installed", "version", "modulePath", "sizeBytes"],
+        &["installing", "progress", "error"],
+    ) && v["installed"].is_boolean()
+        && (v["version"].is_null() || voice_text(&v["version"], 128, false))
+        && (v["modulePath"].is_null() || v["modulePath"] == "__21x_local_voice_runtime__")
+        && integer(&v["sizeBytes"])
+        && v.get("installing").is_none_or(Value::is_boolean)
+        && v.get("progress").is_none_or(|x| voice_number(x, 0.0, 1.0))
+        && v.get("error").is_none_or(|x| x == VOICE_ERROR)
+}
+fn voice_model(v: &Value, tts: bool) -> bool {
+    let common = [
+        "id",
+        "label",
+        "description",
+        "license",
+        "licenseUrl",
+        "languages",
+        "installed",
+        "active",
+        "installing",
+        "progress",
+        "sizeBytes",
+        "downloadable",
+    ];
+    let fields: Vec<&str> = common
+        .into_iter()
+        .chain(if tts {
+            vec!["unpackedBytes", "speakerCount"]
+        } else {
+            vec![]
+        })
+        .collect();
+    object(
+        v,
+        &fields,
+        if tts {
+            &["error"]
+        } else {
+            &["error", "kind", "phase", "legacy"]
+        },
+    ) && voice_model_id(&v["id"], tts)
+        && ["label", "description", "license", "licenseUrl"]
+            .iter()
+            .all(|key| {
+                voice_text(
+                    &v[key],
+                    if *key == "description" { 4096 } else { 1024 },
+                    false,
+                )
+            })
+        && v["languages"].as_array().is_some_and(|items| {
+            items.len() <= 64 && items.iter().all(|x| voice_text(x, 64, false))
+        })
+        && ["installed", "active", "installing", "downloadable"]
+            .iter()
+            .all(|key| v[key].is_boolean())
+        && voice_number(&v["progress"], 0.0, 1.0)
+        && integer(&v["sizeBytes"])
+        && v.get("error").is_none_or(|x| x == VOICE_ERROR)
+        && if tts {
+            integer(&v["unpackedBytes"])
+                && integer(&v["speakerCount"])
+                && voice_number(&v["speakerCount"], 0.0, 512.0)
+        } else {
+            v.get("kind")
+                .is_none_or(|x| matches!(x.as_str(), Some("streaming" | "offline")))
+                && v.get("phase")
+                    .is_none_or(|x| matches!(x.as_str(), Some("downloading" | "verifying")))
+                && v.get("legacy").is_none_or(Value::is_boolean)
+        }
+}
+fn voice_models(v: &Value, tts: bool) -> bool {
+    v.as_array().is_some_and(|rows| {
+        rows.len() <= 16
+            && rows.iter().all(|x| voice_model(x, tts))
+            && rows
+                .iter()
+                .filter_map(|x| x["id"].as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == rows.len()
+    })
+}
+fn voice_engine(v: &Value, tts: bool) -> bool {
+    if v["state"] == "loading" {
+        return object(v, &["state"], &[]);
+    }
+    if v["state"] == "ready" {
+        return if tts {
+            object(
+                v,
+                &["state", "engine", "modelId", "voiceId", "sampleRate"],
+                &[],
+            ) && matches!(v["engine"].as_str(), Some("system" | "local"))
+                && (v["modelId"] == "" || voice_model_id(&v["modelId"], true))
+                && voice_id(&v["voiceId"])
+                && integer(&v["sampleRate"])
+                && voice_number(&v["sampleRate"], 1.0, 192000.0)
+        } else {
+            object(v, &["state", "modelId", "engine"], &[])
+                && voice_model_id(&v["modelId"], false)
+                && voice_text(&v["engine"], 128, false)
+        };
+    }
+    object(v, &["state", "message"], &[])
+        && (if tts {
+            matches!(
+                v["state"].as_str(),
+                Some("unavailable" | "model_missing" | "error")
+            )
+        } else {
+            matches!(
+                v["state"].as_str(),
+                Some("engine_missing" | "model_missing" | "error")
+            )
+        })
+        && (v["message"] == VOICE_ERROR || v["message"] == VOICE_UNAVAILABLE)
+}
+fn voice_status(v: &Value, snapshot: bool) -> bool {
+    let common = ["enabled", "engine", "models", "shortcut", "runtime"];
+    let fields: Vec<&str> = common
+        .into_iter()
+        .chain(if snapshot {
+            vec!["state", "turnId", "partial", "final"]
+        } else {
+            vec![]
+        })
+        .collect();
+    object(v, &fields, &[])
+        && v["enabled"].is_boolean()
+        && voice_engine(&v["engine"], false)
+        && voice_models(&v["models"], false)
+        && voice_text(&v["shortcut"], 256, false)
+        && voice_runtime(&v["runtime"])
+        && (!snapshot
+            || matches!(
+                v["state"].as_str(),
+                Some(
+                    "disabled"
+                        | "idle"
+                        | "model_needed"
+                        | "permission_needed"
+                        | "listening"
+                        | "transcribing"
+                        | "awaiting_confirmation"
+                        | "executing"
+                        | "waiting_for_agent"
+                        | "speaking"
+                        | "error"
+                )
+            ) && (v["turnId"].is_null() || voice_text(&v["turnId"], 128, false))
+                && voice_text(&v["partial"], 65536, true)
+                && voice_text(&v["final"], 65536, true))
+}
+fn voice_tts_voice(v: &Value) -> bool {
+    object(
+        v,
+        &[
+            "id",
+            "label",
+            "engine",
+            "speakerId",
+            "modelId",
+            "language",
+            "description",
+        ],
+        &[],
+    ) && voice_id(&v["id"])
+        && v["id"] != ""
+        && matches!(v["engine"].as_str(), Some("system" | "local"))
+        && integer(&v["speakerId"])
+        && voice_number(&v["speakerId"], 0.0, 512.0)
+        && (v["modelId"] == "" || voice_model_id(&v["modelId"], true))
+        && ["label", "language", "description"].iter().all(|key| {
+            voice_text(
+                &v[key],
+                if *key == "description" { 4096 } else { 512 },
+                false,
+            )
+        })
+}
+fn voice_hosted_off(v: &Value) -> bool {
+    object(
+        v,
+        &[
+            "keySet",
+            "disclosureAccepted",
+            "modelId",
+            "models",
+            "voices",
+            "error",
+            "usage",
+        ],
+        &[],
+    ) && v["keySet"] == false
+        && v["disclosureAccepted"] == false
+        && v["modelId"] == "eleven_flash_v2_5"
+        && v["models"].as_array().is_some_and(Vec::is_empty)
+        && v["voices"].as_array().is_some_and(Vec::is_empty)
+        && (v["error"].is_null()
+            || object(&v["error"], &["kind", "message"], &[])
+                && v["error"]["kind"] == "unknown"
+                && v["error"]["message"] == "Hosted speech is unavailable in this desktop host.")
+        && v["usage"].is_null()
+}
+fn voice_tts_snapshot(v: &Value) -> bool {
+    object(
+        v,
+        &[
+            "enabled",
+            "engine",
+            "status",
+            "voices",
+            "voiceId",
+            "speed",
+            "maxChars",
+            "speakActionResults",
+            "onlyVoiceTurns",
+            "models",
+            "speaking",
+            "elevenlabs",
+        ],
+        &[],
+    ) && v["enabled"].is_boolean()
+        && matches!(v["engine"].as_str(), Some("system" | "local"))
+        && voice_engine(&v["status"], true)
+        && v["voices"].as_array().is_some_and(|rows| {
+            rows.len() <= 256
+                && rows.iter().all(voice_tts_voice)
+                && rows
+                    .iter()
+                    .filter_map(|x| x["id"].as_str())
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    == rows.len()
+        })
+        && voice_id(&v["voiceId"])
+        && voice_number(&v["speed"], 0.5, 2.0)
+        && integer(&v["maxChars"])
+        && voice_number(&v["maxChars"], 1.0, 6000.0)
+        && v["speakActionResults"].is_boolean()
+        && v["onlyVoiceTurns"].is_boolean()
+        && voice_models(&v["models"], true)
+        && v["speaking"].is_boolean()
+        && voice_hosted_off(&v["elevenlabs"])
+}
+fn voice_request(op: &str, v: &Value) -> bool {
+    match op {
+        "voice:setEnabled" | "voice:tts:setEnabled" => {
+            object(v, &["enabled"], &[]) && v["enabled"].is_boolean()
+        }
+        "voice:installModel" | "voice:removeModel" | "voice:selectModel" => {
+            object(v, &["id"], &[]) && voice_model_id(&v["id"], false)
+        }
+        "voice:tts:installModel" | "voice:tts:removeModel" | "voice:tts:selectModel" => {
+            object(v, &["id"], &[]) && voice_model_id(&v["id"], true)
+        }
+        "voice:setEndpointSilence" => {
+            object(v, &["seconds"], &[])
+                && v["seconds"].as_f64().is_some_and(|n| n >= 0.1 && n <= 10.0)
+        }
+        "voice:tts:setEngine" => {
+            object(v, &["engine"], &[]) && matches!(v["engine"].as_str(), Some("system" | "local"))
+        }
+        "voice:tts:setVoice" => object(v, &["voiceId"], &[]) && voice_id(&v["voiceId"]),
+        "voice:tts:setSpeed" => object(v, &["speed"], &[]) && voice_number(&v["speed"], 0.5, 2.0),
+        "voice:tts:setMaxChars" => {
+            object(v, &["maxChars"], &[])
+                && integer(&v["maxChars"])
+                && voice_number(&v["maxChars"], 1.0, 6000.0)
+        }
+        "voice:tts:setSpeakActionResults" | "voice:tts:setOnlyVoiceTurns" => {
+            object(v, &["on"], &[]) && v["on"].is_boolean()
+        }
+        _ => object(v, &[], &[]),
+    }
+}
+fn voice_result(op: &str, v: &Value) -> bool {
+    match op {
+        "voice:getSnapshot" | "voice:setEnabled" => voice_status(v, true),
+        "voice:getRuntime" | "voice:installRuntime" | "voice:removeRuntime" => voice_runtime(v),
+        "voice:installModel" => voice_model(v, false),
+        "voice:removeModel" | "voice:selectModel" => voice_models(v, false),
+        "voice:removeAllModels" | "voice:setEndpointSilence" => {
+            object(v, &["success"], &[]) && v["success"].is_boolean()
+        }
+        _ => voice_tts_snapshot(v),
+    }
+}
+
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if VOICE_COMMANDS.contains(&operation) {
+        return bounded_bytes(value, 8192) && voice_request(operation, value);
+    }
     if ARTIFACT_COMMANDS.contains(&operation) {
         return bounded_bytes(value, 8192) && artifact_request(operation, value);
     }
@@ -2499,6 +2902,13 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if VOICE_COMMANDS.contains(&operation) {
+        return object(value, &["defined", "value"], &[])
+            && value["defined"] == true
+            && bounded_bytes(value, 262208)
+            && bounded_bytes(&value["value"], 262144)
+            && voice_result(operation, &value["value"]);
+    }
     if operation == "agent-installer:detect" {
         return object(value, &["defined", "value"], &[])
             && value["defined"] == true
@@ -2770,6 +3180,27 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
         return false;
     }
     match operation {
+        "voice:status" => bounded_bytes(value, 262144) && voice_status(value, false),
+        "voice:tts:status" => bounded_bytes(value, 262144) && voice_tts_snapshot(value),
+        "voice:tts:modelProgress" => {
+            object(value, &["model"], &[])
+                && bounded_bytes(value, 262144)
+                && voice_model(&value["model"], true)
+        }
+        "voice:runtimeProgress" => {
+            object(value, &["stage", "output", "percent"], &[])
+                && matches!(
+                    value["stage"].as_str(),
+                    Some("starting" | "installing" | "complete" | "error")
+                )
+                && value["output"]
+                    == if value["stage"] == "error" {
+                        VOICE_ERROR
+                    } else {
+                        VOICE_UNAVAILABLE
+                    }
+                && voice_number(&value["percent"], 0.0, 100.0)
+        }
         "mobile:pairing-initiated" => bounded_bytes(value, 64 * 1024) && mobile_pin(value),
         "mobile:device-connected" => {
             bounded_bytes(value, 64 * 1024)
@@ -3053,7 +3484,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 19);
+        assert_eq!(EVENTS.len(), 23);
         let requests = [
             ("mobile:getInfo", json!({})),
             (
@@ -3888,7 +4319,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 140);
+        assert_eq!(COMMANDS.len(), 161);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})
@@ -3961,6 +4392,55 @@ mod tests {
         assert!(!valid_result(
             "secrets:create",
             &json!({"defined":true,"value":private})
+        ));
+    }
+    #[test]
+    fn voice_management_refuses_hosted_paths_audio_and_unknown_model_authority() {
+        assert!(valid_request(
+            "voice:setEndpointSilence",
+            &json!({"seconds":1.5})
+        ));
+        assert!(valid_request(
+            "voice:tts:setVoice",
+            &json!({"voiceId":"system:café"})
+        ));
+        for (op, value) in [
+            ("voice:setEndpointSilence", json!({"seconds":0})),
+            ("voice:setEndpointSilence", json!({"seconds":10.1})),
+            ("voice:tts:setEngine", json!({"engine":"elevenlabs"})),
+            ("voice:installModel", json!({"id":"/foreign/model"})),
+            (
+                "voice:tts:setVoice",
+                json!({"voiceId":"local:kokoro-en-v0_19:001"}),
+            ),
+            ("voice:tts:setMaxChars", json!({"maxChars":1.5})),
+            ("voice:removeRuntime", json!({"rootDir":"/foreign/runtime"})),
+            ("voice:tts:setSpeed", json!({"speed":1,"authority":"all"})),
+            ("voice:pushAudio", json!({"turnId":"foreign","chunk":[]})),
+        ] {
+            assert!(!valid_request(op, &value), "{op}");
+        }
+        let mut runtime = json!({"installed":true,"version":"1.0.0","modulePath":"__21x_local_voice_runtime__","sizeBytes":180000000});
+        assert!(valid_result(
+            "voice:getRuntime",
+            &json!({"defined":true,"value":runtime})
+        ));
+        runtime["modulePath"] = json!("/private/profile/runtime");
+        assert!(!valid_result(
+            "voice:getRuntime",
+            &json!({"defined":true,"value":runtime})
+        ));
+        assert!(!valid_event(
+            "voice:speech:chunk",
+            &json!({"pcm":"unreviewed"})
+        ));
+        assert!(!valid_event(
+            "voice:runtimeProgress",
+            &json!({"stage":"installing","output":"raw process credential","percent":10})
+        ));
+        assert!(valid_event(
+            "voice:runtimeProgress",
+            &json!({"stage":"error","output":VOICE_ERROR,"percent":100})
         ));
     }
     #[test]

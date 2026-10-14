@@ -15729,8 +15729,8 @@
       "references": [
         {
           "column": 7,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 498,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 552,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -15894,9 +15894,17 @@
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
+          "column": 116,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 254,
+          "method": "send",
+          "resolution": "constant",
+          "target": "reviewed-event-wrapper"
+        },
+        {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 559,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 613,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -16005,8 +16013,8 @@
       "references": [
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 462,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 516,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -16221,8 +16229,8 @@
       "references": [
         {
           "column": 9,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 1061,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 1130,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -16439,88 +16447,88 @@
       "references": [
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 422,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 476,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 9,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 477,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 531,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 7,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 485,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 539,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 7,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 499,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 553,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 7,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 509,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 563,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 7,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 548,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 602,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 7,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 613,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 668,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 619,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 674,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 7,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 805,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 861,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 7,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 823,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 879,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
         },
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 833,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 889,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -16573,8 +16581,8 @@
       "references": [
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 454,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 508,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -16955,8 +16963,8 @@
       "references": [
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 937,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 995,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17009,8 +17017,8 @@
       "references": [
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 446,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 500,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17345,7 +17353,7 @@
         {
           "column": 5,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 1132,
+          "line": 1239,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17400,7 +17408,7 @@
         {
           "column": 5,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 1032,
+          "line": 1136,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17408,7 +17416,7 @@
         {
           "column": 5,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 1148,
+          "line": 1256,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17416,7 +17424,7 @@
         {
           "column": 5,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 1163,
+          "line": 1271,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17471,7 +17479,7 @@
         {
           "column": 5,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 780,
+          "line": 883,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17479,7 +17487,7 @@
         {
           "column": 5,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 861,
+          "line": 965,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17487,7 +17495,7 @@
         {
           "column": 5,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 941,
+          "line": 1045,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17596,8 +17604,8 @@
       "references": [
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 1149,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 1220,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -17650,16 +17658,8 @@
       "references": [
         {
           "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 1035,
-          "method": "send",
-          "resolution": "constant",
-          "target": "reviewed-event-wrapper"
-        },
-        {
-          "column": 5,
-          "file": "src/main/voice/voice-session-manager.ts",
-          "line": 1176,
+          "file": "src/main/voice/voice-session-manager-core.ts",
+          "line": 1251,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -18100,7 +18100,7 @@
         {
           "column": 11,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 192,
+          "line": 210,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"
@@ -18782,7 +18782,7 @@
         {
           "column": 5,
           "file": "src/main/voice/voice-speech-service.ts",
-          "line": 1200,
+          "line": 1310,
           "method": "send",
           "resolution": "constant",
           "target": "reviewed-event-wrapper"

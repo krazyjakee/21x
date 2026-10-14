@@ -1,13 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
+import { execFile } from 'child_process'
+import { mkdtempSync, rmSync, readdirSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { VOICE_TTS_EVENTS, VOICE_TTS_SETTING_KEYS, type VoiceTtsStatus, type VoiceTtsVoice } from '../../shared/voice-tts'
 import {
   VoiceSpeechService,
   localVoicesForModel,
   type VoiceSpeechLifecycleOwner,
+  VOICE_HOSTED_SPEECH_UNAVAILABLE,
+  VOICE_DESKTOP_AUDIO_UNAVAILABLE,
 } from './voice-speech-service'
-import type { VoiceTtsWorkerClient } from './voice-tts-worker-client'
-import type { VoiceTtsModelManager } from './voice-tts-model-manager'
+import { VoiceTtsWorkerClient, type VoiceTtsWorkerHost } from './voice-tts-worker-client'
+import { VoiceTtsModelManager } from './voice-tts-model-manager'
+import { VoiceSystemVoicesOwner } from './voice-system-voices'
 
 /**
  * The rules of design §5.7 live here: the reason for speaking decides whether a
@@ -96,6 +103,80 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
+
+function makePortableSpeech(settings: Record<string, string> = {}, fetchImpl?: typeof fetch) {
+  const root = mkdtempSync(join(tmpdir(), '21x-owned-local-speech-')), store = new Map(Object.entries(settings))
+  const db = { getSetting: (key: string) => store.get(key), setSetting: (key: string, value: string) => { store.set(key, value) } }
+  const spawn = vi.fn<VoiceTtsWorkerHost['fork']>(() => { throw new Error('Audio is unavailable; no spawn permitted') })
+  const worker = new VoiceTtsWorkerClient({ scriptPath: join(__dirname, 'voice-tts-worker.js'), execPath: process.execPath, env: {}, fork: spawn, assertCurrent() {}, assertRuntimeModule() { throw new Error('No runtime authority') }, assertModel() { throw new Error('No playback authority') } })
+  const enumerate = vi.fn<typeof execFile>()
+  const systemVoices = new VoiceSystemVoicesOwner({ platform: process.platform, capability: 'unavailable', executable: null, env: {}, execFile: enumerate as unknown as typeof execFile, assertCurrent() {} })
+  const models = new VoiceTtsModelManager({ rootDir: root, fetchImpl, retry: { attempts: 1, baseDelayMs: 0 }, host: { downloads: fetchImpl ? 'enabled' : 'disabled', assertCurrent() {}, beforeRequest() {} } })
+  const events: Array<{ channel: string; data: unknown }> = []
+  const service = new VoiceSpeechService({ modelRootDir: root, db, worker, models, systemVoices, host: { hostedSpeech: 'disabled', audio: 'unavailable', assertCurrent() {} }, notifyRenderer: (channel, data) => events.push({ channel, data }) })
+  return { service, db, worker, models, systemVoices, spawn, enumerate, store, root, events, async cleanup() { await service.close(); rmSync(root, { recursive: true, force: true }) } }
+}
+
+describe('actual portable speech owners and explicit local-only policy', () => {
+  it('projects unavailable local speech without rewriting historical hosted settings or exporting credentials', async () => {
+    const saved = { [VOICE_TTS_SETTING_KEYS.engine]: 'elevenlabs', [VOICE_TTS_SETTING_KEYS.elevenlabsApiKey]: 'synthetic-private-value', [VOICE_TTS_SETTING_KEYS.enabled]: 'true' }
+    const owned = makePortableSpeech(saved)
+    try {
+      const snapshot = await owned.service.snapshot()
+      expect(snapshot.engine).toBe('system'); expect(snapshot.status).toEqual({ state: 'unavailable', message: VOICE_DESKTOP_AUDIO_UNAVAILABLE })
+      expect(snapshot.elevenlabs).toMatchObject({ keySet: false, disclosureAccepted: false, voices: [], models: [], usage: null, error: { message: VOICE_HOSTED_SPEECH_UNAVAILABLE } })
+      expect(JSON.stringify(snapshot)).not.toContain('synthetic-private-value'); expect(owned.store.get(VOICE_TTS_SETTING_KEYS.engine)).toBe('elevenlabs')
+      expect(owned.spawn).not.toHaveBeenCalled(); expect(owned.enumerate).not.toHaveBeenCalled()
+    } finally { await owned.cleanup() }
+  })
+  it('refuses every hosted operation before settings, provider or worker effects', async () => {
+    const owned = makePortableSpeech(), refresh = vi.spyOn(owned.service.elevenlabs, 'refresh')
+    try {
+      for (const effect of [() => owned.service.acceptElevenLabsDisclosure(), () => owned.service.setElevenLabsKey('synthetic'), () => owned.service.clearElevenLabsKey(), () => owned.service.refreshElevenLabs(), () => owned.service.setElevenLabsModel('eleven_flash_v2_5'), () => owned.service.setEngine('elevenlabs'), () => owned.service.setVoice('elevenlabs:synthetic')]) await expect(effect()).rejects.toThrow(VOICE_HOSTED_SPEECH_UNAVAILABLE)
+      expect(owned.store.size).toBe(0); expect(refresh).not.toHaveBeenCalled(); expect(owned.spawn).not.toHaveBeenCalled()
+    } finally { await owned.cleanup() }
+  })
+  it('stores local preferences successfully while audio remains unavailable and refuses prepare/speech effects', async () => {
+    const owned = makePortableSpeech()
+    try {
+      expect((await owned.service.setEnabled(true)).status.state).toBe('unavailable')
+      expect((await owned.service.setEngine('local')).status.state).toBe('unavailable')
+      expect((await owned.service.setSpeed(1.2)).speed).toBe(1.2)
+      await owned.service.prepare()
+      expect(await owned.service.speak({ text: 'Synthetic desktop-only answer.', source: 'manual' })).toBe(false)
+      expect(owned.spawn).not.toHaveBeenCalled(); expect(owned.enumerate).not.toHaveBeenCalled()
+      expect(owned.events.some(event => event.channel === VOICE_TTS_EVENTS.speechStart || event.channel === VOICE_TTS_EVENTS.speechChunk)).toBe(false)
+    } finally { await owned.cleanup() }
+  })
+  it('keeps owner assertions nonrecursive and fences competing or revoked management writes', async () => {
+    const owned = makePortableSpeech(), gate = deferred<void>(), entered = deferred<void>(); let current = true
+    const operation = owned.service.runManagementMutation(async () => { entered.resolve(); await gate.promise; return owned.service.setSpeed(1.2) }, () => { owned.service.assertOwners(owned); if (!current) throw new Error('Permission withdrawn') })
+    const failure = operation.catch(error => error)
+    try {
+      await entered.promise
+      await expect(owned.service.setEnabled(true)).rejects.toThrow('VOICE_MANAGEMENT_BUSY')
+      current = false; gate.resolve(); expect(await failure).toBeInstanceOf(Error)
+      expect(owned.store.size).toBe(0); expect(owned.spawn).not.toHaveBeenCalled()
+    } finally { gate.resolve(); await failure; await owned.cleanup() }
+  })
+  it('retains ignored raw download through close and never selects or broadcasts its late result', async () => {
+    const entered = deferred<void>(), response = deferred<Response>()
+    const owned = makePortableSpeech({}, (() => { entered.resolve(); return response.promise }) as typeof fetch)
+    const install = owned.service.installModel('kitten-nano-en-v0_2'), failure = install.catch(error => error)
+    await entered.promise
+    await expect(owned.service.close(5)).rejects.toThrow('VOICE_SPEECH_SHUTDOWN_INCOMPLETE')
+    expect(owned.models.inflightCount).toBeGreaterThan(0); expect(owned.service.inflightCount).toBeGreaterThan(0)
+    response.resolve(new Response(new Uint8Array([1, 2, 3]))); expect(await failure).toBeInstanceOf(Error)
+    await owned.cleanup(); expect(owned.store.size).toBe(0); expect(owned.events).toEqual([]); expect(owned.spawn).not.toHaveBeenCalled()
+  })
+  it('rejects mismatched actual ownership without granting another model directory', async () => {
+    const owned = makePortableSpeech()
+    try {
+      expect(() => owned.service.assertOwners({ ...owned, db: { getSetting: () => undefined, setSetting() {} } })).toThrow('VOICE_SPEECH_OWNER_MISMATCH')
+      expect(readdirSync(owned.root)).toEqual([])
+    } finally { await owned.cleanup() }
+  })
+})
 
 interface SpeechServiceHarness {
   listVoices: () => Promise<VoiceTtsVoice[]>
@@ -337,9 +418,9 @@ describe('one voice at a time', () => {
     const ready = deferred<VoiceTtsVoice[]>()
     const ctx = makeService({ [VOICE_TTS_SETTING_KEYS.enabled]: 'true' })
     const harness = speechHarness(ctx.service)
-    vi.spyOn(harness, 'listVoices').mockReturnValueOnce(ready.promise)
+    const enumerate = vi.spyOn(harness, 'listVoices').mockReturnValueOnce(ready.promise)
     const stale = ctx.service.speak({ text: 'Old action result.', source: 'action_result' })
-    await Promise.resolve()
+    await vi.waitFor(() => expect(enumerate).toHaveBeenCalledTimes(1))
     ctx.service.stop('cancelled')
     harness.systemVoices = SYSTEM_VOICES
     harness.status = { state: 'ready', engine: 'system', modelId: '', voiceId: 'system:Samantha', sampleRate: 24000 }

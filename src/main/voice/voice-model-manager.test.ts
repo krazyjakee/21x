@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createHash } from 'crypto'
-import { mkdtemp, mkdir, writeFile, rm, stat } from 'fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, stat, readFile, symlink, rename, readdir, realpath } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { VoiceModelManager, customDirKind, sha256OfFile } from './voice-model-manager'
@@ -45,7 +45,7 @@ let root: string
 let added: VoiceModelManifestEntry | null = null
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'voice-models-'))
+  root = await realpath(await mkdtemp(join(tmpdir(), 'voice-models-')))
 })
 
 afterEach(async () => {
@@ -181,6 +181,94 @@ describe('VoiceModelManager', () => {
       downloadable: true,
       sizeBytes: CONTENT.length * 4,
     })
+  })
+})
+
+describe('portable recognition model ownership', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((done) => { resolve = done })
+    return { promise, resolve }
+  }
+  it('retains an ignored cancellation until raw fetch and body cleanup settle, without publication', async () => {
+    const entry = addToManifest(verifiedEntry()), receipt = deferred<Response>(), requested = deferred<void>()
+    const cancelled = vi.fn()
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: (async () => { requested.resolve(); return receipt.promise }) as typeof fetch })
+    const install = manager.install(entry.id).catch(error => error)
+    await requested.promise
+    await expect(manager.close(10)).rejects.toThrow('DRAIN_INCOMPLETE')
+    expect(manager.inflightCount).toBeGreaterThan(0)
+    receipt.resolve(new Response(new ReadableStream({ cancel: cancelled })))
+    await install; await manager.close()
+    expect(cancelled).toHaveBeenCalledOnce()
+    await expect(stat(join(root, entry.id, 'encoder.onnx'))).rejects.toThrow()
+    expect(await readdir(join(root, entry.id))).toEqual([])
+    expect(manager.inflightCount).toBe(0)
+  })
+  it('waits for an accepted download before deleting a model and never publishes aborted bytes', async () => {
+    const entry = addToManifest(verifiedEntry()), receipt = deferred<Response>(), requested = deferred<void>()
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: (async () => { requested.resolve(); return receipt.promise }) as typeof fetch })
+    const install = manager.install(entry.id).catch(error => error)
+    await requested.promise
+    let removed = false
+    const removal = manager.remove(entry.id).then(() => { removed = true })
+    await Promise.resolve(); expect(removed).toBe(false)
+    receipt.resolve(new Response(CONTENT))
+    await install; await removal
+    await expect(stat(join(root, entry.id))).rejects.toThrow()
+    await manager.close()
+  })
+  it('preserves preexisting mismatched files, partials and unknown legacy trees', async () => {
+    const entry = addToManifest(verifiedEntry()), dir = join(root, entry.id)
+    await mkdir(dir); await writeFile(join(dir, 'encoder.onnx'), 'user-owned bytes')
+    await writeFile(join(dir, 'decoder.onnx.part'), 'legacy partial')
+    await mkdir(join(root, 'older-model')); await writeFile(join(root, 'older-model', 'notes.txt'), 'notes')
+    const request = vi.fn(async () => new Response(CONTENT))
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: request as typeof fetch })
+    await expect(manager.install(entry.id)).rejects.toThrow(/failed safely/)
+    await expect(manager.remove(entry.id)).rejects.toThrow('UNOWNED_FILE')
+    expect(await readFile(join(dir, 'encoder.onnx'), 'utf8')).toBe('user-owned bytes')
+    expect(await readFile(join(dir, 'decoder.onnx.part'), 'utf8')).toBe('legacy partial')
+    expect((await manager.list()).some(state => state.id === 'older-model')).toBe(false)
+    expect(await readFile(join(root, 'older-model', 'notes.txt'), 'utf8')).toBe('notes')
+    expect(request).not.toHaveBeenCalled(); await manager.close()
+  })
+  it('uses fixed-manifest requests with redirects refused and joins overflowing body cancellation', async () => {
+    const entry = addToManifest(verifiedEntry()), cleanup = deferred<void>(), cancelling = deferred<void>()
+    const fetchImpl = vi.fn(async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new Uint8Array(CONTENT.length + 1)) },
+      cancel() { cancelling.resolve(); return cleanup.promise },
+    })))
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: fetchImpl as typeof fetch })
+    const install = manager.install(entry.id).catch(error => error)
+    await cancelling.promise
+    expect(fetchImpl).toHaveBeenCalledWith(entry.files[0].url, expect.objectContaining({ redirect: 'error' }))
+    await expect(manager.close(10)).rejects.toThrow('DRAIN_INCOMPLETE')
+    cleanup.resolve(); await install; await manager.close()
+    expect(await readdir(join(root, entry.id))).toEqual([])
+  })
+  it('refuses a swapped parent and leaves replacement user data untouched', async () => {
+    const entry = addToManifest(verifiedEntry()), receipt = deferred<Response>(), requested = deferred<void>()
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: (async () => { requested.resolve(); return receipt.promise }) as typeof fetch })
+    const install = manager.install(entry.id).catch(error => error)
+    await requested.promise
+    await rename(join(root, entry.id), join(root, 'moved-owned-tree'))
+    await mkdir(join(root, entry.id)); await writeFile(join(root, entry.id, 'notes.txt'), 'replacement owner')
+    receipt.resolve(new Response(CONTENT)); await install
+    expect(await readFile(join(root, entry.id, 'notes.txt'), 'utf8')).toBe('replacement owner')
+    expect(await readdir(join(root, entry.id))).toEqual(['notes.txt'])
+    await manager.close()
+  })
+  it('refuses linked model paths and disabled downloads before request', async () => {
+    const entry = addToManifest(verifiedEntry()), external = join(root, 'external'); await mkdir(external)
+    await symlink(external, join(root, entry.id), 'dir')
+    const fetchImpl = vi.fn()
+    const manager = new VoiceModelManager({ rootDir: root, portable: true, fetchImpl: fetchImpl as typeof fetch })
+    await expect(manager.install(entry.id)).rejects.toThrow('PATH_UNSAFE')
+    await expect(manager.remove(entry.id)).rejects.toThrow('PATH_UNSAFE')
+    expect(fetchImpl).not.toHaveBeenCalled(); await manager.close()
+    const disabled = new VoiceModelManager({ rootDir: root, portable: true, downloads: 'disabled', fetchImpl: fetchImpl as typeof fetch })
+    await expect(disabled.install(entry.id)).rejects.toThrow('DOWNLOAD_UNAVAILABLE'); await disabled.close()
   })
 })
 

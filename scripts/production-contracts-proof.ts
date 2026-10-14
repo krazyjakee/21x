@@ -1,3 +1,4 @@
+import { VOICE_MANAGEMENT_CODECS } from '../src/shared/voice-management-codecs'
 import { AGENT_INSTALLER_CODECS } from '../src/shared/agent-installer-codecs'
 import { ARTIFACT_CODECS } from '../src/shared/artifact-codecs'
 /** Pure codec corpus: no service/SDK imports, profiles, mutations or credentials. */
@@ -24,7 +25,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -34,6 +35,10 @@ const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }
 
 /** One explicit valid API argument tuple for every finite production command. */
 export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
+  'voice:getSnapshot': [], 'voice:setEnabled': [false], 'voice:getRuntime': [], 'voice:installRuntime': [], 'voice:removeRuntime': [],
+  'voice:installModel': ['nemo-parakeet-tdt-0.6b-v3'], 'voice:removeModel': ['sherpa-streaming-zipformer-en'], 'voice:removeAllModels': [], 'voice:selectModel': ['nemo-fast-conformer-en-480ms'], 'voice:setEndpointSilence': [1.5],
+  'voice:tts:getSnapshot': [], 'voice:tts:setEnabled': [false], 'voice:tts:setEngine': ['local'], 'voice:tts:setVoice': ['local:kitten-nano-en-v0_2:0'], 'voice:tts:setSpeed': [1.25], 'voice:tts:setMaxChars': [1200], 'voice:tts:setSpeakActionResults': [false], 'voice:tts:setOnlyVoiceTurns': [true],
+  'voice:tts:installModel': ['kitten-nano-en-v0_2'], 'voice:tts:selectModel': ['kokoro-en-v0_19'], 'voice:tts:removeModel': ['kitten-nano-en-v0_2'],
   'agent-installer:detect': [], 'artifacts:scan': [task], 'artifacts:read': [task, 'artifacts/fixture/report.md'],
   'db:getTasks': [project], 'db:getTask': [task], 'db:createTask': [{ title: 'Fixture task', project_id: project }],
   'db:updateTask': [task, { title: 'Updated fixture', status: 'ready_for_review' }], 'db:deleteTask': [task],
@@ -97,6 +102,15 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
 
 type Variant = { operation: string; case: string; args: unknown[] }
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  ...['nemo-parakeet-tdt-0.6b-v3', 'sherpa-streaming-zipformer-en', 'nemo-fast-conformer-en-480ms', 'nemotron-streaming-en-560ms'].map(id => ({ operation: 'voice:selectModel', case: `finite-stt-${id}`, args: [id] })),
+  ...['kitten-nano-en-v0_2', 'kokoro-en-v0_19'].map(id => ({ operation: 'voice:tts:selectModel', case: `finite-tts-${id}`, args: [id] })),
+  { operation: 'voice:setEndpointSilence', case: 'seconds-upper-bound', args: [10] },
+  { operation: 'voice:tts:setSpeed', case: 'speed-lower-bound', args: [0.5] },
+  { operation: 'voice:tts:setSpeed', case: 'speed-upper-bound', args: [2] },
+  { operation: 'voice:tts:setMaxChars', case: 'characters-upper-bound', args: [6000] },
+  { operation: 'voice:tts:setVoice', case: 'system-unicode-voice', args: ['system:café'] },
+  { operation: 'voice:tts:setVoice', case: 'system-byte-boundary', args: ['system:' + 'x'.repeat(505)] },
+  { operation: 'voice:tts:setVoice', case: 'empty-voice-preference', args: [''] },
   { operation: 'artifacts:read', case: 'retained-unicode-relative-path', args: [task, 'reports/café/readme.md'] },
   { operation: 'artifacts:read', case: 'relative-path-byte-boundary', args: [task, 'x'.repeat(2048)] },
   ...['15', '0', '', '0.5'].map(poll_interval_minutes => ({ operation: 'taskSource:update', case: `stored-bridge-interval-${poll_interval_minutes || 'default'}`, args: ['source_fixture', { plugin_id: 'connector-bridge', config: { poll_interval_minutes } }] })),
@@ -189,7 +203,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 140 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 161 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

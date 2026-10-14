@@ -1,5 +1,6 @@
 import { homedir, networkInterfaces } from 'node:os'
 import { PortableAgentDetectionOwner } from '../main/agent-installer/portable-detection'
+import { createProductionVoiceOwner, type ProductionVoiceOwner, type ProductionVoiceResources } from './production-voice-owner'
 import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobileAccessSettings, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, type MobileApiDeps } from '../main/mobile-api-server'
 import { TunnelManagerCore } from '../main/tunnel-manager-core'
 import SQLite from 'better-sqlite3'
@@ -92,6 +93,8 @@ export interface ProductionOwnerBootstrap {
   connectors: { kind: 'disabled'; reason: string } | { kind: 'enabled' }
   /** Verified browser resource root; absent artifacts never expose mobile access. */
   mobile?: { distRoot: string; port?: number }
+  /** Verified optional worker pair and selected standalone runtime, never RPC paths. */
+  voice?: ProductionVoiceResources
   native: {
     agents: Pick<AgentManagerHost, 'renderer' | 'notifications' | 'energy' | 'configuredMcp'>
     /** PATH/native supervision readiness, before any adapter or scheduler starts. */
@@ -120,6 +123,7 @@ export interface ProductionOwnerExternalBoundaries {
 }
 
 export interface ProductionServices {
+  voice: ProductionVoiceOwner | null
   agentDetection: PortableAgentDetectionOwner
   sessionContext: SessionContextService
   db: DatabaseManager
@@ -268,6 +272,17 @@ export class ProductionOwner {
         owners.manager !== services.agents || owners.recurrence !== services.recurrence || owners.heartbeat !== services.heartbeat ||
         owners.automation !== services.automation || owners.coordination !== services.coordination || owners.cleanup !== services.cleanup)
         throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    } }
+  }
+
+  getVoiceBindingLease(): { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech']; assertVoiceOwners(owners: { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech'] }): void } | null {
+    this.getDatabaseBindingLease()
+    const services = this.services!, owned = services.voice
+    if (!owned) return null
+    return { voice: owned.voice, speech: owned.speech, assertVoiceOwners: owners => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services || this.services.voice !== owned || owners.voice !== owned.voice || owners.speech !== owned.speech) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      owned.assertOwners(services.db, services.agents)
     } }
   }
 
@@ -600,7 +615,13 @@ export class ProductionOwner {
     agentDetection.assertOpen()
     this.register('agent-detection', () => agentDetection.stop(), () => agentDetection.close())
     const sessionContext = new SessionContextService(db)
-    this.services = { agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    const voice = this.bootstrap.voice ? createProductionVoiceOwner({ resources: this.bootstrap.voice, profileRoot, tempRoot: this.bootstrap.paths.tempRoot, db, agents,
+      assertCurrent: () => {
+        if (this.abort.signal.aborted || !['starting', 'ready'].includes(this.phase) || processRegistry[registryKey] !== this.identity) throw new ProductionOwnerError('OWNER_CLOSING')
+        this.lock!.assertHeld()
+      }, notify: (channel, payload) => this.emit(channel, payload) }) : null
+    if (voice) this.register('voice', () => voice.shutdown(), () => voice.close())
+    this.services = { voice, agentDetection, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)

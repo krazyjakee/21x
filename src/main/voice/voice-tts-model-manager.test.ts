@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'fs'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, symlinkSync, readdirSync } from 'fs'
 import { stat } from 'fs/promises'
 import { createHash } from 'crypto'
 import { tmpdir } from 'os'
@@ -10,6 +10,7 @@ import {
   extractTarBz2,
   sha256OfFile,
   stripRoot,
+  type VoiceTtsModelManagerOptions,
 } from './voice-tts-model-manager'
 import { findTtsManifestEntry } from './voice-tts-manifest'
 
@@ -38,6 +39,96 @@ let root = ''
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), '20x-tts-models-'))
+})
+
+describe('portable local synthesis model ownership', () => {
+  const id = 'kitten-nano-en-v0_2'
+  // Strict portable archives contain the exact reviewed root, without macOS metadata outside it.
+  const payload = Buffer.from('QlpoOTFBWSZTWR0ZuiEAAOt/gMmAAQBAA/+AECEAQP6p3sAESDAAttQlTUT0Jk9BGmEzQBM0CUSmT1HomCYEwBMEBVQppoyNAAMg0yaB+2cqwEg4Hy1QRO7UQRCVrZmDBwELFfUHgnIQRCNJeSK7O616mnjGGRVQhBFEQdL2tYChYTfrkGpag1gz6LgIiMhjeFaoDrTU+CRc0L1q7Lg82SJKlCthopRq6qCcTHw8vHIbuSAiBnLgd76SawFB2LuSKcKEgOjN0Qg=', 'base64')
+  function portable(options: Partial<VoiceTtsModelManagerOptions> = {}) {
+    // Synthetic archive exercises the real hash, reader, extractor, publication
+    // and removal. It is not a speech-model or live-download acceptance claim.
+    const entry = findTtsManifestEntry(id)!, original = structuredClone(entry)
+    entry.archive.sha256 = createHash('sha256').update(payload).digest('hex')
+    entry.archive.sizeBytes = payload.length; entry.archive.rootDir = 'wrapper'
+    entry.files = { model: 'tokens.txt', voices: 'tokens.txt', tokens: 'tokens.txt', dataDir: 'espeak-ng-data' }
+    try { return new VoiceTtsModelManager({ rootDir: root, host: { downloads: 'enabled', assertCurrent() {}, beforeRequest() {} }, retry: { attempts: 1, baseDelayMs: 0 }, fetchImpl: (async () => new Response(new Uint8Array(payload))) as typeof fetch, ...options }) }
+    finally { Object.assign(entry, original) }
+  }
+  it('publishes a checksummed contained tree and removes only its own exact inventory', async () => {
+    const manager = portable()
+    try {
+      expect((await manager.install(id)).installed).toBe(true)
+      expect(readFileSync(join(root, id, 'tokens.txt'), 'utf8')).toBe('a b c')
+      expect(readdirSync(root)).toEqual([id])
+      await manager.remove(id); expect(existsSync(join(root, id))).toBe(false)
+    } finally { await manager.close() }
+  })
+  it.each(['extra', 'changed', 'historical'])('preserves %s bytes rather than adopting a directory for deletion', async kind => {
+    const manager = portable()
+    try {
+      await manager.install(id)
+      const path = join(root, id)
+      if (kind === 'extra') writeFileSync(join(path, 'personal-notes.txt'), 'Keep this')
+      if (kind === 'changed') writeFileSync(join(path, 'tokens.txt'), 'x y z')
+      const remover = kind === 'historical' ? portable() : manager
+      try { await expect(remover.remove(id)).rejects.toThrow('VOICE_TTS_MODEL_REMOVAL_UNOWNED'); expect(existsSync(path)).toBe(true); if (kind === 'extra') expect(readFileSync(join(path, 'personal-notes.txt'), 'utf8')).toBe('Keep this') }
+      finally { if (remover !== manager) await remover.close() }
+    } finally { await manager.close() }
+  })
+  it('refuses symlinked and incomplete namespaces and preserves unrelated root files', async () => {
+    const manager = portable(), outside = join(root, 'unrelated')
+    mkdirSync(outside); writeFileSync(join(outside, 'personal.txt'), 'Keep')
+    symlinkSync(outside, join(root, id), 'dir')
+    try { await expect(manager.install(id)).rejects.toThrow('VOICE_TTS_MODEL_NAMESPACE_AMBIGUOUS'); await expect(manager.remove(id)).rejects.toThrow('VOICE_TTS_MODEL_PATH_UNSAFE'); expect(readFileSync(join(outside, 'personal.txt'), 'utf8')).toBe('Keep') }
+    finally { await manager.close() }
+  })
+  it('refuses unavailable downloads and unknown removals before filesystem/network effects', async () => {
+    const fetcher = vi.fn<typeof fetch>(), path = join(root, 'not-created')
+    const manager = portable({ rootDir: path, fetchImpl: fetcher, host: { downloads: 'disabled', assertCurrent() {}, beforeRequest() { throw new Error('Unexpected request') } } })
+    try { await expect(manager.install(id)).rejects.toThrow('VOICE_TTS_DOWNLOAD_UNAVAILABLE'); await expect(manager.remove('../unrelated')).rejects.toThrow('Unknown voice model'); expect(fetcher).not.toHaveBeenCalled(); expect(existsSync(path)).toBe(false) }
+    finally { await manager.close() }
+  })
+  it('retains an ignored fetch cancellation and private stage until raw response cleanup finishes', async () => {
+    let resolveResponse!: (value: Response) => void
+    let announceStarted!: () => void
+    const started = new Promise<void>(resolve => { announceStarted = resolve })
+    // The fetch intentionally ignores AbortSignal, representing accepted raw work.
+    const fetcher = vi.fn<typeof fetch>(() => { announceStarted(); return new Promise<Response>(resolve => { resolveResponse = resolve }) })
+    const manager = portable({ fetchImpl: fetcher })
+    const installation = manager.install(id); const failure = installation.catch(error => error)
+    await started
+    await expect(manager.close(5)).rejects.toThrow('VOICE_TTS_MODELS_SHUTDOWN_INCOMPLETE')
+    expect(manager.inflightCount).toBeGreaterThan(0); expect(readdirSync(root).some(name => name.includes('.stage-'))).toBe(true)
+    resolveResponse(new Response(new Uint8Array(payload))); expect(await failure).toBeInstanceOf(Error)
+    await manager.close(); expect(manager.inflightCount).toBe(0); expect(readdirSync(root)).toEqual([])
+  })
+  it('rechecks management authority after raw download and never publishes after withdrawal', async () => {
+    let current = true, resolveResponse!: (response: Response) => void, start!: () => void
+    const started = new Promise<void>(resolve => { start = resolve })
+    const manager = portable({ fetchImpl: (() => { start(); return new Promise(resolve => { resolveResponse = resolve }) }) as typeof fetch })
+    const install = manager.runManagementMutation(() => manager.install(id), () => { if (!current) throw new Error('Permission withdrawn') })
+    const failure = install.catch(error => error); await started; current = false; resolveResponse(new Response(new Uint8Array(payload)))
+    expect(await failure).toBeInstanceOf(Error); expect(existsSync(join(root, id))).toBe(false)
+    await manager.close(); expect(readdirSync(root)).toEqual([])
+  })
+  it('rejects archive bytes beyond the fixed manifest rather than publishing truncated output', async () => {
+    const manager = portable({ fetchImpl: (async () => new Response(new Uint8Array(Buffer.concat([payload, Buffer.from('extra')])))) as typeof fetch })
+    try { await expect(manager.install(id)).rejects.toThrow(); expect(existsSync(join(root, id))).toBe(false); expect(readdirSync(root)).toEqual([]) }
+    finally { await manager.close() }
+  })
+  it('keeps a rejected body reader and private stage owned until actual cancel acknowledgement', async () => {
+    let cancelled!: () => void, release!: () => void
+    const enteredCancel = new Promise<void>(resolve => { cancelled = resolve })
+    const closedReader = new Promise<void>(resolve => { release = resolve })
+    const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(payload.length + 1)) }, cancel() { cancelled(); return closedReader } })
+    const manager = portable({ fetchImpl: (async () => new Response(stream)) as typeof fetch })
+    const install = manager.install(id), failure = install.catch(error => error)
+    await enteredCancel
+    await expect(manager.close(5)).rejects.toThrow('VOICE_TTS_MODELS_SHUTDOWN_INCOMPLETE')
+    expect(manager.inflightCount).toBeGreaterThan(0); expect(readdirSync(root).some(name => name.includes('.stage-'))).toBe(true)
+    release(); expect(await failure).toBeInstanceOf(Error); await manager.close(); expect(readdirSync(root)).toEqual([])
+  })
 })
 
 afterEach(() => {
@@ -121,6 +212,12 @@ describe('install', () => {
 })
 
 describe('extractTarBz2', () => {
+  it('rejects out-of-root metadata through the owned extraction promise without an unhandled entry error', async () => {
+    const archive = join(root, 'strict-fixture.tar.bz2'), target = join(root, 'strict-output')
+    writeFileSync(archive, Buffer.from(FIXTURE_TAR_BZ2, 'base64'))
+    await expect(extractTarBz2(archive, target, undefined, undefined, { rootName: 'wrapper', maxBytes: 1024 * 1024, beforeWrite() {} })).rejects.toThrow('VOICE_TTS_ARCHIVE_UNSAFE')
+    expect(existsSync(join(root, '._wrapper'))).toBe(false)
+  })
   it('unpacks a real bzip2 archive and drops the wrapping directory', async () => {
     const archive = join(root, 'fixture.tar.bz2')
     writeFileSync(archive, Buffer.from(FIXTURE_TAR_BZ2, 'base64'))

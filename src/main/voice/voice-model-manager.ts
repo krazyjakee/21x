@@ -15,10 +15,11 @@
  *    is on disk, so the user can see it and delete it. It is never downloaded.
  */
 
-import { createHash } from 'crypto'
-import { createWriteStream } from 'fs'
-import { mkdir, rm, stat, rename, readdir, open } from 'fs/promises'
-import { join } from 'path'
+import { createHash, randomUUID } from 'crypto'
+import { createWriteStream, constants } from 'fs'
+import { mkdir, rm, stat, rename, readdir, open, lstat, realpath, link, unlink, rmdir, opendir } from 'fs/promises'
+import { join, isAbsolute } from 'path'
+import { AsyncLocalStorage } from 'async_hooks'
 import { totalmem } from 'os'
 import { pipeline } from 'stream/promises'
 import { Readable } from 'stream'
@@ -30,7 +31,6 @@ import type {
 } from '../../shared/voice'
 import {
   VOICE_MODEL_MANIFEST,
-  findManifestEntry,
   isManifestVerified,
   manifestKind,
   manifestSizeBytes,
@@ -63,6 +63,10 @@ export interface VoiceModelManagerOptions {
   /** Injected for tests. */
   fetchImpl?: typeof fetch
   onProgress?: (state: VoiceModelState) => void
+  portable?: boolean
+  downloads?: 'enabled' | 'disabled'
+  assertCurrent?: () => void
+  beforeRequest?: () => void
 }
 
 export class VoiceModelManager {
@@ -71,13 +75,59 @@ export class VoiceModelManager {
   private errors = new Map<string, string>()
   private aborts = new Map<string, AbortController>()
 
-  constructor(private options: VoiceModelManagerOptions) {}
+  private closing = false
+  private flights = new Set<Promise<unknown>>()
+  private installations = new Map<string, Promise<VoiceModelState>>()
+  private guards = new AsyncLocalStorage<() => void>()
+  private readonly manifest: VoiceModelManifestEntry[]
+  private progressListener?: (state: VoiceModelState) => void
+  constructor(private options: VoiceModelManagerOptions) {
+    if (!isAbsolute(options.rootDir)) throw new Error('VOICE_MODEL_ROOT_REQUIRED')
+    this.manifest = structuredClone(VOICE_MODEL_MANIFEST)
+    const methods = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+    for (const name of ['list','listLegacyInstalled','isInstalled','resolve','remove','removeAll'] as const) {
+      const original = methods[name].bind(this)
+      methods[name] = (...args) => {
+        try { this.current(); return this.own(original(...args)) } catch (error) { return Promise.reject(error) }
+      }
+    }
+  }
+  assertRoot(root: string): void { if (root !== this.options.rootDir) throw new Error('VOICE_MODEL_OWNER_MISMATCH') }
+  setProgressListener(listener: (state: VoiceModelState) => void): void { this.progressListener = listener }
+  get inflightCount(): number { return this.flights.size }
+  private current(): void {
+    if (this.closing) throw new Error('VOICE_MODEL_CLOSED')
+    this.options.assertCurrent?.()
+    this.guards.getStore()?.()
+  }
+  withMutationGuard<T>(effect: () => T | Promise<T>, guard: () => void): Promise<T> {
+    this.current()
+    return this.guards.run(guard, () => this.own(Promise.resolve().then(effect)))
+  }
+  private own<T>(raw: Promise<T>): Promise<T> {
+    this.flights.add(raw)
+    void raw.then(() => this.flights.delete(raw), () => this.flights.delete(raw))
+    return raw
+  }
+  stop(): void { this.closing = true; for (const controller of this.aborts.values()) controller.abort() }
+  async close(timeoutMs = 3000): Promise<void> {
+    this.stop()
+    const deadline = Date.now() + Math.max(1, Math.min(timeoutMs, 30000))
+    while (this.flights.size) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) throw new Error('VOICE_MODEL_DRAIN_INCOMPLETE')
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([Promise.allSettled([...this.flights]), new Promise<void>((resolve) => { timer = setTimeout(resolve, remaining) })])
+      if (timer) clearTimeout(timer)
+    }
+  }
 
   private get fetchImpl(): typeof fetch {
     return this.options.fetchImpl ?? fetch
   }
 
   modelDir(id: string): string {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(id) || id === '.' || id === '..') throw new Error('VOICE_MODEL_ID_INVALID')
     return join(this.options.rootDir, id)
   }
 
@@ -88,14 +138,17 @@ export class VoiceModelManager {
    */
   async list(activeId?: string): Promise<VoiceModelState[]> {
     const states: VoiceModelState[] = []
-    for (const entry of VOICE_MODEL_MANIFEST) {
+    if (this.options.portable) await this.safeDirectory(this.options.rootDir, true)
+    for (const entry of this.manifest) {
       states.push({
         ...this.stateOf(entry),
         active: entry.id === activeId,
         installed: await this.isInstalled(entry),
       })
     }
-    for (const id of await this.strayModelIds()) {
+    // Portable management can project only the reviewed catalogue. Unknown
+    // legacy trees remain on disk and are never treated as deletion authority.
+    for (const id of this.options.portable ? [] : await this.strayModelIds()) {
       states.push({
         id,
         label: `Older model (${id})`,
@@ -123,7 +176,8 @@ export class VoiceModelManager {
   /** Directories under the root that no catalogue entry names. */
   private async strayModelIds(): Promise<string[]> {
     const names = await readdir(this.options.rootDir, { withFileTypes: true }).catch(() => [])
-    const known = new Set(VOICE_MODEL_MANIFEST.map((entry) => entry.id))
+    if (names.length > 256) throw new Error('VOICE_MODEL_DIRECTORY_LIMIT')
+    const known = new Set(this.manifest.map((entry) => entry.id))
     return names
       .filter((d) => d.isDirectory() && !known.has(d.name))
       .map((d) => d.name)
@@ -132,9 +186,11 @@ export class VoiceModelManager {
 
   async isInstalled(entry: VoiceModelManifestEntry): Promise<boolean> {
     const dir = this.modelDir(entry.id)
+    if (this.options.portable && !(await this.safeDirectory(dir, true))) return false
     for (const file of entry.files) {
-      const info = await stat(join(dir, file.name)).catch(() => null)
+      const info = await (this.options.portable ? lstat : stat)(join(dir, file.name)).catch(() => null)
       if (!info || !info.isFile() || info.size === 0) return false
+      if (this.options.portable && (info.isSymbolicLink() || info.size > file.sizeBytes)) throw new Error('VOICE_MODEL_FILE_UNSAFE')
     }
     return true
   }
@@ -146,10 +202,11 @@ export class VoiceModelManager {
    */
   async resolve(modelId: string, customDir?: string): Promise<ResolvedModel | null> {
     if (customDir) {
+      if (this.options.portable) throw new Error('VOICE_CUSTOM_MODEL_UNAVAILABLE')
       const resolved = await this.resolveCustomDir(customDir)
       if (resolved) return resolved
     }
-    const entry = findManifestEntry(modelId)
+    const entry = this.manifest.find((item) => item.id === modelId)
     if (!entry) return null
     if (!(await this.isInstalled(entry))) return null
     const dir = this.modelDir(entry.id)
@@ -191,8 +248,18 @@ export class VoiceModelManager {
   }
 
   /** Downloads and verifies one catalogue entry. */
-  async install(id: string): Promise<VoiceModelState> {
-    const entry = findManifestEntry(id)
+  install(id: string): Promise<VoiceModelState> {
+    try { this.current() } catch (error) { return Promise.reject(error) }
+    const existing = this.installations.get(id)
+    if (existing) return existing
+    const raw = this.own(this.installOwned(id))
+    this.installations.set(id, raw)
+    void raw.then(() => this.installations.delete(id), () => this.installations.delete(id))
+    return raw
+  }
+  private async installOwned(id: string): Promise<VoiceModelState> {
+    if (this.options.downloads === 'disabled') throw new Error('VOICE_MODEL_DOWNLOAD_UNAVAILABLE')
+    const entry = this.manifest.find((item) => item.id === id)
     if (!entry) throw new Error(`Unknown voice model: ${id}`)
     if (entry.legacy) {
       throw new Error(
@@ -216,7 +283,12 @@ export class VoiceModelManager {
     }
 
     const dir = this.modelDir(entry.id)
+    this.current()
+    if (this.options.portable) await this.safeDirectory(this.options.rootDir, true)
+    this.current()
     await mkdir(dir, { recursive: true })
+    this.current()
+    if (this.options.portable) await this.safeDirectory(dir)
     const controller = new AbortController()
     this.aborts.set(entry.id, controller)
     this.errors.delete(entry.id)
@@ -227,16 +299,20 @@ export class VoiceModelManager {
     let done = 0
     try {
       for (const file of entry.files) {
+        this.current()
+        if (controller.signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
         const target = join(dir, file.name)
-        const existing = await stat(target).catch(() => null)
+        const existing = await (this.options.portable ? lstat : stat)(target).catch(() => null)
+        if (this.options.portable && existing && (!existing.isFile() || existing.isSymbolicLink() || existing.size > file.sizeBytes)) throw new Error('VOICE_MODEL_FILE_UNSAFE')
         if (existing?.isFile() && (await sha256OfFile(target)) === file.sha256) {
           done += file.sizeBytes
           this.installing.set(entry.id, Math.min(1, done / needed))
           this.emit(entry)
           continue
         }
+        if (this.options.portable && existing) throw new Error('VOICE_MODEL_UNOWNED_FILE')
         this.phases.set(entry.id, 'downloading')
-        await this.downloadFile(
+        await (this.options.portable ? this.downloadOwnedFile.bind(this) : this.downloadFile.bind(this))(
           file.url,
           target,
           file.sha256,
@@ -248,7 +324,8 @@ export class VoiceModelManager {
           () => {
             this.phases.set(entry.id, 'verifying')
             this.emit(entry)
-          }
+          },
+          file.sizeBytes
         )
         done += file.sizeBytes
       }
@@ -272,22 +349,29 @@ export class VoiceModelManager {
 
   cancel(id: string): void {
     this.aborts.get(id)?.abort()
-    this.aborts.delete(id)
-    this.installing.delete(id)
-    this.phases.delete(id)
   }
 
   /** Removes the files and the directory of one model. */
   async remove(id: string): Promise<void> {
     this.cancel(id)
-    await rm(this.modelDir(id), { recursive: true, force: true })
+    await this.installations.get(id)?.catch(() => {})
+    this.current()
+    if (this.options.portable) await this.validateRemoval(id)
+    this.current()
+    if (this.options.portable) await this.removeOwnedDirectory(id)
+    else await rm(this.modelDir(id), { recursive: true, force: true })
     this.errors.delete(id)
   }
 
   /** Removes every downloaded model (the "Delete models" control). */
   async removeAll(): Promise<void> {
-    for (const entry of VOICE_MODEL_MANIFEST) this.cancel(entry.id)
-    await rm(this.options.rootDir, { recursive: true, force: true })
+    for (const id of this.aborts.keys()) this.cancel(id)
+    await Promise.allSettled([...this.installations.values()])
+    this.current()
+    if (this.options.portable) {
+      for (const entry of this.manifest) await this.validateRemoval(entry.id)
+      for (const entry of this.manifest) { this.current(); await this.removeOwnedDirectory(entry.id) }
+    } else await rm(this.options.rootDir, { recursive: true, force: true })
     this.errors.clear()
   }
 
@@ -297,13 +381,17 @@ export class VoiceModelManager {
     expectedSha256: string,
     signal: AbortSignal,
     onBytes: (bytes: number) => void,
-    onVerify: () => void = () => {}
+    onVerify: () => void = () => {},
+    _sizeBytes?: number
   ): Promise<void> {
     const partial = `${target}.part`
     const already = (await stat(partial).catch(() => null))?.size ?? 0
     const headers: Record<string, string> = already > 0 ? { Range: `bytes=${already}-` } : {}
 
+    this.options.beforeRequest?.()
+    this.current()
     const response = await this.fetchImpl(url, { headers, signal })
+    try { this.current(); if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED') } catch (error) { await response.body?.cancel(); throw error }
     if (!response.ok || !response.body) {
       throw new Error(`Download failed (${response.status}) for ${url}`)
     }
@@ -317,7 +405,9 @@ export class VoiceModelManager {
       received += chunk.length
       onBytes(received)
     })
-    await pipeline(source, createWriteStream(partial, { flags: append ? 'a' : 'w' }))
+    await pipeline(source, createWriteStream(partial, { flags: append ? 'a' : 'w' }), { signal })
+    this.current()
+    if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
 
     onVerify()
     const digest = await sha256OfFile(partial)
@@ -328,8 +418,125 @@ export class VoiceModelManager {
     await rename(partial, target)
   }
 
+  private async safeDirectory(path: string, missing = false): Promise<Awaited<ReturnType<typeof lstat>> | null> {
+    const info = await lstat(path).catch((error: NodeJS.ErrnoException) => { if (missing && error.code === 'ENOENT') return null; throw new Error('VOICE_MODEL_PATH_UNAVAILABLE') })
+    if (!info) return null
+    if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) throw new Error('VOICE_MODEL_PATH_UNSAFE')
+    return info
+  }
+  private async validateRemoval(id: string): Promise<void> {
+    await this.safeDirectory(this.options.rootDir, true)
+    const dir = this.modelDir(id)
+    if (!(await this.safeDirectory(dir, true))) return
+    const entry = this.manifest.find((item) => item.id === id)
+    if (!entry) throw new Error('VOICE_MODEL_REMOVAL_UNAVAILABLE')
+    const names = await this.boundedOwnedNames(dir, entry.files.length)
+    const owned = new Set(entry.files.map((file) => file.name))
+    if (names.some((name) => !owned.has(name))) throw new Error('VOICE_MODEL_UNOWNED_FILE')
+    for (const name of names) {
+      const info = await lstat(join(dir, name))
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error('VOICE_MODEL_FILE_UNSAFE')
+      const expected = entry.files.find((file) => file.name === name)!
+      if (info.size !== expected.sizeBytes || await sha256OfFile(join(dir, name)) !== expected.sha256) throw new Error('VOICE_MODEL_UNOWNED_FILE')
+    }
+  }
+  private async boundedOwnedNames(dir: string, max: number): Promise<string[]> {
+    const handle = await opendir(dir)
+    const names: string[] = []
+    try {
+      for (;;) {
+        const item = await handle.read()
+        if (!item) return names
+        if (names.length === max) throw new Error('VOICE_MODEL_UNOWNED_FILE')
+        names.push(item.name)
+      }
+    } finally { await handle.close() }
+  }
+  private async removeOwnedDirectory(id: string): Promise<void> {
+    const dir = this.modelDir(id)
+    const parent = await this.safeDirectory(dir, true)
+    if (!parent) return
+    const names = await this.boundedOwnedNames(dir, this.manifest.find((entry) => entry.id === id)?.files.length ?? 0)
+    const allowed = new Set(this.manifest.find((entry) => entry.id === id)?.files.map((file) => file.name) ?? [])
+    if (names.some((name) => !allowed.has(name))) throw new Error('VOICE_MODEL_UNOWNED_FILE')
+    for (const name of names) {
+      const path = join(dir, name)
+      const file = await lstat(path)
+      const expected = this.manifest.find((entry) => entry.id === id)?.files.find((item) => item.name === name)
+      if (!expected || file.size !== expected.sizeBytes || await sha256OfFile(path) !== expected.sha256) throw new Error('VOICE_MODEL_UNOWNED_FILE')
+      const currentFile = await lstat(path)
+      const now = await this.safeDirectory(dir)
+      if (!now || now.dev !== parent.dev || now.ino !== parent.ino || !file.isFile() || file.isSymbolicLink() || currentFile.dev !== file.dev || currentFile.ino !== file.ino || currentFile.size !== file.size || currentFile.mtimeMs !== file.mtimeMs) throw new Error('VOICE_MODEL_PATH_CHANGED')
+      this.current()
+      await unlink(path)
+    }
+    this.current()
+    const now = await this.safeDirectory(dir)
+    if (!now || now.dev !== parent.dev || now.ino !== parent.ino) throw new Error('VOICE_MODEL_PATH_CHANGED')
+    // Concurrent/user files prevent rmdir; never recursively sweep them.
+    await rmdir(dir)
+  }
+  private async downloadOwnedFile(url: string, target: string, expectedSha256: string, signal: AbortSignal, onBytes: (bytes: number) => void, onVerify: () => void, sizeBytes = 0): Promise<void> {
+    const dir = join(target, '..')
+    const parent = await this.safeDirectory(dir)
+    const partial = `${target}.owned-${randomUUID()}.part`
+    this.current()
+    const handle = await open(partial, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW || 0), 0o600)
+    const receipt = await handle.stat()
+    let published = false
+    try {
+      this.current(); this.options.beforeRequest?.()
+      // A reviewed redirect inventory is not available for all catalogue CDN
+      // hosts. Refuse redirects rather than silently widening network scope.
+      const response = await this.fetchImpl(url, { signal, redirect: 'error' })
+      const reader = response.body?.getReader()
+      let received = 0
+      const hash = createHash('sha256')
+      let ended = false
+      try {
+        this.current()
+        if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
+        if (!response.ok || !reader) throw new Error('VOICE_MODEL_DOWNLOAD_FAILED')
+        for (;;) {
+          const { value, done } = await reader.read()
+          this.current()
+          if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
+          if (done) { ended = true; break }
+          const bytes = Buffer.from(value)
+          received += bytes.length
+          if (received > sizeBytes) throw new Error('VOICE_MODEL_SIZE_MISMATCH')
+          let offset = 0
+          while (offset < bytes.length) { const written = await handle.write(bytes, offset); if (!written.bytesWritten) throw new Error('VOICE_MODEL_WRITE_FAILED'); offset += written.bytesWritten }
+          hash.update(bytes); onBytes(received)
+        }
+      } finally {
+        if (reader) { try { if (!ended) await reader.cancel() } finally { reader.releaseLock() } }
+      }
+      this.current()
+      if (signal.aborted) throw new Error('VOICE_MODEL_ABORTED')
+      onVerify()
+      if (received !== sizeBytes || hash.digest('hex') !== expectedSha256) throw new Error('Checksum mismatch')
+      await handle.sync()
+      const currentParent = await this.safeDirectory(dir)
+      const currentFile = await lstat(partial)
+      if (!parent || !currentParent || parent.dev !== currentParent.dev || parent.ino !== currentParent.ino || currentFile.dev !== receipt.dev || currentFile.ino !== receipt.ino || !currentFile.isFile()) throw new Error('VOICE_MODEL_PATH_CHANGED')
+      this.current()
+      // link is exclusive: a file created by another owner is never replaced.
+      await link(partial, target)
+      published = true
+    } finally {
+      await handle.close()
+      const now = await lstat(partial).catch(() => null)
+      const nowParent = await lstat(dir).catch(() => null)
+      if (now && nowParent && parent && now.dev === receipt.dev && now.ino === receipt.ino && nowParent.dev === parent.dev && nowParent.ino === parent.ino && !now.isSymbolicLink()) await unlink(partial)
+    }
+    if (!published) throw new Error('VOICE_MODEL_PUBLICATION_FAILED')
+  }
+
   private emit(entry: VoiceModelManifestEntry): void {
+    if (this.closing) return
     this.options.onProgress?.(this.stateOf(entry))
+    this.progressListener?.(this.stateOf(entry))
   }
 
   /** The catalogue view of one entry. `active` and `installed` are filled by `list`. */
@@ -368,18 +575,19 @@ export function describeInstallFailure(err: unknown, entry: VoiceModelManifestEn
   const raw = err instanceof Error ? err.message : String(err)
   if (/abort/i.test(raw)) return `The download of "${entry.label}" was cancelled.`
   if (/checksum mismatch/i.test(raw)) {
-    return `${raw}. The file on the server does not match the recorded checksum, so it was discarded. Try again later; if it keeps happening, report it.`
+    return `Checksum mismatch. The file does not match the recorded checksum, so it was discarded. Try again later.`
   }
   if (/ENOSPC/i.test(raw)) {
     return `Not enough disk space for "${entry.label}" (${gigabytes(manifestSizeBytes(entry))} GB). Free some space and try again.`
   }
   if (/Download failed \((\d+)\)/.test(raw)) {
-    return `${raw}. Check the connection and try again; the download resumes where it stopped.`
+    const status = /Download failed \((\d+)\)/.exec(raw)?.[1]
+    return `The download of "${entry.label}" failed (${status}). Check the connection and try again.`
   }
   if (/ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|network/i.test(raw)) {
-    return `The download of "${entry.label}" could not reach the server (${raw}). Check the connection and try again; it resumes where it stopped.`
+    return `The download of "${entry.label}" could not reach the server. Check the connection and try again.`
   }
-  return raw
+  return `The download of "${entry.label}" failed safely. Check the model files and try again.`
 }
 
 async function directorySize(dir: string): Promise<number> {
@@ -393,15 +601,24 @@ async function directorySize(dir: string): Promise<number> {
 }
 
 export async function sha256OfFile(path: string): Promise<string> {
-  const handle = await open(path, 'r')
+  const expected = await lstat(path)
+  if (!expected.isFile() || expected.isSymbolicLink() || expected.size > 2 * 1024 ** 3) throw new Error('VOICE_MODEL_FILE_UNSAFE')
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
   try {
+    const actual = await handle.stat()
+    if (actual.dev !== expected.dev || actual.ino !== expected.ino || actual.size !== expected.size) throw new Error('VOICE_MODEL_PATH_CHANGED')
     const hash = createHash('sha256')
     const buffer = Buffer.alloc(1024 * 1024)
+    let total = 0
     for (;;) {
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, null)
       if (bytesRead === 0) break
+      total += bytesRead
+      if (total > expected.size) throw new Error('VOICE_MODEL_PATH_CHANGED')
       hash.update(buffer.subarray(0, bytesRead))
     }
+    const final = await lstat(path)
+    if (total !== expected.size || final.dev !== expected.dev || final.ino !== expected.ino || final.size !== expected.size || final.mtimeMs !== expected.mtimeMs || final.isSymbolicLink()) throw new Error('VOICE_MODEL_PATH_CHANGED')
     return hash.digest('hex')
   } finally {
     await handle.close()

@@ -1,4 +1,5 @@
 import { AGENT_INSTALLER_DETECTION_KEYS } from '@shared/agent-installer-codecs'
+import { VOICE_MANAGEMENT_UNAVAILABLE } from '@shared/voice-management-codecs'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { TauriDesktopApi } from './tauri-desktop-transport'
 import { createNativeDesktopHost, NATIVE_COMMAND_BINDINGS, type NativeDesktopHost } from './native-desktop-host'
@@ -55,6 +56,25 @@ it('uses exact codecs and trusted host metadata; missing binary/file bindings ne
   expect(() => desktopApi.webUtils.getPathForFile(new File([], 'private'))).toThrow('unavailable')
   expect(typeof desktopApi.commander.onEvent).toBe('function'); expect(Reflect.get(desktopApi, 'browser')).toBeUndefined()
   expect(f.host.supports('commander.send')).toBe(true); expect(f.invoke.mock.calls.length).toBe(before)
+})
+it('binds finite voice management while capture, audio and hosted services remain unavailable', async () => {
+  const f = fixture(), snapshot = { enabled: false, state: 'disabled', turnId: null, partial: '', final: '', engine: { state: 'engine_missing', message: VOICE_MANAGEMENT_UNAVAILABLE }, models: [], shortcut: '', runtime: { installed: false, version: null, modulePath: null, sizeBytes: 0 } }
+  f.results.set('voice:getSnapshot', snapshot); f.results.set('voice:setEndpointSilence', { success: true })
+  await f.host.reconnect()
+  expect(await f.host.api.voice.getSnapshot()).toEqual(snapshot)
+  await expect(f.host.api.voice.setEndpointSilence(1.5)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  expect(await f.host.api.voice.setEndpointSilence(1.5)).toEqual({ success: true })
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'voice:setEndpointSilence', payload: { seconds: 1.5 }, engineEpoch: 'engine-1' })
+  const status = vi.fn(), dispose = f.host.api.voice.onStatus(status)
+  const event = { enabled: snapshot.enabled, engine: snapshot.engine, models: snapshot.models, shortcut: snapshot.shortcut, runtime: snapshot.runtime }
+  f.emit('voice:status', event)
+  expect(status).toHaveBeenCalledWith(event); dispose()
+  expect(f.host.supports('voice.startTurn')).toBe(false); expect(f.host.supports('voice.tts.speak')).toBe(false)
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.voice.tts.setEngine('elevenlabs')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  await expect(f.host.api.voice.getPermission()).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
+  expect(f.invoke.mock.calls.length).toBe(before)
 })
 it('fences writes until durable recovery finishes and never replays a mutation interrupted by reconnect', async () => {
   const f = fixture(), hydration = deferred<void>()
@@ -117,7 +137,7 @@ it('binds Commander reads to exact native codecs without entering Electron', asy
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'commander:listSessions', payload: {}, engineEpoch: 'engine-1' })
 })
 
-it('binds the 142 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 163 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -126,7 +146,7 @@ it('binds the 142 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(142)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(163)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)

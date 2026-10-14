@@ -54,6 +54,17 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   // Nothing starts until the id is known.
   const project = useCurrentProject()
   const captainTaskId = useCaptainTaskId()
+  const mountedRef = useRef(true)
+  const captainViewRef = useRef({ taskId: captainTaskId, projectId: project?.id })
+  if (captainViewRef.current.taskId !== captainTaskId || captainViewRef.current.projectId !== project?.id) {
+    captainViewRef.current = { taskId: captainTaskId, projectId: project?.id }
+  }
+  useEffect(() => {
+    mountedRef.current = true
+    // A remount also starts a new view generation for pending replies.
+    captainViewRef.current = { ...captainViewRef.current }
+    return () => { mountedRef.current = false; captainViewRef.current = { ...captainViewRef.current } }
+  }, [])
   const { start, stop, sendMessage, approve } = useAgentSession(captainTaskId ?? undefined)
   const currentSession = useAgentStore((state) => (captainTaskId ? state.sessions.get(captainTaskId) : undefined))
   const resetSession = useAgentStore((state) => state.resetSession)
@@ -296,11 +307,15 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   )
 
   const retryStart = useCallback(async () => {
+    const view = captainViewRef.current
+    const ownsView = (): boolean => mountedRef.current && captainViewRef.current === view
+    if (!ownsView()) return
     setStartFailure(null)
     setRuntimeActivity({ phase: 'retrying', agentId: runtime?.candidateAgentId ?? selectedAgentIdRef.current ?? '' })
     try {
       if (projectId && runtime?.candidateAgentId) {
         const next = await captainRuntimeApi.retry(projectId)
+        if (!ownsView()) return
         setRuntime(next)
         if (next.phase === 'healthy') {
           selectedAgentIdRef.current = next.agentId
@@ -311,12 +326,13 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         setStartFailure({ agentId: next.candidateAgentId ?? runtime.candidateAgentId, message: next.errorDetail ?? 'Retry failed.' })
         return
       }
-      if (await ensureSession()) await drainQueue()
+      if (await ensureSession() && ownsView()) await drainQueue()
     } catch (err) {
+      if (!ownsView()) return
       console.error('Failed to deliver held Captain messages:', err)
       setStartFailure({ agentId: runtime?.candidateAgentId ?? selectedAgentIdRef.current ?? '', message: startFailureMessage(err) })
     } finally {
-      setRuntimeActivity(null)
+      if (ownsView()) setRuntimeActivity(null)
     }
   }, [projectId, runtime, fetchProjects, ensureSession, drainQueue])
 

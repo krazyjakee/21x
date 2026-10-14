@@ -29,6 +29,7 @@ export const EVENT_WRAPPERS = {
   'src/main/task-api/artifact-routes.ts': ['notifyRenderer'],
   'src/main/mobile-api-server.ts': ['notifyDesktop'],
   'src/main/voice/voice-session-manager.ts': ['this.options.notify'],
+  'src/main/voice/voice-session-manager-core.ts': ['this.options.notify', 'this.options.notifyRenderer'],
   'src/main/voice/voice-action-service.ts': ['this.deps.notify'],
   'src/main/voice/voice-speech-service.ts': ['this.options.notifyRenderer', 'options.notifyRenderer'],
   'src/main/index.ts': ['voiceEvents.notify', 'voiceEvents.notifyRenderer']

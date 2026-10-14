@@ -343,13 +343,13 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     }
     const [snapshot, permission, conversation] = await Promise.all([
       voiceApi.getSnapshot(),
-      voiceApi.getPermission(),
+      desktopSupports('voice.getPermission') ? voiceApi.getPermission() : Promise.resolve({ status: 'unsupported' as const }),
       settingsApi.get(VOICE_SETTING_KEYS.conversation),
     ])
     set({
       // Conversational is the default; only an explicit 'false' turns it off.
       conversation: conversation !== 'false',
-      available: true,
+      available: desktopSupports('voice.startTurn') && desktopSupports('voice.pushAudio'),
       enabled: snapshot.enabled,
       runtime: snapshot.runtime ?? RUNTIME_ABSENT,
       state: snapshot.state,

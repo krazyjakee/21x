@@ -15,6 +15,7 @@
  */
 
 import { createId } from '@paralleldrive/cuid2'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   VOICE_TTS_DEFAULT_MAX_CHARS,
   VOICE_TTS_ELEVENLABS_DEFAULT_MODEL,
@@ -45,7 +46,7 @@ import {
 } from './voice-tts-manifest'
 import { VoiceTtsModelManager } from './voice-tts-model-manager'
 import { VoiceTtsWorkerClient, type VoiceTtsChunk } from './voice-tts-worker-client'
-import { listSystemVoices, pickDefaultSystemVoice, systemVoiceName } from './voice-system-voices'
+import { listSystemVoices, pickDefaultSystemVoice, systemVoiceName, VoiceSystemVoicesOwner } from './voice-system-voices'
 import { ELEVENLABS_SAMPLE_RATE, ElevenLabsEngine, elevenLabsVoiceIdOf } from './voice-elevenlabs'
 
 /**
@@ -66,6 +67,7 @@ export interface VoiceSpeechSettings {
 
 export interface VoiceSpeechServiceOptions {
   db: VoiceSpeechSettings
+  modelRootDir: string
   /** Sends one event to the desktop renderer. Never to a mobile client. */
   notifyRenderer: (channel: string, data: unknown) => void
   models?: VoiceTtsModelManager
@@ -74,7 +76,17 @@ export interface VoiceSpeechServiceOptions {
   listVoices?: typeof listSystemVoices
   /** Injected in tests with a fake transport, so no request leaves the machine (#64). */
   elevenlabs?: ElevenLabsEngine
+  /** Portable policy is explicit even when historical hosted keys exist. */
+  host?: VoiceSpeechHost
+  systemVoices?: VoiceSystemVoicesOwner
 }
+export interface VoiceSpeechHost {
+  hostedSpeech: 'disabled'
+  audio: 'desktop' | 'unavailable'
+  assertCurrent(): void
+}
+export const VOICE_HOSTED_SPEECH_UNAVAILABLE = 'Hosted speech is unavailable in this desktop host.'
+export const VOICE_DESKTOP_AUDIO_UNAVAILABLE = 'Desktop speech audio is unavailable in this host.'
 
 /** Which producer a passage was handed to, so stopping it reaches the right one. */
 type SpeechBackend = 'worker' | 'elevenlabs'
@@ -180,8 +192,14 @@ export class VoiceSpeechService {
   private onSpeakingChange: ((speaking: boolean, owner?: VoiceSpeechLifecycleOwner) => void) | null = null
   /** Invalidates engine preparation that is still across an await boundary. */
   private preparationGeneration = 0
+  private closing = false
+  private readonly flights = new Set<Promise<unknown>>()
+  private readonly management = new AsyncLocalStorage<{ token: object; beforeWrite(): void }>()
+  private managementToken: object | null = null
 
   constructor(private options: VoiceSpeechServiceOptions & { modelRootDir: string }) {
+    if (options.host && (!(options.models instanceof VoiceTtsModelManager) || !(options.worker instanceof VoiceTtsWorkerClient) || !(options.systemVoices instanceof VoiceSystemVoicesOwner))) throw new Error('VOICE_SPEECH_OWNERS_REQUIRED')
+    options.host?.assertCurrent()
     this.models =
       options.models ??
       new VoiceTtsModelManager({
@@ -192,13 +210,13 @@ export class VoiceSpeechService {
           options.notifyRenderer(VOICE_TTS_EVENTS.ttsModelProgress, { model }),
       })
     this.worker = options.worker ?? new VoiceTtsWorkerClient()
-    this.listVoices = options.listVoices ?? listSystemVoices
+    this.listVoices = options.systemVoices ? () => options.systemVoices!.list() : options.listVoices ?? listSystemVoices
     this.elevenlabs =
       options.elevenlabs ??
       new ElevenLabsEngine({
         // Read at the moment of use, so a key saved a second ago is the key
         // that is sent, and nothing here ever holds a copy.
-        getKey: () => options.db.getSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey) ?? '',
+        getKey: () => options.host ? '' : options.db.getSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey) ?? '',
       })
 
     this.worker.on('status', (status: VoiceTtsStatus) => this.onWorkerStatus(status))
@@ -211,9 +229,10 @@ export class VoiceSpeechService {
     this.elevenlabs.tts.on('chunk', (chunk: VoiceTtsChunk) => this.onChunk(chunk))
     this.elevenlabs.tts.on('done', (speechId: string, cancelled: boolean) => this.onDone(speechId, cancelled))
     this.elevenlabs.tts.on('error', (message: string, speechId?: string, kind?: VoiceTtsElevenLabsErrorKind) => {
+      if (this.closing || this.options.host) return
       this.elevenlabs.noteError(kind ?? 'unknown', message)
       this.onError(message, speechId)
-      void this.broadcast()
+      void this.broadcast().catch(() => {})
     })
   }
 
@@ -226,6 +245,7 @@ export class VoiceSpeechService {
 
   /** The local engine shares the runtime speech recognition installs. */
   setRuntimeModulePath(modulePath: string | null): void {
+    this.available()
     this.worker.setRuntimeModulePath(modulePath)
   }
 
@@ -233,11 +253,70 @@ export class VoiceSpeechService {
     // A service replacement can leave the renderer alive. Close the current
     // owned passage before tearing its producer down so every consumer settles.
     this.stop('cancelled')
+    this.closing = true
+    this.expectations.clear(); this.anyExpectation = null
     this.worker.stop()
+    this.models.shutdown?.()
+    this.options.systemVoices?.shutdown()
     // Any open ElevenLabs connection is closed with the app, and its late
     // audio is discarded.
     this.elevenlabs.shutdown()
   }
+  get inflightCount(): number { return this.flights.size }
+  assertOwners(owners: { db: VoiceSpeechSettings; models: VoiceTtsModelManager; worker: VoiceTtsWorkerClient; systemVoices: VoiceSystemVoicesOwner }): void {
+    if (owners.db !== this.options.db || owners.models !== this.models || owners.worker !== this.worker || owners.systemVoices !== this.options.systemVoices) throw new Error('VOICE_SPEECH_OWNER_MISMATCH')
+    this.available()
+  }
+  private available(): void { if (this.closing) throw new Error('VOICE_SPEECH_CLOSED'); this.options.host?.assertCurrent() }
+  private localOnly(): void { this.available(); if (this.options.host) throw new Error(VOICE_HOSTED_SPEECH_UNAVAILABLE) }
+  private owned<T>(effect: () => Promise<T>): Promise<T> {
+    try { this.available() } catch (error) { return Promise.reject(error) }
+    const work = Promise.resolve().then(() => { this.available(); return effect() }).then(value => { this.available(); return value })
+    this.flights.add(work); void work.then(() => this.flights.delete(work), () => this.flights.delete(work)); return work
+  }
+  runManagementMutation<T>(effect: () => Promise<T>, beforeWrite: () => void): Promise<T> {
+    if (this.managementToken) return Promise.reject(new Error('VOICE_MANAGEMENT_BUSY'))
+    const token = {}; this.managementToken = token
+    return this.management.run({ token, beforeWrite }, () => this.owned(() => this.models.runManagementMutation(async () => { this.beforeWrite(); return effect() }, beforeWrite)))
+      .finally(() => { if (this.managementToken === token) this.managementToken = null })
+  }
+  private beforeWrite(): void {
+    this.available(); const owner = this.management.getStore()
+    if (this.managementToken && owner?.token !== this.managementToken) throw new Error('VOICE_MANAGEMENT_BUSY')
+    owner?.beforeWrite()
+  }
+  private writeSetting(key: string, value: string): void { this.beforeWrite(); this.options.db.setSetting(key, value) }
+  /** Recognition runtime removal joins this before deleting shared module bytes. */
+  stopWorker(): Promise<void> { this.stop('cancelled'); return this.worker.stopAcknowledged() }
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) throw new RangeError('Invalid speech service shutdown deadline')
+    this.shutdown(); let timer: ReturnType<typeof setTimeout> | undefined
+    const drains = [Promise.allSettled([...this.flights]), this.worker.close?.(timeoutMs), this.models.close?.(timeoutMs), this.options.systemVoices?.close(timeoutMs)]
+    try { const result = await Promise.race([Promise.allSettled(drains), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('VOICE_SPEECH_SHUTDOWN_INCOMPLETE')), timeoutMs) })]); if (result.some(item => item.status === 'rejected')) throw new Error('VOICE_SPEECH_SHUTDOWN_INCOMPLETE') }
+    finally { if (timer) clearTimeout(timer) }
+  }
+
+  acceptElevenLabsDisclosure(...args: Parameters<VoiceSpeechService['acceptElevenLabsDisclosureImpl']>): ReturnType<VoiceSpeechService['acceptElevenLabsDisclosureImpl']> { return this.owned(() => this.acceptElevenLabsDisclosureImpl(...args)) }
+  setElevenLabsKey(...args: Parameters<VoiceSpeechService['setElevenLabsKeyImpl']>): ReturnType<VoiceSpeechService['setElevenLabsKeyImpl']> { return this.owned(() => this.setElevenLabsKeyImpl(...args)) }
+  clearElevenLabsKey(...args: Parameters<VoiceSpeechService['clearElevenLabsKeyImpl']>): ReturnType<VoiceSpeechService['clearElevenLabsKeyImpl']> { return this.owned(() => this.clearElevenLabsKeyImpl(...args)) }
+  refreshElevenLabs(...args: Parameters<VoiceSpeechService['refreshElevenLabsImpl']>): ReturnType<VoiceSpeechService['refreshElevenLabsImpl']> { return this.owned(() => this.refreshElevenLabsImpl(...args)) }
+  setElevenLabsModel(...args: Parameters<VoiceSpeechService['setElevenLabsModelImpl']>): ReturnType<VoiceSpeechService['setElevenLabsModelImpl']> { return this.owned(() => this.setElevenLabsModelImpl(...args)) }
+  setEnabled(...args: Parameters<VoiceSpeechService['setEnabledImpl']>): ReturnType<VoiceSpeechService['setEnabledImpl']> { return this.owned(() => this.setEnabledImpl(...args)) }
+  setEngine(...args: Parameters<VoiceSpeechService['setEngineImpl']>): ReturnType<VoiceSpeechService['setEngineImpl']> { return this.owned(() => this.setEngineImpl(...args)) }
+  setVoice(...args: Parameters<VoiceSpeechService['setVoiceImpl']>): ReturnType<VoiceSpeechService['setVoiceImpl']> { return this.owned(() => this.setVoiceImpl(...args)) }
+  setSpeed(...args: Parameters<VoiceSpeechService['setSpeedImpl']>): ReturnType<VoiceSpeechService['setSpeedImpl']> { return this.owned(() => this.setSpeedImpl(...args)) }
+  setMaxChars(...args: Parameters<VoiceSpeechService['setMaxCharsImpl']>): ReturnType<VoiceSpeechService['setMaxCharsImpl']> { return this.owned(() => this.setMaxCharsImpl(...args)) }
+  setSpeakActionResults(...args: Parameters<VoiceSpeechService['setSpeakActionResultsImpl']>): ReturnType<VoiceSpeechService['setSpeakActionResultsImpl']> { return this.owned(() => this.setSpeakActionResultsImpl(...args)) }
+  setOnlyVoiceTurns(...args: Parameters<VoiceSpeechService['setOnlyVoiceTurnsImpl']>): ReturnType<VoiceSpeechService['setOnlyVoiceTurnsImpl']> { return this.owned(() => this.setOnlyVoiceTurnsImpl(...args)) }
+  installModel(...args: Parameters<VoiceSpeechService['installModelImpl']>): ReturnType<VoiceSpeechService['installModelImpl']> { return this.owned(() => this.installModelImpl(...args)) }
+  selectModel(...args: Parameters<VoiceSpeechService['selectModelImpl']>): ReturnType<VoiceSpeechService['selectModelImpl']> { return this.owned(() => this.selectModelImpl(...args)) }
+  removeModel(...args: Parameters<VoiceSpeechService['removeModelImpl']>): ReturnType<VoiceSpeechService['removeModelImpl']> { return this.owned(() => this.removeModelImpl(...args)) }
+  prepare(...args: Parameters<VoiceSpeechService['prepareImpl']>): ReturnType<VoiceSpeechService['prepareImpl']> { return this.owned(() => this.prepareImpl(...args)) }
+  speakAgentAnswer(...args: Parameters<VoiceSpeechService['speakAgentAnswerImpl']>): ReturnType<VoiceSpeechService['speakAgentAnswerImpl']> { return this.owned(() => this.speakAgentAnswerImpl(...args)) }
+  speak(...args: Parameters<VoiceSpeechService['speakImpl']>): ReturnType<VoiceSpeechService['speakImpl']> { return this.owned(() => this.speakImpl(...args)) }
+  beginStreamingAnswer(...args: Parameters<VoiceSpeechService['beginStreamingAnswerImpl']>): ReturnType<VoiceSpeechService['beginStreamingAnswerImpl']> { return this.owned(() => this.beginStreamingAnswerImpl(...args)) }
+  snapshot(...args: Parameters<VoiceSpeechService['snapshotImpl']>): ReturnType<VoiceSpeechService['snapshotImpl']> { return this.owned(() => this.snapshotImpl(...args)) }
+  listModels(): ReturnType<VoiceTtsModelManager['list']> { return this.owned(() => this.listModelsImpl()) }
 
   // ── Settings ──────────────────────────────────────────────
 
@@ -247,7 +326,7 @@ export class VoiceSpeechService {
 
   engine(): VoiceTtsEngineId {
     const raw = this.options.db.getSetting(VOICE_TTS_SETTING_KEYS.engine)
-    return isVoiceTtsEngineId(raw) ? raw : 'system'
+    return isVoiceTtsEngineId(raw) && (!this.options.host || raw !== 'elevenlabs') ? raw : 'system'
   }
 
   modelId(): string {
@@ -315,8 +394,9 @@ export class VoiceSpeechService {
    * device, credits may be spent, ElevenLabs' terms apply. The engine cannot
    * be selected before this.
    */
-  async acceptElevenLabsDisclosure(): Promise<VoiceTtsSnapshot> {
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsDisclosure, 'true')
+  private async acceptElevenLabsDisclosureImpl(): Promise<VoiceTtsSnapshot> {
+    this.localOnly()
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.elevenlabsDisclosure, 'true')
     return this.broadcast()
   }
 
@@ -324,80 +404,90 @@ export class VoiceSpeechService {
    * Stores the key on the encrypted settings path and proves it against the
    * account. The key is never returned: the snapshot says only that one is set.
    */
-  async setElevenLabsKey(key: string): Promise<VoiceTtsSnapshot> {
+  private async setElevenLabsKeyImpl(key: string): Promise<VoiceTtsSnapshot> {
+    this.localOnly()
     const trimmed = String(key ?? '').trim()
     if (!trimmed) return this.clearElevenLabsKey()
     this.stop('cancelled')
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey, trimmed)
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey, trimmed)
     this.elevenlabs.reset()
     await this.elevenlabs.refresh()
     if (this.engine() === 'elevenlabs') await this.prepare()
     return this.broadcast()
   }
 
-  async clearElevenLabsKey(): Promise<VoiceTtsSnapshot> {
+  private async clearElevenLabsKeyImpl(): Promise<VoiceTtsSnapshot> {
+    this.localOnly()
     this.stop('cancelled')
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey, '')
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey, '')
     this.elevenlabs.reset()
     if (this.engine() === 'elevenlabs') await this.prepare()
     return this.broadcast()
   }
 
   /** Lists the account's voices and models again. */
-  async refreshElevenLabs(): Promise<VoiceTtsSnapshot> {
+  private async refreshElevenLabsImpl(): Promise<VoiceTtsSnapshot> {
+    this.localOnly()
     await this.elevenlabs.refresh()
     if (this.engine() === 'elevenlabs') await this.prepare()
     return this.broadcast()
   }
 
-  async setElevenLabsModel(modelId: string): Promise<VoiceTtsSnapshot> {
+  private async setElevenLabsModelImpl(modelId: string): Promise<VoiceTtsSnapshot> {
+    this.localOnly()
     const id = String(modelId ?? '').trim()
     if (!id) throw new Error('Choose a model.')
     if (!this.elevenlabs.supportsModel(id)) {
       throw new Error(`“${id}” cannot be used for streaming speech. Choose another ElevenLabs model.`)
     }
     this.stop('cancelled')
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsModelId, id)
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.elevenlabsModelId, id)
     if (this.engine() === 'elevenlabs') await this.prepare()
     return this.broadcast()
   }
 
   private elevenLabsState(): VoiceTtsElevenLabsState {
+    if (this.options.host) return { keySet: false, disclosureAccepted: false, modelId: this.elevenLabsModelId(), voices: [], models: [], usage: null, error: { kind: 'unknown', message: VOICE_HOSTED_SPEECH_UNAVAILABLE } }
     return this.elevenlabs.state({
       disclosureAccepted: this.elevenLabsDisclosureAccepted(),
       modelId: this.elevenLabsModelId(),
     })
   }
 
-  async setEnabled(enabled: boolean): Promise<VoiceTtsSnapshot> {
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.enabled, enabled ? 'true' : 'false')
+  private async setEnabledImpl(enabled: boolean): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.enabled, enabled ? 'true' : 'false')
     if (!enabled) this.stop('cancelled')
     else await this.prepare()
     return this.broadcast()
   }
 
-  async setEngine(engine: VoiceTtsEngineId): Promise<VoiceTtsSnapshot> {
+  private async setEngineImpl(engine: VoiceTtsEngineId): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
+    if (engine === 'elevenlabs') this.localOnly()
     // The hosted engine sends the text away and may cost money. It is refused,
     // not silently allowed, until the user has acknowledged that (#64).
     if (engine === 'elevenlabs' && !this.elevenLabsDisclosureAccepted()) {
       throw new Error('Read and accept the ElevenLabs disclosure in Settings → Voice before choosing this engine.')
     }
     this.stop('cancelled')
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.engine, engine)
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.engine, engine)
     // The stored speaker belongs to the old engine, so it is cleared rather
     // than left to point at a voice that no longer exists.
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.voiceId, '')
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.voiceId, '')
     this.worker.unload()
     await this.prepare()
     return this.broadcast()
   }
 
-  async setVoice(voiceId: string): Promise<VoiceTtsSnapshot> {
+  private async setVoiceImpl(voiceId: string): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
+    if (voiceId.startsWith('elevenlabs:')) this.localOnly()
     this.stop('cancelled')
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.voiceId, voiceId)
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.voiceId, voiceId)
     // An ElevenLabs voice is also remembered on its own, so switching to a
     // local voice and back does not lose it (#64).
-    if (voiceId.startsWith('elevenlabs:')) this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsVoiceId, voiceId)
+    if (voiceId.startsWith('elevenlabs:')) this.writeSetting(VOICE_TTS_SETTING_KEYS.elevenlabsVoiceId, voiceId)
     // A system voice is chosen when the engine is loaded, so the worker has to
     // hear about it. A model speaker is chosen per passage and needs nothing.
     if (this.engine() === 'system') await this.prepare()
@@ -405,64 +495,75 @@ export class VoiceSpeechService {
     return this.broadcast()
   }
 
-  async setSpeed(speed: number): Promise<VoiceTtsSnapshot> {
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.speed, String(clampSpeechSpeed(speed)))
+  private async setSpeedImpl(speed: number): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.speed, String(clampSpeechSpeed(speed)))
     return this.broadcast()
   }
 
-  async setMaxChars(maxChars: number): Promise<VoiceTtsSnapshot> {
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.maxChars, String(Math.round(maxChars)))
+  private async setMaxCharsImpl(maxChars: number): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.maxChars, String(Math.round(maxChars)))
     return this.broadcast()
   }
 
-  async setSpeakActionResults(on: boolean): Promise<VoiceTtsSnapshot> {
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.speakActionResults, on ? 'true' : 'false')
+  private async setSpeakActionResultsImpl(on: boolean): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.speakActionResults, on ? 'true' : 'false')
     return this.broadcast()
   }
 
-  async setOnlyVoiceTurns(on: boolean): Promise<VoiceTtsSnapshot> {
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.onlyVoiceTurns, on ? 'true' : 'false')
+  private async setOnlyVoiceTurnsImpl(on: boolean): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.onlyVoiceTurns, on ? 'true' : 'false')
     return this.broadcast()
   }
 
   // ── Models ────────────────────────────────────────────────
 
-  listModels(): ReturnType<VoiceTtsModelManager['list']> {
+  private listModelsImpl(): ReturnType<VoiceTtsModelManager['list']> {
     return this.models.list(this.modelId())
   }
 
-  async installModel(id: string): Promise<VoiceTtsSnapshot> {
+  private async installModelImpl(id: string): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
     await this.models.install(id)
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.modelId, id)
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.engine, 'local')
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.voiceId, '')
+    this.available()
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.modelId, id)
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.engine, 'local')
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.voiceId, '')
     this.worker.unload()
     await this.prepare()
     return this.broadcast()
   }
 
-  async selectModel(id: string): Promise<VoiceTtsSnapshot> {
+  private async selectModelImpl(id: string): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
+    if (!findTtsManifestEntry(id)) throw new Error('Unknown voice model')
     this.stop('cancelled')
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.modelId, id)
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.modelId, id)
     // Choosing a downloaded voice is choosing the engine that plays it.
     // Without this, "Use" would change nothing while the system voice is
     // selected, and the engine picker is not on the main settings view.
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.engine, 'local')
-    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.voiceId, '')
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.engine, 'local')
+    this.writeSetting(VOICE_TTS_SETTING_KEYS.voiceId, '')
     this.worker.unload()
     await this.prepare()
     return this.broadcast()
   }
 
-  async removeModel(id: string): Promise<VoiceTtsSnapshot> {
+  private async removeModelImpl(id: string): Promise<VoiceTtsSnapshot> {
+    this.beforeWrite()
     this.stop('cancelled')
+    if (this.options.host) await this.worker.stopAcknowledged()
     await this.models.remove(id)
+    this.available()
     if (this.modelId() === id) {
       this.worker.unload()
       // Fall back to the system voice, which needs nothing on disk, so spoken
       // answers keep working after the model is deleted.
-      this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.engine, 'system')
-      this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.voiceId, '')
+      this.writeSetting(VOICE_TTS_SETTING_KEYS.engine, 'system')
+      this.writeSetting(VOICE_TTS_SETTING_KEYS.voiceId, '')
     }
     await this.prepare()
     return this.broadcast()
@@ -471,11 +572,13 @@ export class VoiceSpeechService {
   // ── Preparing the engine ──────────────────────────────────
 
   /** Loads the selected engine. Never throws: speech must not block the app. */
-  async prepare(isOwnerCurrent: VoiceSpeechOwner = () => true): Promise<void> {
+  private async prepareImpl(isOwnerCurrent: VoiceSpeechOwner = () => true): Promise<void> {
     const preparationGeneration = ++this.preparationGeneration
     const isCurrent = (): boolean =>
-      preparationGeneration === this.preparationGeneration && isOwnerCurrent()
+      !this.closing && preparationGeneration === this.preparationGeneration && isOwnerCurrent()
     try {
+      if (this.options.host && this.engine() === 'elevenlabs') { this.status = { state: 'unavailable', message: VOICE_HOSTED_SPEECH_UNAVAILABLE }; return }
+      if (this.options.host?.audio === 'unavailable') { this.status = { state: 'unavailable', message: VOICE_DESKTOP_AUDIO_UNAVAILABLE }; return }
       if (this.systemVoices.length === 0) {
         const systemVoices = await this.listVoices()
         if (!isCurrent()) return
@@ -705,7 +808,7 @@ export class VoiceSpeechService {
    * Called from the `working -> idle` edge in main. It speaks only when the
    * user asked for the answer by voice, unless the user switched that rule off.
    */
-  async speakAgentAnswer(
+  private async speakAgentAnswerImpl(
     taskId: string,
     text: string,
     isOwnerCurrent: VoiceSpeechOwner = () => true,
@@ -731,7 +834,7 @@ export class VoiceSpeechService {
    * Speaks one passage. Returns false when the passage was not spoken, which
    * is a normal outcome and never an error.
    */
-  async speak(
+  private async speakImpl(
     request: VoiceSpeechRequest,
     isOwnerCurrent: VoiceSpeechOwner = () => true,
     lifecycleOwner?: VoiceSpeechLifecycleOwner
@@ -744,7 +847,7 @@ export class VoiceSpeechService {
 
     const generation = ++speechGenerationCounter
     const isCurrent = (): boolean =>
-      generation === speechGenerationCounter && isOwnerCurrent()
+      !this.closing && generation === speechGenerationCounter && isOwnerCurrent()
 
     if (this.status.state !== 'ready') await this.prepare(isCurrent)
     if (!isCurrent() || this.status.state !== 'ready') {
@@ -810,13 +913,14 @@ export class VoiceSpeechService {
    * which needs neither the automatic switch nor a voice turn: opening the
    * conversation was the request.
    */
-  async beginStreamingAnswer(
+  private async beginStreamingAnswerImpl(
     taskId: string,
     parts?: VoiceAnswerPart[],
     source: Extract<VoiceSpeechSource, 'agent_answer' | 'conversation'> = 'agent_answer',
     isOwnerCurrent: VoiceSpeechOwner = () => true,
     lifecycleOwner?: VoiceSpeechLifecycleOwner
   ): Promise<boolean> {
+    if (this.closing || this.options.host?.audio === 'unavailable') return false
     if (this.active?.streaming && this.active.taskId === taskId) return true
 
     // An answer the user talked over must not open a passage. Opening one
@@ -838,7 +942,7 @@ export class VoiceSpeechService {
 
     const generation = ++speechGenerationCounter
     const isCurrent = (): boolean =>
-      generation === speechGenerationCounter && isOwnerCurrent()
+      !this.closing && generation === speechGenerationCounter && isOwnerCurrent()
 
     if (this.status.state !== 'ready') await this.prepare(isCurrent)
     if (!isCurrent() || this.status.state !== 'ready') return false
@@ -1063,6 +1167,7 @@ export class VoiceSpeechService {
    * its own condition (design §5.7).
    */
   private mayspeak(request: VoiceSpeechRequest): boolean {
+    if (this.closing || this.options.host?.audio === 'unavailable' || this.options.host && this.engine() === 'elevenlabs') return false
     if (!request.text || !request.text.trim()) return false
     switch (request.source) {
       // The user pressed a button. Speaking is the whole point of the press, so
@@ -1106,13 +1211,14 @@ export class VoiceSpeechService {
   availableVoices(): VoiceTtsVoice[] {
     const engine = this.engine()
     if (engine === 'system') return this.systemVoices
-    if (engine === 'elevenlabs') return this.elevenlabs.voices
+    if (engine === 'elevenlabs') return this.options.host ? [] : this.elevenlabs.voices
     return localVoicesForModel(this.modelId())
   }
 
   // ── Worker events ─────────────────────────────────────────
 
   private onWorkerStatus(status: VoiceTtsStatus): void {
+    if (this.closing || this.options.host?.audio === 'unavailable') return
     // The worker is not the selected engine, so its state — an unload after
     // the switch, say — must not overwrite what the hosted engine reported.
     if (this.engine() === 'elevenlabs') return
@@ -1123,10 +1229,11 @@ export class VoiceSpeechService {
       this.status = status
       if (status.state !== 'loading') this.stop('error')
     }
-    void this.broadcast()
+    void this.broadcast().catch(() => {})
   }
 
   private onChunk(chunk: VoiceTtsChunk): void {
+    if (this.closing || this.options.host?.audio === 'unavailable') return
     if (!this.active || this.active.speechId !== chunk.speechId) return
     if (chunk.sampleRate > 0) this.sampleRate = chunk.sampleRate
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechChunk, {
@@ -1141,6 +1248,7 @@ export class VoiceSpeechService {
   }
 
   private onDone(speechId: string, cancelled: boolean): void {
+    if (this.closing) return
     if (!this.active || this.active.speechId !== speechId) return
     const active = this.active
     this.active = null
@@ -1175,9 +1283,10 @@ export class VoiceSpeechService {
 
   // ── Snapshots ─────────────────────────────────────────────
 
-  async snapshot(): Promise<VoiceTtsSnapshot> {
+  private async snapshotImpl(): Promise<VoiceTtsSnapshot> {
+    if (this.options.host?.audio === 'unavailable') this.status = { state: 'unavailable', message: VOICE_DESKTOP_AUDIO_UNAVAILABLE }
     if (this.systemVoices.length === 0 && this.engine() === 'system') {
-      this.systemVoices = await this.listVoices()
+      const voices = await this.listVoices(); this.available(); this.systemVoices = voices
     }
     return {
       enabled: this.isEnabled(),
@@ -1197,6 +1306,7 @@ export class VoiceSpeechService {
 
   private async broadcast(): Promise<VoiceTtsSnapshot> {
     const snapshot = await this.snapshot()
+    this.available()
     this.options.notifyRenderer(VOICE_TTS_EVENTS.ttsStatus, snapshot)
     return snapshot
   }

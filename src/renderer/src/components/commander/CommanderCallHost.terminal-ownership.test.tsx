@@ -348,6 +348,9 @@ describe('terminal ownership: real worker failure contract', () => {
     ctx.notify.mockClear()
     await act(async () => {
       child.emit('exit', 1)
+      // Exit alone cannot acknowledge the worker's buffered pipes or admit a replacement.
+      expect(vi.mocked(fork).mock.results.at(-1)!.value).toBe(child)
+      child.emit('close', 1)
       // Successful worker restart does not synthesize or finish the lost passage.
       const restarted = vi.mocked(fork).mock.results.at(-1)!.value
       expect(restarted).not.toBe(child)

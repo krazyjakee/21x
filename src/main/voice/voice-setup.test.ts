@@ -13,7 +13,18 @@ const installer = vi.hoisted(() => ({
   unsupportedHardwareReason: vi.fn((): string | null => null),
   VOICE_RUNTIME_APPROX_BYTES: 180 * 1024 * 1024,
 }))
-vi.mock('./voice-runtime-installer', () => installer)
+vi.mock('./voice-runtime-installer', () => ({ ...installer,
+  // The setup fixture controls acquisition, while the core owns the flow.
+  VoiceRuntimeOwner: class {
+    constructor(private options: { rootDir: string }) {}
+    assertRoot(root: string): void { if (root !== this.options.rootDir) throw new Error('Runtime owner mismatch') }
+    detect(): Promise<unknown> { return installer.detectVoiceRuntime(this.options.rootDir) }
+    install(progress: (event: { stage: string; output: string; percent: number }) => void): Promise<unknown> { return installer.installVoiceRuntime(this.options.rootDir, progress) }
+    remove(): Promise<void> { return installer.removeVoiceRuntime() }
+    stop(): void {}
+    async close(): Promise<void> {}
+  }
+}))
 
 const { VoiceSessionManager } = await import('./voice-session-manager')
 const { DEFAULT_VOICE_MODEL_ID } = await import('./voice-model-manifest')
@@ -48,6 +59,7 @@ class FakeWorker extends EventEmitter {
   cancelTurn = vi.fn()
   unload = vi.fn()
   stop = vi.fn()
+  stopAcknowledged = vi.fn(async () => { this.stop() })
   setRuntimeModulePath = vi.fn()
   isRunning = true
   isLoaded = true
