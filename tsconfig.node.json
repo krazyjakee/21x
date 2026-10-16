@@ -10,17 +10,23 @@
     "src/preload/**/*",
     "src/shared/**/*",
     "src/renderer/src/types/index.ts",
-    "test/**/*"
+    "test/**/*",
+    "scripts/production-workspace-cleanup-proof.ts",
+    "scripts/production-workspace-cleanup-proof.test.ts"
   ],
   "compilerOptions": {
     "composite": true,
-    "types": ["electron-vite/node"],
+    "types": [
+      "electron-vite/node"
+    ],
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "allowJs": true,
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": [
+        "src/shared/*"
+      ]
     }
   },
   "exclude": [

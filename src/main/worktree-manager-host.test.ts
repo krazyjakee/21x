@@ -116,3 +116,36 @@ it('fences the next worktree command and publication after an accepted fetch los
     expect(existsSync(join(reposRoot, 'fixture-org', 'later.git'))).toBe(false)
   } finally { finish?.(); await rejected; await owner.close(); rmSync(root, { recursive: true, force: true }) }
 })
+
+
+it.each(['git', 'fallback', 'task'] as const)('does not swallow observer refusal before %s removal', async boundary => {
+  const root = mkdtempSync(join(tmpdir(), '21x-cleanup-effect-')), reposRoot = join(root, 'repos'), workspaceRoot = join(root, 'workspaces')
+  const target = join(workspaceRoot, 'fixture-task', 'repo')
+  mkdirSync(join(reposRoot, 'fixture-org', 'repo.git'), { recursive: true }); mkdirSync(target, { recursive: true }); writeFileSync(join(target, 'kept'), 'retained')
+  const paths = new WorktreeDirectoryAuthority([reposRoot, workspaceRoot], () => {}), refused = new Error('observer refused exact boundary')
+  let observations = 0
+  const exec = vi.fn(async () => { throw new Error('git refused') })
+  const owner = new WorktreeManager({ reposRoot, workspaceRoot, emitProgress: vi.fn(), exec, assertPath: path => paths.assertPath(path), beforeCleanupEffect: async id => {
+    expect(id).toBe('fixture-task'); observations++
+    if (boundary !== 'fallback' || observations === 2) throw refused
+  } })
+  try {
+    await expect(owner.cleanupTaskWorkspace('fixture-task', boundary === 'task' ? [] : [{ fullName: 'fixture-org/repo' }], 'fixture-org')).rejects.toBe(refused)
+    expect(exec).toHaveBeenCalledTimes(boundary === 'fallback' ? 1 : 0)
+    expect(readFileSync(join(target, 'kept'), 'utf8')).toBe('retained')
+  } finally { await owner.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it('rechecks physical task identity after an awaited cleanup observation', async () => {
+  const root = mkdtempSync(join(tmpdir(), '21x-cleanup-generation-')), reposRoot = join(root, 'repos'), workspaceRoot = join(root, 'workspaces'), task = join(workspaceRoot, 'fixture-task')
+  mkdirSync(reposRoot); mkdirSync(task, { recursive: true }); writeFileSync(join(task, 'original'), 'preserve original')
+  const paths = new WorktreeDirectoryAuthority([reposRoot, workspaceRoot], () => {})
+  const owner = new WorktreeManager({ reposRoot, workspaceRoot, emitProgress: vi.fn(), assertPath: path => paths.assertPath(path), beforeCleanupEffect: async () => {
+    renameSync(task, task + '.retained'); mkdirSync(task); writeFileSync(join(task, 'replacement'), 'preserve replacement')
+  } })
+  try {
+    await expect(owner.cleanupTaskWorkspace('fixture-task', [], '')).rejects.toThrow('WORKTREE_DIRECTORY_CHANGED')
+    expect(readFileSync(join(task, 'replacement'), 'utf8')).toBe('preserve replacement')
+    expect(readFileSync(join(task + '.retained', 'original'), 'utf8')).toBe('preserve original')
+  } finally { await owner.close(); rmSync(root, { recursive: true, force: true }) }
+})

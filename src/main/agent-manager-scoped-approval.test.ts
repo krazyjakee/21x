@@ -1,3 +1,5 @@
+import { AGENT_EVENT_CODECS } from '../shared/agent-desktop-codecs'
+import { TASK_LIFECYCLE_EVENT_CODECS } from '../shared/task-lifecycle-codecs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { dirname } from 'node:path'
 import { rmSync } from 'node:fs'
@@ -107,4 +109,84 @@ it('refuses overlapping task and agent configuration writers in either order', a
   const configuration = f.manager.runAgentConfigurationMutation(f.agent.id, 'update', async () => { await configurationGate }, { name: 'Metadata' })
   await expect(f.manager.runTaskLifecycleMutation([f.task.id], async () => undefined)).rejects.toThrow('configuration')
   finish(); await configuration
+})
+
+
+it('holds global cleanup admission across cross-task, heartbeat, resume and model entry paths', async () => {
+  const f = await fixture(); await f.manager.stopByTaskId(f.task.id)
+  const other = f.db.createTask({ title: 'Foreign workspace admission' })!
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }); finishers.push(release)
+  const entered = vi.fn()
+  const cleanup = f.manager.runTaskLifecycleMutation([f.task.id], () => f.manager.withWorkspaceCleanupExclusion([f.task.id], async () => { entered(); await gate }))
+  await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+  const created = f.adapter.createSession.mock.calls.length
+  await expect(f.manager.requestSession(f.agent.id, other.id, f.db.getWorkspaceDir(f.task.id))).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+  await expect(f.manager.resumeSession(f.agent.id, other.id, 'foreign-native')).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+  await expect(f.manager.sendHeartbeatViaCaptain(f.agent.id, other.id, 'blocked heartbeat')).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+  await expect(f.manager.startHeartbeatSession(f.agent.id, other.id, 'blocked followup')).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+  await expect(f.manager.getProviders(undefined, undefined, 'pi')).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+  await expect(f.manager.listModels('pi')).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+  expect(f.adapter.createSession.mock.calls.length).toBe(created)
+  release(); await cleanup
+  await expect(f.manager.runTaskLifecycleMutation([f.task.id], () => f.manager.withWorkspaceCleanupExclusion([f.task.id], async () => 'retired'))).resolves.toBe('retired')
+})
+
+it.each(['providers', 'models'] as const)('refuses cleanup until an already admitted raw %s listing settles', async kind => {
+  const f = await fixture(); await f.manager.stopByTaskId(f.task.id)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }); finishers.push(release)
+  const entered = vi.fn()
+  Object.assign(f.adapter, { getProviders: async () => { entered(); await gate; return { providers: [], default: {} } }, listModels: async () => { entered(); await gate; return [] } })
+  const listing = kind === 'providers' ? f.manager.getProviders(undefined, undefined, 'pi') : f.manager.listModels('pi')
+  await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+  const effect = vi.fn(async () => {})
+  await expect(f.manager.runTaskLifecycleMutation([f.task.id], () => f.manager.withWorkspaceCleanupExclusion([f.task.id], effect))).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+  expect(effect).not.toHaveBeenCalled()
+  release(); await listing
+  await f.manager.runTaskLifecycleMutation([f.task.id], () => f.manager.withWorkspaceCleanupExclusion([f.task.id], effect))
+  expect(effect).toHaveBeenCalledOnce()
+})
+
+it('keeps global admission closed after failed native cleanup retirement', async () => {
+  const f = await fixture(); await f.manager.stopByTaskId(f.task.id)
+  const other = f.db.createTask({ title: 'After uncertain native release' })!
+  await expect(f.manager.runTaskLifecycleMutation([f.task.id], () => f.manager.withWorkspaceCleanupExclusion([f.task.id], async () => { throw new Error('native release unacknowledged') }, () => false))).rejects.toThrow('native release unacknowledged')
+  await expect(f.manager.requestSession(f.agent.id, other.id)).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+  await expect(f.manager.listModels('pi')).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+})
+
+
+it('routes withdrawn pre-session startup failure through a durable task error and valid task invalidation', async () => {
+  const f = await fixture(); await f.manager.stopByTaskId(f.task.id)
+  const task = f.db.createTask({ title: 'Withdrawn startup keeps truthful task error' })!
+  f.db.updateTask(task.id, { agent_id: f.agent.id })
+  let entered!: () => void, release!: () => void
+  const accepted = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve }); finishers.push(release)
+  f.adapter.createSession.mockImplementationOnce(async () => { entered(); await gate; return 'withdrawn-native' })
+  const events: Array<{ channel: string; payload: unknown }> = []
+  const listener = (channel: string, payload: unknown): void => { events.push({ channel, payload }) }
+  f.manager.addExternalListener(listener)
+  const start = f.manager.requestSession(f.agent.id, task.id, undefined, true)
+  const rejected = expect(start).rejects.toThrow('Start ownership was withdrawn before session registration.')
+  try {
+    await accepted
+    f.db.db.prepare("UPDATE tasks SET status='completed' WHERE id=?").run(task.id)
+    release(); await rejected
+    expect(f.adapter.destroySession.mock.calls.filter(([id]) => id === 'withdrawn-native')).toHaveLength(1)
+    expect(f.manager.getSessionStatus('withdrawn-native')).toBeNull()
+    expect(f.db.getTask(task.id)?.status).toBe('completed')
+    const error = f.db.getTranscriptParts(task.id).find(part => part.partType === 'error' && part.content?.includes('Start ownership was withdrawn before session registration.'))
+    expect(error).toBeDefined()
+    expect(error?.role).toBe('system')
+    expect(f.manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryResult: 'excluded_failure_not_retried' })
+    const invalidations = events.filter(event => event.channel === 'task:updated' && TASK_LIFECYCLE_EVENT_CODECS['task:updated'].validatePayload(event.payload))
+    expect(invalidations).toContainEqual({ channel: 'task:updated', payload: { taskId: task.id, updates: {} } })
+    const statuses = events.filter(event => event.channel === 'agent:status')
+    expect(statuses.length).toBeGreaterThan(0) // actual acknowledged Stop remains observable
+    for (const event of statuses) expect(AGENT_EVENT_CODECS['agent:status'].validatePayload(event.payload)).toBe(true)
+    expect(statuses.some(event => typeof event.payload === 'object' && event.payload !== null && 'sessionId' in event.payload && event.payload.sessionId === '')).toBe(false)
+    await f.manager.stopByTaskId(task.id)
+    expect(f.manager.hasTaskStartOwnership(task.id)).toBe(false)
+  } finally { release(); await start.catch(() => {}); f.manager.removeExternalListener(listener) }
 })

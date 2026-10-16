@@ -69,11 +69,11 @@ export function createBoundedWorkspaceCleanupStore(db: DatabaseManager, beforeEf
     },
     getTasks(): ReturnType<DatabaseManager['getTasks']> {
       beforeEffect()
-      const fields = { id: 128, title: 1024, project_id: 128, role: 32, group_id: 128, agent_id: 128, source_id: 128, status: 64, repos: 65536, updated_at: 64 }
+      const fields = { id: 128, title: 1024, project_id: 128, role: 32, group_id: 128, agent_id: 128, source_id: 128, session_id: 512, status: 64, repos: 65536, updated_at: 64 }
       const sizes = Object.entries(fields).map(([field, max]) => ({ length: `COALESCE(length(CAST(${field} AS BLOB)),0)`, max }))
       const stats = db.db.prepare(`SELECT COUNT(*) AS count,COALESCE(MAX(${sizes.map(value => `(${value.length}>${value.max})`).join(' OR ')}),0) AS oversized,COALESCE(SUM(${sizes.map(value => value.length).join('+')}),0) AS total FROM tasks`).get() as { count: number; oversized: number; total: number }
       if (stats.count > 4096 || stats.oversized || stats.total >= 890000) throw new Error('WORKSPACE_CLEANUP_DATA_LIMIT')
-      return (db.db.prepare('SELECT id,title,project_id,role,group_id,agent_id,source_id,status,repos,updated_at FROM tasks ORDER BY id').all() as Array<Record<string, unknown>>).map(row => {
+      return (db.db.prepare('SELECT id,title,project_id,role,group_id,agent_id,source_id,session_id,status,repos,updated_at FROM tasks ORDER BY id').all() as Array<Record<string, unknown>>).map(row => {
         let repos: unknown
         try { repos = JSON.parse(row.repos as string) } catch { throw new Error('WORKSPACE_CLEANUP_DATA_INVALID') }
         if (typeof row.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(row.id) || !Array.isArray(repos) || repos.length > 128 || repos.some(value => typeof value !== 'string' || Buffer.byteLength(value) > 512) || typeof row.title !== 'string' || Buffer.byteLength(row.title) > 1024 || typeof row.updated_at !== 'string' || Buffer.byteLength(row.updated_at) > 64 || !['task','captain','task_group'].includes(row.role as string)) throw new Error('WORKSPACE_CLEANUP_DATA_INVALID')
@@ -329,7 +329,9 @@ export class WorkspaceCleanupSchedulerCore {
         const path = join(root, entry.name), identity = physical(path), task = tasks.get(entry.name)
         if (!task) { if (identity.mtimeMs < cutoff) throw new Error('WORKSPACE_CLEANUP_ORPHAN_REFUSED'); continue }
         if (depsEnabled) findUnsupportedDeps(path)
-        if (!removeCompleted || task.status !== TaskStatus.Completed || new Date(task.updated_at).getTime() >= cutoff) continue
+        const updatedAt = new Date(task.updated_at).getTime()
+        if (!Number.isFinite(updatedAt)) throw new Error('WORKSPACE_CLEANUP_DATA_INVALID')
+        if (!removeCompleted || task.status !== TaskStatus.Completed || updatedAt >= cutoff) continue
         if (task.role !== 'task' || task.group_id || !/^[A-Za-z0-9_-]{1,128}$/.test(task.id)) throw new Error('WORKSPACE_CLEANUP_SCOPE_UNSUPPORTED')
         selected.push({ task, path, identity })
       }
@@ -349,8 +351,18 @@ export class WorkspaceCleanupSchedulerCore {
           const groups = controls.getRepoGroups?.(value.task.id) ?? []
           if (value.task.repos.length && !groups.length) throw new Error('WORKSPACE_CLEANUP_REPOSITORY_AUTHORITY_UNAVAILABLE')
           await this.worktreeManager.withRequestGuard(async () => {
-            for (const group of groups) { checkSnapshot(); await this.worktreeManager.cleanupTaskWorkspace(value.task.id, group.repos, group.org, false) }
-            checkSnapshot(); await this.worktreeManager.cleanupTaskWorkspace(value.task.id, [], '', true)
+            for (const group of groups) {
+              // One observation per actual repository removal, not one stale
+              // proof shared across an asynchronous multi-repository pass.
+              for (const repo of group.repos) {
+                await assertIdle(value.task.id, value.path); checkSnapshot()
+                if (!same(value.identity, physical(value.path))) throw new Error('WORKSPACE_CLEANUP_PATH_CHANGED')
+                await this.worktreeManager.cleanupTaskWorkspace(value.task.id, [repo], group.org, false)
+              }
+            }
+            await assertIdle(value.task.id, value.path); checkSnapshot()
+            if (!same(value.identity, physical(value.path))) throw new Error('WORKSPACE_CLEANUP_PATH_CHANGED')
+            await this.worktreeManager.cleanupTaskWorkspace(value.task.id, [], '', true)
           }, checkSnapshot, controls.signal)
           checkSnapshot(); if (existsSync(value.path)) throw new Error('WORKSPACE_CLEANUP_REMOVE_UNACKNOWLEDGED'); cleaned++
         }

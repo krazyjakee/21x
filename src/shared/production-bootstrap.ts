@@ -14,6 +14,7 @@ export interface ProductionLaunchDescriptor {
   paths: { profileRoot: string; workspaceRoot: string; attachmentRoot: string; reposRoot: string; resourceRoot: string; tempRoot: string }
   capabilities: {
     workspaceFiles?: 'host' | 'unsupported'
+    workspaceCleanup?: 'host' | 'unsupported'
     attachmentFiles?: 'host' | 'unsupported'
     attachmentDownloads?: 'host' | 'unsupported'
     artifactClipboard?: 'host' | 'unsupported'
@@ -38,10 +39,11 @@ export function isProductionLaunchDescriptor(value: unknown): value is Productio
     value.version === 1 && value.kind === 'production-private-launch' && isProductionLaunchId(value.launchId) && typeof value.profileId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value.profileId) &&
     choice(value.profileIntent, ['create-new', 'load-authenticated-copy']) && typeof value.buildIdentity === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value.buildIdentity) && isResourceDigest(value.resourceManifestSha256) &&
     isRecord(value.paths) && hasExactKeys(value.paths, ['profileRoot', 'workspaceRoot', 'attachmentRoot', 'reposRoot', 'resourceRoot', 'tempRoot']) && Object.values(value.paths).every(isAbsoluteHostPath) &&
-    isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp'], ['workspaceFiles', 'attachmentFiles', 'attachmentDownloads', 'artifactClipboard', 'tray']) &&
+    isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp'], ['workspaceFiles', 'workspaceCleanup', 'attachmentFiles', 'attachmentDownloads', 'artifactClipboard', 'tray']) &&
     (capabilities.tray === undefined || choice(capabilities.tray, ['host', 'unsupported'])) &&
     (capabilities.tray !== 'host' || capabilities.ui === 'host') &&
     (capabilities.workspaceFiles === undefined || choice(capabilities.workspaceFiles, ['host', 'unsupported'])) &&
+    (capabilities.workspaceCleanup === undefined || choice(capabilities.workspaceCleanup, ['host', 'unsupported'])) &&
     (capabilities.attachmentFiles === undefined || choice(capabilities.attachmentFiles, ['host', 'unsupported'])) &&
     (capabilities.attachmentFiles !== 'host' || capabilities.ui === 'host') &&
     (capabilities.attachmentDownloads === undefined || choice(capabilities.attachmentDownloads, ['host', 'unsupported'])) &&

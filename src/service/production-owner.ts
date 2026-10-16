@@ -1,3 +1,5 @@
+import { resolveTaskRepos } from '../main/agent-manager/project-repos'
+import { ProductionWorkspaceProcessOwner } from './production-workspace-process-owner'
 import type { ArtifactCopyFileResult } from '../shared/artifacts'
 import type { AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import type { DesktopCallerContext } from './transport/desktop-registry'
@@ -15,7 +17,7 @@ import { homedir, networkInterfaces } from 'node:os'
 import { PortableAgentDetectionOwner } from '../main/agent-installer/portable-detection'
 import { createProductionGitProviderOwner } from './production-git-provider-owner'
 import { WorkspaceFileOwner, type WorkspaceFileOwnerOptions } from '../main/workspace-file-owner'
-import type { WorkspacePathReceipt } from '../shared/workspace-native-callbacks'
+import type { WorkspacePathReceipt, WorkspaceCleanupObserver } from '../shared/workspace-native-callbacks'
 import { GitProviderProcessOwner, type GitProviderProcessOwnerOptions } from '../main/git-provider-process-owner'
 import { createProductionVoiceOwner, type ProductionVoiceOwner, type ProductionVoiceResources } from './production-voice-owner'
 import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobileAccessSettings, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, type MobileApiDeps } from '../main/mobile-api-server'
@@ -117,6 +119,7 @@ export interface ProductionOwnerBootstrap {
   voice?: ProductionVoiceResources
   agentInstallation?: { nodeExecutable: string }
   native: {
+    workspaceCleanup?: { observe: WorkspaceCleanupObserver }
     /** Captured actual native tray owner, never a renderer setting grant. */
     trayAvailable?: boolean
     /** Actual optional suspend-inhibition bridge, selected at private launch. */
@@ -230,6 +233,8 @@ export class ProductionOwner {
   private databaseRuntime: DatabaseRuntimeOptions | null = null
   private broker: SecretBroker | null = null
   private services: ProductionServices | null = null
+  private workspaceProcesses: ProductionWorkspaceProcessOwner | null = null
+  private readonly workspaceTerminalUsers = new Set<object>()
   private connector: ConnectorBridgeCore | null = null
   private connectorRuntime: ConnectorRuntime | null = null
   private connectorService: ConnectorBridgeService | null = null
@@ -451,8 +456,14 @@ export class ProductionOwner {
     const services = this.services!, { db: database, agents: manager, sync, registry: plugins, oauth, worktrees, gitProviderProcess: processOwner, github, gitlab, forgejo, cleanup, workspaceFiles: files } = services
     const workspaceRoot = this.bootstrap.paths.workspaceRoot, reposRoot = this.bootstrap.paths.reposRoot
     return { database, manager, sync, worktrees, processOwner, github, gitlab, forgejo, cleanup, files, workspaceRoot, reposRoot,
+      assertIdleWorkspace: (taskId: string, path: string) => this.workspaceProcesses!.assertIdleWorkspace(taskId, path),
+      runWorkspaceCleanupMutation: <T>(ids: string[], effect: () => Promise<T>, beforeEffect: () => void, signal: AbortSignal): Promise<T> => {
+        const current = (): void => { beforeEffect(); this.assertWorkspaceCleanupTasksIdle(manager, database, ids); this.assertWorkspaceCleanupUsersIdle(services, ids) }
+        return manager.withWorkspaceCleanupExclusion(ids, () => this.workspaceProcesses!.run(ids, effect, current, signal), () => this.workspaceProcesses!.inflightCount === 0)
+      },
       beforeWorkspaceMutation: (taskIds: readonly string[]): void => {
         this.getDatabaseBindingLease()
+        this.workspaceProcesses!.assertOtherWorkAllowed()
         if (files.inflightCount || services.heartbeatFiles.inflightCount || taskIds.some(id => services.heartbeat.hasTaskOwnership(id))) throw new ProductionOwnerError('WORKSPACE_BUSY')
       },
       assertWorktreeRuntimeOwners: (owners: { database: DatabaseManager; manager: AgentManager; sync: SyncManager; worktrees: WorktreeManager; processOwner: GitProviderProcessOwner; github: GitHubManager; gitlab: GitLabManager; forgejo: ForgejoManager; cleanup: WorkspaceCleanupSchedulerCore; files: WorkspaceFileOwner; workspaceRoot: string; reposRoot: string }): void => {
@@ -462,6 +473,60 @@ export class ProductionOwner {
         if (services.registry !== plugins || services.oauth !== oauth) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
         sync.assertOwners(database, plugins, oauth); files.assertOwners(workspaceRoot); worktrees.assertOwners(reposRoot, workspaceRoot, forgejo); processOwner.assertOpen(); github.assertOwners(processOwner); gitlab.assertOwners(processOwner); forgejo.assertOwners(processOwner)
       } }
+  }
+
+  /** Bounded scheduled repo binding; the manual route obtains the same facts
+   * through its per-caller TaskWorkspaceScopeReader. Retain exact snapshots. */
+  private captureCleanupRepositories(database: DatabaseManager, ids: readonly string[]) {
+    const read = () => {
+      const table = (name: 'projects' | 'project_repos', fields: Record<string, number>, where: string, params: readonly string[], maximum: number) => {
+        const lengths = Object.entries(fields).map(([field, max]) => ({ bytes: `COALESCE(length(CAST(${field} AS BLOB)),0)`, max }))
+        const stats = database.db.prepare(`SELECT COUNT(*) AS count,COALESCE(MAX(${lengths.map(value => `(${value.bytes}>${value.max})`).join(' OR ')}),0) AS oversized,COALESCE(SUM(${lengths.map(value => value.bytes).join('+')}),0) AS bytes FROM ${name} WHERE ${where}`).get(...params) as { count: number; oversized: number; bytes: number }
+        if (stats.count > maximum || stats.oversized || stats.bytes >= 890000) throw new Error('WORKSPACE_CLEANUP_DATA_LIMIT')
+        return database.db.prepare(`SELECT ${Object.keys(fields).join(',')} FROM ${name} WHERE ${where} ORDER BY id`).all(...params) as Array<Record<string, unknown>>
+      }
+      const tasks = createBoundedWorkspaceCleanupStore(database, () => {}).getTasks({ includeCoordinators: true }).filter(task => ids.includes(task.id))
+      if (tasks.length !== ids.length) throw new Error('WORKSPACE_CLEANUP_SCOPE_CHANGED')
+      const projectIds = [...new Set(tasks.map(task => task.project_id))], slots = projectIds.map(() => '?').join(',')
+      const projects = table('projects', { id: 128, git_provider: 32, git_org: 512 }, `id IN (${slots})`, projectIds, 128)
+      const repos = table('project_repos', { id: 128, project_id: 128, provider: 32, org: 512, name: 128, default_branch: 1024 }, `project_id IN (${slots})`, projectIds, 128)
+      const store = createBoundedWorkspaceCleanupStore(database, () => {})
+      const settings = Object.fromEntries(['git_provider', 'github_org', 'repo_providers'].map(key => [key, store.getSetting(key)]))
+      return { tasks, projects, repos, settings }
+    }
+    const captured = read(), snapshot = JSON.stringify(captured)
+    const groups = new Map<string, Array<{ org: string; repos: { fullName: string }[] }>>()
+    for (const task of captured.tasks) {
+      const resolved = resolveTaskRepos({ getProject: id => captured.projects.find(row => row.id === id) as unknown as ReturnType<DatabaseManager['getProject']>,
+        getProjectRepos: id => captured.repos.filter(row => row.project_id === id) as unknown as ReturnType<DatabaseManager['getProjectRepos']>,
+        getSetting: key => captured.settings[key] }, task)
+      if (resolved.length !== task.repos.length || new Set(resolved.map(repo => repo.name)).size !== resolved.length) throw new Error('WORKSPACE_CLEANUP_REPOSITORY_AUTHORITY_UNAVAILABLE')
+      groups.set(task.id, resolved.map(repo => ({ org: repo.org, repos: [{ fullName: repo.fullName }] })))
+    }
+    return { current: (): void => { if (JSON.stringify(read()) !== snapshot) throw new Error('WORKSPACE_CLEANUP_SCOPE_CHANGED') },
+      getRepoGroups: (id: string) => { const value = groups.get(id); if (!value) throw new Error('WORKSPACE_CLEANUP_SCOPE_CHANGED'); return value } }
+  }
+
+  private assertWorkspaceCleanupTasksIdle(manager: AgentManager, database: DatabaseManager, ids: readonly string[]): void {
+    const columns: string[] = []
+    for (const row of database.db.prepare('PRAGMA table_info(tasks)').iterate() as Iterable<{ name: string }>) {
+      if (columns.length >= 256 || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(row.name)) throw new Error('WORKSPACE_CLEANUP_DATA_INVALID')
+      columns.push(`COALESCE(length(CAST("${row.name}" AS BLOB)),0)`)
+    }
+    for (const id of ids) {
+      // Existing lifecycle/session helpers load the legacy full row. Bound it
+      // before handing control to those owners, including repeated rechecks.
+      const row = database.db.prepare(`SELECT status,agent_id,${columns.join('+')} AS bytes FROM tasks WHERE id=?`).get(id) as { status: string; agent_id: string | null; bytes: number } | undefined
+      if (!row || row.bytes > 128000) throw new Error('WORKSPACE_CLEANUP_DATA_LIMIT')
+      if (row.agent_id && database.db.prepare('SELECT 1 FROM agents WHERE id=? AND length(CAST(config AS BLOB))>128000').get(row.agent_id)) throw new Error('WORKSPACE_CLEANUP_DATA_LIMIT')
+      if (['agent_working', 'agent_learning', 'triaging'].includes(row.status) || manager.hasTaskStartOwnership(id) || manager.findSessionByTaskId(id)) throw new ProductionOwnerError('WORKSPACE_CLEANUP_BUSY')
+    }
+  }
+
+  private assertWorkspaceCleanupUsersIdle(services: ProductionServices, ids: readonly string[]): void {
+    this.getDatabaseBindingLease()
+    if (this.services !== services || services.workspaceFiles.inflightCount || services.heartbeatFiles.inflightCount ||
+      this.workspaceTerminalUsers.size || ids.some(id => services.heartbeat.hasTaskOwnership(id))) throw new ProductionOwnerError('WORKSPACE_CLEANUP_BUSY')
   }
 
   getUiBindingLease(): { ui: ProductionUiOwner; database: DatabaseManager; manager: AgentManager; assertUiOwners(owners: { ui: ProductionUiOwner; database: DatabaseManager; manager: AgentManager }): void } | null {
@@ -686,6 +751,10 @@ export class ProductionOwner {
       process.env.PATH = installed; this.ownedPath = { previous, installed }
     }
     const native = this.bootstrap.native
+    const workspaceProcesses = new ProductionWorkspaceProcessOwner(this.bootstrap.paths.workspaceRoot,
+      native.workspaceCleanup ? native.workspaceCleanup.observe.bind(native.workspaceCleanup) : undefined)
+    this.workspaceProcesses = workspaceProcesses
+    this.register('workspace-processes', () => workspaceProcesses.shutdown(), () => workspaceProcesses.close())
     const energy = native.energy ? new ProductionEnergyOwner({
       assertCurrent: () => {
         if (!this.lock || processRegistry[registryKey] !== this.identity || !['starting', 'ready', 'stopping', 'blocked'].includes(this.phase)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
@@ -732,7 +801,10 @@ export class ProductionOwner {
     this.register('git-provider-process', () => gitProviderProcess.stop(), () => gitProviderProcess.close())
     const worktrees = new WorktreeManager({ reposRoot: this.bootstrap.paths.reposRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot,
       portableLimits: WORKTREE_PORTABLE_LIMITS,
-      exec: gitProviders.exec, assertPath: gitProviders.assertPath,
+      exec: gitProviders.exec, assertPath: path => { workspaceProcesses.assertOtherWorkAllowed(); gitProviders.assertPath(path) },
+      beforeCleanupEffect: async id => {
+        if (workspaceProcesses.ownsCurrentScope) await workspaceProcesses.assertIdleWorkspace(id, join(this.bootstrap.paths.workspaceRoot, id))
+      },
       onWorktreeRemoved: (path, identity) => gitProviderProcess.retireWorktreeDirectory(path, identity),
       onTaskWorkspaceRemoved: (id, identity) => { workspaceFiles.retireWorkspace(id, identity); heartbeatFiles.retireWorkspace(id, identity); gitProviderProcess.retireWorktreeDirectory(join(this.bootstrap.paths.workspaceRoot, id), identity) }, emitProgress: data => this.emit('worktree:progress', data) })
     worktrees.setForgejoManager(forgejo)
@@ -742,6 +814,7 @@ export class ProductionOwner {
       native: { ...(native.openPath ? { openPath: native.openPath.bind(native) } : {}), ...(native.showItemInFolder ? { showItemInFolder: native.showItemInFolder.bind(native) } : {}) },
       assertCurrent: () => {
         if (this.abort.signal.aborted || !['starting', 'ready'].includes(this.phase) || processRegistry[registryKey] !== this.identity) throw new ProductionOwnerError('OWNER_CLOSING')
+        workspaceProcesses.assertOtherWorkAllowed()
         this.lock!.assertHeld()
       } }
     const workspaceFiles = this.boundaries.workspaceFiles ? this.boundaries.workspaceFiles(fileOptions) : new WorkspaceFileOwner(fileOptions)
@@ -827,13 +900,25 @@ export class ProductionOwner {
     configureCaptainGithubTools({ db, mergeDb: db, issueDb: db, notifyUser: (title, body) => this.notify(title, body), notifyRenderer: (channel, data) => this.emit(channel, data) })
     const chat = new ChatRuntime()
     this.register('chat', () => chat.shutdown(), () => chat.close())
-    const terminals = new TerminalServiceCore(this.boundaries.terminalProcessHost ?? {
+    const terminalHost: TerminalProcessHost = this.boundaries.terminalProcessHost ?? {
       resolveShell,
       // The resource-verified staged engine resolves its own physical pinned
       // native module only when a terminal is accepted, never from caller paths.
       create: options => createNodePty(options, createRequire(import.meta.url)('node-pty') as typeof import('node-pty')),
       getCwd: terminalProcessCwd
-    })
+    }
+    const terminals = new TerminalServiceCore({ resolveShell: () => terminalHost.resolveShell(),
+      create: options => {
+        workspaceProcesses.assertOtherWorkAllowed()
+        const token = {}; this.workspaceTerminalUsers.add(token)
+        try { return terminalHost.create({ ...options, onExit: (...args) => { this.workspaceTerminalUsers.delete(token); options.onExit(...args) } }) }
+        catch (error) { this.workspaceTerminalUsers.delete(token); throw error }
+      },
+      getCwd: async (pid, current) => {
+        workspaceProcesses.assertOtherWorkAllowed()
+        const token = {}; this.workspaceTerminalUsers.add(token)
+        try { return await terminalHost.getCwd(pid, current) } finally { this.workspaceTerminalUsers.delete(token) }
+      } })
     this.register('terminals', () => terminals.shutdown(), () => terminals.close())
     const createChatProvider = () => provider(db)
     const commanderStore = new CommanderStore(db)
@@ -872,7 +957,7 @@ export class ProductionOwner {
       return createHash('sha256').update(binding).digest('hex')
     }
     const heartbeat = new HeartbeatSchedulerCore(db, agents, { fileOwner: heartbeatFiles,
-      beforeTaskEffect: taskId => assertHeartbeatTaskEffects(heartbeatAuthority, taskId, heartbeatCaller),
+      beforeTaskEffect: taskId => { workspaceProcesses.assertOtherWorkAllowed(); assertHeartbeatTaskEffects(heartbeatAuthority, taskId, heartbeatCaller) },
       captureTaskBinding: captureHeartbeatBinding,
       preflightTask: (taskId, content, lastCheck) => {
         const initial = captureHeartbeatTaskEffects(heartbeatAuthority, taskId, heartbeatCaller)
@@ -889,8 +974,29 @@ export class ProductionOwner {
     const wakeups = new CaptainWaker(db, agents)
     const coordination = new ScheduledCoordination({ db, agents, getCommander: () => commanderService, createProvider: () => provider(db), notify: (title, body) => this.notify(title, body),
       getSpeech: () => native.speech?.get() ?? null, canPlayAudio: () => native.speech?.canPlayAudio() ?? false })
+    let scheduledRepositories: ReturnType<ProductionOwner['captureCleanupRepositories']> | null = null
     const cleanup = new WorkspaceCleanupSchedulerCore(db, worktrees, { workspacesRoot: this.bootstrap.paths.workspaceRoot,
-      portablePolicy: { beforeEffect: fileOptions.assertCurrent, signal: this.abort.signal, store: createBoundedWorkspaceCleanupStore(db, fileOptions.assertCurrent) },
+      portablePolicy: { beforeEffect: fileOptions.assertCurrent, signal: this.abort.signal, store: createBoundedWorkspaceCleanupStore(db, fileOptions.assertCurrent),
+        assertIdleWorkspace: (id, path) => workspaceProcesses.assertIdleWorkspace(id, path),
+        getRepoGroups: id => { if (!scheduledRepositories) throw new Error('WORKSPACE_CLEANUP_SCOPE_CHANGED'); return scheduledRepositories.getRepoGroups(id) },
+        runMutation: async (ids, effect) => {
+          const repositories = this.captureCleanupRepositories(db, ids)
+          const tasks = createBoundedWorkspaceCleanupStore(db, fileOptions.assertCurrent).getTasks({ includeCoordinators: true }).filter(task => ids.includes(task.id))
+          const sources = [...new Set(tasks.map(task => task.source_id).filter((id): id is string => typeof id === 'string'))].sort()
+          const current = (): void => {
+            fileOptions.assertCurrent(); repositories.current(); this.assertWorkspaceCleanupTasksIdle(agents, db, ids)
+            if (!this.services) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+            this.assertWorkspaceCleanupUsersIdle(this.services, ids)
+          }
+          this.assertWorkspaceCleanupTasksIdle(agents, db, ids)
+          const joined = () => agents.runTaskLifecycleMutation(ids, () => agents.withWorkspaceCleanupExclusion(ids, () => workspaceProcesses.run(ids, async () => {
+            scheduledRepositories = repositories
+            try { return await gitProviderProcess.withRequestGuard(() => worktrees.withRequestGuard(effect, current, this.abort.signal), current, this.abort.signal) }
+            finally { scheduledRepositories = null }
+          }, current, this.abort.signal), () => workspaceProcesses.inflightCount === 0))
+          const source = (index: number): ReturnType<typeof joined> => index === sources.length ? joined() : sync.runSourceMutation(sources[index]!, () => source(index + 1))
+          return source(0)
+        } },
       listWorkspaceDirs: () => readdirSync(this.bootstrap.paths.workspaceRoot, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.isSymbolicLink()).map(entry => entry.name),
       emit: (channel, data) => this.emit(channel, data) })
     for (const [name, scheduler] of [['heartbeat', heartbeat], ['recurrence', recurrence], ['automation', automation], ['wakeups', wakeups], ['coordination', coordination], ['cleanup', cleanup]] as const) {

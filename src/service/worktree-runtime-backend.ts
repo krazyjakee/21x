@@ -1,5 +1,5 @@
 import { AgentManager } from '../main/agent-manager-core'
-import { SyncManager } from '../main/sync-manager'
+import { SyncManager, SourceMutationBusyError } from '../main/sync-manager'
 import { WorktreeManager, WORKTREE_PORTABLE_LIMITS, type WorktreeRepo } from '../main/worktree-manager-core'
 import { WorkspaceCleanupSchedulerCore, createBoundedWorkspaceCleanupStore, type WorkspaceCleanupRequestControls } from '../main/workspace-cleanup-scheduler-core'
 import { WorkspaceFileOwner, WorkspaceFileError } from '../main/workspace-file-owner'
@@ -34,6 +34,8 @@ export interface WorktreeRuntimeBackendOptions extends WorktreeRuntimeOwners {
   canAccessSource(id: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   canAccessRepository(projectId: string, fullName: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   beforeWorkspaceMutation(taskIds: readonly string[]): void
+  assertIdleWorkspace?(taskId: string, path: string): Promise<void>
+  runWorkspaceCleanupMutation?<T>(taskIds: string[], effect: () => Promise<T>, beforeEffect: () => void, signal: AbortSignal): Promise<T>
   runWorktreeMutation?<T>(taskIds: string[], sourceIds: string[], effect: () => Promise<T>): Promise<T>
 }
 const mutation = (op: WorktreeRuntimeOperation): boolean => op === 'worktree:setup' || op === 'worktree:cleanup' || op === 'workspace:runCleanupNow'
@@ -187,7 +189,9 @@ export class WorktreeRuntimeBackend {
           for (const task of allTasks) scoped(task.id)
           const controls: WorkspaceCleanupRequestControls = { beforeEffect: recheck, signal, store: { getSetting: store.getSetting, getTasks: opts => { recheck(); return store.getTasks(opts) } }, getRepoGroups: id => {
             const groups = new Map<string, { org: string; repos: { fullName: string }[] }>(); for (const repo of scoped(id).repos) { const group = groups.get(repo.org) ?? { org: repo.org, repos: [] }; group.repos.push({ fullName: repo.fullName }); groups.set(repo.org, group) }; return [...groups.values()]
-          }, runMutation: (ids, effect) => lease(ids, [...usedSources], effect) }
+          }, ...(this.options.assertIdleWorkspace ? { assertIdleWorkspace: this.options.assertIdleWorkspace } : {}),
+          runMutation: (ids, effect) => lease(ids, [...usedSources], () => this.options.runWorkspaceCleanupMutation
+            ? this.options.runWorkspaceCleanupMutation(ids, effect, recheck, signal) : effect()) }
           const actual = await cleanup.runNow(controls); recheck(); result = { ...actual, errors: actual.errors.map(error => error === 'Cleanup is already in progress' ? error : WORKSPACE_RUNTIME_ERROR) }
         } else {
           const id = args[0] as string, binding = scoped(id), supplied = operation === 'worktree:readFile' ? (args[1] === null ? [] : [{ fullName: args[1] as string }]) : args[1] as { fullName: string; defaultBranch?: string }[]
@@ -246,12 +250,15 @@ export class WorktreeRuntimeBackend {
       } }), recheck, signal)
     } catch (error) {
       current(); if (error instanceof ServiceProtocolError) throw error
+      if (error instanceof SourceMutationBusyError) throw new ServiceProtocolError('BACKPRESSURE')
       if (error instanceof GitProviderProcessError) {
         const codes = { GIT_PROVIDER_CANCELLED: 'CANCELLED', GIT_PROVIDER_CLOSED: 'DISCONNECTED', GIT_PROVIDER_BUSY: 'BACKPRESSURE', GIT_PROVIDER_TIMEOUT: 'TIMEOUT', GIT_PROVIDER_OUTPUT_LIMIT: 'FRAME_TOO_LARGE', GIT_PROVIDER_INVALID_RESULT: 'INVALID_RESULT' } as const
         if (Object.hasOwn(codes, error.code)) throw new ServiceProtocolError(codes[error.code as keyof typeof codes])
       }
       if (error instanceof WorkspaceFileError && ['WORKSPACE_PATH_REFUSED','WORKSPACE_PATH_CHANGED'].includes(error.code)) throw new ServiceProtocolError('INVALID_REQUEST')
       if (error instanceof Error) {
+        if (error.message === 'WORKSPACE_BUSY' || error.message === 'WORKSPACE_CLEANUP_BUSY' || error.message === 'WORKSPACE_CLEANUP_PROCESS_NOT_IDLE') throw new ServiceProtocolError('BACKPRESSURE')
+        if (error.message === 'WORKSPACE_CLEANUP_PROCESS_RESULT_INVALID') throw new ServiceProtocolError('INVALID_RESULT')
         if (/^WORKSPACE_CLEANUP_.*UNAVAILABLE$/.test(error.message) || error.message === 'WORKTREE_REMOTE_SCOPE_UNAVAILABLE') throw new ServiceProtocolError('UNKNOWN_OPERATION')
         if (/^WORKTREE_(?:OUTPUT|FILES|SCAN|DEPTH)_LIMIT$/.test(error.message) || error.message === 'WORKSPACE_CLEANUP_DATA_LIMIT' || error.message === 'WORKSPACE_CLEANUP_SCAN_LIMIT') throw new ServiceProtocolError('FRAME_TOO_LARGE')
         if (/^WORKSPACE_CLEANUP_(?:ORPHAN|SCOPE|PATH|DATA|REPOSITORY)/.test(error.message) || /^WORKTREE_(?:PATH|REF|CLONE|DIRECTORY)/.test(error.message)) throw new ServiceProtocolError('INVALID_REQUEST')

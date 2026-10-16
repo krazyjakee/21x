@@ -14,7 +14,7 @@ import type { ProductionUiNativeHost } from '../main/production-ui-owner'
 import type { ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { isProductionLaunchDescriptor, isProductionInitialize, PRODUCTION_HOST_SCHEMAS } from '../shared/production-bootstrap'
 import { HOST_OPERATION_SCHEMAS } from '../shared/host-services'
-import { isWorkspacePathReceipt, WORKSPACE_NATIVE_CALLBACK_SCHEMAS, type WorkspacePathReceipt } from '../shared/workspace-native-callbacks'
+import { isWorkspacePathReceipt, WORKSPACE_NATIVE_CALLBACK_SCHEMAS, WORKSPACE_CLEANUP_CALLBACK_SCHEMA, matchesWorkspaceCleanupObservation, type WorkspaceCleanupObserver, type WorkspacePathReceipt } from '../shared/workspace-native-callbacks'
 import { hasExactKeys, isBootstrapResult, isRecord, SERVICE_PROTOCOL_VERSION, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
 import { ProductionOwner, type ProductionOwnerBootstrap, type ProductionOwnerExternalBoundaries, type ProductionServices } from './production-owner'
 import { ProductionDesktopBindings, PRODUCTION_COMMAND_CODECS, PRODUCTION_EVENT_CODECS, validateProductionEventWire, type ProductionDesktopBindingOptions } from './production-desktop-bindings'
@@ -24,6 +24,7 @@ import type { DesktopCallerContext } from './transport/desktop-registry'
 import { ServicePeer, type OperationSchema } from './transport/peer'
 
 export interface ProductionPrivateCallbacks {
+  cleanupObservation: WorkspaceCleanupObserver
   copyArtifact(receipt: WorkspacePathReceipt, leaseId: string, beforeEffect: () => void): Promise<ArtifactCopyFileResult>
   openAttachment(receipt: AttachmentPathReceipt, leaseId: string): Promise<void>
   downloadAttachment(receipt: AttachmentPathReceipt, leaseId: string, beforeEffect: () => void): Promise<void>
@@ -88,6 +89,14 @@ export class ProductionService {
     if (!sealed.has(host)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const construction = host.construction, descriptor = construction.descriptor
     const callbacks: ProductionPrivateCallbacks = {
+      cleanupObservation: async (request, signal) => {
+        if (descriptor.capabilities.workspaceCleanup !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
+        if (request.action !== 'release' && signal.aborted) throw new ServiceProtocolError('CANCELLED')
+        // A public cancellation cannot abandon a late acquired native lease.
+        const result = await this.retain(this.peer.request('host.workspace.cleanupObservation', request as unknown as JsonValue))
+        if (!matchesWorkspaceCleanupObservation(request, result)) throw new ServiceProtocolError('INVALID_RESULT')
+        return result
+      },
       copyArtifact: async (receipt, leaseId, beforeEffect) => {
         if (descriptor.capabilities.artifactClipboard !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
         if (!isArtifactClipboardReceipt(receipt) || typeof beforeEffect !== 'function') throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -321,6 +330,7 @@ export class ProductionService {
     for (const [operation, schema] of Object.entries(PRODUCTION_HOST_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.externalUrls === 'host') operations['host.shell.openExternal'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateResult }
     if (descriptor.capabilities.workspaceFiles === 'host') for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
+    if (descriptor.capabilities.workspaceCleanup === 'host') operations['host.workspace.cleanupObservation'] = WORKSPACE_CLEANUP_CALLBACK_SCHEMA
     if (descriptor.capabilities.notifications === 'host') for (const operation of ['host.notification.show', 'host.notification.status'] as const) operations[operation] = { validatePayload: HOST_OPERATION_SCHEMAS[operation].validateRequest, validateResult: HOST_OPERATION_SCHEMAS[operation].validateResult }
     if (descriptor.capabilities.energy === 'host') operations['host.sleep.set'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.sleep.set'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.sleep.set'].validateResult }
     if (descriptor.capabilities.ui === 'host') for (const [operation, schema] of Object.entries(UI_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
@@ -445,6 +455,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
       native: { trayAvailable: descriptor.capabilities.tray === 'host', ...(descriptor.capabilities.energy === 'host' ? { energy: { setActive: callbacks.setSleep! } } : {}), agents: { renderer: { kind: 'unsupported' }, notifications: descriptor.capabilities.notifications === 'host' ? { kind: 'native', isSupported: () => true, show: ({ title, body }) => callbacks.notifyStatus!(title, body) } : { kind: 'unsupported' }, energy: { kind: 'unsupported' }, configuredMcp: descriptor.capabilities.configuredMcp },
         prepareRuntime: callbacks.prepare, drainOwnedProcesses: callbacks.drain, openExternal: callbacks.openExternal,
         ...(descriptor.capabilities.workspaceFiles === 'host' ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}),
+        ...(descriptor.capabilities.workspaceCleanup === 'host' ? { workspaceCleanup: { observe: callbacks.cleanupObservation } } : {}),
         ...(descriptor.capabilities.attachmentFiles === 'host' ? { openAttachment: callbacks.openAttachment } : {}),
         ...(descriptor.capabilities.attachmentDownloads === 'host' ? { downloadAttachment: callbacks.downloadAttachment } : {}),
         ...(descriptor.capabilities.artifactClipboard === 'host' ? { copyArtifact: callbacks.copyArtifact } : {}),

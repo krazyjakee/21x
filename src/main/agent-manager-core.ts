@@ -354,6 +354,8 @@ export class AgentManager extends EventEmitter {
   /** In-flight admitted starts, so a durable message accepted during warm-up
    * joins that start instead of opening a competing Captain session. */
   private sessionStarts: Map<string, Promise<string>> = new Map()
+  private workspaceCleanupExclusion = false
+  private readonly workspaceProcessWork = new Set<Promise<unknown>>()
   /** Actual task startup/cleanup receipts outlive bounded public deadlines. */
   private readonly rawTaskStarts = new Map<string, Set<Promise<unknown>>>()
   /** Raw flights stay owned even when their caller's startup deadline expires. */
@@ -1092,6 +1094,7 @@ export class AgentManager extends EventEmitter {
 
   /** Adapters are created lazily and cached per backend type. */
   private getAdapterByType(backendType: string): CodingAgentAdapter | null {
+    this.assertWorkspaceCleanupAvailable()
     const cached = this.adapters.get(backendType)
     if (cached) return cached
     const adapter = this.host.createAdapter(backendType, this.db)
@@ -1219,6 +1222,7 @@ export class AgentManager extends EventEmitter {
   /** A definition/review lease blocks new dispatches while source effects or
    * acknowledged idle teardown finish. Shutdown joins this work before SQLite. */
   async runTaskGroupMutation<T>(taskIds: string[], mutation: () => Promise<T>): Promise<T> {
+    this.assertWorkspaceCleanupAvailable()
     if (this.shuttingDown) throw new Error('The app is shutting down.')
     if (this.productionAdmissionMutation) throw new Error('The agent configuration is being updated. Retry after it finishes.')
     if (!Array.isArray(taskIds) || !taskIds.length || taskIds.length > 32 || taskIds.some(id => typeof id !== 'string' || !id))
@@ -1240,6 +1244,7 @@ export class AgentManager extends EventEmitter {
   /** Ordinary task writes join accepted sends before lifecycle side effects.
    * The domain owner validates scope/references before entering this lease. */
   async runTaskLifecycleMutation<T>(taskIds: string[], mutation: () => Promise<T>): Promise<T> {
+    this.assertWorkspaceCleanupAvailable()
     if (this.shuttingDown) throw new Error('The app is shutting down.')
     if (this.productionAdmissionMutation) throw new Error('The agent configuration is being updated. Retry after it finishes.')
     if (!Array.isArray(taskIds) || !taskIds.length || taskIds.length > 128 || taskIds.some(id => typeof id !== 'string' || !id) || typeof mutation !== 'function')
@@ -1261,10 +1266,58 @@ export class AgentManager extends EventEmitter {
     })())
   }
 
+  /** Production cleanup borrows the existing task leases, then excludes ALL
+   * new managed work (including other task/captain/heartbeat namespaces).
+   * No process is killed; an already owned process or raw start refuses. */
+  withWorkspaceCleanupExclusion<T>(taskIds: readonly string[], effect: () => Promise<T>, isRetired: () => boolean = () => true): Promise<T> {
+    this.taskGroupRequests.assertCurrent()
+    if (this.shuttingDown || this.startupReconciliation || this.workspaceCleanupExclusion || this.productionAdmissionMutation || this.productionCredentialMutation ||
+      this.agentConfigurationMutations.size || this.backendConfigurationMutations.size || this.workspaceProcessWork.size || this.sessions.size || this.sessionStarts.size || this.rawTaskStarts.size ||
+      this.admittedStarts.size || this.taskStops.size || this.sessionStops.size || this.captainSwitches.size || this.providerRecoveryFlights.size ||
+      this.taskGroupMutations.size || this.taskLifecycleMutations.size !== new Set(taskIds).size || !taskIds.length || taskIds.some(id => !this.taskLifecycleMutations.has(id))) return Promise.reject(new Error('WORKSPACE_CLEANUP_BUSY'))
+    this.workspaceCleanupExclusion = true
+    return this.ownShutdownWork((async () => {
+      try { return await effect() }
+      finally {
+        // A rejected public wait is not a native retirement receipt. Failed or
+        // uncertain observer teardown leaves admission fenced through shutdown.
+        if (isRetired()) {
+          this.workspaceCleanupExclusion = false
+          this.drainStartQueue(); this.scheduleProviderRecovery()
+        }
+      }
+    })())
+  }
+
+  private retainWorkspaceProcessWork<T>(effect: () => Promise<T>, cleanup = false): Promise<T> {
+    if (!cleanup) this.assertWorkspaceCleanupAvailable()
+    // Register before invoking any adapter. An ignored timeout/cancellation
+    // keeps this exact raw initialization/model/config call counted until settle.
+    let resolveRaw!: (value: T | PromiseLike<T>) => void
+    let rejectRaw!: (reason: unknown) => void
+    const raw = new Promise<T>((resolve, reject) => {
+      resolveRaw = resolve
+      rejectRaw = reject
+    })
+    this.workspaceProcessWork.add(raw)
+    void raw.then(() => this.workspaceProcessWork.delete(raw), () => this.workspaceProcessWork.delete(raw))
+    this.ownShutdownWork(raw)
+    // Preserve synchronous adapter admission while making reentrant shutdown
+    // or cleanup observe the retained receipt before the adapter can run.
+    try { resolveRaw(effect()) }
+    catch (error) { rejectRaw(error) }
+    return raw
+  }
+
+  private assertWorkspaceCleanupAvailable(): void {
+    if (this.workspaceCleanupExclusion) throw new Error('WORKSPACE_CLEANUP_BUSY')
+  }
+
   /** Configuration changes join the actual lifecycle owner. Cap/name changes
    * leave live sessions intact; runtime edits and deletion acknowledge Stop
    * before committing. Shared backend adapters cannot disrupt another agent. */
   async runAgentConfigurationMutation<T>(agentId: string, kind: 'update' | 'delete', mutation: () => T | Promise<T>, changes?: UpdateAgentData): Promise<T> {
+    this.assertWorkspaceCleanupAvailable()
     if (this.shuttingDown) throw new Error('The app is shutting down.')
     if (this.productionCredentialMutation) throw new Error('Wait for the credential change to finish before changing agents.')
     if (typeof agentId !== 'string' || !agentId || !['update', 'delete'].includes(kind) || typeof mutation !== 'function') throw new Error('Invalid agent configuration mutation.')
@@ -1311,7 +1364,7 @@ export class AgentManager extends EventEmitter {
           for (const type of backends) {
             const adapter = this.adapters.get(type)
             if (adapter?.notifyConfigChanged) {
-              try { await this.ownShutdownWork(adapter.notifyConfigChanged()) }
+              try { await this.retainWorkspaceProcessWork(() => adapter.notifyConfigChanged!()) }
               catch (error) { this.failedBackendConfigurations.add(type); throw error }
             }
             this.failedBackendConfigurations.delete(type)
@@ -1464,6 +1517,7 @@ export class AgentManager extends EventEmitter {
     return this.runCliRuntimeMutation(this.cliConfigurationTargets(clis), mutation, false)
   }
   private runCliRuntimeMutation<T>(targets: Set<string>, mutation: () => Promise<T>, installation: boolean): Promise<T> {
+    this.assertWorkspaceCleanupAvailable()
     this.taskGroupRequests.assertCurrent()
     if (typeof mutation !== 'function') return Promise.reject(new Error('A CLI mutation is required.'))
     if (this.shuttingDown || this.productionCredentialMutation || this.productionAdmissionMutation || this.agentConfigurationMutations.size || this.backendConfigurationMutations.size
@@ -1510,7 +1564,7 @@ export class AgentManager extends EventEmitter {
           const adapter = this.adapters.get(backend)
           if (adapter?.notifyConfigChanged) {
             try {
-              await this.ownShutdownWork(adapter.notifyConfigChanged())
+              await this.retainWorkspaceProcessWork(() => adapter.notifyConfigChanged!())
               this.taskGroupRequests.assertCurrent()
               if (this.shuttingDown) throw new Error('The app is shutting down.')
             } catch (error) { this.failedBackendConfigurations.add(backend); throw error }
@@ -1546,6 +1600,7 @@ export class AgentManager extends EventEmitter {
   }
 
   runProductionCredentialMutation<T>(input: ProductionCredentialMutation, mutation: () => T | Promise<T>): Promise<T> {
+    this.assertWorkspaceCleanupAvailable()
     if (this.shuttingDown || this.productionCredentialMutation || this.agentConfigurationMutations.size || this.backendConfigurationMutations.size)
       return Promise.reject(new Error('The credential lifecycle is unavailable. Retry after current changes finish.'))
     if (!input || !['provider-key', 'secret', 'mcp-server', 'default-agent', 'plugin-resources'].includes(input.kind) || typeof mutation !== 'function' ||
@@ -1584,7 +1639,7 @@ export class AgentManager extends EventEmitter {
         const result = await mutation()
         for (const backend of backends) {
           try {
-            await this.ownShutdownWork(this.adapters.get(backend)!.notifyConfigChanged!())
+            await this.retainWorkspaceProcessWork(() => this.adapters.get(backend)!.notifyConfigChanged!())
             this.failedBackendConfigurations.delete(backend)
           } catch (error) { this.failedBackendConfigurations.add(backend); throw error }
         }
@@ -1600,6 +1655,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private assertAgentConfigurationAvailable(agentId: string | undefined): void {
+    this.assertWorkspaceCleanupAvailable()
     this.taskGroupRequests.assertCurrent()
     if (!agentId) return
     const agent = this.db.getAgent(agentId)
@@ -1638,6 +1694,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private assertNoTaskGroupMutation(taskId: string): void {
+    this.assertWorkspaceCleanupAvailable()
     const pendingCleanup = this.findSessionByTaskId(taskId)
     if (pendingCleanup && this.scopedCleanupFailures.has(pendingCleanup.sessionId)) throw new Error('Accepted native cleanup must finish before this task can restart.')
     if (this.taskLifecycleMutations.has(taskId)) throw new Error('The task is being updated. Retry after its lifecycle change finishes.')
@@ -1655,10 +1712,18 @@ export class AgentManager extends EventEmitter {
       this.retainCaptainObservation(this.managedEngine(managed)!.finishTurn(owner.taskId, sessionId, intentId,
         activityOutcome === 'cancelled' || activityOutcome === 'interrupted' ? activityOutcome : status === 'idle' ? 'end_turn' : 'error'))
     }
-    for (const taskId of this.taskGroupActivityTargets(owner.taskId, status)) this.sendToRenderer('agent:status', {
-      sessionId, agentId: owner.agentId, taskId, status,
-      ...(activityOutcome ? { activityOutcome } : {}), ...this.activityObservations.stamp()
-    })
+    for (const taskId of this.taskGroupActivityTargets(owner.taskId, status)) {
+      if (sessionId) this.sendToRenderer('agent:status', {
+        sessionId, agentId: owner.agentId, taskId, status,
+        ...(activityOutcome ? { activityOutcome } : {}), ...this.activityObservations.stamp()
+      })
+      else if (this.db.getTask(taskId)) {
+        // A rejected start has no runtime identity. Its durable transcript and
+        // queue audit carry the error; invalidate the existing task so clients
+        // reread those facts without inventing a session or provider status.
+        this.sendToRenderer('task:updated', { taskId, updates: {} })
+      }
+    }
     // Every idle transition and every stop ends here: a slot may have freed.
     if (status === 'idle' || status === 'error') this.scheduleStartQueueDrain()
     // Project events (#57): an agent waiting on the user, or one that failed,
@@ -1776,12 +1841,12 @@ export class AgentManager extends EventEmitter {
 
   private async initializeAndProbeAdapter(adapter: CodingAgentAdapter, taskId: string, generation = this.captainRuntimes.get(taskId)?.generation): Promise<void> {
     this.taskGroupRequests.assertCurrent()
-    const init = this.ownShutdownWork(adapter.initialize())
+    const init = this.retainWorkspaceProcessWork(() => adapter.initialize())
     try {
       await withStartupDeadline(init, AGENT_SERVER_START_TIMEOUT_MS, 'Agent server startup')
       this.taskGroupRequests.assertCurrent()
       const health = typeof adapter.checkHealth === 'function'
-        ? await withStartupDeadline(this.ownShutdownWork(adapter.checkHealth()), AGENT_SERVER_START_TIMEOUT_MS, 'Agent health probe')
+        ? await withStartupDeadline(this.retainWorkspaceProcessWork(() => adapter.checkHealth()), AGENT_SERVER_START_TIMEOUT_MS, 'Agent health probe')
         : { available: true }
       this.taskGroupRequests.assertCurrent()
       if (!health.available) {
@@ -1802,7 +1867,7 @@ export class AgentManager extends EventEmitter {
     } catch (error) {
       const stoppable = adapter as CodingAgentAdapter & { stopServer?: () => Promise<void> }
       if (![...this.sessions.values()].some((session) => session.adapter === adapter) && typeof stoppable.stopServer === 'function') {
-        void this.ownShutdownWork(stoppable.stopServer()).catch(() => {})
+        void this.retainWorkspaceProcessWork(() => stoppable.stopServer!(), true).catch(() => {})
       }
       throw error
     }
@@ -1908,6 +1973,7 @@ export class AgentManager extends EventEmitter {
     deferCoordinatorBinding = false,
     mayStart: () => boolean = () => !this.shuttingDown
   ): Promise<string> {
+    this.assertWorkspaceCleanupAvailable()
     this.taskGroupRequests.assertCurrent()
     if (this.productionAdmissionMutation) throw new Error('Wait for CLI configuration changes before starting a session.')
     const agent = this.db.getAgent(agentId)!
@@ -3465,8 +3531,8 @@ export class AgentManager extends EventEmitter {
       this.scheduleStartQueueDrain()
       // The renderer pre-registered a "starting" session before awaiting this
       // call, and the IPC rejection alone does not tell other bound views the
-      // start failed. Surface the reason in the transcript and as an error
-      // status so every view leaves "Agent is starting..." instead of sitting
+      // start failed. Surface the reason in the durable transcript and invalidate
+      // the task so every view leaves "Agent is starting..." instead of sitting
       // there forever (e.g. the backend process died before it came up).
       const message = error instanceof Error ? error.message : String(error)
       if (runtime) {
@@ -4049,6 +4115,7 @@ export class AgentManager extends EventEmitter {
    * Uses the real task's workspace dir so the agent has repo context for gh commands.
    */
   async sendHeartbeatViaCaptain(agentId: string, taskId: string, heartbeatPrompt: string): Promise<string> {
+    this.assertWorkspaceCleanupAvailable()
     this.taskGroupRequests.assertCurrent()
     const heartbeatTaskId = `heartbeat-${taskId}`
 
@@ -4073,6 +4140,7 @@ export class AgentManager extends EventEmitter {
    * Only called when captain detected something that needs the task agent to act on.
    */
   async startHeartbeatSession(agentId: string, taskId: string, heartbeatPrompt: string): Promise<string> {
+    this.assertWorkspaceCleanupAvailable()
     this.taskGroupRequests.assertCurrent()
     const task = this.db.getTask(taskId)
     let sessionId = task?.session_id
@@ -5512,7 +5580,7 @@ export class AgentManager extends EventEmitter {
    */
   drainStartQueue(): void {
     if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.drainStartQueue())
-    if (this.shuttingDown || this.startupReconciliation || this.productionAdmissionMutation) return
+    if (this.shuttingDown || this.startupReconciliation || this.productionAdmissionMutation || this.workspaceCleanupExclusion) return
     let changed = false
     let nextRetryAt: number | null = null
     // #150: a priority changed while waiting reorders the queue now.
@@ -6046,13 +6114,14 @@ export class AgentManager extends EventEmitter {
 
   private scheduleProviderRecovery(): void {
     if (this.taskGroupRequests.scoped) return this.taskGroupRequests.detached(() => this.scheduleProviderRecovery())
-    if (this.shuttingDown || this.startupReconciliation) return
+    if (this.shuttingDown || this.startupReconciliation || this.workspaceCleanupExclusion) return
     if (this.providerRecoveryTimer) clearTimeout(this.providerRecoveryTimer)
     const pending = this.providerRecoveries.list(['retrying']).filter((row) => !this.providerRecoveryFlights.has(row.taskId) && !this.agentConfigurationBlocked(row.agentId) && !this.taskLifecycleMutations.has(row.taskId))
     if (!pending.length) { this.providerRecoveryTimer = null; return }
     const deadline = Math.min(...pending.map((row) => row.nextRetryAt ?? Date.now()))
     this.providerRecoveryTimer = setTimeout(() => {
       this.providerRecoveryTimer = null
+      if (this.workspaceCleanupExclusion) return
       for (const row of this.providerRecoveries.list(['retrying'])) {
         if (row.state !== 'retrying' || (row.nextRetryAt ?? 0) > Date.now() || this.providerRecoveryFlights.has(row.taskId) || this.agentConfigurationBlocked(row.agentId) || this.taskLifecycleMutations.has(row.taskId)) continue
         this.providerRecoveryFlights.add(row.taskId)
@@ -6065,7 +6134,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private async dispatchProviderRecovery(original: ProviderRecovery): Promise<void> {
-    if (this.shuttingDown) return
+    if (this.shuttingDown || this.workspaceCleanupExclusion) return
     let row = this.providerRecoveries.get(original.taskId)
     if (!row || row.generation !== original.generation || row.state !== 'retrying') return
     const task = this.db.getTask(row.taskId)
@@ -6629,10 +6698,11 @@ export class AgentManager extends EventEmitter {
   }
 
   async getProviders(serverUrl?: string, directory?: string, backendType?: string): Promise<{ providers: { id: string; name: string; [key: string]: unknown }[]; default: Record<string, string> } | null> {
-    return this.ownShutdownWork(this.getProvidersNow(serverUrl, directory, backendType))
+    return this.retainWorkspaceProcessWork(() => this.getProvidersNow(serverUrl, directory, backendType))
   }
 
   private async getProvidersNow(serverUrl?: string, directory?: string, backendType?: string): ReturnType<AgentManager['getProviders']> {
+    this.assertWorkspaceCleanupAvailable()
     if (this.shuttingDown) return null
     try {
       const defaultAgent = this.defaultAgent()
@@ -6668,10 +6738,11 @@ export class AgentManager extends EventEmitter {
    * backend has no such listing or the CLI could not be asked.
    */
   async listModels(backendType: string): Promise<BackendModel[] | null> {
-    return this.ownShutdownWork(this.listModelsNow(backendType))
+    return this.retainWorkspaceProcessWork(() => this.listModelsNow(backendType))
   }
 
   private async listModelsNow(backendType: string): Promise<BackendModel[] | null> {
+    this.assertWorkspaceCleanupAvailable()
     if (this.shuttingDown) return null
     if (this.backendConfigurationMutations.has(backendType) || this.failedBackendConfigurations.has(backendType)) return null
     const adapter = this.getAdapterByType(backendType)

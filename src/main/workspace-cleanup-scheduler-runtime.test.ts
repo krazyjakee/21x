@@ -37,7 +37,21 @@ describe('strict portable cleanup policy', () => {
     const value = oldTask(), observed = vi.fn(async (id: string, path: string) => { expect(id).toBe(value.task.id); expect(path).toBe(value.path); expect(existsSync(path)).toBe(true) })
     let leased = false
     const actual = await owner.runNow({ ...controls, assertIdleWorkspace: observed, runMutation: async (ids, effect) => { expect(ids).toEqual([value.task.id]); leased = true; try { return await effect() } finally { leased = false } }, beforeEffect() { if (observed.mock.calls.length) expect(leased).toBe(true) } })
-    expect(actual).toEqual({ cleaned: 1, errors: [], nodeModulesCleaned: 0 }); expect(existsSync(value.path)).toBe(false); expect(observed).toHaveBeenCalledOnce(); expect(db.getTask(value.task.id)).toBeDefined()
+    expect(actual).toEqual({ cleaned: 1, errors: [], nodeModulesCleaned: 0 }); expect(existsSync(value.path)).toBe(false); expect(observed).toHaveBeenCalledTimes(2); expect(db.getTask(value.task.id)).toBeDefined()
+  })
+  it('requires a fresh observation at the actual removal boundary after planning accepted idle', async () => {
+    const value = oldTask(), observed = vi.fn(async () => {})
+    observed.mockImplementationOnce(async () => {}).mockImplementationOnce(async () => { throw new Error('WORKSPACE_CLEANUP_PROCESS_NOT_IDLE') })
+    await expect(owner.runNow({ ...controls, assertIdleWorkspace: observed, runMutation: async (_ids, effect) => effect() })).rejects.toThrow('PROCESS_NOT_IDLE')
+    expect(observed).toHaveBeenCalledTimes(2); expect(readFileSync(join(value.path, 'kept.txt'), 'utf8')).toBe('actual owned bytes')
+  })
+  it('refuses a replacement session binding or malformed task time after planning', async () => {
+    const value = oldTask()
+    await expect(owner.runNow({ ...controls, assertIdleWorkspace: async () => { db.db.prepare('UPDATE tasks SET session_id=? WHERE id=?').run('replacement-generation', value.task.id) }, runMutation: async (_ids, effect) => effect() })).rejects.toThrow('SCOPE_CHANGED')
+    expect(existsSync(value.path)).toBe(true)
+    db.db.prepare('UPDATE tasks SET updated_at=? WHERE id=?').run('invalid-time', value.task.id)
+    await expect(owner.runNow({ ...controls, assertIdleWorkspace: async () => {}, runMutation: async (_ids, effect) => effect() })).rejects.toThrow('DATA_INVALID')
+    expect(existsSync(value.path)).toBe(true)
   })
   it('retains an accepted process observation across cancellation and close timeout without deleting bytes', async () => {
     const value = oldTask(), gate = held(), entered = held()

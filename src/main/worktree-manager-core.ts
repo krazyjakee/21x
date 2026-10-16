@@ -90,6 +90,8 @@ export interface WorktreeHost {
   /** Trusted captured process owner; absent only for the legacy host. */
   exec?(program: 'git' | 'gh' | 'glab', args: string[], options: ExecFileOptions & { allowDiffExitOne?: true }): Promise<{ stdout: string; stderr: string }>
   assertPath?(path: string): void
+  /** Optional captured cleanup observer; rejection must never enter fallback. */
+  beforeCleanupEffect?(taskId: string): Promise<void>
   onTaskWorkspaceRemoved?(taskId: string, identity: { dev: string; ino: string }): void
   onWorktreeRemoved?(path: string, identity: { dev: string; ino: string }): void
   portableLimits?: typeof WORKTREE_PORTABLE_LIMITS
@@ -536,6 +538,15 @@ export class WorktreeManager {
   ): Promise<void> {
     const taskDir = this.taskDirectory(taskId)
     const taskIdentity = this.host.assertPath && existsSync(taskDir) ? lstatSync(taskDir, { bigint: true }) : null
+    const beforeRemoval = async (path: string, captured: BigIntStats | null): Promise<void> => {
+      if (!this.host.beforeCleanupEffect) return
+      this.assertRequestCurrent()
+      await this.host.beforeCleanupEffect(taskId)
+      // Observations yield. Recheck request, physical task generation and the
+      // precise target after the await and before any destructive boundary.
+      this.assertRequestCurrent(); this.assertRemoval(taskDir, taskIdentity)
+      if (path !== taskDir) this.assertRemoval(path, captured)
+    }
     for (const repo of repos) {
       const repoName = repo.fullName.split('/').pop() || repo.fullName
       const barePath = this.bareClonePath(org, repoName)
@@ -543,6 +554,7 @@ export class WorktreeManager {
       const worktreeIdentity = this.host.assertPath && existsSync(wtPath) ? lstatSync(wtPath, { bigint: true }) : null
 
       if (existsSync(barePath) && existsSync(wtPath)) {
+        await beforeRemoval(wtPath, worktreeIdentity)
         try {
           await this.execOwned('git', ['worktree', 'remove', wtPath, '--force'], {
             cwd: barePath
@@ -551,12 +563,14 @@ export class WorktreeManager {
           this.fallback(error)
           // If git worktree remove fails, remove directory manually
           if (existsSync(wtPath)) {
+            await beforeRemoval(wtPath, worktreeIdentity)
             this.assertRequestCurrent()
             this.assertRemoval(wtPath, worktreeIdentity)
             rmSync(wtPath, { recursive: true, force: true })
           }
         }
       } else if (existsSync(wtPath)) {
+        await beforeRemoval(wtPath, worktreeIdentity)
         this.assertRequestCurrent()
         this.assertRemoval(wtPath, worktreeIdentity)
         rmSync(wtPath, { recursive: true, force: true })
@@ -569,6 +583,7 @@ export class WorktreeManager {
     // Remove task directory if requested (skip when session is still active)
     if (removeTaskDir) {
       if (existsSync(taskDir)) {
+        await beforeRemoval(taskDir, taskIdentity)
         try {
           this.assertRequestCurrent()
           this.assertRemoval(taskDir, taskIdentity)

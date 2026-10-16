@@ -14,9 +14,9 @@ use tauri_plugin_opener::OpenerExt;
 use twentyonex_engine::{
     production::{
         DelegatedCgroup, HostCapability, OptionalCapability, ProductionAttachmentHost,
-        ProductionCapabilities, ProductionDescriptor, ProductionEnergyHost, ProductionEngine,
-        ProductionNativeHost, ProductionNotificationHost, ProductionPaths, ProductionWorkspaceHost,
-        ProfileIntent, TrustedProductionLaunch,
+        ProductionCapabilities, ProductionCleanupHost, ProductionDescriptor, ProductionEnergyHost,
+        ProductionEngine, ProductionNativeHost, ProductionNotificationHost, ProductionPaths,
+        ProductionWorkspaceHost, ProfileIntent, TrustedProductionLaunch,
     },
     production_attachment_files::{NativeAttachmentFileOwner, NativeAttachmentReceipt},
     production_files::{NativeWorkspaceFileOwner, NativeWorkspaceReceipt},
@@ -109,6 +109,63 @@ async fn open_external(
             .map_err(|_| EngineError::new("INTERNAL_ERROR"))
     })
     .await
+}
+
+fn workspace_cleanup_host(
+    app: &tauri::AppHandle,
+    work: NativeWorkOwner,
+    descriptor: &ProductionDescriptor,
+) -> Result<Option<ProductionCleanupHost>, EngineError> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, work, descriptor);
+        Ok(None)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use twentyonex_engine::production::cleanup_observation::Observer;
+        let observer = Arc::new(Observer::open(
+            &descriptor.paths.profile_root,
+            &descriptor.paths.workspace_root,
+        )?);
+        let closing = observer.clone();
+        let app = app.clone();
+        Ok(Some(ProductionCleanupHost {
+            invoke: Arc::new(move |request, epoch| {
+                let (observer, app, work) = (observer.clone(), app.clone(), work.clone());
+                Box::pin(async move {
+                    // Release is ticket-only and remains available after the
+                    // task directory disappears or ordinary native admission
+                    // closes. It performs no scan or filesystem mutation.
+                    if request["action"] == "release" {
+                        return observer.observe(&request, &epoch);
+                    }
+                    let result = Arc::new(std::sync::Mutex::new(None));
+                    let delivered = result.clone();
+                    work.run(move || {
+                        available_engine(&app, Some(&epoch))?;
+                        let value = observer.observe(&request, &epoch)?;
+                        // Stale completion cannot authorize a cleanup effect.
+                        available_engine(&app, Some(&epoch))?;
+                        *delivered
+                            .lock()
+                            .map_err(|_| EngineError::new("DISCONNECTED"))? = Some(value);
+                        Ok(())
+                    })
+                    .await?;
+                    let value = result
+                        .lock()
+                        .map_err(|_| EngineError::new("DISCONNECTED"))?
+                        .take();
+                    value.ok_or_else(|| EngineError::new("DISCONNECTED"))
+                })
+            }),
+            close: Arc::new(move || {
+                let closing = closing.clone();
+                Box::pin(async move { closing.close() })
+            }),
+        }))
+    }
 }
 
 fn workspace_file_host(
@@ -681,6 +738,11 @@ async fn start(
             resource_root: resources,
         },
         capabilities: ProductionCapabilities {
+            workspace_cleanup: if cfg!(target_os = "linux") {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             tray: if tray_available {
                 HostCapability::Host
             } else {
@@ -727,6 +789,7 @@ async fn start(
     let handle = app.clone();
     let external_app = app.clone();
     let workspace_file = workspace_file_host(app, native_work.clone(), &descriptor)?;
+    let workspace_cleanup = workspace_cleanup_host(app, native_work.clone(), &descriptor)?;
     let attachment_file = attachment_file_host(app, native_work.clone(), ui.clone(), &descriptor)?;
     let attachment_download = native_attachment_download::host(
         app,
@@ -803,6 +866,7 @@ async fn start(
             containment,
         },
         ProductionNativeHost {
+            workspace_cleanup,
             workspace_file,
             attachment_file,
             attachment_download,

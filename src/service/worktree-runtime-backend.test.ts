@@ -1,3 +1,4 @@
+import { ProductionWorkspaceProcessOwner } from './production-workspace-process-owner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
@@ -130,6 +131,42 @@ describe('actual protected worktree/SQLite/file/lifecycle owners', () => {
     db.db.prepare("UPDATE tasks SET status='completed',updated_at='2020-01-01T00:00:00Z' WHERE id=?").run(value.id)
     await expect(call('workspace:runCleanupNow', [])).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' }); expect(readFileSync(join(path, 'keep'), 'utf8')).toBe('keep')
     global = false; await expect(call('workspace:runCleanupNow', [])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+  it('uses the exact retained observer through real manual lifecycle and filesystem removal', async () => {
+    const value = task(), path = db.getWorkspaceDir(value.id), actions: string[] = []
+    db.db.prepare("UPDATE tasks SET status='completed',updated_at='2020-01-01T00:00:00Z' WHERE id=?").run(value.id)
+    const observer = new ProductionWorkspaceProcessOwner(workspaceRoot, async request => {
+      actions.push(request.action)
+      if (request.action === 'acquire') {
+        expect(manager.hasTaskStartOwnership(value.id)).toBe(false)
+        await expect(manager.requestSession('synthetic-agent', value.id)).rejects.toThrow('lifecycle change')
+        return { status: 'idle', leaseId: '8bac4cd9-4ef5-4a20-b109-89d28df6857b' }
+      }
+      if (request.action === 'release') { expect(existsSync(path)).toBe(false); return { released: true } }
+      return { status: 'idle' }
+    })
+    options.assertIdleWorkspace = (id, selected) => observer.assertIdleWorkspace(id, selected)
+    options.runWorkspaceCleanupMutation = (ids, effect, current, signal) => observer.run(ids, effect, current, signal)
+    expect(await call('workspace:runCleanupNow', [])).toEqual({ cleaned: 1, errors: [], nodeModulesCleaned: 0 })
+    expect(actions).toEqual(['acquire', 'check', 'check', 'release']); expect(db.getTask(value.id)).toBeDefined(); await observer.close()
+  })
+  it.each([['WORKSPACE_CLEANUP_PROCESS_NOT_IDLE', 'BACKPRESSURE'], ['WORKSPACE_CLEANUP_PROCESS_OBSERVATION_UNAVAILABLE', 'UNKNOWN_OPERATION'], ['WORKSPACE_BUSY', 'BACKPRESSURE']] as const)('maps actual owned refusal %s to %s while preserving bytes', async (failure, code) => {
+    const value = task(), path = db.getWorkspaceDir(value.id); writeFileSync(join(path, 'keep'), 'owned bytes')
+    db.db.prepare("UPDATE tasks SET status='completed',updated_at='2020-01-01T00:00:00Z' WHERE id=?").run(value.id)
+    options.assertIdleWorkspace = async () => { throw new Error(failure) }
+    await expect(call('workspace:runCleanupNow', [])).rejects.toMatchObject({ code })
+    expect(readFileSync(join(path, 'keep'), 'utf8')).toBe('owned bytes')
+  })
+  it('refuses cleanup while the actual source mutation lease is retained', async () => {
+    const source = db.createTaskSource({ name: 'Cleanup source fixture', plugin_id: 'fixture', mcp_server_id: null, config: {}, project_id: projectId })!
+    const value = task(), path = db.getWorkspaceDir(value.id), gate = held(), entered = held(); releases.push(gate.release)
+    db.db.prepare("UPDATE tasks SET status='completed',updated_at='2020-01-01T00:00:00Z',source_id=? WHERE id=?").run(source.id, value.id)
+    const current = sync.runSourceMutation(source.id, async () => { entered.release(); await gate.promise })
+    await entered.promise; options.assertIdleWorkspace = vi.fn(async () => {})
+    try {
+      await expect(call('workspace:runCleanupNow', [])).rejects.toMatchObject({ code: 'BACKPRESSURE' })
+      expect(options.assertIdleWorkspace).not.toHaveBeenCalled(); expect(existsSync(path)).toBe(true)
+    } finally { gate.release(); await current }
   })
   it('returns truthful empty global cleanup and refuses pre-materialization/receipt capacity excess', async () => {
     expect(await call('workspace:runCleanupNow', [])).toEqual({ cleaned: 0, errors: [], nodeModulesCleaned: 0 })

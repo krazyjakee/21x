@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isWorkspacePathReceipt, WORKSPACE_NATIVE_CALLBACK_SCHEMAS } from './workspace-native-callbacks'
+import { isWorkspacePathReceipt, WORKSPACE_NATIVE_CALLBACK_SCHEMAS, isWorkspaceCleanupObservationRequest, matchesWorkspaceCleanupObservation } from './workspace-native-callbacks'
 import type { WorkspacePathIdentity, WorkspacePathReceipt } from './workspace-native-callbacks'
 
 const identity = (path: string, kind: WorkspacePathIdentity['kind'] = 'directory'): WorkspacePathIdentity => ({ path, kind, dev: '1', ino: '2', size: '4096', nlink: kind === 'file' ? '1' : '2' })
@@ -28,5 +28,27 @@ describe('private captured workspace file callbacks', () => {
     const long = '/' + '"'.repeat(4000)
     expect(isWorkspacePathReceipt({ ...expected, ancestors: Array.from({ length: 64 }, () => identity(long)) })).toBe(false)
     expect(isWorkspacePathReceipt({ ...expected, root: { ...expected.root, size: '10', nlink: '3' } })).toBe(true)
+  })
+})
+
+describe('private workspace cleanup observation', () => {
+  const leaseId = '8bac4cd9-4ef5-4a20-b109-89d28df6857b'
+  it('accepts only exact task-only acquisition and native-ticket checks/releases', () => {
+    expect(isWorkspaceCleanupObservationRequest({ version: 1, action: 'acquire', taskId: 'task-one' })).toBe(true)
+    for (const action of ['check', 'release']) expect(isWorkspaceCleanupObservationRequest({ version: 1, action, taskId: 'task-one', leaseId })).toBe(true)
+    for (const patch of [{ path: '/private' }, { pid: 1 }, { leaseId }, { taskId: '../private' }, { version: 2 }])
+      expect(isWorkspaceCleanupObservationRequest({ version: 1, action: 'acquire', taskId: 'task-one', ...patch })).toBe(false)
+    expect(isWorkspaceCleanupObservationRequest({ version: 1, action: 'check', taskId: 'task-one' })).toBe(false)
+  })
+  it('associates exact result fields with their originating action', () => {
+    const acquire = { version: 1 as const, action: 'acquire' as const, taskId: 'task-one' }
+    expect(matchesWorkspaceCleanupObservation(acquire, { status: 'idle', leaseId })).toBe(true)
+    expect(matchesWorkspaceCleanupObservation(acquire, { status: 'idle' })).toBe(false)
+    expect(matchesWorkspaceCleanupObservation({ ...acquire, action: 'check', leaseId }, { status: 'idle', leaseId })).toBe(false)
+    expect(matchesWorkspaceCleanupObservation({ ...acquire, action: 'release', leaseId }, { released: true })).toBe(true)
+    expect(matchesWorkspaceCleanupObservation(acquire, { released: true })).toBe(false)
+    expect(matchesWorkspaceCleanupObservation(acquire, { status: 'unknown', leaseId })).toBe(false)
+    expect(matchesWorkspaceCleanupObservation(acquire, { status: 'busy' })).toBe(true)
+    expect(matchesWorkspaceCleanupObservation(acquire, { status: 'unknown' })).toBe(true)
   })
 })

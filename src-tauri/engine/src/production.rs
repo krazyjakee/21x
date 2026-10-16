@@ -1,4 +1,6 @@
 //! Opt-in native production launcher. No renderer-supplied bootstrap or PID authority.
+#[path = "production_cleanup_observation.rs"]
+pub mod cleanup_observation;
 #[path = "production_contracts.rs"]
 pub mod contracts;
 use crate::EngineError;
@@ -106,6 +108,8 @@ pub struct ProductionCapabilities {
     #[serde(default = "unsupported_host_capability")]
     pub workspace_files: HostCapability,
     #[serde(default = "unsupported_host_capability")]
+    pub workspace_cleanup: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
     pub attachment_files: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub attachment_downloads: HostCapability,
@@ -164,7 +168,12 @@ pub struct ProductionNotificationHost {
     pub invoke: Arc<dyn Fn(String, String, bool, String) -> HostFuture<bool> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
 }
+pub struct ProductionCleanupHost {
+    pub invoke: Arc<dyn Fn(Value, String) -> HostFuture<Value> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionNativeHost {
+    pub workspace_cleanup: Option<ProductionCleanupHost>,
     pub workspace_file: Option<ProductionWorkspaceHost>,
     pub attachment_file: Option<ProductionAttachmentHost>,
     pub attachment_download: Option<ProductionAttachmentDownloadHost>,
@@ -811,8 +820,10 @@ impl ProductionEngine {
         host: ProductionNativeHost,
     ) -> Result<Self, EngineError> {
         descriptor_bytes(&launch.descriptor)?;
-        if (launch.descriptor.capabilities.external_urls == HostCapability::Host
-            && host.open_external.is_none())
+        if (launch.descriptor.capabilities.workspace_cleanup == HostCapability::Host)
+            != host.workspace_cleanup.is_some()
+            || (launch.descriptor.capabilities.external_urls == HostCapability::Host
+                && host.open_external.is_none())
             || (launch.descriptor.capabilities.notifications == HostCapability::Host
                 && host.notification.is_none())
             || (launch.descriptor.capabilities.workspace_files == HostCapability::Host
@@ -1635,6 +1646,31 @@ impl ProductionEngine {
                 }
                 Ok(result)
             }
+            "host.workspace.cleanupObservation" => {
+                if !cleanup_observation::request(payload) {
+                    return Err(EngineError::new("INVALID_ARGUMENTS"));
+                }
+                if self.0.descriptor.capabilities.workspace_cleanup != HostCapability::Host {
+                    return Err(EngineError::new("UNKNOWN_OPERATION"));
+                }
+                if !self.0.prepared.load(Ordering::SeqCst)
+                    || self.0.closed.load(Ordering::SeqCst)
+                    || self.0.stopping.load(Ordering::SeqCst) && payload["action"] != "release"
+                {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                let host = self
+                    .0
+                    .host
+                    .workspace_cleanup
+                    .as_ref()
+                    .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?;
+                let result = (host.invoke)(payload.clone(), self.epoch()).await?;
+                if !cleanup_observation::result(payload["action"].as_str().unwrap(), &result) {
+                    return Err(EngineError::new("INVALID_RESULT"));
+                }
+                Ok(result)
+            }
             "host.production.prepare" => {
                 if !contracts::object(payload, &["launchId", "resourceManifestSha256"], &[])
                     || payload["launchId"] != self.0.descriptor.launch_id
@@ -1671,6 +1707,9 @@ impl ProductionEngine {
                         "production-native-callback-drain",
                     )
                 })?;
+                if let Some(cleanup) = &self.0.host.workspace_cleanup {
+                    (cleanup.close)().await?;
+                }
                 if let Some(files) = &self.0.host.workspace_file {
                     (files.close)().await?;
                 }
@@ -2479,6 +2518,11 @@ mod linux {
                 }
                 supervise.0.ready.store(false, Ordering::SeqCst);
                 supervise.0.stopping.store(true, Ordering::SeqCst);
+                // Pipe loss retires tickets too. Accepted raw observation work
+                // retains its own owner/FD leases until NativeWorkOwner joins it.
+                if let Some(cleanup) = &supervise.0.host.workspace_cleanup {
+                    let _ = (cleanup.close)().await;
+                }
                 // Failed cleanup retains the actual scope/Child/guardian. Never
                 // publish an exit receipt or abandon the lease on a deadline.
                 loop {
@@ -2673,6 +2717,7 @@ mod tests {
             },
             capabilities: ProductionCapabilities {
                 workspace_files: HostCapability::Unsupported,
+                workspace_cleanup: HostCapability::Unsupported,
                 attachment_files: HostCapability::Unsupported,
                 attachment_downloads: HostCapability::Unsupported,
                 artifact_clipboard: HostCapability::Unsupported,
@@ -2811,6 +2856,75 @@ mod tests {
             assert!(engine.0.pending.lock().unwrap().is_empty());
             assert_eq!(engine.0.request_slots.available_permits(), 128);
         }
+        #[tokio::test]
+        async fn actual_cleanup_callback_enforces_action_result_and_retained_epoch_authority() {
+            let calls = Arc::new(AtomicU64::new(0));
+            let invoked = calls.clone();
+            let closed = Arc::new(AtomicBool::new(false));
+            let closing = closed.clone();
+            let mut host = ui_host();
+            host.workspace_cleanup = Some(ProductionCleanupHost {
+                invoke: Arc::new(move |request, epoch| {
+                    invoked.fetch_add(1, Ordering::SeqCst);
+                    Box::pin(async move {
+                        assert_eq!(epoch, "transport-fixture");
+                        Ok(if request["action"] == "release" {
+                            json!({"released":true})
+                        } else {
+                            json!({"status":"unknown"})
+                        })
+                    })
+                }),
+                close: Arc::new(move || {
+                    closing.store(true, Ordering::SeqCst);
+                    Box::pin(async { Ok(()) })
+                }),
+            });
+            let mut fixture = Fixture::new(host);
+            let frame = |payload| json!({"kind":"request","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"service:1","operation":"host.workspace.cleanupObservation","payload":payload});
+            let acquire = frame(json!({"version":1,"action":"acquire","taskId":"task_fixture"}));
+            assert_eq!(
+                fixture.engine.callback(&acquire).await.unwrap_err().code,
+                "UNKNOWN_OPERATION"
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            Arc::get_mut(&mut fixture.engine.0)
+                .unwrap()
+                .descriptor
+                .capabilities
+                .workspace_cleanup = HostCapability::Host;
+            assert_eq!(
+                fixture.engine.callback(&acquire).await.unwrap(),
+                json!({"status":"unknown"})
+            );
+            assert!(fixture.engine.callback(&frame(json!({"version":1,"action":"acquire","taskId":"task_fixture","path":"/foreign"}))).await.is_err());
+            fixture.engine.0.stopping.store(true, Ordering::SeqCst);
+            assert_eq!(
+                fixture.engine.callback(&acquire).await.unwrap_err().code,
+                "DISCONNECTED"
+            );
+            let release = frame(
+                json!({"version":1,"action":"release","taskId":"task_fixture","leaseId":"00112233-4455-4677-8899-aabbccddeeff"}),
+            );
+            assert_eq!(
+                fixture.engine.callback(&release).await.unwrap(),
+                json!({"released":true})
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            (fixture
+                .engine
+                .0
+                .host
+                .workspace_cleanup
+                .as_ref()
+                .unwrap()
+                .close)()
+            .await
+            .unwrap();
+            assert!(closed.load(Ordering::SeqCst));
+            fixture.reap().await;
+        }
+
         #[tokio::test]
         async fn actual_request_guard_retires_epoch_when_cancel_pipe_write_fails() {
             let mut fixture = Fixture::new(ui_host());
@@ -3326,6 +3440,7 @@ mod tests {
     }
     fn ui_host() -> ProductionNativeHost {
         ProductionNativeHost {
+            workspace_cleanup: None,
             workspace_file: None,
             attachment_file: None,
             attachment_download: None,
