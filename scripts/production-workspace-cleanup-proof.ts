@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { constants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { constants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { open, readlink, type FileHandle } from 'node:fs/promises'
 import { tmpdir, release as osRelease } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -15,6 +15,7 @@ import { WORKSPACE_CLEANUP_CALLBACK_SCHEMA, type WorkspaceCleanupObservationRequ
 import { WorkspaceFileOwner } from '../src/main/workspace-file-owner'
 import { createNodePty, terminalProcessCwd } from '../src/main/terminal-process'
 import { SessionStatusType, type CodingAgentAdapter } from '../src/main/adapters/coding-agent-adapter'
+import { createWorkspaceCleanupGitFixture, type CleanupGitRemovalReceipt } from './production-workspace-cleanup-git-fixture'
 
 interface ProofCounter { name: string; expected: number; actual: number; comparison: 'equal' | 'atMost' | 'atLeast' }
 function assertProofCounter(counter: ProofCounter): void {
@@ -67,6 +68,7 @@ export interface WorkspaceCleanupProofReport {
   counters: ProofCounter[]
   contracts: Array<{ name: string; kind: string; declaredOwner: string; declaredCaller: string; destination: string; codec: boolean; runtimeInThisLaunch: boolean; attempted: number; succeededOrObserved: number; authorityProof: string; nativeProof: string }>
   observation: { scope: string; acquire: number; check: number; release: number; peakDirectoryFds: number; openDirectoryFds: number }
+  git: { removal: CleanupGitRemovalReceipt | null; final: ReturnType<Awaited<ReturnType<typeof createWorkspaceCleanupGitFixture>>['snapshot']> | null }
   cleanup: { ownerStopped: boolean; profileRemoved: boolean; childExits: number; ptyExits: number }
   remaining: string[]
 }
@@ -91,14 +93,16 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
     'src/service/production-desktop-bindings.ts', 'src/service/worktree-runtime-backend.ts', 'src/main/workspace-cleanup-scheduler-core.ts',
     'src/main/agent-manager-core.ts', 'src/main/worktree-manager-core.ts', 'src/main/terminal-service-core.ts',
     'src/main/workspace-file-owner.ts', 'src/shared/workspace-native-callbacks.ts', 'src/shared/production-bootstrap.ts',
-    'src/service/production-workspace-process-owner.ts', 'src-tauri/engine/src/production_cleanup_observation.rs', 'src/shared/desktop-operations.ts', 'scripts/tauri-runtime.json']
+    'src/service/production-workspace-process-owner.ts', 'src-tauri/engine/src/production_cleanup_observation.rs', 'src/shared/desktop-operations.ts', 'scripts/tauri-runtime.json',
+    'scripts/production-workspace-cleanup-git-fixture.ts', 'scripts/production-workspace-cleanup-git-fixture.test.ts',
+    'src/main/git-provider-process-owner.ts', 'src/main/workspace-node-modules-gc.ts']
   const sources = Object.fromEntries(sourcePaths.map(path => [path, hash(readFileSync(resolve(path)))]))
   const root = realpathSync(mkdtempSync(join(tmpdir(), '21x-cleanup-acceptance-'))), workspaceRoot = join(root, 'workspaces')
   mkdirSync(join(root, 'resources')); mkdirSync(workspaceRoot)
   const observation = { scope: 'controlled-retained-fixture-processes-only-not-full-host-procfs', acquire: 0, check: 0, release: 0, peakDirectoryFds: 0, openDirectoryFds: 0 }
   const report: WorkspaceCleanupProofReport = { version: 1, scope: 'actual-production-owner-private-peer-cleanup-controlled-native-observer', fixture: WORKSPACE_CLEANUP_FIXTURE,
     provenance: { platform: process.platform, architecture: process.arch, osRelease: osRelease(), node: process.version, electron: null, webview: null,
-      packages: { 'better-sqlite3': pins.nativeDependencies['better-sqlite3'], 'node-pty': pins.nativeDependencies['node-pty'] }, sources, artifacts }, counters: [], contracts: [], observation,
+      packages: { 'better-sqlite3': pins.nativeDependencies['better-sqlite3'], 'node-pty': pins.nativeDependencies['node-pty'] }, sources, artifacts }, counters: [], contracts: [], observation, git: { removal: null, final: null },
     cleanup: { ownerStopped: false, profileRemoved: false, childExits: 0, ptyExits: 0 }, remaining: [
       'Actual Rust full-host procfs authority and physical-root source-wire proof must supplement this controlled native callback.',
       'Partial/unreadable full-host visibility is unknown, never idle; unsupported OS remains unavailable.',
@@ -186,6 +190,7 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
   const descriptor: ProductionLaunchDescriptor = { version: 1, kind: 'production-private-launch', launchId: 'launch_cleanup_proof_001', profileId: 'cleanup-disposable', profileIntent: 'create-new',
     buildIdentity: 'source-cleanup-fixture-v1', resourceManifestSha256: 'a'.repeat(64), paths: { profileRoot: join(root, 'profile'), workspaceRoot, attachmentRoot: join(root, 'attachments'), reposRoot: join(root, 'repos'), resourceRoot: join(root, 'resources'), tempRoot: join(root, 'temp') },
     capabilities: { workspaceCleanup: 'host', externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported', configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
+  const gitFixture = await createWorkspaceCleanupGitFixture({ root, profileRoot: descriptor.paths.profileRoot, reposRoot: descriptor.paths.reposRoot, workspaceRoot, tempRoot: descriptor.paths.tempRoot })
   let allowed = true
   const trusted = (): boolean => allowed
   const terminalDirectories = new Map<string, Readonly<{ taskId: string; cwd: string; rootIdentity: string; cwdIdentity: string }>>()
@@ -213,7 +218,7 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
   schemas['host.workspace.cleanupObservation'] = { ...WORKSPACE_CLEANUP_CALLBACK_SCHEMA, handle: payload => observe(payload as unknown as WorkspaceCleanupObservationRequest) as Promise<JsonValue> }
   const deliver = (peer: ServicePeer, bytes: Uint8Array): void => { for (let at = 0; at < bytes.length; at += WORKSPACE_CLEANUP_FIXTURE.fragmentBytes) peer.receive(bytes.subarray(at, at + WORKSPACE_CLEANUP_FIXTURE.fragmentBytes)) }
   const service = new ProductionService(sealProductionServiceHost({ descriptor, authority, caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' }, unbridgedOwnerEvent: () => {},
-    boundaries: { cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter, createProvider: () => { throw new Error('CLEANUP_PROOF unexpected provider') },
+    boundaries: { gitProviderProcess: options => gitFixture.gitProviderProcess(options), cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter, createProvider: () => { throw new Error('CLEANUP_PROOF unexpected provider') },
       terminalProcessHost: { resolveShell: () => '/bin/bash', getCwd: terminalProcessCwd, create: options => {
         const receipt = { exited: false }; ptys.push(receipt)
         return createNodePty({ ...options, onExit: (pid, code, signal) => { receipt.exited = true; options.onExit(pid, code, signal) } }, { spawn: (shell, _args, settings) => pty.spawn(shell, ['--noprofile', '--norc'], { ...settings, env: { HOME: root, PATH: '/usr/bin:/bin', TERM: 'xterm-256color', PS1: '', HISTFILE: '/dev/null' } }) })
@@ -267,7 +272,13 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
       writeFileSync(join(path, 'keep.txt'), title); db.db.prepare('UPDATE tasks SET status=?,updated_at=? WHERE id=?').run('completed', WORKSPACE_CLEANUP_FIXTURE.age, task.id)
       return { task, path }
     }
-    const scheduled = async (): Promise<void> => {
+    const scheduled = async (makeDue = true): Promise<void> => {
+      // Every ordinary scenario requests a due automatic pass explicitly;
+      // recent successful runs otherwise correctly suppress the 23h cadence.
+      if (makeDue) {
+        db.setSetting('workspace_autocleanup_last_run', WORKSPACE_CLEANUP_FIXTURE.age)
+        db.setSetting('workspace_nodemodules_gc_last_run', WORKSPACE_CLEANUP_FIXTURE.age)
+      }
       const run = Reflect.get(services.cleanup, 'runCleanup') as () => Promise<void>
       await deadline('actual scheduled cleanup pass', run.call(services.cleanup))
     }
@@ -461,6 +472,166 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
       rmSync(selected, { recursive: true }); renameSync(displaced, selected); await manual()
     }
 
+    // Batch33 extends the same actual owners after every fixture session and
+    // Captain delivery has acknowledged retirement. An orphan never borrows a
+    // fabricated task row: the literal name comes only from the physical scan.
+    const age = (path: string): void => { const old = new Date(WORKSPACE_CLEANUP_FIXTURE.age); utimesSync(path, old, old) }
+    const orphan = () => {
+      const id = `orphan-${randomUUID()}`, path = join(workspaceRoot, id)
+      mkdirSync(path); writeFileSync(join(path, 'keep.txt'), id); age(path)
+      if (db.getTask(id)) throw new Error('CLEANUP_PROOF orphan unexpectedly has task authority')
+      return { id, path }
+    }
+    const peersDrained = (): Promise<unknown> => deadline('batch33 accepted private work drains', Promise.all([service.peer.drain(), host!.drain()]))
+    const orphanManual = orphan()
+    const orphanResult = await manual() as { cleaned: number; nodeModulesCleaned: number }
+    check('absent-row manual orphan counted once', 1, orphanResult.cleaned)
+    check('manual orphan physical target removed', 0, Number(existsSync(orphanManual.path)))
+    check('manual orphan never received a database task', 1, Number(db.getTask(orphanManual.id) === undefined))
+    const orphanScheduled = orphan(); db.setSetting('workspace_autocleanup_enabled', 'false')
+    await scheduled(); check('disabled scheduled whole cleanup preserves aged orphan', 1, Number(existsSync(orphanScheduled.path)))
+    db.setSetting('workspace_autocleanup_enabled', 'true'); await scheduled()
+    check('enabled scheduled whole cleanup removes aged orphan', 0, Number(existsSync(orphanScheduled.path)))
+    const orphanUnknown = orphan(); unknown = true
+    check('orphan unknown observation refuses manual cleanup', 1, Number(await outcome(manual()) === 'UNKNOWN_OPERATION'))
+    await scheduled(); check('orphan unknown scheduled bytes preserved', 1, Number(readFileSync(join(orphanUnknown.path, 'keep.txt'), 'utf8') === orphanUnknown.id))
+    unknown = false; await manual()
+    const orphanBusy = orphan(), orphanChild = await child(orphanBusy.path)
+    check('orphan retained real process refuses manual cleanup', 1, Number(await outcome(manual()) === 'BACKPRESSURE'))
+    await scheduled(); check('orphan live process scheduled bytes preserved', 1, Number(existsSync(orphanBusy.path)))
+    check('orphan real child never signaled', 0, Number(orphanChild.child.killed))
+    orphanChild.child.stdin!.end(); await deadline('orphan retained child actual close', orphanChild.closed)
+    await manual(); check('orphan removes only after retained child closes', 0, Number(existsSync(orphanBusy.path)))
+    const refreshedOrphan = orphan(), orphanAgeHold = hold('check'), orphanAgeResult = outcome(manual())
+    await deadline('orphan age check entered', orphanAgeHold.entered.promise)
+    utimesSync(refreshedOrphan.path, new Date(), new Date()); orphanAgeHold.finish.release()
+    check('orphan mtime refresh refuses late effect', 1, Number(await orphanAgeResult === 'INVALID_REQUEST'))
+    await peersDrained(); check('refreshed orphan exact bytes preserved', 1, Number(readFileSync(join(refreshedOrphan.path, 'keep.txt'), 'utf8') === refreshedOrphan.id))
+    age(refreshedOrphan.path); await manual()
+    const replacedOrphan = orphan(), orphanIdentityHold = hold('check'), orphanIdentityResult = outcome(manual())
+    await deadline('orphan physical check entered', orphanIdentityHold.entered.promise)
+    const displacedOrphan = join(root, 'displaced-orphan')
+    renameSync(replacedOrphan.path, displacedOrphan); mkdirSync(replacedOrphan.path); writeFileSync(join(replacedOrphan.path, 'keep.txt'), 'replacement orphan')
+    orphanIdentityHold.finish.release()
+    check('orphan replacement observation unavailable', 1, Number(await orphanIdentityResult === 'UNKNOWN_OPERATION'))
+    await peersDrained()
+    check('orphan original generation preserved', 1, Number(readFileSync(join(displacedOrphan, 'keep.txt'), 'utf8') === replacedOrphan.id))
+    check('orphan replacement generation preserved', 1, Number(readFileSync(join(replacedOrphan.path, 'keep.txt'), 'utf8') === 'replacement orphan'))
+    rmSync(replacedOrphan.path, { recursive: true }); renameSync(displacedOrphan, replacedOrphan.path); age(replacedOrphan.path); await manual()
+
+    // Dependency GC has its own actual setting and scheduled owner. Keep the
+    // task itself ineligible for whole removal and preserve nondependency data.
+    db.setSetting('workspace_autocleanup_enabled', 'false'); db.setSetting('workspace_nodemodules_gc_enabled', 'false'); db.setSetting('workspace_nodemodules_gc_days', '1')
+    const dependencyTask = await create('independent dependency settings preserve workspace')
+    db.db.prepare('UPDATE tasks SET status=? WHERE id=?').run('not_started', dependencyTask.task.id)
+    const dependency = (parent: string, name: string) => {
+      const path = join(parent, name, 'node_modules'); mkdirSync(path, { recursive: true }); writeFileSync(join(path, 'package.txt'), name); age(path); return path
+    }
+    const nestedDependency = dependency(dependencyTask.path, 'packages/nested'), recentDependency = dependency(dependencyTask.path, 'recent')
+    utimesSync(recentDependency, new Date(), new Date())
+    await scheduled(); check('disabled dependency setting preserves old nested modules', 1, Number(existsSync(nestedDependency)))
+    db.setSetting('workspace_nodemodules_gc_enabled', 'true')
+    await scheduled()
+    check('independent scheduled dependency setting removes nested modules', 0, Number(existsSync(nestedDependency)))
+    check('dependency GC preserves recent modules', 1, Number(existsSync(recentDependency)))
+    check('dependency-only GC preserves exact task workspace bytes', 1, Number(readFileSync(join(dependencyTask.path, 'keep.txt'), 'utf8') === 'independent dependency settings preserve workspace'))
+    const manualDependency = dependency(dependencyTask.path, 'manual')
+    const dependencyResult = await manual() as { cleaned: number; nodeModulesCleaned: number }
+    check('manual dependency result counts exact removed candidate', 1, dependencyResult.nodeModulesCleaned)
+    check('dependency-only manual pass counts zero whole workspaces', 0, dependencyResult.cleaned)
+    check('manual dependency physical target removed', 0, Number(existsSync(manualDependency)))
+    const unknownDependency = dependency(dependencyTask.path, 'unknown'); unknown = true
+    check('dependency unknown observation explicitly unavailable', 1, Number(await outcome(manual()) === 'UNKNOWN_OPERATION'))
+    await scheduled(); check('unknown scheduled dependency target preserved', 1, Number(existsSync(unknownDependency)))
+    unknown = false; await manual()
+    const activeDependency = dependency(dependencyTask.path, 'active')
+    db.db.prepare('UPDATE tasks SET status=? WHERE id=?').run('agent_working', dependencyTask.task.id)
+    const activeCalls = observerCalls; await manual(); await scheduled()
+    check('active task dependency is not selected', activeCalls, observerCalls)
+    check('active task dependency bytes preserved', 1, Number(readFileSync(join(activeDependency, 'package.txt'), 'utf8') === 'active'))
+    db.db.prepare('UPDATE tasks SET status=? WHERE id=?').run('not_started', dependencyTask.task.id); await manual()
+    const changedDependency = dependency(dependencyTask.path, 'changed'), dependencyHold = hold('check'), dependencyPending = outcome(manual())
+    await deadline('dependency inventory check entered', dependencyHold.entered.promise)
+    writeFileSync(join(changedDependency, 'package.txt'), 'changed after selection'); dependencyHold.finish.release()
+    check('dependency changed child metadata refuses late effect', 1, Number(await dependencyPending === 'INVALID_REQUEST'))
+    await peersDrained(); check('changed dependency bytes preserved', 1, Number(readFileSync(join(changedDependency, 'package.txt'), 'utf8') === 'changed after selection'))
+    age(changedDependency); await manual()
+    const swappedDependency = dependency(dependencyTask.path, 'swapped'), dependencySwapHold = hold('check'), dependencySwapPending = outcome(manual())
+    await deadline('dependency target identity check entered', dependencySwapHold.entered.promise)
+    const displacedDependency = join(root, 'displaced-node-modules')
+    renameSync(swappedDependency, displacedDependency); mkdirSync(swappedDependency); writeFileSync(join(swappedDependency, 'package.txt'), 'replacement dependency'); age(swappedDependency)
+    dependencySwapHold.finish.release()
+    check('dependency target replacement refuses late effect', 1, Number(await dependencySwapPending === 'INVALID_REQUEST'))
+    await peersDrained()
+    check('dependency original target preserved', 1, Number(readFileSync(join(displacedDependency, 'package.txt'), 'utf8') === 'swapped'))
+    check('dependency replacement target preserved', 1, Number(readFileSync(join(swappedDependency, 'package.txt'), 'utf8') === 'replacement dependency'))
+    rmSync(swappedDependency, { recursive: true }); renameSync(displacedDependency, swappedDependency); age(swappedDependency); await manual()
+    const cancelledDependency = dependency(dependencyTask.path, 'cancelled'), dependencyCancelHold = hold('acquire'), dependencyAbort = new AbortController()
+    const dependencyCancelResult = outcome(call('workspace:runCleanupNow', [], dependencyAbort.signal))
+    await deadline('dependency cancellable raw acquire entered', dependencyCancelHold.entered.promise)
+    dependencyAbort.abort(); check('dependency public cleanup cancellation acknowledged', 1, Number(await dependencyCancelResult === 'CANCELLED'))
+    check('dependency cancelled raw acquire retains directory FDs', 2, observation.openDirectoryFds)
+    dependencyCancelHold.finish.release(); await peersDrained()
+    check('dependency cancelled raw observation descriptors drained', 0, observation.openDirectoryFds)
+    check('dependency cancellation preserves exact target', 1, Number(readFileSync(join(cancelledDependency, 'package.txt'), 'utf8') === 'cancelled'))
+    await manual()
+    const rowlessDependencyRoot = orphan(), rowlessDependency = dependency(rowlessDependencyRoot.path, 'rowless')
+    age(rowlessDependencyRoot.path)
+    await scheduled()
+    check('independent scheduled dependency GC accepts explicit absent-row scope', 0, Number(existsSync(rowlessDependency)))
+    check('dependency-only pass preserves absent-row workspace root', 1, Number(existsSync(rowlessDependencyRoot.path)))
+    check('dependency-only orphan remains without database task', 1, Number(db.getTask(rowlessDependencyRoot.id) === undefined))
+    await manual()
+    check('explicit manual orphan removal ignores disabled automatic whole flag', 0, Number(existsSync(rowlessDependencyRoot.path)))
+    const cadenceDependency = dependency(dependencyTask.path, 'cadence'), cadenceWhole = orphan()
+    db.setSetting('workspace_autocleanup_enabled', 'true')
+    db.setSetting('workspace_autocleanup_last_run', WORKSPACE_CLEANUP_FIXTURE.age)
+    const recentDependencyRun = new Date().toISOString()
+    db.setSetting('workspace_nodemodules_gc_last_run', recentDependencyRun)
+    await scheduled(false)
+    check('recent dependency run does not suppress due whole cleanup', 0, Number(existsSync(cadenceWhole.path)))
+    check('recent dependency cadence preserves aged dependency', 1, Number(existsSync(cadenceDependency)))
+    check('skipped automatic dependency timestamp unchanged', 1, Number(db.getSetting('workspace_nodemodules_gc_last_run') === recentDependencyRun))
+    const cadenceOrphan = orphan(), recentWholeRun = new Date().toISOString()
+    db.setSetting('workspace_autocleanup_last_run', recentWholeRun)
+    db.setSetting('workspace_nodemodules_gc_last_run', WORKSPACE_CLEANUP_FIXTURE.age)
+    await scheduled(false)
+    check('recent whole run does not suppress due dependency cleanup', 0, Number(existsSync(cadenceDependency)))
+    check('recent whole cadence preserves aged orphan', 1, Number(existsSync(cadenceOrphan.path)))
+    check('skipped automatic whole timestamp unchanged', 1, Number(db.getSetting('workspace_autocleanup_last_run') === recentWholeRun))
+    const beforeManualWhole = db.getSetting('workspace_autocleanup_last_run'), beforeManualDependency = db.getSetting('workspace_nodemodules_gc_last_run')
+    await manual()
+    check('explicit manual cleanup ignores recent automatic whole cadence', 0, Number(existsSync(cadenceOrphan.path)))
+    check('manual cleanup does not rewrite last automatic whole run', 1, Number(db.getSetting('workspace_autocleanup_last_run') === beforeManualWhole))
+    check('manual cleanup does not rewrite last automatic dependency run', 1, Number(db.getSetting('workspace_nodemodules_gc_last_run') === beforeManualDependency))
+    db.setSetting('workspace_nodemodules_gc_enabled', 'false'); db.setSetting('workspace_autocleanup_enabled', 'true')
+
+    const gitTask = db.createTask({ title: 'actual committed two-repository cleanup' })!
+    for (const name of ['alpha', 'beta']) db.addProjectRepo(gitTask.project_id, { provider: 'github', org: 'cleanup-fixture', name, default_branch: 'main' })
+    const gitSeed = await deadline('actual local Git fixture setup', gitFixture.seed(gitTask.id))
+    db.updateTask(gitTask.id, { repos: gitSeed.repos.map(repo => repo.fullName) })
+    db.db.prepare('UPDATE tasks SET status=?,updated_at=? WHERE id=?').run('completed', WORKSPACE_CLEANUP_FIXTURE.age, gitTask.id)
+    check('two distinct committed Git worktrees seeded', 2, gitSeed.worktrees.length)
+    for (const tree of gitSeed.worktrees) check(`actual committed Git content ${tree.branch}`, 1, Number(readFileSync(join(tree.path, tree.file), 'utf8') === tree.content))
+    const gitHeld = gitFixture.holdNextRemoval(); extraReleases.push(gitHeld.release)
+    const gitPending = outcome(manual())
+    await deadline('real Git child and stdio close before held callback delivery', gitHeld.entered)
+    const gitRaw = gitFixture.snapshot(), productionCommand = gitRaw.commands.find(command => command.phase === 'production')
+    check('actual first Git removal callback captured', 1, Number(productionCommand?.callbackReceived))
+    check('actual first Git removal child closed', 1, Number(productionCommand?.childClosed))
+    check('actual first Git removal stdio closed', 2, Number(productionCommand?.stdoutClosed) + Number(productionCommand?.stderrClosed))
+    check('actual Git completion delivery remains held', 0, Number(productionCommand?.callbackDelivered))
+    check('raw Git callback remains retained', 1, gitRaw.rawPending)
+    check('SQLite writer retained through raw Git callback', 1, Number(db.db.open))
+    check('cross-task start refused while actual Git callback retained', 1, Number(await outcome(services.agents.requestSession(agent.id, otherStart.task.id, otherStart.path, true)) !== 'resolved'))
+    gitHeld.release(); check('actual production multi-repository cleanup completes', 1, Number(await gitPending === 'resolved'))
+    await peersDrained(); report.git.removal = await gitFixture.assertRemoved(gitSeed)
+    check('two successful production Git removals', 2, report.git.removal.successfulProductionRemovals)
+    check('both actual bare Git metadata entries removed', 2, report.git.removal.metadataEntriesRemoved)
+    check('both actual worktree paths removed', 2, report.git.removal.pathsRemoved)
+    check('production final Git task directory removed', 0, Number(existsSync(gitSeed.taskPath)))
+    check('raw Git work fully acknowledged before next profile effect', 0, report.git.removal.rawPending)
+
     const cancelled = await create('cancelled raw observer keeps bytes'), cancelHold = hold('acquire'), controller = new AbortController()
     check('unrelated retained child survives every cleanup pass', 0, Number(unrelated.exited) + Number(unrelated.child.killed))
     unrelated.child.stdin!.end(); await deadline('unrelated fixture child acknowledged close', unrelated.closed)
@@ -480,7 +651,7 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
     check('cancelled cleanup preserves selected workspace', 1, Number(existsSync(cancelled.path)))
   } catch (error) {
     workloadFailure = error; hadWorkloadFailure = true
-    console.error(`PRODUCTION_WORKSPACE_CLEANUP_FAILURE ${JSON.stringify({ reason: error instanceof ServiceProtocolError ? error.code : error instanceof Error ? error.message : 'unknown', disconnects: disconnectReceipt(), runtimeOwnership: readOnlyDrainState(service.owner), counters: report.counters, observation, provenance: report.provenance })}`)
+    console.error(`PRODUCTION_WORKSPACE_CLEANUP_FAILURE ${JSON.stringify({ reason: error instanceof ServiceProtocolError ? error.code : error instanceof Error ? error.message : 'unknown', disconnects: disconnectReceipt(), runtimeOwnership: readOnlyDrainState(service.owner), counters: report.counters, observation, git: gitFixture.snapshot(), provenance: report.provenance })}`)
     throw error
   } finally {
     allowed = true
@@ -491,11 +662,26 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
     transportState.expectedClose = true
     try { await deadline('actual production owner close', service.close()); host.disconnect(); await host.waitForHandlers() }
     catch (closeError) {
-      console.error(`PRODUCTION_WORKSPACE_CLEANUP_DRAIN_FAILURE ${JSON.stringify({ workload: hadWorkloadFailure ? String(workloadFailure) : null, cleanup: String(closeError), disconnects: disconnectReceipt(), owner: service.owner.snapshot(), drainState: readOnlyDrainState(service.owner), observation, fileFds, adapterDestroyed })}`)
+      console.error(`PRODUCTION_WORKSPACE_CLEANUP_DRAIN_FAILURE ${JSON.stringify({ workload: hadWorkloadFailure ? String(workloadFailure) : null, cleanup: String(closeError), disconnects: disconnectReceipt(), owner: service.owner.snapshot(), drainState: readOnlyDrainState(service.owner), observation, fileFds, adapterDestroyed, git: gitFixture.snapshot() })}`)
       if (hadWorkloadFailure) throw new AggregateError([workloadFailure, closeError], 'CLEANUP_PROOF workload and owner drain failed; disposable profile retained')
       throw closeError
     }
-    await Promise.all(children.map(receipt => deadline('owned child close', receipt.closed)))
+    // The helper may delete only its private setup sandbox, after actual
+    // ProductionOwner close and every real Git callback/child/stdio receipt.
+    try {
+      await Promise.all(children.map(receipt => deadline('owned child close', receipt.closed)))
+      await deadline('actual Git fixture raw owner drain', gitFixture.close())
+    }
+    catch (closeError) {
+      console.error(`PRODUCTION_WORKSPACE_CLEANUP_GIT_DRAIN_FAILURE ${JSON.stringify({ workload: hadWorkloadFailure ? String(workloadFailure) : null, cleanup: String(closeError), git: gitFixture.snapshot(), rootPreserved: root })}`)
+      if (hadWorkloadFailure) throw new AggregateError([workloadFailure, closeError], 'CLEANUP_PROOF workload and Git raw drain failed; disposable root retained')
+      throw closeError
+    }
+    report.git.final = gitFixture.snapshot()
+    check('final Git callbacks all delivered', report.git.final.started, report.git.final.callbacksDelivered)
+    check('final Git children all closed', report.git.final.started, report.git.final.childCloses)
+    check('final Git stdio all closed', report.git.final.started * 2, report.git.final.stdioCloses)
+    check('final Git raw work drained', 0, report.git.final.rawPending)
     report.cleanup.ownerStopped = service.owner.snapshot().phase === 'stopped'; report.cleanup.childExits = children.filter(value => value.exited).length; report.cleanup.ptyExits = ptys.filter(value => value.exited).length
     if (leases.size || observation.openDirectoryFds || fileFds || ptys.some(value => !value.exited)) throw new Error('CLEANUP_PROOF raw resources retained; disposable root preserved')
     check('observer lease receipts all released', 0, leases.size)

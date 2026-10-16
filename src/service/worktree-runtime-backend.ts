@@ -35,7 +35,7 @@ export interface WorktreeRuntimeBackendOptions extends WorktreeRuntimeOwners {
   canAccessRepository(projectId: string, fullName: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   beforeWorkspaceMutation(taskIds: readonly string[]): void
   assertIdleWorkspace?(taskId: string, path: string): Promise<void>
-  runWorkspaceCleanupMutation?<T>(taskIds: string[], effect: () => Promise<T>, beforeEffect: () => void, signal: AbortSignal): Promise<T>
+  runWorkspaceCleanupMutation?<T>(taskIds: string[], effect: () => Promise<T>, beforeEffect: () => void, signal: AbortSignal, absentIds?: readonly string[]): Promise<T>
   runWorktreeMutation?<T>(taskIds: string[], sourceIds: string[], effect: () => Promise<T>): Promise<T>
 }
 const mutation = (op: WorktreeRuntimeOperation): boolean => op === 'worktree:setup' || op === 'worktree:cleanup' || op === 'workspace:runCleanupNow'
@@ -157,25 +157,28 @@ export class WorktreeRuntimeBackend {
       if (mutation(operation)) this.options.beforeWorkspaceMutation([...usedTasks])
       if (operation === 'workspace:runCleanupNow') global()
     }
-    const assertIdle = (ids: string[]): void => {
+    const assertIdle = (ids: string[], absentIds: readonly string[] = []): void => {
       for (const id of ids) {
         const bound = rows('SELECT id,role,group_id,status FROM tasks WHERE id=?', [id], { id: 128, role: 32, group_id: 128, status: 64 }, 1)[0]
-        if (!bound || ['agent_working','agent_learning','triaging'].includes(bound.status as string) || manager.findSessionByTaskId(id, { getTask: () => bound as unknown as ReturnType<DatabaseManager['getTask']> })) throw new ServiceProtocolError('BACKPRESSURE')
+        if (absentIds.includes(id) && (operation !== 'workspace:runCleanupNow' || bound)) throw new ServiceProtocolError('INVALID_REQUEST')
+        if ((!bound && !absentIds.includes(id)) || (bound && ['agent_working','agent_learning','triaging'].includes(bound.status as string)) || manager.findSessionByTaskId(id, { getTask: () => bound as unknown as ReturnType<DatabaseManager['getTask']> })) throw new ServiceProtocolError('BACKPRESSURE')
         if (rows("SELECT id FROM agent_start_queue WHERE task_id=? AND state IN ('queued','retrying','claimed','starting')", [id], { id: 128 }, 1).length) throw new ServiceProtocolError('BACKPRESSURE')
       }
     }
-    const lease = <T>(ids: string[], sourceIds: string[], effect: () => Promise<T>): Promise<T> => {
-      recheck(); assertIdle(ids)
+    const lease = <T>(ids: string[], sourceIds: string[], effect: () => Promise<T>, absentIds: readonly string[] = []): Promise<T> => {
+      if (absentIds.some(id => !ids.includes(id)) || new Set(absentIds).size !== absentIds.length) throw new ServiceProtocolError('INVALID_REQUEST')
+      recheck(); assertIdle(ids, absentIds)
       // The existing lifecycle lease calls getTask before invoking us. Bound
       // its complete stored row before that legacy getter copies any text/JSON.
       const columns = db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>
       const lengths = columns.map(column => `COALESCE(length(CAST("${column.name.replaceAll('"', '""')}" AS BLOB)),0)`).join('+')
       for (const id of ids) {
         const stored = db.prepare(`SELECT ${lengths} AS bytes FROM tasks WHERE id=?`).get(id) as { bytes: number } | undefined
+        if (absentIds.includes(id)) { if (stored) throw new ServiceProtocolError('INVALID_REQUEST'); continue }
         if (!stored || !Number.isSafeInteger(stored.bytes) || stored.bytes < 0 || stored.bytes > 128000) throw new ServiceProtocolError('FRAME_TOO_LARGE')
       }
       for (const id of ids) rows('SELECT labels,checklist,attachments,repos,output_fields,next_subtask_ids,recurrence_pattern FROM tasks WHERE id=?', [id], { labels: 65536, checklist: 65536, attachments: 65536, repos: 65536, output_fields: 65536, next_subtask_ids: 65536, recurrence_pattern: 65536 }, 1)
-      const joined = (): Promise<T> => { recheck(); assertIdle(ids); return effect() }
+      const joined = (): Promise<T> => { recheck(); assertIdle(ids, absentIds); return effect() }
       if (this.options.runWorktreeMutation) return this.options.runWorktreeMutation(ids, sourceIds, joined)
       const sources = (index: number): Promise<T> => index === sourceIds.length ? manager.runTaskLifecycleMutation(ids, joined) : sync.runSourceMutation(sourceIds[index]!, () => sources(index + 1))
       return sources(0)
@@ -190,8 +193,8 @@ export class WorktreeRuntimeBackend {
           const controls: WorkspaceCleanupRequestControls = { beforeEffect: recheck, signal, store: { getSetting: store.getSetting, getTasks: opts => { recheck(); return store.getTasks(opts) } }, getRepoGroups: id => {
             const groups = new Map<string, { org: string; repos: { fullName: string }[] }>(); for (const repo of scoped(id).repos) { const group = groups.get(repo.org) ?? { org: repo.org, repos: [] }; group.repos.push({ fullName: repo.fullName }); groups.set(repo.org, group) }; return [...groups.values()]
           }, ...(this.options.assertIdleWorkspace ? { assertIdleWorkspace: this.options.assertIdleWorkspace } : {}),
-          runMutation: (ids, effect) => lease(ids, [...usedSources], () => this.options.runWorkspaceCleanupMutation
-            ? this.options.runWorkspaceCleanupMutation(ids, effect, recheck, signal) : effect()) }
+          runMutation: (ids, effect, absentIds = []) => lease(ids, [...usedSources], () => this.options.runWorkspaceCleanupMutation
+            ? this.options.runWorkspaceCleanupMutation(ids, effect, recheck, signal, absentIds) : effect(), absentIds) }
           const actual = await cleanup.runNow(controls); recheck(); result = { ...actual, errors: actual.errors.map(error => error === 'Cleanup is already in progress' ? error : WORKSPACE_RUNTIME_ERROR) }
         } else {
           const id = args[0] as string, binding = scoped(id), supplied = operation === 'worktree:readFile' ? (args[1] === null ? [] : [{ fullName: args[1] as string }]) : args[1] as { fullName: string; defaultBranch?: string }[]

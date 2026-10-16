@@ -12,7 +12,9 @@
     "src/renderer/src/types/index.ts",
     "test/**/*",
     "scripts/production-workspace-cleanup-proof.ts",
-    "scripts/production-workspace-cleanup-proof.test.ts"
+    "scripts/production-workspace-cleanup-proof.test.ts",
+    "scripts/production-workspace-cleanup-git-fixture.ts",
+    "scripts/production-workspace-cleanup-git-fixture.test.ts"
   ],
   "compilerOptions": {
     "composite": true,

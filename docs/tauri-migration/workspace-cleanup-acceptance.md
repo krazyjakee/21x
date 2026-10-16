@@ -1,6 +1,6 @@
 # Production workspace cleanup acceptance
 
-This batch addresses the actual nonempty cleanup consumer in issue #210. It is
+This continuation addresses the actual nonempty cleanup consumer in issue #210. It is
 one part of that issue's task/project/configuration/settings acceptance, not a
 claim that the whole issue or the migration is complete. The explicit #202
 closure dependency remains in force. A reviewed process-observation code subset
@@ -77,6 +77,15 @@ Expected acceptance scenarios (actual results come only from the executed log):
 | Task-directory and workspace-root inode substitution | Controlled observer loses physical visibility, refuses with unavailable; both original and replacement generations remain intact |
 | Cancellation during raw acquire followed by held release | Public reply cancels; real observer directory FDs and profile writer remain open until raw release acknowledges; writer closes afterward |
 | Unrelated retained child | Survives all cleanup passes without being signaled; exits only when fixture closes its own stdin |
+| Rowless aged orphan, manual and scheduled | Server-discovered literal directory ID has no task before or after removal; scheduled whole flag is honored, explicit manual removal remains available |
+| Orphan busy/unknown, age refresh and physical replacement | Retained actual child yields busy, unknown refuses, changed age refuses late effect, and both displaced/replacement generations retain exact bytes |
+| Independent nested dependency cleanup | With whole cleanup disabled, enabled scheduled GC removes only aged `node_modules`; recent modules and exact workspace bytes remain; disabled dependency GC preserves the old candidate |
+| Dependency manual result and active task | `nodeModulesCleaned` counts the exact removed target and `cleaned` stays zero; an active task is excluded from selection without borrowing an idle observation |
+| Dependency unknown, inventory/target replacement and cancellation | Unknown refuses; changed bounded child metadata or target identity refuses late effect; cancellation retains raw directory FDs until acknowledged release and preserves bytes |
+| Dependency GC on a rowless directory | Existing literal-ID absence lease allows dependency-only pruning without creating a task, while preserving its workspace root |
+| Independent automatic cadence | A recent dependency run does not suppress due whole cleanup, and a recent whole run does not suppress due dependencies; skipped-phase timestamps stay unchanged; manual ignores cadence and preserves both automatic timestamps |
+| Two actual committed local Git worktrees | Actual public manual cleanup reaches production `WorktreeManager` and `GitProviderProcessOwner`; both successful Git removals, absent bare metadata entries, absent worktree paths and final task directory removal are required |
+| Held real Git completion | Actual callback received and child/stdout/stderr closed before delivery is held; global start exclusion and SQLite writer remain retained until delivery; every raw receipt drains before profile/root release |
 
 The scheduled trigger reflectively calls the actual private `runCleanup()`
 method on the real singleton scheduler. It adds no RPC and uses no fake clock or
@@ -85,6 +94,40 @@ Race barriers acknowledge actual observer/read/start callbacks. Peer drain and
 owner close join raw work before subsequent scenarios or profile release. No
 query runs on SQLite while it is concurrently closing. The final writer-open
 observation happens while the explicitly held raw native release blocks shutdown.
+
+Ordinary scheduled scenarios explicitly set both
+`workspace_autocleanup_last_run` and `workspace_nodemodules_gc_last_run` to the
+ancient fixture timestamp before triggering a pass. They do not depend on the
+last scenario's successful automatic cadence. Dedicated cadence cases set one
+recent and one ancient value and leave those values untouched before the actual
+scheduled trigger. Retention settings are explicit (`1` day) for reproducibility;
+both production default retention values are seven days. Dependency GC defaults
+enabled when its setting is absent; otherwise only the literal `true` enables it.
+
+Orphan names come from the real scheduler's bounded directory scan, match its
+literal ID policy and remain without a database task. Whole-orphan eligibility
+uses the directory's own mtime and is rechecked after yielded observations.
+The service owner's separate regression deletes/restores an exact captured real
+task row during observation to test reappearance; the Node proof's replacement
+and mtime races do not claim to execute that row-reappearance case. Dependency
+selection uses each candidate directory's own mtime, skips symlink directories
+and `.git`, stops at an accepted `node_modules`, and retains bounded descendant
+metadata plus physical ancestor identity. Source regressions supplement cases
+not independently executed by the actual-owner harness.
+
+`scripts/production-workspace-cleanup-git-fixture.ts` creates only new local
+committed repositories, bare clones and linked worktrees inside the synthetic
+root. Setup is fixture work, not production setup/fetch acceptance. The actual
+task and project repository records authorize `cleanup-fixture/alpha` and
+`cleanup-fixture/beta`; removal uses the unchanged public cleanup owner. The
+helper instruments the real process owner's `execFile`, never stubs removal or
+fabricates success. Its callback gate opens only after actual callback, child
+and stdio close receipts. The report retains system Git path/version/SHA-256,
+per-command receipt booleans and removal metadata verification. No network
+transport, user Git config, credential helper or hooks are used. Teardown closes
+ProductionOwner first, joins the helper's real raw process work and then removes
+its private setup sandbox. Any failed drain preserves the fixture root and
+records the original workload failure together with cleanup failure.
 
 Every directory and child belongs to the newly created fixture root. Shells use
 the staged node-pty addon with no profile/history and a minimal environment;
@@ -110,7 +153,7 @@ CRUD remaining unbound or agent API-key writes remaining plaintext-only.
 | Source-completion effects | Task lifecycle/source/plugin/connector finite codecs | Current source association and plugin-declared action; actual SyncManager source leases, external acceptance and local reconciliation | Existing controlled source acceptance/refusal evidence; actual configured external source completion must be demonstrated with authorized fixtures. Local completion choice is not an external update receipt |
 | Agent CRUD/config/model listing | `AgentConfigurationBackend`, finite agent configuration codecs, actual production composition | Current global/agent/project/reference scope; manager Stop/config notification, queue reconciliation and raw provider/listing lifetime | Published foundation/lifecycle/record-credential evidence. Actual five-backend SDK/CLI and installed lifecycle parity remain their own acceptance; successful controlled adapter callback is insufficient |
 | Settings credential formats/masking | `ProductionSettingsBackend`, record-credential codecs and protected startup preflight | Actual authenticated setting/record storage; finite key/environment names; derived affected owners and current mutation fences; marker preservation and omission/empty distinctions | Later record-credential source encrypts agent API keys, MCP and declared source fields. Historical credential conversion and installed OS-store acceptance remain separate; no silent conversion or plaintext echo |
-| Lifecycle-dependent settings | Settings backend plus actual owned scheduling/native consumers | Global admission/pause immediate effects; other preferences consumed on their real cadence; unsupported effects refuse before persistence | This batch repairs nonempty strict workspace cleanup. It does not replace unsupported settings owners with no-ops or make unrelated native feature work part of this bounded acceptance |
+| Lifecycle-dependent settings | Settings backend plus actual owned scheduling/native consumers | Global admission/pause immediate effects; whole-workspace and dependency cleanup use independent enable/retention/23h automatic cadence settings; other preferences remain on their real cadence | Batch32 validated retained strict plain-task cleanup. This continuation authors actual orphan/dependency/Git acceptance and independent cadence receipts; results remain UNRUN until primary validates. It does not replace unsupported settings owners with no-ops or make unrelated native feature work part of this bounded acceptance |
 | Every retained command/event reconciled with #202 | `src/shared/desktop-operations.ts`, generated contract inventory, exact `PRODUCTION_COMMAND_CODECS` / `PRODUCTION_EVENT_CODECS`, finite native policy and request corpus | Codec membership, native grant, runtime handler, current authorization and actual effect are separate facts | Use existing inventory/contract/corpus checks and owner evidence at the validated revision. No blanket parity claim from a count; remaining unbound/unsupported operations and installed event routes stay explicit under #202 |
 
 The canonical production map composes database, configuration, task/agent,
@@ -135,12 +178,16 @@ attempt/refusal/effect evidence; zero attempts and absent optional capability
 stay visible. This mapping is not a claim to have exercised every retained
 command, proved each domain's authorization or completed #202.
 
-Strict cleanup still refuses aged orphan directories, aged dependency pruning
-(`WORKSPACE_CLEANUP_NODE_MODULES_UNAVAILABLE`) and selected group/coordinator
-workspace deletion. These are exact remaining consumer gaps, alongside native
-visibility and the lack of atomic exclusion of arbitrary external processes.
-They must remain in the whole-issue assessment; the plain-task successful fixture
-cannot be used as evidence that those paths work.
+The new source supports explicit captured absent-ID orphan removal and independent
+aged dependency pruning through retained physical observation and managed-work
+exclusion. Their newly authored scenarios and successful production Git removal
+are **source-ready acceptance work, UNRUN by the engineer**; only primary's actual
+report can establish passing results at the new source hashes. Batch32's 94
+validated counters remain the baseline, not retrospective evidence for these new
+paths. Protected group/coordinator workspace deletion remains excluded. Native
+visibility, arbitrary external processes entering after a scan, installed
+platform/event routes and the whole issue's provider/source/learning/checkpoint
+acceptance remain separate. The explicit #202 closure prerequisite remains open.
 
 Relevant accepted source histories include production foundation/lifecycle,
 native terminal/settings, sources/MCP credentials, connector/plugin forms,

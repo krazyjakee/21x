@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { execFile, type ChildProcess, type ExecFileException } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { open, symlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
@@ -156,6 +156,39 @@ describe('actual protected worktree/SQLite/file/lifecycle owners', () => {
     options.assertIdleWorkspace = async () => { throw new Error(failure) }
     await expect(call('workspace:runCleanupNow', [])).rejects.toMatchObject({ code })
     expect(readFileSync(join(path, 'keep'), 'utf8')).toBe('owned bytes')
+  })
+  it('removes only a captured absent workspace through real manual authority and selected-ID/global leases', async () => {
+    const id = 'absent-cleanup-fixture', path = join(workspaceRoot, id); mkdirSync(path); writeFileSync(join(path, 'keep'), 'aged orphan'); utimesSync(path, new Date('2020-01-01'), new Date('2020-01-01'))
+    const actions: string[] = []
+    const observer = new ProductionWorkspaceProcessOwner(workspaceRoot, async request => {
+      actions.push(request.action); expect(db.getTask(id)).toBeUndefined()
+      if (request.action === 'acquire') {
+        await expect(manager.requestSession('synthetic-agent', id)).rejects.toThrow('WORKSPACE_CLEANUP_BUSY')
+        return { status: 'idle', leaseId: '8bac4cd9-4ef5-4a20-b109-89d28df6857b' }
+      }
+      return request.action === 'release' ? { released: true } : { status: 'idle' }
+    })
+    options.assertIdleWorkspace = (selected, absolute) => observer.assertIdleWorkspace(selected, absolute)
+    options.runWorkspaceCleanupMutation = (ids, effect, current, signal, absentIds) => {
+      expect(ids).toEqual([id]); expect(absentIds).toEqual([id])
+      return manager.withWorkspaceCleanupExclusion(ids, () => observer.run(ids, effect, current, signal), () => observer.inflightCount === 0)
+    }
+    expect(await call('workspace:runCleanupNow', [])).toEqual({ cleaned: 1, errors: [], nodeModulesCleaned: 0 })
+    expect(actions).toEqual(['acquire', 'check', 'check', 'release']); expect(existsSync(path)).toBe(false); expect(db.getTask(id)).toBeUndefined(); await observer.close()
+    await expect(call('worktree:cleanup', [id, [], '', true])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+  it('preserves an orphan when caller authority is revoked during the actual process observation', async () => {
+    const id = 'absent-cleanup-fixture', path = join(workspaceRoot, id); mkdirSync(path); writeFileSync(join(path, 'keep'), 'aged orphan'); utimesSync(path, new Date('2020-01-01'), new Date('2020-01-01'))
+    const actions: string[] = []
+    const observer = new ProductionWorkspaceProcessOwner(workspaceRoot, async request => {
+      actions.push(request.action)
+      if (request.action === 'acquire') { global = false; return { status: 'idle', leaseId: '8bac4cd9-4ef5-4a20-b109-89d28df6857b' } }
+      return request.action === 'release' ? { released: true } : { status: 'idle' }
+    })
+    options.assertIdleWorkspace = (id, path) => observer.assertIdleWorkspace(id, path)
+    options.runWorkspaceCleanupMutation = (ids, effect, current, signal) => observer.run(ids, effect, current, signal)
+    await expect(call('workspace:runCleanupNow', [])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(actions).toEqual(['acquire', 'release']); expect(readFileSync(join(path, 'keep'), 'utf8')).toBe('aged orphan'); await observer.close()
   })
   it('refuses cleanup while the actual source mutation lease is retained', async () => {
     const source = db.createTaskSource({ name: 'Cleanup source fixture', plugin_id: 'fixture', mcp_server_id: null, config: {}, project_id: projectId })!
