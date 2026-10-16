@@ -1,0 +1,4265 @@
+{
+  "version": 1,
+  "recordedAt": "2026-10-16T16:11:38.574641+00:00",
+  "repository": "krazyjakee/21x",
+  "targetBranch": "master",
+  "implementationBase": "e45a25312b3ccedc862136a35d2ac1cf498a0309",
+  "implementationRevision": "The Git commit containing this evidence; exact source hashes below",
+  "scope": "Exactly three retained task feedback notices through actual owner senders, current read projection, bounded service/native codecs and current-document page callbacks",
+  "wholeIssueAcceptance": false,
+  "releaseOrLiveProfileCutover": false,
+  "shippingHost": "Electron retained",
+  "sourceHashes": {
+    "docs/tauri-migration/event-forwarding-review.json": "fac8705995f2a49728b18f68208335108d2c40f4c69d1171865e92d0192c4308",
+    "docs/tauri-migration/inventory.json": "11b481872ff4a2d02f94ef579870bedd19ffd4a3951119365b5d72285774435d",
+    "docs/tauri-migration/operations.json": "1d26592a535c60b8881a573344015e04f96fc37c10bf47a1a6212acf5d8bda92",
+    "docs/tauri-migration/task-feedback-acceptance.md": "6c46b265ab0e58dfd41103bf5108b24c245839de81679f52cffe757228d23a22",
+    "scripts/production-task-feedback-proof.test.ts": "76a8b1fde35398991cca4cef6624458b0e903e6b3cf1f524252429c7ee8cd47e",
+    "scripts/production-task-feedback-proof.ts": "5093f1e79d3f9287900f7681322d904346f9d0dccdf6f9eac18041ebb13c5334",
+    "src-tauri/engine/src/production_contracts.rs": "c2a6456fadf30f64a777e0a552d4bd7bccca939d79b8b0d1f02b493240f9b41d",
+    "src-tauri/src/production_host.rs": "8866f3856e587ceba7cf709fae43a1477dc17e5dc4a0f35648e5aff166690bbf",
+    "src/main/agent-manager-core.ts": "2331648cadd3f77eb433c6ca0c5ea82e7171f6725584ff6a15ed938916fe1c38",
+    "src/main/agent-manager-scoped-approval.test.ts": "859f183f9d4e63cdca21d83bf711df1c1f64c6cc58b01f2ab562980be4f527fc",
+    "src/main/agent-manager.test.ts": "b997228e70be2fbf1f27b35d921aeb981909beeeb8ceaaca43f4d96cbbdada2b",
+    "src/main/session-feedback.test.ts": "fddccb78108eb3fe83766b40190cd8cd4a51e21778e83b0f2f663d80d11de6c1",
+    "src/main/session-feedback.ts": "a6eb78f18ac7cfb9a33fada0ff2508d090825fda9c398f2b6211eb3b37bf4dda",
+    "src/main/task-api-voice-tools.test.ts": "d54508db9de022e31be1eb5a1eb209547b705e04e078fe9c05b21555ba052ef3",
+    "src/main/task-api/session-routes.ts": "5ed01619048d28697b825b4e35c960ac84ad3a0f9c308476ea9fdb69d479ad65",
+    "src/main/task-api/state.ts": "9441fcf87749ad427772c770352d6152a28a6bbbefcac29c04c6dc3bc6c7920c",
+    "src/renderer/src/lib/native-desktop-host.test.ts": "388769bda6f2ae824791054e9b20257065fbc8fcff76ed1e27e9da34ca761510",
+    "src/renderer/src/lib/native-desktop-host.ts": "d0b3ac7ce399c10216f367fb207c952d32155cd065a104370cb6f6e1f0103af1",
+    "src/renderer/src/lib/tauri-desktop-transport.test.ts": "46778fe07a7dd1f63d36166fc52ea642fb03eb68b9bb6df190b83662f82cd781",
+    "src/renderer/src/lib/tauri-desktop-transport.ts": "9f24d2d28ffb2787dc8b6c24551af190a954e981f2cddb70acda60140204ae07",
+    "src/renderer/src/types/electron.d.ts": "8e44df4c94fb4962990d3aa726e0ef9f0dfd62b6f75210d76b3ab3be1edf3b4e",
+    "src/service/production-desktop-bindings.test.ts": "a4414cdae8ebf738b49220256da1be1a13f87ecdbac00e0568b9cf8d1b5807c1",
+    "src/service/production-desktop-bindings.ts": "439ceb9c177b64f58488495659a3f52005f38b138df2ad43e354266a15cb0549",
+    "src/service/production-task-feedback-acceptance.test.ts": "665690d580edf00efa216928eb61190f0f60a158d2ddbb610c594661afd1eaac",
+    "src/shared/desktop-api.ts": "39aefffcf6ce525de94b5b22db3b4c07a63956fe602efd3a294f7b2a24737e60",
+    "src/shared/desktop-event-forwarding.ts": "4c26d82db4e0948d1981eebebe5516adf79d94136f7c270b535302456af8f6ab",
+    "src/shared/production-agent-events.test.ts": "f1537f4c27754ee70885fa51de7d9dfca88da8c0ae687fe0ae0652580c2ae630",
+    "src/shared/production-agent-events.ts": "6aa0761473f1e78d244cd3a6f9646f923ece9def5e1ff7e44c01e4f7dd8a238f",
+    "src/shared/task-feedback-event-codecs.test.ts": "fc782bc2f6110e489d6cc064950242461a429ae30d96513c9f4e4ff4cff267c1",
+    "src/shared/task-feedback-event-codecs.ts": "3396f7dd88b1e470156d24fed58712ada31947ba44329afec846623729ecc1bd",
+    "tsconfig.node.json": "8c709daecf1d816ea26231036f6f19d4399a5b6c5c0dbcb819324580e7550d4d",
+    "vitest.tauri.config.ts": "a4ff27c95147ea03d4972985311a64bfb5d33f5ca5b1ab05744ce3e843988123"
+  },
+  "frozenInputs": {
+    "integrated": {
+      "files": 2126,
+      "sha256": "d489913cdbbc35923a6c9b4dbfbd049b7e0e97f42f1122ef56c5e067f820a929",
+      "unchanged": true
+    },
+    "engine": {
+      "files": 20,
+      "sha256": "3c1b587ebc11e50fd2196e5659452bb6a4802baf9673e4a5161b69c280635426",
+      "unchanged": true
+    },
+    "host": {
+      "files": 45,
+      "sha256": "8c44feb0ea5028b8e81f1e2e6eb0a01c1882ca0261ca0c9c3c748de5be67825e",
+      "unchanged": true
+    },
+    "staged": {
+      "files": 2,
+      "sha256": "3740a1fbcb4c32690eee2ecb94694b6fa81e4ad5307a357b6cfa0697a671ab12",
+      "unchanged": true
+    }
+  },
+  "platform": {
+    "system": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "stagedNode": "v22.23.2",
+    "sqlite": "13.0.3",
+    "applicationElectron": "44.0.0",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18",
+    "installedWebViewObserved": null
+  },
+  "fixtureSchema": {
+    "version": 1,
+    "databaseSchemaVersion": 37
+  },
+  "taskFeedbackReceipt": {
+    "version": 1,
+    "scope": "actual-source-production-owner-authenticated-task-api-private-peer-controlled-adapter-source",
+    "provenance": {
+      "platform": "linux",
+      "architecture": "x64",
+      "osRelease": "6.8.0-139-generic",
+      "node": "v22.23.2",
+      "sqlite": "13.0.3",
+      "webview": null,
+      "sources": {
+        "scripts/production-task-feedback-proof.ts": "5093f1e79d3f9287900f7681322d904346f9d0dccdf6f9eac18041ebb13c5334",
+        "scripts/production-task-feedback-proof.test.ts": "76a8b1fde35398991cca4cef6624458b0e903e6b3cf1f524252429c7ee8cd47e",
+        "src/service/production-task-feedback-acceptance.test.ts": "665690d580edf00efa216928eb61190f0f60a158d2ddbb610c594661afd1eaac",
+        "src/service/production-service.ts": "091fa19fe37dff89302f61695d50fd56bfa549cd696d569dc5a733e4f58d79db",
+        "src/service/production-owner.ts": "2d4ddd943722f7bfd6a76e6ece89597e0c6775971184272e9f6ba9d53af67fea",
+        "src/service/production-desktop-bindings.ts": "439ceb9c177b64f58488495659a3f52005f38b138df2ad43e354266a15cb0549",
+        "src/service/production-agent-backend.ts": "a12bbcae2630901fdcbbd0ea5b5050c7a5312375fbdb96335521a7939d9458ab",
+        "src/shared/production-agent-events.ts": "6aa0761473f1e78d244cd3a6f9646f923ece9def5e1ff7e44c01e4f7dd8a238f",
+        "src/shared/task-feedback-event-codecs.ts": "3396f7dd88b1e470156d24fed58712ada31947ba44329afec846623729ecc1bd",
+        "src/main/agent-manager-core.ts": "2331648cadd3f77eb433c6ca0c5ea82e7171f6725584ff6a15ed938916fe1c38",
+        "src/main/task-api/session-routes.ts": "5ed01619048d28697b825b4e35c960ac84ad3a0f9c308476ea9fdb69d479ad65",
+        "src/main/task-api/state.ts": "9441fcf87749ad427772c770352d6152a28a6bbbefcac29c04c6dc3bc6c7920c",
+        "src/main/task-api-server-core.ts": "386c095021a808b73b8a00cb9d61914f29c209b4af54e3135ce9a41c2eb8c46b",
+        "src/main/session-feedback.ts": "a6eb78f18ac7cfb9a33fada0ff2508d090825fda9c398f2b6211eb3b37bf4dda",
+        "src/main/sync-manager.ts": "704741425135d5b683220ab50835e36c5bb05c4ac1e5f8333a74affe74b2712b",
+        "src/main/plugins/github-issues-plugin.ts": "114e9b8f63dae859a34d8711065118b6e739487544ca6ab69a2f2527db3c4196",
+        "src/main/git-provider-process-owner.ts": "6566fb0bf2267f724e51300baeb98a7e7b4a2778a8606df06d9cecf6f1d4a69c",
+        "src/shared/desktop-api.ts": "39aefffcf6ce525de94b5b22db3b4c07a63956fe602efd3a294f7b2a24737e60",
+        "src/shared/desktop-operations.ts": "ee09cc3712723f5cdf9d9c81f0fa77f23092bb833ee484db077cf5bf6c7c82dc",
+        "src-tauri/engine/src/production_contracts.rs": "c2a6456fadf30f64a777e0a552d4bd7bccca939d79b8b0d1f02b493240f9b41d",
+        "src-tauri/src/production_host.rs": "8866f3856e587ceba7cf709fae43a1477dc17e5dc4a0f35648e5aff166690bbf",
+        "src/renderer/src/lib/tauri-desktop-transport.ts": "9f24d2d28ffb2787dc8b6c24551af190a954e981f2cddb70acda60140204ae07",
+        "src/renderer/src/lib/native-desktop-host.ts": "d0b3ac7ce399c10216f367fb207c952d32155cd065a104370cb6f6e1f0103af1"
+      },
+      "artifacts": {
+        "node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+        "sqlitePackage": "6c9ea355190dfce3646ad4d2a31c9506de36d884a6461b3655a2a0c4ba3d1695",
+        "sqliteAddon": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+        "sourceFixture": "03afed6421f1038573e8f1b2852aa4074e3e3bd010b16b74c4d256f5515c9b59"
+      }
+    },
+    "counters": [
+      {
+        "name": "actual incompatible resume refuses public mutation",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual Manager emitted one incompatible notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "incompatible payload exact current identities",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "incompatible backend error redacted to exact wire notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "incompatible durable native session cleared",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "incompatible durable classified loss notice retained",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "incompatible failure does not automatically create replacement session",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "transport usable after actual incompatible failure",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "transport usable after actual incompatible failure zero fatal disconnects",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "captured incompatible event denies current task read",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "real task-denied incompatible resume still refuses",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "real task-denied incompatible sender leaks no notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "captured incompatible event denies current project read",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "real project-denied incompatible resume still refuses",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "real project-denied incompatible sender leaks no notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "captured incompatible event denies current agent read",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "real agent-denied incompatible resume still refuses",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "real agent-denied incompatible sender leaks no notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "captured incompatible event denies stale epoch",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "captured incompatible event denies foreign principal",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "checkpoint actually waits in current Manager",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "unauthenticated checkpoint returns401",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "name": "unauthorized checkpoint never calls adapter",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "foreign task checkpoint refuses",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "foreign task never approves other session",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "checkpoint nonboolean approval refuses",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "invalid boolean never calls native approval",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "actual adapter refusal does not claim checkpoint success",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "adapter refusal emits no answered notice",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "authenticated checkpoint success follows actual adapter acknowledgment",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual checkpoint response emits one notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "checkpoint notice preserves actual false boolean and exact task",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "duplicate answered checkpoint refuses",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "duplicate never replays adapter approval",
+        "expected": 2,
+        "actual": 2
+      },
+      {
+        "name": "duplicate emits no false second notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "acknowledged checkpoint current pending request consumed",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "checkpoint durable session binding remains exact",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "answered checkpoint actual adapter destruction acknowledged",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "answered checkpoint retained Manager session retired before next start",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "answered checkpoint controlled adapter identity retired",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "actual acknowledged checkpoint with task-denied observer",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task-denied checkpoint leaks no answered event",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "no automatic checkpoint replay after task read restored",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "no automatic checkpoint replay after task read restored zero fatal disconnects",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "restored task grant does not replay notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual acknowledged checkpoint with project-denied observer",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual project-denied checkpoint leaks no answered event",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "no automatic checkpoint replay after project read restored",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "no automatic checkpoint replay after project read restored zero fatal disconnects",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "restored project grant does not replay notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual acknowledged checkpoint with agent-denied observer",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual agent-denied checkpoint leaks no answered event",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "no automatic checkpoint replay after agent read restored",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "no automatic checkpoint replay after agent read restored zero fatal disconnects",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "restored agent grant does not replay notice",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "transport usable after acknowledged checkpoint",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "transport usable after acknowledged checkpoint zero fatal disconnects",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "synthetic source binding persisted through source writer origin",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual source WAITING to BUSY polling acknowledged by current Manager and wire",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "user feedback pending choice persisted",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual source failure projected safe fixed error",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual source failure title fits UTF8/codepoint bound",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "failed source completion leaves task durably ready for review",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "source completion choice consumed without automatic replay",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "one actual bounded source command attempted",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "one actual source callback acknowledged",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "one actual source child close acknowledged",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual source stdout and stderr close acknowledged",
+        "expected": 2,
+        "actual": 2
+      },
+      {
+        "name": "transport usable after actual source failure",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "transport usable after actual source failure zero fatal disconnects",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "source failure denies current task read",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "source failure denies current project read",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "source failure denies current agent read",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "source failure denies current source read",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual agent:incompatible-session has exact production codec",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual agent:incompatible-session wire bytes bounded",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual agent:incompatible-session stamped current engine epoch",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual agent:incompatible-session avoids unbridged fallback",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "actual agent:incompatible-session refuses unknown wire keys",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task:checkpointAnswered has exact production codec",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task:checkpointAnswered wire bytes bounded",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task:checkpointAnswered stamped current engine epoch",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task:checkpointAnswered avoids unbridged fallback",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "actual task:checkpointAnswered refuses unknown wire keys",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task:source-action-failed has exact production codec",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task:source-action-failed wire bytes bounded",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task:source-action-failed stamped current engine epoch",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "actual task:source-action-failed avoids unbridged fallback",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "actual task:source-action-failed refuses unknown wire keys",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "exact three distinct retained notices exercised",
+        "expected": 3,
+        "actual": 3
+      },
+      {
+        "name": "agent:incompatible-session foreign document observer denied",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "task:checkpointAnswered foreign document observer denied",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "task:source-action-failed foreign document observer denied",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "incompatible event cannot describe a replaced assigned agent",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "captured incompatible event grants no deleted-task access",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "checkpoint event follows moved task current project grant",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "no incompatible automatic resume retry",
+        "expected": 4,
+        "actual": 4
+      },
+      {
+        "name": "source command is not replayed by later pings/drains",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "checkpoint HTTP caller cancellation observed",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "retired checkpoint generation no longer registered",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "cancelled raw approval has not fabricated answered event",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "profile SQLite writer retained through raw checkpoint callback",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "retired cancelled checkpoint emits no false approval",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "profile SQLite closes after raw checkpoint retirement",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "real native process-owner drain acknowledged",
+        "expected": 1,
+        "actual": 1
+      },
+      {
+        "name": "no fatal feedback transport disconnects",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "no source child signaled",
+        "expected": 0,
+        "actual": 0
+      },
+      {
+        "name": "all accepted adapter sessions destroyed",
+        "expected": 0,
+        "actual": 0
+      }
+    ],
+    "notices": [
+      {
+        "operation": "agent:incompatible-session",
+        "payload": {
+          "taskId": "ro3tqt1fsf9rst5r6jc7r1s8",
+          "agentId": "v5mp2jtyd3vhfe7sc89bnk7n",
+          "error": "The backend session is no longer available. Start a new session to continue with a recap."
+        },
+        "engineEpoch": "5b620ecc-e62b-4d07-a34b-8a2ed16b1e66",
+        "sequence": 2
+      },
+      {
+        "operation": "task:checkpointAnswered",
+        "payload": {
+          "taskId": "d1gapsk1450ajk61cotxw7ka",
+          "approved": false
+        },
+        "engineEpoch": "5b620ecc-e62b-4d07-a34b-8a2ed16b1e66",
+        "sequence": 10
+      },
+      {
+        "operation": "task:source-action-failed",
+        "payload": {
+          "taskId": "n6qhww8ys1s8lf0qc1y1wvti",
+          "taskTitle": "\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea\ud83e\uddea",
+          "error": "The task source action failed. Review the task and retry."
+        },
+        "engineEpoch": "5b620ecc-e62b-4d07-a34b-8a2ed16b1e66",
+        "sequence": 61
+      }
+    ],
+    "encoding": [
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 207,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 207,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 180,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 180,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "transcript:changed",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "parts",
+              "maxRev"
+            ],
+            "fields": {
+              "taskId": "string",
+              "parts": "object",
+              "maxRev": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 1038,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "parts",
+              "maxRev"
+            ],
+            "fields": {
+              "taskId": "string",
+              "parts": "object",
+              "maxRev": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 1038,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "transcript:changed",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "parts",
+              "maxRev"
+            ],
+            "fields": {
+              "taskId": "string",
+              "parts": "object",
+              "maxRev": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 414,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "parts",
+              "maxRev"
+            ],
+            "fields": {
+              "taskId": "string",
+              "parts": "object",
+              "maxRev": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 414,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 189,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 189,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:checkpointAnswered",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "approved"
+            ],
+            "fields": {
+              "taskId": "string",
+              "approved": "boolean"
+            }
+          },
+          "nested": null,
+          "bytes": 53,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "approved"
+            ],
+            "fields": {
+              "taskId": "string",
+              "approved": "boolean"
+            }
+          },
+          "nested": null,
+          "bytes": 53,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:recoveryStateChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "cause",
+              "action",
+              "result",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "cause": "string",
+              "action": "string",
+              "result": "string",
+              "error": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 137,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "cause",
+              "action",
+              "result",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "cause": "string",
+              "action": "string",
+              "result": "string",
+              "error": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 137,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "project:statusChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "projectId"
+            ],
+            "fields": {
+              "projectId": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 23,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "projectId"
+            ],
+            "fields": {
+              "projectId": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 23,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 207,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 207,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 180,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 180,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 189,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 189,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:checkpointAnswered",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "approved"
+            ],
+            "fields": {
+              "taskId": "string",
+              "approved": "boolean"
+            }
+          },
+          "nested": null,
+          "bytes": 53,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "approved"
+            ],
+            "fields": {
+              "taskId": "string",
+              "approved": "boolean"
+            }
+          },
+          "nested": null,
+          "bytes": 53,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:recoveryStateChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "cause",
+              "action",
+              "result",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "cause": "string",
+              "action": "string",
+              "result": "string",
+              "error": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 137,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "cause",
+              "action",
+              "result",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "cause": "string",
+              "action": "string",
+              "result": "string",
+              "error": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 137,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "project:statusChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "projectId"
+            ],
+            "fields": {
+              "projectId": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 23,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "projectId"
+            ],
+            "fields": {
+              "projectId": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 23,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 207,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 207,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 181,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 181,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 190,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 190,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:checkpointAnswered",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "approved"
+            ],
+            "fields": {
+              "taskId": "string",
+              "approved": "boolean"
+            }
+          },
+          "nested": null,
+          "bytes": 53,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "approved"
+            ],
+            "fields": {
+              "taskId": "string",
+              "approved": "boolean"
+            }
+          },
+          "nested": null,
+          "bytes": 53,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:recoveryStateChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "cause",
+              "action",
+              "result",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "cause": "string",
+              "action": "string",
+              "result": "string",
+              "error": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 137,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "cause",
+              "action",
+              "result",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "cause": "string",
+              "action": "string",
+              "result": "string",
+              "error": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 137,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "project:statusChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "projectId"
+            ],
+            "fields": {
+              "projectId": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 23,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "projectId"
+            ],
+            "fields": {
+              "projectId": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 23,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 208,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 208,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 181,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 181,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 190,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 190,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 181,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 181,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:source-action-failed",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "taskTitle",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "taskTitle": "string",
+              "error": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 855,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "taskTitle",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "taskTitle": "string",
+              "error": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 632,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status",
+              "updated_at",
+              "last_activity_at"
+            ],
+            "fields": {
+              "status": "string",
+              "updated_at": "string",
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 163,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status",
+              "updated_at",
+              "last_activity_at"
+            ],
+            "fields": {
+              "status": "string",
+              "updated_at": "string",
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 163,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 178,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 178,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 427,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "status"
+            ],
+            "fields": {
+              "status": "string"
+            }
+          },
+          "bytes": 74,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 181,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 181,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 190,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 190,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:recoveryStateChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "cause",
+              "action",
+              "result",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "cause": "string",
+              "action": "string",
+              "result": "string",
+              "error": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 137,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "cause",
+              "action",
+              "result",
+              "error"
+            ],
+            "fields": {
+              "taskId": "string",
+              "cause": "string",
+              "action": "string",
+              "result": "string",
+              "error": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 137,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "project:statusChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "projectId"
+            ],
+            "fields": {
+              "projectId": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 23,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "projectId"
+            ],
+            "fields": {
+              "projectId": "string"
+            }
+          },
+          "nested": null,
+          "bytes": 23,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:startQueueChanged",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "queue"
+            ],
+            "fields": {
+              "queue": "object"
+            }
+          },
+          "nested": null,
+          "bytes": 12,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "task:updated",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "taskId",
+              "updates"
+            ],
+            "fields": {
+              "taskId": "string",
+              "updates": "object"
+            }
+          },
+          "nested": {
+            "type": "object",
+            "keys": [
+              "last_activity_at"
+            ],
+            "fields": {
+              "last_activity_at": "string"
+            }
+          },
+          "bytes": 95,
+          "serializable": true
+        },
+        "code": null
+      },
+      {
+        "operation": "agent:status",
+        "succeeded": true,
+        "raw": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 208,
+          "serializable": true
+        },
+        "encoded": {
+          "shape": {
+            "type": "object",
+            "keys": [
+              "sessionId",
+              "agentId",
+              "taskId",
+              "status",
+              "activityOutcome",
+              "epoch",
+              "seq"
+            ],
+            "fields": {
+              "sessionId": "string",
+              "agentId": "string",
+              "taskId": "string",
+              "status": "string",
+              "activityOutcome": "string",
+              "epoch": "string",
+              "seq": "number"
+            }
+          },
+          "nested": null,
+          "bytes": 208,
+          "serializable": true
+        },
+        "code": null
+      }
+    ],
+    "raw": {
+      "adapterCreates": 6,
+      "adapterResumes": 4,
+      "adapterApprovals": 6,
+      "adapterDestroys": 6,
+      "sourceCommands": 1,
+      "sourceCallbacks": 1,
+      "sourceChildren": 1,
+      "sourceStdio": 2,
+      "nativeDrainAcks": 1
+    },
+    "cleanup": {
+      "ownerStopped": true,
+      "profileRemoved": true
+    },
+    "remaining": [
+      "Node sender/private-peer/projection receipts do not establish native window/document or renderer consumer delivery; separate owned-source tests supplement them.",
+      "Controlled local adapter and failing source CLI are not installed vendor/provider or authorized remote source mutation acceptance.",
+      "Full learning/skill/checkpoint/source/platform acceptance and explicit #202 prerequisite remain open; no whole #210 closure."
+    ]
+  },
+  "verification": {
+    "vitestReports": {
+      "focused": {
+        "passed": 435,
+        "failed": 0,
+        "skipped": 0,
+        "files": 12,
+        "reportSha256": "28303e25169eaa36dda6d0c794774c6384dff87955d9e804a33da7e83dbbd99f",
+        "logSha256": "32bcc05538c5326e912ed8893ce34a6701a0c8e35860e8a80b84435afefc867e"
+      },
+      "application": {
+        "passed": 7202,
+        "failed": 0,
+        "skipped": 33,
+        "files": 587,
+        "reportSha256": "488215a4076a26fd468d776af77ff169065259040c2a62d873aa100c1069efc5",
+        "logSha256": "51ff9ebf7b3ae7a58c9538245cd689aa00b473d2e59dcde1bc2ad32d5115c4fa"
+      },
+      "standalone": {
+        "passed": 3716,
+        "failed": 0,
+        "skipped": 5,
+        "files": 299,
+        "reportSha256": "fc23261aa304e8dabd7ba6ee16d504f7300ad724ebe81159f505968bd595258d",
+        "logSha256": "a86641ff848f13817dd2cb4fd3e6203e4acd6424251353402cff655af6c0334d"
+      },
+      "feedback-proof": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "files": 1,
+        "reportSha256": "b1e90d48aea65e56fc07d0ae801b72d5357847505f7af30c3c79010d4f045596",
+        "logSha256": "49d0acf74b071bce745253d45ff22e6ae2331dc58e2381e60248886c854395cf"
+      },
+      "private-production": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "files": 1,
+        "reportSha256": "c1f605ff41bdc2c6c7aa23234b26b58bccb94f2b124e4ce4a098453892bc0529",
+        "logSha256": "53f586f2e516241f82418e10f8bc129cb1a44a1ed4c653866338f6670a6b6e2a"
+      },
+      "payload-regression": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "files": 1,
+        "reportSha256": "2d00d324bdfb4ebc2fb6e2049e020b143848ff19f7162ef787c8d636b90a2ba8",
+        "logSha256": "3f7648ce44789b812ed41ffdecbb0b36f466f1d1ea3d1e602ad8395a441c113b"
+      }
+    },
+    "serializedSteps": [
+      {
+        "name": "native-engine",
+        "command": [
+          "rtk",
+          "env",
+          "CARGO_BUILD_JOBS=1",
+          "cargo",
+          "test",
+          "--locked",
+          "--manifest-path",
+          "src-tauri/Cargo.toml",
+          "-p",
+          "twentyonex-engine",
+          "--features",
+          "production-service",
+          "--",
+          "--test-threads=1"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:42:17.213682+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-native-engine.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:42:24.281276+00:00",
+        "logSha256": "df2be79e9a05ef447c688db74da0d265e38b3269107bd293045d7948649b488e"
+      },
+      {
+        "name": "focused",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:run",
+          "--maxWorkers=2",
+          "src/shared/production-agent-events.test.ts",
+          "src/shared/task-feedback-event-codecs.test.ts",
+          "src/main/agent-manager.test.ts",
+          "src/main/agent-manager-scoped-approval.test.ts",
+          "src/main/agent-manager-coordinator.test.ts",
+          "src/main/session-feedback.test.ts",
+          "src/main/task-api-voice-tools.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-service.test.ts",
+          "src/renderer/src/lib/native-desktop-host.test.ts",
+          "src/renderer/src/lib/tauri-desktop-transport.test.ts",
+          "scripts/production-task-feedback-proof.test.ts",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch34-focused.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:54:55.758350+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-focused.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:55:17.995356+00:00",
+        "logSha256": "32bcc05538c5326e912ed8893ce34a6701a0c8e35860e8a80b84435afefc867e"
+      },
+      {
+        "name": "production-stage",
+        "command": [
+          "rtk",
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:55:37.396393+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-production-stage.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:55:59.867622+00:00",
+        "logSha256": "3910fb26e0104f9ab5884bbb27951807f1ebd63f805f4fa1abbf57aefbd7ca21"
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "rtk",
+          "node",
+          "scripts/tauri-inventory.mjs",
+          "--check"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:56:50.990193+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-inventory.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:56:57.122468+00:00",
+        "logSha256": "a5811d8e5733d8f69ead4f9a4f0e384c6daf0cca875f7dc46ca47c412c6500c6"
+      },
+      {
+        "name": "contracts",
+        "command": [
+          "rtk",
+          "node",
+          "scripts/tauri-contracts.mjs",
+          "--check"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:56:57.123012+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-contracts.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:57:01.873820+00:00",
+        "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+      },
+      {
+        "name": "native-host",
+        "command": [
+          "rtk",
+          "env",
+          "CARGO_BUILD_JOBS=1",
+          "cargo",
+          "test",
+          "--locked",
+          "--manifest-path",
+          "src-tauri/Cargo.toml",
+          "-p",
+          "twentyonex-tauri-feasibility",
+          "--features",
+          "production-service",
+          "--",
+          "--test-threads=1"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:57:01.874553+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-native-host.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:57:14.170590+00:00",
+        "logSha256": "cbe1703cbefcbed837d39affb579580d0b636166ef0c35532dcf80e4a333d4ce"
+      },
+      {
+        "name": "shipping",
+        "command": [
+          "rtk",
+          "pnpm",
+          "build"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:57:14.171410+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-shipping.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:57:48.715261+00:00",
+        "logSha256": "2dbd9e53cb20d0cdb27f35b59b9934a8cf6a7c47c3f5aa775dbbd30a19e6da86"
+      },
+      {
+        "name": "production-frontend",
+        "command": [
+          "rtk",
+          "pnpm",
+          "tauri:production:frontend:build"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:57:48.717641+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-production-frontend.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:58:04.686312+00:00",
+        "logSha256": "553ded55b8888eec5209179a026ee938aa39184a8f22ff8ca58db525ed7e2e1b"
+      },
+      {
+        "name": "diagnostic-frontend",
+        "command": [
+          "rtk",
+          "pnpm",
+          "tauri:frontend:build"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:58:04.686729+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-diagnostic-frontend.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:58:05.507853+00:00",
+        "logSha256": "d339191425259b659705c138a656838be9354d792c200c8a31c3a9856dde5d57"
+      },
+      {
+        "name": "format",
+        "command": [
+          "rtk",
+          "rustfmt",
+          "--edition",
+          "2021",
+          "--config",
+          "skip_children=true",
+          "--check",
+          "src-tauri/engine/src/production_contracts.rs",
+          "src-tauri/src/production_host.rs"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:58:05.508335+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-format.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:58:05.980263+00:00",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "feedback-proof",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:tauri",
+          "--",
+          "--terminal-proofs",
+          "src/service/production-task-feedback-acceptance.test.ts",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch34-feedback-proof.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:58:10.223541+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-feedback-proof.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:58:15.492375+00:00",
+        "logSha256": "49d0acf74b071bce745253d45ff22e6ae2331dc58e2381e60248886c854395cf"
+      },
+      {
+        "name": "typecheck",
+        "command": [
+          "rtk",
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:58:21.172931+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-typecheck.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:58:57.609839+00:00",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "lint",
+        "command": [
+          "rtk",
+          "pnpm",
+          "lint"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:58:57.610307+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-lint.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T15:59:15.009459+00:00",
+        "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+      },
+      {
+        "name": "application",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:run",
+          "--maxWorkers=2",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch34-application.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T15:59:15.009906+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-application.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T16:03:54.575999+00:00",
+        "logSha256": "51ff9ebf7b3ae7a58c9538245cd689aa00b473d2e59dcde1bc2ad32d5115c4fa"
+      },
+      {
+        "name": "standalone",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:tauri",
+          "--",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch34-standalone.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T16:03:54.576492+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-standalone.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T16:11:14.672303+00:00",
+        "logSha256": "a86641ff848f13817dd2cb4fd3e6203e4acd6424251353402cff655af6c0334d"
+      },
+      {
+        "name": "private-production",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:tauri",
+          "--",
+          "--production-proofs",
+          "scripts/production-service-proof.test.ts",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch34-private-production.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T16:11:14.673889+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-private-production.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T16:11:20.790243+00:00",
+        "logSha256": "53f586f2e516241f82418e10f8bc129cb1a44a1ed4c653866338f6670a6b6e2a"
+      },
+      {
+        "name": "payload-regression",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:tauri",
+          "--",
+          "--terminal-proofs",
+          "scripts/production-payload-recovery-proof.test.ts",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch34-payload-regression.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T16:11:20.790840+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-payload-regression.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T16:11:28.913729+00:00",
+        "logSha256": "3f7648ce44789b812ed41ffdecbb0b36f466f1d1ea3d1e602ad8395a441c113b"
+      },
+      {
+        "name": "diff",
+        "command": [
+          "rtk",
+          "git",
+          "diff",
+          "--check"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T16:11:38.185472+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch34-diff.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T16:11:38.288821+00:00",
+        "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      }
+    ],
+    "native": {
+      "engine": {
+        "passed": 99,
+        "failed": 0,
+        "ignored": 4,
+        "logSha256": "df2be79e9a05ef447c688db74da0d265e38b3269107bd293045d7948649b488e",
+        "snapshot": {
+          "files": 20,
+          "sha256": "3c1b587ebc11e50fd2196e5659452bb6a4802baf9673e4a5161b69c280635426",
+          "unchanged": true
+        }
+      },
+      "host": {
+        "passed": 79,
+        "failed": 0,
+        "ignored": 0,
+        "logSha256": "cbe1703cbefcbed837d39affb579580d0b636166ef0c35532dcf80e4a333d4ce",
+        "snapshot": {
+          "files": 45,
+          "sha256": "8c44feb0ea5028b8e81f1e2e6eb0a01c1882ca0261ca0c9c3c748de5be67825e",
+          "unchanged": true
+        }
+      }
+    },
+    "initialFailures": [
+      {
+        "log": "batch34-feedback-proof-initial.log",
+        "sha256": "e6d31687e2a424397684b392dab3eefe9f53a23b22d4aadecccdb88f96ab6130"
+      },
+      {
+        "log": "batch34-focused-initial.log",
+        "sha256": "7d2ab9d8005478f154d9cac85839d57cd3c71686f010487bf3325d58b920bf5e"
+      },
+      {
+        "log": "batch34-lint-initial.log",
+        "sha256": "6c1331349c4a94d1f21018ff4a73d50cf3bb2f52222fe5e041ddb0e752007108"
+      },
+      {
+        "log": "batch34-native-engine-initial.log",
+        "sha256": "ce175eb1fd46732f44c4f1dc995df188aa9b35c1657be96beea69480dc2733f1"
+      },
+      {
+        "log": "batch34-typecheck-initial.log",
+        "sha256": "8161b749f82cae617293ffe1f48444cd0486f21b2606bec7257e9465f2526f78"
+      }
+    ],
+    "repairs": [
+      {
+        "stage": "compiler",
+        "files": [
+          "src/shared/task-feedback-event-codecs.ts",
+          "scripts/production-task-feedback-proof.ts"
+        ],
+        "cause": "Byte predicate false narrowing and unsupported fixture project update field"
+      },
+      {
+        "stage": "focused",
+        "files": [
+          "src/main/agent-manager.test.ts",
+          "src/main/agent-manager-scoped-approval.test.ts",
+          "src/renderer/src/lib/native-desktop-host.test.ts"
+        ],
+        "cause": "Mock feedback delete did not consume intent; malformed envelope expected existing UNSUPPORTED_VERSION reason",
+        "runtimeChanged": false
+      },
+      {
+        "stage": "lint",
+        "files": [
+          "scripts/production-task-feedback-proof.ts"
+        ],
+        "cause": "prefer-const2declarations, initialization sites/contextual types unchanged"
+      },
+      {
+        "stage": "actual proof",
+        "files": [
+          "scripts/production-task-feedback-proof.ts"
+        ],
+        "cause": "Real initial checkpoint stays BUSY; Stop/drain before new admitted fixture; explicit public start receipts"
+      },
+      {
+        "stage": "native engine",
+        "files": [
+          "src-tauri/engine/src/production_contracts.rs"
+        ],
+        "cause": "Finite event cardinality30->33 for exact approved3"
+      },
+      {
+        "stage": "actual proof source setup",
+        "files": [
+          "scripts/production-task-feedback-proof.ts"
+        ],
+        "cause": "Use actual task-source authorized mapped source writer, persisted binding receipt"
+      },
+      {
+        "stage": "actual proof poll receipt",
+        "files": [
+          "scripts/production-task-feedback-proof.ts",
+          "docs/tauri-migration/task-feedback-acceptance.md"
+        ],
+        "cause": "Actual window-only heartbeat unavailable; real polled Manager WAITING->BUSY + wire transitions before feedback"
+      },
+      {
+        "stage": "actual encoder diagnostic",
+        "files": [
+          "scripts/production-task-feedback-proof.ts"
+        ],
+        "cause": "Capture actual failed operation+field types only, original return/throw retained",
+        "confirmedOperation": "task:updated",
+        "privateKeys": [
+          "checklist",
+          "mcp_scope_nonce"
+        ]
+      },
+      {
+        "stage": "production source sender",
+        "files": [
+          "src/main/agent-manager-core.ts",
+          "src/main/agent-manager-scoped-approval.test.ts"
+        ],
+        "cause": "Confirmed raw DB row task:updated rejected closed codec; finite persisted status/timestamps preserve renderer merge; original-intent and current binding guard before learning writes/publications",
+        "codecWidened": false
+      },
+      {
+        "stage": "actual proof retirement ordering",
+        "files": [
+          "scripts/production-task-feedback-proof.ts"
+        ],
+        "cause": "Await actual Manager Stop acknowledgement before registered-session0 assertion, raw approval remains held through profile writer retention"
+      }
+    ],
+    "failedRunEvidence": [
+      {
+        "log": "typecheck-initial",
+        "sha256": "8161b749f82cae617293ffe1f48444cd0486f21b2606bec7257e9465f2526f78"
+      },
+      {
+        "log": "focused-initial",
+        "sha256": "7d2ab9d8005478f154d9cac85839d57cd3c71686f010487bf3325d58b920bf5e"
+      },
+      {
+        "log": "lint-initial",
+        "sha256": "6c1331349c4a94d1f21018ff4a73d50cf3bb2f52222fe5e041ddb0e752007108"
+      },
+      {
+        "log": "native-engine-initial",
+        "sha256": "ce175eb1fd46732f44c4f1dc995df188aa9b35c1657be96beea69480dc2733f1"
+      },
+      {
+        "log": "feedback-proof-initial",
+        "sha256": "e6d31687e2a424397684b392dab3eefe9f53a23b22d4aadecccdb88f96ab6130"
+      },
+      {
+        "log": "feedback-proof-retirement-repaired",
+        "sha256": "bf5ec4f3fba734a31d469748adfa3c86e19d263850d98444e47242c18e0052f9"
+      },
+      {
+        "log": "feedback-proof-source-writer-repaired",
+        "sha256": "f3beac9149d7cf9901082a37e470447519897008fe8b5f136ce7642bd585669d"
+      },
+      {
+        "log": "feedback-proof-poll-repaired",
+        "sha256": "3256ed0d00dfbaa4652eb506210fda75a602391bb048bf75a2273143e678904d"
+      },
+      {
+        "log": "feedback-proof-encoder-diagnostic",
+        "sha256": "9ee5728de59291952da911fafc51302f9699384ff4931b2745934385a1ce7513"
+      },
+      {
+        "log": "feedback-proof-sender-repaired",
+        "sha256": "3fc98f1737d19156ad9f9b89bef16039e9bcb02a710b1e36c31dccc2028a9065"
+      }
+    ]
+  },
+  "resourceBounds": {
+    "eventJsonUtf8Bytes": 2048,
+    "sourceTitleUtf8Bytes": 512,
+    "sourceRawTitleUtf16Units": 65536,
+    "databaseIdCharacters": 128
+  },
+  "stagedInputs": {
+    "capturedAt": "2026-10-16T15:55:59.856927+00:00",
+    "files": {
+      "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": "d781550fa6e7d05b7025abbec46e98945e4a56c62820cd10e0d278de647ffb74",
+      "src-tauri/resources/service/production-stdio.mjs": "1d6c73006d9e6b0b6e70402ec14895df509598da051638320bdc227d4d8360d0"
+    }
+  },
+  "publicationPreflight": {
+    "checkedAt": "2026-10-16T16:03:15.238012+00:00",
+    "masterProtected": false,
+    "effectiveRules": [],
+    "masterRuns": 0,
+    "remoteRevision": "e45a25312b3ccedc862136a35d2ac1cf498a0309"
+  },
+  "closurePrerequisites": {
+    "210": "#202 remains OPEN; preserve explicit dependency and any exact remaining actual/platform acceptance; do not close from the cleanup slice alone"
+  },
+  "remainingAcceptance": [
+    "Node sender/private-peer/projection receipts do not establish native window/document or renderer consumer delivery; separate owned-source tests supplement them.",
+    "Controlled local adapter and failing source CLI are not installed vendor/provider or authorized remote source mutation acceptance.",
+    "Full learning/skill/checkpoint/source/platform acceptance and explicit #202 prerequisite remain open; no whole #210 closure.",
+    "Whole210 and explicit202 closure prerequisite remain open.",
+    "Mocked Tauri plus real DesktopClient callback tests and native envelope unit tests are source evidence; no installed physical WebView/platform delivery is claimed.",
+    "Controlled adapter and local failing gh subprocess do not prove actual vendor/provider success or remote source mutation.",
+    "No live release/profile cutover or further batch is authorized; stop after this publication."
+  ],
+  "changes": [
+    "Closed exact wire shapes redact private backend/source errors and bound serialized UTF8, Unicode title scalars and IDs.",
+    "Actual projection rereads current existing task, project, assigned agent and source read grants; withdrawn, deleted, moved and foreign observers receive no notice.",
+    "Checkpoint success requires literal boolean, current generation/request scope and actual handled acknowledgement; false is preserved and never causes an approval write on the page.",
+    "Learning/source completion uses retained generation and persisted task/intent checks before effects and each local write; withdrawal preserves newer state with no rollback or replay.",
+    "Native exact3 document notices require the bootstrap-activated current physical main lease; page transport rejects retired stamps before client cursor advancement, and checkpoint triggers existing durable refresh invalidation."
+  ],
+  "stagedRuntime": {
+    "version": 1,
+    "kind": "production-resource-closure",
+    "buildIdentity": "production-d0991931fed7ff1e6fd60f9160979240",
+    "nodeVersion": "22.23.2",
+    "platform": "linux",
+    "arch": "x64",
+    "redistributionReviewComplete": false
+  },
+  "priorFailedDisposableProfiles": {
+    "retained": 2,
+    "reason": "Failed transport could not acknowledge native drain; no acknowledgement or cleanup was fabricated. Local paths remain in the coordination checkpoint."
+  }
+}

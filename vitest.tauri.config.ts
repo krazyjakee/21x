@@ -123,6 +123,7 @@ const mainFiles = [
   'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts', 'scripts/tauri-stage-production.test.ts', 'scripts/production-contracts-proof.test.ts', 'scripts/native-notification-contracts-proof.test.ts',
   'scripts/artifact-frame-proof.test.ts',
   'scripts/production-workspace-cleanup-git-fixture.test.ts',
+  'scripts/production-task-feedback-proof.test.ts',
   'scripts/activity-process-proof.test.ts',
   'scripts/database-proof.test.ts', 'scripts/configuration-proof.test.ts', 'scripts/agent-desktop-proof.test.ts',
   ...(process.env.TAURI_PRODUCTION_SERVICE_PROOFS === '1' ? ['scripts/production-service-proof.test.ts'] : []),

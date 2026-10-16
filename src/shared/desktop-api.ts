@@ -740,6 +740,10 @@ export interface DesktopApi {
         taskTitle: string;
         error: string;
     }) => void) => () => void;
+    onTaskCheckpointAnswered: (callback: (event: {
+        taskId: string;
+        approved: boolean;
+    }) => void) => () => void;
     onTaskCreated: (callback: (event: {
         task: Task;
     }) => void) => () => void;

@@ -14,7 +14,9 @@
     "scripts/production-workspace-cleanup-proof.ts",
     "scripts/production-workspace-cleanup-proof.test.ts",
     "scripts/production-workspace-cleanup-git-fixture.ts",
-    "scripts/production-workspace-cleanup-git-fixture.test.ts"
+    "scripts/production-workspace-cleanup-git-fixture.test.ts",
+    "scripts/production-task-feedback-proof.ts",
+    "scripts/production-task-feedback-proof.test.ts"
   ],
   "compilerOptions": {
     "composite": true,

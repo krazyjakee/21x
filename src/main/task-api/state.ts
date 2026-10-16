@@ -23,7 +23,7 @@ type TaskApiAgentController = Pick<
   | 'getConcurrencyState'
   | 'setConcurrencyLevel'
   | 'setTaskTouches'
-> & Partial<Pick<AgentManager, 'getStartQueue' | 'getStartRecoveryState'>>
+> & Partial<Pick<AgentManager, 'getStartQueue' | 'getStartRecoveryState' | 'getSessionRequestScope' | 'respondToScopedPermission'>>
 
 type TranscriptProvider = (taskId: string) => Promise<Array<{ role: string; text: string }>>
 

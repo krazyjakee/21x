@@ -142,20 +142,32 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
     case '/respond_to_checkpoint': {
       if (!params.task_id) return { error: 'task_id is required' }
       if (params.approved === undefined) return { error: 'approved is required' }
+      if (typeof params.approved !== 'boolean') return { error: 'approved must be a boolean' }
       if (!agentController) return { error: 'Agent controller not available' }
       const taskId = String(params.task_id)
+      const controller = agentController
 
       // Answer only a checkpoint that is really waiting, on the task named.
       // Without this a mis-heard word could answer an unrelated session, or a
       // session that has already moved on.
-      const found = agentController.findSessionByTaskId(taskId)
+      const found = controller.findSessionByTaskId(taskId)
       if (!found) return { error: 'No agent session for that task' }
-      if (agentController.getSessionStatus(found.sessionId)?.status !== 'waiting_approval') {
+      const status = controller.getSessionStatus(found.sessionId)
+      if (status?.status !== 'waiting_approval') {
         return { error: 'That task is not waiting for an answer' }
       }
-
-      const approved = params.approved === true
-      await agentController.respondToPermission(found.sessionId, approved, params.message ? String(params.message) : undefined)
+      if (!controller.getSessionRequestScope || !controller.respondToScopedPermission) return { error: 'Acknowledged checkpoint responses are unavailable' }
+      const task = db.getTask(taskId)
+      if (!task || task.session_id !== found.sessionId || task.agent_id !== status.agentId || status.taskId !== taskId) return { error: 'That checkpoint is no longer current' }
+      const current = (): boolean => {
+        const latest = db.getTask(taskId)
+        return agentController === controller && !!latest && latest.project_id === task.project_id && latest.agent_id === task.agent_id && latest.session_id === task.session_id && controller.findSessionByTaskId(taskId)?.sessionId === found.sessionId
+      }
+      const scope = await controller.getSessionRequestScope(found.sessionId)
+      if (!current() || !scope || scope.sessionId !== found.sessionId || scope.taskId !== taskId || scope.agentId !== task.agent_id || controller.getSessionStatus(found.sessionId)?.status !== 'waiting_approval') return { error: 'That checkpoint is no longer current' }
+      const approved = params.approved
+      const result = await controller.respondToScopedPermission({ ...scope, approved, ...(params.message ? { message: String(params.message) } : {}) })
+      if (!result.handled || !current()) return { error: 'The checkpoint response was not acknowledged' }
       notifyRenderer?.('task:checkpointAnswered', { taskId, approved })
       return { success: true, task_id: taskId, approved }
     }

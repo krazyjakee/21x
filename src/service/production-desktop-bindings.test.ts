@@ -35,6 +35,8 @@ import { WORKSPACE_FILE_CODECS } from '../shared/workspace-file-codecs'
 import { TASK_GROUP_CODECS } from '../shared/task-group-codecs'
 import { PROJECT_RUNTIME_CODECS } from '../shared/project-runtime-codecs'
 import { open as openFile } from 'node:fs/promises'
+import { PRODUCTION_INCOMPATIBLE_SESSION_ERROR } from '../shared/production-agent-events'
+import { TASK_SOURCE_ACTION_ERROR } from '../shared/task-feedback-event-codecs'
 
 const owned: Array<{ owner: ProductionOwner; root: string }> = [], finishers: Array<() => void> = []
 function deferred<T = void>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
@@ -675,6 +677,43 @@ describe('reviewed bindings attached to the actual production singleton', () => 
     expect(() => f.backend.encodeOwnerEvent('agent:status', { sessionId: 'invented', taskId: task.id, agentId: 'invented', status: 'manufactured' })).toThrow()
     expect(fatal).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_RESULT' }))
     await expect(f.backend.invoke('db:getTasks', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  })
+  it('projects exactly the three finite notices only with existing current task/project/agent/source read grants', async () => {
+    const f = await fixture(), agent = f.services.db.createAgent({ name: 'Notice owner', config: { coding_agent: 'pi' } })!
+    const task = f.services.db.createTask({ title: 'Notice task' })!
+    const source = f.services.db.createTaskSource({ name: 'Notice source', plugin_id: 'fixture', mcp_server_id: null, config: {}, project_id: task.project_id })!
+    f.services.db.updateTask(task.id, { agent_id: agent.id })
+    f.services.db.db.prepare('UPDATE tasks SET source_id=? WHERE id=?').run(source.id, task.id)
+    const notices = [
+      { operation: 'agent:incompatible-session', payload: { taskId: task.id, agentId: agent.id, error: 'private backend response' } },
+      { operation: 'task:source-action-failed', payload: { taskId: task.id, taskTitle: task.title, error: 'private source response' } },
+      { operation: 'task:checkpointAnswered', payload: { taskId: task.id, approved: true } }
+    ]
+    const taskGrant = f.options.authority.canAccessTask, projectGrant = f.options.authority.canAccessProject, agentGrant = f.options.authority.canAccessAgent
+    for (const notice of notices) {
+      const wire = f.backend.encodeOwnerEvent(notice.operation, notice.payload)
+      expect(JSON.stringify(wire)).not.toContain('private')
+      expect(f.backend.projectOwnerEvent(notice.operation, wire, f.caller)).toEqual(wire)
+      expect(f.backend.projectOwnerEvent(notice.operation, wire, { ...f.caller, engineEpoch: 'retired-epoch' })).toBeUndefined()
+      expect(f.backend.projectOwnerEvent(notice.operation, wire, { ...f.caller, origin: 'https://foreign.example' })).toBeUndefined()
+      f.options.authority.canAccessTask = () => false
+      expect(f.backend.projectOwnerEvent(notice.operation, wire, f.caller)).toBeUndefined(); f.options.authority.canAccessTask = taskGrant
+      f.options.authority.canAccessProject = () => false
+      expect(f.backend.projectOwnerEvent(notice.operation, wire, f.caller)).toBeUndefined(); f.options.authority.canAccessProject = projectGrant
+      f.options.authority.canAccessAgent = () => false
+      expect(f.backend.projectOwnerEvent(notice.operation, wire, f.caller)).toBeUndefined(); f.options.authority.canAccessAgent = agentGrant
+    }
+    const incompatible = f.backend.encodeOwnerEvent('agent:incompatible-session', notices[0].payload)
+    expect(incompatible).toEqual({ taskId: task.id, agentId: agent.id, error: PRODUCTION_INCOMPATIBLE_SESSION_ERROR })
+    const failed = f.backend.encodeOwnerEvent('task:source-action-failed', notices[1].payload)
+    expect(failed).toEqual({ taskId: task.id, taskTitle: task.title, error: TASK_SOURCE_ACTION_ERROR })
+    f.options.authority.canAccessSource = () => false
+    expect(f.backend.projectOwnerEvent('task:source-action-failed', failed, f.caller)).toBeUndefined()
+    const replacement = f.services.db.createAgent({ name: 'Replacement owner', config: { coding_agent: 'pi' } })!
+    f.services.db.updateTask(task.id, { agent_id: replacement.id })
+    expect(f.backend.projectOwnerEvent('agent:incompatible-session', incompatible, f.caller)).toBeUndefined()
+    f.services.db.db.prepare('DELETE FROM tasks WHERE id=?').run(task.id)
+    for (const notice of notices) expect(f.backend.projectOwnerEvent(notice.operation, f.backend.encodeOwnerEvent(notice.operation, notice.payload), f.caller)).toBeUndefined()
   })
   it('uses the same Commander store for session creation and durable history while enforcing session read scope', async () => {
     const f = await fixture(), codec = COMMANDER_COMMAND_CODECS['commander:createSession']

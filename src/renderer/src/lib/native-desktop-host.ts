@@ -16,6 +16,7 @@ import { ARTIFACT_CODECS } from '@shared/artifact-codecs'
 import { NATIVE_SERVICES_CODECS } from '@shared/native-services-codecs'
 import { NATIVE_CLIPBOARD_CODECS } from '@shared/native-clipboard-codecs'
 import { TASK_LIFECYCLE_CODECS, TASK_LIFECYCLE_EVENT_CODECS } from '@shared/task-lifecycle-codecs'
+import { TASK_FEEDBACK_EVENT_CODECS } from '@shared/task-feedback-event-codecs'
 import { PRODUCTION_AGENT_CODECS } from '@shared/production-agent-codecs'
 import { PRODUCTION_AGENT_EVENT_CODECS } from '@shared/production-agent-events'
 import { COMMANDER_COMMAND_CODECS, COMMANDER_EVENT_CODECS } from '@shared/commander-desktop-codecs'
@@ -41,6 +42,7 @@ import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
 const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...TRAY_PREFERENCE_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS,
+  ...TASK_FEEDBACK_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
 /** Explicit binding is separate from codec validation and native/service authorization. */
@@ -124,6 +126,9 @@ export const NATIVE_COMMAND_BINDINGS = {
   'mobile:setCustomUrl': 'mobile.setCustomUrl', 'mobile:clearCustomUrl': 'mobile.clearCustomUrl', 'mobile:getPendingPin': 'mobile.getPendingPin', 'mobile:getSessions': 'mobile.getSessions', 'mobile:revokeSession': 'mobile.revokeSession', 'mobile:revokeAllSessions': 'mobile.revokeAllSessions'
 } as const satisfies Record<keyof typeof commands, ApiPath<DesktopApi>>
 export const NATIVE_EVENT_BINDINGS = {
+  'agent:incompatible-session': 'onAgentIncompatibleSession',
+  'task:checkpointAnswered': 'onTaskCheckpointAnswered',
+  'task:source-action-failed': 'onTaskSourceActionFailed',
   'agent-installer:progress': 'agentInstaller.onProgress',
   'ui:command': 'ui.onCommand',
   'heartbeat:alert': 'onHeartbeatAlert', 'heartbeat:disabled': 'onHeartbeatDisabled',
@@ -173,6 +178,11 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
     notify()
   } })
   client.subscribe('agent:status', event => { sessionTasks.set(event.sessionId, event.taskId) })
+  // Existing task-store refresh subscribers re-read durable state. A notice is
+  // not an approval or permission to mutate a task/session locally.
+  client.subscribe('task:checkpointAnswered', () => {
+    for (const listener of [...refreshes]) { try { listener() } catch { /* Consumer failures cannot fabricate a checkpoint decision. */ } }
+  })
   client.subscribe('transcript:changed', event => {
     observedRevisions.set(event.taskId, Math.max(observedRevisions.get(event.taskId) ?? 0, event.maxRev))
     if (event.reloadRequired) hydratedRevisions.delete(event.taskId)

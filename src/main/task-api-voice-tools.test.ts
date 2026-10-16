@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { handleRoute, setTaskApiAgentController, setTaskApiUiState } from './task-api-server'
+import { setTaskApiNotifier } from './task-api/state'
 
 /** The routes take the database first; the tests read better the other way. */
 const handleTaskApiRoute = (
@@ -60,7 +61,7 @@ function task(id: string, title: string, extra: Partial<TaskRecord> = {}): TaskR
   } as TaskRecord
 }
 
-const TASKS = [task('t1', 'Fix login'), task('t2', 'Write the release notes')]
+const TASKS = [task('t1', 'Fix login', { session_id: 's1', project_id: 'project-1' }), task('t2', 'Write the release notes')]
 
 function part(seq: number, role: string, content: string, partType = 'text') {
   return {
@@ -86,7 +87,7 @@ const PARTS = [
 function makeDb() {
   return {
     getTasks: vi.fn(() => TASKS),
-    getTask: vi.fn((id: string) => TASKS.find((t) => t.id === id)),
+    getTask: vi.fn((id: string) => { const found = TASKS.find((t) => t.id === id); return found ? { ...found } : undefined }),
     getTranscriptParts: vi.fn(() => PARTS),
   } as never
 }
@@ -97,6 +98,8 @@ function makeAgents(overrides: Record<string, unknown> = {}) {
     notifyParentOfSubtaskCompletion: vi.fn(),
     sendByTaskId: vi.fn(async () => ({ sessionId: 's1' })),
     respondToPermission: vi.fn(async () => undefined),
+    getSessionRequestScope: vi.fn(async (): Promise<{ sessionId: string; taskId: string; agentId: string; requestId: string; responseType: 'permission' | 'question' } | null> => ({ sessionId: 's1', taskId: 't1', agentId: 'a1', requestId: 'request-1', responseType: 'permission' })),
+    respondToScopedPermission: vi.fn(async () => ({ handled: true })),
     stopByTaskId: vi.fn(async (): Promise<{ sessionId: string | null }> => ({ sessionId: 's1' })),
     findSessionByTaskId: vi.fn((id: string) =>
       id === 't1' ? { sessionId: 's1', session: {} } : undefined
@@ -110,12 +113,15 @@ function makeAgents(overrides: Record<string, unknown> = {}) {
 }
 
 let agents: ReturnType<typeof makeAgents>
+const checkpointNotices = vi.fn()
 
 beforeEach(() => {
   agents = makeAgents()
   setTaskApiAgentController(agents as never)
   setTaskApiUiState(null)
+  TASKS[0].session_id = 's1'; TASKS[0].project_id = 'project-1'; checkpointNotices.mockClear(); setTaskApiNotifier(checkpointNotices)
 })
+afterEach(() => { setTaskApiNotifier(null); setTaskApiAgentController(null) })
 
 describe('get_messages', () => {
   it('returns the conversation newest first and leaves tool output out', async () => {
@@ -215,12 +221,16 @@ describe('respond_to_checkpoint', () => {
       makeDb()
     )) as { success: boolean }
     expect(result.success).toBe(true)
-    expect(agents.respondToPermission).toHaveBeenCalledWith('s1', true, undefined)
+    expect(agents.respondToScopedPermission).toHaveBeenCalledWith({ sessionId: 's1', taskId: 't1', agentId: 'a1', requestId: 'request-1', responseType: 'permission', approved: true })
+    expect(checkpointNotices).toHaveBeenCalledWith('task:checkpointAnswered', { taskId: 't1', approved: true }); expect(checkpointNotices).toHaveBeenCalledOnce()
+    expect(agents.respondToPermission).not.toHaveBeenCalled()
   })
 
   it('rejects with false, never with true', async () => {
     await handleTaskApiRoute('/respond_to_checkpoint', { task_id: 't1', approved: false }, makeDb())
-    expect(agents.respondToPermission).toHaveBeenCalledWith('s1', false, undefined)
+    expect(agents.respondToScopedPermission).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 's1', requestId: 'request-1', approved: false }))
+    expect(checkpointNotices).toHaveBeenCalledWith('task:checkpointAnswered', { taskId: 't1', approved: false })
+    expect(agents.respondToPermission).not.toHaveBeenCalled()
   })
 
   it('refuses when that task is not waiting', async () => {
@@ -242,6 +252,28 @@ describe('respond_to_checkpoint', () => {
     )) as { error?: string }
     expect(result.error).toMatch(/no agent session/i)
     expect(agents.respondToPermission).not.toHaveBeenCalled()
+  })
+  it.each([false, 'missing-scope', 'unavailable', 'not-boolean'] as const)('never publishes an approval without a real acknowledged scope: %s', async refusal => {
+    if (refusal === false) agents.respondToScopedPermission.mockResolvedValueOnce({ handled: false })
+    if (refusal === 'missing-scope') agents.getSessionRequestScope.mockResolvedValueOnce(null)
+    if (refusal === 'unavailable') Object.assign(agents, { getSessionRequestScope: undefined })
+    const result = await handleTaskApiRoute('/respond_to_checkpoint', { task_id: 't1', approved: refusal === 'not-boolean' ? 'true' : true }, makeDb())
+    expect(result).toEqual({ error: expect.any(String) }); expect(checkpointNotices).not.toHaveBeenCalled(); expect(agents.respondToPermission).not.toHaveBeenCalled()
+  })
+  it('refuses a foreign pending task/request scope without invoking a response', async () => {
+    agents.getSessionRequestScope.mockResolvedValueOnce({ sessionId: 's1', taskId: 't2', agentId: 'a1', requestId: 'foreign', responseType: 'permission' })
+    expect(await handleTaskApiRoute('/respond_to_checkpoint', { task_id: 't1', approved: true }, makeDb())).toEqual({ error: expect.any(String) })
+    expect(agents.respondToScopedPermission).not.toHaveBeenCalled(); expect(checkpointNotices).not.toHaveBeenCalled()
+  })
+  it('does not publish checkpoint success after the persisted task/session generation changes during the actual response wait', async () => {
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve }), accepted = new Promise<void>(resolve => { entered = resolve })
+    agents.respondToScopedPermission.mockImplementationOnce(async () => { entered(); await gate; return { handled: true } })
+    const response = handleTaskApiRoute('/respond_to_checkpoint', { task_id: 't1', approved: true }, makeDb())
+    try {
+      await accepted; TASKS[0].session_id = 'replacement-session'; release()
+      expect(await response).toEqual({ error: expect.any(String) }); expect(checkpointNotices).not.toHaveBeenCalled()
+    } finally { release(); await response; TASKS[0].session_id = 's1' }
   })
 })
 

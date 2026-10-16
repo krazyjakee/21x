@@ -3,7 +3,7 @@ import { serializeTaskSend } from './task-send-lock'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import type { AgentManagerHost, AgentWindow } from './agent-manager/host'
 import { transcriptDisplayPart } from './transcript-display'
-import { finishSessionFeedback, updateTaskFromUser } from './session-feedback'
+import { finishSessionFeedback, SessionFeedbackOwnershipChangedError, updateTaskFromUser } from './session-feedback'
 import { buildAgentSwitchRecap, buildLostSessionRecap, buildTokenBudgetedRecap, INITIAL_PROMPT_PART_PREFIX, LOST_SESSION_NOTICE, taskContextBudget } from './agent-handoff'
 import { EventEmitter } from 'events'
 import { join } from 'path'
@@ -3243,6 +3243,9 @@ export class AgentManager extends EventEmitter {
           // Don't show the alarming "incompatible" dialog — just clear the session_id
           // so the UI shows "Start" instead. This commonly happens with subtask sessions.
           const currentTask = this.db.getTask(taskId)
+          if (this.shuttingDown || (originalTask && (!currentTask || currentTask.session_id !== originalBinding || currentTask.agent_id !== originalTask.agent_id || currentTask.project_id !== originalTask.project_id))) {
+            throw new Error('Resume ownership changed before the backend reconnected.')
+          }
           this.markSessionLost(taskId, adapterSessionId, errorMessage)
           // A coordinator conversation the backend no longer has is simply over;
           // the caller opens a new one. There is no task to ask the user about.
@@ -4685,28 +4688,58 @@ export class AgentManager extends EventEmitter {
     console.log(`[AgentManager] transitionToIdle checking task status: ${task.status} (looking for ${TaskStatus.AgentLearning})`)
     if (task.status === TaskStatus.AgentLearning) {
       console.log(`[AgentManager] Task in learning mode, syncing skills and marking as completed`)
+      if (task.session_id !== sessionId || task.agent_id !== session.agentId) return
+      const intentKey = `session-feedback-completion:${session.taskId}`
+      const learningIntent = this.db.getSetting(intentKey)
+      const binding = { projectId: task.project_id, agentId: task.agent_id, sourceId: task.source_id, sessionId: task.session_id }
+      const currentLearningTask = (): TaskRecord | undefined => {
+        if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) return undefined
+        const current = this.db.getTask(session.taskId)
+        return current && current.project_id === binding.projectId && current.agent_id === binding.agentId && current.source_id === binding.sourceId && current.session_id === binding.sessionId ? current : undefined
+      }
 
       try {
         await this.syncSkillsFromWorkspace(sessionId)
       } catch (err) {
         console.error(`[AgentManager] Skill sync error:`, err)
+        const current = currentLearningTask()
+        if (!current || current.status !== TaskStatus.AgentLearning || this.db.getSetting(intentKey) !== learningIntent) return
         updateTaskFromUser(this.db, session.taskId, {status: TaskStatus.ReadyForReview})
-        this.sendToRenderer('task:updated', {taskId: session.taskId, updates: this.db.getTask(session.taskId)})
+        const saved = currentLearningTask()
+        if (!saved) return
+        this.sendToRenderer('task:updated', { taskId: session.taskId, updates: { status: saved.status, updated_at: saved.updated_at, last_activity_at: saved.last_activity_at ?? null } })
+        if (!currentLearningTask()) return
         this.emitStatus(sessionId, session, 'idle')
         return
       }
       await yieldEventLoop()
 
+      const beforeFeedback = currentLearningTask()
+      if (!beforeFeedback || beforeFeedback.status !== TaskStatus.AgentLearning || this.db.getSetting(intentKey) !== learningIntent) return
       try {
-        const completed = await finishSessionFeedback(this.db, this.syncManager, session.taskId)
+        const completed = await finishSessionFeedback(this.db, this.syncManager, session.taskId, () => {
+          this.assertSessionGeneration(sessionId, session)
+          if (!currentLearningTask()) throw new SessionFeedbackOwnershipChangedError()
+        })
+        if (!currentLearningTask()) return
         if (completed?.parent_task_id) {
           await this.notifyParentOfSubtaskCompletion(completed.parent_task_id, session.taskId)
         }
-        if (!completed && this.db.getTask(session.taskId)?.status !== TaskStatus.Completed) this.updateTaskFromLocalAgent(session.taskId, {status: TaskStatus.ReadyForReview})
+        if (!completed) {
+          const current = currentLearningTask()
+          if (!current || current.status !== TaskStatus.AgentLearning || this.db.getSetting(intentKey) !== learningIntent) return
+          this.updateTaskFromLocalAgent(session.taskId, {status: TaskStatus.ReadyForReview})
+        }
       } catch (error) {
-        this.sendToRenderer('task:source-action-failed', {taskId: session.taskId, taskTitle: task.title, error: error instanceof Error ? error.message : String(error)})
+        if (error instanceof SessionFeedbackOwnershipChangedError) return
+        const currentTask = currentLearningTask()
+        if (!currentTask) return
+        this.sendToRenderer('task:source-action-failed', {taskId: session.taskId, taskTitle: currentTask.title, error: error instanceof Error ? error.message : String(error)})
       }
-      this.sendToRenderer('task:updated', {taskId: session.taskId, updates: this.db.getTask(session.taskId)})
+      const saved = currentLearningTask()
+      if (!saved) return
+      this.sendToRenderer('task:updated', { taskId: session.taskId, updates: { status: saved.status, updated_at: saved.updated_at, last_activity_at: saved.last_activity_at ?? null } })
+      if (!currentLearningTask()) return
       this.emitStatus(sessionId, session, 'idle')
       return
     }

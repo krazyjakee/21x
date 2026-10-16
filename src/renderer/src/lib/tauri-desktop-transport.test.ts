@@ -1,6 +1,43 @@
 import { expect, it, vi } from 'vitest'
 import { productionBootstrapMessage, getTauriEngineEpoch, getTauriUiDocument, createTauriDesktopTransport, type TauriDesktopApi } from './tauri-desktop-transport'
 
+it('unwraps only the exact three current document notices and revokes old listeners during same-epoch bootstrap', async () => {
+  let leaseId = 'document:1'
+  const listeners: Array<(event: { payload: unknown }) => void> = []
+  const invoke = vi.fn(async () => ({ available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: leaseId }))
+  const listen = vi.fn(async (_name: string, receive: (event: { payload: unknown }) => void) => { listeners.push(receive); return () => {} })
+  const native = { core: { invoke }, event: { listen } } as unknown as TauriDesktopApi
+  await getTauriEngineEpoch(native)
+  const transport = createTauriDesktopTransport(native), receive = vi.fn()
+  await transport.listen(receive)
+  for (const operation of ['agent:incompatible-session', 'task:checkpointAnswered', 'task:source-action-failed']) {
+    const frame = { kind: 'event', protocolVersion: 1, engineEpoch: 'engine-1', sequence: 1, operation, payload: {} }
+    // Payload validation is DesktopClient's separate responsibility. This
+    // boundary grants only the exact captured document, never an event codec.
+    listeners[0]({ payload: frame })
+    listeners[0]({ payload: { engineEpoch: 'engine-1', leaseId: 'foreign', event: frame } })
+    const before = receive.mock.calls.length
+    listeners[0]({ payload: { engineEpoch: 'engine-1', leaseId, event: frame } })
+    expect(receive).toHaveBeenCalledTimes(before + 1)
+    expect(receive).toHaveBeenLastCalledWith(frame)
+  }
+  const accepted = receive.mock.calls.length
+  leaseId = 'document:2'
+  const replacement = getTauriEngineEpoch(native)
+  const frame = { kind: 'event', protocolVersion: 1, engineEpoch: 'engine-1', sequence: 900, operation: 'task:checkpointAnswered', payload: { taskId: 'task_fixture', approved: false } }
+  listeners[0]({ payload: { engineEpoch: 'engine-1', leaseId: 'document:1', event: frame } })
+  expect(receive).toHaveBeenCalledTimes(accepted)
+  await replacement; await transport.listen(receive)
+  listeners[0]({ payload: { engineEpoch: 'engine-1', leaseId, event: frame } })
+  listeners[1]({ payload: { engineEpoch: 'engine-1', leaseId: 'document:1', event: frame } })
+  expect(receive).toHaveBeenCalledTimes(accepted)
+  listeners[1]({ payload: { engineEpoch: 'engine-1', leaseId, event: frame } })
+  expect(receive).toHaveBeenCalledTimes(accepted + 1)
+  const generic = { ...frame, operation: 'tasks:refresh', payload: {} }
+  listeners[1]({ payload: generic })
+  expect(receive).toHaveBeenLastCalledWith(generic)
+})
+
 it('projects only known startup failures into fixed redacted provisioning guidance', () => {
   const status = (code: string, phase: string) => ({ protocolVersion: 1, production: true, available: false, startupFailure: { code, phase, path: '/private/profile', error: 'private credential detail' } })
   expect(productionBootstrapMessage(status('PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-delegation-missing'))).toBe('Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.')

@@ -265,6 +265,9 @@ pub const EVENTS: &[&str] = &[
     "transcript:changed",
     "agent:status",
     "agent:startQueueChanged",
+    "agent:incompatible-session",
+    "task:checkpointAnswered",
+    "task:source-action-failed",
     "project:statusChanged",
     "concurrency:changed",
     "agent:recoveryStateChanged",
@@ -3719,6 +3722,19 @@ fn transcript_page_request(value: &Value) -> bool {
             || value.get("watermark").is_none()
             || value["after"].as_u64() <= value["watermark"].as_u64())
 }
+fn task_feedback_title(value: &Value) -> bool {
+    value.as_str().is_some_and(|title| {
+        title.len() <= 512
+            && !title.contains('\0')
+            // Match JavaScript trim(), not Rust Unicode White_Space: BOM is
+            // trimmed by JS while NEL is not. Preserve the actual title bytes.
+            && title.chars().any(|c| !matches!(c,
+                '\u{0009}'..='\u{000d}' | ' ' | '\u{00a0}' | '\u{1680}'
+                | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}'
+                | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+            ))
+    })
+}
 pub fn valid_event(operation: &str, value: &Value) -> bool {
     if operation == agent_installer::EVENT {
         return agent_installer::progress(value);
@@ -3733,6 +3749,26 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
         return false;
     }
     match operation {
+        "agent:incompatible-session" => {
+            object(value, &["taskId", "agentId", "error"], &[])
+                && bounded_bytes(value, 2048)
+                && id(&value["taskId"])
+                && id(&value["agentId"])
+                && value["error"] == "The backend session is no longer available. Start a new session to continue with a recap."
+        }
+        "task:checkpointAnswered" => {
+            object(value, &["taskId", "approved"], &[])
+                && bounded_bytes(value, 2048)
+                && id(&value["taskId"])
+                && value["approved"].is_boolean()
+        }
+        "task:source-action-failed" => {
+            object(value, &["taskId", "taskTitle", "error"], &[])
+                && bounded_bytes(value, 2048)
+                && id(&value["taskId"])
+                && task_feedback_title(&value["taskTitle"])
+                && value["error"] == "The task source action failed. Review the task and retry."
+        }
         "voice:status" => bounded_bytes(value, 262144) && voice_status(value, false),
         "voice:tts:status" => bounded_bytes(value, 262144) && voice_tts_snapshot(value),
         "voice:tts:modelProgress" => {
@@ -4035,6 +4071,89 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn exact_failure_and_checkpoint_notices_match_agreed_typescript_wire_samples() {
+        let samples = [
+            (
+                "agent:incompatible-session",
+                json!({"taskId":"task_fixture","agentId":"agent_fixture","error":"The backend session is no longer available. Start a new session to continue with a recap."}),
+            ),
+            (
+                "task:checkpointAnswered",
+                json!({"taskId":"task_fixture","approved":true}),
+            ),
+            (
+                "task:source-action-failed",
+                json!({"taskId":"task_fixture","taskTitle":"Review 雪","error":"The task source action failed. Review the task and retry."}),
+            ),
+        ];
+        for (operation, sample) in samples {
+            assert!(EVENTS.contains(&operation));
+            assert!(valid_event(operation, &sample), "{operation}");
+            for key in [
+                "sessionId",
+                "projectId",
+                "sourceId",
+                "rawError",
+                "caller",
+                "leaseId",
+            ] {
+                let mut foreign = sample.clone();
+                foreign[key] = json!("private-or-untrusted");
+                assert!(!valid_event(operation, &foreign), "{operation}: {key}");
+            }
+            for task in ["", "../task", "task:foreign", &"a".repeat(129)] {
+                let mut foreign = sample.clone();
+                foreign["taskId"] = json!(task);
+                assert!(!valid_event(operation, &foreign), "{operation}: task");
+            }
+            if operation != "task:checkpointAnswered" {
+                let mut private = sample.clone();
+                private["error"] = json!("backend credential=private /profile");
+                assert!(!valid_event(operation, &private));
+            }
+        }
+        assert!(valid_event(
+            "task:checkpointAnswered",
+            &json!({"taskId":"task_fixture","approved":false})
+        ));
+        for approved in [json!("true"), json!(1), Value::Null] {
+            assert!(!valid_event(
+                "task:checkpointAnswered",
+                &json!({"taskId":"task_fixture","approved":approved})
+            ));
+        }
+    }
+
+    #[test]
+    fn source_notice_titles_use_utf8_bytes_and_never_accept_private_or_malformed_fields() {
+        let sample = |title: String| json!({"taskId":"task_fixture","taskTitle":title,"error":"The task source action failed. Review the task and retry."});
+        assert!(valid_event(
+            "task:source-action-failed",
+            &sample("😀".repeat(128))
+        ));
+        assert!(valid_event(
+            "task:source-action-failed",
+            &sample(format!("{}é", "雪".repeat(170)))
+        ));
+        assert!(valid_event(
+            "task:source-action-failed",
+            &sample("\u{0085}".to_owned())
+        ));
+        for title in [
+            "".to_owned(),
+            " \t\n".to_owned(),
+            "\u{feff}".to_owned(),
+            "task\0private".to_owned(),
+            "😀".repeat(129),
+            "雪".repeat(171),
+            "x".repeat(2049),
+        ] {
+            assert!(!valid_event("task:source-action-failed", &sample(title)));
+        }
+        assert!(serde_json::from_str::<Value>(r#"{"taskId":"task_fixture","taskTitle":"\ud800","error":"The task source action failed. Review the task and retry."}"#).is_err());
+    }
+
     fn git_test_repo() -> Value {
         json!({"name":"repo","fullName":"fixture/repo","defaultBranch":"release/main","cloneUrl":"https://git.example/fixture/repo.git","description":"Public\nDescription","isPrivate":true})
     }
@@ -4260,7 +4379,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 30);
+        assert_eq!(EVENTS.len(), 33);
         let requests = [
             ("mobile:getInfo", json!({})),
             (

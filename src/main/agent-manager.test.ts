@@ -1475,6 +1475,9 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
       repos: [],
       skill_ids: [],
       status: TaskStatus.AgentLearning,
+      agent_id: 'agent-1',
+      session_id: 'session-1',
+      project_id: 'project-1',
       source_id: 'source-1',
       output_fields: [],
       ...taskOverrides,
@@ -1522,8 +1525,9 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
     const mockDb = createSourceTaskDb({complete_at_source: completeAtSource})
     const {mgr, session} = setupManager(mockDb)
     const task = mockDb.getTask('task-1')!
-    vi.mocked(mockDb.getSetting).mockImplementation(key => key === 'session-feedback-completion:task-1' ? JSON.stringify({completeAtSource}) : undefined)
-    mockDb.deleteSetting = vi.fn()
+    const settings = new Map([['session-feedback-completion:task-1', JSON.stringify({completeAtSource})]])
+    vi.mocked(mockDb.getSetting).mockImplementation(key => settings.get(key))
+    mockDb.deleteSetting = vi.fn(key => { settings.delete(key) })
     vi.mocked(mockDb.updateTask).mockImplementation((_id, updates) => Object.assign(task, updates))
     let finishSkills!: () => void
     const syncSkills = vi.spyOn(mgr as any, 'syncSkillsFromWorkspace').mockImplementation(() => new Promise(resolve => {

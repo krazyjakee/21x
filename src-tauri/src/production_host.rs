@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicU8, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow};
@@ -52,6 +52,40 @@ struct ProductionState {
     notifications: NativeNotificationOwner,
     tray: Option<NativeTrayOwner>,
     energy: Option<NativeEnergyOwner>,
+    notice_document: Mutex<Option<(String, String)>>,
+}
+
+fn is_document_notice(operation: &str) -> bool {
+    matches!(
+        operation,
+        "agent:incompatible-session" | "task:checkpointAnswered" | "task:source-action-failed"
+    )
+}
+fn document_notice_frame(frame: &Value, epoch: &str, lease: &str) -> Result<Value, EngineError> {
+    let keys = [
+        "kind",
+        "protocolVersion",
+        "engineEpoch",
+        "operation",
+        "payload",
+        "sequence",
+    ];
+    let operation = frame["operation"].as_str().unwrap_or("");
+    if !frame.as_object().is_some_and(|value| {
+        value.len() == keys.len() && keys.iter().all(|key| value.contains_key(*key))
+    }) || frame["kind"] != "event"
+        || frame["protocolVersion"] != 1
+        || frame["engineEpoch"] != epoch
+        || !frame["sequence"]
+            .as_u64()
+            .is_some_and(|sequence| sequence > 0 && sequence <= 9_007_199_254_740_991)
+        || !is_document_notice(operation)
+        || !twentyonex_engine::production::contracts::valid_event(operation, &frame["payload"])
+        || !twentyonex_engine::production_ui_contracts::lease_id(&json!(lease))
+    {
+        return Err(EngineError::new("INVALID_RESULT"));
+    }
+    Ok(json!({"engineEpoch":epoch,"leaseId":lease,"event":frame}))
 }
 
 fn trusted_origin(url: &tauri::Url) -> bool {
@@ -371,9 +405,15 @@ fn engine_status(
         snapshot["available"] =
             json!(snapshot["available"] == true && state.native_work.assert_open().is_ok());
         snapshot["uiSupported"] = json!(true);
+        let mut notice = state
+            .notice_document
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        *notice = None;
         if snapshot["available"] == true {
             if let Some(lease) = state.ui.activate(&window, &engine.epoch()) {
-                snapshot["uiLeaseId"] = json!(lease);
+                snapshot["uiLeaseId"] = json!(lease.clone());
+                *notice = Some((engine.epoch(), lease));
             }
         }
         return Ok(snapshot);
@@ -872,6 +912,33 @@ async fn start(
             attachment_download,
             artifact_clipboard,
             event_sink: Arc::new(move |frame| {
+                let frame = if is_document_notice(frame["operation"].as_str().unwrap_or("")) {
+                    let Some(state) = handle.try_state::<ProductionState>() else {
+                        return Ok(());
+                    };
+                    let captured = state
+                        .notice_document
+                        .lock()
+                        .map_err(|_| EngineError::new("DISCONNECTED"))?
+                        .clone();
+                    let Some((epoch, lease)) = captured else {
+                        return Ok(());
+                    };
+                    if frame["engineEpoch"] != epoch {
+                        return Ok(());
+                    }
+                    let Some(window) = handle.get_webview_window("main") else {
+                        return Ok(());
+                    };
+                    // Only bootstrap activates this lease. Do not mint a new
+                    // document grant or redirect a queued notice after reload.
+                    if state.ui.assert_publish(&window, &epoch, &lease).is_err() {
+                        return Ok(());
+                    }
+                    document_notice_frame(&frame, &epoch, &lease)?
+                } else {
+                    frame
+                };
                 handle
                     .emit_to(
                         EventTarget::WebviewWindow {
@@ -946,6 +1013,7 @@ pub fn run() {
                     notifications: notifications.clone(),
                     tray: tray.clone(),
                     energy: energy.clone(),
+                    notice_document: Mutex::new(None),
                 },
                 Err(error) => ProductionState {
                     engine: None,
@@ -955,6 +1023,7 @@ pub fn run() {
                     notifications: notifications.clone(),
                     tray: tray.clone(),
                     energy: energy.clone(),
+                    notice_document: Mutex::new(None),
                 },
             };
             app.manage(state);
@@ -1085,6 +1154,46 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_exact_validated_notices_receive_a_native_document_envelope() {
+        for (operation, payload) in [
+            (
+                "agent:incompatible-session",
+                json!({"taskId":"task_fixture","agentId":"agent_fixture","error":"The backend session is no longer available. Start a new session to continue with a recap."}),
+            ),
+            (
+                "task:checkpointAnswered",
+                json!({"taskId":"task_fixture","approved":false}),
+            ),
+            (
+                "task:source-action-failed",
+                json!({"taskId":"task_fixture","taskTitle":"Review 雪","error":"The task source action failed. Review the task and retry."}),
+            ),
+        ] {
+            let frame = json!({"kind":"event","protocolVersion":1,"engineEpoch":"engine_fixture","sequence":42,"operation":operation,"payload":payload});
+            assert_eq!(
+                document_notice_frame(&frame, "engine_fixture", "document:fixture").unwrap(),
+                json!({"engineEpoch":"engine_fixture","leaseId":"document:fixture","event":frame})
+            );
+            assert!(document_notice_frame(&frame, "foreign_epoch", "document:fixture").is_err());
+            assert!(document_notice_frame(&frame, "engine_fixture", "../foreign").is_err());
+            let mut injected = frame.clone();
+            injected["leaseId"] = json!("caller-document");
+            assert!(
+                document_notice_frame(&injected, "engine_fixture", "document:fixture").is_err()
+            );
+            injected = frame.clone();
+            injected["payload"]["rawError"] = json!("private backend credential");
+            assert!(
+                document_notice_frame(&injected, "engine_fixture", "document:fixture").is_err()
+            );
+        }
+        let checkpoint = json!({"kind":"event","protocolVersion":1,"engineEpoch":"engine_fixture","sequence":1,"operation":"task:checkpointAnswered","payload":{"taskId":"task_fixture","approved":"true"}});
+        assert!(document_notice_frame(&checkpoint, "engine_fixture", "document:fixture").is_err());
+        assert!(!is_document_notice("agent:status"));
+        assert!(!is_document_notice("tasks:refresh"));
+    }
+
     #[test]
     fn production_origins_are_exact_and_remote_windows_gain_no_authority() {
         assert!(trusted_origin(

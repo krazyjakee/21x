@@ -32,6 +32,8 @@ import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
 import { ClaudePluginBackend, type ClaudePluginBackendOptions } from './claude-plugin-backend'
 import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
 import { TaskLifecycleBackend } from './task-lifecycle-backend'
+import { TASK_FEEDBACK_EVENT_CODECS } from '../shared/task-feedback-event-codecs'
+import { isDatabaseId } from '../shared/database-desktop-codecs'
 import { ProductionAgentBackend } from './production-agent-backend'
 import { CommanderBackend } from './commander-backend'
 import { TerminalBackend, type TerminalDirectoryAuthority } from './terminal-backend'
@@ -99,7 +101,7 @@ export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS, ...TRAY_P
   ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
   ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
-  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS }
+  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...TASK_FEEDBACK_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS }
 
 /** Validate actual wire payload, including explicit binary envelopes. */
 export function validateProductionEventWire(operation: string, payload: unknown): boolean {
@@ -373,6 +375,22 @@ export class ProductionDesktopBindings {
     if (operation === 'terminal:data' || operation === 'terminal:exit')
       return this.terminals.canReadEvent(operation, TERMINAL_EVENT_CODECS[operation].decodePayload(payload), caller) ? payload : undefined
     if (!isRecord(payload)) return undefined
+    if (operation === 'agent:incompatible-session' || operation === 'task:checkpointAnswered' || operation === 'task:source-action-failed') {
+      // These notices describe a current live task, never a tombstone or a
+      // historical grant. Read bounded scope scalars without loading task text.
+      if (!isDatabaseId(payload.taskId) || !authority.canAccessTask(payload.taskId, caller, 'read')) return undefined
+      const scope = this.services.db.db.prepare<[string], { project_id: unknown; agent_id: unknown; source_id: unknown }>(
+        'SELECT project_id,agent_id,source_id FROM tasks WHERE id=? AND length(CAST(project_id AS BLOB))<=128 AND COALESCE(length(CAST(agent_id AS BLOB)),0)<=128 AND COALESCE(length(CAST(source_id AS BLOB)),0)<=128'
+      ).get(payload.taskId)
+      if (!scope || !isDatabaseId(scope.project_id) || !authority.canAccessProject(scope.project_id, caller, 'read') ||
+        !this.services.db.db.prepare('SELECT 1 FROM projects WHERE id=?').get(scope.project_id) ||
+        !isDatabaseId(scope.agent_id) || !authority.canAccessAgent(scope.agent_id, caller, 'read') ||
+        !this.services.db.db.prepare('SELECT 1 FROM agents WHERE id=?').get(scope.agent_id)) return undefined
+      if (operation === 'agent:incompatible-session' && payload.agentId !== scope.agent_id) return undefined
+      if (operation === 'task:source-action-failed' && scope.source_id !== null &&
+        (!isDatabaseId(scope.source_id) || !authority.canAccessSource(scope.source_id, caller, 'read') || !this.services.db.db.prepare('SELECT 1 FROM task_sources WHERE id=?').get(scope.source_id))) return undefined
+      return payload
+    }
     if (operation === 'worktree:progress' || Object.hasOwn(HEARTBEAT_EVENT_CODECS, operation)) {
       if (typeof payload.taskId !== 'string' || !authority.canAccessTask(payload.taskId, caller, 'read')) return undefined
       const task = this.services.db.db.prepare('SELECT project_id FROM tasks WHERE id=?').get(payload.taskId) as { project_id: string } | undefined

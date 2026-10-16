@@ -1,6 +1,6 @@
 import { isUiLeaseId } from '@shared/ui-desktop-codecs'
 import {
-  SERVICE_ERROR_MESSAGES, ServiceProtocolError, isRecord, type ServiceErrorCode
+  SERVICE_ERROR_MESSAGES, ServiceProtocolError, hasExactKeys, isRecord, type ServiceErrorCode
 } from '@shared/service-protocol'
 import type { DesktopTransport } from './desktop-client'
 
@@ -13,6 +13,7 @@ export interface TauriDesktopApi {
 
 const bootstrapGenerations = new WeakMap<TauriDesktopApi, number>()
 const uiDocuments = new WeakMap<TauriDesktopApi, Readonly<{ engineEpoch: string; leaseId: string }>>()
+const documentNotices = new Set(['agent:incompatible-session', 'task:checkpointAnswered', 'task:source-action-failed'])
 export function getTauriUiDocument(native: TauriDesktopApi): Readonly<{ engineEpoch: string; leaseId: string }> | undefined { return uiDocuments.get(native) }
 
 /** Fixed product wording only; native diagnostics, paths and credentials are
@@ -54,7 +55,23 @@ export function createTauriDesktopTransport(native: TauriDesktopApi): DesktopTra
     },
     async listen(receive) {
       try {
-        return await native.event.listen<unknown>('desktop:event', event => receive(event.payload),
+        const document = uiDocuments.get(native)
+        return await native.event.listen<unknown>('desktop:event', event => {
+          const value = event.payload
+          if (isRecord(value) && isRecord(value.event) && documentNotices.has(String(value.event.operation))) {
+            // Reject ungranted/retired document receipts before DesktopClient
+            // sees the sequence. Invalid current envelopes retain its normal
+            // fatal validation policy; only the exact native wrapper unwraps.
+            if (!document || uiDocuments.get(native) !== document || value.engineEpoch !== document.engineEpoch || value.leaseId !== document.leaseId) return
+            if (!hasExactKeys(value, ['engineEpoch', 'leaseId', 'event']) || value.event.engineEpoch !== document.engineEpoch) { receive(value); return }
+            receive(value.event)
+            return
+          }
+          // These exact notices require a native document stamp. Other generic
+          // service events keep their existing transport semantics.
+          if (isRecord(value) && documentNotices.has(String(value.operation))) return
+          receive(value)
+        },
           { target: { kind: 'WebviewWindow', label: 'main' } })
       } catch (error) { throw nativeError(error) }
     }

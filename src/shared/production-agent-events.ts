@@ -1,7 +1,13 @@
 import type { DesktopEventMap } from './desktop-operations'
+import { isDatabaseId } from './database-desktop-codecs'
 import { AGENT_EVENT_CODECS, AGENT_RECOVERY_ERROR } from './agent-desktop-codecs'
 import { PRODUCTION_AGENT_CODECS, projectProductionAgentQueue } from './production-agent-codecs'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from './service-protocol'
+
+export const PRODUCTION_INCOMPATIBLE_SESSION_ERROR = 'The backend session is no longer available. Start a new session to continue with a recap.'
+const incompatible = (value: unknown): value is JsonValue => isRecord(value) && hasExactKeys(value, ['taskId', 'agentId', 'error']) &&
+  isDatabaseId(value.taskId) && isDatabaseId(value.agentId) && value.error === PRODUCTION_INCOMPATIBLE_SESSION_ERROR &&
+  isJsonValue(value) && new TextEncoder().encode(JSON.stringify(value)).byteLength <= 2048
 
 function queue(value: unknown): JsonValue {
   if (!isRecord(value) || !hasExactKeys(value, ['queue'], ['failed'])) throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -23,6 +29,19 @@ function validQueue(value: unknown): boolean {
  * own finite, redacted queue contract. Native session observations stay exact. */
 export const PRODUCTION_AGENT_EVENT_CODECS = {
   ...AGENT_EVENT_CODECS,
+  'agent:incompatible-session': {
+    validatePayload: incompatible,
+    encodePayload(value: unknown): JsonValue {
+      if (!isRecord(value) || !hasExactKeys(value, ['taskId', 'agentId', 'error']) || !isDatabaseId(value.taskId) || !isDatabaseId(value.agentId) || typeof value.error !== 'string') throw new ServiceProtocolError('INVALID_ARGUMENTS')
+      const result = { taskId: value.taskId, agentId: value.agentId, error: PRODUCTION_INCOMPATIBLE_SESSION_ERROR }
+      if (!incompatible(result)) throw new ServiceProtocolError('INVALID_RESULT')
+      return result
+    },
+    decodePayload(value: JsonValue): DesktopEventMap['agent:incompatible-session'] {
+      if (!incompatible(value)) throw new ServiceProtocolError('INVALID_RESULT')
+      return value as unknown as DesktopEventMap['agent:incompatible-session']
+    }
+  },
   'agent:startQueueChanged': {
     validatePayload: validQueue,
     encodePayload(value: unknown): JsonValue { const result = queue(value); if (!validQueue(result)) throw new ServiceProtocolError('INVALID_RESULT'); return result },

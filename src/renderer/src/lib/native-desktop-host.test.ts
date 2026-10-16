@@ -5,6 +5,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { TauriDesktopApi } from './tauri-desktop-transport'
 import { createNativeDesktopHost, NATIVE_COMMAND_BINDINGS, type NativeDesktopHost } from './native-desktop-host'
 import { PRODUCTION_API_KEY_SET_MARKER } from '@shared/production-settings-codecs'
+import { PRODUCTION_INCOMPATIBLE_SESSION_ERROR } from '@shared/production-agent-events'
+import { TASK_SOURCE_ACTION_ERROR } from '@shared/task-feedback-event-codecs'
 import { MCP_SECRET_SET_MARKER } from '@shared/mcp-codecs'
 import { CONNECTOR_WRITE_ERROR, CONNECTOR_STORAGE_REMEDIATION, CONNECTOR_SYNC_ERROR } from '@shared/connector-codecs'
 import type { RolloverPolicy, SessionContextSnapshot } from '@shared/session-context'
@@ -33,12 +35,133 @@ function fixture(ui = false) {
     if (_name === 'desktop:ui-command') { uiReceivers.add(receive); uiHistory.push(receive); return () => { uiReceivers.delete(receive); unlisten() } }
     receivers.add(receive); history.push(receive); return () => { receivers.delete(receive); unlisten() } })
   const host = createNativeDesktopHost({ core: { invoke }, event: { listen } } as unknown as TauriDesktopApi); hosts.push(host)
-  const emit = (operation: ServiceEvent['operation'], payload: ServiceEvent['payload']) => { const event = { protocolVersion: 1, kind: 'event', operation, payload, engineEpoch: epoch, sequence: ++sequence }; for (const receive of [...receivers]) receive({ payload: event }) }
-  return { host, invoke, listen, unlisten, results, history, emit, uiHistory, progressHistory,
+  const dispatch = (payload: unknown) => { for (const receive of [...receivers]) receive({ payload }) }
+  const emit = (operation: ServiceEvent['operation'], payload: ServiceEvent['payload']) => {
+    const event = { protocolVersion: 1, kind: 'event', operation, payload, engineEpoch: epoch, sequence: ++sequence }
+    dispatch(ui && ['agent:incompatible-session', 'task:checkpointAnswered', 'task:source-action-failed'].includes(operation)
+      ? { engineEpoch: epoch, leaseId: uiLease, event } : event)
+  }
+  return { host, invoke, listen, unlisten, results, history, emit, dispatch, uiHistory, progressHistory,
     emitProgress: (value: unknown) => { for (const receive of [...progressReceivers]) receive({ payload: value }) },
     emitUi: (value: unknown) => { for (const receive of [...uiReceivers]) receive({ payload: value }) },
     changeUiLease: () => { uiLease = 'document-2' }, changeEpoch: () => { epoch = 'engine-2'; sequence = 0 } }
 }
+
+const lifecycleNotices = [
+  { operation: 'agent:incompatible-session', payload: { taskId: 'task_fixture', agentId: 'agent_fixture', error: PRODUCTION_INCOMPATIBLE_SESSION_ERROR },
+    subscribe: (host: NativeDesktopHost, receive: (payload: unknown) => void) => host.api.onAgentIncompatibleSession(receive) },
+  { operation: 'task:source-action-failed', payload: { taskId: 'task_fixture', taskTitle: 'Review 雪', error: TASK_SOURCE_ACTION_ERROR },
+    subscribe: (host: NativeDesktopHost, receive: (payload: unknown) => void) => host.api.onTaskSourceActionFailed(receive) },
+  { operation: 'task:checkpointAnswered', payload: { taskId: 'task_fixture', approved: false },
+    subscribe: (host: NativeDesktopHost, receive: (payload: unknown) => void) => host.api.onTaskCheckpointAnswered(receive) }
+] as const
+
+it.each(lifecycleNotices)('delivers $operation through the real page host/client/transport callback without replay or approval', async notice => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const receive = vi.fn(), off = notice.subscribe(f.host, receive)
+  const before = f.invoke.mock.calls.length
+  f.emit(notice.operation, notice.payload)
+  expect(receive).toHaveBeenCalledTimes(1)
+  expect(receive).toHaveBeenCalledWith(notice.payload)
+  expect(f.host.connection.status).toBe('ready')
+  expect(f.invoke.mock.calls.length).toBe(before)
+  off(); f.emit(notice.operation, notice.payload)
+  expect(receive).toHaveBeenCalledTimes(1)
+})
+
+it.each(lifecycleNotices)('rejects unredacted or malformed $operation before any consumer call', async notice => {
+  const invalid = notice.operation === 'task:checkpointAnswered'
+    ? [{ taskId: 'task_fixture', approved: 'true' }, { ...notice.payload, agentId: 'foreign' }]
+    : [{ ...notice.payload, error: 'private backend token=secret /profile' }, { ...notice.payload, caller: '*' }]
+  for (const payload of invalid) {
+    const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+    const receive = vi.fn(); notice.subscribe(f.host, receive)
+    f.emit(notice.operation, payload)
+    expect(receive).not.toHaveBeenCalled()
+    expect(f.host.connection).toMatchObject({ status: 'disconnected', reason: 'INVALID_RESULT' })
+  }
+})
+
+it('enforces source-notice UTF8 title boundaries in actual page callbacks', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const receive = vi.fn(); f.host.api.onTaskSourceActionFailed(receive)
+  f.emit('task:source-action-failed', { taskId: 'task_fixture', taskTitle: '😀'.repeat(128), error: TASK_SOURCE_ACTION_ERROR })
+  expect(receive).toHaveBeenCalledOnce()
+  f.emit('task:source-action-failed', { taskId: 'task_fixture', taskTitle: '😀'.repeat(129), error: TASK_SOURCE_ACTION_ERROR })
+  expect(receive).toHaveBeenCalledOnce()
+  expect(f.host.connection).toMatchObject({ status: 'disconnected', reason: 'INVALID_RESULT' })
+})
+
+it.each(lifecycleNotices)('fences $operation by document and epoch before cursor advancement, and delivers once after reconnect', async notice => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const receive = vi.fn(), off = notice.subscribe(f.host, receive)
+  const frame = (sequence: number) => ({ kind: 'event', protocolVersion: 1, engineEpoch: 'engine-1', operation: notice.operation, payload: notice.payload, sequence })
+  for (const rejected of [frame(500), { engineEpoch: 'engine-1', leaseId: 'foreign', event: frame(500) },
+    { engineEpoch: 'foreign', leaseId: 'document-1', event: frame(500) }]) f.dispatch(rejected)
+  expect(receive).not.toHaveBeenCalled()
+  expect(f.host.connection.status).toBe('ready')
+  const current = { engineEpoch: 'engine-1', leaseId: 'document-1', event: frame(1) }
+  f.dispatch(current); f.dispatch(current)
+  expect(receive).toHaveBeenCalledTimes(1)
+  const retired = f.history.at(-1)!
+  f.changeUiLease(); await f.host.reconnect()
+  retired({ payload: { ...current, event: frame(900) } })
+  f.dispatch({ ...current, event: frame(900) })
+  expect(receive).toHaveBeenCalledTimes(1)
+  f.dispatch({ ...current, leaseId: 'document-2', event: frame(2) })
+  expect(receive).toHaveBeenCalledTimes(2)
+  expect(f.host.connection.status).toBe('ready')
+  off(); f.dispatch({ ...current, leaseId: 'document-2', event: frame(3) })
+  expect(receive).toHaveBeenCalledTimes(2)
+  expect(f.invoke.mock.calls.some(([, args]) => args?.operation === 'agentSession:approve')).toBe(false)
+})
+
+it('uses checkpoint false only as a durable refresh invalidation and respects both unsubscribe paths', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const checkpoint = vi.fn(), refresh = vi.fn()
+  const offCheckpoint = f.host.api.onTaskCheckpointAnswered(checkpoint), offRefresh = f.host.api.onTasksRefresh(refresh)
+  const before = f.invoke.mock.calls.length
+  const frame = { kind: 'event', protocolVersion: 1, engineEpoch: 'engine-1', operation: 'task:checkpointAnswered', payload: { taskId: 'task_fixture', approved: false }, sequence: 1 }
+  const notice = { engineEpoch: 'engine-1', leaseId: 'document-1', event: frame }
+  f.dispatch(notice); f.dispatch(notice)
+  expect(checkpoint).toHaveBeenCalledTimes(1)
+  expect(checkpoint).toHaveBeenCalledWith({ taskId: 'task_fixture', approved: false })
+  expect(refresh).toHaveBeenCalledTimes(1)
+  expect(f.invoke.mock.calls.length).toBe(before)
+  offCheckpoint(); offRefresh()
+  f.dispatch({ ...notice, event: { ...frame, sequence: 2 } })
+  expect(checkpoint).toHaveBeenCalledTimes(1); expect(refresh).toHaveBeenCalledTimes(1)
+})
+
+it('requires physical document authority for the exact three notices and treats malformed current envelopes as invalid frames', async () => {
+  const absent = fixture(); absent.host.setRehydrator(async () => {}); await absent.host.reconnect()
+  const denied = vi.fn(); absent.host.api.onTaskCheckpointAnswered(denied)
+  absent.emit('task:checkpointAnswered', { taskId: 'task_fixture', approved: true })
+  expect(denied).not.toHaveBeenCalled(); expect(absent.host.connection.status).toBe('ready')
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const receive = vi.fn(); f.host.api.onTaskCheckpointAnswered(receive)
+  f.dispatch({ engineEpoch: 'engine-1', leaseId: 'document-1', caller: '*', event: {
+    kind: 'event', protocolVersion: 1, engineEpoch: 'engine-1', operation: 'task:checkpointAnswered', payload: { taskId: 'task_fixture', approved: false }, sequence: 1
+  } })
+  expect(receive).not.toHaveBeenCalled()
+  // The intact rejected wrapper has no top-level protocolVersion. Existing
+  // frame validation reports that first, before inspecting its frame keys.
+  expect(f.host.connection).toMatchObject({ status: 'disconnected', reason: 'UNSUPPORTED_VERSION' })
+})
+
+it('refuses an inner epoch substitution even with a current native document stamp', async () => {
+  const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const receive = vi.fn(), refresh = vi.fn()
+  f.host.api.onTaskCheckpointAnswered(receive); f.host.api.onTasksRefresh(refresh)
+  f.dispatch({ engineEpoch: 'engine-1', leaseId: 'document-1', event: {
+    kind: 'event', protocolVersion: 1, engineEpoch: 'foreign', operation: 'task:checkpointAnswered', payload: { taskId: 'task_fixture', approved: false }, sequence: 900
+  } })
+  expect(receive).not.toHaveBeenCalled(); expect(refresh).not.toHaveBeenCalled()
+  // A substituted inner epoch keeps the wrapper intact for fatal validation;
+  // its absent top-level protocolVersion is the existing first refusal.
+  expect(f.host.connection).toMatchObject({ status: 'disconnected', reason: 'UNSUPPORTED_VERSION' })
+  expect(f.invoke.mock.calls.some(([, args]) => args?.operation === 'agentSession:approve')).toBe(false)
+})
 function mcpRow() {
   return { id: 'mcp.fixture:one', name: 'Fixture MCP', type: 'local', command: 'fixture-mcp', args: [], url: '', headers: { Authorization: MCP_SECRET_SET_MARKER }, environment: { FIXTURE_TOKEN: MCP_SECRET_SET_MARKER }, tools: [], oauth_metadata: { client_secret: MCP_SECRET_SET_MARKER }, source: 'user', created_at: '2026-10-14', updated_at: '2026-10-14' }
 }
