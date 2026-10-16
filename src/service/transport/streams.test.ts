@@ -78,6 +78,35 @@ describe('private pipe acknowledged streams', () => {
     raw.resolve(); await cancel; await p.close()
     expect(senderClose).toHaveBeenCalledOnce(); expect(readerClose).toHaveBeenCalledOnce(); expect(p.host.streams.activeCount).toBe(0)
   })
+  it('request cancellation calls the closer before waiting for a consumer that ignores abort', async () => {
+    const p = pair(), raw = deferred(), entered = deferred(), closed = deferred()
+    const writer = p.service.streams.createWriter('blocked_resource', () => {})
+    const closer = vi.fn(() => { closed.resolve(); raw.resolve() })
+    p.host.streams.acceptReader(writer.descriptor, async () => { entered.resolve(); await raw.promise }, closer)
+    const controller = new AbortController()
+    const result = expect(writer.write(Uint8Array.of(1), controller.signal)).rejects.toMatchObject({ code: 'CANCELLED' })
+    await entered.promise
+    controller.abort()
+    await closed.promise
+    await result
+    await p.close()
+    expect(closer).toHaveBeenCalledOnce()
+    expect(p.host.streams.activeCount).toBe(0)
+    expect(p.service.streams.activeCount).toBe(0)
+  })
+  it('failed stream cleanup disconnects and retains its slot and drain failure', async () => {
+    const p = pair(), closer = vi.fn(() => { throw new Error('private cleanup detail') })
+    const writer = p.service.streams.createWriter('cleanup_failure', () => {})
+    const reader = p.host.streams.acceptReader(writer.descriptor, () => {}, closer)
+    await expect(reader.cancel()).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    expect(closer).toHaveBeenCalledOnce()
+    expect(p.host.streams.activeCount).toBe(1)
+    await expect(p.host.waitForHandlers()).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    await expect(p.host.request('engine.stream.cancel', streamJson(writer.descriptor))).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    await expect(reader.cancel()).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    p.service.disconnect()
+    await p.service.waitForHandlers()
+  })
   it('disconnects a saturated publisher so durable owners must rehydrate on a new epoch', async () => {
     const blocked = deferred(), disconnect = vi.fn()
     const peer = new ServicePeer({ role: 'service', engineEpoch: 'epoch', operations: {}, eventSchemas: { changed: value => typeof value === 'string' }, write: () => blocked.promise, onDisconnect: disconnect })

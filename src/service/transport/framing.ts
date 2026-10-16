@@ -23,6 +23,8 @@ export class ServiceFrameDecoder {
   private failed = false
   private decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
+  get pendingByteCount(): number { return this.length }
+
   push(chunk: Uint8Array, onFrame: (frame: ServiceFrame) => void): void {
     if (this.failed) throw new ServiceProtocolError('DISCONNECTED')
     try {

@@ -108,7 +108,11 @@ export class ServiceStreams {
     if (entry.busy) throw new ServiceProtocolError('BACKPRESSURE')
     if (packet.sequence !== entry.sequence + 1) throw new ServiceProtocolError('INVALID_REQUEST')
     entry.busy = true; clearTimeout(entry.timer)
-    const abort = (): void => entry.controller.abort()
+    const abort = (): void => {
+      // The closer may be what unblocks the raw consumer. Waiting for consume
+      // to settle before invoking it deadlocks consumers that ignore the signal.
+      void this.release(entry).catch(() => {})
+    }
     signal.addEventListener('abort', abort, { once: true })
     try {
       if (signal.aborted) abort()

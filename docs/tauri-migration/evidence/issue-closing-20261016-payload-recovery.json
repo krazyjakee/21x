@@ -1,0 +1,1035 @@
+{
+  "version": 1,
+  "date": "2026-10-16T12:42:09.676451+00:00",
+  "repository": "krazyjakee/21x",
+  "targetBranch": "master",
+  "implementationBase": "f920cea66defd2d1d0a6f994cc61294a62c1ead9",
+  "scope": "Bounded service/native partial-frame and cancellation lifecycle repairs, with actual source ProductionService/private-peer payload/recovery acceptance under staged Node",
+  "wholeIssueAcceptance": false,
+  "releaseOrLiveProfileCutover": false,
+  "shippingHost": "Electron retained",
+  "sourceHashes": {
+    "docs/tauri-migration/stream-contract.md": "076f17767d76d13a87c14140cc434bcb786fd921a294115df7eadec81846f103",
+    "src-tauri/engine/src/production.rs": "af3c96f9a6330d23a1e20953cdf7da089df50155df18d9ab263e2cd5163f4501",
+    "src/service/transport/framing.ts": "c265d241b966ff0b555cf34a44232a3c0ce5e16148e3716e6d1f8d6f04f81d9d",
+    "src/service/transport/peer.ts": "c93b2693033af6e63d192afb21a1cd54d7aacc20b81fbce4fd0c15f54901acbc",
+    "src/service/transport/streams.test.ts": "542f15c58711692548e97c6fb8aad8f184b4cf8fbc1a583ccbc75013980d3b15",
+    "src/service/transport/streams.ts": "e28f2156b218d87382708f4aa9608267a4445977e0514d6a0254290abbdec359",
+    "src/shared/service-protocol.test.ts": "0c4c82c99002c6ba3b05ac0cbe7a7ddb84fd4ca02519e680042d866de7cf4f52",
+    "vitest.tauri.config.ts": "285505c18c2f17f0a2f5b56ca4a21b688c4aafcd9139a03b15775fdb1271202f",
+    "scripts/production-payload-recovery-proof.ts": "2bd36f20203b0ab844ffa5d49d49eed0f94ca4aef0149eb6358b21a9d70505e5",
+    "scripts/production-payload-recovery-proof.test.ts": "1b89106d0ab5b01bceb95598321072028f6c900d8d658317a2516880f80fc103",
+    "docs/tauri-migration/payload-recovery-acceptance.md": "e3e143a944b1f843d2bc281fa50ca025c704714eef638d67cda2c1d7525e9b32"
+  },
+  "frozenSnapshot": {
+    "files": 2108,
+    "sha256": "59789414cf25015727db1d84d696f7cebbde61db35d8fa91fc33ed3bac71b379",
+    "unchanged": true
+  },
+  "localPlatform": {
+    "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "rootNode": "v22.22.0",
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "compileLibraries": {
+      "gtk": "3.24.41",
+      "webkit2gtk": "2.52.6"
+    },
+    "installedWebViewObserved": null
+  },
+  "payloadRecoveryReceipt": {
+    "version": 1,
+    "scope": "source-production-private-peer-real-linux-pty-controlled-native-attachment-callback",
+    "fixture": {
+      "version": 1,
+      "transcriptParts": 1024,
+      "partChars": 4096,
+      "largeToolChars": 400000,
+      "terminals": 4,
+      "terminalLines": 256,
+      "terminalLineChars": 1024,
+      "fragmentBytes": 79,
+      "attachmentBytes": 524288,
+      "deadlineMs": 15000
+    },
+    "provenance": {
+      "platform": "linux",
+      "architecture": "x64",
+      "node": "v22.23.2",
+      "electron": null,
+      "webview": null,
+      "sources": {
+        "scripts/production-payload-recovery-proof.ts": "2bd36f20203b0ab844ffa5d49d49eed0f94ca4aef0149eb6358b21a9d70505e5",
+        "scripts/production-payload-recovery-proof.test.ts": "1b89106d0ab5b01bceb95598321072028f6c900d8d658317a2516880f80fc103",
+        "src/service/production-service.ts": "e4b46f5d89be9de2c0c01f80b17fc54133299fdba7c31937e514532fa4319e36",
+        "src/service/production-owner.ts": "4293cdef9a8c61429d04004dd74956bcac0159e01e33a3ba12e5b64171fd9053",
+        "src/service/production-desktop-bindings.ts": "6566a8697aaf87030499fdd720886e62de4c04096a8e615225e62a17ab71008f",
+        "src/service/transport/peer.ts": "c93b2693033af6e63d192afb21a1cd54d7aacc20b81fbce4fd0c15f54901acbc",
+        "src/service/transport/framing.ts": "c265d241b966ff0b555cf34a44232a3c0ce5e16148e3716e6d1f8d6f04f81d9d",
+        "src/service/task-attachment-backend.ts": "67adad0576045ab07c038eeb459e6536adc2c562b3b4def3958b1ba6692b7c63",
+        "src/main/task-attachment-file-owner.ts": "85f9bfae784e17f760bba6446eb12ca9d566057374b03d50ad5910980efe9139",
+        "src/main/terminal-service-core.ts": "a3f7d4c0bd6ed912033ab3f40c8cbae5645cd0daa3b15a6c98e483d96bdc917a",
+        "src/main/terminal-process.ts": "62ae5dad7cbee3a65774521000933e88caf6371848aca07c3fa8143067a7c500",
+        "src/service/terminal-backend.ts": "4698ef91f94d44e692b8b83b61767e19204fe09fe9f191c2b29b45963a77680a",
+        "src/main/database/manager.ts": "14f4206d12fbfd5b58b4a081c24d0361840f901bf0a696e69b9c639d877957d2",
+        "src/renderer/src/lib/transcript-pagination.ts": "f4a4817a89017e3e7efc6c3944105ad7c49b5903606cccfe9d8d0544ce0d1eb9",
+        "src/shared/transcript/projection.ts": "2f5e289e68060ebcc3d79f7abf042611cb7731cced9eb95098f569bc8fe63e8c",
+        "src/shared/service-protocol.ts": "7f8a4a9c8b9b640e03252bcf17a3eb5097f7910d7af814e5ea51c4dfc3b56500",
+        "src/shared/transcript-page.ts": "77db964521d1d518a022bc9437be458cbb4e37471af8fe59302a39f8159be90b",
+        "src/shared/task-attachment-codecs.ts": "08eb2a3a55cd2daa32ca5f62c875e2ff8c9f0502bfc7b0cb4d0aa67e1923c4e6",
+        "src/shared/terminal-desktop-codecs.ts": "d049cbf307ea593f8392e439248479550e260e073e069b2e3d4c597d1ad0c7f0",
+        "scripts/tauri-runtime.json": "23fe6fb61778a75e30729951e3817640ea48380f6285c9255f8ec34ac7fa5e82"
+      },
+      "artifacts": {
+        "better-sqlite3/package.json": "6c9ea355190dfce3646ad4d2a31c9506de36d884a6461b3655a2a0c4ba3d1695",
+        "better-sqlite3/native-addon": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+        "node-pty/package.json": "f8b6a14f7022c14f1cd5d109486f5dacd32bffb63a9a63e38eced37dacb47439",
+        "node-pty/native-addon": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5",
+        "node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+      }
+    },
+    "counters": [
+      {
+        "name": "hydrated unique parts after revision race",
+        "expected": 1026,
+        "actual": 1026,
+        "comparison": "equal"
+      },
+      {
+        "name": "projection sorted uniqueness",
+        "expected": 1026,
+        "actual": 1026,
+        "comparison": "equal"
+      },
+      {
+        "name": "newest racing revision retained",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "indexed durable identity/revision/content mismatches",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "snapshot pages",
+        "expected": 2,
+        "actual": 52,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "delta pages",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "largest page JSON bytes",
+        "expected": 262144,
+        "actual": 261250,
+        "comparison": "atMost"
+      },
+      {
+        "name": "largest page part count",
+        "expected": 64,
+        "actual": 21,
+        "comparison": "atMost"
+      },
+      {
+        "name": "stored full large tool characters",
+        "expected": 400000,
+        "actual": 400000,
+        "comparison": "equal"
+      },
+      {
+        "name": "unmounted hydration cancelled",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "late page never applied after unmount",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "attachment published exact byte digest",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "authorized native download callbacks",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "attachment reply cancellation",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "retired callback does not accept another download",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "attachment read syscall bytes",
+        "expected": 65536,
+        "actual": 65536,
+        "comparison": "atMost"
+      },
+      {
+        "name": "attachment write syscall bytes",
+        "expected": 65536,
+        "actual": 65536,
+        "comparison": "atMost"
+      },
+      {
+        "name": "attachment active descriptors",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 0 reconnect keeps native PID",
+        "expected": 3356353,
+        "actual": 3356353,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 0 bounded recovery tail",
+        "expected": 524288,
+        "actual": 263314,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 0 completion in recovery tail",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 0 minimum delivered bytes",
+        "expected": 262144,
+        "actual": 262819,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "terminal 0 exact sequential payload lines",
+        "expected": 256,
+        "actual": 256,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 0 duplicate or out-of-order payload lines",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 1 reconnect keeps native PID",
+        "expected": 3356356,
+        "actual": 3356356,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 1 bounded recovery tail",
+        "expected": 524288,
+        "actual": 263317,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 1 completion in recovery tail",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 1 minimum delivered bytes",
+        "expected": 262144,
+        "actual": 262819,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "terminal 1 exact sequential payload lines",
+        "expected": 256,
+        "actual": 256,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 1 duplicate or out-of-order payload lines",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 2 reconnect keeps native PID",
+        "expected": 3356359,
+        "actual": 3356359,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 2 bounded recovery tail",
+        "expected": 524288,
+        "actual": 263317,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 2 completion in recovery tail",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 2 minimum delivered bytes",
+        "expected": 262144,
+        "actual": 262819,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "terminal 2 exact sequential payload lines",
+        "expected": 256,
+        "actual": 256,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 2 duplicate or out-of-order payload lines",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 3 reconnect keeps native PID",
+        "expected": 3356362,
+        "actual": 3356362,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 3 bounded recovery tail",
+        "expected": 524288,
+        "actual": 263320,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 3 completion in recovery tail",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 3 minimum delivered bytes",
+        "expected": 262144,
+        "actual": 262819,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "terminal 3 exact sequential payload lines",
+        "expected": 256,
+        "actual": 256,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 3 duplicate or out-of-order payload lines",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "parallel native PTY spawns",
+        "expected": 4,
+        "actual": 4,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal event byte bound",
+        "expected": 16384,
+        "actual": 4095,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal event deliveries",
+        "expected": 4,
+        "actual": 267,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "uncertain mutation reply cancelled",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "all native PTYs exited before profile reopen",
+        "expected": 4,
+        "actual": 4,
+        "comparison": "equal"
+      },
+      {
+        "name": "replacement epoch differs",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "durable parts rehydrated after epoch replacement",
+        "expected": 1026,
+        "actual": 1026,
+        "comparison": "equal"
+      },
+      {
+        "name": "replacement projection identity/revision/content mismatches",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "replacement owner stopped before durable inspection",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "replacement writer closed before durable inspection",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "uncertain mutation committed exactly once without replay",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "stale epoch mutation effects",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "independent read-only inspection handle closed",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "fragments delivered",
+        "expected": 100,
+        "actual": 363480,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "frame bytes including newline",
+        "expected": 1048577,
+        "actual": 699317,
+        "comparison": "atMost"
+      },
+      {
+        "name": "peer queued bytes",
+        "expected": 4194304,
+        "actual": 699317,
+        "comparison": "atMost"
+      },
+      {
+        "name": "peer queued frames",
+        "expected": 128,
+        "actual": 3,
+        "comparison": "atMost"
+      },
+      {
+        "name": "peer pending calls",
+        "expected": 128,
+        "actual": 4,
+        "comparison": "atMost"
+      }
+    ],
+    "memory": {
+      "startRss": 194142208,
+      "peakSampledRss": 302014464,
+      "peakSampledHeap": 151315784,
+      "note": "Sampled process memory includes Vitest/runtime. Logical page/frame/FD/tail bounds are asserted; RSS is diagnostic, not a constant-memory claim."
+    },
+    "epochs": [
+      "cad2b108-0d2e-4e46-bede-7b8682f65f83",
+      "c96424fd-3f36-4514-b615-15c4b7a83847"
+    ],
+    "cleanup": {
+      "ownerClosed": true,
+      "nativeExits": 4,
+      "profileRemoved": true
+    },
+    "remaining": [
+      "Installed supported OS/architecture/WebView runs, actual native Save dialog/copy, native host process-tree drain and packaged stdio load proof.",
+      "Terminal getBuffer is a bounded volatile tail; saturation retires its owner and cannot recover discarded output losslessly.",
+      "Audio/binary ServiceStreams foundation has no production Rust consumer; this proof uses existing domain payload paths.",
+      "#202 closure dependency remains open; source readiness does not close #207 or pass migration gates."
+    ]
+  },
+  "verification": {
+    "nativeEngine": {
+      "command": "rtk env CARGO_BUILD_JOBS=1 cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service -- --test-threads=1",
+      "passed": 87,
+      "failed": 0,
+      "ignored": 4,
+      "log": ".git/issue-closing/batch31-native-engine.log",
+      "inputSnapshot": ".git/issue-closing/batch31-native-frozen-inputs.json",
+      "snapshotUnchanged": true,
+      "limits": "No staged ignored run, native presentation or cancellation/reader-stop integration proof claimed"
+    },
+    "focusedStandalone": {
+      "success": true,
+      "numPassedTests": 220,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTotalTests": 220,
+      "numPassedTestSuites": 30,
+      "numFailedTestSuites": 0,
+      "report": ".git/issue-closing/batch31-focused.json",
+      "log": ".git/issue-closing/batch31-focused.log",
+      "snapshot": ".git/issue-closing/batch31-service-frozen-inputs.json",
+      "snapshotUnchanged": true,
+      "runtime": "pinned staged standalone Node and SQLite; terminal proof flag off"
+    },
+    "shippingBuild": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "log": ".git/issue-closing/batch31-build.log",
+      "inputsUnchanged": true,
+      "warnings": "Existing chunk-size/dynamic import warnings retained; no warning-free claim"
+    },
+    "nativeEngineFinal": {
+      "command": "rtk env CARGO_BUILD_JOBS=1 cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service -- --test-threads=1",
+      "passed": 91,
+      "failed": 0,
+      "ignored": 4,
+      "log": ".git/issue-closing/batch31-native-engine-final.log",
+      "snapshot": ".git/issue-closing/batch31-final-frozen-inputs.json",
+      "snapshotUnchanged": true,
+      "coverage": "Includes all four actual native transport integration tests; installed UI/platform gaps remain"
+    },
+    "payloadProofInitial": {
+      "command": "rtk pnpm test:tauri -- --terminal-proofs scripts/production-payload-recovery-proof.test.ts --reporter=json --outputFile=.git/issue-closing/batch31-payload-proof.json",
+      "report": ".git/issue-closing/batch31-payload-proof.json",
+      "log": ".git/issue-closing/batch31-payload-proof.log",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "integrationDurationMs": 2798.335999,
+      "limitation": "JSON-only reporter did not preserve console.info measured receipt; final run needs default reporter as well. Static review found stale-epoch assertion reads live SQLite after disconnect starts asynchronous owner.close; passing run does not eliminate timing race."
+    },
+    "nativeEngineFormatted": {
+      "command": "rtk env CARGO_BUILD_JOBS=1 cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service -- --test-threads=1",
+      "passed": 91,
+      "failed": 0,
+      "ignored": 4,
+      "log": ".git/issue-closing/batch31-native-engine-formatted.log",
+      "sourceHash": "af3c96f9a6330d23a1e20953cdf7da089df50155df18d9ab263e2cd5163f4501"
+    },
+    "payloadProofFinal": {
+      "command": "rtk pnpm test:tauri -- --terminal-proofs scripts/production-payload-recovery-proof.test.ts --reporter=default --reporter=json --outputFile=.git/issue-closing/batch31-payload-proof-final.json",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "report": ".git/issue-closing/batch31-payload-proof-final.json",
+      "log": ".git/issue-closing/batch31-payload-proof-final.log",
+      "receipt": ".git/issue-closing/batch31-payload-receipt.json",
+      "assertedCounters": 60,
+      "cleanup": {
+        "ownerClosed": true,
+        "nativeExits": 4,
+        "profileRemoved": true
+      },
+      "inputsUnchanged": true
+    },
+    "typecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "log": ".git/issue-closing/batch31-typecheck.log",
+      "inputsUnchanged": true
+    },
+    "application": {
+      "passed": 7108,
+      "failed": 0,
+      "skipped": 31,
+      "report": ".git/issue-closing/batch31-application.json",
+      "log": ".git/issue-closing/batch31-application.log",
+      "reportSha256": "9cab58380cc0140fd84f66cdf6c9cd3f32d99fdeaea5cc82ab68085f56027d2e",
+      "workerLimit": 1
+    },
+    "standalone": {
+      "passed": 3638,
+      "failed": 0,
+      "skipped": 3,
+      "report": ".git/issue-closing/batch31-standalone.json",
+      "log": ".git/issue-closing/batch31-standalone.log",
+      "reportSha256": "761a6eded9ec2d7c65009231c454f14629036b98cb001bea5d5b31a1fea550b4"
+    },
+    "remainingDriver": {
+      "status": "passed",
+      "record": ".git/issue-closing/batch31-validation-driver.json",
+      "steps": [
+        {
+          "name": "lint",
+          "command": [
+            "rtk",
+            "pnpm",
+            "lint"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-lint.log",
+          "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+        },
+        {
+          "name": "application",
+          "command": [
+            "rtk",
+            "pnpm",
+            "test:run",
+            "--maxWorkers=1",
+            "--reporter=json",
+            "--outputFile=.git/issue-closing/batch31-application.json"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-application.log",
+          "logSha256": "9a4af0985de5fcfae70677c7ea2f76bfac4c9a48f9448754940b83555077063a"
+        },
+        {
+          "name": "standalone",
+          "command": [
+            "rtk",
+            "pnpm",
+            "test:tauri",
+            "--",
+            "--reporter=json",
+            "--outputFile=.git/issue-closing/batch31-standalone.json"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-standalone.log",
+          "logSha256": "6b96bcb105c240e02be70f9f482a6a155dd1e422f39310fefe751d57afe37bd0"
+        },
+        {
+          "name": "native-host",
+          "command": [
+            "rtk",
+            "env",
+            "CARGO_BUILD_JOBS=1",
+            "cargo",
+            "test",
+            "--locked",
+            "--manifest-path",
+            "src-tauri/Cargo.toml",
+            "-p",
+            "twentyonex-tauri-feasibility",
+            "--features",
+            "production-service",
+            "--",
+            "--test-threads=1"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-native-host.log",
+          "logSha256": "e7f438310a0dd01a48cee38327e3172d1a5469d6af276a981a6bea1a3653a392"
+        },
+        {
+          "name": "production-frontend",
+          "command": [
+            "rtk",
+            "pnpm",
+            "tauri:production:frontend:build"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-production-frontend.log",
+          "logSha256": "af9c329de5963f92c51d94d21570c108cf8168705fc4cc9073153b4d5f47ad61"
+        },
+        {
+          "name": "diagnostic-frontend",
+          "command": [
+            "rtk",
+            "pnpm",
+            "tauri:frontend:build"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-diagnostic-frontend.log",
+          "logSha256": "8dd427c46de971d8339f5da9e2721d3d9850cd84000d467b1b15a09c2c41ee64"
+        },
+        {
+          "name": "inventory",
+          "command": [
+            "rtk",
+            "node",
+            "scripts/tauri-inventory.mjs",
+            "--check"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-inventory.log",
+          "logSha256": "45d3f3f794ff560ce0c72f5ac73e2458545e0fadec18634021bb8e814b3d5ba0"
+        },
+        {
+          "name": "contracts",
+          "command": [
+            "rtk",
+            "node",
+            "scripts/tauri-contracts.mjs",
+            "--check"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-contracts.log",
+          "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+        },
+        {
+          "name": "production-stage",
+          "command": [
+            "rtk",
+            "pnpm",
+            "tauri:prepare:production"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-production-stage.log",
+          "logSha256": "a03c067d1e42b816f04fb9d024ccdbfaf24d96aad7d1aa6771268e0cb0a36d48"
+        },
+        {
+          "name": "private-production",
+          "command": [
+            "rtk",
+            "pnpm",
+            "test:tauri",
+            "--",
+            "--production-proofs",
+            "scripts/production-service-proof.test.ts",
+            "--reporter=default",
+            "--reporter=json",
+            "--outputFile=.git/issue-closing/batch31-private-production.json"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-private-production.log",
+          "logSha256": "86aa21e63c8d4a5b3aa721c9afbcf13e49b8bab24f806b5f9e7209a9ebe3aab0"
+        },
+        {
+          "name": "format",
+          "command": [
+            "rtk",
+            "rustfmt",
+            "--edition",
+            "2021",
+            "--check",
+            "src-tauri/engine/src/production.rs"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-format.log",
+          "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "diff",
+          "command": [
+            "rtk",
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exitCode": 0,
+          "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-diff.log",
+          "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+        }
+      ]
+    },
+    "nativeHostFinal": {
+      "command": "rtk env CARGO_BUILD_JOBS=1 cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-tauri-feasibility --features production-service -- --test-threads=1",
+      "passed": 78,
+      "failed": 0,
+      "ignored": 0,
+      "log": ".git/issue-closing/batch31-native-host-final.log",
+      "logSha256": "e9f43d8e4fc8e937035cb9f55c993bb318055249306751cdb992c3c402c5cb38",
+      "stagedRuntimeHashesUnchanged": true,
+      "stagedInputs": {
+        "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": "60b8f118ca3a9d71ee00cef3d5062e22d03e7b2b080e9695d278aa1382d33122",
+        "src-tauri/resources/service/production-stdio.mjs": "a1b09e52ab0ead207168d90fcd1e409f9f6744ac543afe3427f73b4aab1faf8f"
+      },
+      "scope": "Production feature compiled against final staged manifest; display-free lifecycle tests, not installed native UI"
+    },
+    "fullSuites": {
+      "application": {
+        "passed": 7108,
+        "failed": 0,
+        "skipped": 31,
+        "files": 580,
+        "reportSha256": "9cab58380cc0140fd84f66cdf6c9cd3f32d99fdeaea5cc82ab68085f56027d2e",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:run",
+          "--maxWorkers=1",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch31-application.json"
+        ],
+        "logSha256": "9a4af0985de5fcfae70677c7ea2f76bfac4c9a48f9448754940b83555077063a"
+      },
+      "standalone": {
+        "passed": 3638,
+        "failed": 0,
+        "skipped": 3,
+        "files": 293,
+        "reportSha256": "761a6eded9ec2d7c65009231c454f14629036b98cb001bea5d5b31a1fea550b4",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:tauri",
+          "--",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch31-standalone.json"
+        ],
+        "logSha256": "6b96bcb105c240e02be70f9f482a6a155dd1e422f39310fefe751d57afe37bd0"
+      },
+      "private-production": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "files": 1,
+        "reportSha256": "df1bfb75fd010bf35b2909335fa9888f3f461a6e9718a7c216358e42d0da2505",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:tauri",
+          "--",
+          "--production-proofs",
+          "scripts/production-service-proof.test.ts",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch31-private-production.json"
+        ],
+        "logSha256": "86aa21e63c8d4a5b3aa721c9afbcf13e49b8bab24f806b5f9e7209a9ebe3aab0"
+      }
+    },
+    "remainingDriverSteps": [
+      {
+        "name": "lint",
+        "command": [
+          "rtk",
+          "pnpm",
+          "lint"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:21:43.468354+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-lint.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:22:01.021372+00:00",
+        "logSha256": "3320389bdb7c8a1884a2ac81384c0bb98096fcbf467d534d0575e2f04025f4ee"
+      },
+      {
+        "name": "application",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:run",
+          "--maxWorkers=1",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch31-application.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:22:01.021735+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-application.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:30:38.587513+00:00",
+        "logSha256": "9a4af0985de5fcfae70677c7ea2f76bfac4c9a48f9448754940b83555077063a"
+      },
+      {
+        "name": "standalone",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:tauri",
+          "--",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch31-standalone.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:30:38.588740+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-standalone.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:37:51.860194+00:00",
+        "logSha256": "6b96bcb105c240e02be70f9f482a6a155dd1e422f39310fefe751d57afe37bd0"
+      },
+      {
+        "name": "native-host",
+        "command": [
+          "rtk",
+          "env",
+          "CARGO_BUILD_JOBS=1",
+          "cargo",
+          "test",
+          "--locked",
+          "--manifest-path",
+          "src-tauri/Cargo.toml",
+          "-p",
+          "twentyonex-tauri-feasibility",
+          "--features",
+          "production-service",
+          "--",
+          "--test-threads=1"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:37:51.860649+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-native-host.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:08.590912+00:00",
+        "logSha256": "e7f438310a0dd01a48cee38327e3172d1a5469d6af276a981a6bea1a3653a392"
+      },
+      {
+        "name": "production-frontend",
+        "command": [
+          "rtk",
+          "pnpm",
+          "tauri:production:frontend:build"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:38:08.591552+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-production-frontend.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:22.322643+00:00",
+        "logSha256": "af9c329de5963f92c51d94d21570c108cf8168705fc4cc9073153b4d5f47ad61"
+      },
+      {
+        "name": "diagnostic-frontend",
+        "command": [
+          "rtk",
+          "pnpm",
+          "tauri:frontend:build"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:38:22.323120+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-diagnostic-frontend.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:23.355648+00:00",
+        "logSha256": "8dd427c46de971d8339f5da9e2721d3d9850cd84000d467b1b15a09c2c41ee64"
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "rtk",
+          "node",
+          "scripts/tauri-inventory.mjs",
+          "--check"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:38:23.355958+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-inventory.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:28.003609+00:00",
+        "logSha256": "45d3f3f794ff560ce0c72f5ac73e2458545e0fadec18634021bb8e814b3d5ba0"
+      },
+      {
+        "name": "contracts",
+        "command": [
+          "rtk",
+          "node",
+          "scripts/tauri-contracts.mjs",
+          "--check"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:38:28.004002+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-contracts.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:32.317687+00:00",
+        "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+      },
+      {
+        "name": "production-stage",
+        "command": [
+          "rtk",
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:38:32.318065+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-production-stage.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:50.374803+00:00",
+        "logSha256": "a03c067d1e42b816f04fb9d024ccdbfaf24d96aad7d1aa6771268e0cb0a36d48"
+      },
+      {
+        "name": "private-production",
+        "command": [
+          "rtk",
+          "pnpm",
+          "test:tauri",
+          "--",
+          "--production-proofs",
+          "scripts/production-service-proof.test.ts",
+          "--reporter=default",
+          "--reporter=json",
+          "--outputFile=.git/issue-closing/batch31-private-production.json"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:38:50.375228+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-private-production.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:55.016339+00:00",
+        "logSha256": "86aa21e63c8d4a5b3aa721c9afbcf13e49b8bab24f806b5f9e7209a9ebe3aab0"
+      },
+      {
+        "name": "format",
+        "command": [
+          "rtk",
+          "rustfmt",
+          "--edition",
+          "2021",
+          "--check",
+          "src-tauri/engine/src/production.rs"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:38:55.016767+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-format.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:55.841932+00:00",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "diff",
+        "command": [
+          "rtk",
+          "git",
+          "diff",
+          "--check"
+        ],
+        "status": "passed",
+        "startedAt": "2026-10-16T12:38:55.842363+00:00",
+        "log": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch31-diff.log",
+        "exitCode": 0,
+        "endedAt": "2026-10-16T12:38:55.888338+00:00",
+        "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      }
+    ]
+  },
+  "ci": {
+    "checkedAt": "2026-10-16T12:22:45.185744+00:00",
+    "remoteMaster": "f920cea66defd2d1d0a6f994cc61294a62c1ead9",
+    "remoteUnchanged": true,
+    "branchProtection": "GitHub API returns Branch not protected (404)",
+    "existingMasterRuns": "Explicit repository gh run list on master returned empty; Verify workflow targets main",
+    "closureGate": "#202 freshly verified OPEN; keep #207 open despite local passing proof",
+    "publisher": "primary only, after remaining validation and exact source/evidence review",
+    "applicableBranchRules": []
+  },
+  "closurePrerequisites": {
+    "207": "#202 dependency remains explicit; implementation may deliver independently; do not close until prerequisite accepted or tracker explicitly clarifies gate"
+  },
+  "remainingAcceptance": [
+    "Installed supported OS/architecture/WebView runs, actual native Save dialog/copy, native host process-tree drain and packaged stdio load proof.",
+    "Terminal getBuffer is a bounded volatile tail; saturation retires its owner and cannot recover discarded output losslessly.",
+    "Audio/binary ServiceStreams foundation has no production Rust consumer; this proof uses existing domain payload paths.",
+    "#202 closure dependency remains open; source readiness does not close #207 or pass migration gates.",
+    "Complete #207 acceptance and its explicit #202 prerequisite remain open; this validated local batch is not installed supported-platform acceptance."
+  ],
+  "changes": [
+    "Fixed 30s incomplete-frame deadline in TypeScript peer and actual Rust production reader; fragments cannot extend lifetime",
+    "Cancellation invokes stream resource closer before awaiting raw consumer; failed cleanup retains slot/drain ownership",
+    "Failed or timed-out native cancellation retires epoch; stop watch ends stdout reader and buffered callbacks cannot revive retired owner",
+    "Native integration regressions exercise real child stdin/actual RequestGuard, stopped child stdout, and deterministic buffered callback retirement",
+    "Bounded actual-owner harness checks Unicode transcripts, 512KiB attachment receipt/FD route, four real PTYs, owner reconstruction and uncertain mutation no replay"
+  ]
+}

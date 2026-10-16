@@ -125,7 +125,9 @@ const mainFiles = [
   'scripts/activity-process-proof.test.ts',
   'scripts/database-proof.test.ts', 'scripts/configuration-proof.test.ts', 'scripts/agent-desktop-proof.test.ts',
   ...(process.env.TAURI_PRODUCTION_SERVICE_PROOFS === '1' ? ['scripts/production-service-proof.test.ts'] : []),
-  ...(process.env.TAURI_TERMINAL_PROOFS === '1' ? ['scripts/production-terminal-proof.test.ts'] : []),
+  ...(process.env.TAURI_TERMINAL_PROOFS === '1' ? [
+    'scripts/production-terminal-proof.test.ts', 'scripts/production-payload-recovery-proof.test.ts'
+  ] : []),
   ...(process.env.TAURI_STANDALONE_SERVICE_PROOFS === '1' ? [
     'scripts/database-service-proof.test.ts', 'scripts/configuration-service-proof.test.ts', 'scripts/transcript-page-proof.test.ts',
     'scripts/connector-worker-service-proof.test.ts'

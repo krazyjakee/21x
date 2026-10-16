@@ -120,6 +120,49 @@ describe('graceful peer drain', () => {
   })
 })
 
+describe('partial frame lifetime', () => {
+  it('disconnects an incomplete frame at a fixed deadline despite arriving fragments', async () => {
+    vi.useFakeTimers()
+    const disconnected = vi.fn(), host = peer({ onDisconnect: disconnected })
+    const frame = encodeServiceFrame(response())
+    host.receive(frame.subarray(0, 1))
+    await vi.advanceTimersByTimeAsync(SERVICE_LIMITS.requestTimeoutMs - 1)
+    host.receive(frame.subarray(1, 2))
+    expect(disconnected).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(disconnected).toHaveBeenCalledOnce()
+    expect(disconnected.mock.calls[0][0]).toMatchObject({ code: 'TIMEOUT' })
+    host.receive(frame.subarray(2))
+    await expect(host.request('test.echo', null)).rejects.toMatchObject({ code: 'TIMEOUT' })
+  })
+
+  it('gives a new partial frame its own deadline after the preceding frame completes', async () => {
+    vi.useFakeTimers()
+    const disconnected = vi.fn(), host = peer({ onDisconnect: disconnected })
+    const frame = encodeServiceFrame(response())
+    host.receive(frame.subarray(0, 1))
+    await vi.advanceTimersByTimeAsync(SERVICE_LIMITS.requestTimeoutMs - 1)
+    const completion = new Uint8Array(frame.length)
+    completion.set(frame.subarray(1)); completion[frame.length - 1] = frame[0]
+    host.receive(completion)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(disconnected).not.toHaveBeenCalled()
+    host.receive(frame.subarray(1))
+    await vi.advanceTimersByTimeAsync(SERVICE_LIMITS.requestTimeoutMs)
+    expect(disconnected).not.toHaveBeenCalled()
+  })
+
+  it('rejects EOF in an incomplete frame and retires its deadline exactly once', async () => {
+    vi.useFakeTimers()
+    const disconnected = vi.fn(), host = peer({ onDisconnect: disconnected })
+    host.receive(encoder.encode('{'))
+    host.end()
+    expect(disconnected.mock.calls[0][0]).toMatchObject({ code: 'INVALID_FRAME' })
+    await vi.advanceTimersByTimeAsync(SERVICE_LIMITS.requestTimeoutMs)
+    expect(disconnected).toHaveBeenCalledOnce()
+  })
+})
+
 describe('private service envelope', () => {
   it('recognizes the fixed optimistic skill conflict code without diagnostic values', () => {
     const error = new ServiceProtocolError('SKILL_VERSION_CONFLICT')

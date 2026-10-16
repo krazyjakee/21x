@@ -27,6 +27,37 @@ use tokio::{
 
 const MAX_FRAME: usize = 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
+
+// A complete frame has a bounded lifetime even when the peer trickles bytes.
+// An idle pipe is allowed: only an unfinished frame starts this deadline.
+#[derive(Default)]
+struct ProductionFrameDecoder {
+    bytes: Vec<u8>,
+    started: Option<Instant>,
+}
+impl ProductionFrameDecoder {
+    fn push(&mut self, byte: u8, now: Instant) -> Result<Option<Value>, EngineError> {
+        if self.started.is_some_and(|start| now >= start + DEADLINE) {
+            return Err(EngineError::new("TIMEOUT"));
+        }
+        if byte == b'\n' {
+            let frame = serde_json::from_slice(&self.bytes)
+                .map_err(|_| EngineError::new("INVALID_FRAME"))?;
+            self.bytes.clear();
+            self.started = None;
+            return Ok(Some(frame));
+        }
+        if self.bytes.len() == MAX_FRAME {
+            return Err(EngineError::new("FRAME_TOO_LARGE"));
+        }
+        self.started.get_or_insert(now);
+        self.bytes.push(byte);
+        Ok(None)
+    }
+    fn deadline(&self) -> Option<Instant> {
+        self.started.map(|start| start + DEADLINE)
+    }
+}
 fn request_deadline_at(operation: &str, started: Instant) -> Instant {
     // Private installation/download operations have bounded owned plans.
     // No caller-provided duration or namespace changes other request budgets.
@@ -710,6 +741,8 @@ struct Inner {
     queue_bytes: Arc<Semaphore>,
     callback_slots: Arc<Semaphore>,
     callback_work: AtomicU64,
+    #[cfg(test)]
+    cancellation_budget: Duration,
     stop: watch::Sender<bool>,
     exited: watch::Receiver<bool>,
     descriptor: ProductionDescriptor,
@@ -739,7 +772,16 @@ impl Drop for RequestGuard {
             let id = self.id.clone();
             tokio::spawn(async move {
                 let epoch = engine.epoch();
-                let _=engine.write(&json!({"kind":"event","protocolVersion":1,"engineEpoch":epoch,"operation":"engine.cancel","payload":{"requestId":id}})).await;
+                // Cancellation is not a best-effort invalidation. A saturated
+                // or blocked writer must retire this epoch, never leave raw
+                // peer work running behind a released local request slot.
+                let frame = json!({"kind":"event","protocolVersion":1,"engineEpoch":epoch,"operation":"engine.cancel","payload":{"requestId":id}});
+                if !matches!(
+                    timeout(engine.cancellation_budget(), engine.write(&frame)).await,
+                    Ok(Ok(()))
+                ) {
+                    engine.disconnect();
+                }
             });
         }
     }
@@ -753,6 +795,17 @@ impl Drop for StartupGuard {
     }
 }
 impl ProductionEngine {
+    fn cancellation_budget(&self) -> Duration {
+        #[cfg(test)]
+        {
+            self.0.cancellation_budget
+        }
+        #[cfg(not(test))]
+        {
+            DEADLINE
+        }
+    }
+
     pub async fn start(
         launch: TrustedProductionLaunch,
         host: ProductionNativeHost,
@@ -1232,7 +1285,56 @@ impl ProductionEngine {
             let _ = pending.sender.send(Err(EngineError::new("DISCONNECTED")));
         }
     }
+    async fn read_stdout<R: tokio::io::AsyncRead + Unpin>(&self, mut stdout: R) {
+        let mut chunk = [0u8; 8192];
+        let mut decoder = ProductionFrameDecoder::default();
+        let mut stopped = self.0.stop.subscribe();
+        loop {
+            if *stopped.borrow() {
+                break;
+            }
+            let read = async {
+                if let Some(deadline) = decoder.deadline() {
+                    timeout_at(deadline, stdout.read(&mut chunk))
+                        .await
+                        .map_err(|_| ())?
+                        .map_err(|_| ())
+                } else {
+                    stdout.read(&mut chunk).await.map_err(|_| ())
+                }
+            };
+            let count = tokio::select! {
+                _ = stopped.changed() => break,
+                result = read => match result {
+                    Ok(0) | Err(()) => break,
+                    Ok(count) => count,
+                },
+            };
+            for byte in &chunk[..count] {
+                match decoder.push(*byte, Instant::now()) {
+                    Ok(Some(frame)) => {
+                        if self.accept(frame).await.is_err() {
+                            self.disconnect();
+                            return;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(_) => {
+                        self.disconnect();
+                        return;
+                    }
+                }
+            }
+        }
+        self.disconnect();
+    }
+
     async fn accept(&self, frame: Value) -> Result<(), EngineError> {
+        // A buffered frame cannot revive a retired owner or start a native
+        // callback after teardown has already begun.
+        if self.0.closed.load(Ordering::SeqCst) {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
         if frame["protocolVersion"] != 1 {
             return Err(EngineError::new("INVALID_FRAME"));
         }
@@ -1337,36 +1439,12 @@ impl ProductionEngine {
                     // callback work stays retained until the actual future ends.
                     return Ok(());
                 }
-                if !contracts::object(
+                forward_production_event(
                     &frame,
-                    &[
-                        "kind",
-                        "protocolVersion",
-                        "engineEpoch",
-                        "operation",
-                        "payload",
-                        "sequence",
-                    ],
-                    &[],
-                ) || current.is_empty()
-                    || current != epoch
-                {
-                    return Err(EngineError::new("INVALID_FRAME"));
-                }
-                let operation = frame["operation"]
-                    .as_str()
-                    .ok_or_else(|| EngineError::new("INVALID_FRAME"))?;
-                let sequence = frame["sequence"]
-                    .as_u64()
-                    .filter(|n| *n > 0 && *n <= 9_007_199_254_740_991)
-                    .ok_or_else(|| EngineError::new("INVALID_FRAME"))?;
-                let mut previous = self.0.last_event.lock().unwrap();
-                if sequence <= *previous || !contracts::valid_event(operation, &frame["payload"]) {
-                    return Err(EngineError::new("INVALID_RESULT"));
-                }
-                (self.0.host.event_sink)(frame.clone())?;
-                *previous = sequence;
-                Ok(())
+                    &current,
+                    &self.0.last_event,
+                    &*self.0.host.event_sink,
+                )
             }
             Some("request") => {
                 if !contracts::object(
@@ -1739,6 +1817,46 @@ impl ProductionEngine {
         })
     }
 }
+// Advance only after the host accepts the invalidation. The caller retires the
+// epoch on any error; recovery uses owner snapshots, never mutation replay.
+fn forward_production_event(
+    frame: &Value,
+    current: &str,
+    last_event: &Mutex<u64>,
+    sink: &(dyn Fn(Value) -> Result<(), EngineError> + Send + Sync),
+) -> Result<(), EngineError> {
+    if !contracts::object(
+        frame,
+        &[
+            "kind",
+            "protocolVersion",
+            "engineEpoch",
+            "operation",
+            "payload",
+            "sequence",
+        ],
+        &[],
+    ) || current.is_empty()
+        || frame["engineEpoch"] != current
+    {
+        return Err(EngineError::new("INVALID_FRAME"));
+    }
+    let operation = frame["operation"]
+        .as_str()
+        .ok_or_else(|| EngineError::new("INVALID_FRAME"))?;
+    let sequence = frame["sequence"]
+        .as_u64()
+        .filter(|n| *n > 0 && *n <= 9_007_199_254_740_991)
+        .ok_or_else(|| EngineError::new("INVALID_FRAME"))?;
+    let mut previous = last_event.lock().unwrap();
+    if sequence <= *previous || !contracts::valid_event(operation, &frame["payload"]) {
+        return Err(EngineError::new("INVALID_RESULT"));
+    }
+    sink(frame.clone())?;
+    *previous = sequence;
+    Ok(())
+}
+
 fn request_id(value: &str, prefix: &str) -> Option<u128> {
     let digits = value.strip_prefix(prefix)?;
     if digits.is_empty()
@@ -1936,6 +2054,23 @@ mod linux {
         }
     }
     impl Scope {
+        // Transport regressions do not mint cgroup authority or launch a
+        // guardian. Ordinary files cannot satisfy prove_ready/await_leader_only.
+        #[cfg(test)]
+        pub(super) fn transport_fixture(root: &Path) -> Arc<Self> {
+            let directory = File::open(root).unwrap();
+            Arc::new(Self {
+                root: directory.try_clone().unwrap(),
+                directory,
+                name: CString::new("inert-transport-fixture").unwrap(),
+                kill: Mutex::new(File::open("/dev/null").unwrap()),
+                guardian_writer: Mutex::new(None),
+                guardian: 0,
+                leader: AtomicU64::new(0),
+                guardian_reaped: AtomicBool::new(true),
+                released: AtomicBool::new(true),
+            })
+        }
         fn create(root: File, launch: &str) -> Result<Arc<Self>, EngineError> {
             let name = CString::new(format!("21x-{launch}")).map_err(|_| failure())?;
             if unsafe { libc::mkdirat(root.as_raw_fd(), name.as_ptr(), 0o700) } != 0 {
@@ -2304,7 +2439,7 @@ mod linux {
                 .stdin
                 .take()
                 .ok_or_else(|| problem("DISCONNECTED", "production-private-stdin"))?;
-            let mut stdout = child
+            let stdout = child
                 .stdout
                 .take()
                 .ok_or_else(|| problem("DISCONNECTED", "production-private-stdout"))?;
@@ -2326,6 +2461,8 @@ mod linux {
                 queue_bytes: Arc::new(Semaphore::new(4 * 1024 * 1024)),
                 callback_slots: Arc::new(Semaphore::new(128)),
                 callback_work: AtomicU64::new(0),
+                #[cfg(test)]
+                cancellation_budget: DEADLINE,
                 stop,
                 exited,
                 descriptor: descriptor.clone(),
@@ -2357,39 +2494,7 @@ mod linux {
             });
             scope_guard.1 = true;
             let reader = engine.clone();
-            tokio::spawn(async move {
-                let mut chunk = [0u8; 8192];
-                let mut pending = Vec::new();
-                loop {
-                    let count = match stdout.read(&mut chunk).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(count) => count,
-                    };
-                    for byte in &chunk[..count] {
-                        if *byte == b'\n' {
-                            let frame = match serde_json::from_slice(&pending) {
-                                Ok(frame) => frame,
-                                Err(_) => {
-                                    reader.disconnect();
-                                    return;
-                                }
-                            };
-                            pending.clear();
-                            if reader.accept(frame).await.is_err() {
-                                reader.disconnect();
-                                return;
-                            }
-                        } else {
-                            pending.push(*byte);
-                            if pending.len() > MAX_FRAME {
-                                reader.disconnect();
-                                return;
-                            }
-                        }
-                    }
-                }
-                reader.disconnect();
-            });
+            tokio::spawn(async move { reader.read_stdout(stdout).await });
             let mut guard = StartupGuard(engine.clone(), false);
             let bytes = descriptor_bytes(&descriptor)?;
             tokio::task::spawn_blocking(move || {
@@ -2583,6 +2688,367 @@ mod tests {
             },
         }
     }
+    #[cfg(target_os = "linux")]
+    mod transport_integration {
+        use super::*;
+        use std::process::Stdio;
+        use tokio::process::{Child, ChildStdout, Command};
+
+        struct ObservedStdout {
+            pipe: ChildStdout,
+            entered: Option<oneshot::Sender<()>>,
+        }
+        impl tokio::io::AsyncRead for ObservedStdout {
+            fn poll_read(
+                self: Pin<&mut Self>,
+                context: &mut std::task::Context<'_>,
+                buffer: &mut tokio::io::ReadBuf<'_>,
+            ) -> std::task::Poll<std::io::Result<()>> {
+                let this = self.get_mut();
+                if let Some(entered) = this.entered.take() {
+                    let _ = entered.send(());
+                }
+                tokio::io::AsyncRead::poll_read(Pin::new(&mut this.pipe), context, buffer)
+            }
+        }
+
+        struct Fixture {
+            engine: ProductionEngine,
+            child: Child,
+            stdout: Option<ChildStdout>,
+            _root: Temporary,
+            // Keep receivers alive: stop notification must not depend on the
+            // launcher's supervisor, which this transport fixture does not run.
+            _stop: watch::Receiver<bool>,
+            _exited: watch::Sender<bool>,
+        }
+        impl Fixture {
+            fn new(host: ProductionNativeHost) -> Self {
+                let root = Temporary::new();
+                // Shell builtins only: this fixture has no descendant process,
+                // profile, model backend or production containment authority.
+                let mut child = Command::new("/bin/sh")
+                    .args(["-c", "IFS= read -r request; printf 'written\n'; while IFS= read -r request; do :; done"])
+                    .env_clear()
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .kill_on_drop(true)
+                    .spawn().unwrap();
+                let stdin = child.stdin.take().unwrap();
+                let stdout = child.stdout.take();
+                let (stop, stop_rx) = watch::channel(false);
+                let (exited_tx, exited) = watch::channel(false);
+                let engine = ProductionEngine(Arc::new(Inner {
+                    stdin: AsyncMutex::new(stdin),
+                    pending: Mutex::new(HashMap::new()),
+                    epoch: Mutex::new("transport-fixture".into()),
+                    next: AtomicU64::new(1),
+                    closed: AtomicBool::new(false),
+                    ready: AtomicBool::new(true),
+                    stopping: AtomicBool::new(false),
+                    prepared: AtomicBool::new(true),
+                    drained: AtomicBool::new(false),
+                    last_callback: Mutex::new(0),
+                    last_event: Mutex::new(0),
+                    request_slots: Arc::new(Semaphore::new(128)),
+                    queue_bytes: Arc::new(Semaphore::new(4 * 1024 * 1024)),
+                    callback_slots: Arc::new(Semaphore::new(128)),
+                    callback_work: AtomicU64::new(0),
+                    cancellation_budget: Duration::from_millis(20),
+                    stop,
+                    exited,
+                    descriptor: descriptor(&root.0),
+                    host,
+                    scope: linux::Scope::transport_fixture(&root.0),
+                }));
+                Self {
+                    engine,
+                    child,
+                    stdout,
+                    _root: root,
+                    _stop: stop_rx,
+                    _exited: exited_tx,
+                }
+            }
+            async fn pending_request(
+                &mut self,
+            ) -> tokio::task::JoinHandle<Result<Value, EngineError>> {
+                let engine = self.engine.clone();
+                let call =
+                    tokio::spawn(async move { engine.request_raw("engine.ping", json!({})).await });
+                let mut written = [0; 8];
+                timeout(
+                    Duration::from_secs(2),
+                    self.stdout.as_mut().unwrap().read_exact(&mut written),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert_eq!(&written, b"written\n");
+                assert_eq!(self.engine.0.pending.lock().unwrap().len(), 1);
+                call
+            }
+            async fn reap(&mut self) {
+                self.engine.disconnect();
+                self.child.start_kill().unwrap();
+                timeout(Duration::from_secs(2), self.child.wait())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+        }
+        async fn retired(engine: &ProductionEngine) {
+            timeout(Duration::from_secs(2), async {
+                while !engine.0.closed.load(Ordering::SeqCst) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(!engine.0.ready.load(Ordering::SeqCst));
+            assert!(*engine.0.stop.borrow());
+            assert!(engine.0.pending.lock().unwrap().is_empty());
+            assert_eq!(engine.0.request_slots.available_permits(), 128);
+        }
+        #[tokio::test]
+        async fn actual_request_guard_retires_epoch_when_cancel_pipe_write_fails() {
+            let mut fixture = Fixture::new(ui_host());
+            let call = fixture.pending_request().await;
+            // Reap the only pipe reader before cancellation. The subsequent
+            // real ChildStdin write must fail; no synthetic writer is involved.
+            fixture.child.start_kill().unwrap();
+            timeout(Duration::from_secs(2), fixture.child.wait())
+                .await
+                .unwrap()
+                .unwrap();
+            call.abort();
+            assert!(call.await.unwrap_err().is_cancelled());
+            retired(&fixture.engine).await;
+            assert_eq!(
+                fixture
+                    .engine
+                    .request_raw("engine.ping", json!({}))
+                    .await
+                    .unwrap_err()
+                    .code,
+                "DISCONNECTED"
+            );
+            assert_eq!(fixture.engine.0.next.load(Ordering::SeqCst), 2);
+        }
+        #[tokio::test]
+        async fn actual_request_guard_retires_epoch_when_cancel_writer_is_blocked() {
+            let (entered_tx, entered_rx) = oneshot::channel();
+            let (release_tx, release_rx) = oneshot::channel();
+            let entered = Mutex::new(Some(entered_tx));
+            let release = Mutex::new(Some(release_rx));
+            let mut host = ui_host();
+            host.open_external = Some(Arc::new(move |_| {
+                let entered = entered.lock().unwrap().take().unwrap();
+                let release = release.lock().unwrap().take().unwrap();
+                Box::pin(async move {
+                    let _ = entered.send(());
+                    let _ = release.await;
+                    Ok(())
+                })
+            }));
+            let mut fixture = Fixture::new(host);
+            Arc::get_mut(&mut fixture.engine.0)
+                .unwrap()
+                .descriptor
+                .capabilities
+                .external_urls = HostCapability::Host;
+            let call = fixture.pending_request().await;
+            let engine = fixture.engine.clone();
+            engine.accept(json!({"kind":"request","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"service:1","operation":"host.shell.openExternal","payload":{"url":"https://example.com/"}})).await.unwrap();
+            timeout(Duration::from_secs(2), entered_rx)
+                .await
+                .unwrap()
+                .unwrap();
+            let writer = engine.0.stdin.lock().await;
+            call.abort();
+            assert!(call.await.unwrap_err().is_cancelled());
+            retired(&engine).await;
+            // The raw pipe and child remain owned even though the cancellation
+            // wait expired. Release the lock only after retirement is observed.
+            assert!(fixture.child.try_wait().unwrap().is_none());
+            assert_eq!(engine.0.callback_work.load(Ordering::SeqCst), 1);
+            assert_eq!(engine.0.callback_slots.available_permits(), 127);
+            drop(writer);
+            release_tx.send(()).unwrap();
+            timeout(Duration::from_secs(2), async {
+                while engine.0.callback_work.load(Ordering::SeqCst) != 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(engine.0.callback_slots.available_permits(), 128);
+            assert_eq!(engine.0.next.load(Ordering::SeqCst), 2);
+            fixture.reap().await;
+        }
+        #[tokio::test]
+        async fn actual_stdout_reader_stops_without_waiting_for_child_eof() {
+            let mut fixture = Fixture::new(ui_host());
+            let engine = fixture.engine.clone();
+            let (entered_tx, entered_rx) = oneshot::channel();
+            let stdout = ObservedStdout {
+                pipe: fixture.stdout.take().unwrap(),
+                entered: Some(entered_tx),
+            };
+            let reader = tokio::spawn(async move { engine.read_stdout(stdout).await });
+            // Child has not received input and keeps stdout open indefinitely.
+            timeout(Duration::from_secs(2), entered_rx)
+                .await
+                .unwrap()
+                .unwrap();
+            fixture.engine.disconnect();
+            timeout(Duration::from_secs(2), reader)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(fixture.child.try_wait().unwrap().is_none());
+            assert_eq!(fixture.engine.0.callback_work.load(Ordering::SeqCst), 0);
+            fixture.reap().await;
+        }
+        #[tokio::test]
+        async fn actual_stdout_reader_refuses_callback_buffered_after_retirement() {
+            let owner: Arc<Mutex<Option<ProductionEngine>>> = Arc::new(Mutex::new(None));
+            let close_owner = owner.clone();
+            let invoked = Arc::new(AtomicU64::new(0));
+            let callback_invoked = invoked.clone();
+            let mut host = ui_host();
+            host.event_sink = Arc::new(move |_| {
+                close_owner.lock().unwrap().as_ref().unwrap().disconnect();
+                Ok(())
+            });
+            host.open_external = Some(Arc::new(move |_| {
+                callback_invoked.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }));
+            let mut fixture = Fixture::new(host);
+            // This route would be valid if dispatched before retirement.
+            Arc::get_mut(&mut fixture.engine.0)
+                .unwrap()
+                .descriptor
+                .capabilities
+                .external_urls = HostCapability::Host;
+            *owner.lock().unwrap() = Some(fixture.engine.clone());
+            let event = json!({"kind":"event","protocolVersion":1,"engineEpoch":"transport-fixture","operation":"terminal:data","payload":{"id":"terminal:fixture","data":"retire"},"sequence":1});
+            let callback = json!({"kind":"request","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"service:1","operation":"host.shell.openExternal","payload":{"url":"https://example.com/"}});
+            let mut bytes = serde_json::to_vec(&event).unwrap();
+            bytes.push(b'\n');
+            bytes.extend(serde_json::to_vec(&callback).unwrap());
+            bytes.push(b'\n');
+            // Prebuffer both frames in one read. The first sink retires the
+            // actual owner; the second must not allocate or launch a callback.
+            fixture.engine.read_stdout(bytes.as_slice()).await;
+            assert_eq!(
+                fixture.engine.accept(callback).await.unwrap_err().code,
+                "DISCONNECTED"
+            );
+            assert_eq!(*fixture.engine.0.last_callback.lock().unwrap(), 0);
+            assert_eq!(fixture.engine.0.callback_work.load(Ordering::SeqCst), 0);
+            assert_eq!(fixture.engine.0.callback_slots.available_permits(), 128);
+            assert_eq!(invoked.load(Ordering::SeqCst), 0);
+            owner.lock().unwrap().take();
+            fixture.reap().await;
+        }
+    }
+
+    #[test]
+    fn production_frames_preserve_fragmented_utf8_and_coalesced_boundaries() {
+        let mut decoder = ProductionFrameDecoder::default();
+        let expected = [json!({"text":"\u{001b}[31mλ雪"}), json!({"defined":false})];
+        let now = Instant::now();
+        let mut received = Vec::new();
+        for frame in &expected {
+            let mut bytes = serde_json::to_vec(frame).unwrap();
+            bytes.push(b'\n');
+            for byte in bytes {
+                if let Some(value) = decoder.push(byte, now).unwrap() {
+                    received.push(value);
+                }
+            }
+            assert!(decoder.deadline().is_none());
+            assert!(decoder.bytes.is_empty());
+        }
+        assert_eq!(received, expected);
+    }
+
+    #[test]
+    fn production_partial_frame_deadline_is_not_extended_by_trickled_bytes() {
+        let mut decoder = ProductionFrameDecoder::default();
+        let start = Instant::now();
+        assert!(decoder.deadline().is_none());
+        decoder.push(b'{', start).unwrap();
+        decoder
+            .push(b' ', start + DEADLINE - Duration::from_millis(1))
+            .unwrap();
+        assert_eq!(decoder.deadline(), Some(start + DEADLINE));
+        assert_eq!(
+            decoder.push(b'}', start + DEADLINE).unwrap_err().code,
+            "TIMEOUT"
+        );
+    }
+
+    #[test]
+    fn production_frames_reject_oversize_and_malformed_input_before_dispatch() {
+        let now = Instant::now();
+        let mut decoder = ProductionFrameDecoder::default();
+        // Exactly the frame cap is permitted; the next byte is never retained.
+        for _ in 0..MAX_FRAME {
+            decoder.push(b' ', now).unwrap();
+        }
+        assert_eq!(decoder.push(b' ', now).unwrap_err().code, "FRAME_TOO_LARGE");
+        assert_eq!(decoder.bytes.len(), MAX_FRAME);
+        let mut exact = ProductionFrameDecoder::default();
+        exact.push(b'"', now).unwrap();
+        for _ in 0..MAX_FRAME - 2 {
+            exact.push(b'x', now).unwrap();
+        }
+        exact.push(b'"', now).unwrap();
+        assert_eq!(
+            exact
+                .push(b'\n', now)
+                .unwrap()
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .len(),
+            MAX_FRAME - 2
+        );
+        let mut decoder = ProductionFrameDecoder::default();
+        assert_eq!(decoder.push(b'\n', now).unwrap_err().code, "INVALID_FRAME");
+        decoder.push(0xff, now).unwrap();
+        assert_eq!(decoder.push(b'\n', now).unwrap_err().code, "INVALID_FRAME");
+    }
+
+    #[test]
+    fn production_event_saturation_retains_cursor_and_old_epochs_never_reach_host() {
+        let cursor = Mutex::new(0);
+        let frame = json!({"kind":"event","protocolVersion":1,"engineEpoch":"epoch-current", "operation":"terminal:data","payload":{"id":"terminal:fixture","data":"output"},"sequence":1});
+        let saturated = |_: Value| Err(EngineError::new("BACKPRESSURE"));
+        assert_eq!(
+            forward_production_event(&frame, "epoch-current", &cursor, &saturated)
+                .unwrap_err()
+                .code,
+            "BACKPRESSURE"
+        );
+        assert_eq!(*cursor.lock().unwrap(), 0);
+        let received = Mutex::new(Vec::new());
+        let sink = |value: Value| {
+            received.lock().unwrap().push(value);
+            Ok(())
+        };
+        assert!(forward_production_event(&frame, "epoch-replacement", &cursor, &sink).is_err());
+        assert!(received.lock().unwrap().is_empty());
+        forward_production_event(&frame, "epoch-current", &cursor, &sink).unwrap();
+        assert_eq!(*cursor.lock().unwrap(), 1);
+        assert!(forward_production_event(&frame, "epoch-current", &cursor, &sink).is_err());
+        assert_eq!(received.lock().unwrap().len(), 1);
+    }
+
     #[tokio::test]
     async fn energy_uses_only_a_captured_host_and_releases_after_acquisition_authority_retires() {
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));

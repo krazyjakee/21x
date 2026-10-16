@@ -57,6 +57,7 @@ export class ServicePeer {
   private queuedBytes = 0
   private writing = false
   private stopWrite: (() => void) | null = null
+  private partialFrameTimer: ReturnType<typeof setTimeout> | undefined
   private nextId = 0n
   private lastRemoteId = 0n
   private failure: ServiceProtocolError | null = null
@@ -114,8 +115,19 @@ export class ServicePeer {
 
   receive(bytes: Uint8Array): void {
     if (this.failure) return
-    try { this.decoder.push(bytes, frame => { if (!this.failure) this.accept(frame) }) }
-    catch (error) { this.disconnect(error instanceof ServiceProtocolError ? error.code : 'INVALID_FRAME') }
+    try {
+      this.decoder.push(bytes, frame => {
+        // A completed frame retires its deadline. Subsequent partial bytes in
+        // this same read belong to a new frame with their own bounded lifetime.
+        clearTimeout(this.partialFrameTimer); this.partialFrameTimer = undefined
+        if (!this.failure) this.accept(frame)
+      })
+      if (!this.failure && this.decoder.pendingByteCount > 0 && !this.partialFrameTimer) {
+        // Do not renew on each fragment: a slow sender cannot keep an
+        // incomplete frame (or its epoch/resources) alive indefinitely.
+        this.partialFrameTimer = setTimeout(() => this.disconnect('TIMEOUT'), SERVICE_LIMITS.requestTimeoutMs)
+      }
+    } catch (error) { this.disconnect(error instanceof ServiceProtocolError ? error.code : 'INVALID_FRAME') }
   }
 
   end(): void {
@@ -128,6 +140,7 @@ export class ServicePeer {
     if (this.failure) return
     const error = new ServiceProtocolError(code)
     this.failure = error
+    clearTimeout(this.partialFrameTimer); this.partialFrameTimer = undefined
     this.streams.disconnect()
     for (const waiter of this.drainWaiters) waiter.reject(error)
     this.drainWaiters.clear()
