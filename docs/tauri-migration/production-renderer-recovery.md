@@ -88,3 +88,49 @@ disposal retire queued callbacks. These are controlled renderer tests rather tha
 installed OS notification, tray, updater or process-recovery acceptance.
 
 [Preferences/activity evidence](evidence/issue-209-native-preferences-activity-local-20261017.json) binds commands and results to the published implementation revision.
+
+## Native file imports and inert browser surfaces
+
+The native task attachment chooser keeps the retained `pick()` and
+`save(taskId, path)` signatures. E2's private native selection owner holds the
+actual file descriptor and binds a one-shot offer to the physical document;
+returned paths are display data. The renderer does not turn DOM `File` paths or
+drops into save authority. Task and transcript drops show chooser guidance and
+perform no import. Draft files remain pending until the explicit task create
+returns its accepted task ID.
+
+Native imports run sequentially through the existing Source mutation lane.
+Accepted partial file receipts are merged into explicit task metadata once; a
+later save refusal stops the batch, shows a fixed error and does not replay.
+Metadata persistence failure is explicit and uncertain copies/updates are not
+repeated or destructively rolled back. After accepted task creation, attachment
+failure opens the accepted task instead of leaving a form that repeats create.
+Withdrawing create intent, replacing a task, reconnecting or unmounting fences
+later effects/publications. Picker/save/metadata errors do not expose raw native
+paths or diagnostics. These controls use actual UI owners, client/codecs and
+transport with controlled native responses; E2's independent GTK/Source proofs
+supply the private selection backend evidence.
+
+Ordinary task mutation cannot append metadata to a `task_group` execution anchor
+or Captain row. Their native file picker/import surfaces are therefore absent;
+saved attachment reads/open/download remain retained. No member storage alias or
+new group mutation is invented. An explicit domain attachment operation is still
+needed for those file imports. The existing atomic chat-image path is unchanged.
+
+Two additional controls install the actual native host with preload absent and
+exercise the existing browser retirement policy: saved browser/webpage panels
+render inert content without URLs, embedding, broker/control calls or creation
+menu entries. Typed settings hydration and explicit viewport persistence preserve
+dormant records and edges; new browser/webpage panels and browser edges are
+refused. All generated browser operations retain `removed-browser`, `caller:none`
+and `destination:none`. Four existing retirement controls remain in the gate.
+This establishes the stated source/controlled-renderer criterion, while installed
+native UI recovery and migration umbrella prerequisites remain open.
+
+An accepted copy can remain protected but unreferenced after refused or uncertain
+metadata completion. The UI does not silently reimport or delete that copy;
+explicit domain reconciliation remains needed. This is a recorded cleanup limit,
+not evidence of complete attachment/platform parity.
+
+[Attachment UI and browser evidence](evidence/issue-209-native-attachment-ui-local-20261017.json)
+records the full baseline, final affected checks, revisions and remaining defects.

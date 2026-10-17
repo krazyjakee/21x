@@ -1,4 +1,4 @@
-import { desktopApi } from '@/lib/desktop-api'
+import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { FileText, Paperclip, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -10,6 +10,7 @@ import { formatFileSize } from '@/lib/utils'
 import { AttachmentTray } from '@/components/chat/AttachmentTray'
 import { useChatAttachments } from '@/hooks/use-chat-attachments'
 import type { ChatImageInput } from '@shared/chat-images'
+import { ATTACHMENT_IMPORT_FAILURE, NATIVE_FILE_DROP_MESSAGE } from '@/lib/task-attachment-import'
 
 export interface ComposerAttachment {
   id: string
@@ -58,6 +59,8 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
   const [isDragOver, setIsDragOver] = useState(false)
   const sending = useRef(false)
   const [isSending, setIsSending] = useState(false)
+  const picking = useRef(false)
+  const [isPicking, setIsPicking] = useState(false)
   const activeTask = useRef(taskId)
   activeTask.current = taskId
   const mounted = useRef(true)
@@ -150,7 +153,18 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
   }
 
   const handlePickAttachments = async () => {
-    if (!sending.current && onPickAttachments) addAttachments(await onPickAttachments())
+    if (sending.current || picking.current || !onPickAttachments) return
+    const owner = taskId, scope = captureDesktopRead()
+    picking.current = true; setIsPicking(true)
+    try {
+      const added = await onPickAttachments()
+      if (mounted.current && activeTask.current === owner && scope.isCurrent()) addAttachments(added)
+    } catch {
+      if (mounted.current && activeTask.current === owner && scope.isCurrent()) dispatchShortcutFeedback(ATTACHMENT_IMPORT_FAILURE, true)
+    } finally {
+      picking.current = false
+      if (mounted.current) setIsPicking(false)
+    }
   }
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -176,10 +190,19 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     setIsDragOver(false)
     if (sending.current) return
 
-    const filePaths = Array.from(e.dataTransfer.files)
-      .map((file) => desktopApi.webUtils.getPathForFile(file))
-      .filter(Boolean)
-    if (filePaths.length > 0) addAttachments(await onAddAttachmentPaths(filePaths))
+    if (getDesktopHost().kind === 'tauri') {
+      dispatchShortcutFeedback(NATIVE_FILE_DROP_MESSAGE, true)
+      return
+    }
+
+    const owner = taskId
+    try {
+      const filePaths = Array.from(e.dataTransfer.files).map(file => desktopApi.webUtils.getPathForFile(file)).filter(Boolean)
+      if (filePaths.length > 0) {
+        const added = await onAddAttachmentPaths(filePaths)
+        if (mounted.current && activeTask.current === owner) addAttachments(added)
+      }
+    } catch { if (mounted.current && activeTask.current === owner) dispatchShortcutFeedback(ATTACHMENT_IMPORT_FAILURE, true) }
   }
 
   return (
@@ -248,6 +271,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
             variant="ghost"
             size="icon"
             onClick={handlePickAttachments}
+            disabled={isPicking || isSending || isStarting}
             className="h-[32px] w-[32px] shrink-0 rounded-lg"
             title="Attach files"
             aria-label="Attach files"

@@ -1,4 +1,4 @@
-import { desktopApi } from '@/lib/desktop-api'
+import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import { LayoutList, Send, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -13,6 +13,8 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { useTaskStore } from '@/stores/task-store'
 import { taskApi, worktreeApi, taskSourceApi, attachmentApi, artifactApi, agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
+import { ATTACHMENT_IMPORT_FAILURE, importTaskAttachments, mergeTaskAttachments } from '@/lib/task-attachment-import'
+import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import { memo, useEffect, useCallback, useRef, useState, useMemo } from 'react'
 import { TaskStatus } from '@/types'
 import type { Task, FileAttachment, OutputField, Agent } from '@/types'
@@ -45,7 +47,7 @@ interface TaskWorkspaceProps {
   agents: Agent[]
   onEdit: () => void
   onDelete: () => void
-  onUpdateAttachments: (attachments: FileAttachment[]) => void
+  onUpdateAttachments: (attachments: FileAttachment[]) => void | Promise<void>
   onUpdateOutputFields: (fields: OutputField[]) => void
   onCompleteTask: (completeAtSource?: boolean) => void
   onAssignAgent: (taskId: string, agentId: string | null) => void
@@ -106,6 +108,11 @@ function TaskWorkspaceComponent({
   const [parentTask, setParentTask] = useState<Task | null>(null)
   const [recoveryState, setRecoveryState] = useState<QueuedAgentStart | null>(null)
   const startingRef = useRef(false)
+  const attachmentBusy = useRef(false)
+  const attachmentMounted = useRef(true)
+  const attachmentOwner = useRef(task)
+  attachmentOwner.current = task
+  useEffect(() => { attachmentMounted.current = true; return () => { attachmentMounted.current = false } }, [])
   const submittedQuestionIdsRef = useRef(new Set<string>())
   const openTaskOnCanvas = useUIStore((s) => s.openTaskOnCanvas)
   const artifacts = useArtifactStore((s) => task?.id ? (s.artifactsByTask[task.id] || EMPTY_ARTIFACTS) : EMPTY_ARTIFACTS)
@@ -438,27 +445,37 @@ function TaskWorkspaceComponent({
 
   const handleAddAttachmentPaths = useCallback(async (filePaths: string[]) => {
     if (!task?.id || filePaths.length === 0) return []
-    const saved = await Promise.all(filePaths.map((fp) => attachmentApi.save(task.id, fp)))
-    const merged = [...task.attachments]
-    const seen = new Set(merged.map((a) => a.id))
-    for (const attachment of saved) {
-      if (seen.has(attachment.id)) continue
-      seen.add(attachment.id)
-      merged.push(attachment)
+    if (getDesktopHost().kind === 'tauri' && task.role !== 'task') throw new Error('File import is unavailable for this conversation.')
+    if (attachmentBusy.current) return []
+    attachmentBusy.current = true
+    const scope = captureDesktopRead()
+    try {
+      const { saved, incomplete } = await importTaskAttachments(task.id, filePaths, () => attachmentMounted.current && attachmentOwner.current?.id === task.id)
+      scope.assertCurrent()
+      if (!attachmentMounted.current || attachmentOwner.current?.id !== task.id) return []
+      if (saved.length) {
+        const merged = mergeTaskAttachments(attachmentOwner.current.attachments, saved)
+        await onUpdateAttachments(merged)
+      }
+      if (!scope.isCurrent() || !attachmentMounted.current || attachmentOwner.current?.id !== task.id) return []
+      if (incomplete) dispatchShortcutFeedback(ATTACHMENT_IMPORT_FAILURE, true)
+      return saved
+    } finally {
+      attachmentBusy.current = false
     }
-    onUpdateAttachments(merged)
-    return saved
-  }, [onUpdateAttachments, task?.attachments, task?.id])
+  }, [onUpdateAttachments, task?.id, task?.role])
 
   // Pasted images (#144): main stores them as task attachments and updates the task.
   const handleSaveImages = useMemo(() => (task?.id ? taskImageSaver(task.id) : undefined), [task?.id])
 
   const handlePickAttachments = useCallback(async () => {
     if (!task?.id) return []
+    if (getDesktopHost().kind === 'tauri' && task.role !== 'task') throw new Error('File import is unavailable for this conversation.')
+    const scope = captureDesktopRead(), owner = task.id
     const filePaths = await attachmentApi.pick()
-    if (!filePaths.length) return []
+    if (!filePaths.length || !scope.isCurrent() || !attachmentMounted.current || attachmentOwner.current?.id !== owner) return []
     return handleAddAttachmentPaths(filePaths)
-  }, [handleAddAttachmentPaths, task?.id])
+  }, [handleAddAttachmentPaths, task?.id, task?.role])
 
   const feedback = useTaskFeedbackFlow({
     task,
@@ -744,8 +761,8 @@ function TaskWorkspaceComponent({
       onStop={handleAbort}
       onRestart={groupHistory ? undefined : handleStartFreshSession}
       onSend={groupHistory ? undefined : handleSend}
-      onPickAttachments={handlePickAttachments}
-      onAddAttachmentPaths={handleAddAttachmentPaths}
+      onPickAttachments={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handlePickAttachments}
+      onAddAttachmentPaths={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handleAddAttachmentPaths}
       onSaveImages={handleSaveImages}
     />
   )

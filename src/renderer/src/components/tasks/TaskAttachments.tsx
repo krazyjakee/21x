@@ -1,9 +1,10 @@
-import { desktopApi } from '@/lib/desktop-api'
-import { useState, useCallback } from 'react'
+import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Paperclip, X, FileText, Download } from 'lucide-react'
 import { attachmentApi } from '@/lib/ipc-client'
 import type { FileAttachment } from '@/types'
 import { formatFileSize } from '@/lib/utils'
+import { ATTACHMENT_IMPORT_FAILURE, importTaskAttachments, mergeTaskAttachments, NATIVE_FILE_DROP_MESSAGE } from '@/lib/task-attachment-import'
 
 export interface PendingFile {
   id: string
@@ -14,7 +15,7 @@ export interface PendingFile {
 
 interface TaskAttachmentsProps {
   items: FileAttachment[]
-  onChange: (items: FileAttachment[]) => void
+  onChange: (items: FileAttachment[]) => void | Promise<void>
   taskId: string | null
   readOnly?: boolean
   pendingFiles?: PendingFile[]
@@ -30,34 +31,55 @@ export function TaskAttachments({
   onPendingChange
 }: TaskAttachmentsProps) {
   const [isDragging, setIsDragging] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const pending = useRef(false), mounted = useRef(true)
+  const current = useRef({ taskId, items, pendingFiles, onChange, onPendingChange })
+  current.current = { taskId, items, pendingFiles, onChange, onPendingChange }
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+
+  const run = async (action: (isCurrent: () => boolean) => Promise<void>, allowReadOnly = false) => {
+    if (pending.current || readOnly && !allowReadOnly) return
+    const owner = taskId, scope = captureDesktopRead()
+    const isCurrent = () => mounted.current && current.current.taskId === owner && scope.isCurrent()
+    pending.current = true; setBusy(true); setError(null)
+    try { await action(isCurrent) }
+    catch { if (isCurrent()) setError(ATTACHMENT_IMPORT_FAILURE) }
+    finally { pending.current = false; if (mounted.current) setBusy(false) }
+  }
 
   const processFilePaths = useCallback(
-    async (filePaths: string[]) => {
-      if (!filePaths.length) return
+    async (filePaths: string[], isCurrent: () => boolean) => {
+      if (!filePaths.length || !isCurrent()) return
 
       if (taskId) {
-        const newAttachments: FileAttachment[] = []
-        for (const fp of filePaths) {
-          const attachment = await attachmentApi.save(taskId, fp)
-          newAttachments.push(attachment)
+        const { saved, incomplete } = await importTaskAttachments(taskId, filePaths, isCurrent)
+        if (!isCurrent()) return
+        if (saved.length) {
+          const next = mergeTaskAttachments(current.current.items, saved)
+          await current.current.onChange(next)
+          if (isCurrent()) current.current.items = next
         }
-        onChange([...items, ...newAttachments])
+        if (incomplete && isCurrent()) setError(ATTACHMENT_IMPORT_FAILURE)
       } else {
-        const pending: PendingFile[] = filePaths.map((fp) => ({
+        const existing = new Set(current.current.pendingFiles.map(file => file.sourcePath))
+        const pending: PendingFile[] = filePaths.filter(fp => !existing.has(fp)).map((fp) => ({
           id: crypto.randomUUID(),
-          filename: fp.split('/').pop() || fp.split('\\').pop() || fp,
+          filename: fp.split(/[\\/]/).pop() || fp,
           size: 0,
           sourcePath: fp
         }))
-        onPendingChange?.([...pendingFiles, ...pending])
+        current.current.onPendingChange?.([...current.current.pendingFiles, ...pending])
       }
     },
-    [taskId, items, onChange, pendingFiles, onPendingChange]
+    [taskId]
   )
 
   const handleAdd = async () => {
-    const filePaths = await attachmentApi.pick()
-    await processFilePaths(filePaths)
+    await run(async isCurrent => {
+      const filePaths = await attachmentApi.pick()
+      await processFilePaths(filePaths, isCurrent)
+    })
   }
 
   const handleDragOver = useCallback(
@@ -80,27 +102,28 @@ export function TaskAttachments({
     [readOnly]
   )
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      if (readOnly) return
+  const handleDrop = (e: React.DragEvent) => {
       e.preventDefault()
       e.stopPropagation()
       setIsDragging(false)
+      if (readOnly) return
 
-      const files = Array.from(e.dataTransfer.files)
-      const filePaths = files
-        .map((f) => desktopApi.webUtils.getPathForFile(f))
-        .filter((p) => !!p)
-      processFilePaths(filePaths)
-    },
-    [readOnly, processFilePaths]
-  )
+      if (getDesktopHost().kind === 'tauri') {
+        setError(NATIVE_FILE_DROP_MESSAGE)
+        return
+      }
+
+      void run(async isCurrent => {
+        const filePaths = Array.from(e.dataTransfer.files).map(f => desktopApi.webUtils.getPathForFile(f)).filter(Boolean)
+        await processFilePaths(filePaths, isCurrent)
+      })
+  }
 
   const handleRemove = async (attachment: FileAttachment) => {
-    if (taskId) {
-      await attachmentApi.remove(taskId, attachment.id)
-    }
-    onChange(items.filter((a) => a.id !== attachment.id))
+    await run(async isCurrent => {
+      if (taskId) await attachmentApi.remove(taskId, attachment.id)
+      if (isCurrent()) await current.current.onChange(current.current.items.filter(a => a.id !== attachment.id))
+    })
   }
 
   const handleRemovePending = (id: string) => {
@@ -108,11 +131,11 @@ export function TaskAttachments({
   }
 
   const handleOpen = (attachment: FileAttachment) => {
-    if (taskId) attachmentApi.open(taskId, attachment.id)
+    if (taskId) void run(async () => { await attachmentApi.open(taskId, attachment.id) }, true)
   }
 
   const handleDownload = (attachment: FileAttachment) => {
-    if (taskId) attachmentApi.download(taskId, attachment.id)
+    if (taskId) void run(async () => { await attachmentApi.download(taskId, attachment.id) }, true)
   }
 
   const totalCount = items.length + pendingFiles.length
@@ -124,6 +147,7 @@ export function TaskAttachments({
       }`}
       role="group"
       aria-label="Attachments"
+      aria-busy={busy}
       onDragOver={handleDragOver}
       onDragEnter={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -141,6 +165,7 @@ export function TaskAttachments({
           <span className="text-xs text-muted-foreground">{totalCount} file{totalCount !== 1 ? 's' : ''}</span>
         )}
       </div>
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       {(items.length > 0 || pendingFiles.length > 0) && (
         <div className="space-y-1" role="list">
@@ -150,6 +175,7 @@ export function TaskAttachments({
               <button
                 type="button"
                 onClick={() => handleOpen(a)}
+                disabled={busy}
                 className="text-sm flex-1 text-left truncate hover:underline cursor-pointer"
                 title="Click to preview"
               >
@@ -159,6 +185,7 @@ export function TaskAttachments({
               <button
                 type="button"
                 onClick={() => handleDownload(a)}
+                disabled={busy}
                 className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground cursor-pointer"
                 title="Download to Downloads folder"
               >
@@ -168,6 +195,7 @@ export function TaskAttachments({
                 <button
                   type="button"
                   onClick={() => handleRemove(a)}
+                  disabled={busy}
                   className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive cursor-pointer"
                   title="Remove attachment"
                 >
@@ -185,6 +213,7 @@ export function TaskAttachments({
                 <button
                   type="button"
                   onClick={() => handleRemovePending(f.id)}
+                  disabled={busy}
                   className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive cursor-pointer"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -199,6 +228,7 @@ export function TaskAttachments({
         <button
           type="button"
           onClick={handleAdd}
+          disabled={busy}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground cursor-pointer"
         >
           <Paperclip className="h-3.5 w-3.5" />

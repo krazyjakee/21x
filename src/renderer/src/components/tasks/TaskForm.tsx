@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getDesktopHost } from '@/lib/desktop-api'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -156,6 +157,7 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
           items={attachments}
           onChange={setAttachments}
           taskId={task?.id ?? null}
+          readOnly={getDesktopHost().kind === 'tauri' && !!task && task.role !== 'task'}
           pendingFiles={pendingFiles}
           onPendingChange={setPendingFiles}
         />

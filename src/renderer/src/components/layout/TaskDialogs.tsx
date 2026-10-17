@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { TaskWorkspace } from '@/components/tasks/TaskWorkspace'
 import { TaskForm, type TaskFormSubmitData } from '@/components/tasks/TaskForm'
 import { DeleteConfirmDialog } from '@/components/tasks/DeleteConfirmDialog'
@@ -7,7 +7,10 @@ import { useCurrentProject } from '@/hooks/use-project-tasks'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useAgentStore } from '@/stores/agent-store'
-import { attachmentApi, worktreeApi, settingsApi } from '@/lib/ipc-client'
+import { worktreeApi, settingsApi } from '@/lib/ipc-client'
+import { ATTACHMENT_IMPORT_FAILURE, importTaskAttachments, mergeTaskAttachments } from '@/lib/task-attachment-import'
+import { captureDesktopRead } from '@/lib/desktop-api'
+import { useProjectStore } from '@/stores/project-store'
 import type { Agent, FileAttachment, OutputField } from '@/types'
 
 interface TaskDialogsProps {
@@ -37,6 +40,9 @@ export function TaskDialogs({
   const selectTask = useTaskStore((s) => s.selectTask)
   const stopAndRemoveSessionForTask = useAgentStore((s) => s.stopAndRemoveSessionForTask)
   const currentProject = useCurrentProject()
+  const creating = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   const activeModal = useUIStore((s) => s.activeModal)
   const closeModal = useUIStore((s) => s.closeModal)
@@ -74,7 +80,7 @@ export function TaskDialogs({
   }, [dashboardPreviewTaskId, openDeleteModal])
   const handleUpdatePreviewAttachments = useCallback(
     async (attachments: FileAttachment[]) => {
-      if (dashboardPreviewTaskId) await updateTask(dashboardPreviewTaskId, { attachments })
+      if (dashboardPreviewTaskId && !await updateTask(dashboardPreviewTaskId, { attachments })) throw new Error(ATTACHMENT_IMPORT_FAILURE)
     },
     [dashboardPreviewTaskId, updateTask]
   )
@@ -91,28 +97,38 @@ export function TaskDialogs({
   const closeCreate = () => { closeModal(); clearCreateTaskPrefill() }
 
   const handleCreate = async (data: unknown) => {
-    const formData = data as TaskFormSubmitData
-    const pendingFiles = formData._pendingFiles
-    delete formData._pendingFiles
-
-    const newTask = await createTask(formData)
-    if (newTask && pendingFiles?.length) {
-      const attachments: FileAttachment[] = []
-      for (const pf of pendingFiles) {
-        const a = await attachmentApi.save(newTask.id, pf.sourcePath)
-        attachments.push(a)
+    if (creating.current) return
+    creating.current = true
+    const scope = captureDesktopRead()
+    let retained = true
+    const releaseModal = useUIStore.subscribe((state, previous) => { if (state.activeModal !== previous.activeModal) retained = false })
+    const releaseProject = useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) retained = false })
+    const isCurrent = () => mounted.current && retained && scope.isCurrent()
+    try {
+      const { _pendingFiles: pendingFiles, ...formData } = data as TaskFormSubmitData
+      const newTask = await createTask(formData)
+      if (!newTask) throw new Error('The task could not be created. Check the task list before trying again.')
+      // Creation was accepted. Attachment failure must not leave the form able
+      // to repeat that create; preserve known receipts and open the real task.
+      if (pendingFiles?.length) {
+        try {
+          const { saved, incomplete } = await importTaskAttachments(newTask.id, pendingFiles.map(file => file.sourcePath), isCurrent)
+          if (!isCurrent()) return
+          if (saved.length && !await updateTask(newTask.id, { attachments: mergeTaskAttachments(newTask.attachments, saved) })) {
+            throw new Error(ATTACHMENT_IMPORT_FAILURE)
+          }
+          if (incomplete && isCurrent()) showToast(ATTACHMENT_IMPORT_FAILURE, true)
+        } catch { if (isCurrent()) showToast(ATTACHMENT_IMPORT_FAILURE, true) }
       }
-      await updateTask(newTask.id, { attachments })
-    }
-    closeCreate()
-    if (newTask) {
+      if (!isCurrent()) return
+      closeCreate()
       if (sidebarView === 'canvas') {
         setCanvasPendingTaskId(newTask.id)
       } else {
         selectTask(newTask.id)
         setSidebarView('tasks')
       }
-    }
+    } finally { releaseModal(); releaseProject(); creating.current = false }
   }
 
   const handleConfirmDelete = async () => {

@@ -1,4 +1,4 @@
-import { desktopApi } from '@/lib/desktop-api'
+import { desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import React, { useEffect } from 'react'
 import { Pencil, Trash2, Calendar, User, Tag, Clock, Bot, Play, History, GitBranch, Route, Plus, X, BookOpen, AlarmClockOff, BellRing, Folder, Repeat, Star, Sparkles, Layers, Settings2, Terminal } from 'lucide-react'
 import { CollapsibleDescription } from '@/components/ui/CollapsibleDescription'
@@ -29,7 +29,7 @@ interface TaskDetailViewProps {
   agents: Agent[]
   onEdit: () => void
   onDelete: () => void
-  onUpdateAttachments: (attachments: FileAttachment[]) => void
+  onUpdateAttachments: (attachments: FileAttachment[]) => void | Promise<void>
   onUpdateOutputFields: (fields: OutputField[]) => void
   onCompleteTask: () => void
   onAssignAgent: (agentId: string | null) => void
@@ -471,6 +471,7 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
               items={task.attachments}
               onChange={onUpdateAttachments}
               taskId={task.id}
+              readOnly={getDesktopHost().kind === 'tauri' && task.role !== 'task'}
             />
           </div>
 

@@ -6,6 +6,8 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+#209 native attachment UI continuation: ordinary task/draft picker imports use E2’s published private one-shot selection contract with unchanged typed signatures. Native saves are sequential, explicit metadata append preserves accepted partial receipts, and failures/withdrawn intent/task replacement do not replay writes or target a replacement task. DOM drops stay non-authoritative and show chooser guidance. Nonordinary group/Captain file pickers are absent because no supported metadata mutation exists; saved reads remain, atomic chat images unchanged. Twenty-one actual typed-native attachment UI controls and two native browser-retirement controls pass, retaining four existing retirement controls. Full renderer1714/150files and staged341/19files baseline pass; final late-feedback delta73app/73staged, forced raw typecheck, lint0/165existingwarnings, both frontends and inventory900/736IPC/contracts pass. [Revision-bound evidence](evidence/issue-209-native-attachment-ui-local-20261017.json) records exact scope and failure repairs. Existing retirement source policy keeps saved browser/webpage records inert and new creation/control paths absent. No installed GUI/platform claim or #202 scope change.
+
 The #215/#214 attachment continuation adds a Linux GTK picker whose private
 selection receipts hold the original regular-file FD and physical document.
 Public path strings only select an already-owned receipt. Source claims it once

@@ -41,11 +41,11 @@
       "resolution": "literal"
     },
     {
-      "column": 22,
+      "column": 70,
       "expression": "desktopApi.webUtils.getPathForFile",
       "file": "src/renderer/src/components/agents/transcript/TranscriptComposer.tsx",
       "kind": "call",
-      "line": 180,
+      "line": 200,
       "path": [
         "webUtils",
         "getPathForFile"
@@ -105,7 +105,7 @@
       "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/AppLayout.tsx",
       "kind": "call",
-      "line": 179,
+      "line": 180,
       "path": [
         "app",
         "getVersion"
@@ -117,7 +117,7 @@
       "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/AppLayout.tsx",
       "kind": "call",
-      "line": 190,
+      "line": 191,
       "path": [
         "app",
         "getVersion"
@@ -513,11 +513,11 @@
       "resolution": "literal"
     },
     {
-      "column": 21,
+      "column": 69,
       "expression": "desktopApi.webUtils.getPathForFile",
       "file": "src/renderer/src/components/tasks/TaskAttachments.tsx",
       "kind": "call",
-      "line": 92,
+      "line": 117,
       "path": [
         "webUtils",
         "getPathForFile"
@@ -553,7 +553,7 @@
       "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 583,
+      "line": 600,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -565,7 +565,7 @@
       "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 584,
+      "line": 601,
       "path": [
         "shell",
         "openPath"
@@ -6004,6 +6004,7 @@
     "src/renderer/src/lib/serialize-transcript-debug.ts",
     "src/renderer/src/lib/shared-ipc-listeners.ts",
     "src/renderer/src/lib/snooze-options.ts",
+    "src/renderer/src/lib/task-attachment-import.ts",
     "src/renderer/src/lib/task-search.ts",
     "src/renderer/src/lib/tauri-desktop-transport.ts",
     "src/renderer/src/lib/terminal-session.ts",
@@ -14467,7 +14468,7 @@
   "summary": {
     "desktopAPIConsumers": 362,
     "directAPIConsumers": 1,
-    "files": 899,
+    "files": 900,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,
