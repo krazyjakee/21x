@@ -1688,6 +1688,25 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
     expect(adapter.sessions.size).toBe(1)
   })
 
+  it('joins every displaced child when three creates contend during acknowledged retirement', async () => {
+    const first = fakeSession('task-1', 4201), second = fakeSession('task-1', 4202), third = fakeSession('task-1', 4203)
+    const { adapterInstance, adapter } = harness([first, second, third])
+    let release!: () => void
+    adapter.initializeAppServer = vi.fn().mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+      .mockResolvedValue(undefined)
+    const firstCreate = adapterInstance.createSession(config as never).catch(() => null)
+    await new Promise(done => setImmediate(done))
+    const secondCreate = adapterInstance.createSession(config as never).catch(() => null)
+    const thirdCreate = adapterInstance.createSession(config as never)
+    await Promise.all([secondCreate, thirdCreate])
+    release(); await firstCreate
+    expect(first.process.kill).toHaveBeenCalledTimes(1)
+    expect(second.process.kill).toHaveBeenCalledTimes(1)
+    expect(third.process.kill).not.toHaveBeenCalled()
+    expect(adapter.sessions.get('thread-1')).toBe(third)
+    expect(adapter.sessions.size).toBe(1)
+  })
+
   it('fails the displaced create rather than handing back a dead thread id', async () => {
     // The loser must not report success: its child is already stopped, and
     // adopting the thread key would evict the live child that replaced it.

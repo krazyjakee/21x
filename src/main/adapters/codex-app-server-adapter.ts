@@ -435,6 +435,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   }
 
   async closeOwnedSessions(): Promise<void> {
+    if (this.orphanSweepTimer) { clearInterval(this.orphanSweepTimer); this.orphanSweepTimer = null }
     const sessions = new Set([...this.liveSessions, ...this.sessions.values()])
     const results = await Promise.allSettled([...sessions].map(async session => {
       await this.terminateSession(session, 'owner closing')

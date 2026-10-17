@@ -95,6 +95,12 @@ the receipt. Pi retains its existing POSIX process-group/Windows tree-stop polic
 ACP/Codex retain their existing direct-child signaling policy. This is not a proof
 that arbitrary detached descendants on every platform were reaped.
 
+The shared CLI finder also searches executable files on explicit absolute PATH
+entries when `which`/`where` is unavailable. This permits a staged Node plus CLI
+directory to work without shipping a system lookup utility. Linux controls verify
+resolution without executing the candidate, and reject directory/nonexecutable
+candidates in that fallback search.
+
 Codex serializes replacement claims and joins displaced-child teardown, including
 failed create/resume and model discovery. Production adapter shutdown also joins
 `closeOwnedSessions`, covering children from failed creates that returned no
