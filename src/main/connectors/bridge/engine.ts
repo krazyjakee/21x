@@ -57,6 +57,8 @@ const MAX_DEAD_LETTER_PAYLOAD_BYTES = 64 * 1024
 
 /** The slice of PieceHostClient the engine uses. */
 export interface BridgePieceRunner {
+  /** Actual PieceHostClient can commit KV with the synchronous importer. */
+  readonly atomicKvResults?: boolean
   call(req: PieceCallRequest): Promise<unknown>
 }
 
@@ -185,7 +187,6 @@ export class ConnectorBridgeEngine {
     const now = this.now()
     const resolved = await this.credentialsFor(instance.id)
     const creds = resolved.creds
-    const redact = (text: string): string => redactCredentials(text, creds)
     if (resolved.error) {
       // An OAuth token that was revoked or could not be renewed: a clear,
       // permanent error in the sync status; no retries and no task changes.
@@ -214,24 +215,46 @@ export class ConnectorBridgeEngine {
     await this.flushPending(instance, mapping, cfg, cursor, creds, result)
 
     let output: unknown
+    let accepted = false
+    const acceptOutput: PieceCallRequest['acceptOutput'] = this.runtime.client.atomicKvResults ? (value, commit) => {
+      // No SQLite transaction spans worker/network awaits. Once the result is
+      // received, imported tasks, retry state and the worker checkpoint commit
+      // in the same synchronous transaction. A crash exposes either side.
+      const local: PluginSyncResult = { imported: 0, updated: 0, errors: [...result.errors] }
+      const next = structuredClone(cursor)
+      ctx.db.db.transaction(() => {
+        this.applyImport(value, sourceId, mapping, instance, ctx, next, creds, local, now)
+        if (!local.errors.length) commit()
+      })()
+      Object.assign(result, local)
+      accepted = true
+    } : undefined
     try {
       const props = resolveProps(mapping.import.props, cfg.props, mapping)
-      output = await this.callImport(instance, mapping, props, cursor)
+      output = await this.callImport(instance, mapping, props, cursor, acceptOutput,
+        effect => ctx.db.db.transaction(effect)())
       delete cursor.rateLimitedUntil
     } catch (err) {
       this.failJob(instance.id, mapping, cursor, err, creds, result, state?.attemptCount ?? 0)
       return result
     }
+    if (!accepted) this.applyImport(output, sourceId, mapping, instance, ctx, cursor, creds, result, now)
+    return result
+  }
 
+  private applyImport(output: unknown, sourceId: string, mapping: ConnectorTaskMapping, instance: ConnectorInstanceRecord,
+    ctx: PluginContext, cursor: BridgeCursor, creds: ConnectorCredentials | null, result: PluginSyncResult, now: number): void {
+    const redact = (text: string): string => redactCredentials(text, creds)
+    delete cursor.rateLimitedUntil
     const size = jsonByteLength(output)
     if (size > BRIDGE_MAX_OUTPUT_BYTES) {
       this.failJob(instance.id, mapping, cursor, new Error(`${mapping.label} returned ${size} bytes; the limit is ${BRIDGE_MAX_OUTPUT_BYTES}`), creds, result, 0)
-      return result
+      return
     }
     const items = extractItems(output, mapping)
     if (!items) {
       this.failJob(instance.id, mapping, cursor, new Error(`${mapping.label} returned no item list${mapping.import.itemsPath ? ` at "${mapping.import.itemsPath}"` : ''}`), creds, result, 0)
-      return result
+      return
     }
     if (items.length > BRIDGE_MAX_ITEMS_PER_SYNC) {
       result.errors.push(`${mapping.label} returned ${items.length} items; only the first ${BRIDGE_MAX_ITEMS_PER_SYNC} were imported.`)
@@ -282,27 +305,33 @@ export class ConnectorBridgeEngine {
       lastError: result.errors.length ? redact(result.errors.join('\n')).slice(0, 4000) : null,
       lastSyncedAt: now
     })
-    return result
   }
 
   private async callImport(
     instance: ConnectorInstanceRecord,
     mapping: ConnectorTaskMapping,
     props: Record<string, unknown>,
-    cursor: BridgeCursor
+    cursor: BridgeCursor,
+    acceptOutput?: PieceCallRequest['acceptOutput'],
+    checkpoint?: (effect: () => void) => void
   ): Promise<unknown> {
     const base = { instanceId: instance.id, pieceName: instance.pieceName, pieceVersion: instance.pieceVersion, propsValue: props }
     const { target } = mapping.import
     if (target.type === 'action') {
-      return this.runtime.client.call({ ...base, target: { type: 'action', name: target.name } })
+      return this.runtime.client.call({ ...base, target: { type: 'action', name: target.name }, acceptOutput })
     }
     if (cursor.triggerEnabled !== target.name) {
-      await this.runtime.client.call({ ...base, target: { type: 'trigger', name: target.name, hook: 'onEnable' } })
+      const next = { ...cursor, triggerEnabled: target.name }
+      const enabled: PieceCallRequest['acceptOutput'] = this.runtime.client.atomicKvResults && checkpoint ? (_value, commit) => {
+        checkpoint(() => { commit(); this.store.updateSyncState(instance.id, { cursor: next }) })
+      } : undefined
+      await this.runtime.client.call({ ...base, target: { type: 'trigger', name: target.name, hook: 'onEnable' }, acceptOutput: enabled })
       cursor.triggerEnabled = target.name
-      // Persist now: re-running onEnable would reset the trigger's own cursor.
-      this.store.updateSyncState(instance.id, { cursor })
+      // The enable marker and its KV initialization share a transaction in the
+      // real runtime, so restart cannot accidentally reset an advanced cursor.
+      if (!enabled) this.store.updateSyncState(instance.id, { cursor })
     }
-    return this.runtime.client.call({ ...base, target: { type: 'trigger', name: target.name, hook: 'run' } })
+    return this.runtime.client.call({ ...base, target: { type: 'trigger', name: target.name, hook: 'run' }, acceptOutput })
   }
 
   /** Records a failed import job. Cached tasks are left exactly as they were. */

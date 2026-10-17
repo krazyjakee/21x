@@ -83,3 +83,45 @@ need their stated installed-target evidence. Hosted issue #92 remains deferred.
 
 Coordinator validation and source provenance are recorded in [the October 14
 form-control evidence](evidence/issue-closing-20261014-connector-plugin-forms.json).
+
+
+## Atomic worker checkpoints (October 17 continuation)
+
+`kvBackendFromConnectorStore` now creates a journal for each actual SQLite-backed
+worker call. Reads see the call's staged writes/deletes in the captured instance
+and scope. Other calls and durable readers keep seeing the committed state.
+Failure, cancellation, timeout and process exit discard the journal. A successful
+result commits all edits in one SQLite transaction; a failed later write rolls
+back earlier edits. Existing key/value/instance limits still apply, and the
+in-memory journal additionally bounds staged bytes to 10 MiB and distinct keys
+to 4,096. Values are JSON snapshots, so retained references cannot modify a
+pending checkpoint. Closed journals reject late access.
+
+The bridge accepts successful import output through a trusted synchronous
+callback retained only in the parent. It never sends that callback to a worker
+or exposes it as a desktop command. Task upserts, sync state and the call's KV
+checkpoint share one transaction. Validation/item errors keep the old worker
+checkpoint, allowing a later poll to replay idempotent task upserts. Trigger
+onEnable's KV initialization and its enable marker likewise share a transaction;
+there is no open SQLite transaction while awaiting worker or network work.
+External provider side effects remain outside SQLite rollback.
+
+The standalone transport requests SIGTERM once, escalates to SIGKILL after
+250 ms if the child remains open, and clears the escalation timer on actual
+close. It targets only its captured child process. The existing raw-work/close
+barriers remain authoritative; requesting either signal is not an exit receipt.
+
+Regressions compile the real host loop with an explicitly synthetic provider
+loader and use real Node IPC, actual authenticated ciphertext, per-instance KV,
+on-disk SQLite reopen, worker errors/crash/timeout/cancel, a SIGTERM-ignoring child,
+failed final commit and failed enable-marker writes. The separate existing staged
+proof still loads the actual pinned Trello/Todoist local hooks. Synthetic loader
+results do not prove live provider APIs, native browser callbacks or installed
+packaged connector behavior. Native OAuth warm/cold callbacks, refresh/revoke
+under the final current/legacy identity, installed target coverage and
+redistribution review remain open. Repository Actions are disabled; hosted
+Verify/platform dispatch is unavailable pending the user's decision.
+
+Local command results, source/resource digests, fixture/schema/Node versions,
+failure repairs and remaining gaps are retained in the
+[October 17 checkpoint evidence](evidence/issue-216-connector-checkpoint-local-20261017.json).

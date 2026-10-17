@@ -19,6 +19,10 @@ export const CONNECTOR_KV_MAX_INSTANCE_BYTES = 10 * 1024 * 1024
 /** Matches the Activepieces store key limit. */
 export const CONNECTOR_KV_MAX_KEY_CHARS = 128
 
+export type ConnectorKvMutation =
+  | { op: 'put'; scope: ConnectorKvScope; key: string; value: unknown }
+  | { op: 'delete'; scope: ConnectorKvScope; key: string }
+
 export type ConnectorKvLimitKind = 'key' | 'value' | 'instance'
 
 /** Thrown when a KV write would exceed a size cap. Nothing is written. */
@@ -298,6 +302,16 @@ export class ConnectorStore {
     assertScope(scope)
     return this.db.prepare('DELETE FROM connector_kv WHERE instance_id = ? AND scope = ? AND key = ?')
       .run(instanceId, scope, key).changes > 0
+  }
+
+  /** Commit one successful worker call, rolling back every edit if any cap/write fails. */
+  kvApply(instanceId: string, mutations: readonly ConnectorKvMutation[]): void {
+    this.db.transaction(() => {
+      for (const mutation of mutations) {
+        if (mutation.op === 'put') this.kvPut(instanceId, mutation.scope, mutation.key, mutation.value)
+        else this.kvDelete(instanceId, mutation.scope, mutation.key)
+      }
+    })()
   }
 
   kvList(instanceId: string, scope: ConnectorKvScope): string[] {

@@ -9,6 +9,8 @@ import {
   serializePieceError
 } from './errors'
 import type { HostInboundMessage, HostOutboundMessage, PieceStoreScope } from './protocol'
+import { createPieceKvCall, type PieceKvCall } from './kv-call'
+import type { ConnectorKvMutation } from '../connector-store'
 
 /**
  * Main-process side of the connector piece host (issue #12).
@@ -42,6 +44,8 @@ export interface PieceKvBackend {
   get(instanceId: string, scope: PieceStoreScope, key: string): unknown
   put(instanceId: string, scope: PieceStoreScope, key: string, value: unknown): unknown
   delete(instanceId: string, scope: PieceStoreScope, key: string): unknown
+  /** Production SQLite backends stage edits until a successful worker result. */
+  beginCall?(instanceId: string): PieceKvCall
 }
 
 /** Credential source; ConnectorCredentialStore satisfies it. */
@@ -53,11 +57,15 @@ export function kvBackendFromConnectorStore(store: {
   kvGet(instanceId: string, scope: PieceStoreScope, key: string): unknown
   kvPut(instanceId: string, scope: PieceStoreScope, key: string, value: unknown): void
   kvDelete(instanceId: string, scope: PieceStoreScope, key: string): unknown
+  kvApply?(instanceId: string, mutations: readonly ConnectorKvMutation[]): void
 }): PieceKvBackend {
   return {
     get: (instanceId, scope, key) => store.kvGet(instanceId, scope, key),
     put: (instanceId, scope, key, value) => store.kvPut(instanceId, scope, key, value),
-    delete: (instanceId, scope, key) => store.kvDelete(instanceId, scope, key)
+    delete: (instanceId, scope, key) => store.kvDelete(instanceId, scope, key),
+    ...(store.kvApply ? { beginCall: (instanceId: string) => createPieceKvCall(
+      (scope, key) => store.kvGet(instanceId, scope, key), mutations => store.kvApply!(instanceId, mutations)
+    ) } : {})
   }
 }
 
@@ -95,6 +103,9 @@ export interface PieceCallRequest {
   propsValue?: Record<string, unknown>
   timeoutMs?: number
   signal?: AbortSignal
+  /** Trusted synchronous importer only; commit may join its SQLite transaction.
+   * Never serialized to the worker. Omitting commit discards the call's KV edits. */
+  acceptOutput?: (output: unknown, commit: () => void) => void
 }
 
 export const DEFAULT_PIECE_CALL_TIMEOUT_MS = 60_000
@@ -111,6 +122,8 @@ interface ActiveCall {
   instanceId: string
   resolve: (value: unknown) => void
   reject: (err: unknown) => void
+  kv?: PieceKvCall
+  acceptOutput?: PieceCallRequest['acceptOutput']
 }
 
 interface HostHandle {
@@ -128,8 +141,11 @@ export class PieceHostClient {
   private pendingWork = new Set<Promise<unknown>>()
   /** Number of host processes started; exposed for diagnostics and tests. */
   starts = 0
+  readonly atomicKvResults: boolean
 
-  constructor(private readonly options: PieceHostClientOptions) {}
+  constructor(private readonly options: PieceHostClientOptions) {
+    this.atomicKvResults = typeof options.kv.beginCall === 'function'
+  }
 
   runAction(req: Omit<PieceCallRequest, 'target'> & { actionName: string }): Promise<unknown> {
     const { actionName, ...rest } = req
@@ -164,6 +180,7 @@ export class PieceHostClient {
     this.disposed = true
     this.killHost()
     if (this.active) {
+      this.active.kv?.discard()
       this.active.reject(new PieceCancelledError())
       this.active = null
     }
@@ -205,7 +222,8 @@ export class PieceHostClient {
     const resolved: { creds: ConnectorCredentials | null } = { creds: null }
     try {
       return await new Promise<unknown>((resolve, reject) => {
-        const call: ActiveCall = { id, instanceId: req.instanceId, resolve, reject }
+        const call: ActiveCall = { id, instanceId: req.instanceId, resolve, reject, acceptOutput: req.acceptOutput }
+        call.kv = this.options.kv.beginCall?.(req.instanceId)
         this.active = call
         timer = setTimeout(() => {
           this.failActive(call, new PieceTimeoutError(timeoutMs))
@@ -249,13 +267,14 @@ export class PieceHostClient {
     } finally {
       if (timer) clearTimeout(timer)
       if (onAbort) req.signal?.removeEventListener('abort', onAbort)
-      if (this.active?.id === id) this.active = null
+      if (this.active?.id === id) { this.active.kv?.discard(); this.active = null }
     }
   }
 
   private failActive(call: ActiveCall, err: unknown): void {
     if (this.active !== call) return
     this.active = null
+    call.kv?.discard()
     call.reject(err)
   }
 
@@ -321,8 +340,15 @@ export class PieceHostClient {
         const call = this.active
         if (!call || call.id !== message.id) return
         this.active = null
-        if (message.ok) call.resolve(message.output)
-        else call.reject(deserializePieceError(message.error))
+        try {
+          if (message.ok) {
+            if (call.acceptOutput) call.acceptOutput(message.output, () => call.kv?.commit())
+            else call.kv?.commit()
+            call.resolve(message.output)
+          }
+          else call.reject(deserializePieceError(message.error))
+        } catch (error) { call.reject(deserializePieceError(serializePieceError(error))) }
+        finally { call.kv?.discard() }
         return
       }
       case 'store': {
@@ -339,7 +365,7 @@ export class PieceHostClient {
           })
           return
         }
-        void this.ownWork(this.handleStore(call.instanceId, message)
+        void this.ownWork(this.handleStore(call, message)
           .then((value) => reply({ kind: 'store-result', storeId: message.storeId, ok: true, value }))
           .catch((err) => reply({ kind: 'store-result', storeId: message.storeId, ok: false, error: serializePieceError(err) })), call.instanceId)
         return
@@ -348,12 +374,19 @@ export class PieceHostClient {
   }
 
   private async handleStore(
-    instanceId: string,
+    call: ActiveCall,
     message: Extract<HostOutboundMessage, { kind: 'store' }>
   ): Promise<unknown> {
     const { op, scope, key } = message
     if (scope !== 'project' && scope !== 'flow') throw new Error(`Unknown store scope: ${String(scope)}`)
     if (typeof key !== 'string') throw new Error('Store keys must be strings')
+    const { instanceId } = call
+    if (call.kv) {
+      if (op === 'get') return call.kv.get(scope, key)
+      if (op === 'put') return call.kv.put(scope, key, message.value ?? null) ?? null
+      if (op === 'delete') return call.kv.delete(scope, key) ?? null
+      throw new Error(`Unknown store operation: ${String(op)}`)
+    }
     const { kv } = this.options
     if (op === 'get') {
       const value = await kv.get(instanceId, scope, key)

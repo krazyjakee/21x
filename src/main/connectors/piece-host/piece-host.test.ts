@@ -21,6 +21,7 @@ import {
 import { startPieceHost, type PieceModuleLoader } from './host-runtime'
 import type { HostInboundMessage, HostOutboundMessage } from './protocol'
 import type { HostLookup } from '../ssrf'
+import { createPieceKvCall } from './kv-call'
 
 /**
  * Drives the real host runtime and PieceHostClient through a fake transport
@@ -36,7 +37,7 @@ const VERSION = '1.0.0'
 
 /** Stands in for the provider API the stub piece polls. */
 const remote = { items: [] as { id: string; ts: number }[] }
-const hooks: { onCrash?: () => void } = {}
+const hooks: { onCrash?: () => void; afterCheckpoint?: () => void } = {}
 
 const stubPiece = createPiece({
   displayName: 'Stub',
@@ -157,6 +158,7 @@ const stubPiece = createPiece({
         if (last === null) throw new Error("lastPoll doesn't exist in the store.")
         const fresh = remote.items.filter((i) => i.ts > last)
         await store.put('lastPoll', fresh.reduce((acc, i) => Math.max(acc, i.ts), last))
+        hooks.afterCheckpoint?.()
         return fresh.map((i) => i.id)
       }
     }),
@@ -436,6 +438,7 @@ describe('PieceHostClient + host runtime', () => {
   beforeEach(() => {
     hooks.onCrash = undefined
     remote.items = []
+    delete hooks.afterCheckpoint
   })
 
   it('runs an action through IPC and returns its output, with auth resolved per call', async () => {
@@ -569,6 +572,7 @@ describe('polling trigger cursor in connector_kv', () => {
     remote.items = []
   })
   afterEach(async () => {
+    delete hooks.afterCheckpoint
     for (const owner of owners) {
       await owner.client?.close()
       if (owner.db.open) owner.db.close()
@@ -584,6 +588,37 @@ describe('polling trigger cursor in connector_kv', () => {
     applySchema(db)
     return { db, store: new ConnectorStore({ db }) }
   }
+
+  describe('atomic checkpoint failures', () => {
+    let store: ConnectorStore
+    beforeEach(() => { ({ store } = openStore()) })
+
+    it('does not advance the polling cursor when the piece throws after its store write', async () => {
+      const instance = store.createInstance({ pieceName: PIECE, pieceVersion: VERSION })
+      const { client } = makeClient({ kv: kvBackendFromConnectorStore(store) })
+      owners[owners.length - 1].client = client
+      const trigger = { ...base, instanceId: instance.id, triggerName: 'new_items' }
+      await client.runTrigger({ ...trigger, hook: 'onEnable' })
+      remote.items = [{ id: 'recover-me', ts: 200 }]
+      hooks.afterCheckpoint = () => { throw new Error('Failure after cursor write') }
+      await expect(client.runTrigger({ ...trigger, hook: 'run' })).rejects.toBeInstanceOf(PieceExecutionError)
+      expect(store.kvGet(instance.id, 'flow', 'lastPoll')).toBe(100)
+      delete hooks.afterCheckpoint
+      await expect(client.runTrigger({ ...trigger, hook: 'run' })).resolves.toEqual(['recover-me'])
+      expect(store.kvGet(instance.id, 'flow', 'lastPoll')).toBe(200)
+    })
+
+    it('rolls back earlier edits if a later edit fails during atomic SQLite commit', () => {
+      const instance = store.createInstance({ pieceName: PIECE, pieceVersion: VERSION })
+      store.kvPut(instance.id, 'flow', 'lastPoll', 100)
+      expect(() => store.kvApply(instance.id, [
+        { op: 'put', scope: 'flow', key: 'lastPoll', value: 200 },
+        { op: 'put', scope: 'project', key: 'oversized', value: 'x'.repeat(512 * 1024) }
+      ])).toThrow('limit')
+      expect(store.kvGet(instance.id, 'flow', 'lastPoll')).toBe(100)
+    })
+
+  })
 
   it('persists the cursor across a simulated app restart', async () => {
     const phase = async <T>(name: string, work: () => T | Promise<T>): Promise<T> => {
@@ -619,4 +654,35 @@ describe('polling trigger cursor in connector_kv', () => {
   // Two real on-disk schema initializations can exceed Vitest's five-second
   // fixture budget on Windows. Calls and close barriers retain two-second bounds.
   }, 15_000)
+})
+
+describe('bounded call KV journal', () => {
+  it('isolates scopes, snapshots values and prevents late writes after discard', () => {
+    const writes: unknown[] = []
+    const journal = createPieceKvCall(() => 'durable', mutations => writes.push(mutations))
+    const value = { cursor: 200 }
+    journal.put('flow', 'cursor', value); value.cursor = 999
+    const read = journal.get('flow', 'cursor') as { cursor: number }; read.cursor = 888
+    expect(journal.get('flow', 'cursor')).toEqual({ cursor: 200 })
+    expect(journal.get('project', 'cursor')).toBe('durable')
+    journal.delete('project', 'cursor')
+    expect(journal.get('project', 'cursor')).toBeNull()
+    expect(writes).toEqual([])
+    journal.commit()
+    expect(writes).toEqual([[
+      { op: 'put', scope: 'flow', key: 'cursor', value: { cursor: 200 } },
+      { op: 'delete', scope: 'project', key: 'cursor' }
+    ]])
+    expect(() => journal.put('flow', 'late', 'write')).toThrow('closed')
+  })
+
+  it('bounds delete-only and overwritten journals before durable writes', () => {
+    const journal = createPieceKvCall(() => null, () => { throw new Error('Must not commit') })
+    for (let n = 0; n < 4096; n++) journal.delete('flow', String(n))
+    expect(() => journal.delete('flow', '4096')).toThrow('limit')
+    expect(() => journal.delete('flow', '0')).not.toThrow()
+    journal.discard()
+    expect(() => journal.get('flow', '0')).toThrow('closed')
+    expect(() => journal.commit()).toThrow('closed')
+  })
 })

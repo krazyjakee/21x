@@ -26,22 +26,34 @@ export function createNodeProcessTransport(entryPath: string): PieceHostTranspor
   const handlers: ((code: number | null) => void)[] = []
   let closed = false
   let exitCode: number | null = null
-  child.once('error', () => { child.kill() })
+  let terminating = false
+  let escalation: ReturnType<typeof setTimeout> | undefined
+  const terminate = (): void => {
+    if (closed || terminating) return
+    terminating = true
+    // A piece may install a SIGTERM handler. A request to kill is not an exit
+    // receipt; bound the grace period and keep owning the child until close.
+    child.kill('SIGTERM')
+    escalation = setTimeout(() => { if (!closed) child.kill('SIGKILL') }, 250)
+    escalation.unref()
+  }
+  child.on('error', terminate)
   child.once('close', code => {
     closed = true
+    if (escalation) clearTimeout(escalation)
     exitCode = code
     for (const handler of handlers) handler(code)
     handlers.length = 0
   })
   return {
     postMessage: message => {
-      if (!closed && child.connected) child.send(message, error => { if (error) child.kill() })
+      if (!closed && child.connected) child.send(message, error => { if (error) terminate() })
     },
     onMessage: handler => { child.on('message', message => handler(message as HostOutboundMessage)) },
     onExit: handler => {
       if (closed) queueMicrotask(() => handler(exitCode))
       else handlers.push(handler)
     },
-    kill: () => { if (!closed) child.kill() }
+    kill: terminate
   }
 }
