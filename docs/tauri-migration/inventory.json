@@ -323,11 +323,11 @@
       "resolution": "literal"
     },
     {
-      "column": 37,
-      "expression": "desktopApi?.app?.getLoginItemSettings",
+      "column": 55,
+      "expression": "desktopApi.app.getLoginItemSettings",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 38,
+      "line": 54,
       "path": [
         "app",
         "getLoginItemSettings"
@@ -335,11 +335,11 @@
       "resolution": "literal"
     },
     {
-      "column": 33,
-      "expression": "desktopApi?.app?.getNotificationPermission",
+      "column": 60,
+      "expression": "desktopApi.app.getNotificationPermission",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 40,
+      "line": 55,
       "path": [
         "app",
         "getNotificationPermission"
@@ -347,11 +347,11 @@
       "resolution": "literal"
     },
     {
-      "column": 28,
-      "expression": "desktopApi?.app?.getMinimizeToTray",
+      "column": 52,
+      "expression": "desktopApi.app.getMinimizeToTray",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 42,
+      "line": 56,
       "path": [
         "app",
         "getMinimizeToTray"
@@ -359,11 +359,11 @@
       "resolution": "literal"
     },
     {
-      "column": 13,
-      "expression": "desktopApi?.app?.setLoginItemSettings",
+      "column": 34,
+      "expression": "desktopApi.app.setLoginItemSettings",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 62,
+      "line": 91,
       "path": [
         "app",
         "setLoginItemSettings"
@@ -372,10 +372,10 @@
     },
     {
       "column": 34,
-      "expression": "desktopApi?.app?.requestNotificationPermission",
+      "expression": "desktopApi.app.requestNotificationPermission",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 79,
+      "line": 102,
       "path": [
         "app",
         "requestNotificationPermission"
@@ -383,11 +383,11 @@
       "resolution": "literal"
     },
     {
-      "column": 13,
-      "expression": "desktopApi?.app?.setMinimizeToTray",
+      "column": 34,
+      "expression": "desktopApi.app.setMinimizeToTray",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 91,
+      "line": 107,
       "path": [
         "app",
         "setMinimizeToTray"
@@ -601,7 +601,7 @@
       "expression": "desktopApi?.shell?.openExternal",
       "file": "src/renderer/src/components/update/UpdateDialog.tsx",
       "kind": "call",
-      "line": 279,
+      "line": 288,
       "path": [
         "shell",
         "openExternal"
@@ -1714,7 +1714,7 @@
       "expression": "desktopApi?.updater?.check",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 364,
+      "line": 369,
       "path": [
         "updater",
         "check"
@@ -1726,7 +1726,7 @@
       "expression": "desktopApi?.updater?.download",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 367,
+      "line": 372,
       "path": [
         "updater",
         "download"
@@ -1738,7 +1738,7 @@
       "expression": "desktopApi?.updater?.install",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 370,
+      "line": 375,
       "path": [
         "updater",
         "install"
@@ -1746,13 +1746,25 @@
       "resolution": "literal"
     },
     {
-      "column": 12,
-      "expression": "desktopApi?.updater?.getVersion",
+      "column": 55,
+      "expression": "desktopApi.updater.getVersion",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 373,
+      "line": 378,
       "path": [
         "updater",
+        "getVersion"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 51,
+      "expression": "desktopApi.app.getVersion",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 379,
+      "path": [
+        "app",
         "getVersion"
       ],
       "resolution": "literal"
@@ -1762,7 +1774,7 @@
       "expression": "desktopApi?.updater?.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 376,
+      "line": 383,
       "path": [
         "updater",
         "onStatus"
@@ -1774,7 +1786,7 @@
       "expression": "desktopApi?.updater?.onMenuCheckForUpdates",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 379,
+      "line": 386,
       "path": [
         "updater",
         "onMenuCheckForUpdates"
@@ -1786,7 +1798,7 @@
       "expression": "desktopApi?.mobile?.getInfo",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 397,
+      "line": 404,
       "path": [
         "mobile",
         "getInfo"
@@ -1798,7 +1810,7 @@
       "expression": "desktopApi?.mobile?.setAccess",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 403,
+      "line": 410,
       "path": [
         "mobile",
         "setAccess"
@@ -1810,7 +1822,7 @@
       "expression": "desktopApi?.mobile?.startTunnel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 408,
+      "line": 415,
       "path": [
         "mobile",
         "startTunnel"
@@ -1822,7 +1834,7 @@
       "expression": "desktopApi?.mobile?.stopTunnel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 411,
+      "line": 418,
       "path": [
         "mobile",
         "stopTunnel"
@@ -1834,7 +1846,7 @@
       "expression": "desktopApi?.mobile?.setCustomUrl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 414,
+      "line": 421,
       "path": [
         "mobile",
         "setCustomUrl"
@@ -1846,7 +1858,7 @@
       "expression": "desktopApi?.mobile?.clearCustomUrl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 417,
+      "line": 424,
       "path": [
         "mobile",
         "clearCustomUrl"
@@ -1858,7 +1870,7 @@
       "expression": "desktopApi?.mobile?.getPendingPin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 420,
+      "line": 427,
       "path": [
         "mobile",
         "getPendingPin"
@@ -1870,7 +1882,7 @@
       "expression": "desktopApi?.mobile?.getSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 423,
+      "line": 430,
       "path": [
         "mobile",
         "getSessions"
@@ -1882,7 +1894,7 @@
       "expression": "desktopApi?.mobile?.revokeSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 426,
+      "line": 433,
       "path": [
         "mobile",
         "revokeSession"
@@ -1894,7 +1906,7 @@
       "expression": "desktopApi?.mobile?.revokeAllSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 429,
+      "line": 436,
       "path": [
         "mobile",
         "revokeAllSessions"
@@ -1906,7 +1918,7 @@
       "expression": "desktopApi?.mobile?.onPairingInitiated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 432,
+      "line": 439,
       "path": [
         "mobile",
         "onPairingInitiated"
@@ -1918,7 +1930,7 @@
       "expression": "desktopApi?.mobile?.onDeviceConnected",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 435,
+      "line": 442,
       "path": [
         "mobile",
         "onDeviceConnected"
@@ -1930,7 +1942,7 @@
       "expression": "desktopApi.github.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 441,
+      "line": 448,
       "path": [
         "github",
         "checkCli"
@@ -1942,7 +1954,7 @@
       "expression": "desktopApi.github.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 444,
+      "line": 451,
       "path": [
         "github",
         "fetchOrgs"
@@ -1954,7 +1966,7 @@
       "expression": "desktopApi.github.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 447,
+      "line": 454,
       "path": [
         "github",
         "fetchOrgRepos"
@@ -1966,7 +1978,7 @@
       "expression": "desktopApi.github.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 450,
+      "line": 457,
       "path": [
         "github",
         "fetchUserRepos"
@@ -1978,7 +1990,7 @@
       "expression": "desktopApi.gitlab.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 456,
+      "line": 463,
       "path": [
         "gitlab",
         "checkCli"
@@ -1990,7 +2002,7 @@
       "expression": "desktopApi.gitlab.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 459,
+      "line": 466,
       "path": [
         "gitlab",
         "fetchOrgs"
@@ -2002,7 +2014,7 @@
       "expression": "desktopApi.gitlab.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 462,
+      "line": 469,
       "path": [
         "gitlab",
         "fetchOrgRepos"
@@ -2014,7 +2026,7 @@
       "expression": "desktopApi.gitlab.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 465,
+      "line": 472,
       "path": [
         "gitlab",
         "fetchUserRepos"
@@ -2026,7 +2038,7 @@
       "expression": "desktopApi.forgejo.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 471,
+      "line": 478,
       "path": [
         "forgejo",
         "checkCli"
@@ -2038,7 +2050,7 @@
       "expression": "desktopApi.forgejo.setLogin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 474,
+      "line": 481,
       "path": [
         "forgejo",
         "setLogin"
@@ -2050,7 +2062,7 @@
       "expression": "desktopApi.forgejo.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 477,
+      "line": 484,
       "path": [
         "forgejo",
         "fetchOrgs"
@@ -2062,7 +2074,7 @@
       "expression": "desktopApi.forgejo.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 480,
+      "line": 487,
       "path": [
         "forgejo",
         "fetchOrgRepos"
@@ -2074,7 +2086,7 @@
       "expression": "desktopApi.forgejo.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 483,
+      "line": 490,
       "path": [
         "forgejo",
         "fetchUserRepos"
@@ -2086,7 +2098,7 @@
       "expression": "desktopApi.git.recordRepoProviders",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 489,
+      "line": 496,
       "path": [
         "git",
         "recordRepoProviders"
@@ -2098,7 +2110,7 @@
       "expression": "desktopApi.taskSources.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 496,
+      "line": 503,
       "path": [
         "taskSources",
         "getAll"
@@ -2110,7 +2122,7 @@
       "expression": "desktopApi.taskSources.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 500,
+      "line": 507,
       "path": [
         "taskSources",
         "create"
@@ -2122,7 +2134,7 @@
       "expression": "desktopApi.taskSources.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 504,
+      "line": 511,
       "path": [
         "taskSources",
         "update"
@@ -2134,7 +2146,7 @@
       "expression": "desktopApi.taskSources.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 508,
+      "line": 515,
       "path": [
         "taskSources",
         "delete"
@@ -2146,7 +2158,7 @@
       "expression": "desktopApi.taskSources.sync",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 512,
+      "line": 519,
       "path": [
         "taskSources",
         "sync"
@@ -2158,7 +2170,7 @@
       "expression": "desktopApi.taskSources.exportUpdate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 516,
+      "line": 523,
       "path": [
         "taskSources",
         "exportUpdate"
@@ -2170,7 +2182,7 @@
       "expression": "desktopApi.taskSources.getUsers",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 520,
+      "line": 527,
       "path": [
         "taskSources",
         "getUsers"
@@ -2182,7 +2194,7 @@
       "expression": "desktopApi.taskSources.reassign",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 524,
+      "line": 531,
       "path": [
         "taskSources",
         "reassign"
@@ -2194,7 +2206,7 @@
       "expression": "desktopApi.projects.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 529,
+      "line": 536,
       "path": [
         "projects",
         "getAll"
@@ -2206,7 +2218,7 @@
       "expression": "desktopApi.projects.get",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 530,
+      "line": 537,
       "path": [
         "projects",
         "get"
@@ -2218,7 +2230,7 @@
       "expression": "desktopApi.projects.getDefault",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 531,
+      "line": 538,
       "path": [
         "projects",
         "getDefault"
@@ -2230,7 +2242,7 @@
       "expression": "desktopApi.projects.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 532,
+      "line": 539,
       "path": [
         "projects",
         "create"
@@ -2242,7 +2254,7 @@
       "expression": "desktopApi.projects.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 533,
+      "line": 540,
       "path": [
         "projects",
         "update"
@@ -2254,7 +2266,7 @@
       "expression": "desktopApi.projects.archive",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 534,
+      "line": 541,
       "path": [
         "projects",
         "archive"
@@ -2266,7 +2278,7 @@
       "expression": "desktopApi.projects.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 535,
+      "line": 542,
       "path": [
         "projects",
         "reorder"
@@ -2278,7 +2290,7 @@
       "expression": "desktopApi.projects.getCaptainMemory",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 538,
+      "line": 545,
       "path": [
         "projects",
         "getCaptainMemory"
@@ -2290,7 +2302,7 @@
       "expression": "desktopApi.projects.moveTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 540,
+      "line": 547,
       "path": [
         "projects",
         "moveTask"
@@ -2302,7 +2314,7 @@
       "expression": "desktopApi.projects?.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 542,
+      "line": 549,
       "path": [
         "projects",
         "onChanged"
@@ -2314,7 +2326,7 @@
       "expression": "desktopApi.projects.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 542,
+      "line": 549,
       "path": [
         "projects",
         "onChanged"
@@ -2326,7 +2338,7 @@
       "expression": "desktopApi.projects.getStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 544,
+      "line": 551,
       "path": [
         "projects",
         "getStatus"
@@ -2338,7 +2350,7 @@
       "expression": "desktopApi.projects.getStatusHistory",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 547,
+      "line": 554,
       "path": [
         "projects",
         "getStatusHistory"
@@ -2350,7 +2362,7 @@
       "expression": "desktopApi.projects.onStatusChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 550,
+      "line": 557,
       "path": [
         "projects",
         "onStatusChanged"
@@ -2362,7 +2374,7 @@
       "expression": "desktopApi.projects.onStatusChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 550,
+      "line": 557,
       "path": [
         "projects",
         "onStatusChanged"
@@ -2374,7 +2386,7 @@
       "expression": "desktopApi.projects.repos.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 552,
+      "line": 559,
       "path": [
         "projects",
         "repos",
@@ -2387,7 +2399,7 @@
       "expression": "desktopApi.projects.repos.add",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 554,
+      "line": 561,
       "path": [
         "projects",
         "repos",
@@ -2400,7 +2412,7 @@
       "expression": "desktopApi.projects.repos.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 556,
+      "line": 563,
       "path": [
         "projects",
         "repos",
@@ -2413,7 +2425,7 @@
       "expression": "desktopApi.projects.repos.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 557,
+      "line": 564,
       "path": [
         "projects",
         "repos",
@@ -2426,7 +2438,7 @@
       "expression": "desktopApi.projects.repos.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 559,
+      "line": 566,
       "path": [
         "projects",
         "repos",
@@ -2439,7 +2451,7 @@
       "expression": "desktopApi.projects.resources.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 561,
+      "line": 568,
       "path": [
         "projects",
         "resources",
@@ -2452,7 +2464,7 @@
       "expression": "desktopApi.projects.resources.add",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 563,
+      "line": 570,
       "path": [
         "projects",
         "resources",
@@ -2465,7 +2477,7 @@
       "expression": "desktopApi.projects.resources.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 565,
+      "line": 572,
       "path": [
         "projects",
         "resources",
@@ -2478,7 +2490,7 @@
       "expression": "desktopApi.projects.resources.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 566,
+      "line": 573,
       "path": [
         "projects",
         "resources",
@@ -2491,7 +2503,7 @@
       "expression": "desktopApi.projects.resources.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 568,
+      "line": 575,
       "path": [
         "projects",
         "resources",
@@ -2504,7 +2516,7 @@
       "expression": "desktopApi.projectLimits.getState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 573,
+      "line": 580,
       "path": [
         "projectLimits",
         "getState"
@@ -2516,7 +2528,7 @@
       "expression": "desktopApi.projectLimits.isAllPaused",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 574,
+      "line": 581,
       "path": [
         "projectLimits",
         "isAllPaused"
@@ -2528,7 +2540,7 @@
       "expression": "desktopApi.projectLimits.pauseAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 575,
+      "line": 582,
       "path": [
         "projectLimits",
         "pauseAll"
@@ -2540,7 +2552,7 @@
       "expression": "desktopApi.concurrency.getState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 580,
+      "line": 587,
       "path": [
         "concurrency",
         "getState"
@@ -2552,7 +2564,7 @@
       "expression": "desktopApi.concurrency.setCaptainControl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 582,
+      "line": 589,
       "path": [
         "concurrency",
         "setCaptainControl"
@@ -2564,7 +2576,7 @@
       "expression": "desktopApi.concurrency.pin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 584,
+      "line": 591,
       "path": [
         "concurrency",
         "pin"
@@ -2576,7 +2588,7 @@
       "expression": "desktopApi.concurrency?.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 586,
+      "line": 593,
       "path": [
         "concurrency",
         "onChanged"
@@ -2588,7 +2600,7 @@
       "expression": "desktopApi.concurrency.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 586,
+      "line": 593,
       "path": [
         "concurrency",
         "onChanged"
@@ -2600,7 +2612,7 @@
       "expression": "desktopApi.overview?.getAllStatuses",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 593,
+      "line": 600,
       "path": [
         "overview",
         "getAllStatuses"
@@ -2612,7 +2624,7 @@
       "expression": "desktopApi.overview.getAllStatuses",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 593,
+      "line": 600,
       "path": [
         "overview",
         "getAllStatuses"
@@ -2624,7 +2636,7 @@
       "expression": "desktopApi.skills.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 598,
+      "line": 605,
       "path": [
         "skills",
         "getAll"
@@ -2636,7 +2648,7 @@
       "expression": "desktopApi.skills.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 602,
+      "line": 609,
       "path": [
         "skills",
         "create"
@@ -2648,7 +2660,7 @@
       "expression": "desktopApi.skills.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 606,
+      "line": 613,
       "path": [
         "skills",
         "update"
@@ -2660,7 +2672,7 @@
       "expression": "desktopApi.skills.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 610,
+      "line": 617,
       "path": [
         "skills",
         "delete"
@@ -2672,7 +2684,7 @@
       "expression": "desktopApi.skills.setProject",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 615,
+      "line": 622,
       "path": [
         "skills",
         "setProject"
@@ -2684,7 +2696,7 @@
       "expression": "desktopApi.skills.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 620,
+      "line": 627,
       "path": [
         "skills",
         "onChanged"
@@ -2696,7 +2708,7 @@
       "expression": "desktopApi.skills.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 620,
+      "line": 627,
       "path": [
         "skills",
         "onChanged"
@@ -2708,7 +2720,7 @@
       "expression": "desktopApi.secrets.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 626,
+      "line": 633,
       "path": [
         "secrets",
         "getAll"
@@ -2720,7 +2732,7 @@
       "expression": "desktopApi.secrets.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 630,
+      "line": 637,
       "path": [
         "secrets",
         "create"
@@ -2732,7 +2744,7 @@
       "expression": "desktopApi.secrets.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 634,
+      "line": 641,
       "path": [
         "secrets",
         "update"
@@ -2744,7 +2756,7 @@
       "expression": "desktopApi.secrets.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 638,
+      "line": 645,
       "path": [
         "secrets",
         "delete"
@@ -2756,7 +2768,7 @@
       "expression": "desktopApi.plugins.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 644,
+      "line": 651,
       "path": [
         "plugins",
         "list"
@@ -2768,7 +2780,7 @@
       "expression": "desktopApi.plugins.getDocumentation",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 648,
+      "line": 655,
       "path": [
         "plugins",
         "getDocumentation"
@@ -2780,7 +2792,7 @@
       "expression": "desktopApi.plugins.resolveOptions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 652,
+      "line": 659,
       "path": [
         "plugins",
         "resolveOptions"
@@ -2792,7 +2804,7 @@
       "expression": "desktopApi.plugins.executeAction",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 656,
+      "line": 663,
       "path": [
         "plugins",
         "executeAction"
@@ -2804,7 +2816,7 @@
       "expression": "desktopApi.connectors.bridgePieces",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 664,
+      "line": 671,
       "path": [
         "connectors",
         "bridgePieces"
@@ -2816,7 +2828,7 @@
       "expression": "desktopApi.connectors.ensureInstance",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 666,
+      "line": 673,
       "path": [
         "connectors",
         "ensureInstance"
@@ -2828,7 +2840,7 @@
       "expression": "desktopApi.connectors.credentialStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 667,
+      "line": 674,
       "path": [
         "connectors",
         "credentialStatus"
@@ -2840,7 +2852,7 @@
       "expression": "desktopApi.connectors.setCredentials",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 672,
+      "line": 679,
       "path": [
         "connectors",
         "setCredentials"
@@ -2852,7 +2864,7 @@
       "expression": "desktopApi.connectors.clearCredentials",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 673,
+      "line": 680,
       "path": [
         "connectors",
         "clearCredentials"
@@ -2864,7 +2876,7 @@
       "expression": "desktopApi.connectors.oauthConnect",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 678,
+      "line": 685,
       "path": [
         "connectors",
         "oauthConnect"
@@ -2876,7 +2888,7 @@
       "expression": "desktopApi.connectors.syncStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 679,
+      "line": 686,
       "path": [
         "connectors",
         "syncStatus"
@@ -2888,7 +2900,7 @@
       "expression": "desktopApi.claudePlugins.getMarketplaceSources",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 684,
+      "line": 691,
       "path": [
         "claudePlugins",
         "getMarketplaceSources"
@@ -2900,7 +2912,7 @@
       "expression": "desktopApi.claudePlugins.addMarketplaceSource",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 688,
+      "line": 695,
       "path": [
         "claudePlugins",
         "addMarketplaceSource"
@@ -2912,7 +2924,7 @@
       "expression": "desktopApi.claudePlugins.removeMarketplaceSource",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 692,
+      "line": 699,
       "path": [
         "claudePlugins",
         "removeMarketplaceSource"
@@ -2924,7 +2936,7 @@
       "expression": "desktopApi.claudePlugins.fetchCatalog",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 696,
+      "line": 703,
       "path": [
         "claudePlugins",
         "fetchCatalog"
@@ -2936,7 +2948,7 @@
       "expression": "desktopApi.claudePlugins.discoverPlugins",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 700,
+      "line": 707,
       "path": [
         "claudePlugins",
         "discoverPlugins"
@@ -2948,7 +2960,7 @@
       "expression": "desktopApi.claudePlugins.getInstalledPlugins",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 704,
+      "line": 711,
       "path": [
         "claudePlugins",
         "getInstalledPlugins"
@@ -2960,7 +2972,7 @@
       "expression": "desktopApi.claudePlugins.installPlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 708,
+      "line": 715,
       "path": [
         "claudePlugins",
         "installPlugin"
@@ -2972,7 +2984,7 @@
       "expression": "desktopApi.claudePlugins.uninstallPlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 712,
+      "line": 719,
       "path": [
         "claudePlugins",
         "uninstallPlugin"
@@ -2984,7 +2996,7 @@
       "expression": "desktopApi.claudePlugins.enablePlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 716,
+      "line": 723,
       "path": [
         "claudePlugins",
         "enablePlugin"
@@ -2996,7 +3008,7 @@
       "expression": "desktopApi.claudePlugins.disablePlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 720,
+      "line": 727,
       "path": [
         "claudePlugins",
         "disablePlugin"
@@ -3008,7 +3020,7 @@
       "expression": "desktopApi.claudePlugins.getPluginResources",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 724,
+      "line": 731,
       "path": [
         "claudePlugins",
         "getPluginResources"
@@ -3020,7 +3032,7 @@
       "expression": "desktopApi.worktree.setup",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 730,
+      "line": 737,
       "path": [
         "worktree",
         "setup"
@@ -3032,7 +3044,7 @@
       "expression": "desktopApi.worktree.cleanup",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 733,
+      "line": 740,
       "path": [
         "worktree",
         "cleanup"
@@ -3044,7 +3056,7 @@
       "expression": "desktopApi.worktree.changes",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 736,
+      "line": 743,
       "path": [
         "worktree",
         "changes"
@@ -3056,7 +3068,7 @@
       "expression": "desktopApi.worktree.files",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 739,
+      "line": 746,
       "path": [
         "worktree",
         "files"
@@ -3068,7 +3080,7 @@
       "expression": "desktopApi.worktree.readFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 742,
+      "line": 749,
       "path": [
         "worktree",
         "readFile"
@@ -3080,7 +3092,7 @@
       "expression": "readFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 746,
+      "line": 753,
       "path": [
         "worktree",
         "readFile"
@@ -3092,7 +3104,7 @@
       "expression": "desktopApi.worktree.runCleanupNow",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 749,
+      "line": 756,
       "path": [
         "worktree",
         "runCleanupNow"
@@ -3104,7 +3116,7 @@
       "expression": "desktopApi.onWorktreeProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 754,
+      "line": 761,
       "path": [
         "onWorktreeProgress"
       ],
@@ -3115,7 +3127,7 @@
       "expression": "desktopApi.onWorkspaceCleanupProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 758,
+      "line": 765,
       "path": [
         "onWorkspaceCleanupProgress"
       ],
@@ -3126,7 +3138,7 @@
       "expression": "desktopApi.voice.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 766,
+      "line": 773,
       "path": [
         "voice",
         "getSnapshot"
@@ -3138,7 +3150,7 @@
       "expression": "desktopApi.voice.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 767,
+      "line": 774,
       "path": [
         "voice",
         "setEnabled"
@@ -3150,7 +3162,7 @@
       "expression": "desktopApi.voice.getPermission",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 768,
+      "line": 775,
       "path": [
         "voice",
         "getPermission"
@@ -3162,7 +3174,7 @@
       "expression": "desktopApi.voice.requestPermission",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 770,
+      "line": 777,
       "path": [
         "voice",
         "requestPermission"
@@ -3174,7 +3186,7 @@
       "expression": "desktopApi.voice.startTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 772,
+      "line": 779,
       "path": [
         "voice",
         "startTurn"
@@ -3186,7 +3198,7 @@
       "expression": "desktopApi.voice.pushAudio",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 774,
+      "line": 781,
       "path": [
         "voice",
         "pushAudio"
@@ -3198,7 +3210,7 @@
       "expression": "desktopApi.voice.endTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 775,
+      "line": 782,
       "path": [
         "voice",
         "endTurn"
@@ -3210,7 +3222,7 @@
       "expression": "desktopApi.voice.cancelTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 777,
+      "line": 784,
       "path": [
         "voice",
         "cancelTurn"
@@ -3222,7 +3234,7 @@
       "expression": "desktopApi.voice.confirm",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 780,
+      "line": 787,
       "path": [
         "voice",
         "confirm"
@@ -3234,7 +3246,7 @@
       "expression": "desktopApi.voice.confirm",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 781,
+      "line": 788,
       "path": [
         "voice",
         "confirm"
@@ -3246,7 +3258,7 @@
       "expression": "desktopApi.voice.dismiss",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 784,
+      "line": 791,
       "path": [
         "voice",
         "dismiss"
@@ -3258,7 +3270,7 @@
       "expression": "desktopApi.voice.dismiss",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 785,
+      "line": 792,
       "path": [
         "voice",
         "dismiss"
@@ -3270,7 +3282,7 @@
       "expression": "desktopApi.voice.getRuntime",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 786,
+      "line": 793,
       "path": [
         "voice",
         "getRuntime"
@@ -3282,7 +3294,7 @@
       "expression": "desktopApi.voice.installRuntime",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 787,
+      "line": 794,
       "path": [
         "voice",
         "installRuntime"
@@ -3294,7 +3306,7 @@
       "expression": "desktopApi.voice.removeRuntime",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 788,
+      "line": 795,
       "path": [
         "voice",
         "removeRuntime"
@@ -3306,7 +3318,7 @@
       "expression": "desktopApi.voice.installModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 789,
+      "line": 796,
       "path": [
         "voice",
         "installModel"
@@ -3318,7 +3330,7 @@
       "expression": "desktopApi.voice.removeModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 790,
+      "line": 797,
       "path": [
         "voice",
         "removeModel"
@@ -3330,7 +3342,7 @@
       "expression": "desktopApi.voice.selectModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 791,
+      "line": 798,
       "path": [
         "voice",
         "selectModel"
@@ -3342,7 +3354,7 @@
       "expression": "desktopApi.voice.removeAllModels",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 792,
+      "line": 799,
       "path": [
         "voice",
         "removeAllModels"
@@ -3354,7 +3366,7 @@
       "expression": "desktopApi.voice.setCustomModelDir",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 793,
+      "line": 800,
       "path": [
         "voice",
         "setCustomModelDir"
@@ -3366,7 +3378,7 @@
       "expression": "desktopApi.voice.pickModelDir",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 794,
+      "line": 801,
       "path": [
         "voice",
         "pickModelDir"
@@ -3378,7 +3390,7 @@
       "expression": "desktopApi.voice.setEndpointSilence",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 796,
+      "line": 803,
       "path": [
         "voice",
         "setEndpointSilence"
@@ -3390,7 +3402,7 @@
       "expression": "desktopApi.voice.setShortcut",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 797,
+      "line": 804,
       "path": [
         "voice",
         "setShortcut"
@@ -3402,7 +3414,7 @@
       "expression": "desktopApi.voice.expectAnswer",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 799,
+      "line": 806,
       "path": [
         "voice",
         "expectAnswer"
@@ -3414,7 +3426,7 @@
       "expression": "desktopApi?.voice?.answerNotExpected",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 802,
+      "line": 809,
       "path": [
         "voice",
         "answerNotExpected"
@@ -3426,7 +3438,7 @@
       "expression": "desktopApi.voice.onState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 804,
+      "line": 811,
       "path": [
         "voice",
         "onState"
@@ -3438,7 +3450,7 @@
       "expression": "desktopApi.voice.onPartial",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 806,
+      "line": 813,
       "path": [
         "voice",
         "onPartial"
@@ -3450,7 +3462,7 @@
       "expression": "desktopApi.voice.onFinal",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 808,
+      "line": 815,
       "path": [
         "voice",
         "onFinal"
@@ -3462,7 +3474,7 @@
       "expression": "desktopApi.voice.onSegment",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 811,
+      "line": 818,
       "path": [
         "voice",
         "onSegment"
@@ -3474,7 +3486,7 @@
       "expression": "desktopApi.voice.onOutcome",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 813,
+      "line": 820,
       "path": [
         "voice",
         "onOutcome"
@@ -3486,7 +3498,7 @@
       "expression": "desktopApi.voice.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 815,
+      "line": 822,
       "path": [
         "voice",
         "onStatus"
@@ -3498,7 +3510,7 @@
       "expression": "desktopApi.voice.onError",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 817,
+      "line": 824,
       "path": [
         "voice",
         "onError"
@@ -3510,7 +3522,7 @@
       "expression": "desktopApi.voice.onNavigate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 819,
+      "line": 826,
       "path": [
         "voice",
         "onNavigate"
@@ -3522,7 +3534,7 @@
       "expression": "desktopApi.voice.onDictate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 821,
+      "line": 828,
       "path": [
         "voice",
         "onDictate"
@@ -3534,7 +3546,7 @@
       "expression": "desktopApi.voice.onRuntimeProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 823,
+      "line": 830,
       "path": [
         "voice",
         "onRuntimeProgress"
@@ -3546,7 +3558,7 @@
       "expression": "desktopApi.voice.onHotkey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 825,
+      "line": 832,
       "path": [
         "voice",
         "onHotkey"
@@ -3558,7 +3570,7 @@
       "expression": "desktopApi.voice.tts.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 830,
+      "line": 837,
       "path": [
         "voice",
         "tts",
@@ -3571,7 +3583,7 @@
       "expression": "desktopApi.voice.tts.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 832,
+      "line": 839,
       "path": [
         "voice",
         "tts",
@@ -3584,7 +3596,7 @@
       "expression": "desktopApi.voice.tts.setEngine",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 834,
+      "line": 841,
       "path": [
         "voice",
         "tts",
@@ -3597,7 +3609,7 @@
       "expression": "desktopApi.voice.tts.setVoice",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 835,
+      "line": 842,
       "path": [
         "voice",
         "tts",
@@ -3610,7 +3622,7 @@
       "expression": "desktopApi.voice.tts.setSpeed",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 836,
+      "line": 843,
       "path": [
         "voice",
         "tts",
@@ -3623,7 +3635,7 @@
       "expression": "desktopApi.voice.tts.setMaxChars",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 838,
+      "line": 845,
       "path": [
         "voice",
         "tts",
@@ -3636,7 +3648,7 @@
       "expression": "desktopApi.voice.tts.setSpeakActionResults",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 840,
+      "line": 847,
       "path": [
         "voice",
         "tts",
@@ -3649,7 +3661,7 @@
       "expression": "desktopApi.voice.tts.setOnlyVoiceTurns",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 842,
+      "line": 849,
       "path": [
         "voice",
         "tts",
@@ -3662,7 +3674,7 @@
       "expression": "desktopApi.voice.tts.installModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 843,
+      "line": 850,
       "path": [
         "voice",
         "tts",
@@ -3675,7 +3687,7 @@
       "expression": "desktopApi.voice.tts.selectModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 844,
+      "line": 851,
       "path": [
         "voice",
         "tts",
@@ -3688,7 +3700,7 @@
       "expression": "desktopApi.voice.tts.removeModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 845,
+      "line": 852,
       "path": [
         "voice",
         "tts",
@@ -3701,7 +3713,7 @@
       "expression": "desktopApi.voice.tts.preview",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 846,
+      "line": 853,
       "path": [
         "voice",
         "tts",
@@ -3714,7 +3726,7 @@
       "expression": "desktopApi.voice.tts.speak",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 848,
+      "line": 855,
       "path": [
         "voice",
         "tts",
@@ -3727,7 +3739,7 @@
       "expression": "desktopApi.voice.tts.stop",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 849,
+      "line": 856,
       "path": [
         "voice",
         "tts",
@@ -3740,7 +3752,7 @@
       "expression": "desktopApi.voice.tts.onSpeechStart",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 851,
+      "line": 858,
       "path": [
         "voice",
         "tts",
@@ -3753,7 +3765,7 @@
       "expression": "desktopApi.voice.tts.onSpeechChunk",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 853,
+      "line": 860,
       "path": [
         "voice",
         "tts",
@@ -3766,7 +3778,7 @@
       "expression": "desktopApi.voice.tts.onSpeechEnd",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 855,
+      "line": 862,
       "path": [
         "voice",
         "tts",
@@ -3779,7 +3791,7 @@
       "expression": "desktopApi.voice.tts.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 857,
+      "line": 864,
       "path": [
         "voice",
         "tts",
@@ -3792,7 +3804,7 @@
       "expression": "desktopApi.voice.tts.onModelProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 859,
+      "line": 866,
       "path": [
         "voice",
         "tts",
@@ -3805,7 +3817,7 @@
       "expression": "desktopApi.chat.start",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 881,
+      "line": 888,
       "path": [
         "chat",
         "start"
@@ -3817,7 +3829,7 @@
       "expression": "desktopApi.chat.cancel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 882,
+      "line": 889,
       "path": [
         "chat",
         "cancel"
@@ -3829,7 +3841,7 @@
       "expression": "desktopApi.chat.onEvent",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 883,
+      "line": 890,
       "path": [
         "chat",
         "onEvent"
@@ -3841,7 +3853,7 @@
       "expression": "desktopApi.sessionContext.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 891,
+      "line": 898,
       "path": [
         "sessionContext",
         "getSnapshot"
@@ -3853,7 +3865,7 @@
       "expression": "desktopApi.sessionContext.setPolicy",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 892,
+      "line": 899,
       "path": [
         "sessionContext",
         "setPolicy"
@@ -3865,7 +3877,7 @@
       "expression": "desktopApi.commander.listSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 896,
+      "line": 903,
       "path": [
         "commander",
         "listSessions"
@@ -3877,7 +3889,7 @@
       "expression": "desktopApi.commander.createSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 897,
+      "line": 904,
       "path": [
         "commander",
         "createSession"
@@ -3889,7 +3901,7 @@
       "expression": "desktopApi.commander.renameSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 898,
+      "line": 905,
       "path": [
         "commander",
         "renameSession"
@@ -3901,7 +3913,7 @@
       "expression": "desktopApi.commander.archiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 899,
+      "line": 906,
       "path": [
         "commander",
         "archiveSession"
@@ -3913,7 +3925,7 @@
       "expression": "desktopApi.commander.listMessages",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 901,
+      "line": 908,
       "path": [
         "commander",
         "listMessages"
@@ -3925,7 +3937,7 @@
       "expression": "desktopApi.commander.markRead",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 902,
+      "line": 909,
       "path": [
         "commander",
         "markRead"
@@ -3937,7 +3949,7 @@
       "expression": "desktopApi.commander.setActiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 905,
+      "line": 912,
       "path": [
         "commander",
         "setActiveSession"
@@ -3949,7 +3961,7 @@
       "expression": "desktopApi.commander.setActiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 905,
+      "line": 912,
       "path": [
         "commander",
         "setActiveSession"
@@ -3961,7 +3973,7 @@
       "expression": "desktopApi.commander.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 907,
+      "line": 914,
       "path": [
         "commander",
         "send"
@@ -3973,7 +3985,7 @@
       "expression": "desktopApi.commander.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 907,
+      "line": 914,
       "path": [
         "commander",
         "send"
@@ -3985,7 +3997,7 @@
       "expression": "desktopApi.commander.getImage",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 908,
+      "line": 915,
       "path": [
         "commander",
         "getImage"
@@ -3997,7 +4009,7 @@
       "expression": "desktopApi.commander.cancel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 909,
+      "line": 916,
       "path": [
         "commander",
         "cancel"
@@ -4009,7 +4021,7 @@
       "expression": "desktopApi.commander.undoAction",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 911,
+      "line": 918,
       "path": [
         "commander",
         "undoAction"
@@ -4021,7 +4033,7 @@
       "expression": "desktopApi.commander.getActivity",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 912,
+      "line": 919,
       "path": [
         "commander",
         "getActivity"
@@ -4033,7 +4045,7 @@
       "expression": "desktopApi.commander.onEvent",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 913,
+      "line": 920,
       "path": [
         "commander",
         "onEvent"
@@ -4045,7 +4057,7 @@
       "expression": "desktopApi.cliMcp.snapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 920,
+      "line": 927,
       "path": [
         "cliMcp",
         "snapshot"
@@ -4057,7 +4069,7 @@
       "expression": "desktopApi.cliMcp.upsert",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 921,
+      "line": 928,
       "path": [
         "cliMcp",
         "upsert"
@@ -4069,7 +4081,7 @@
       "expression": "desktopApi.cliMcp.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 922,
+      "line": 929,
       "path": [
         "cliMcp",
         "remove"
@@ -4081,7 +4093,7 @@
       "expression": "desktopApi.cliMcp.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 923,
+      "line": 930,
       "path": [
         "cliMcp",
         "setEnabled"
@@ -4093,7 +4105,7 @@
       "expression": "desktopApi.cliMcp.setToolEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 925,
+      "line": 932,
       "path": [
         "cliMcp",
         "setToolEnabled"
@@ -4105,7 +4117,7 @@
       "expression": "desktopApi.cliMcp.probe",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 926,
+      "line": 933,
       "path": [
         "cliMcp",
         "probe"
@@ -4117,7 +4129,7 @@
       "expression": "desktopApi.voiceElevenLabs.setKey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 934,
+      "line": 941,
       "path": [
         "voiceElevenLabs",
         "setKey"
@@ -4129,7 +4141,7 @@
       "expression": "desktopApi.voiceElevenLabs.clearKey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 935,
+      "line": 942,
       "path": [
         "voiceElevenLabs",
         "clearKey"
@@ -4141,7 +4153,7 @@
       "expression": "desktopApi.voiceElevenLabs.acceptDisclosure",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 936,
+      "line": 943,
       "path": [
         "voiceElevenLabs",
         "acceptDisclosure"
@@ -4153,7 +4165,7 @@
       "expression": "desktopApi.voiceElevenLabs.refresh",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 937,
+      "line": 944,
       "path": [
         "voiceElevenLabs",
         "refresh"
@@ -4165,7 +4177,7 @@
       "expression": "desktopApi.voiceElevenLabs.setModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 938,
+      "line": 945,
       "path": [
         "voiceElevenLabs",
         "setModel"
@@ -4177,7 +4189,7 @@
       "expression": "desktopApi.commanderVoice.setActive",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 942,
+      "line": 949,
       "path": [
         "commanderVoice",
         "setActive"
@@ -4189,7 +4201,7 @@
       "expression": "desktopApi.commanderVoice.bargeIn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 943,
+      "line": 950,
       "path": [
         "commanderVoice",
         "bargeIn"
@@ -4201,7 +4213,7 @@
       "expression": "desktopApi.commanderVoice.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 945,
+      "line": 952,
       "path": [
         "commanderVoice",
         "send"
@@ -14450,7 +14462,7 @@
     "src/tauri-production"
   ],
   "summary": {
-    "desktopAPIConsumers": 361,
+    "desktopAPIConsumers": 362,
     "directAPIConsumers": 1,
     "files": 896,
     "operations": 736,

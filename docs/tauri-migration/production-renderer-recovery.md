@@ -86,3 +86,5 @@ Source sequence replay, foreign session heartbeats and malformed disconnect
 metadata are refused; same-epoch reconnect, source-epoch replacement and document
 disposal retire queued callbacks. These are controlled renderer tests rather than
 installed OS notification, tray, updater or process-recovery acceptance.
+
+[Preferences/activity evidence](evidence/issue-209-native-preferences-activity-local-20261017.json) binds commands and results to the published implementation revision.

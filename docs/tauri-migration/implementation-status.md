@@ -6,6 +6,9 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+#209 native general-preferences and activity continuation: supported notification/tray reads settle independently of unavailable login-at-startup; native reconnect re-reads each generation and ignores retired publications, and writes use accepted receipts without replay. The always-mounted update dialog and General settings read the existing native app version and show updater actions unavailable; no updater/feed policy was added. Eight actual typed-native React controls and eight agent-store heartbeat/disconnect/reconnect/disposal controls pass without preload, retaining the early return before session/turn/transcript transitions. Full renderer1681/staged258 baseline and final affected161app/126staged pass, raw forced typecheck and lint0errors/165existingwarnings pass, both full frontends build. [Domain and limits](production-renderer-recovery.md); [Revision-bound evidence](evidence/issue-209-native-preferences-activity-local-20261017.json) records the final source and limits. Notification-off remains local UI state; Captain prewarm remains native-disabled. Installed OS/UI acceptance and other209 criteria remain open; hosted Verify unavailable: repository Actions disabled, awaiting user decision.
+
+
 The #209 renderer continuation makes task/project/settings recovery read-only
 and preserves events crossing pending snapshots. Reads coalesce and retry a
 bounded number of times; replacement bootstrap retires old reads immediately,
