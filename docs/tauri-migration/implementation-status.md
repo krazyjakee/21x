@@ -36,14 +36,24 @@ user's decision. #211 and G3 remain open. See
 The #215 OAuth continuation adds finite private register/open/retire leases,
 a one-shot native state/URI authority, sanitized denial outcomes and a Source
 lease owner. Private delivery acknowledges atomic Source claim before async
-exchange; retirement joins raw native opening/delivery work. The preview refuses
-custom-scheme registration and retains unavailable production `oauthBrowser`.
-No callback code/state becomes a renderer event. See the
-[agreed callback contract and identity decision](native-oauth-authority.md).
-This is infrastructure evidence; OS registration, warm single-instance/cold
-routing and integrated provider credential consumers remain open. The user must
-approve final app identity and handler ownership; preview identifiers are unchanged.
-Hosted Verify remains unavailable while repository Actions is disabled.
+exchange; retirement joins raw native opening/delivery work. Linux now installs
+a native-only single-instance session-bus handler before Source/profile startup,
+using the configured identifier to derive a valid private bus name. Exact
+callback argv, current/legacy scheme parsing and one-shot claims are exercised
+through the actual plugin under an isolated session bus and Tauri MockRuntime.
+Cold callbacks receive a fixed fresh-Connect diagnostic; lost PKCE/intent is
+never reconstructed. Native retirement registers its notification waiter before
+checking raw work, preventing a lost completion wakeup.
+
+The preview refuses custom-scheme registration and retains unavailable global
+production `oauthBrowser`; no callback code/state becomes a renderer event.
+The plugin's absent-session-bus startup fallback does not attest callback
+availability. See the [agreed callback contract and identity decision](native-oauth-authority.md)
+and [Linux ingress evidence](evidence/batch35-215-linux-callback-ingress.json).
+Installed OS registration/routing, real provider credential consumers and
+supported-platform acceptance remain open. The user must approve final app
+identity and handler ownership; preview identifiers are unchanged. Hosted Verify
+remains unavailable while repository Actions is disabled.
 
 The #208 restart continuation reconciles old durable effect authority in one
 SQLite transaction before production constructs APIs, adapters or schedulers.

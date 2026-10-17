@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "issue": 215,
+  "createdAt": "2026-10-17T19:17:09.233029+00:00",
+  "implementationRevision": "a3a84fedcc27a5f0ca6482c41e6de026f7f01489",
+  "baseRevision": "6991ea0359b7d27704a26fe98145dd787f4ce687",
+  "hostIntegrationRevision": "75cce3adc2e45e3a8f13d410f048cc757cc36ab3",
+  "validatedRevision": "7b041bd6ac5c1da4106ea5a14ac247bd318d9261",
+  "scope": "Integrated Linux private single-instance callback transport and race-safe native lease retirement; no installed OAuth parity.",
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "hostNode": "v22.22.0",
+    "standaloneNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "tauri": "2.12.3",
+    "singleInstancePlugin": "2.5.4",
+    "gtk": "3.24.41",
+    "gio": "2.80.0",
+    "dbusDaemon": "1.14.10",
+    "webkitInstalled": "2.52.6",
+    "webviewExecuted": "none; Tauri MockRuntime only"
+  },
+  "fixtures": {
+    "profile": "synthetic leases; no live profile, installed handlers or accounts",
+    "transport": "actual org.SingleInstance.DBus.ExecuteCallback inside timeout-bounded dbus-run-session subprocess; private synthetic identifier derived from configured ID policy",
+    "runtime": "official pinned single-instance plugin plus Tauri MockRuntime; not installed Wry/production Source/provider credential end-to-end",
+    "cold": "bounded native callback argv parser tests and compiled fresh-Connect host hook; no installed cold launch, persisted PKCE/intent or cold redemption",
+    "secrets": "synthetic nonce/code/error description only; none recorded in renderer events"
+  },
+  "expectedActual": [
+    {
+      "expected": "Accept only exact configured native transport + matching current/legacy one-shot lease authority.",
+      "actual": "Configured identity hashes into valid, unambiguous private bus name. Exact two-argument callback parser rejects oversized/multiple/extra-ID input. Real D-Bus test accepts primary code and legacy sanitized denial, rejects foreign state/replay and pending valid callback after stop."
+    },
+    {
+      "expected": "Do not publish raw OAuth callback URLs, codes, state or arbitrary provider errors.",
+      "actual": "Optional deep-link plugin feature disabled; native closure validates before private forwarding. Bus regression observes zero deep-link://new-url events; denial outcome contains only status:denied."
+    },
+    {
+      "expected": "Raw work completion cannot strand native lease retirement.",
+      "actual": "Review found Notify::notify_waiters race when waiter registered after active-count inspection. Fixed enable-before-check pattern; 128 concurrent raw completion/retire iterations pass. No deterministic pre-fix failing reproduction is claimed."
+    },
+    {
+      "expected": "Do not select final identity or steal Electron current/legacy handlers.",
+      "actual": "No config/scheme/OS registration edit. Custom registration still refused by production owner; global oauthBrowser unavailable. Plugin only on Linux; missing session bus permits ordinary startup and is not callback-transport attestation."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "commands": [
+      {
+        "command": "rtk proxy cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service -- --test-threads=1",
+        "exitCode": 0,
+        "result": "113 passed; four existing opt-in staged tests ignored",
+        "log": {
+          "sha256": "47d8708e8239cda19c23851c03fad57044df12767bda82e232e5096037c2c115",
+          "bytes": 13588
+        }
+      },
+      {
+        "command": "rtk proxy cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service --bin twentyonex-tauri-feasibility -- --test-threads=1",
+        "exitCode": 0,
+        "result": "81 passed; zero skips; actual isolated D-Bus + MockRuntime",
+        "log": {
+          "sha256": "b9d7e47f7d209c0a74c9b28e332690afefb3a1b0a32ab486f314cc9ab24415c8",
+          "bytes": 11676
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "result": "pass; zero diagnostics",
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run --project main src/service/oauth-flow-owner.test.ts src/service/production-service.test.ts src/shared/production-bootstrap.test.ts src/main/oauth/oauth-manager-host.test.ts",
+        "exitCode": 0,
+        "result": "71 passed; zero skips",
+        "log": {
+          "sha256": "a393a3f54779be561ce20b344ff702c631d9723edaa43b697423d871ce400078",
+          "bytes": 125044
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/service/oauth-flow-owner.test.ts src/service/production-service.test.ts src/shared/production-bootstrap.test.ts src/main/oauth/oauth-manager-host.test.ts",
+        "exitCode": 0,
+        "result": "71 passed; zero skips; bundled Node22.23.2",
+        "log": {
+          "sha256": "1a75ca116fec445291717b12755cb4e8fde7b658793458feec515bfba8a96258",
+          "bytes": 125283
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "result": "zero errors;165 existing warnings",
+        "log": {
+          "sha256": "6e921d53e2547340f3e719b13cd99b58153de027f0b39ed53034088780cddf82",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy env CARGO_BUILD_JOBS=2 cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+        "exitCode": 0,
+        "result": "pass; only two existing native_notifications warnings",
+        "log": {
+          "sha256": "6c5d832eff9059b492c3db1699329bdf7df1ea9bcc8f037daee87e6630d3fbf8",
+          "bytes": 1155
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "result": "fresh; no command/event surface change",
+        "log": {
+          "sha256": "60c5c52355623130f3188875951508792e0018b28da51476a2ce46367c415b93",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "result": "fresh",
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      }
+    ]
+  },
+  "dependencyChange": {
+    "added": "tauri-plugin-single-instance =2.5.4; Linux-only optional production feature; default features disabled",
+    "lockChange": "one package and root dependency edge only; no existing package version/checksum change",
+    "testFeature": "Tauri test feature Linux dev-dependency only",
+    "remainingWarnings": "Two pre-existing native_notifications warnings; transitional helper dead-code warnings resolved by integrated host hook."
+  },
+  "permissionsReview": {
+    "capabilities": "No capability/permission/public manifest addition; existing local main-only native grants retained",
+    "plugin": "No deep-link feature, JS link interception or renderer plugin IPC added",
+    "bounds": "URL/argument limits apply after D-Bus decode; they do not cap all transport allocation",
+    "nonLinux": "No activation of this transport on macOS/Windows; macOS temporary-socket transport not accepted as authority"
+  },
+  "remainingDefects": [
+    "Final app ID and installed current/legacy handler ownership require user decision.",
+    "No installed warm/cold OS-handler test or integrated actual provider/credential path.",
+    "Fresh process discards stale callback; durable encrypted continuation is not implemented; fixed native diagnostic is not graphical user guidance.",
+    "Source/Linear/MCP and connector consumer migrations retain their separate owner/prewrite requirements; global browser unavailable.",
+    "Native picker/import (attachments:pick and attachments:save), window-state/chrome/shortcuts/login-item semantics and other platform services still require implementation/acceptance; not claimed hardware-only blockers.",
+    "Installed hostile-WebView/permission interactions and supported-platform acceptance remain open under #215/#208/#202."
+  ],
+  "ci": {
+    "status": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "runs": [],
+    "settingsMutations": false,
+    "dispatches": false
+  },
+  "constraints": {
+    "liveRelease": false,
+    "liveProfileOrCutover": false,
+    "electronRetired": false,
+    "hostedVoice": "deferred by user decision"
+  },
+  "issueState": "OPEN; no whole acceptance checkbox ticked",
+  "artifacts": {
+    "engine-final": {
+      "filename": "twentyonex_engine-ec65b8e065befcd3",
+      "sha256": "b83f81d165b1f0b23392772ec01884041dcfe4488ea228fb81fd5a4f13155270",
+      "bytes": 53232888
+    },
+    "native-host-final": {
+      "filename": "twentyonex_tauri_feasibility-ea7513794e27a40b",
+      "sha256": "8f93be7ab412a7598ed2913fe3d75265de3137c9a9e2d4955dc0f1196daac4af",
+      "bytes": 361107328
+    }
+  },
+  "decisionsRequired": {
+    "identity": "Retain com.krazyjakee.21x and primary twentyonex/legacy nuanu with separately approved installer/handler transfer, or approve a distinct final Tauri ID and scheme/provider migration.",
+    "recommendation": "Retain existing identity/schemes to preserve provider redirects; no registration/cutover authorized by this recommendation.",
+    "actions": "User decision on disabled Actions; no settings or dispatch."
+  },
+  "inputHashes": {
+    "src-tauri/Cargo.toml": {
+      "sha256": "4adbb1e9a5cb7a95639bf90d3cde8aa8acb9b299848c1e0f64a26ac8fbb54714",
+      "bytes": 1608
+    },
+    "src-tauri/Cargo.lock": {
+      "sha256": "52a0e6be9b0efc81512c084a02153ea2eadf80db674d60d0a9c2eafc9988d73d",
+      "bytes": 135604
+    },
+    "src-tauri/engine/src/production_oauth.rs": {
+      "sha256": "d8d1d069b43991db83d62ecc206d45ff8d6d1dbb64fe31a7671fa48799cdb740",
+      "bytes": 23490
+    },
+    "src-tauri/src/native_oauth.rs": {
+      "sha256": "3fd3933ff01bb49b20890660edff71eea84a855d32ddd4c5e499dabf017731b9",
+      "bytes": 13660
+    },
+    "src-tauri/src/production_host.rs": {
+      "sha256": "2c03b8e20ec290eca11d8d2e6e438512495fe23d7c45182092b3aa2c79887ac9",
+      "bytes": 51509
+    },
+    "src/service/oauth-flow-owner.ts": {
+      "sha256": "e3332ed45de62a70fc23eecd55d0f7eadc56c1752f6f1bfcd52d235a58faace8",
+      "bytes": 7475
+    },
+    "src/service/production-service.ts": {
+      "sha256": "4716fd79fb5314676d38935324eae984b0e42da9d79a75ce9bcfced894430d30",
+      "bytes": 41095
+    },
+    "src/service/production-owner.ts": {
+      "sha256": "aa6cbf9cc4f958b54f4dda66ceb24417cdf24ecfa8821b0b929636ae371a121e",
+      "bytes": 94707
+    },
+    "src/shared/oauth-native-callbacks.ts": {
+      "sha256": "eed1279f6eadece8651f23dfe6b9845fda3b9af187dbb946129c965e406400a2",
+      "bytes": 4580
+    },
+    "src/shared/production-bootstrap.ts": {
+      "sha256": "5f3f673d2211871d77ace74d43b02d20c4049c960386f6baed0a41abc471a0be",
+      "bytes": 7529
+    },
+    "docs/tauri-migration/native-oauth-authority.md": {
+      "sha256": "61312c3f7b96bc5342ebe54c5b419c45fa03604bd39dc7f1a488404b8468d5b4",
+      "bytes": 8805
+    }
+  }
+}

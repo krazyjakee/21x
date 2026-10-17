@@ -81,11 +81,11 @@ automatically steal either installed Electron scheme.
 
 ## Linux callback ingress
 
-The Linux-only plugin factory is implemented. Production-host installation is
-a serialized #208/#215 handoff, pending in this helper checkpoint. When
-installed, the pinned single-instance plugin precedes other plugins and
-Source/profile startup. Its transport uses the session bus only. The configured
-build identifier is hashed into an unambiguous valid
+The production Linux host installs the pinned single-instance plugin before
+other plugins and Source/profile startup. The helper is published at
+`a3a84fed`; the serialized host hook is published with #208 at `75cce3ad`.
+Its transport uses the session bus only. The configured build identifier is
+hashed into an unambiguous valid
 D-Bus name; numeric segments in the existing preview identifiers cannot be used
 as literal D-Bus name segments. No final identifier is chosen by this mapping.
 The plugin's optional deep-link feature is disabled, and no plugin IPC grant
