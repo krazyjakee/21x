@@ -50,6 +50,11 @@ codec presence, declared caller and required domain authority, successful
 synthetic private-peer calls, observed events and outstanding platform proof as
 separate fields. It does not invoke commands while inspecting registrations.
 An attached handler is not an authorization receipt or a provider outcome.
+Command registration is inspected from the actual schemas. Event producer
+registration is explicitly uninspected (`null`): `hasOwnerEvent()` only checks
+the codec table. Observed private-peer deliveries are recorded independently,
+including the real overdue timer; an unsupported voice codec cannot count as
+an attached event owner.
 
 The reconciliation launch deliberately leaves voice unsupported, connectors and
 configured MCP disabled, and native UI/mobile unconfigured. Rows for absent

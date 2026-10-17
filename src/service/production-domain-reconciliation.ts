@@ -53,7 +53,10 @@ export function reconcileProductionDomains(bindings: ProductionDesktopBindings, 
     if (commands instanceof Map) for (const name of commands.keys()) if (typeof name === 'string') domainRegistrations.set(name, [...(domainRegistrations.get(name) ?? []), field])
   }
   const rows = Object.values(DESKTOP_OPERATION_MANIFEST).filter(row => row.disposition === 'retained').map(row => {
-    const sourceRegistered = row.kind === 'command' ? typeof schemas[row.name]?.handle === 'function' : bindings.hasOwnerEvent(row.name)
+    // hasOwnerEvent() checks the codec table, not an emitter subscription.
+    // This fixture inspects command handlers; event producer registration is
+    // deliberately unknown, independently of any observed delivery below.
+    const sourceRegistered = row.kind === 'command' ? typeof schemas[row.name]?.handle === 'function' : null
     const sourceCodec = row.kind === 'command' ? Object.hasOwn(PRODUCTION_COMMAND_CODECS, row.name) : Object.hasOwn(PRODUCTION_EVENT_CODECS, row.name)
     const nativeClientCodec = row.kind === 'command' && Object.hasOwn(nativeCodecs, row.name)
     const observed = observations.commands.get(row.name)
@@ -65,7 +68,7 @@ export function reconcileProductionDomains(bindings: ProductionDesktopBindings, 
         registeredSourceDomainOwners: row.kind === 'command' ? domainRegistrations.get(row.name) ?? [] : [],
         sourceOwnerCandidate: sourceOwner(row.name),
         native: nativeClientCodec ? 'Native codec exists; OS/document/private dispatch runtime not inspected by this Source fixture' : 'Not assessed by this Source fixture',
-        status: sourceRegistered ? 'Source handler/event owner registered; capability and domain checks still apply' : sourceCodec ? 'Source codec present; optional owner not attached in this launch' : nativeClientCodec ? 'Native-only client codec; no ordinary Source registration' : 'No Source codec or registration in this launch'
+        status: row.kind === 'event' ? 'Event producer registration not inspected; codec presence and observed delivery are separate columns' : sourceRegistered ? 'Source command handler registered; capability and domain checks still apply' : sourceCodec ? 'Source codec present; optional owner not attached in this launch' : nativeClientCodec ? 'Native-only client codec; no ordinary Source registration' : 'No Source codec or registration in this launch'
       },
       codec: { sourceRequestResultOrEvent: sourceCodec, nativeClientRequestResult: nativeClientCodec, nativeValidator: 'See production_contracts.rs and native domain modules; presence is not platform proof' },
       authorization: {
@@ -86,6 +89,9 @@ export function reconcileProductionDomains(bindings: ProductionDesktopBindings, 
   return { schemaVersion: 1, contractScope: '#202 unchanged',
     launch: { voice: 'unsupported', connectors: 'disabled', mobile: 'not configured', nativeUi: 'unsupported', realMicrophone: false, hostedVoice: 'deferred' },
     counts: { retained: rows.length, commands: rows.filter(row => row.kind === 'command').length, events: rows.filter(row => row.kind === 'event').length,
-      sourceRegistered: rows.filter(row => row.runtimeBinding.sourceRegisteredInThisLaunch).length, sourceCodecs: rows.filter(row => row.codec.sourceRequestResultOrEvent).length,
+      sourceRegisteredCommands: rows.filter(row => row.runtimeBinding.sourceRegisteredInThisLaunch === true).length,
+      eventRegistrationsNotInspected: rows.filter(row => row.kind === 'event').length,
+      sourceEventCodecs: rows.filter(row => row.kind === 'event' && row.codec.sourceRequestResultOrEvent).length,
+      sourceCodecs: rows.filter(row => row.codec.sourceRequestResultOrEvent).length,
       nativeClientCodecs: rows.filter(row => row.codec.nativeClientRequestResult).length }, rows }
 }
