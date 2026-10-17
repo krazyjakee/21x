@@ -8,7 +8,7 @@ import type {
 } from '@/components/canvas/drawing/types'
 import { DEFAULT_STROKE, DEFAULT_TOOL_OPTIONS } from '@/components/canvas/drawing/types'
 import { useThemeStore } from '@/stores/theme-store'
-import { migrateLegacySettingToDefaultProject, projectScopedKey } from '@/lib/project-scoped-setting'
+import { readProjectScopedSetting, projectScopedKey } from '@/lib/project-scoped-setting'
 import { getCurrentProjectId, useProjectStore } from '@/stores/project-store'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 
@@ -177,8 +177,7 @@ export const useDrawingStore = create<DrawingState>()(subscribeWithSelector((set
 
     const promise = (async () => {
       try {
-        await migrateLegacySettingToDefaultProject(DRAWING_STORAGE_KEY)
-        const raw = await settingsApi.get(drawingStorageKey(projectId))
+        const raw = await readProjectScopedSetting(DRAWING_STORAGE_KEY, projectId)
         // Another project was asked for while this one was being read.
         if (seq !== loadSeq) return
         if (!raw) {

@@ -16,7 +16,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useAgentAutoStart } from '@/hooks/use-agent-auto-start'
 import { useOverdueNotifications } from '@/hooks/use-overdue-notifications'
-import { agentApi, agentSessionApi, settingsApi, projectApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
+import { agentApi, agentSessionApi, settingsApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
 import { isOverdue, isSnoozed } from '@/lib/utils'
 import { onShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import { TASK_STATUSES, TaskStatus } from '@/types'
@@ -69,7 +69,6 @@ export function AppLayout() {
     fetchAgents()
     // Restores the persisted current project; task views scope to it.
     void useProjectStore.getState().init()
-    return projectApi.onChanged(() => { void useProjectStore.getState().fetchProjects() })
   }, [])
 
   const [toast, setToast] = useState<{ message: string; isError?: boolean } | null>(null)

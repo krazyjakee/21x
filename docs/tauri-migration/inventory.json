@@ -105,7 +105,7 @@
       "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/AppLayout.tsx",
       "kind": "call",
-      "line": 180,
+      "line": 179,
       "path": [
         "app",
         "getVersion"
@@ -117,7 +117,7 @@
       "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/AppLayout.tsx",
       "kind": "call",
-      "line": 191,
+      "line": 190,
       "path": [
         "app",
         "getVersion"
@@ -2299,7 +2299,7 @@
     },
     {
       "column": 12,
-      "expression": "desktopApi.projects.onChanged",
+      "expression": "desktopApi.projects?.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
       "line": 542,
@@ -2310,7 +2310,7 @@
       "resolution": "literal"
     },
     {
-      "column": 59,
+      "column": 60,
       "expression": "desktopApi.projects.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
@@ -4332,7 +4332,7 @@
       "expression": "desktopApi.terminal.getBuffer",
       "file": "src/renderer/src/stores/canvas-store.ts",
       "kind": "call",
-      "line": 881,
+      "line": 880,
       "path": [
         "terminal",
         "getBuffer"
@@ -4346,7 +4346,7 @@
       "expression": "window.electronAPI",
       "file": "src/renderer/src/lib/desktop-api.ts",
       "kind": "access",
-      "line": 22,
+      "line": 25,
       "path": [],
       "resolution": "literal"
     }
@@ -5978,6 +5978,7 @@
     "src/renderer/src/lib/desktop-client.ts",
     "src/renderer/src/lib/desktop-features.ts",
     "src/renderer/src/lib/desktop-rehydration.ts",
+    "src/renderer/src/lib/desktop-snapshot.ts",
     "src/renderer/src/lib/diff-parser.ts",
     "src/renderer/src/lib/git-provider-api.ts",
     "src/renderer/src/lib/ipc-client.ts",
@@ -14462,7 +14463,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 895,
+    "files": 896,
     "operations": 737,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

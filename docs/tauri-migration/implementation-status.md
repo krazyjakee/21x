@@ -6,6 +6,20 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #209 renderer continuation makes task/project/settings recovery read-only
+and preserves events crossing pending snapshots. Reads coalesce and retry a
+bounded number of times; replacement bootstrap retires old reads immediately,
+even when the engine epoch is unchanged. Failed/busy recovery keeps native
+mutations fenced. Saved project restoration does not persist a selection, and
+native canvas/drawing restoration reads legacy Default data without copying
+settings or writing migration markers. Task/project listener cohorts retire on
+pagehide/HMR. The historical 368 direct preload references were already reduced
+to the central Electron compatibility reader by the production foundation;
+this continuation repairs actual typed-client behavior. See
+[renderer recovery](production-renderer-recovery.md). Native installed UI and
+unsupported operation/platform acceptance remain open; Actions is disabled
+pending the user's decision.
+
 The #216 Source continuation binds connector loopback OAuth to the private native
 flow owner captured at runtime construction. Only the connector binding gains
 browser availability; global MCP/Linear OAuth stays unavailable. The actual

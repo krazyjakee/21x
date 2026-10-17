@@ -2,7 +2,7 @@ import { desktopApi, electronBrowserApi } from '@/lib/desktop-api'
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { settingsApi } from '@/lib/ipc-client'
-import { migrateLegacySettingToDefaultProject, projectScopedKey } from '@/lib/project-scoped-setting'
+import { readProjectScopedSetting, projectScopedKey } from '@/lib/project-scoped-setting'
 import { getCurrentProjectId, useProjectStore } from '@/stores/project-store'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import { embeddedBrowserEnabled, isRetiredBrowserPanel } from '@/lib/desktop-features'
@@ -370,8 +370,7 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
 
     const promise = (async () => {
       try {
-        await migrateLegacySettingToDefaultProject(CANVAS_STORAGE_KEY)
-        const raw = await settingsApi.get(canvasStorageKey(projectId))
+        const raw = await readProjectScopedSetting(CANVAS_STORAGE_KEY, projectId)
         // Another project was asked for while this one was being read.
         if (seq !== loadSeq) return
         if (!raw) {

@@ -265,6 +265,7 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
   }
   return {
     kind: 'tauri', api: node('') as DesktopApi,
+    get connectionGeneration() { return generation },
     get connection() { return state }, get hydrationPending() { return hydrationPending },
     get unavailableCapability() { return unavailableCapability },
     get recoveryFailed() { return recoveryFailed },
@@ -275,6 +276,8 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
     rehydrate: hydrate,
     async reconnect() {
       if (disposed) throw new ServiceProtocolError('DISCONNECTED')
+      // Retire read publications immediately, before awaiting native bootstrap.
+      client.disconnect('STALE_EPOCH')
       unavailableCapability = null
       bootstrapFailure = null
       hydrationPending = true; recoveryFailed = false; notify()

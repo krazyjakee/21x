@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { projectApi, settingsApi } from '@/lib/ipc-client'
+import { createDesktopSnapshotReader } from '@/lib/desktop-snapshot'
 import {
   DEFAULT_PROJECT_ID,
   type ProjectRecord,
@@ -47,6 +48,8 @@ function replaceProject(projects: ProjectRecord[], updated: ProjectRecord): Proj
     : sortProjects([...projects, updated])
 }
 
+let selectionRevision = 0
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   currentProjectId: DEFAULT_PROJECT_ID,
@@ -54,35 +57,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   error: null,
 
   init: async () => {
-    await get().fetchProjects()
-    let stored: string | null = null
-    try {
-      stored = await settingsApi.get(CURRENT_PROJECT_SETTING)
-    } catch {
-      stored = null
-    }
-    const { projects, currentProjectId } = get()
-    // A switch made while the setting was loading wins over the stored value.
-    const wanted = currentProjectId !== DEFAULT_PROJECT_ID ? currentProjectId : stored
-    get().setCurrentProject(isSelectable(projects, wanted) ? wanted : DEFAULT_PROJECT_ID)
-    set({ isLoaded: true })
+    await rehydrateProjectDesktopState().catch(() => {})
   },
 
   fetchProjects: async () => {
-    try {
-      const projects = sortProjects(await projectApi.getAll({ includeArchived: true }))
-      set({ projects, error: null })
-      // The current project was archived elsewhere: fall back to Default.
-      const { currentProjectId } = get()
-      if (projects.length > 0 && !isSelectable(projects, currentProjectId)) {
-        get().setCurrentProject(DEFAULT_PROJECT_ID)
-      }
-    } catch (err) {
-      set({ error: String(err) })
-    }
+    await rehydrateProjectDesktopState().catch(() => {})
   },
 
   setCurrentProject: (id) => {
+    selectionRevision++
     const target = id || DEFAULT_PROJECT_ID
     if (get().currentProjectId === target) return
     set({ currentProjectId: target })
@@ -95,6 +78,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const created = await projectApi.create(data)
       if (!created) return null
+      projectSnapshot.invalidate()
       set((state) => ({ projects: replaceProject(state.projects, created), error: null }))
       return created
     } catch (err) {
@@ -107,6 +91,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const updated = await projectApi.update(id, data)
       if (!updated) return null
+      projectSnapshot.invalidate()
       set((state) => ({ projects: replaceProject(state.projects, updated), error: null }))
       return updated
     } catch (err) {
@@ -119,6 +104,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const updated = await projectApi.archive(id, archived)
       if (!updated) return null
+      projectSnapshot.invalidate()
       set((state) => ({ projects: replaceProject(state.projects, updated), error: null }))
       if (updated.archived && get().currentProjectId === id) get().setCurrentProject(DEFAULT_PROJECT_ID)
       return updated
@@ -130,6 +116,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   reorderProjects: async (orderedIds) => {
     const previous = get().projects
+    projectSnapshot.invalidate()
     const rank = new Map(orderedIds.map((id, index) => [id, index]))
     // Optimistic: archived projects not in the list keep their place after the ordered ones.
     set({
@@ -139,11 +126,63 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
     try {
       await projectApi.reorder(orderedIds)
+      projectSnapshot.invalidate()
+      set(state => ({ projects: sortProjects(state.projects.map(p => rank.has(p.id) ? { ...p, sort_order: rank.get(p.id)! } : p)) }))
     } catch (err) {
       set({ projects: previous, error: err instanceof Error ? err.message : String(err) })
     }
   }
 }))
+
+const projectSnapshot = createDesktopSnapshotReader({
+  read: async () => {
+    const selected = selectionRevision, restore = !useProjectStore.getState().isLoaded
+    const [rows, stored] = await Promise.all([
+      projectApi.getAll({ includeArchived: true }), settingsApi.get(CURRENT_PROJECT_SETTING)
+    ])
+    return { rows, stored, selected, restore }
+  },
+  apply: ({ rows, stored, selected, restore }) => {
+    const projects = sortProjects(rows)
+    useProjectStore.setState(state => {
+      const wanted = restore && selected === selectionRevision ? stored : state.currentProjectId
+      return { projects, error: null, isLoaded: true,
+      // Snapshot recovery is read-only, including an archived selection fallback.
+        currentProjectId: isSelectable(projects, wanted) ? wanted : DEFAULT_PROJECT_ID }
+    })
+  },
+  fail: error => useProjectStore.setState({ error: String(error) })
+})
+
+export function rehydrateProjectDesktopState(): Promise<void> {
+  // Subscribe before the first read, without importing a live listener into
+  // views that only borrow project names or filtering helpers.
+  initializeProjectDesktopState()
+  return projectSnapshot.refresh()
+}
+
+let releaseProjectListener: (() => void) | undefined
+export function initializeProjectDesktopState(): () => void {
+  if (releaseProjectListener) return releaseProjectListener
+  let active = true
+  const cleanup = projectApi.onChanged?.(() => {
+    if (!active) return
+    projectSnapshot.invalidate()
+    void useProjectStore.getState().fetchProjects()
+  })
+  const release = () => {
+    if (!active) return
+    active = false
+    releaseProjectListener = undefined
+    projectSnapshot.dispose()
+    cleanup?.()
+    window.removeEventListener('pagehide', release)
+  }
+  releaseProjectListener = release
+  window.addEventListener('pagehide', release, { once: true })
+  return release
+}
+if (import.meta.hot) import.meta.hot.dispose(() => releaseProjectListener?.())
 
 /** The current project id, read outside React. */
 export function getCurrentProjectId(): string {

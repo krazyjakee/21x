@@ -539,7 +539,7 @@ export const projectApi = {
   /** Moves a top-level task with its subtasks; resolves to the moved rows, or null when refused. */
   moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => desktopApi.projects.moveTask(taskId, projectId),
   onChanged: (callback: (event: ProjectChangedEvent) => void): (() => void) | undefined =>
-    typeof desktopApi.projects.onChanged === 'function' ? desktopApi.projects.onChanged?.(callback) : undefined,
+    typeof desktopApi.projects?.onChanged === 'function' ? desktopApi.projects.onChanged?.(callback) : undefined,
   /** Project status (#58): counts computed now, plus the Captain's latest summary. */
   getStatus: (projectId: string): Promise<ProjectStatus> => desktopApi.projects.getStatus(projectId),
   /** Status history (#72): one page of the Captain's journal, newest first; pass `next_cursor` back for older entries. */

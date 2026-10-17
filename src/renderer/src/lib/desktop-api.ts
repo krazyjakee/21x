@@ -1,5 +1,6 @@
 import type { DesktopApi } from '@shared/desktop-api'
 import type { DesktopClientState } from './desktop-client'
+import { ServiceProtocolError } from '@shared/service-protocol'
 
 export class DesktopUnavailableError extends Error {
   readonly code = 'DESKTOP_UNAVAILABLE'
@@ -10,6 +11,8 @@ export interface DesktopHost {
   readonly kind: 'electron' | 'tauri' | 'unavailable'
   readonly api: DesktopApi
   readonly connection: Readonly<DesktopClientState>
+  /** Changes before replacement bootstrap starts, including same-epoch reconnects. */
+  readonly connectionGeneration?: number
   supports: (path: string) => boolean
   subscribeConnection: (listener: () => void) => () => void
   reconnect?: () => Promise<void>
@@ -49,6 +52,14 @@ export const desktopApi: DesktopApi = new Proxy({} as DesktopApi, {
   }
 })
 export function getDesktopHost(): DesktopHost { return host }
+/** A renderer read may never publish into a replacement document/connection. */
+export function captureDesktopRead(): { isCurrent: () => boolean; isSameConnection: () => boolean; assertCurrent: () => void } {
+  const captured = host, generation = captured.connectionGeneration
+  const isSameConnection = () => host === captured && captured.connectionGeneration === generation
+  const isCurrent = () => isSameConnection() && captured.connection.status === 'ready'
+  return { isCurrent, isSameConnection,
+    assertCurrent() { if (!isCurrent()) throw new ServiceProtocolError(isSameConnection() ? 'DISCONNECTED' : 'STALE_EPOCH') } }
+}
 export function desktopSupports(path: string): boolean { return host.supports(path) }
 export function installDesktopHost(next: DesktopHost): () => void {
   const previous = host

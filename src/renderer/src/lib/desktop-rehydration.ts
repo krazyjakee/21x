@@ -1,11 +1,10 @@
-import { useTaskStore } from '@/stores/task-store'
-import { useProjectStore } from '@/stores/project-store'
+import { rehydrateTaskDesktopState } from '@/stores/task-store'
+import { rehydrateProjectDesktopState } from '@/stores/project-store'
+import { rehydrateSettingsDesktopState } from '@/stores/settings-store'
 import { rehydrateDesktopAgentState } from '@/stores/agent-store'
 import { rehydrateCommanderDesktopState } from '@/stores/commander-store'
-import { ServiceProtocolError } from '@shared/service-protocol'
 
 /** Read-only recovery. A failed owner leaves native mutation/approval fenced. */
 export async function rehydrateProductionDesktop(): Promise<void> {
-  await Promise.all([useTaskStore.getState().fetchTasks(), useProjectStore.getState().fetchProjects(), rehydrateDesktopAgentState(), rehydrateCommanderDesktopState()])
-  if (useTaskStore.getState().error || useProjectStore.getState().error) throw new ServiceProtocolError('DISCONNECTED')
+  await Promise.all([rehydrateTaskDesktopState(), rehydrateProjectDesktopState(), rehydrateSettingsDesktopState(), rehydrateDesktopAgentState(), rehydrateCommanderDesktopState()])
 }

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, OutputField, OutputFieldType } from '@/types'
 import { taskApi, taskSourceApi, projectApi, onTaskUpdated, onTaskCreated, onTaskDeleted, onTasksRefresh } from '@/lib/ipc-client'
 import { useProjectStore, getCurrentProjectId, isInProject, projectIdOf } from './project-store'
+import { createDesktopSnapshotReader } from '@/lib/desktop-snapshot'
 
 const VALID_OUTPUT_FIELD_TYPES = new Set<OutputFieldType>([
   'text',
@@ -80,13 +81,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   error: null,
 
   fetchTasks: async () => {
-    set({ isLoading: true, error: null })
-    try {
-      const tasks = (await taskApi.getAll()).map(normalizeTask)
-      set({ tasks, isLoading: false })
-    } catch (err) {
-      set({ error: String(err), isLoading: false })
-    }
+    await taskSnapshot.refresh().catch(() => {})
   },
 
   createTask: async (data) => {
@@ -95,6 +90,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       // parent's, which the main process enforces.
       const payload = data.project_id || data.parent_task_id ? data : { ...data, project_id: getCurrentProjectId() }
       const task = normalizeTask(await taskApi.create(payload))
+      taskSnapshot.invalidate()
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -108,6 +104,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       const raw = await taskApi.update(id, data)
       const updated = raw ? normalizeTask(raw) : null
       if (updated) {
+        taskSnapshot.invalidate()
         set((state) => ({
           tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
           error: null
@@ -129,6 +126,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     try {
       const success = await taskApi.delete(id)
       if (success) {
+        taskSnapshot.invalidate()
         set((state) => ({
           tasks: state.tasks.filter((t) => t.id !== id),
           selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
@@ -155,6 +153,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     try {
       const moved = await projectApi.moveTask(taskId, projectId)
       if (!moved) return false
+      taskSnapshot.invalidate()
       const byId = new Map(moved.map((t) => [t.id, normalizeTask(t)]))
       set((state) => ({
         tasks: state.tasks.map((t) => byId.get(t.id) ?? t),
@@ -168,51 +167,93 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   }
 }))
 
-// Switching projects drops a selection that belongs to the project left behind.
-useProjectStore.subscribe((state, previous) => {
-  if (state.currentProjectId === previous.currentProjectId) return
-  const { selectedTaskId, tasks } = useTaskStore.getState()
-  if (!selectedTaskId) return
-  const selected = tasks.find((t) => t.id === selectedTaskId)
-  if (!selected || !isInProject(selected, state.currentProjectId)) {
-    useTaskStore.setState({ selectedTaskId: null })
+const taskSnapshot = createDesktopSnapshotReader({
+  read: () => taskApi.getAll(),
+  start: () => useTaskStore.setState({ isLoading: true, error: null }),
+  apply: tasks => useTaskStore.setState(state => ({
+    tasks: tasks.map(normalizeTask), isLoading: false, error: null,
+    selectedTaskId: state.selectedTaskId && tasks.some(task => task.id === state.selectedTaskId) ? state.selectedTaskId : null
+  })),
+  fail: error => useTaskStore.setState({ isLoading: false, error: String(error) })
+})
+
+/** Strict recovery participates in the native host's mutation fence. */
+export function rehydrateTaskDesktopState(): Promise<void> { return taskSnapshot.refresh() }
+
+let releaseListeners: (() => void) | undefined
+export function initializeTaskDesktopState(): () => void {
+  if (releaseListeners) return releaseListeners
+  let active = true
+  const cleanups: Array<(() => void) | undefined> = []
+
+  // Switching projects drops a selection that belongs to the project left behind.
+  cleanups.push(useProjectStore.subscribe((state, previous) => {
+    if (state.currentProjectId === previous.currentProjectId) return
+    const { selectedTaskId, tasks } = useTaskStore.getState()
+    if (!selectedTaskId) return
+    const selected = tasks.find((t) => t.id === selectedTaskId)
+    if (!selected || !isInProject(selected, state.currentProjectId)) {
+      useTaskStore.setState({ selectedTaskId: null })
+    }
+  }))
+
+  // Listen for task updates from the backend (e.g., when agent changes task status)
+  cleanups.push(onTaskUpdated((event) => {
+    if (!active) return
+    taskSnapshot.invalidate()
+    useTaskStore.setState((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === event.taskId ? normalizeTask({ ...t, ...event.updates }) : t
+      )
+    }))
+  }))
+
+  // Listen for tasks created externally (e.g., via task-management MCP server)
+  cleanups.push(onTaskCreated((event) => {
+    if (!active) return
+    taskSnapshot.invalidate()
+    useTaskStore.setState((state) => {
+      // Avoid duplicates
+      if (state.tasks.some((t) => t.id === event.task.id)) return state
+      return { tasks: [normalizeTask(event.task), ...state.tasks] }
+    })
+  }))
+
+  // Listen for task deletions from backend (UI-initiated or external MCP)
+  cleanups.push(onTaskDeleted((event) => {
+    if (!active) return
+    taskSnapshot.invalidate()
+    const taskId = event.taskId
+    useTaskStore.setState((state) => ({
+      tasks: state.tasks.filter((t) => t.id !== taskId),
+      selectedTaskId: state.selectedTaskId === taskId ? null : state.selectedTaskId
+    }))
+
+    // Automatically remove from canvas if it was added.
+    // Dynamic import avoids circular dependency and ensures canvas store is only loaded if needed.
+    import('./canvas-store').then(({ useCanvasStore }) => {
+      if (releaseListeners !== release) return
+      useCanvasStore.getState().removePanelsByRefId(taskId)
+    })
+  }))
+
+  // Listen for tasks:refresh from main process (recurrence scheduler, heartbeat, etc.)
+  cleanups.push(onTasksRefresh(() => {
+    if (!active) return
+    taskSnapshot.invalidate()
+    useTaskStore.getState().fetchTasks()
+  }))
+  const release = () => {
+    if (releaseListeners !== release) return
+    active = false
+    releaseListeners = undefined
+    taskSnapshot.dispose()
+    for (const cleanup of cleanups) cleanup?.()
+    window.removeEventListener('pagehide', release)
   }
-})
-
-// Listen for task updates from the backend (e.g., when agent changes task status)
-onTaskUpdated((event) => {
-  useTaskStore.setState((state) => ({
-    tasks: state.tasks.map((t) =>
-      t.id === event.taskId ? normalizeTask({ ...t, ...event.updates }) : t
-    )
-  }))
-})
-
-// Listen for tasks created externally (e.g., via task-management MCP server)
-onTaskCreated((event) => {
-  useTaskStore.setState((state) => {
-    // Avoid duplicates
-    if (state.tasks.some((t) => t.id === event.task.id)) return state
-    return { tasks: [normalizeTask(event.task), ...state.tasks] }
-  })
-})
-
-// Listen for task deletions from backend (UI-initiated or external MCP)
-onTaskDeleted((event) => {
-  const taskId = event.taskId
-  useTaskStore.setState((state) => ({
-    tasks: state.tasks.filter((t) => t.id !== taskId),
-    selectedTaskId: state.selectedTaskId === taskId ? null : state.selectedTaskId
-  }))
-
-  // Automatically remove from canvas if it was added.
-  // Dynamic import avoids circular dependency and ensures canvas store is only loaded if needed.
-  import('./canvas-store').then(({ useCanvasStore }) => {
-    useCanvasStore.getState().removePanelsByRefId(taskId)
-  })
-})
-
-// Listen for tasks:refresh from main process (recurrence scheduler, heartbeat, etc.)
-onTasksRefresh(() => {
-  useTaskStore.getState().fetchTasks()
-})
+  releaseListeners = release
+  window.addEventListener('pagehide', release, { once: true })
+  return release
+}
+initializeTaskDesktopState()
+if (import.meta.hot) import.meta.hot.dispose(() => releaseListeners?.())
