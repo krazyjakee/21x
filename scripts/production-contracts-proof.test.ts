@@ -12,10 +12,10 @@ import { MOBILE_EVENTS, MOBILE_EVENT_CODECS } from '../src/shared/mobile-codecs'
 import { sanitizeChatImageName, base64ByteLength } from '../src/shared/chat-images'
 
 describe('actual production TypeScript-to-native golden request corpus', () => {
-  it('uses the actual production override map and encodes all 228 finite command fixtures', () => {
+  it('uses the actual production override map and encodes all 229 finite command fixtures', () => {
     const corpus = createProductionRequestCorpus()
     expect(corpus.operations).toEqual(Object.keys(PRODUCTION_COMMAND_CODECS).sort())
-    expect(corpus.operations).toHaveLength(228)
+    expect(corpus.operations).toHaveLength(229)
     expect(new Set(corpus.requests.map(row => row.operation))).toEqual(new Set(corpus.operations))
     for (const row of corpus.requests) {
       const codec = PRODUCTION_COMMAND_CODECS[row.operation as keyof typeof PRODUCTION_COMMAND_CODECS]
@@ -94,6 +94,16 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     expect(save.validateWireResult({ defined: false })).toBe(false)
     expect(remove.encodeResult(undefined)).toEqual({ defined: false }); expect(remove.decodeResult(undefined)).toBeUndefined()
     for (const value of [{ defined: true, value: true }, { defined: false, value: null }]) expect(remove.validateWireResult(value)).toBe(false)
+  })
+  it('keeps picker-backed save display paths finite without accepting a native receipt or caller authority', () => {
+    const corpus=createProductionRequestCorpus(), save=PROOF_COMMAND_CODECS['attachments:save']
+    expect(corpus.requests.filter(row=>row.operation==='attachments:save').map(row=>row.case)).toEqual(['baseline','selection-save-windows-display-path','selection-save-path-byte-boundary'])
+    expect(save.decodeArguments({taskId:'task_fixture',filePath:'/tmp/selected-fixture.txt'})).toEqual(['task_fixture','/tmp/selected-fixture.txt'])
+    for(const extra of ['selectionId','leaseId','root','caller','projectId'])expect(()=>save.decodeArguments({taskId:'task_fixture',filePath:'/tmp/selected-fixture.txt',[extra]:'forged'})).toThrow()
+    const record={id:'00000000-0000-4000-8000-000000000001',filename:'selected-fixture.txt',size:2000000,mime_type:'text/plain',added_at:'2026-10-17T00:00:00Z'}
+    expect(save.validateWireResult({defined:true,value:record})).toBe(true)
+    expect(save.validateWireResult({defined:true,value:{...record,path:'/private'}})).toBe(false)
+    expect(save.validateWireResult({defined:true,value:{...record,size:67108865}})).toBe(false)
   })
   it.each(['open', 'download'] as const)('covers exact ID-only attachment %s without public path or document grants', method => {
     const corpus = createProductionRequestCorpus(), open = PROOF_COMMAND_CODECS[`attachments:${method}`]
@@ -255,6 +265,6 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
     const path = process.env.TWENTYONEX_PRODUCTION_CONTRACTS_OUT
     if (!path) return
     const corpus = await writeProductionRequestCorpus(path)
-    expect(corpus.operations).toHaveLength(228)
+    expect(corpus.operations).toHaveLength(229)
   })
 })

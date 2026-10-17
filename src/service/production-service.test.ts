@@ -1,3 +1,4 @@
+import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer } from '../shared/attachment-selection-callbacks'
 import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck } from '../shared/attachment-native-callbacks'
@@ -50,7 +51,7 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false, oauth = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false, oauth = false, selections = false) {
   let selectedAdapter: CodingAgentAdapter | null = null
   let privateCallbacks: ProductionPrivateCallbacks | null = null
   let notificationAcknowledgement: Promise<void> | null = null
@@ -75,6 +76,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   if (energy) launch.capabilities.energy = 'host'
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   if (ui) launch.capabilities.ui = 'host'
+  if (selections) launch.capabilities.attachmentSelections = 'host'
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
   if (attachmentDownloading) launch.capabilities.attachmentDownloads = 'host'
   if (artifactClipboard) launch.capabilities.artifactClipboard = 'host'
@@ -155,6 +157,18 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   if (workspaceFiles) for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) schemas[operation] = { ...schema, handle: async payload => {
     nativeCalls.push(operation); fileReceipts.push((payload as { receipt: JsonValue }).receipt)
     await fileAcknowledgement; return {}
+  } }
+  schemas['engine.attachment.selection.offer'] = { validatePayload: isSelectionOffer, validateResult: value => isRecord(value) && hasExactKeys(value, ['accepted']) && typeof value.accepted === 'boolean' }
+  schemas['engine.attachment.save'] = { validatePayload: value => isRecord(value), validateResult: TASK_ATTACHMENT_CODECS['attachments:save'].validateWireResult }
+  if (selections) for (const [operation, schema] of Object.entries(ATTACHMENT_SELECTION_SCHEMAS)) schemas[operation] = { ...schema, handle: async (payload): Promise<JsonValue> => {
+    if (!isRecord(payload)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    nativeCalls.push(operation)
+    if (operation.endsWith('.retire')) return { retired: true }
+    if (!uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    await attachmentAcknowledgement
+    if (!uiLease || payload.leaseId !== uiLease) throw new ServiceProtocolError('STALE_EPOCH')
+    if (operation.endsWith('.finish')) return { verified: true }
+    return { data: Buffer.alloc(Number(payload.length), 7).toString('base64') }
   } }
   schemas['engine.attachment.open'] = { validatePayload: isPrivateAttachmentOpen, validateResult: TASK_ATTACHMENT_CODECS['attachments:open'].validateWireResult }
   schemas['engine.attachment.download'] = { validatePayload: isPrivateAttachmentDownload, validateResult: TASK_ATTACHMENT_CODECS['attachments:download'].validateWireResult }
@@ -858,4 +872,30 @@ describe('private native notification bridge around actual production ownership'
     f.privateCallbacks().notifyStatus!('Agent finished', 'Retired scope'); f.privateCallbacks().notify('General update', 'Retired scope')
     expect(f.notificationCalls).toHaveLength(2); gate.finish(); await closing; expect(closed).toBe(true); expect(f.notificationCalls).toHaveLength(2)
   })
+})
+
+
+describe('private selection receipts through actual service peer and SQLite owners',()=>{
+ const selection={selectionId:'61f07006-c85b-438e-83a7-497c77b0dcae',path:'/tmp/selected.txt',filename:'selected.txt',size:131073},leaseId='document_fixture_1'
+ function create(){return fixture(false,true,false,false,false,false,false,false,false,false,true)}
+ it('registers only the native offer, refuses public path save, and returns one exact imported file without metadata append',async()=>{
+  const f=create();await f.initialize();const db=f.service.getReadyServices()!.db,task=db.createTask(makeTask())!
+  await expect(f.host.request('attachments:save',{taskId:task.id,filePath:selection.path})).rejects.toMatchObject({code:'INVALID_REQUEST'})
+  await expect(f.host.request('engine.attachment.save',{taskId:task.id,filePath:selection.path,leaseId})).rejects.toMatchObject({code:'INVALID_REQUEST'})
+  expect(await f.host.request('engine.attachment.selection.offer',{leaseId,selections:[selection]})).toEqual({accepted:true})
+  const response=await f.host.request('engine.attachment.save',{taskId:task.id,filePath:selection.path,leaseId}) as {defined:true,value:typeof selection&{id:string}}
+  expect(response).toMatchObject({defined:true,value:{filename:selection.filename,size:selection.size,mime_type:'text/plain'}})
+  expect(readFileSync(join(f.launch.paths.attachmentRoot,task.id,`${response.value.id}-${response.value.filename}`))).toEqual(Buffer.alloc(selection.size,7))
+  expect(db.getTask(task.id)!.attachments).toEqual([])
+  expect(f.nativeCalls.filter(v=>v==='host.attachment.selection.read')).toHaveLength(3);expect(f.nativeCalls).toContain('host.attachment.selection.finish');expect(f.nativeCalls).toContain('host.attachment.selection.retire')
+  await expect(f.host.request('engine.attachment.save',{taskId:task.id,filePath:selection.path,leaseId})).rejects.toMatchObject({code:'INVALID_REQUEST'})
+ })
+ it('retains actual database/profile ownership while a cancelled raw read remains unsettled',async()=>{
+  const f=create();await f.initialize();const actual=f.service.getReadyServices()!,task=actual.db.createTask(makeTask())!
+  await f.host.request('engine.attachment.selection.offer',{leaseId,selections:[selection]});const gate=deferred();release.push(gate.finish);f.holdAttachmentAcknowledgement(gate.promise)
+  const abort=new AbortController(),pending=f.host.request('engine.attachment.save',{taskId:task.id,filePath:selection.path,leaseId},{signal:abort.signal}),failure=expect(pending).rejects.toMatchObject({code:'CANCELLED'})
+  await vi.waitFor(()=>expect(f.nativeCalls).toContain('host.attachment.selection.read'));abort.abort();await failure
+  await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED');expect(actual.db.db.open).toBe(true);expect(f.nativeCalls).not.toContain('host.attachment.selection.retire')
+  gate.finish();await f.service.close();expect(actual.db.db.open).toBe(false);expect(f.nativeCalls.filter(v=>v==='host.attachment.selection.read')).toHaveLength(1);expect(f.nativeCalls).toContain('host.attachment.selection.retire')
+ })
 })

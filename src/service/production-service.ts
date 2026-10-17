@@ -1,3 +1,6 @@
+import { isUiLeaseId } from '../shared/ui-desktop-codecs'
+import { AttachmentSelectionOwner } from './attachment-selection-owner'
+import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer } from '../shared/attachment-selection-callbacks'
 import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isArtifactClipboardReceipt, isArtifactClipboardResult, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { TRAY_PREFERENCE_CODECS } from '../shared/tray-preference-codecs'
@@ -84,6 +87,7 @@ export class ProductionService {
   private readonly downloadAuthorizations = new Map<string, () => void>()
   private sequence = 0
   private readonly caller: DesktopCallerContext
+  private readonly attachmentSelections: AttachmentSelectionOwner | null
   private readonly oauthFlows: OAuthFlowOwner | null
 
   constructor(host: SealedProductionServiceHost, transport: {
@@ -100,6 +104,14 @@ export class ProductionService {
       retire: async request => await oauthRequest('host.oauth.retire', request) as Awaited<ReturnType<NativeOAuthBridge['retire']>>
     }
     this.oauthFlows = descriptor.capabilities.oauthFlows === 'host' ? new OAuthFlowOwner(oauthBridge, () => {
+      if (!this.initialized || this.closing || !this.services || this.owner.snapshot().epoch !== this.caller.engineEpoch) throw new ServiceProtocolError('DISCONNECTED')
+      this.owner.getDatabaseBindingLease()
+    }) : null
+    this.attachmentSelections = descriptor.capabilities.attachmentSelections === 'host' ? new AttachmentSelectionOwner({
+      read: async payload => await this.retain(this.peer.request('host.attachment.selection.read', payload as unknown as JsonValue)) as { data: string },
+      finish: async payload => await this.retain(this.peer.request('host.attachment.selection.finish', payload as unknown as JsonValue)) as { verified: true },
+      retire: async payload => await this.retain(this.peer.request('host.attachment.selection.retire', payload as unknown as JsonValue)) as { retired: true }
+    }, () => {
       if (!this.initialized || this.closing || !this.services || this.owner.snapshot().epoch !== this.caller.engineEpoch) throw new ServiceProtocolError('DISCONNECTED')
       this.owner.getDatabaseBindingLease()
     }) : null
@@ -233,6 +245,16 @@ export class ProductionService {
         return this.retain(this.bindings.invoke(operation, payload, this.caller, signal))
       }
     }]))
+    operations['engine.attachment.selection.offer'] = { validatePayload: isSelectionOffer,
+      validateResult: value => isRecord(value) && hasExactKeys(value, ['accepted']) && typeof value.accepted === 'boolean',
+      handle: value => this.attachmentSelections?.offer(value) ?? { accepted: false } }
+    operations['attachments:save'].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
+    operations['engine.attachment.save'] = { validatePayload: value => isRecord(value) && hasExactKeys(value, ['taskId','filePath','leaseId']) && isUiLeaseId(value.leaseId) && TASK_ATTACHMENT_CODECS['attachments:save'].validateArguments([value.taskId,value.filePath]),
+      validateResult: TASK_ATTACHMENT_CODECS['attachments:save'].validateWireResult,
+      handle: (value, signal) => {
+        if (!this.initialized || this.closing || !this.bindings || !isRecord(value)) throw new ServiceProtocolError('INVALID_REQUEST')
+        return this.retain(this.bindings.invoke('attachments:save', { taskId: value.taskId, filePath: value.filePath } as JsonValue, { ...this.caller, uiLeaseId: value.leaseId as string }, signal))
+      } }
     operations['engine.oauth.callback'] = { ...OAUTH_DELIVERY_SCHEMA, handle: payload => {
       if (!this.initialized || this.closing || !this.oauthFlows) return { accepted: false }
       // Synchronous claim only. The caller's owned waiter performs token work.
@@ -323,12 +345,13 @@ export class ProductionService {
       const initialization = (async () => {
         this.services = await this.owner.start()
         if (this.closing || signal.aborted) throw new ServiceProtocolError('CANCELLED')
-        this.bindings = await ProductionDesktopBindings.attach(this.owner, { authority: construction.authority,
+        this.bindings = await ProductionDesktopBindings.attach(this.owner, { attachmentSelections: this.attachmentSelections ?? undefined, authority: construction.authority,
           emit: (operation, value, recipient) => {
             if (recipient !== undefined && (recipient.webviewId !== this.caller.webviewId || recipient.origin !== this.caller.origin || recipient.engineEpoch !== this.caller.engineEpoch)) return
             if (this.initialized && !this.closing) this.publishScoped(operation, value)
           }, fatal: error => this.peer.disconnect(error.code) })
         this.owner.retainCleanup('private-service-flights', () => { this.closing = true }, () => this.drainDomains())
+        if (this.attachmentSelections) this.owner.retainCleanup('private-attachment-selections', () => this.attachmentSelections!.stop(), () => this.attachmentSelections!.close())
         if (this.oauthFlows) this.owner.retainCleanup('private-oauth-flows', () => this.oauthFlows!.stop(), () => this.oauthFlows!.close())
         if (signal.aborted || this.closing) throw new ServiceProtocolError('CANCELLED')
         this.initialized = true
@@ -355,6 +378,7 @@ export class ProductionService {
         return { stopped: true }
       } }
     for (const [operation, schema] of Object.entries(PRODUCTION_HOST_SCHEMAS)) operations[operation] = schema
+    if (descriptor.capabilities.attachmentSelections === 'host') for (const [operation, schema] of Object.entries(ATTACHMENT_SELECTION_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.oauthFlows === 'host') for (const [operation, schema] of Object.entries(OAUTH_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.externalUrls === 'host') operations['host.shell.openExternal'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateResult }
     if (descriptor.capabilities.workspaceFiles === 'host') for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema

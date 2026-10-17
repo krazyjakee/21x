@@ -1,3 +1,6 @@
+import { mimeTypeForPath } from '../main/mime'
+import { randomUUID } from 'node:crypto'
+import type { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { AgentManager } from '../main/agent-manager-core'
 import type { DatabaseManager } from '../main/database/manager'
 import type { FileAttachmentRecord } from '../main/database/types'
@@ -24,6 +27,7 @@ export interface TaskAttachmentBackendOptions extends TaskAttachmentOwners {
   canAccessAgent(id: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
   runAttachmentMutation?<T>(taskIds: string[], effect: () => Promise<T>): Promise<T>
   onTaskUpdated(taskId: string, attachments: FileAttachmentRecord[]): void
+  selections?: AttachmentSelectionOwner
   openAttachment?(receipt: AttachmentPathReceipt, caller: DesktopCallerContext, signal: AbortSignal): Promise<void>
   downloadAttachment?(receipt: AttachmentPathReceipt, caller: DesktopCallerContext, signal: AbortSignal, beforeEffect: () => void): Promise<void>
 }
@@ -36,10 +40,12 @@ export class TaskAttachmentBackend {
   private readonly controllers = new Set<AbortController>()
   private closing = false
   private mutationBusy = false
+  private readonly selections: AttachmentSelectionOwner | undefined
   private readonly openAttachment: TaskAttachmentBackendOptions['openAttachment']
   private readonly downloadAttachment: TaskAttachmentBackendOptions['downloadAttachment']
   constructor(private readonly options: TaskAttachmentBackendOptions) {
     this.owners = Object.freeze({ database: options.database, manager: options.manager, files: options.files, attachmentRoot: options.attachmentRoot })
+    this.selections = options.selections
     this.openAttachment = options.openAttachment
     this.downloadAttachment = options.downloadAttachment
     if (!(options.manager instanceof AgentManager) || !(options.files instanceof TaskAttachmentFileOwner) || typeof options.onTaskUpdated !== 'function' || this.openAttachment !== undefined && typeof this.openAttachment !== 'function' || this.downloadAttachment !== undefined && typeof this.downloadAttachment !== 'function') throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -47,7 +53,7 @@ export class TaskAttachmentBackend {
     for (const operation of this.operations()) this.bind(operation)
   }
   get inflightCount(): number { return this.flights.size }
-  private operations(): readonly TaskAttachmentOperation[] { return TASK_ATTACHMENT_OPERATIONS.filter(operation => operation === 'attachments:open' ? !!this.openAttachment : operation === 'attachments:download' ? !!this.downloadAttachment : true) }
+  private operations(): readonly TaskAttachmentOperation[] { return TASK_ATTACHMENT_OPERATIONS.filter(operation => operation === 'attachments:save' ? !!this.selections : operation === 'attachments:open' ? !!this.openAttachment : operation === 'attachments:download' ? !!this.downloadAttachment : true) }
   shutdown(): void { this.closing = true; for (const controller of this.controllers) controller.abort() }
   async close(timeoutMs = 2000): Promise<void> {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) throw new RangeError('Invalid attachment backend close deadline')
@@ -68,12 +74,13 @@ export class TaskAttachmentBackend {
   }
   private async execute<K extends TaskAttachmentOperation>(operation: K, args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal): Promise<DesktopCommandMap[K]['result']> {
     const { database, manager, files } = this.owners, db = database.db, taskId = args[0] as string
-    const mutation = operation === 'chatImages:saveToTask' || operation === 'attachments:remove'
+    const mutation = operation === 'chatImages:saveToTask' || operation === 'attachments:remove' || operation === 'attachments:save'
     const nativeCallback = operation === 'attachments:download' ? this.downloadAttachment : this.openAttachment
     let active = true
     const current = (): void => {
       if (!active) throw new ServiceProtocolError('CANCELLED')
       this.authorize(caller, signal)
+      if (operation === 'attachments:save' && (!this.selections || this.options.selections !== this.selections || !isUiLeaseId(caller.uiLeaseId))) throw new ServiceProtocolError('INVALID_REQUEST')
       if (!mutation) {
         if (!isUiLeaseId(caller.uiLeaseId)) throw new ServiceProtocolError('INVALID_REQUEST')
         const configured = operation === 'attachments:download' ? this.options.downloadAttachment : this.options.openAttachment
@@ -170,6 +177,22 @@ export class TaskAttachmentBackend {
       if (operation === 'chatImages:saveToTask' && initial.records.length + (args[1] as unknown[]).length > TASK_ATTACHMENT_LIMITS.records) throw new ServiceProtocolError('FRAME_TOO_LARGE')
       const effect = async (): Promise<unknown> => {
         beforeEffect()
+        if (operation === 'attachments:save') {
+          if (initial.records.length >= TASK_ATTACHMENT_LIMITS.records) throw new ServiceProtocolError('FRAME_TOO_LARGE')
+          const selection = this.selections!.claim(args[1] as string, caller.uiLeaseId!, beforeEffect)
+          let receipt: object | undefined
+          try {
+            const record: FileAttachmentRecord = { id: randomUUID(), filename: selection.filename, size: selection.size, mime_type: mimeTypeForPath(selection.filename), added_at: new Date().toISOString() }
+            receipt = await files.writeStream(taskId, record, (offset, length) => selection.read(offset, length), { beforeEffect, signal })
+            // Native retirement must acknowledge before accepting the output.
+            await selection.finish(); beforeEffect(); await selection.close(); beforeEffect()
+            files.commit(receipt); receipt = undefined
+            return record
+          } finally {
+            const results = await Promise.allSettled([selection.close(), ...(receipt ? [files.rollback(receipt)] : [])])
+            for (const result of results) if (result.status === 'rejected') throw result.reason
+          }
+        }
         if (operation === 'attachments:remove') {
           const selected = initial.records.find(record => record.id === args[1])
           if (!selected) throw new ServiceProtocolError('INVALID_REQUEST')
@@ -211,7 +234,7 @@ export class TaskAttachmentBackend {
   private bind<K extends TaskAttachmentOperation>(operation: K): void {
     const codec = TASK_ATTACHMENT_CODECS[operation] as TaskAttachmentCodec<K>
     this.registry.bindCommand(operation, { decodeRequest: value => codec.decodeArguments(structuredClone(value)), validateArguments: codec.validateArguments, authorize: (_args, caller) => { this.authorize(caller); return true }, invoke: (args, caller, signal) => {
-      const mutation = operation === 'chatImages:saveToTask' || operation === 'attachments:remove'
+      const mutation = operation === 'chatImages:saveToTask' || operation === 'attachments:remove' || operation === 'attachments:save'
       if (this.mutationBusy || this.flights.size >= TASK_ATTACHMENT_LIMITS.requests || mutation && this.flights.size > 0) throw new ServiceProtocolError('BACKPRESSURE')
       if (mutation) this.mutationBusy = true; const controller = new AbortController(), abort = (): void => controller.abort(); this.controllers.add(controller); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
       const raw = this.execute(operation, args, Object.freeze({ ...caller }), controller.signal).finally(() => { if (mutation) this.mutationBusy = false; this.controllers.delete(controller); signal.removeEventListener('abort', abort) })

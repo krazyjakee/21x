@@ -190,9 +190,25 @@ impl NativeWorkOwner {
             .map_err(|_| EngineError::new("DISCONNECTED"))?
             .active)
     }
-    pub async fn run<F>(&self, work: F) -> Result<(), EngineError>
+    pub async fn run<T, F>(&self, work: F) -> Result<T, EngineError>
     where
-        F: FnOnce() -> Result<(), EngineError> + Send + 'static,
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, EngineError> + Send + 'static,
+    {
+        self.run_owned(work, false).await
+    }
+    /// Cleanup may retire already-owned resources after normal admission closes.
+    pub async fn run_cleanup<T, F>(&self, work: F) -> Result<T, EngineError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, EngineError> + Send + 'static,
+    {
+        self.run_owned(work, true).await
+    }
+    async fn run_owned<T, F>(&self, work: F, cleanup: bool) -> Result<T, EngineError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, EngineError> + Send + 'static,
     {
         let receipt = {
             let mut state = self
@@ -200,7 +216,7 @@ impl NativeWorkOwner {
                 .state
                 .lock()
                 .map_err(|_| EngineError::new("DISCONNECTED"))?;
-            if state.closing {
+            if state.closing && !cleanup {
                 return Err(EngineError::new("DISCONNECTED"));
             }
             if state.active >= MAX_NATIVE_WORK {
@@ -212,7 +228,9 @@ impl NativeWorkOwner {
         let owner = self.clone();
         let (deliver, result) = tokio::sync::oneshot::channel();
         let raw = tauri::async_runtime::spawn_blocking(move || {
-            owner.assert_open()?;
+            if !cleanup {
+                owner.assert_open()?;
+            }
             work()
         });
         // The driver owns and joins the raw handle independently of the public
@@ -407,6 +425,34 @@ mod tests {
         assert_eq!(owner.active().unwrap(), 0);
     }
     #[tokio::test]
+    async fn cleanup_after_admission_close_returns_owned_value_and_remains_joined() {
+        let owner = NativeWorkOwner::default();
+        owner.close().unwrap();
+        assert!(owner.run(|| Ok(7u32)).await.is_err());
+        let (release, wait) = std::sync::mpsc::channel();
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let copy = owner.clone();
+        let request = tokio::spawn(async move {
+            copy.run_cleanup(move || {
+                let _ = entered.send(());
+                wait.recv().unwrap();
+                Ok(19u32)
+            })
+            .await
+        });
+        ready.await.unwrap();
+        request.abort();
+        let copy = owner.clone();
+        let drain = tokio::spawn(async move { copy.drain().await });
+        tokio::task::yield_now().await;
+        assert_eq!(owner.active().unwrap(), 1);
+        assert!(!drain.is_finished());
+        release.send(()).unwrap();
+        drain.await.unwrap().unwrap();
+        assert_eq!(owner.active().unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn bounded_raw_work_admission_does_not_queue_or_run_rejected_effects() {
         let owner = NativeWorkOwner::default();
         let mut releases = Vec::new();
@@ -455,7 +501,7 @@ mod tests {
         let owner = NativeWorkOwner::default();
         assert_eq!(
             owner
-                .run(|| Err(EngineError::new("INTERNAL_ERROR")))
+                .run(|| Err::<(), _>(EngineError::new("INTERNAL_ERROR")))
                 .await
                 .unwrap_err()
                 .code,
@@ -463,7 +509,7 @@ mod tests {
         );
         assert_eq!(
             owner
-                .run(|| panic!("controlled native call panic"))
+                .run::<(), _>(|| panic!("controlled native call panic"))
                 .await
                 .unwrap_err()
                 .code,

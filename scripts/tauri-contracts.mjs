@@ -19,7 +19,7 @@ const knownFamilies = new Set(['agent-installer', 'agent', 'agentConfig', 'agent
   'connectors', 'db', 'env', 'forgejo', 'git', 'github', 'gitlab', 'heartbeat', 'mcp', 'menu', 'mobile', 'notifications',
   'oauth', 'overdue', 'plugin', 'project', 'projectLimits', 'projectRepo', 'projectResource', 'secrets', 'settings',
   'sessionContext', 'shell', 'skills', 'task', 'taskGroups', 'taskSource', 'tasks', 'terminal', 'transcript', 'ui', 'updater', 'voice', 'workspace', 'worktree'])
-const callbackCommands = new Set(['artifacts:copyFile', 'attachments:open', 'attachments:download',
+const callbackCommands = new Set(['attachments:save', 'artifacts:copyFile', 'attachments:open', 'attachments:download',
   // Node admits only an actual current task workspace; native receives the
   // captured path receipt rather than a caller-selected global filesystem grant.
   'shell:openPath', 'shell:showItemInFolder',

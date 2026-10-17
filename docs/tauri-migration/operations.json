@@ -3214,7 +3214,7 @@
       },
       "kind": "command",
       "name": "attachments:save",
-      "nativeCallback": false,
+      "nativeCallback": true,
       "owner": "service",
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [

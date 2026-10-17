@@ -153,3 +153,49 @@ describe('actual native attachment-opening FD lifetime',()=>{
     expect((await readFile(join(attachmentRoot+'.retained',saved.taskId,`${metadata.id}-${metadata.filename}`))).length).toBe(metadata.size)
   })
 })
+
+
+describe('bounded selection-stream publication', () => {
+  it('streams and verifies larger files with bounded reads, preserves image limits, and removes the exact committed output', async () => {
+    const size = 2 * 1024 * 1024 + 17, record = { ...metadata, filename: 'document.bin', size, mime_type: 'application/octet-stream' }
+    const lengths: number[] = [], positions: number[] = []
+    owner = create({ open: async (path, flags, mode) => {
+      const fd = await actualHandle(path, flags, mode)
+      return { ...fd, read: async (b, o, l, p) => { expect(b.length).toBeLessThanOrEqual(65536); return fd.read(b, o, Math.min(997, l), p) }, write: async (b, o, l, p) => fd.write(b, o, Math.min(1009, l), p) }
+    } })
+    const receipt = await owner.writeStream('task-stream', record, async (offset, length) => { lengths.push(length); positions.push(offset); return Buffer.alloc(length, offset / 65536 % 251) }, controls())
+    owner.commit(receipt)
+    expect(Math.max(...lengths)).toBe(65536); expect(positions).toEqual(Array.from({ length: Math.ceil(size / 65536) }, (_, i) => i * 65536))
+    const actual = await readFile(join(attachmentRoot, 'task-stream', `${record.id}-${record.filename}`))
+    expect(actual.length).toBe(size); expect(actual[65536]).toBe(1); expect(actual[size - 1]).toBe(32)
+    await expect(owner.write('task-image', record, Buffer.alloc(size), controls())).rejects.toMatchObject({ code: 'ATTACHMENT_INVALID_ARGUMENTS' })
+    await owner.remove('task-stream', record, controls()); expect(await readdir(join(attachmentRoot, 'task-stream'))).toEqual([])
+  })
+  it('rolls back an acknowledged streamed prefix after producer refusal, short chunk or withdrawn scope', async () => {
+    const record = { ...metadata, size: 131073 }
+    for (const mode of ['refused', 'short', 'withdrawn']) {
+      let permitted = true
+      const guarded = { signal: new AbortController().signal, beforeEffect() { if (!permitted) throw new ServiceProtocolError('INVALID_REQUEST') } }
+      await expect(owner.writeStream('task-' + mode, record, async (offset, length) => {
+        if (offset) { if (mode === 'refused') throw new Error('Controlled producer refusal'); if (mode === 'short') return Buffer.alloc(length - 1); permitted = false }
+        return Buffer.alloc(length, 3)
+      }, guarded)).rejects.toBeInstanceOf(Error)
+      expect(await readdir(join(attachmentRoot, 'task-' + mode))).toEqual([])
+    }
+  })
+  it('joins a raw producer and destination close through cancellation and failed-close retry', async () => {
+    const gate = held(), entered = held(); releases.push(gate.release); let refuse = true
+    owner = create({ open: async (path, flags, mode) => { const fd = await actualHandle(path, flags, mode); return { ...fd, close: async () => { if (refuse) throw new Error('Controlled close refusal'); await fd.close() } } } })
+    const pending = owner.writeStream('task-held-stream', { ...metadata, size: 65537 }, async (_offset, length) => { entered.release(); await gate.promise; return Buffer.alloc(length) }, controls()), failure = pending.catch(error => error)
+    await entered.promise; await expect(owner.close(5)).rejects.toMatchObject({ code: 'ATTACHMENT_DRAIN_INCOMPLETE' })
+    gate.release(); expect((await failure).code).toBe('ATTACHMENT_CLOSE_FAILED'); expect(owner.inflightCount).toBeGreaterThan(0)
+    refuse = false; await owner.close(); expect(await readdir(join(attachmentRoot, 'task-held-stream'))).toEqual([])
+  })
+  it('preserves an altered streamed publication and retains cleanup ownership until explicit repair', async () => {
+    const record = { ...metadata, size: 1048577 }, receipt = await owner.writeStream('task-changed-stream', record, async (_offset, length) => Buffer.alloc(length, 4), controls())
+    const path = join(attachmentRoot, 'task-changed-stream', `${record.id}-${record.filename}`)
+    const fd = await open(path, 'r+'); try { await fd.write(Buffer.from([8]), 0, 1, 900000) } finally { await fd.close() }
+    await expect(owner.rollback(receipt)).rejects.toMatchObject({ code: 'ATTACHMENT_PATH_CHANGED' }); expect((await readFile(path))[900000]).toBe(8)
+    await rm(path); await owner.close()
+  })
+})

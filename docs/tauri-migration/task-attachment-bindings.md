@@ -1,5 +1,9 @@
 # Retained task image saves and attachment removal
 
+The October 17 continuation adds selection-only `attachments:save` with bounded
+streaming and private native receipts. See [native picker/import authority](native-attachment-selection.md).
+The original image-save/removal controls below retain their separate image limits.
+
 `TaskAttachmentBackend` borrows the production SQLite manager, actual
 `AgentManager`, `TaskAttachmentFileOwner`, and captured attachment root.
 Attachments use their own profile root, distinct from task workspaces. The

@@ -6,6 +6,22 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #215/#214 attachment continuation adds a Linux GTK picker whose private
+selection receipts hold the original regular-file FD and physical document.
+Public path strings only select an already-owned receipt. Source claims it once
+under the exact task/project/group/agent scope, streams bounded chunks, verifies
+bytes and namespace, joins native retirement and returns metadata without
+appending task attachments. Reload/cancellation cannot release raw reads or
+failed cleanup ownership early. The retained picker/save APIs and native typed
+transport carry current document receipts; forged paths and late results do not
+replay. See [native attachment selection](native-attachment-selection.md).
+Controlled real GTK/Xvfb, FD, SQLite/private-peer and staged Node evidence is
+separate from installed Wry/platform acceptance. Native drop receipts/viewer,
+keyboard/focus and the remaining window/chrome/menu/shortcut/login services
+remain open. No final identity/scheme choice, live profile or release is made.
+Hosted Verify is unavailable: repository Actions disabled
+(actions/permissions enabled:false), awaiting user decision.
+
 #209 native general-preferences and activity continuation: supported notification/tray reads settle independently of unavailable login-at-startup; native reconnect re-reads each generation and ignores retired publications, and writes use accepted receipts without replay. The always-mounted update dialog and General settings read the existing native app version and show updater actions unavailable; no updater/feed policy was added. Eight actual typed-native React controls and eight agent-store heartbeat/disconnect/reconnect/disposal controls pass without preload, retaining the early return before session/turn/transcript transitions. Full renderer1681/staged258 baseline and final affected161app/126staged pass, raw forced typecheck and lint0errors/165existingwarnings pass, both full frontends build. [Domain and limits](production-renderer-recovery.md); [Revision-bound evidence](evidence/issue-209-native-preferences-activity-local-20261017.json) records the final source and limits. Notification-off remains local UI state; Captain prewarm remains native-disabled. Installed OS/UI acceptance and other209 criteria remain open; hosted Verify unavailable: repository Actions disabled, awaiting user decision.
 
 

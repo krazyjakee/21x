@@ -1,3 +1,4 @@
+import type { JsonValue } from '@shared/service-protocol'
 import { expect, it, vi } from 'vitest'
 import { productionBootstrapMessage, getTauriEngineEpoch, getTauriUiDocument, createTauriDesktopTransport, type TauriDesktopApi } from './tauri-desktop-transport'
 
@@ -133,4 +134,19 @@ it('stamps notification document authority and rejects an old show acknowledgeme
   const refused = expect(pending).rejects.toMatchObject({ code: 'STALE_EPOCH' }); await getTauriEngineEpoch(native)
   finishShow({ engineEpoch: 'engine-1', result: { defined: false } }); await refused
   expect(invoke.mock.calls.filter(([command]) => command === 'desktop_invoke')).toEqual([['desktop_invoke', { operation: 'notifications:show', payload: { title: 'Review', body: '' }, engineEpoch: 'engine-1', uiLease: 'document:1' }]])
+})
+
+
+it.each(['attachments:pick','attachments:save'] as const)('requires the exact physical document for %s and rejects late results during replacement bootstrap',async operation=>{
+ let finish!: (value:unknown)=>void, bootstrap!: (value:unknown)=>void
+ const raw=new Promise(resolve=>{finish=resolve}), replacement=new Promise(resolve=>{bootstrap=resolve})
+ const invoke=vi.fn().mockResolvedValueOnce({available:true,protocolVersion:1,engineEpoch:'engine-1',uiLeaseId:'document:1'}).mockImplementation((command:string)=>command==='engine_status'?replacement:raw)
+ const native={core:{invoke},event:{listen:vi.fn()}} as unknown as TauriDesktopApi;await getTauriEngineEpoch(native)
+ const transport=createTauriDesktopTransport(native);const payload:JsonValue=operation==='attachments:pick'?{}:{taskId:'task_fixture',filePath:'/tmp/selected.txt'}
+ const pending=transport.invoke(operation,payload,{engineEpoch:'engine-1',signal:new AbortController().signal}),failure=expect(pending).rejects.toMatchObject({code:'STALE_EPOCH'})
+ expect(invoke).toHaveBeenLastCalledWith('desktop_invoke',{operation,payload,engineEpoch:'engine-1',uiLease:'document:1'})
+ const refreshed=getTauriEngineEpoch(native);finish({engineEpoch:'engine-1',result:{defined:true,value:[]}});await failure
+ bootstrap({available:true,protocolVersion:1,engineEpoch:'engine-1'});await refreshed
+ const before=invoke.mock.calls.length;await expect(transport.invoke(operation,payload,{engineEpoch:'engine-1',signal:new AbortController().signal})).rejects.toMatchObject({code:'DISCONNECTED'});expect(invoke.mock.calls.length).toBe(before)
+ expect(invoke.mock.calls.filter(([command])=>command==='desktop_invoke')).toHaveLength(1)
 })

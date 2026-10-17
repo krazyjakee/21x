@@ -28,6 +28,8 @@ pub mod production;
 #[cfg(feature = "production-service")]
 pub mod production_attachment_files;
 #[cfg(feature = "production-service")]
+pub mod production_attachment_selection;
+#[cfg(feature = "production-service")]
 pub mod production_files;
 #[cfg(feature = "production-service")]
 pub mod production_oauth;

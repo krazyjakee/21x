@@ -1,3 +1,4 @@
+import type { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { UiStateBackend } from './ui-state-backend'
 import { TrayPreferenceBackend } from './tray-preference-backend'
 import { TRAY_PREFERENCE_CODECS } from '../shared/tray-preference-codecs'
@@ -90,6 +91,7 @@ type Authority = Pick<AgentConfigurationBackendOptions, 'isTrustedDesktop' | 'ca
     canUseSourcePlugin(id: string, caller: DesktopCallerContext, operation: TaskSourceOperation | TaskSourcePluginOperation | 'plugin:executeAction'): boolean
   }
 export interface ProductionDesktopBindingOptions {
+  attachmentSelections?: AttachmentSelectionOwner
   authority: Authority
   emit(operation: string, payload: JsonValue, recipient?: DesktopCallerContext): void
   fatal(error: ServiceProtocolError): void
@@ -235,7 +237,7 @@ export class ProductionDesktopBindings {
         const current = (): void => { if (capture() !== binding) throw new ServiceProtocolError('INVALID_REQUEST') }
         return await services.agents.withTaskGroupRequestGuard(() => services.agents.runCliConfigurationMutation(targets, async () => { current(); const result = await effect(); current(); return result }), current, new AbortController().signal)
       } })
-    this.taskAttachments = new TaskAttachmentBackend({ ...owner.getTaskAttachmentBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
+    this.taskAttachments = new TaskAttachmentBackend({ selections: options.attachmentSelections, ...owner.getTaskAttachmentBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask,
       canAccessProject: dynamicAuthority.canAccessProject, canAccessAgent: dynamicAuthority.canAccessAgent })
     this.sources = new TaskSourceBackend({ database: services.db, manager: services.agents, sync: services.sync, plugins: services.registry,

@@ -24,6 +24,7 @@ pub const COMMANDS: &[&str] = &[
     "cliMcp:setToolEnabled",
     "cliMcp:probe",
     "chatImages:saveToTask",
+    "attachments:save",
     "attachments:remove",
     "attachments:open",
     "attachments:download",
@@ -3245,6 +3246,9 @@ fn workspace_file_path(v: &Value) -> bool {
     })
 }
 pub fn valid_request(operation: &str, value: &Value) -> bool {
+    if operation == "attachments:save" {
+        return crate::production_attachment_selection::save_request(value);
+    }
     if crate::production_tray_contracts::COMMANDS.contains(&operation) {
         return crate::production_tray_contracts::request(operation, value);
     }
@@ -3398,6 +3402,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
         })
 }
 pub fn valid_result(operation: &str, value: &Value) -> bool {
+    if operation == "attachments:save" {
+        return crate::production_attachment_selection::save_result(value);
+    }
     if crate::production_tray_contracts::COMMANDS.contains(&operation) {
         return crate::production_tray_contracts::result(value);
     }
@@ -5217,7 +5224,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 228);
+        assert_eq!(COMMANDS.len(), 229);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

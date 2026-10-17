@@ -6,7 +6,7 @@ const image = { name: '../写真.png', mimeType: 'image/png' as const, data: 'iV
 const attachment = { id, filename: '写真.png', size: 12, mime_type: 'image/png', added_at: '2026-10-14T00:00:00.000Z' }
 describe('finite task attachment contracts', () => {
   it('keeps exact existing payload keys, metadata and void removal/open/download', () => {
-    expect(TASK_ATTACHMENT_OPERATIONS).toEqual(['chatImages:saveToTask', 'attachments:remove', 'attachments:open', 'attachments:download'])
+    expect(TASK_ATTACHMENT_OPERATIONS).toEqual(['chatImages:saveToTask', 'attachments:save', 'attachments:remove', 'attachments:open', 'attachments:download'])
     expect(codecs['chatImages:saveToTask'].encodeArguments(['task-1', [image]])).toEqual({ taskId: 'task-1', images: [image] })
     expect(codecs['chatImages:saveToTask'].decodeArguments({ taskId: 'task-1', images: [image] })).toEqual(['task-1', [image]])
     expect(codecs['attachments:remove'].encodeArguments(['task-1', id])).toEqual({ taskId: 'task-1', attachmentId: id })
@@ -19,6 +19,15 @@ describe('finite task attachment contracts', () => {
     expect(codecs['attachments:download'].encodeResult(undefined)).toEqual({ defined: false })
     expect(TASK_ATTACHMENT_LIMITS.openBytes).toBe(64 * 1024 * 1024)
     expect(codecs['chatImages:saveToTask'].encodeResult([attachment])).toEqual({ defined: true, value: [attachment] })
+  })
+  it('encodes save as display path plus literal task only and validates bounded returned metadata', () => {
+    expect(codecs['attachments:save'].encodeArguments(['task-1', '/tmp/写真.png'])).toEqual({ taskId: 'task-1', filePath: '/tmp/写真.png' })
+    expect(codecs['attachments:save'].decodeArguments({ taskId: 'task-1', filePath: '/tmp/写真.png' })).toEqual(['task-1', '/tmp/写真.png'])
+    expect(codecs['attachments:save'].encodeResult(attachment)).toEqual({ defined: true, value: attachment })
+    for (const extra of ['selectionId','leaseId','root','projectId','scope']) expect(() => codecs['attachments:save'].decodeArguments({ taskId: 'task-1', filePath: '/tmp/写真.png', [extra]: 'forged' })).toThrow()
+    expect(codecs['attachments:save'].validateArguments(['task-1', '/tmp/a\0b'])).toBe(false)
+    expect(codecs['attachments:save'].validateResult({ ...attachment, size: TASK_ATTACHMENT_LIMITS.openBytes + 1 })).toBe(false)
+    expect(codecs['attachments:save'].validateWireResult({ defined: true, value: attachment, path: '/private' })).toBe(false)
   })
   it('refuses caller paths/roots/grants, non-UUID selectors and malformed metadata', () => {
     for (const extra of ['path','root','filename','scope','projectId']) expect(() => codecs['attachments:remove'].decodeArguments({ taskId: 'task-1', attachmentId: id, [extra]: undefined } as never)).toThrow()

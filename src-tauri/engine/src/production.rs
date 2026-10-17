@@ -141,7 +141,7 @@ fn request_deadline_at(operation: &str, started: Instant) -> Instant {
     started
         + if matches!(
             operation,
-            "engine.agent.install" | "engine.attachment.download"
+            "engine.agent.install" | "engine.attachment.download" | "engine.attachment.save"
         ) {
             Duration::from_secs(180)
         } else {
@@ -188,6 +188,8 @@ pub struct ProductionCapabilities {
     pub attachment_files: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub attachment_downloads: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
+    pub attachment_selections: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub artifact_clipboard: HostCapability,
     #[serde(default = "unsupported_host_capability")]
@@ -253,7 +255,12 @@ pub struct ProductionOAuthHost {
     pub invoke: Arc<dyn Fn(String, Value, String) -> HostFuture<Value> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
 }
+pub struct ProductionAttachmentSelectionHost {
+    pub invoke: Arc<dyn Fn(String, Value, String) -> HostFuture<Value> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionNativeHost {
+    pub attachment_selection: Option<ProductionAttachmentSelectionHost>,
     pub oauth: Option<ProductionOAuthHost>,
     pub workspace_cleanup: Option<ProductionCleanupHost>,
     pub workspace_file: Option<ProductionWorkspaceHost>,
@@ -575,6 +582,8 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || capabilities.voice != HostCapability::Unsupported
         || capabilities.oauth_flows == HostCapability::Host
             && capabilities.external_urls != HostCapability::Host
+        || capabilities.attachment_selections == HostCapability::Host
+            && capabilities.ui != HostCapability::Host
         || capabilities.attachment_files == HostCapability::Host
             && capabilities.ui != HostCapability::Host
         || capabilities.attachment_downloads == HostCapability::Host
@@ -925,6 +934,8 @@ impl ProductionEngine {
                 && host.notification.is_some())
             || !energy_host_matches(&launch.descriptor.capabilities.energy, &host)
             || !ui_host_matches(&launch.descriptor.capabilities.ui, &host)
+            || (launch.descriptor.capabilities.attachment_selections == HostCapability::Host)
+                != host.attachment_selection.is_some()
             || !attachment_host_matches(&launch.descriptor.capabilities.attachment_files, &host)
             || !attachment_download_host_matches(
                 &launch.descriptor.capabilities.attachment_downloads,
@@ -1270,6 +1281,97 @@ impl ProductionEngine {
     ) -> Result<Value, EngineError> {
         self.attachment_request(epoch, payload, lease_id, true)
             .await
+    }
+    /// Native pick delivery is private; no renderer can mint selection grants.
+    pub async fn offer_attachment_selections(
+        &self,
+        epoch: &str,
+        payload: Value,
+    ) -> Result<(), EngineError> {
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.attachment_selections != HostCapability::Host
+            || !crate::production_attachment_selection::offer(&payload)
+        {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        let result = self
+            .request("engine.attachment.selection.offer", payload)
+            .await?;
+        if result != json!({"accepted":true}) {
+            return Err(EngineError::new("INVALID_REQUEST"));
+        }
+        Ok(())
+    }
+    pub async fn pick_attachments(&self, epoch: &str, lease: &str) -> Result<Value, EngineError> {
+        if epoch != self.epoch() || !crate::production_ui_contracts::lease_id(&json!(lease)) {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        if self.0.descriptor.capabilities.attachment_selections != HostCapability::Host {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        let host = self
+            .0
+            .host
+            .attachment_selection
+            .as_ref()
+            .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?;
+        let value = (host.invoke)(
+            "native.attachment.pick".into(),
+            json!({"leaseId":lease}),
+            epoch.into(),
+        )
+        .await?;
+        if !contracts::object(&value, &["defined", "value"], &[])
+            || value["defined"] != true
+            || !value["value"].as_array().is_some_and(|rows| {
+                rows.len() <= 16
+                    && rows
+                        .iter()
+                        .all(crate::production_attachment_selection::path)
+            })
+        {
+            return Err(EngineError::new("INVALID_RESULT"));
+        }
+        Ok(value)
+    }
+    pub async fn save_attachment(
+        &self,
+        epoch: &str,
+        mut payload: Value,
+        lease: &str,
+    ) -> Result<Value, EngineError> {
+        if epoch != self.epoch() || !crate::production_ui_contracts::lease_id(&json!(lease)) {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.attachment_selections != HostCapability::Host
+            || !contracts::object(&payload, &["taskId", "filePath"], &[])
+            || !contracts::id(&payload["taskId"])
+            || !crate::production_attachment_selection::path(&payload["filePath"])
+        {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        payload["leaseId"] = json!(lease);
+        self.request("engine.attachment.save", payload).await
     }
     pub async fn check_attachment_download(
         &self,
@@ -1642,6 +1744,13 @@ impl ProductionEngine {
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
                         "engine.ownerState" => valid_owner_state(result),
+                        "engine.attachment.selection.offer" => {
+                            contracts::object(result, &["accepted"], &[])
+                                && result["accepted"].is_boolean()
+                        }
+                        "engine.attachment.save" => {
+                            crate::production_attachment_selection::save_result(result)
+                        }
                         "engine.oauth.callback" => {
                             crate::production_oauth::delivery_receipt(result)
                         }
@@ -1784,6 +1893,36 @@ impl ProductionEngine {
         let payload = &frame["payload"];
         let operation = frame["operation"].as_str().unwrap_or("");
         match operation {
+            "host.attachment.selection.read"
+            | "host.attachment.selection.retire"
+            | "host.attachment.selection.finish" => {
+                if !crate::production_attachment_selection::request(operation, payload) {
+                    return Err(EngineError::new("INVALID_ARGUMENTS"));
+                }
+                let retiring = operation == "host.attachment.selection.retire";
+                if self.0.descriptor.capabilities.attachment_selections != HostCapability::Host {
+                    return Err(EngineError::new("UNKNOWN_OPERATION"));
+                }
+                if !self.0.prepared.load(Ordering::SeqCst)
+                    || self.0.closed.load(Ordering::SeqCst)
+                    || !retiring
+                        && (!self.0.ready.load(Ordering::SeqCst)
+                            || self.0.stopping.load(Ordering::SeqCst))
+                {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                let host = self
+                    .0
+                    .host
+                    .attachment_selection
+                    .as_ref()
+                    .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?;
+                let result = (host.invoke)(operation.into(), payload.clone(), self.epoch()).await?;
+                if !crate::production_attachment_selection::result(operation, &result) {
+                    return Err(EngineError::new("INVALID_RESULT"));
+                }
+                Ok(result)
+            }
             "host.oauth.register" | "host.oauth.open" | "host.oauth.retire" => {
                 let retire = operation == "host.oauth.retire";
                 let valid = if operation == "host.oauth.register" {
@@ -2014,6 +2153,9 @@ impl ProductionEngine {
                 }
                 if let Some(files) = &self.0.host.attachment_file {
                     (files.close)().await?;
+                }
+                if let Some(selection) = &self.0.host.attachment_selection {
+                    (selection.close)().await?;
                 }
                 if let Some(files) = &self.0.host.attachment_download {
                     (files.close)().await?;
@@ -3029,6 +3171,7 @@ mod tests {
                 workspace_cleanup: HostCapability::Unsupported,
                 attachment_files: HostCapability::Unsupported,
                 attachment_downloads: HostCapability::Unsupported,
+                attachment_selections: HostCapability::Unsupported,
                 artifact_clipboard: HostCapability::Unsupported,
                 tray: HostCapability::Unsupported,
                 oauth_flows: HostCapability::Unsupported,
@@ -3157,6 +3300,55 @@ mod tests {
                     .await
                     .unwrap()
                     .unwrap();
+            }
+        }
+        #[tokio::test]
+        async fn private_attachment_selection_results_use_exact_pending_validators_and_no_public_dispatch(
+        ) {
+            for (operation, result) in [
+                (
+                    "engine.attachment.selection.offer",
+                    json!({"accepted":true}),
+                ),
+                (
+                    "engine.attachment.save",
+                    json!({"defined":true,"value":{"id":"61f07006-c85b-438e-83a7-497c77b0dcae","filename":"selected.txt","size":2000000,"mime_type":"text/plain","added_at":"2026-10-17T00:00:00Z"}}),
+                ),
+            ] {
+                let mut fixture = Fixture::new(ui_host());
+                let request = fixture.pending_request_for(operation).await;
+                fixture.engine.accept(json!({"kind":"response","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"host:1","result":result})).await.unwrap();
+                assert_eq!(request.await.unwrap().unwrap(), result);
+                assert_eq!(
+                    fixture
+                        .engine
+                        .invoke("transport-fixture", operation, json!({}))
+                        .await
+                        .unwrap_err()
+                        .code,
+                    "UNKNOWN_OPERATION"
+                );
+                fixture.reap().await;
+            }
+        }
+        #[tokio::test]
+        async fn private_attachment_selection_results_refuse_callback_paths_secrets_or_foreign_authority(
+        ) {
+            for (operation, result) in [
+                (
+                    "engine.attachment.selection.offer",
+                    json!({"accepted":true,"selectionId":"foreign"}),
+                ),
+                (
+                    "engine.attachment.save",
+                    json!({"defined":true,"value":{"id":"61f07006-c85b-438e-83a7-497c77b0dcae","filename":"selected.txt","size":3,"mime_type":"text/plain","added_at":"2026-10-17T00:00:00Z","path":"/private/canary"}}),
+                ),
+            ] {
+                let mut fixture = Fixture::new(ui_host());
+                let request = fixture.pending_request_for(operation).await;
+                assert_eq!(fixture.engine.accept(json!({"kind":"response","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"host:1","result":result})).await.unwrap_err().code,"INVALID_RESULT");
+                assert_eq!(request.await.unwrap().unwrap_err().code, "INVALID_RESULT");
+                fixture.reap().await;
             }
         }
         #[tokio::test]
@@ -3817,6 +4009,7 @@ mod tests {
             workspace_file: None,
             attachment_file: None,
             attachment_download: None,
+            attachment_selection: None,
             artifact_clipboard: None,
             event_sink: Arc::new(|_| Ok(())),
             open_external: None,

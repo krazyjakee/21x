@@ -24,7 +24,7 @@ it('retains exact installer work beyond ordinary deadlines and aborts it at its 
   expect(serviceOperationTimeoutMs('engine.agent.install.extra')).toBe(30000)
 })
 
-it.each(['attachments:download', 'engine.attachment.download', 'host.attachment.download'])('retains %s through a bounded save-dialog wait without extending related operations', async operation => {
+it.each(['attachments:pick', 'attachments:save', 'engine.attachment.save', 'attachments:download', 'engine.attachment.download', 'host.attachment.download'])('retains %s through a bounded save-dialog wait without extending related operations', async operation => {
   vi.useFakeTimers()
   const handlers = new Map<string, { signal: AbortSignal; finish(value: { ok: boolean }): void }>()
   const extra = `${operation}.extra`

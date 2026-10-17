@@ -303,7 +303,6 @@ it('uses exact codecs and trusted host metadata; missing binary/file bindings ne
   await expect(desktopApi.settings.get('api_key')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   const before = f.invoke.mock.calls.length
   await expect(desktopApi.voice.pushAudio('turn', new Uint8Array([1, 2]))).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE', capability: 'voice.pushAudio' })
-  await expect(desktopApi.attachments.pick()).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
   expect(() => desktopApi.webUtils.getPathForFile(new File([], 'private'))).toThrow('unavailable')
   expect(typeof desktopApi.commander.onEvent).toBe('function'); expect(Reflect.get(desktopApi, 'browser')).toBeUndefined()
   expect(f.host.supports('commander.send')).toBe(true); expect(f.invoke.mock.calls.length).toBe(before)
@@ -419,7 +418,7 @@ it('hydrates the tray preference as a read but fences mutations and requires the
   f.results.set('app:getMinimizeToTray', { enabled: true, action: 'hide' })
   await expect(desktopApi.app.getMinimizeToTray()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })
-it('binds the 234 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 236 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -428,7 +427,7 @@ it('binds the 234 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(234)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(236)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -1140,4 +1139,24 @@ it('hydrates permission availability through the captured document while fencing
   })
   await f.host.reconnect(); expect(observed).toBe('granted')
   expect(f.invoke.mock.calls.filter(([command]) => command === 'desktop_invoke')).toEqual([['desktop_invoke', { operation: 'app:getNotificationPermission', payload: {}, engineEpoch: 'engine-1', uiLease: 'document-1' }]])
+})
+
+
+it('binds retained attachment picker/save through actual facade codecs and physical document transport', async () => {
+ const f=fixture(true), path='/tmp/写真.txt', record={id:'61f07006-c85b-438e-83a7-497c77b0dcae',filename:'写真.txt',size:3,mime_type:'text/plain',added_at:'2026-10-17T00:00:00.000Z'}
+ f.results.set('attachments:pick',[path]);f.results.set('attachments:save',record);f.host.setRehydrator(async()=>{});await f.host.reconnect()
+ expect(await f.host.api.attachments.pick()).toEqual([path]);expect(f.invoke).toHaveBeenLastCalledWith('desktop_invoke',{operation:'attachments:pick',payload:{},engineEpoch:'engine-1',uiLease:'document-1'})
+ expect(await f.host.api.attachments.save('task_fixture',path)).toEqual(record);expect(f.invoke).toHaveBeenLastCalledWith('desktop_invoke',{operation:'attachments:save',payload:{taskId:'task_fixture',filePath:path},engineEpoch:'engine-1',uiLease:'document-1'})
+ const count=f.invoke.mock.calls.length
+ await expect(Reflect.apply(f.host.api.attachments.pick,null,[{path:'/etc/passwd'}])).rejects.toMatchObject({code:'INVALID_ARGUMENTS'})
+ await expect(Reflect.apply(f.host.api.attachments.save,null,['task_fixture',path,{selectionId:record.id}])).rejects.toMatchObject({code:'INVALID_ARGUMENTS'})
+ await expect(f.host.api.attachments.save('../foreign','/etc/passwd')).rejects.toMatchObject({code:'INVALID_ARGUMENTS'})
+ expect(f.invoke.mock.calls.length).toBe(count);expect(()=>f.host.api.webUtils.getPathForFile(new File([],'private'))).toThrow('unavailable')
+})
+it.each(['attachments:pick','attachments:save'] as const)('fences accepted %s receipts after document replacement and never replays the mutation',async operation=>{
+ const f=fixture(true);f.host.setRehydrator(async()=>{});await f.host.reconnect();const raw=deferred<unknown>();f.invoke.mockImplementationOnce(()=>raw.promise)
+ const pending=operation==='attachments:pick'?f.host.api.attachments.pick():f.host.api.attachments.save('task_fixture','/tmp/selected.txt')
+ const failure=expect(pending).rejects.toMatchObject({code:'STALE_EPOCH'});f.changeUiLease();await f.host.reconnect()
+ raw.resolve({engineEpoch:'engine-1',result:{defined:true,value:operation==='attachments:pick'?['/tmp/selected.txt']:{id:'61f07006-c85b-438e-83a7-497c77b0dcae',filename:'selected.txt',size:3,mime_type:'text/plain',added_at:'2026-10-17T00:00:00.000Z'}}});await failure
+ expect(f.invoke.mock.calls.filter(([command,args])=>command==='desktop_invoke'&&args?.operation===operation)).toHaveLength(1)
 })

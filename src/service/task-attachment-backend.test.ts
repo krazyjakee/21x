@@ -1,3 +1,4 @@
+import { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, symlinkSync, linkSync, renameSync } from 'node:fs'
 import { link, open } from 'node:fs/promises'
@@ -269,7 +270,7 @@ describe('actual task attachment bindings and accepted-effect ownership', () => 
   })
   it('saves real sanitized images and durable records, emits ordinary task updates, and removes only the exact file', async () => {
     const value = task(), ambient = vi.spyOn(db, 'getAttachmentsDir').mockImplementation(() => { throw new Error('Ambient directory forbidden') })
-    expect(Object.keys(backend.operationSchemas(caller))).toEqual(TASK_ATTACHMENT_OPERATIONS.filter(operation => operation !== 'attachments:open' && operation !== 'attachments:download'))
+    expect(Object.keys(backend.operationSchemas(caller))).toEqual(TASK_ATTACHMENT_OPERATIONS.filter(operation => operation !== 'attachments:save' && operation !== 'attachments:open' && operation !== 'attachments:download'))
     const first = await call('chatImages:saveToTask', [value.id, [image]]), second = await call('chatImages:saveToTask', [value.id, [image]])
     expect(first[0]?.filename).toBe('写真.png'); expect(second[0]?.filename).toBe('写真-2.png'); expect(metadata(value.id)).toEqual([...first, ...second]); expect(events).toEqual([{ taskId: value.id, attachments: first }, { taskId: value.id, attachments: [...first, ...second] }])
     const selected = first[0]!, path = join(attachmentRoot, value.id, `${selected.id}-${selected.filename}`); expect(readFileSync(path)).toEqual(Buffer.from(image.data, 'base64'))
@@ -327,4 +328,46 @@ describe('actual task attachment bindings and accepted-effect ownership', () => 
     await expect(call('chatImages:saveToTask', [value.id, [image]], undefined, { ...caller, engineEpoch: 'old' })).rejects.toMatchObject({ code: 'STALE_EPOCH' })
     read = false; await expect(call('chatImages:saveToTask', [value.id, [image]])).rejects.toMatchObject({ code: 'INVALID_REQUEST' }); expect(metadata(value.id)).toEqual([])
   })
+})
+
+
+describe('native selection import under actual Source task ownership',()=>{
+ const identity={...caller,uiLeaseId:'ui_selection_fixture'}, selected={selectionId:'61f07006-c85b-438e-83a7-497c77b0dcae',path:'/tmp/selected.txt',filename:'selected.txt',size:1048577}
+ let selectionOwner:AttachmentSelectionOwner, reads:number, retire:ReturnType<typeof vi.fn<() => Promise<{retired:true}>>>
+ async function enable(readChunk?:(offset:number,length:number)=>Promise<Buffer>){
+  await backend.close();reads=0;retire=vi.fn(async()=>({retired:true as const}))
+  selectionOwner=new AttachmentSelectionOwner({finish:async()=>({verified:true}),read:async request=>{reads++;return{data:(await (readChunk?.(request.offset,request.length)??Promise.resolve(Buffer.alloc(request.length,7)))).toString('base64')}},retire},()=>{if(!ownerValid)throw new ServiceProtocolError('DISCONNECTED')})
+  options={...options,selections:selectionOwner};backend=new TaskAttachmentBackend(options)
+  expect(selectionOwner.offer({leaseId:identity.uiLeaseId,selections:[selected]})).toEqual({accepted:true})
+ }
+ afterEach(async()=>{if(selectionOwner)await selectionOwner.close()})
+ it('supports selection before task creation, returns metadata only, and cannot read an unselected path',async()=>{
+  await enable();const value=task()
+  await expect(call('attachments:save',[value.id,'/etc/passwd'],undefined,identity)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(reads).toBe(0)
+  const record=await call('attachments:save',[value.id,selected.path],undefined,identity)
+  expect(record).toMatchObject({filename:selected.filename,size:selected.size,mime_type:'text/plain'});expect(reads).toBe(17);expect(retire).toHaveBeenCalledTimes(1)
+  expect(metadata(value.id)).toEqual([]);expect(events).toEqual([])
+  const path=join(attachmentRoot,value.id,`${record.id}-${record.filename}`);expect(readFileSync(path)).toEqual(Buffer.alloc(selected.size,7))
+  db.updateTask(value.id,{attachments:[record]});expect(metadata(value.id)).toEqual([record])
+  await expect(call('attachments:save',[value.id,selected.path],undefined,identity)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(reads).toBe(17)
+ })
+ it('refuses wrong document and revoked task/project write scope before reading',async()=>{
+  await enable();const value=task()
+  await expect(call('attachments:save',[value.id,selected.path],undefined,{...identity,uiLeaseId:'ui_other'})).rejects.toMatchObject({code:'INVALID_REQUEST'})
+  write=false;await expect(call('attachments:save',[value.id,selected.path],undefined,identity)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(reads).toBe(0)
+  write=true;options.canAccessProject=()=>false;await expect(call('attachments:save',[value.id,selected.path],undefined,identity)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(reads).toBe(0)
+ })
+ it('captures task project binding across a held native read and rolls back only its import prefix',async()=>{
+  const entered=held(),gate=held();releases.push(gate.release);await enable(async(offset,length)=>{if(offset){entered.release();await gate.promise}return Buffer.alloc(length,2)})
+  const value=task(),outcome=call('attachments:save',[value.id,selected.path],undefined,identity).catch(e=>e);await entered.promise
+  const project=db.createProject({name:'Replacement project'})!;db.db.prepare('UPDATE tasks SET project_id=? WHERE id=?').run(project.id,value.id)
+  gate.release();expect(await outcome).toMatchObject({code:'INVALID_REQUEST'});expect(retire).toHaveBeenCalledTimes(1);expect(readdirSync(join(attachmentRoot,value.id))).toEqual([]);expect(metadata(value.id)).toEqual([])
+ })
+ it('joins failed native retirement before publication acceptance, retains retry ownership, and does not replay',async()=>{
+  await enable();const value=task();retire.mockRejectedValueOnce(new Error('Controlled native retire failure'))
+  await expect(call('attachments:save',[value.id,selected.path],undefined,identity)).rejects.toMatchObject({code:'INTERNAL_ERROR'})
+  expect(readdirSync(join(attachmentRoot,value.id))).toEqual([]);expect(metadata(value.id)).toEqual([])
+  await expect(call('attachments:save',[value.id,selected.path],undefined,identity)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(reads).toBe(17)
+  await selectionOwner.close();expect(retire).toHaveBeenCalledTimes(2)
+ })
 })

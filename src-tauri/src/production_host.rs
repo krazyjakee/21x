@@ -40,6 +40,8 @@ use native_energy::NativeEnergyOwner;
 pub(crate) mod native_artifact_clipboard;
 #[path = "native_attachment_download.rs"]
 pub(crate) mod native_attachment_download;
+#[path = "native_attachment_selection.rs"]
+pub(crate) mod native_attachment_selection;
 #[path = "native_clipboard.rs"]
 pub(crate) mod native_clipboard;
 #[path = "production_ui.rs"]
@@ -459,6 +461,24 @@ async fn desktop_invoke(
         state.ui.assert_publish(&window, &engine_epoch, &lease)?;
         return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
     }
+    if matches!(operation.as_str(), "attachments:pick" | "attachments:save") {
+        let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        let result = if operation == "attachments:pick" {
+            if payload != json!({}) {
+                return Err(EngineError::new("INVALID_ARGUMENTS"));
+            }
+            engine.pick_attachments(&engine_epoch, &lease).await?
+        } else {
+            engine
+                .save_attachment(&engine_epoch, payload, &lease)
+                .await?
+        };
+        authorize(&window)?;
+        available_engine(window.app_handle(), Some(&engine_epoch))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
+    }
     if matches!(
         operation.as_str(),
         "ui:publishState"
@@ -812,6 +832,11 @@ async fn start(
             } else {
                 HostCapability::Unsupported
             },
+            attachment_selections: if cfg!(target_os = "linux") {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             attachment_files: if cfg!(target_os = "linux") {
                 HostCapability::Host
             } else {
@@ -920,6 +945,12 @@ async fn start(
     };
     let ui_command = ui.command_callback(app.clone(), native_work.clone());
     let installer_progress = ui.installer_progress_callback(app.clone(), native_work.clone());
+    let attachment_selection = native_attachment_selection::host(
+        app,
+        native_work.clone(),
+        ui.clone(),
+        descriptor.paths.profile_root.clone(),
+    );
     ProductionEngine::start(
         TrustedProductionLaunch {
             descriptor,
@@ -931,6 +962,7 @@ async fn start(
             workspace_file,
             attachment_file,
             attachment_download,
+            attachment_selection,
             artifact_clipboard,
             event_sink: Arc::new(move |frame| {
                 let frame = if is_document_notice(frame["operation"].as_str().unwrap_or("")) {

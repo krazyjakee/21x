@@ -32,7 +32,6 @@ function fail(code: TaskAttachmentFileCode): never { throw new TaskAttachmentFil
 const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
 const sameNode = (a: BigIntStats, b: BigIntStats): boolean => a.dev === b.dev && a.ino === b.ino && a.isDirectory() === b.isDirectory() && a.isFile() === b.isFile()
 const sameBytes = (a: BigIntStats, b: BigIntStats): boolean => sameNode(a, b) && a.size === b.size && a.nlink === b.nlink && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs
-const hash = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
 interface DirectoryProof { taskId: string; path: string; info: BigIntStats }
 interface Handle { fd: TaskAttachmentFileHandle; closing?: Promise<void> }
 interface Publication { proof: DirectoryProof; paths: Set<string>; info: BigIntStats; digest: string; size: number; receipt: object }
@@ -114,7 +113,7 @@ export class TaskAttachmentFileOwner {
     await this.rootProof(); const info = await this.fs.lstat(proof.path); this.profile()
     if (!info.isDirectory() || info.isSymbolicLink() || !sameNode(info, proof.info) || await this.fs.realpath(proof.path) !== proof.path) fail('ATTACHMENT_PATH_CHANGED'); this.profile()
   }
-  private file(info: BigIntStats, size?: number, links = 1): void { if (!info.isFile() || info.isSymbolicLink() || info.nlink !== BigInt(links) || info.size < 0n || info.size > BigInt(TASK_ATTACHMENT_LIMITS.imageBytes) || size !== undefined && info.size !== BigInt(size)) fail(info.size > BigInt(TASK_ATTACHMENT_LIMITS.imageBytes) ? 'ATTACHMENT_CAPACITY' : 'ATTACHMENT_PATH_REFUSED') }
+  private file(info: BigIntStats, size?: number, links = 1): void { if (!info.isFile() || info.isSymbolicLink() || info.nlink !== BigInt(links) || info.size < 0n || info.size > BigInt(TASK_ATTACHMENT_LIMITS.openBytes) || size !== undefined && info.size !== BigInt(size)) fail(info.size > BigInt(TASK_ATTACHMENT_LIMITS.openBytes) ? 'ATTACHMENT_CAPACITY' : 'ATTACHMENT_PATH_REFUSED') }
   private async openOwned(path: string, flags: number, controls?: TaskAttachmentFileControls): Promise<Handle> {
     if (controls) this.current(controls); else this.profile()
     const fd = await this.fs.open(path, flags | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0), 0o600), receipt = { fd }
@@ -127,11 +126,17 @@ export class TaskAttachmentFileOwner {
     if (!receipt.closing) { const raw = Promise.resolve().then(() => receipt.fd.close()); receipt.closing = raw; void raw.then(() => this.handles.delete(receipt), () => { if (receipt.closing === raw) receipt.closing = undefined }) }
     try { await receipt.closing } catch { fail('ATTACHMENT_CLOSE_FAILED') }
   }
-  private async bytes(fd: TaskAttachmentFileHandle, size: number): Promise<Buffer> {
-    if (size > TASK_ATTACHMENT_LIMITS.imageBytes) fail('ATTACHMENT_CAPACITY')
-    const out = Buffer.alloc(size); let read = 0
-    while (read < size) { this.profile(); const result = await fd.read(out, read, Math.min(65536, size - read), read); if (!Number.isSafeInteger(result.bytesRead) || result.bytesRead < 1 || result.bytesRead > size - read) fail('ATTACHMENT_PATH_CHANGED'); read += result.bytesRead }
-    return out
+  private async digest(fd: TaskAttachmentFileHandle, size: number, controls?: TaskAttachmentFileControls): Promise<string> {
+    if (!Number.isSafeInteger(size) || size < 0 || size > TASK_ATTACHMENT_LIMITS.openBytes) fail('ATTACHMENT_CAPACITY')
+    const buffer = Buffer.alloc(Math.min(65536, size)), digest = createHash('sha256'); let read = 0
+    while (read < size) {
+      if (controls) this.current(controls); else this.profile()
+      const length = Math.min(buffer.length, size - read), result = await fd.read(buffer, 0, length, read)
+      if (!Number.isSafeInteger(result.bytesRead) || result.bytesRead < 1 || result.bytesRead > length) fail('ATTACHMENT_PATH_CHANGED')
+      digest.update(buffer.subarray(0, result.bytesRead)); read += result.bytesRead
+      if (controls) this.current(controls); else this.profile()
+    }
+    return digest.digest('hex')
   }
   private async verifyOpeningDirectory(proof: DirectoryProof | null, controls: TaskAttachmentFileControls): Promise<void> {
     for (const root of this.roots) {
@@ -193,29 +198,53 @@ export class TaskAttachmentFileOwner {
   /** Receipts are owner-produced opaque objects, never accepted over RPC. */
   write(taskId: string, attachment: FileAttachmentRecord, rawBytes: Buffer, controls: TaskAttachmentFileControls): Promise<object> {
     if (!taskAttachmentRecord(attachment) || !Buffer.isBuffer(rawBytes) || attachment.size !== rawBytes.length || rawBytes.length > TASK_ATTACHMENT_LIMITS.imageBytes) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
-    const metadata = Object.freeze({ ...attachment }), bytes = Buffer.from(rawBytes)
+    const bytes = Buffer.from(rawBytes)
+    return this.writeStream(taskId, attachment, async (offset, length) => bytes.subarray(offset, offset + length), controls)
+  }
+  /** The producer is an app-owned native selection lease, never a renderer
+   * pathname. Chunks and verification scratch space stay bounded at 64 KiB;
+   * the complete file is never allocated in memory. */
+  writeStream(taskId: string, attachment: FileAttachmentRecord, read: (offset: number, length: number) => Promise<Buffer>, controls: TaskAttachmentFileControls): Promise<object> {
+    if (!taskAttachmentRecord(attachment) || attachment.size > TASK_ATTACHMENT_LIMITS.openBytes || typeof read !== 'function') return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
+    const metadata = Object.freeze({ ...attachment })
     let accepted: Publication | undefined
     return this.run(taskId, controls, async guard => {
       const proof = (await this.directory(taskId, true, guard))!, path = join(proof.path, `${metadata.id}-${metadata.filename}`), stage = join(proof.path, `.attachment-${randomUUID()}.tmp`)
       let handle: Handle | undefined, publication: Publication | undefined, written = 0
+      const acknowledged = createHash('sha256')
       try {
         handle = await this.openOwned(stage, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL, guard)
         const initial = await handle.fd.stat(); this.file(initial, 0)
-        publication = { proof, paths: new Set([stage]), info: initial, digest: hash(bytes), size: bytes.length, receipt: Object.freeze({}) }
+        publication = { proof, paths: new Set([stage]), info: initial, digest: acknowledged.copy().digest('hex'), size: 0, receipt: Object.freeze({}) }
         accepted = publication
         this.retiring.add(publication); this.current(guard); await this.verifyDirectory(proof)
-        while (written < bytes.length) { this.current(guard); const result = await handle.fd.write(bytes, written, Math.min(65536, bytes.length - written), written); if (!Number.isSafeInteger(result.bytesWritten) || result.bytesWritten < 1 || result.bytesWritten > bytes.length - written) fail('ATTACHMENT_IO_FAILED'); written += result.bytesWritten; this.current(guard) }
-        const ready = await handle.fd.stat(); this.file(ready, bytes.length); if (!sameNode(initial, ready) || hash(await this.bytes(handle.fd, bytes.length)) !== publication.digest) fail('ATTACHMENT_PATH_CHANGED')
+        while (written < metadata.size) {
+          const length = Math.min(65536, metadata.size - written)
+          const raw = await this.step(guard, () => read(written, length))
+          if (!Buffer.isBuffer(raw) || raw.length !== length) fail('ATTACHMENT_PATH_CHANGED')
+          // Detach from the producer before awaiting any destination effect.
+          const chunk = Buffer.from(raw); let offset = 0
+          while (offset < chunk.length) {
+            this.current(guard)
+            const available = chunk.length - offset, result = await handle.fd.write(chunk, offset, available, written)
+            if (!Number.isSafeInteger(result.bytesWritten) || result.bytesWritten < 1 || result.bytesWritten > available) fail('ATTACHMENT_IO_FAILED')
+            acknowledged.update(chunk.subarray(offset, offset + result.bytesWritten)); offset += result.bytesWritten; written += result.bytesWritten
+            this.current(guard)
+          }
+        }
+        publication.digest = acknowledged.copy().digest('hex'); publication.size = written
+        const ready = await handle.fd.stat(); this.file(ready, metadata.size)
+        if (!sameNode(initial, ready) || await this.digest(handle.fd, metadata.size, guard) !== publication.digest) fail('ATTACHMENT_PATH_CHANGED')
         await handle.fd.sync(); this.current(guard); const verified = await handle.fd.stat(); if (!sameBytes(ready, verified)) fail('ATTACHMENT_PATH_CHANGED'); publication.info = verified
         await this.closeHandle(handle); handle = undefined; this.current(guard); await this.verifyDirectory(proof)
         const current = await this.step(guard, () => this.fs.lstat(stage)); if (!sameBytes(current, verified)) fail('ATTACHMENT_PATH_CHANGED')
         // link is atomic no-replace publication; rename-overwrite is never used.
         this.current(guard); await this.fs.link(stage, path); publication.paths.add(path)
         this.current(guard); await this.verifyDirectory(proof)
-        const linked = await this.fs.lstat(path); this.file(linked, bytes.length, 2); if (!sameNode(linked, verified)) fail('ATTACHMENT_PATH_CHANGED')
+        const linked = await this.fs.lstat(path); this.file(linked, metadata.size, 2); if (!sameNode(linked, verified)) fail('ATTACHMENT_PATH_CHANGED')
         const staged = await this.fs.lstat(stage); if (!sameBytes(linked, staged)) fail('ATTACHMENT_PATH_CHANGED')
         this.current(guard); await this.fs.unlink(stage); publication.paths.delete(stage)
-        const final = await this.fs.lstat(path); this.file(final, bytes.length); if (!sameNode(final, verified) || final.mtimeNs !== verified.mtimeNs) fail('ATTACHMENT_PATH_CHANGED'); publication.info = final
+        const final = await this.fs.lstat(path); this.file(final, metadata.size); if (!sameNode(final, verified) || final.mtimeNs !== verified.mtimeNs) fail('ATTACHMENT_PATH_CHANGED'); publication.info = final
         this.current(guard); await this.verifyDirectory(proof)
         this.publications.set(publication.receipt, publication); this.pendingPublications.add(publication); this.retiring.delete(publication); return publication.receipt
       } catch (error) {
@@ -224,8 +253,8 @@ export class TaskAttachmentFileOwner {
           // syscall or a changed prefix remains preserved for explicit repair.
           if (publication) {
             const info = await handle.fd.stat(); this.file(info)
-            if (sameNode(info, publication.info) && info.size === BigInt(written) && hash(await this.bytes(handle.fd, written)) === hash(bytes.subarray(0, written)) && sameBytes(info, await handle.fd.stat())) {
-              publication.info = info; publication.size = written; publication.digest = hash(bytes.subarray(0, written))
+            if (sameNode(info, publication.info) && info.size === BigInt(written) && await this.digest(handle.fd, written) === acknowledged.copy().digest('hex') && sameBytes(info, await handle.fd.stat())) {
+              publication.info = info; publication.size = written; publication.digest = acknowledged.copy().digest('hex')
             }
           }
           await this.closeHandle(handle); handle = undefined
@@ -257,7 +286,7 @@ export class TaskAttachmentFileOwner {
     for (const item of present) {
       this.file(item.info, publication.size, present.length); if (!sameNode(item.info, publication.info)) fail('ATTACHMENT_PATH_CHANGED')
       const handle = await this.openOwned(item.path, constants.O_RDONLY)
-      try { const stat = await handle.fd.stat(); if (!sameBytes(stat, item.info) || hash(await this.bytes(handle.fd, publication.size)) !== publication.digest || !sameBytes(await handle.fd.stat(), item.info)) fail('ATTACHMENT_PATH_CHANGED') } finally { await this.closeHandle(handle) }
+      try { const stat = await handle.fd.stat(); if (!sameBytes(stat, item.info) || await this.digest(handle.fd, publication.size) !== publication.digest || !sameBytes(await handle.fd.stat(), item.info)) fail('ATTACHMENT_PATH_CHANGED') } finally { await this.closeHandle(handle) }
       await this.verifyDirectory(publication.proof); if (!sameBytes(await this.fs.lstat(item.path), item.info)) fail('ATTACHMENT_PATH_CHANGED')
     }
     // Every named link is ours and every byte verified before the first unlink.
@@ -272,12 +301,12 @@ export class TaskAttachmentFileOwner {
     if (!taskAttachmentRecord(attachment) || !taskAttachmentId(attachment.id) || !taskAttachmentFilename(attachment.filename)) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
     const metadata = Object.freeze({ ...attachment })
     return this.run(taskId, controls, async guard => {
-      if (metadata.size > TASK_ATTACHMENT_LIMITS.imageBytes) fail('ATTACHMENT_CAPACITY')
+      if (metadata.size > TASK_ATTACHMENT_LIMITS.openBytes) fail('ATTACHMENT_CAPACITY')
       const proof = await this.directory(taskId, false, guard); if (!proof) return
       const path = join(proof.path, `${metadata.id}-${metadata.filename}`); let before: BigIntStats
       try { before = await this.step(guard, () => this.fs.lstat(path)) } catch (error) { if (!missing(error)) throw error; await this.verifyDirectory(proof); this.current(guard); return }
       this.file(before, metadata.size); const handle = await this.openOwned(path, constants.O_RDONLY, guard)
-      try { this.current(guard); const fdInfo = await this.step(guard, () => handle.fd.stat()); if (!sameBytes(before, fdInfo)) fail('ATTACHMENT_PATH_CHANGED'); await this.step(guard, () => this.bytes(handle.fd, metadata.size)); if (!sameBytes(before, await this.step(guard, () => handle.fd.stat()))) fail('ATTACHMENT_PATH_CHANGED') } finally { await this.closeHandle(handle) }
+      try { this.current(guard); const fdInfo = await this.step(guard, () => handle.fd.stat()); if (!sameBytes(before, fdInfo)) fail('ATTACHMENT_PATH_CHANGED'); await this.step(guard, () => this.digest(handle.fd, metadata.size, guard)); if (!sameBytes(before, await this.step(guard, () => handle.fd.stat()))) fail('ATTACHMENT_PATH_CHANGED') } finally { await this.closeHandle(handle) }
       await this.verifyDirectory(proof); const after = await this.step(guard, () => this.fs.lstat(path)); if (!sameBytes(before, after)) fail('ATTACHMENT_PATH_CHANGED')
       this.current(guard); await this.fs.unlink(path); this.current(guard); await this.verifyDirectory(proof)
     })

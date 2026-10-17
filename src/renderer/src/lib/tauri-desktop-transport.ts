@@ -56,7 +56,7 @@ export function createTauriDesktopTransport(native: TauriDesktopApi): DesktopTra
       try {
         // Paths, native identity and caller authority never originate in renderer arguments.
         const document = uiDocuments.get(native)
-        const requiresDocument = operation === 'ui:publishState' || operation === 'agent-installer:install' || operation === 'attachments:open' || operation === 'attachments:download' || operation === 'artifacts:copyFile' || operation === 'chatImages:readClipboard' || operation === 'notifications:show' || operation === 'app:getNotificationPermission' || operation === 'app:requestNotificationPermission' || operation === 'app:getMinimizeToTray' || operation === 'app:setMinimizeToTray'
+        const requiresDocument = operation === 'ui:publishState' || operation === 'agent-installer:install' || operation === 'attachments:pick' || operation === 'attachments:save' || operation === 'attachments:open' || operation === 'attachments:download' || operation === 'artifacts:copyFile' || operation === 'chatImages:readClipboard' || operation === 'notifications:show' || operation === 'app:getNotificationPermission' || operation === 'app:requestNotificationPermission' || operation === 'app:getMinimizeToTray' || operation === 'app:setMinimizeToTray'
         if (requiresDocument && (!document || document.engineEpoch !== engineEpoch)) throw new ServiceProtocolError('DISCONNECTED')
         const result = await native.core.invoke('desktop_invoke', { operation, payload, engineEpoch,
           ...(requiresDocument ? { uiLease: document!.leaseId } : {}) })
