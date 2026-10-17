@@ -22,10 +22,13 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    process::ChildStdin,
     sync::{oneshot, watch, Mutex as AsyncMutex, Semaphore},
     time::{timeout, timeout_at, Instant},
 };
+
+#[cfg(windows)]
+#[path = "production_windows.rs"]
+mod windows;
 
 const MAX_FRAME: usize = 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
@@ -520,6 +523,11 @@ pub struct DelegatedCgroup {
     root: File,
 }
 impl DelegatedCgroup {
+    /// Windows authority is an atomic, app-owned Job, with no caller path.
+    #[cfg(windows)]
+    pub fn native_job() -> Self {
+        Self {}
+    }
     pub fn open(path: &Path) -> Result<Self, EngineError> {
         #[cfg(target_os = "linux")]
         {
@@ -816,7 +824,7 @@ struct Pending {
     sender: oneshot::Sender<Result<Value, EngineError>>,
 }
 struct Inner {
-    stdin: AsyncMutex<ChildStdin>,
+    stdin: AsyncMutex<Box<dyn tokio::io::AsyncWrite + Send + Unpin>>,
     pending: Mutex<HashMap<String, Pending>>,
     epoch: Mutex<String>,
     next: AtomicU64,
@@ -839,6 +847,8 @@ struct Inner {
     host: ProductionNativeHost,
     #[cfg(target_os = "linux")]
     scope: Arc<linux::Scope>,
+    #[cfg(windows)]
+    scope: Arc<windows::Scope>,
 }
 #[derive(Clone)]
 pub struct ProductionEngine(Arc<Inner>);
@@ -934,7 +944,11 @@ impl ProductionEngine {
         {
             return Self::launch_linux(launch, host).await;
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        {
+            Self::launch_windows(launch, host).await
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             let _ = (launch, host);
             Err(problem(
@@ -946,6 +960,135 @@ impl ProductionEngine {
                 },
             ))
         }
+    }
+
+    #[cfg(windows)]
+    async fn launch_windows(
+        launch: TrustedProductionLaunch,
+        host: ProductionNativeHost,
+    ) -> Result<Self, EngineError> {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Mutex;
+        use tokio::{
+            io::AsyncWriteExt,
+            sync::{watch, Mutex as AsyncMutex, Semaphore},
+        };
+        let descriptor = launch.descriptor;
+        let check = descriptor.clone();
+        let resources = tokio::task::spawn_blocking(move || resources(&check))
+            .await
+            .map_err(|_| problem("DISCONNECTED", "production-resource-verification"))??;
+        let windows::Spawned {
+            scope,
+            stdin,
+            stdout,
+        } = windows::spawn(
+            &resources.node,
+            &resources.stdio,
+            &resources.root,
+            &descriptor.launch_id,
+        )
+        .await?;
+        let (stop, mut stop_rx) = watch::channel(false);
+        let (exited_tx, exited) = watch::channel(false);
+        let engine = Self(Arc::new(Inner {
+            stdin: AsyncMutex::new(Box::new(stdin)),
+            pending: Mutex::new(std::collections::HashMap::new()),
+            epoch: Mutex::new(String::new()),
+            next: AtomicU64::new(1),
+            closed: AtomicBool::new(false),
+            ready: AtomicBool::new(false),
+            stopping: AtomicBool::new(false),
+            prepared: AtomicBool::new(false),
+            drained: AtomicBool::new(false),
+            last_callback: Mutex::new(0),
+            last_event: Mutex::new(0),
+            request_slots: Arc::new(Semaphore::new(128)),
+            queue_bytes: Arc::new(Semaphore::new(4 * 1024 * 1024)),
+            callback_slots: Arc::new(Semaphore::new(128)),
+            callback_work: AtomicU64::new(0),
+            #[cfg(test)]
+            cancellation_budget: DEADLINE,
+            stop,
+            exited,
+            descriptor: descriptor.clone(),
+            host,
+            scope: scope.clone(),
+        }));
+        let supervise = engine.clone();
+        tokio::spawn(async move {
+            loop {
+                if *stop_rx.borrow() || !scope.alive().unwrap_or(false) {
+                    break;
+                }
+                tokio::select! { _=stop_rx.changed()=>break, _=tokio::time::sleep(Duration::from_millis(25))=>{} }
+            }
+            supervise.0.ready.store(false, Ordering::SeqCst);
+            supervise.0.stopping.store(true, Ordering::SeqCst);
+            if let Some(cleanup) = &supervise.0.host.workspace_cleanup {
+                let _ = (cleanup.close)().await;
+            }
+            // Keep the exact Job/process handles after failed cleanup. There is
+            // no PID lookup, public timeout exit receipt, or abandoned tree.
+            loop {
+                if scope.finish().await.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let _ = exited_tx.send(true);
+        });
+        let reader = engine.clone();
+        tokio::spawn(async move { reader.read_stdout(stdout).await });
+        let mut guard = StartupGuard(engine.clone(), false);
+        let mut bytes = descriptor_bytes(&descriptor)?;
+        bytes.push(b'\n');
+        tokio::time::timeout(DEADLINE, async {
+            let mut input = engine.0.stdin.lock().await;
+            input.write_all(&bytes).await?;
+            input.flush().await
+        })
+        .await
+        .map_err(|_| problem("TIMEOUT", "production-private-bootstrap-write"))?
+        .map_err(|_| problem("DISCONNECTED", "production-private-bootstrap-write"))?;
+        engine.initialize_owner().await?;
+        guard.1 = true;
+        Ok(engine)
+    }
+
+    async fn initialize_owner(&self) -> Result<(), EngineError> {
+        let engine = self;
+        let descriptor = &self.0.descriptor;
+        // Await ping response first: callback frames during initialize must
+        // already carry the negotiated exact epoch.
+        engine
+            .request("engine.ping", json!({}))
+            .await
+            .map_err(|error| error.startup("production-epoch-ping"))?;
+        if let Err(error) = engine
+            .request(
+                "engine.initialize",
+                json!({"protocolVersion":1,"launchId":descriptor.launch_id}),
+            )
+            .await
+        {
+            // Observe finite metadata before the startup guard retires this
+            // epoch. This never retries initialization or a domain effect.
+            if let Ok(state) = engine.request("engine.ownerState", json!({})).await {
+                if let Some(recovery) = owner_recovery_error(&state) {
+                    return Err(recovery);
+                }
+            }
+            return Err(error.startup("production-owner-initialize"));
+        }
+        if !engine.0.prepared.load(Ordering::SeqCst) || engine.0.closed.load(Ordering::SeqCst) {
+            return Err(problem(
+                "PRODUCTION_CONTAINMENT_UNAVAILABLE",
+                "production-prepare-not-acknowledged",
+            ));
+        }
+        engine.0.ready.store(true, Ordering::SeqCst);
+        Ok(())
     }
     pub fn epoch(&self) -> String {
         self.0.epoch.lock().unwrap().clone()
@@ -973,7 +1116,7 @@ impl ProductionEngine {
         self.request("engine.oauth.callback", payload).await
     }
     pub fn snapshot(&self) -> Value {
-        json!({"production":true,"engineEpoch":self.epoch(),"available":self.0.ready.load(Ordering::SeqCst)&&!self.0.closed.load(Ordering::SeqCst)&&!self.0.stopping.load(Ordering::SeqCst),"prepared":self.0.prepared.load(Ordering::SeqCst),"nativeDrainAcknowledged":self.0.drained.load(Ordering::SeqCst),"ownedTreeExited":*self.0.exited.borrow(),"nativeCallbacks":self.0.callback_work.load(Ordering::SeqCst),"containment":"linux-delegated-cgroup-v2-with-private-guardian"})
+        json!({"production":true,"engineEpoch":self.epoch(),"available":self.0.ready.load(Ordering::SeqCst)&&!self.0.closed.load(Ordering::SeqCst)&&!self.0.stopping.load(Ordering::SeqCst),"prepared":self.0.prepared.load(Ordering::SeqCst),"nativeDrainAcknowledged":self.0.drained.load(Ordering::SeqCst),"ownedTreeExited":*self.0.exited.borrow(),"nativeCallbacks":self.0.callback_work.load(Ordering::SeqCst),"containment":if cfg!(windows) { "windows-atomic-job-kill-on-close" } else { "linux-delegated-cgroup-v2-with-private-guardian" }})
     }
     /// Caller identity/frame validation belongs to the trusted native ingress.
     pub async fn invoke(
@@ -1829,9 +1972,9 @@ impl ProductionEngine {
                 {
                     return Err(EngineError::new("INVALID_ARGUMENTS"));
                 }
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", windows))]
                 self.0.scope.prove_ready()?;
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(any(target_os = "linux", windows)))]
                 return Err(EngineError::new("PRODUCTION_CONTAINMENT_UNAVAILABLE"));
                 self.0.prepared.store(true, Ordering::SeqCst);
                 Ok(
@@ -1881,9 +2024,9 @@ impl ProductionEngine {
                 if let Some(files) = &self.0.host.artifact_clipboard {
                     (files.close)().await?;
                 }
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", windows))]
                 self.0.scope.await_leader_only().await?;
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(any(target_os = "linux", windows)))]
                 return Err(EngineError::new("PRODUCTION_CONTAINMENT_UNAVAILABLE"));
                 self.0.drained.store(true, Ordering::SeqCst);
                 Ok(json!({"launchId":self.0.descriptor.launch_id,"acknowledged":true}))
@@ -2638,7 +2781,7 @@ mod linux {
             let (stop, mut stop_rx) = watch::channel(false);
             let (exited_tx, exited) = watch::channel(false);
             let engine = Self(Arc::new(Inner {
-                stdin: AsyncMutex::new(stdin),
+                stdin: AsyncMutex::new(Box::new(stdin)),
                 pending: Mutex::new(HashMap::new()),
                 epoch: Mutex::new(String::new()),
                 next: AtomicU64::new(1),
@@ -2701,35 +2844,7 @@ mod linux {
             })
             .await
             .map_err(|_| problem("DISCONNECTED", "production-private-fd3-write"))??;
-            // Await ping response first: callback frames during initialize must
-            // already carry the negotiated exact epoch.
-            engine
-                .request("engine.ping", json!({}))
-                .await
-                .map_err(|error| error.startup("production-epoch-ping"))?;
-            if let Err(error) = engine
-                .request(
-                    "engine.initialize",
-                    json!({"protocolVersion":1,"launchId":descriptor.launch_id}),
-                )
-                .await
-            {
-                // Observe finite metadata before the startup guard retires this
-                // epoch. This never retries initialization or a domain effect.
-                if let Ok(state) = engine.request("engine.ownerState", json!({})).await {
-                    if let Some(recovery) = owner_recovery_error(&state) {
-                        return Err(recovery);
-                    }
-                }
-                return Err(error.startup("production-owner-initialize"));
-            }
-            if !engine.0.prepared.load(Ordering::SeqCst) || engine.0.closed.load(Ordering::SeqCst) {
-                return Err(problem(
-                    "PRODUCTION_CONTAINMENT_UNAVAILABLE",
-                    "production-prepare-not-acknowledged",
-                ));
-            }
-            engine.0.ready.store(true, Ordering::SeqCst);
+            engine.initialize_owner().await?;
             guard.1 = true;
             Ok(engine)
         }
@@ -2980,7 +3095,7 @@ mod tests {
                 let (stop, stop_rx) = watch::channel(false);
                 let (exited_tx, exited) = watch::channel(false);
                 let engine = ProductionEngine(Arc::new(Inner {
-                    stdin: AsyncMutex::new(stdin),
+                    stdin: AsyncMutex::new(Box::new(stdin)),
                     pending: Mutex::new(HashMap::new()),
                     epoch: Mutex::new("transport-fixture".into()),
                     next: AtomicU64::new(1),

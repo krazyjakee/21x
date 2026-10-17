@@ -6,6 +6,16 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #208 Windows continuation adds an atomic kill-on-close Job and captured
+private asynchronous pipe handles to the production launcher. The bounded
+stdin descriptor prefix preserves pipelined RPC bytes; Linux retains fd3 and
+its delegated-cgroup guardian. Both launchers share one owner initialization
+and recovery path, with #215 native OAuth authority preserved. See
+[Windows production containment](production-windows-containment.md).
+Engine cross-compilation and a Linux inherited-stdin proof are not Windows
+runtime acceptance. macOS containment remains unavailable; installed platform
+proof and hosted Verify await hardware/runners and the Actions user decision.
+
 The October 17 #211 agent continuation joins ACP/Codex/Pi raw child-close
 receipts, retains failed-create native cleanup, and keeps Pi busy until an
 actual abort settlement event. CLI discovery also works when a restricted PATH
@@ -21,6 +31,7 @@ Hosted Verify is unavailable because repository Actions is disabled, awaiting th
 user's decision. #211 and G3 remain open. See
 [agent lifecycle](production-agent-lifecycle.md) and
 [local evidence](evidence/issue-211-agent-process-local-20261017.json).
+
 
 The #215 OAuth continuation adds finite private register/open/retire leases,
 a one-shot native state/URI authority, sanitized denial outcomes and a Source

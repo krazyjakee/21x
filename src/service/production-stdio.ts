@@ -5,6 +5,7 @@ import { createReadStream, fstatSync } from 'node:fs'
 import { lstat, readFile, readdir, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { Socket } from 'node:net'
+import type { Readable } from 'node:stream'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isProductionLaunchDescriptor, PRODUCTION_DESCRIPTOR_MAX_BYTES, type ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { hasExactKeys, isRecord } from '../shared/service-protocol'
@@ -146,19 +147,61 @@ export async function readProductionDescriptor(fd = 3): Promise<ProductionLaunch
   } finally { clearTimeout(timer); pipe.destroy(); for (const chunk of chunks) chunk.fill(0) }
 }
 
+/** Windows uses the inherited private stdin handle, with one bounded JSON line
+ * before RPC. Do not use an async iterator here: exiting it destroys the stream.
+ * Bytes following that first line belong to the peer and must remain unread. */
+export function readProductionStdinDescriptor(input: Readable = process.stdin): Promise<ProductionLaunchDescriptor> {
+  input.pause()
+  return new Promise((resolveDescriptor, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0, settled = false
+    const timer = setTimeout(() => finish(new ProductionBootstrapError('DESCRIPTOR_TIMEOUT')), 30_000)
+    const finish = (error?: unknown, result?: ProductionLaunchDescriptor): void => {
+      if (settled) return
+      settled = true; clearTimeout(timer)
+      input.removeListener('readable', read); input.removeListener('end', ended); input.removeListener('error', finish)
+      input.pause()
+      for (const chunk of chunks) chunk.fill(0)
+      if (error) { input.destroy(); reject(error) } else resolveDescriptor(result!)
+    }
+    const ended = (): void => finish(new ProductionBootstrapError('DESCRIPTOR_INVALID'))
+    const read = (): void => {
+      try {
+        let chunk: unknown
+        while (!settled && (chunk = input.read()) !== null) {
+          if (!Buffer.isBuffer(chunk)) fail('DESCRIPTOR_INVALID')
+          const newline = chunk.indexOf(10), length = newline < 0 ? chunk.length : newline
+          size += length
+          if (size > PRODUCTION_DESCRIPTOR_MAX_BYTES) fail('DESCRIPTOR_TOO_LARGE')
+          chunks.push(Buffer.from(chunk.subarray(0, length)))
+          if (newline >= 0) {
+            if (newline + 1 < chunk.length) input.unshift(Buffer.from(chunk.subarray(newline + 1)))
+            const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))
+            if (!isProductionLaunchDescriptor(value)) fail('DESCRIPTOR_INVALID')
+            finish(undefined, value)
+          }
+        }
+      } catch (error) { finish(error) }
+    }
+    input.on('readable', read); input.once('end', ended); input.once('error', finish)
+    if (input.readableEnded || input.destroyed) ended(); else read()
+  })
+}
+
 export async function startProductionStdio(): Promise<void> {
   for (const fd of [0, 1]) {
     const stat = fstatSync(fd)
     if (process.platform !== 'win32' && !stat.isFIFO() && !stat.isSocket()) fail('PRIVATE_STDIO_REQUIRED')
   }
   if (process.stdin.isTTY || process.stdout.isTTY) fail('PRIVATE_STDIO_REQUIRED')
-  const descriptor = await readProductionDescriptor()
+  const descriptor = await (process.platform === 'win32' ? readProductionStdinDescriptor() : readProductionDescriptor())
   const resources = await verifyProductionResources(descriptor)
   // Credentials are loaded by the protected store. A private launch cannot use
   // inherited model/API tokens as a second unreviewed credential transport.
   if (Object.keys(process.env).some(name => /(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|SECRET_KEY|PRIVATE_KEY|PASSWORD|GITHUB_TOKEN|TASK_API_TOKEN)$/i.test(name))) fail('CREDENTIAL_ENVIRONMENT_REJECTED')
   const nativeNames = new Set(['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
-    'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'])
+    'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP',
+    'COMSPEC', 'PATHEXT', 'HOMEDRIVE', 'HOMEPATH', 'USERNAME'])
   for (const name of Object.keys(process.env)) if (!nativeNames.has(name)) delete process.env[name]
   // No stdout logging or raw provider errors can corrupt/private-leak the wire.
   for (const method of ['log', 'info', 'debug', 'warn', 'error'] as const) console[method] = () => { process.stderr.write('PRODUCTION_DIAGNOSTIC\n') }

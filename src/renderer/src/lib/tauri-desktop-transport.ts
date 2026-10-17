@@ -26,10 +26,15 @@ export function productionBootstrapMessage(value: unknown): string | null {
   const { code, phase } = value.startupFailure
   if (typeof code !== 'string' || typeof phase !== 'string') return null
   if (code === 'PRODUCTION_CONTAINMENT_UNAVAILABLE') {
+    if (['production-windows-job-create', 'production-windows-job-limits', 'production-windows-attributes', 'production-windows-atomic-job-launch',
+      'production-windows-private-pipe', 'production-windows-private-pipe-owner', 'production-windows-private-stderr', 'production-windows-argument',
+      'production-windows-owned-process', 'production-windows-owned-thread', 'production-windows-job-readiness', 'production-windows-job-observation',
+      'production-windows-process-observation', 'production-windows-job-drain', 'production-windows-job-stop'].includes(phase)) return 'Windows process supervision is unavailable. Check the native environment and relaunch the app. Changes are paused.'
     if (phase === 'production-windows-private-fd3-unavailable') return 'This preview cannot supervise desktop processes on Windows yet. Changes are paused.'
     if (phase === 'production-detached-descendant-containment-unavailable') return 'This preview cannot supervise desktop processes on this platform yet. Changes are paused.'
     if (['production-delegation-missing', 'production-delegated-cgroup-v2', 'production-owned-receipts', 'production-prepare-not-acknowledged'].includes(phase)) return 'Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.'
   }
+  if (['DISCONNECTED', 'TIMEOUT'].includes(code) && phase === 'production-private-bootstrap-write') return 'The private desktop service channel could not be established. Relaunch the app. Changes are paused.'
   if (code === 'PRODUCTION_GUARDIAN_UNAVAILABLE' && phase === 'production-private-guardian-receipt') return 'Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.'
   if (['INVALID_ARGUMENTS', 'INVALID_RESULT', 'DISCONNECTED', 'FRAME_TOO_LARGE'].includes(code) && ['production-resources', 'production-resource-root', 'production-resource-files', 'production-resource-links', 'production-resource-containment', 'production-resource-verification', 'production-resource-entries', 'production-resource-closure', 'production-resource-signature', 'production-resource-bytes', 'production-manifest', 'production-manifest-digest', 'production-manifest-build-digest', 'production-manifest-build-identity'].includes(phase)) return 'Required desktop resources could not be verified. Provision the preview and relaunch the app. Changes are paused.'
   if (['PROFILE_IN_USE', 'PROFILE_DUPLICATE_OWNER'].includes(code) && phase === 'profile-lock') return 'Another desktop service owns this profile. Close that service before relaunching. Changes are paused.'

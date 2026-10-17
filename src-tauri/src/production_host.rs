@@ -685,6 +685,31 @@ fn attach_tray_close(
         });
     });
 }
+fn production_containment() -> Result<DelegatedCgroup, EngineError> {
+    #[cfg(windows)]
+    {
+        Ok(DelegatedCgroup::native_job())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Native provisioning only; no IPC accepts a delegation path.
+        let delegation = std::env::var_os("TWENTYONEX_PRODUCTION_CGROUP_ROOT")
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                unavailable(
+                    "PRODUCTION_CONTAINMENT_UNAVAILABLE",
+                    "production-delegation-missing",
+                )
+            })?;
+        DelegatedCgroup::open(&delegation)
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    Err(unavailable(
+        "PRODUCTION_CONTAINMENT_UNAVAILABLE",
+        "production-detached-descendant-containment-unavailable",
+    ))
+}
+
 async fn start(
     app: &tauri::AppHandle,
     native_work: NativeWorkOwner,
@@ -694,17 +719,7 @@ async fn start(
     tray_available: bool,
     energy: Option<NativeEnergyOwner>,
 ) -> Result<ProductionEngine, EngineError> {
-    // Developer/native provisioning only. Never accept a scope path via IPC;
-    // absence of a real delegated scope prevents Node/key/profile startup.
-    let delegation = std::env::var_os("TWENTYONEX_PRODUCTION_CGROUP_ROOT")
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            unavailable(
-                "PRODUCTION_CONTAINMENT_UNAVAILABLE",
-                "production-delegation-missing",
-            )
-        })?;
-    let containment = DelegatedCgroup::open(&delegation)?;
+    let containment = production_containment()?;
     let resources = app
         .path()
         .resource_dir()
@@ -977,7 +992,11 @@ async fn start(
 }
 
 pub fn run() {
-    let app = tauri::Builder::default()
+    let context = tauri::generate_context!();
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "linux")]
+    let builder = builder.plugin(native_oauth::single_instance(&context.config().identifier));
+    let app = builder
         // Native Rust uses this plugin; WebViews receive no direct plugin
         // permission and no injected link interception script.
         .plugin(
@@ -989,6 +1008,12 @@ pub fn run() {
         .setup(|app| {
             let native_work = NativeWorkOwner::default();
             let oauth = native_oauth::NativeOAuthOwner::default();
+            oauth.reject_cold_callback(
+                &std::env::args_os()
+                    .take(3)
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+            );
             let ui = NativeUiOwner::default();
             let notifications = NativeNotificationOwner::new(app.handle(), native_work.clone())
                 .map_err(|_| std::io::Error::other("PRODUCTION_NOTIFICATION_UNAVAILABLE"))?;
@@ -1083,7 +1108,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to initialize isolated production preview host");
     let quitting = Arc::new(AtomicU8::new(0));
     app.run(move |handle, event| {

@@ -1,5 +1,8 @@
 # Production application ownership
 
+The [Windows production continuation](production-windows-containment.md) adds an
+atomic Job/private-pipe backend; runtime and installed acceptance remain open.
+
 The [restart reconciliation continuation](production-restart-recovery.md) retires
 old effect claims before service construction while preserving durable evidence.
 

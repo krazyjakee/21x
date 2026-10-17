@@ -49,7 +49,10 @@ it('projects only known startup failures into fixed redacted provisioning guidan
   for (const [code, phase, text] of [
     ['PROFILE_LOW_DISK', 'resources', 'Free space'], ['PROFILE_DATABASE_LOCKED', 'database-preflight', 'database is busy'],
     ['RESOURCE_UNAVAILABLE', 'resources', 'Repair the preview installation'], ['AGENT_CLI_UNAVAILABLE', 'services', 'configured CLI'],
-    ['OWNER_DRAIN_BLOCKED', 'credentials', 'owned work stops'], ['PROFILE_DATABASE_CORRUPT', 'database-preflight', 'opened safely']
+    ['OWNER_DRAIN_BLOCKED', 'credentials', 'owned work stops'], ['PROFILE_DATABASE_CORRUPT', 'database-preflight', 'opened safely'],
+    ['PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-windows-atomic-job-launch', 'Windows process supervision'],
+    ['PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-windows-private-pipe-owner', 'Windows process supervision'],
+    ['TIMEOUT', 'production-private-bootstrap-write', 'private desktop service channel']
   ]) {
     expect(productionBootstrapMessage(status(code, phase))).toContain(text)
     expect(productionBootstrapMessage(status(code, '/private/canary'))).toBeNull()
