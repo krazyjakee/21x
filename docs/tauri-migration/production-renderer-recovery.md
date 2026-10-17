@@ -134,3 +134,26 @@ not evidence of complete attachment/platform parity.
 
 [Attachment UI and browser evidence](evidence/issue-209-native-attachment-ui-local-20261017.json)
 records the full baseline, final affected checks, revisions and remaining defects.
+
+## Agent collection and document-owned activity
+
+Agent collection hydration now uses the same bounded snapshot owner as task and
+project reads. Concurrent reads coalesce, accepted create/update/delete receipts
+invalidate an older snapshot, and a retired document or connection cannot publish
+its pending result. Recovery awaits the strict read result, so a failed agent
+list does not release the native mutation fence. Continuous invalidation stops
+after eight read attempts with backpressure; accepted writes are never replayed.
+
+One document-owned status/transcript subscription cohort is released on pagehide
+and hot replacement. Explicit reinitialization creates one replacement cohort.
+The existing heartbeat/disconnect early return remains intact: activity renews
+freshness without starting sessions, changing tasks or advancing turn state.
+Transcript page and delta readers capture the document/connection generation;
+a retired read cannot project artifacts, publish messages, or start another page.
+
+The typed native-host activity regression now has eighteen controls, including
+held snapshots across all three CRUD operations, strict recovery refusal/retry,
+bounded invalidation, singleton listener replacement and held transcript page
+retirement. The existing thirty-five agent-store controls also run in the staged
+renderer suite. These are controlled native-boundary tests, not installed WebView
+or real provider evidence. Native window lifecycle/platform proof remains open.

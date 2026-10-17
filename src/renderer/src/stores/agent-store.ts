@@ -1,4 +1,5 @@
-import { desktopApi, getDesktopHost } from '@/lib/desktop-api'
+import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
+import { createDesktopSnapshotReader } from '@/lib/desktop-snapshot'
 import { hydrateTranscriptProjection, readTranscriptWindow } from '@/lib/transcript-pagination'
 import { ServiceProtocolError } from '@shared/service-protocol'
 import { create } from 'zustand'
@@ -54,6 +55,8 @@ const bindingTasks = new Set<string>()
 const dirtyTranscripts = new Set<string>()
 const recoveringTranscripts = new Set<string>()
 const recoverAgain = new Set<string>()
+let agentDesktopGeneration = 0
+let registerAgentDesktopListeners: () => () => void
 
 function getProjection(taskId: string): TranscriptProjection {
   let p = projections.get(taskId)
@@ -148,12 +151,17 @@ export const useAgentStore = create<AgentState>((set, get) => {
     if (typeof desktopApi?.agentSession?.getTranscriptSnapshot !== 'function') return
     bindingTasks.add(taskId)
     dirtyTranscripts.add(taskId)
+    const owner = agentDesktopGeneration, scope = captureDesktopRead()
+    const isCurrent = () => owner === agentDesktopGeneration && scope.isCurrent()
     try {
       let projection: TranscriptProjection
       let snapshot: TranscriptPartRecord[]
       if (getDesktopHost().kind === 'tauri') {
         projection = createProjection()
-        await hydrateTranscriptProjection((id, page) => desktopApi.agentSession.getTranscriptPage(id, page), taskId, projection)
+        await hydrateTranscriptProjection((id, page) => {
+          if (!isCurrent()) throw new ServiceProtocolError('STALE_EPOCH')
+          return desktopApi.agentSession.getTranscriptPage(id, page)
+        }, taskId, projection)
         snapshot = [...projection.parts.values()]
       } else {
         snapshot = await agentSessionApi.getTranscriptSnapshot(taskId)
@@ -162,7 +170,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       }
       // The panel may have gone off-screen while the snapshot IPC was in
       // flight. Do not repopulate the cache after its final consumer left.
-      if (requireBinding && !projectionBindings.has(taskId)) return
+      if (!isCurrent() || requireBinding && !projectionBindings.has(taskId)) return
       // Live events can arrive while the snapshot is in flight. Keep their
       // newer rows, then reconcile from the snapshot cursor to cover changes
       // behind the scan.
@@ -172,11 +180,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
       useArtifactStore.getState().projectTranscriptParts(taskId, snapshot)
       if (projection.parts.size || get().sessions.has(taskId)) commitMessages(taskId)
     } catch (err) {
-      console.error(`[agent-store] hydrateTranscript failed for task ${taskId}:`, err)
+      if (isCurrent()) console.error(`[agent-store] hydrateTranscript failed for task ${taskId}:`, err)
     } finally {
       bindingTasks.delete(taskId)
     }
-    if (projections.has(taskId)) await reconcileDelta(taskId)
+    if (isCurrent() && projections.has(taskId)) await reconcileDelta(taskId)
   }
 
   // Reconcile a task against the durable projection by fetching everything
@@ -190,28 +198,33 @@ export const useAgentStore = create<AgentState>((set, get) => {
     // runs another pass from the advanced cursor.
     if (recoveringTranscripts.has(taskId)) { recoverAgain.add(taskId); return }
     recoveringTranscripts.add(taskId)
+    const owner = agentDesktopGeneration, scope = captureDesktopRead()
+    const isCurrent = () => owner === agentDesktopGeneration && scope.isCurrent()
     try {
       do {
         recoverAgain.delete(taskId)
         const projection = getProjection(taskId)
         if (getDesktopHost().kind === 'tauri') {
-          const { cursor } = await readTranscriptWindow((id, page) => desktopApi.agentSession.getTranscriptPage(id, page), taskId,
+          const { cursor } = await readTranscriptWindow((id, page) => {
+            if (!isCurrent()) throw new ServiceProtocolError('STALE_EPOCH')
+            return desktopApi.agentSession.getTranscriptPage(id, page)
+          }, taskId,
             { version: 1, mode: 'delta', after: projection.rev }, { onPage: page => {
-              if (projections.get(taskId) === projection) applyParts(taskId, page.parts)
+              if (isCurrent() && projections.get(taskId) === projection) applyParts(taskId, page.parts)
             } })
-          if (projections.get(taskId) !== projection) return
+          if (!isCurrent() || projections.get(taskId) !== projection) return
           applyParts(taskId, [], cursor)
           continue
         }
         const { parts, maxRev } = await agentSessionApi.getTranscriptDelta(taskId, projection.rev)
         // Unbound (or re-hydrated) while the read was in flight.
-        if (projections.get(taskId) !== projection) return
+        if (!isCurrent() || projections.get(taskId) !== projection) return
         applyParts(taskId, parts, maxRev)
       } while (recoverAgain.has(taskId))
       dirtyTranscripts.delete(taskId)
     } catch (err) {
       dirtyTranscripts.add(taskId)
-      console.error(`[agent-store] reconcileDelta failed for task ${taskId}:`, err)
+      if (isCurrent()) console.error(`[agent-store] reconcileDelta failed for task ${taskId}:`, err)
     } finally {
       recoveringTranscripts.delete(taskId)
       recoverAgain.delete(taskId)
@@ -219,69 +232,74 @@ export const useAgentStore = create<AgentState>((set, get) => {
   }
 
   // ── IPC event subscriptions ──
+  registerAgentDesktopListeners = () => {
+    let active = true
 
-  // Transcript content: the ONLY writer of messages. Idempotent delta apply.
-  onTranscriptChanged((event: TranscriptChangedEvent) => {
-    if (!event?.taskId) return
-    // The main process could not deliver a live batch (IPC size guard): the
-    // projection is missing rows until a delta read catches up.
-    if (event.reloadRequired && projections.has(event.taskId)) dirtyTranscripts.add(event.taskId)
-    useArtifactStore.getState().projectTranscriptParts(event.taskId, event.parts || [])
-    // Background agents continue writing to the durable projection, but an
-    // unmounted task has no renderer consumer. Ignoring its payload here avoids
-    // rebuilding every off-screen transcript in memory; bindTranscript() loads
-    // the authoritative snapshot when the task becomes visible again.
-    if (projections.has(event.taskId)) {
-      // While recovering, apply the rows but keep the cursor where it is, so
-      // the delta read does not skip the rows that never arrived.
-      const recovering = dirtyTranscripts.has(event.taskId) || recoveringTranscripts.has(event.taskId)
-      applyParts(event.taskId, event.parts || [], recovering ? undefined : event.maxRev)
-      if (recovering) void reconcileDelta(event.taskId)
-      else if (getDesktopHost().kind === 'tauri' && get().sessions.get(event.taskId)?.status === SessionStatus.WAITING_APPROVAL) void reconcileDelta(event.taskId)
-    }
-  })
-
-  // Session state only (status / sessionId) — never messages.
-  onAgentStatus((event: AgentStatusEvent) => {
-    // Activity indicators (#95) keep their own freshness record. A heartbeat
-    // only renews that record: it is not a transition and must not touch the
-    // session, turn bookkeeping or the end-of-turn reconcile below.
-    recordAgentStatus(event)
-    if (isAgentStatusHeartbeat(event)) return
-    const state = get()
-    const session = findBySessionId(state.sessions, event.sessionId) || state.sessions.get(event.taskId)
-
-    if (!session) {
-      if (event.taskId && event.sessionId && event.status !== SessionStatus.IDLE) {
-        set({
-          sessions: new Map(state.sessions).set(event.taskId, {
-            sessionId: event.sessionId,
-            agentId: event.agentId || '',
-            taskId: event.taskId,
-            status: event.status,
-            messages: projectMessages(projections.get(event.taskId))
-          })
-        })
+    // Transcript content: the ONLY writer of messages. Idempotent delta apply.
+    const offTranscript = onTranscriptChanged((event: TranscriptChangedEvent) => {
+      if (!active || !event?.taskId) return
+      // The main process could not deliver a live batch (IPC size guard): the
+      // projection is missing rows until a delta read catches up.
+      if (event.reloadRequired && projections.has(event.taskId)) dirtyTranscripts.add(event.taskId)
+      useArtifactStore.getState().projectTranscriptParts(event.taskId, event.parts || [])
+      // Background agents continue writing to the durable projection, but an
+      // unmounted task has no renderer consumer. Ignoring its payload here avoids
+      // rebuilding every off-screen transcript in memory; bindTranscript() loads
+      // the authoritative snapshot when the task becomes visible again.
+      if (projections.has(event.taskId)) {
+        // While recovering, apply the rows but keep the cursor where it is, so
+        // the delta read does not skip the rows that never arrived.
+        const recovering = dirtyTranscripts.has(event.taskId) || recoveringTranscripts.has(event.taskId)
+        applyParts(event.taskId, event.parts || [], recovering ? undefined : event.maxRev)
+        if (recovering) void reconcileDelta(event.taskId)
+        else if (getDesktopHost().kind === 'tauri' && get().sessions.get(event.taskId)?.status === SessionStatus.WAITING_APPROVAL) void reconcileDelta(event.taskId)
       }
-      return
-    }
+    })
 
-    const previousStatus = session.status
-    const updated = { ...session, status: event.status, agentId: event.agentId || session.agentId }
-    if (event.sessionId && session.sessionId !== event.sessionId) updated.sessionId = event.sessionId
-    // Turn confirmed running (or errored/awaiting input) — stop showing
-    // "starting". Interim `idle` events during resume must NOT clear it.
-    if (event.status !== SessionStatus.IDLE) updated.pendingSend = false
-    set({ sessions: new Map(state.sessions).set(session.taskId, updated) })
-    if (previousStatus === SessionStatus.IDLE && event.status !== SessionStatus.IDLE) {
-      useArtifactStore.getState().beginTurn(session.taskId)
-    } else if (previousStatus !== SessionStatus.IDLE && event.status === SessionStatus.IDLE) {
-      useArtifactStore.getState().endTurn(session.taskId)
-    }
+    // Session state only (status / sessionId) — never messages.
+    const offStatus = onAgentStatus((event: AgentStatusEvent) => {
+      if (!active) return
+      // Activity indicators (#95) keep their own freshness record. A heartbeat
+      // only renews that record: it is not a transition and must not touch the
+      // session, turn bookkeeping or the end-of-turn reconcile below.
+      recordAgentStatus(event)
+      if (isAgentStatusHeartbeat(event)) return
+      const state = get()
+      const session = findBySessionId(state.sessions, event.sessionId) || state.sessions.get(event.taskId)
 
-    // Safety-net reconcile at end of each turn — catches any missed delta.
-    if (event.status === SessionStatus.IDLE || getDesktopHost().kind === 'tauri' && event.status === SessionStatus.WAITING_APPROVAL) void reconcileDelta(session.taskId)
-  })
+      if (!session) {
+        if (event.taskId && event.sessionId && event.status !== SessionStatus.IDLE) {
+          set({
+            sessions: new Map(state.sessions).set(event.taskId, {
+              sessionId: event.sessionId,
+              agentId: event.agentId || '',
+              taskId: event.taskId,
+              status: event.status,
+              messages: projectMessages(projections.get(event.taskId))
+            })
+          })
+        }
+        return
+      }
+
+      const previousStatus = session.status
+      const updated = { ...session, status: event.status, agentId: event.agentId || session.agentId }
+      if (event.sessionId && session.sessionId !== event.sessionId) updated.sessionId = event.sessionId
+      // Turn confirmed running (or errored/awaiting input) — stop showing
+      // "starting". Interim `idle` events during resume must NOT clear it.
+      if (event.status !== SessionStatus.IDLE) updated.pendingSend = false
+      set({ sessions: new Map(state.sessions).set(session.taskId, updated) })
+      if (previousStatus === SessionStatus.IDLE && event.status !== SessionStatus.IDLE) {
+        useArtifactStore.getState().beginTurn(session.taskId)
+      } else if (previousStatus !== SessionStatus.IDLE && event.status === SessionStatus.IDLE) {
+        useArtifactStore.getState().endTurn(session.taskId)
+      }
+
+      // Safety-net reconcile at end of each turn — catches any missed delta.
+      if (event.status === SessionStatus.IDLE || getDesktopHost().kind === 'tauri' && event.status === SessionStatus.WAITING_APPROVAL) void reconcileDelta(session.taskId)
+    })
+    return () => { active = false; offTranscript?.(); offStatus?.() }
+  }
 
   const clearPendingSend = (taskId: string): void => {
     set((state) => {
@@ -300,18 +318,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
     sessions: new Map(),
 
     fetchAgents: async () => {
-      set({ isLoading: true, error: null })
-      try {
-        const agents = await agentApi.getAll()
-        set({ agents, isLoading: false })
-      } catch (err) {
-        set({ error: String(err), isLoading: false })
-      }
+      await agentSnapshot.refresh().catch(() => {})
     },
 
     createAgent: async (data) => {
       try {
         const agent = await agentApi.create(data)
+        agentSnapshot.invalidate()
         set((state) => ({ agents: [...state.agents, agent] }))
         return agent
       } catch (err) {
@@ -324,6 +337,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       try {
         const updated = await agentApi.update(id, data)
         if (updated) {
+          agentSnapshot.invalidate()
           set((state) => ({ agents: state.agents.map((a) => (a.id === id ? updated : a)) }))
         }
         return updated || null
@@ -337,6 +351,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       try {
         const success = await agentApi.delete(id)
         if (success) {
+          agentSnapshot.invalidate()
           set((state) => ({ agents: state.agents.filter((a) => a.id !== id) }))
         }
         return success
@@ -460,9 +475,37 @@ export const useAgentStore = create<AgentState>((set, get) => {
   }
 })
 
+const agentSnapshot = createDesktopSnapshotReader({
+  read: () => agentApi.getAll(),
+  start: () => useAgentStore.setState({ isLoading: true, error: null }),
+  apply: agents => useAgentStore.setState({ agents, isLoading: false, error: null }),
+  fail: error => useAgentStore.setState({ error: String(error), isLoading: false })
+})
+
+let releaseAgentListeners: (() => void) | undefined
+/** One document-owned status/transcript cohort, independent of mounted panels. */
+export function initializeAgentDesktopState(): () => void {
+  if (releaseAgentListeners) return releaseAgentListeners
+  const cleanup = registerAgentDesktopListeners()
+  const release = () => {
+    if (releaseAgentListeners !== release) return
+    releaseAgentListeners = undefined
+    agentDesktopGeneration++
+    agentSnapshot.dispose()
+    cleanup()
+    window.removeEventListener('pagehide', release)
+  }
+  releaseAgentListeners = release
+  window.addEventListener('pagehide', release, { once: true })
+  return release
+}
+initializeAgentDesktopState()
+if (import.meta.hot) import.meta.hot.dispose(() => releaseAgentListeners?.())
+
 /** Restore only transcripts retained by real views; historical deltas stay in the durable owner. */
 export async function rehydrateDesktopAgentState(): Promise<void> {
-  await useAgentStore.getState().fetchAgents()
+  initializeAgentDesktopState()
+  await agentSnapshot.refresh()
   await Promise.all([...projectionBindings.keys()].map(taskId => useAgentStore.getState().hydrateTranscript(taskId)))
   if (useAgentStore.getState().error || [...projectionBindings.keys()].some(taskId => dirtyTranscripts.has(taskId) || bindingTasks.has(taskId))) throw new ServiceProtocolError('DISCONNECTED')
 }
