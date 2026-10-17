@@ -1,0 +1,363 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T21:09:12.954255+00:00",
+  "baseRevision": "8c23868e5897dfc92fd2df807f3724a77aeb2309",
+  "implementationRevision": "a1f9fce6b6e1fd49981c47801a1f82e4f98ad5ed",
+  "scope": "Ordinary task/draft native file-import UI through existing private picker/save contract; explicit unavailable nonordinary/drop imports; verified existing inert browser source policy. No native/backend/authority broadening.",
+  "fixture": {
+    "profiles": "Synthetic controlled native invoke/event boundary; actual React TaskForm/TaskDialogs/TaskAttachments/TaskWorkspace owner and TranscriptComposer, typed host/client/codecs/transport/Zustand. Workspace transcript view is replaced only to expose its real import callback. No preload or actual OS chooser/filesystem in these new UI tests. E2 aff690 independent GTK/Source proofs are not claimed as this UI suite.",
+    "schema": 37,
+    "protocol": 1,
+    "webview": null,
+    "installed": false
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "stagedNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "electronLauncher": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "expectedActual": [
+    {
+      "expected": "Only native picker selections reach native save; DOM drops/raw paths are not a fallback.",
+      "actual": "UI uses retained pick/save methods and physical-document lease codec. Native task/transcript DOM drops issue chooser guidance without save or webUtils access. Backend private one-shot FD authority is supplied by aff690, not by a renderer pathname."
+    },
+    {
+      "expected": "Native multi-import respects Source single-mutation admission and accepted partial receipts.",
+      "actual": "Native saves run sequentially, await each receipt, merge known metadata without duplicate IDs, stop at first refusal and append explicitly. Electron retains its parallel-import compatibility path. Refused/uncertain saves or metadata are not replayed/deleted."
+    },
+    {
+      "expected": "Draft files wait for accepted task ID and attachment failure cannot repeat create.",
+      "actual": "Actual create form picks before task creation, then saves under only accepted created-task ID. Partial accepted metadata persists once; metadata failure closes accepted create with fixed toast. Withdrawal/replacement/unmount/reconnect fence subsequent effects/publications."
+    },
+    {
+      "expected": "Unsupported group/Captain file imports do not claim selections or pretend metadata was persisted.",
+      "actual": "Native TaskWorkspace picker/drop callbacks absent for nonordinary roles; native detail/edit attachment UI is read-only, retaining saved preview. Explicit group/domain attachment mutation remains a prerequisite. Atomic chat-image path unchanged."
+    },
+    {
+      "expected": "Approved browser/webpage records stay inert and absent from creation/control.",
+      "actual": "Two actual native-host controls with no preload plus four retained retirement regressions verify inert panels/no embedding or broker calls, absent creation menu, rejected new panels/edges, dormant metadata roundtrip via typed settings, and every generated browser operation remains removed-browser/caller:none/destination:none."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "fullRendererBaseline": {
+      "passed": 1714,
+      "files": 150,
+      "skipped": 0
+    },
+    "stagedRendererBaseline": {
+      "passed": 341,
+      "files": 19,
+      "skipped": 0
+    },
+    "finalAffectedApp": {
+      "passed": 73,
+      "files": 5,
+      "skipped": 0
+    },
+    "finalAffectedStaged": {
+      "passed": 73,
+      "files": 5,
+      "skipped": 0
+    },
+    "newControls": {
+      "attachmentUI": 21,
+      "nativeBrowser": 2
+    },
+    "retainedRetirementControls": 4,
+    "contractTests": {
+      "passed": 20,
+      "files": 2,
+      "skipped": 0
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "a7f5403a776bfd98ebfa0f4f5bf418f245af2652108effefbfa5e656bbe501e5",
+          "bytes": 1147482
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- <19 affected renderer files; exact gateScript below>",
+        "exitCode": 0,
+        "log": {
+          "sha256": "afad221d5634a5c3348a3b367c4a775daf86354bd3d5b98744fbe63f9dfaecb3",
+          "bytes": 116296
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "84057fa9a1850399659d68b212527a786aa8a78f0defdd4d8da0f72155e8a0a7",
+          "bytes": 533
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "14515d6f569ceecf70ab547da16abd5f7cb169566191753e7c21f79bcce3cf90",
+          "bytes": 29344
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "f116b36cdee2e0ac9ac6641d90f29da860bdda4898234e90a4d55ad5c4ee4486",
+          "bytes": 9620
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "52209c5918078a70f312139ccc0b1582c7cf52eb921ec595565f66cc21e08768",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run --project renderer <5 files>",
+        "exitCode": 0,
+        "log": {
+          "sha256": "16a74d73e40029d06aed030f47da439db3ee463b93d4c88a13b321fc8291b1bd",
+          "bytes": 38171
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- <same5 files>",
+        "exitCode": 0,
+        "log": {
+          "sha256": "3b709a529f70ad1f143343ca204d5df067d0c913af25fa8e3eff6e0c024ddc10",
+          "bytes": 38151
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "c40699df9f5add3751285217ec1fc0f2d26da4033d2ee76288fa551cc30af808",
+          "bytes": 29345
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "7fca0204b2bca67f9bbd9271e3fa22ade798f6c6e9cf96b978a9194103ae82e3",
+          "bytes": 9620
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check; node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e0b6a489b8fab57d2a9c3fd132ded73c9def80260f3d4f05ec23d888be29b8e2",
+          "bytes": 134
+        }
+      }
+    ],
+    "gateScript": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer --maxWorkers=4 > /tmp/ea209-attachments-renderer.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-attachments-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-attachments-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-attachments-staged.log 2>&1\nrtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts > /tmp/ea209-attachments-contract-tests.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-attachments-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-attachments-production-build.log 2>&1\nrtk proxy node scripts/tauri-inventory.mjs --check > /tmp/ea209-attachments-inventory.log 2>&1\nrtk proxy node scripts/tauri-contracts.mjs --check > /tmp/ea209-attachments-contracts.log 2>&1\nrtk proxy git diff --check\n",
+    "finalDeltaGateScript": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx > /tmp/ea209-attachments-final-app.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx > /tmp/ea209-attachments-final-staged.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-attachments-final-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-attachments-final-lint.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-attachments-final-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-attachments-final-production-build.log 2>&1\nrtk proxy node scripts/tauri-inventory.mjs --check > /tmp/ea209-attachments-final-freshness.log 2>&1\nrtk proxy node scripts/tauri-contracts.mjs --check >> /tmp/ea209-attachments-final-freshness.log 2>&1\nrtk proxy git diff --check\n"
+  },
+  "sourceFiles": [
+    {
+      "path": "docs/tauri-migration/implementation-status.md",
+      "sha256": "4819e48b7e7da5ec4e00d979bd9c105400f3a7e87855e6cb336347b8576e0496",
+      "bytes": 61557
+    },
+    {
+      "path": "docs/tauri-migration/inventory.json",
+      "sha256": "78b724e3fe119ce084b0d4290da708e59477e88f5241686addb94b1fa4376df3",
+      "bytes": 379961
+    },
+    {
+      "path": "docs/tauri-migration/production-renderer-recovery.md",
+      "sha256": "f7768a89b9023160ff7bd860e525f41f5f2b2550f67fe2cd112a023b5b33d088",
+      "bytes": 8973
+    },
+    {
+      "path": "src/renderer/src/components/agents/transcript/TranscriptComposer.tsx",
+      "sha256": "ccbcf3e249edeb7f955601777e81d10d323fc9cd14d9fa4603a184bdf917e987",
+      "bytes": 13024
+    },
+    {
+      "path": "src/renderer/src/components/canvas/TaskPanelContent.tsx",
+      "sha256": "9df40b4762dd2e5755da7aea511270be5da6d4e5bdd3fa5be68743ad7aeef371",
+      "bytes": 5593
+    },
+    {
+      "path": "src/renderer/src/components/canvas/native-browser-retirement.test.tsx",
+      "sha256": "0e0d54ac932a226db00dc9fbfeb028bcc7e4290142e973b84af116096232a754",
+      "bytes": 5702
+    },
+    {
+      "path": "src/renderer/src/components/layout/AppLayout.tsx",
+      "sha256": "ec93609f2bf9bedc165a267d4d5969d2c9540e9e5028b7172496a57760a7ca97",
+      "bytes": 15347
+    },
+    {
+      "path": "src/renderer/src/components/layout/TaskDialogs.tsx",
+      "sha256": "fd6c744e84369b47ea2102a1cfd334109bfa1cde8c56008f4e0f8244831450d9",
+      "bytes": 10371
+    },
+    {
+      "path": "src/renderer/src/components/tasks/TaskAttachments.tsx",
+      "sha256": "34d83c5fa03deda958f46835803500721a0c540d2f9ecf4e3ddc94ea55806a2b",
+      "bytes": 8816
+    },
+    {
+      "path": "src/renderer/src/components/tasks/TaskDetailView.tsx",
+      "sha256": "2b70804c28eac2e39ea26ba29fc974f2c7a655c97360da7280edfe5fd66f2037",
+      "bytes": 29379
+    },
+    {
+      "path": "src/renderer/src/components/tasks/TaskForm.tsx",
+      "sha256": "cb01135d5ca24b6a65a22dc9b942edb61990bff2a9fa9e48144466d0eaf91fd9",
+      "bytes": 10012
+    },
+    {
+      "path": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
+      "sha256": "f9bc7b50967c5339e250412ec192cafe0bb96e68ebdc830569cc45843661eb21",
+      "bytes": 42122
+    },
+    {
+      "path": "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+      "sha256": "82898ca64b8b7653e10b65bf97f51fcbf9147ede9a3fc12f0f6e6290ef39ab24",
+      "bytes": 23939
+    },
+    {
+      "path": "src/renderer/src/lib/task-attachment-import.ts",
+      "sha256": "5bec3722750fe940b7fecb831cc16cd8ad1b3b40c28aed1e7feabc35cc40153a",
+      "bytes": 1638
+    },
+    {
+      "path": "vitest.tauri.config.ts",
+      "sha256": "376b62372e02784959e7a4101d1ceba00ec80e93aaa0beb27d3a72d65d5a4ac4",
+      "bytes": 12306
+    }
+  ],
+  "artifactChecksums": [
+    {
+      "path": "out/tauri-production-renderer/assets/main-DgiB9pqx.js",
+      "sha256": "4507e082a92ef9264fd1b326efd9fcd92b28b5fc2c23e40c583d965dd8b55ac6",
+      "bytes": 1510288
+    },
+    {
+      "path": "out/tauri-production-renderer/index.html",
+      "sha256": "b65fa0d4af76e92f2fa39d6ce2ccb41805b1af09886ead33669da6a81e243e2a",
+      "bytes": 856
+    },
+    {
+      "path": "src-tauri/resources/node/node",
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    {
+      "path": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "bytes": 2226168
+    }
+  ],
+  "failureRepair": [
+    {
+      "failure": "Review found late error feedback could target a new task/document after metadata or picker await.",
+      "repair": "Guarded post-await feedback with captured task/document/mounted owner, added three precise regressions and reran affected app/Node/type/lint/build/freshness gates."
+    },
+    {
+      "failure": "Full renderer1713 passed, then forced raw typecheck exited2 on generic vi.fn constructor/procedure listener type.",
+      "repair": "Declared the exact feedback listener signature; added a create-owner unmount fence/regression; final coherent full gate rerun passes."
+    },
+    {
+      "failure": "First native UI suite8pass/2fail: Windows picker path is outside current Linux selection contract; no-session workspace did not mount transcript callbacks.",
+      "repair": "Used valid Linux selection path and explicit transcript-only workspace with a valid empty paged transcript fixture; all controls pass without widening production codec."
+    },
+    {
+      "failure": "Native dormant-layout test waited only the exact1000ms save debounce, racing its default1000ms test deadline.",
+      "repair": "Kept production1000ms debounce and increased assertion wait budget to3000ms; typed persistence and exact metadata assertions retained."
+    }
+  ],
+  "criteria": {
+    "build": "previous c0/9d met",
+    "allRetainedConsumers": "open",
+    "completeTaskSettingsPlatformUX": "open",
+    "installedUIRaces": "open",
+    "inertBrowserSourcePolicy": "met by stated source/controlled-renderer evidence; installed acceptance separately open"
+  },
+  "remainingDefects": [
+    "Native group/Captain file imports require explicit supported domain metadata operation; no member-storage alias.",
+    "Accepted file copies can remain protected but unreferenced after metadata refusal/uncertain completion; UI never automatically reimports or deletes them. Explicit domain reconciliation remains needed.",
+    "DOM drag/drop receipt authority is unavailable; chooser guidance only. Native non-Linux picker runtime remains unavailable/unproven.",
+    "Complete native keyboard/focus/window/theme/zoom and settings UX await215 window contract and218 local voice authority.",
+    "Installed native UI pending reload/reconnect/snapshot/delta and supported-target acceptance blocked on platform/Actions decision;202 remains open."
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runs": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "constraints": {
+    "release": false,
+    "liveProfile": false,
+    "liveProvider": false,
+    "electronRetirement": false,
+    "hostedVoice": "deferred",
+    "finalIdentityChosen": false
+  }
+}
