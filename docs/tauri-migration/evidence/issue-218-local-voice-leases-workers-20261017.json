@@ -1,0 +1,279 @@
+{
+  "issue": 218,
+  "sourceRevision": "17514f96df81b7bf5dc1436adb261fe38e0ac806",
+  "baseRevision": "4df46bc256eb8e0135b075eee4b113b0d1d581e3",
+  "recordedAtUtc": "2026-10-17T21:16:03.393982+00:00",
+  "scope": "Scoped Linux local-voice continuation; optional private Source SDK plus actual bundled TTS worker repair. All whole-issue criteria remain open.",
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "shellNode": "v22.22.0",
+    "bundledNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "typescript": "5.9.3",
+    "stagedSqlite": "13.0.3",
+    "databaseSchema": 37,
+    "webview": "Not exercised; production native voice remains unavailable."
+  },
+  "artifacts": {
+    "src/shared/voice-native-callbacks.ts": {
+      "sha256": "a51542680fcdc652c2fdb6c3a2cdceb598067502c1ca77fe1542095a21ddfd14",
+      "bytes": 16870
+    },
+    "src/service/voice-flow-owner.ts": {
+      "sha256": "17128b545b51d072a28ae98188382d30e13b453a025d745ae02da0b013c8baf1",
+      "bytes": 16562
+    },
+    "src/main/voice/voice-tts-worker-client.ts": {
+      "sha256": "b68979d260a0e487e84989ac78c5d759e2d15d04ad256b5a9fdfd800ed8ceca6",
+      "bytes": 20436
+    },
+    "src/main/voice/voice-tts-worker.js": {
+      "sha256": "b6ffd3047cf8fef809c4a3bebc24054a5d1c17863701560f94cf2548f1e3e1e2",
+      "bytes": 21835
+    },
+    "scripts/voice-retirement-proof.mjs": {
+      "sha256": "bb5e8f6a70ea8b1789df41e0d4ab4e785118c9b71734364a4b345e0d49a403a2",
+      "bytes": 3444
+    },
+    "src-tauri/resources/service/voice-tts-worker.cjs": {
+      "sha256": "b6ffd3047cf8fef809c4a3bebc24054a5d1c17863701560f94cf2548f1e3e1e2",
+      "bytes": 21835
+    },
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "a6175b5488ec1ea3a764d3e5142f960320f173c421c1b267fccb0fbcf94191bf",
+      "bytes": 1261481
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "b5061badfc93051968eb2b99d7f0e68d3954910efcb1e0da17ae87d7724d6e5c",
+      "bytes": 18845
+    },
+    "src-tauri/resources/native/twentyonex-credential-key": {
+      "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+      "bytes": 25759896
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src/shared/voice-native-callbacks.test.ts": {
+      "sha256": "14cd0e4f5dbb0f092ca59c12921e125e6c375802fa3b2729149de3ec22f005f5",
+      "bytes": 5009
+    },
+    "src/service/voice-flow-owner.test.ts": {
+      "sha256": "4fdfb62f65dfb21f6163b1b8b0fe6745857dcdcf6f830fd523ef342408ba2424",
+      "bytes": 20081
+    },
+    "src/main/voice/voice-tts-worker-client.test.ts": {
+      "sha256": "3c0aeb810014c7bf313d2a002d28650d692efdfaf422bef41767243a9b584aae",
+      "bytes": 27274
+    }
+  },
+  "profilePolicy": {
+    "profiles": "Synthetic temporary profiles only; no live ~/.config/21x access",
+    "microphoneRecorded": false,
+    "installedVoiceInvoked": false,
+    "downloadedSpeechModelUsed": false,
+    "hostedVoiceProviderRequests": false,
+    "liveReleaseOrCutover": false
+  },
+  "sourceChanges": [
+    "Optional private exact-schema Source lease owner: captured fences, early ownership/ready boundary, 16 active/4096 epoch IDs, TTL, canonical PCM/sequence/total budgets, pending publication limits, strict turn/speech pairs, synchronous revocation and raw retirement retry. Not registered in production private peer; no native availability claim.",
+    "Actual TTS command handles join execFile callback plus native close; TERM refusal escalates on captured handle; cancellation and graceful worker TERM/disconnect join descendants. No uncatchable crash process-tree acceptance claim.",
+    "Monotonic private worker request epochs drop stale same-speech-ID replies; portable PCM validation and 128KiB fragments with exact order/first-fragment sentence text.",
+    "Finite reviewed native handoff contract, remaining blockers and regenerated inventory; no public operation/grant/native capability change."
+  ],
+  "checks": [
+    {
+      "name": "rebased app integration",
+      "command": "pnpm test:run src/main/voice/voice-tts-worker-client.test.ts src/main/voice/voice-speech-service.test.ts src/main/voice/voice-session-manager-core.test.ts src/main/voice/voice-worker-client.test.ts src/shared/voice-native-callbacks.test.ts src/service/voice-flow-owner.test.ts src/service/voice-management-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts scripts/tauri-stage-production.test.ts --reporter=json --outputFile=/tmp/218-rebased-app.json > /tmp/218-rebased-app.log 2>&1",
+      "rawExit": 0,
+      "expected": "All selected checks pass; documented opt-in/platform-only cases may skip.",
+      "actual": {
+        "numPassedTests": 229,
+        "numFailedTests": 0,
+        "numPendingTests": 8,
+        "success": true
+      },
+      "skippedTests": [
+        "portable speech worker native receipt ownership runs the actual staged worker with only synthetic owned env over real Node IPC",
+        "bundled Node system voice raw ownership fragments real command WAV output without losing bytes, ordering or first-fragment text",
+        "bundled Node system voice raw ownership joins a TERM-refusing command before cancellation receipt and replacement with the same speech ID",
+        "bundled Node system voice raw ownership keeps shutdown pending through a TERM-refusing descendant and preserves an unrelated process",
+        "bundled Node system voice raw ownership does not acknowledge cancellation while its owned raw command remains alive",
+        "VoiceWorkerClient with the installed runtime loads the real recogniser, so the config shape cannot drift",
+        "Parakeet v3 with the installed runtime loads the offline recogniser and transcribes a complete turn",
+        "a single-shot turn reports a final and never a segment, so dictation cannot send by itself"
+      ],
+      "jsonLogSha256": "c6407daa97370e866b17300b59d2607feb3c17c1e68f9e9124bea88b1e305a99"
+    },
+    {
+      "name": "rebased node integration",
+      "command": "node scripts/tauri-test.mjs --production-proofs src/main/voice/voice-tts-worker-client.test.ts src/main/voice/voice-speech-service.test.ts src/main/voice/voice-session-manager-core.test.ts src/main/voice/voice-worker-client.test.ts src/shared/voice-native-callbacks.test.ts src/service/voice-flow-owner.test.ts src/service/voice-management-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts scripts/tauri-stage-production.test.ts scripts/production-service-proof.test.ts --reporter=json --outputFile=/tmp/218-rebased-node.json > /tmp/218-rebased-node.log 2>&1",
+      "rawExit": 0,
+      "expected": "All selected checks pass; documented opt-in/platform-only cases may skip.",
+      "actual": {
+        "numPassedTests": 236,
+        "numFailedTests": 0,
+        "numPendingTests": 3,
+        "success": true
+      },
+      "skippedTests": [
+        "VoiceWorkerClient with the installed runtime loads the real recogniser, so the config shape cannot drift",
+        "Parakeet v3 with the installed runtime loads the offline recogniser and transcribes a complete turn",
+        "a single-shot turn reports a final and never a segment, so dictation cannot send by itself"
+      ],
+      "jsonLogSha256": "71836a65992eda45b8a2a6f124d4e5eeae62bcc7fec8ded374282f486cc276e0"
+    },
+    {
+      "name": "forced typecheck",
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "rawExit": 0,
+      "expected": "Pass without weakening checks.",
+      "actual": "Pass; raw output empty."
+    },
+    {
+      "name": "full lint",
+      "command": "pnpm lint",
+      "rawExit": 0,
+      "expected": "Pass without weakening checks.",
+      "actual": "0 errors, 165 existing warnings; no new warnings."
+    },
+    {
+      "name": "production staging",
+      "command": "pnpm tauri:prepare:production",
+      "rawExit": 0,
+      "expected": "Pass without weakening checks.",
+      "actual": {
+        "staged": true,
+        "entry": "service/production-stdio.mjs",
+        "buildIdentity": "production-eeeadb178da3e4a10c15d3a78edd7250",
+        "resourceManifestSha256": "a6175b5488ec1ea3a764d3e5142f960320f173c421c1b267fccb0fbcf94191bf",
+        "redistributionReviewComplete": false
+      }
+    },
+    {
+      "name": "packaged worker raw descendant",
+      "command": "src-tauri/resources/node/node scripts/voice-retirement-proof.mjs src-tauri/resources/service/voice-tts-worker.cjs",
+      "rawExit": 0,
+      "expected": "Pass without weakening checks.",
+      "actual": {
+        "node": "v22.23.2",
+        "workerSha256": "b6ffd3047cf8fef809c4a3bebc24054a5d1c17863701560f94cf2548f1e3e1e2",
+        "workerClosed": true,
+        "expectedDescendantAlive": false,
+        "actualDescendantAlive": false
+      }
+    },
+    {
+      "name": "inventory",
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "rawExit": 0,
+      "expected": "Pass without weakening checks.",
+      "actual": "Verified docs/tauri-migration/inventory.json: 902 files, 736 IPC operations (9 unresolved)"
+    },
+    {
+      "name": "retained contracts",
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "rawExit": 0,
+      "expected": "Pass without weakening checks.",
+      "actual": "Verified explicit desktop contract outputs"
+    },
+    {
+      "name": "whitespace",
+      "command": "git diff --check",
+      "rawExit": 0,
+      "expected": "Pass without weakening checks.",
+      "actual": "Pass; raw output empty."
+    }
+  ],
+  "failureRepairs": [
+    {
+      "failure": "Initial SDK cleanup accidentally called the retirement promise as a function; 11 exploratory failures.",
+      "repair": "Removed extra call; subsequent 16 then final 20 private schema/SDK tests and real peer tests pass.",
+      "verification": "Final revision-bound gates below."
+    },
+    {
+      "failure": "Initial typecheck inferred literal numeric default parameters.",
+      "repair": "Annotated numeric bounds as number; forced full typecheck passes."
+    },
+    {
+      "failure": "Full lint found three new prefer-const errors in real private-peer test.",
+      "repair": "Captured const peers/owner replace separate assignments; affected15 app/15 standalone plus forced typecheck and lint0/165 pass."
+    },
+    {
+      "failure": "Production staging first lacked its explicitly staged credential-key helper in the new worktree.",
+      "repair": "Copied the existing reviewed regular helper binary physically into this synthetic staging tree; hash recorded; no native key-store call. Final standalone staging gate passes."
+    },
+    {
+      "failure": "Temporary negative-control test file was excluded by the standalone configuration.",
+      "repair": "No regression evidence claimed from that run. Added independent committed voice-retirement-proof.mjs; published old worker fails with descendant alive, repaired staged worker passes."
+    }
+  ],
+  "workflowNotes": [
+    "The first exploratory two-file SDK run was accidentally outside heavy.lock. It is not the required acceptance gate; subsequent required suites/typecheck/lint/staging/commits run under heavy.lock with raw exit status.",
+    "An initial combined staging/negative-control shell grouped expected failure too broadly. The final rebased gate uses set -euo pipefail with staging and positive proof as independent steps; its raw success is the required result."
+  ],
+  "negativeControl": {
+    "baselineRevision": "fc3cfc63e66d98f954dea9fd9999db45381a0cd9",
+    "baselineWorkerSha256": "e2634bbfa09521a85c370562d56fab0481409075cf6eaea9bcc6e4959d9a820e",
+    "harness": "scripts/voice-retirement-proof.mjs",
+    "oldCommand": "src-tauri/resources/node/node scripts/voice-retirement-proof.mjs /tmp/218-old-tts-worker.cjs",
+    "oldWorkerMaterializedBy": "git show fc3cfc63e66d98f954dea9fd9999db45381a0cd9:src/main/voice/voice-tts-worker.js",
+    "expectedExit": 1,
+    "actualExit": 1,
+    "expectedDescendantAlive": false,
+    "actualDescendantAlive": true,
+    "repairedExpectedExit": 0,
+    "repairedActualExit": 0,
+    "repairedActualDescendantAlive": false
+  },
+  "criteria": [
+    {
+      "criterion": 1,
+      "complete": false,
+      "progress": "Existing 21 management commands/4 events retained and regression-checked. Native custom-directory selection and reviewed optional runtime installer remain unavailable."
+    },
+    {
+      "criterion": 2,
+      "complete": false,
+      "progress": "Optional private consumer contract and real peer fence/drain controls delivered; no production mic/shortcut/capture/playback/action authority. Must use existing scoped task/AgentManager services after native215 prerequisite."
+    },
+    {
+      "criterion": 3,
+      "complete": false,
+      "progress": "Actual synthesis descendant cancellation, graceful shutdown, epochs, bounded fragments and staged resources proven with synthetic command/model fixtures. Actual system/downloaded-model inference and native playback/installed platform acceptance remain open."
+    },
+    {
+      "criterion": 4,
+      "complete": false,
+      "progress": "Existing audio-disabled/mobile-exclusion and new synthetic raw-lifetime controls pass. No native permission/raw-stream or supported-platform/device acceptance claim."
+    }
+  ],
+  "remainingDefects": [
+    "#215 physical-document permission/capture/playback/global shortcut authority, including persisted WebView grants and acknowledged raw media stream revocation. All current production WebView permission requests remain denied.",
+    "SDK is optional and not production-wired; native cleanup must deliver exact bound idle/cancelled terminals only to a still-current physical document, never retarget a replacement. Renderer disconnect/pagehide media stop awaits proven native binding.",
+    "Production scoped voice start/confirm/focused dictation and HITL must bind exact task/project/session/request/intent through existing domain services and admission; legacy unscoped action service is not enabled.",
+    "Reviewed pinned runtime installation and native custom-model-directory selection remain unavailable.",
+    "Real system/downloaded local model inference, hard-crash process-tree cleanup and installed microphone/playback/permission behavior across Linux/macOS/Windows remain unproven.",
+    "#208/#215 full prerequisites and packaged redistribution review remain open.",
+    "Hosted Verify unavailable: repository Actions disabled, awaiting user decision. No settings change or workflow dispatch performed."
+  ],
+  "hostedCI": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runList": [],
+    "command": "gh run list -R krazyjakee/21x --commit 17514f96df81b7bf5dc1436adb261fe38e0ac806 --limit 10 --json databaseId,status,conclusion,url,workflowName",
+    "reasonSource": "Lead instruction; no settings endpoint queried."
+  },
+  "issueDisposition": "OPEN; no checkbox changed or whole acceptance criterion claimed.",
+  "gate": {
+    "wrapper": "rtk proxy flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock bash /tmp/218-rebased-gate.sh",
+    "shellPolicy": "set -euo pipefail; no expected-failure branch in required gate",
+    "rawExit": 0,
+    "script": "#!/usr/bin/env bash\nset -euo pipefail\npnpm test:run src/main/voice/voice-tts-worker-client.test.ts src/main/voice/voice-speech-service.test.ts src/main/voice/voice-session-manager-core.test.ts src/main/voice/voice-worker-client.test.ts src/shared/voice-native-callbacks.test.ts src/service/voice-flow-owner.test.ts src/service/voice-management-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts scripts/tauri-stage-production.test.ts --reporter=json --outputFile=/tmp/218-rebased-app.json > /tmp/218-rebased-app.log 2>&1\npnpm tauri:prepare:production > /tmp/218-rebased-staging.log 2>&1\nnode scripts/tauri-test.mjs --production-proofs src/main/voice/voice-tts-worker-client.test.ts src/main/voice/voice-speech-service.test.ts src/main/voice/voice-session-manager-core.test.ts src/main/voice/voice-worker-client.test.ts src/shared/voice-native-callbacks.test.ts src/service/voice-flow-owner.test.ts src/service/voice-management-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts scripts/tauri-stage-production.test.ts scripts/production-service-proof.test.ts --reporter=json --outputFile=/tmp/218-rebased-node.json > /tmp/218-rebased-node.log 2>&1\nsrc-tauri/resources/node/node scripts/voice-retirement-proof.mjs src-tauri/resources/service/voice-tts-worker.cjs > /tmp/218-rebased-retirement.log 2>&1\npnpm exec tsc --build --noEmit --force > /tmp/218-rebased-typecheck.log 2>&1\npnpm lint > /tmp/218-rebased-lint.log 2>&1\nnode scripts/tauri-inventory.mjs --check > /tmp/218-rebased-inventory.log 2>&1\nnode scripts/tauri-contracts.mjs --check > /tmp/218-rebased-contracts.log 2>&1\ngit diff --check\n"
+  },
+  "sourceWorkerEqualsPackagedWorker": true
+}
