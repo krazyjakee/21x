@@ -47,6 +47,8 @@ pub(crate) mod native_clipboard;
 #[path = "production_ui.rs"]
 pub(crate) mod production_ui;
 use production_ui::NativeUiOwner;
+#[path = "native_media.rs"]
+mod native_media;
 #[path = "native_window.rs"]
 mod native_window;
 use native_window::NativeWindowOwner;
@@ -1149,40 +1151,42 @@ pub fn run() {
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
             let navigation_ui = ui.clone();
             let page_ui = ui.clone();
-            let window = tauri::WebviewWindowBuilder::new(
-                app,
-                "main",
-                tauri::WebviewUrl::App("index.html".into()),
-            )
-            .title("21x Production Preview")
-            .visible(false)
-            .inner_size(1280.0, 850.0)
-            .on_navigation(move |url| {
-                if !trusted_origin(url) {
-                    return false;
-                }
-                navigation_ui.navigation(ticket).is_ok()
-            })
-            .on_page_load(move |window, payload| match payload.event() {
-                tauri::webview::PageLoadEvent::Started => {
-                    // A hidden first load must obtain its physical handle
-                    // before recording the start; never infer readiness from
-                    // an unmatched completion after native realization.
-                    let _ = native_window::prepare(&window);
-                    let _ = page_ui.page_started(ticket, &window);
-                }
-                tauri::webview::PageLoadEvent::Finished => {
-                    if trusted_origin(payload.url()) {
-                        let _ = page_ui.page_finished(ticket, &window);
+            let media_navigation = native_media::StartupNavigation::default();
+            let window = tauri::WebviewWindowBuilder::new(app, "main", native_media::initial_url())
+                .title("21x Production Preview")
+                .visible(false)
+                .inner_size(1280.0, 850.0)
+                .on_navigation(move |url| {
+                    if media_navigation.allows_blank(url) {
+                        return true;
                     }
-                }
-            })
-            .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
-            .on_download(|_, _| false)
-            .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
-            .build()?;
+                    if !trusted_origin(url) {
+                        return false;
+                    }
+                    media_navigation.application();
+                    navigation_ui.navigation(ticket).is_ok()
+                })
+                .on_page_load(move |window, payload| match payload.event() {
+                    tauri::webview::PageLoadEvent::Started => {
+                        // A hidden first load must obtain its physical handle
+                        // before recording the start; never infer readiness from
+                        // an unmatched completion after native realization.
+                        let _ = native_window::prepare(&window);
+                        let _ = page_ui.page_started(ticket, &window);
+                    }
+                    tauri::webview::PageLoadEvent::Finished => {
+                        if trusted_origin(payload.url()) {
+                            let _ = page_ui.page_finished(ticket, &window);
+                        }
+                    }
+                })
+                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                .on_download(|_, _| false)
+                .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
+                .build()?;
             native_window::prepare(&window)
                 .map_err(|_| std::io::Error::other("PRODUCTION_WINDOW_CONTROLS_UNAVAILABLE"))?;
+            #[cfg(not(target_os = "linux"))]
             ui.attach_window(ticket, &window)
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
             ui.watch_destroy(ticket, &window)
@@ -1201,6 +1205,11 @@ pub fn run() {
                 eprintln!("PRODUCTION_WINDOW_CONTROLS_UNAVAILABLE");
             }
             window.show()?;
+            native_media::load(
+                window.clone(),
+                app.state::<ProductionState>().native_work.clone(),
+            )
+            .map_err(|_| std::io::Error::other("PRODUCTION_MEDIA_ADMISSION_UNAVAILABLE"))?;
             if let Some(tray) = tray.filter(|owner| owner.is_available()) {
                 attach_tray_close(
                     &window,

@@ -731,7 +731,7 @@ mod tests {
 }
 
 #[cfg(all(test, target_os = "linux"))]
-mod wry_proof {
+pub(crate) mod wry_proof {
     use super::*;
     use std::{
         borrow::Cow,
@@ -757,7 +757,7 @@ mod wry_proof {
         }
     }
     #[allow(deprecated)]
-    fn pump(app: &mut tauri::App, mut ready: impl FnMut() -> bool) {
+    pub(crate) fn pump(app: &mut tauri::App, mut ready: impl FnMut() -> bool) {
         let until = Instant::now() + Duration::from_secs(10);
         loop {
             // Tao may otherwise wait for an OS event beyond the test deadline.
@@ -775,7 +775,7 @@ mod wry_proof {
         }
     }
     #[allow(deprecated)]
-    fn js(app: &mut tauri::App, window: &WebviewWindow, script: &str) -> String {
+    pub(crate) fn js(app: &mut tauri::App, window: &WebviewWindow, script: &str) -> String {
         let (send, receive) = std::sync::mpsc::channel();
         let script = script.to_owned();
         window
