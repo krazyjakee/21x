@@ -1,4 +1,6 @@
 import { PROJECT_CONFIGURATION_CODECS } from '@shared/project-configuration-codecs'
+import { createNativeAttachmentDrops } from './native-attachment-drop-owner'
+import { NATIVE_ATTACHMENT_DROP } from '@shared/native-attachment-drop'
 import { NATIVE_ATTACHMENT_IMAGE_CODECS } from '@shared/attachment-image-codecs'
 import { NATIVE_WINDOW_CODECS } from '@shared/native-window-codecs'
 import { NATIVE_ATTACHMENT_PICK_CODECS } from '@shared/native-attachment-pick-codecs'
@@ -177,9 +179,10 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
   let bootstrapFailure: string | null = null
   const sessionTasks = new Map<string, string>(), observedRevisions = new Map<string, number>(), hydratedRevisions = new Map<string, number>()
   const notify = () => { for (const listener of [...observers]) { try { listener() } catch { /* Consumer failures cannot change connection ownership. */ } } }
+  const drops = createNativeAttachmentDrops(native, () => ({ generation, ready: !disposed && !hydrationPending && state.status === 'ready' }))
   const client = new DesktopClient({ transport: createTauriDesktopTransport(native), commands, events, onState: next => {
     state = next
-    if (next.status !== 'ready') { generation++; hydrationGeneration++; hydrationPending = true; recoveryFailed = false; sessionTasks.clear(); observedRevisions.clear(); hydratedRevisions.clear() }
+    if (next.status !== 'ready') { drops.retire(); generation++; hydrationGeneration++; hydrationPending = true; recoveryFailed = false; sessionTasks.clear(); observedRevisions.clear(); hydratedRevisions.clear() }
     notify()
   } })
   client.subscribe('agent:status', event => { sessionTasks.set(event.sessionId, event.taskId) })
@@ -197,6 +200,8 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
   const namespaces = new Set(['projects.repos', 'projects.resources', 'voice.tts'])
   const nodes = new Map<string, unknown>()
   const functionFor = (path: string): unknown => {
+    if (path === 'attachments.setNativeDropContext') return drops.setContext
+    if (path === 'attachments.onNativeDrop') return drops.subscribe
     const operation = commandPaths.get(path)
     if (operation) return async (...args: unknown[]) => {
       if (!reads.has(operation) && hydrationPending) throw new ServiceProtocolError('DISCONNECTED')
@@ -275,7 +280,8 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
     get unavailableCapability() { return unavailableCapability },
     get recoveryFailed() { return recoveryFailed },
     get bootstrapFailure() { return bootstrapFailure },
-    supports: path => commandPaths.has(path) || eventPaths.has(path) || path === 'onTasksRefresh',
+    supports: path => path === 'attachments.setNativeDropContext' || path === 'attachments.onNativeDrop'
+      ? drops.supported() : commandPaths.has(path) || eventPaths.has(path) || path === 'onTasksRefresh',
     subscribeConnection: listener => { observers.add(listener); return () => { observers.delete(listener) } },
     setRehydrator: callback => { rehydrate = callback },
     rehydrate: hydrate,
@@ -313,6 +319,7 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
               for (const observer of [...installationObservers]) { try { observer(structuredClone(value.progress)) } catch { /* Receipts do not change installation ownership. */ } }
             } }
           ]
+          if (drops.supported()) subscriptions.push({ event: NATIVE_ATTACHMENT_DROP.event, receive: value => { if (currentDocument(value)) drops.receive(value) } })
           for (const subscription of subscriptions) {
             const cleanup = await native.event.listen<unknown>(subscription.event, event => subscription.receive(event.payload), { target: { kind: 'WebviewWindow', label: 'main' } })
             if (!active || disposed || attempt !== uiConnectGeneration) { cleanup(); throw new ServiceProtocolError('DISCONNECTED') }
@@ -326,6 +333,6 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
       // all retained durable owners have settled against this trusted epoch.
       if (rehydrate) await hydrate()
     },
-    dispose() { if (disposed) return; disposed = true; uiConnectGeneration++; uiCleanup?.(); uiCleanup = undefined; uiObservers.clear(); installationObservers.clear(); client.dispose(); observers.clear(); refreshes.clear() }
+    dispose() { if (disposed) return; disposed = true; drops.dispose(); uiConnectGeneration++; uiCleanup?.(); uiCleanup = undefined; uiObservers.clear(); installationObservers.clear(); client.dispose(); observers.clear(); refreshes.clear() }
   }
 }

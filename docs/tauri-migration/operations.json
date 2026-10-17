@@ -480,6 +480,73 @@
       "portableReplacement": "required; File objects are not stdio payloads"
     }
   ],
+  "nativeFacadeProtocols": [
+    {
+      "api": [
+        [
+          "attachments",
+          "setNativeDropContext"
+        ],
+        [
+          "attachments",
+          "onNativeDrop"
+        ]
+      ],
+      "availability": "explicit native bootstrap; acknowledged current physical document and UI context",
+      "id": "native-attachment-drop-v1",
+      "limits": {
+        "activeDrops": 16,
+        "displayPaths": 16,
+        "dropIdsPerEpoch": 4096,
+        "unacceptedTtlMs": 15000
+      },
+      "nativeEvent": {
+        "name": "desktop:attachment-drop",
+        "payload": [
+          "dropId",
+          "contextId",
+          "paths"
+        ],
+        "routing": "captured main physical document only; separate from desktop:event",
+        "stamp": [
+          "engineEpoch",
+          "leaseId"
+        ]
+      },
+      "nativeInvokes": [
+        {
+          "authority": "current native document; monotonic facade revision; join old retirement before acknowledgement",
+          "operation": "attachments:setNativeDropContext",
+          "payload": [
+            "contextId",
+            "contextRevision"
+          ]
+        },
+        {
+          "authority": "exact current physical-document/context drop; no paths or task selector",
+          "operation": "native.attachment.drop.accept",
+          "payload": [
+            "dropId",
+            "contextId"
+          ]
+        },
+        {
+          "authority": "captured exact receipt-only cleanup; usable for retired document; joins raw accept/import/FD retirement",
+          "operation": "native.attachment.drop.close",
+          "payload": [
+            "dropId",
+            "contextId"
+          ]
+        }
+      ],
+      "result": "exact undefined receipt; functions exist only in facade; accepted destination copies survive close",
+      "review": "215/214 original physical-document/context and held FD; two-phase receipt",
+      "scope": "native-only extension; no Electron AST site; no change to retained operation policy",
+      "sourceEvents": [],
+      "sourceGrants": [],
+      "sourceOperations": []
+    }
+  ],
   "operations": [
     {
       "caller": "trusted-desktop-main",

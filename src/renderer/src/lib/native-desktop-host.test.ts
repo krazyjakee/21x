@@ -14,23 +14,26 @@ import { CLAUDE_PLUGIN_LOCAL_SOURCE } from '@shared/claude-plugin-codecs'
 import { CLI_IDS, CLI_LABELS, CLI_CAPABILITIES, MASKED_SECRET, type CliMcpSnapshot } from '@shared/cli-mcp-config'
 import { desktopApi, installDesktopHost } from './desktop-api'
 import type { ServiceEvent } from '@shared/service-protocol'
+import { NATIVE_ATTACHMENT_DROP, type NativeAttachmentDropReceipt } from '@shared/native-attachment-drop'
 const hosts: NativeDesktopHost[] = [], releases: Array<() => void> = []
 afterEach(() => { for (const release of releases.splice(0)) release(); for (const host of hosts.splice(0)) host.dispose() })
 function deferred<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(done => { resolve = done }), resolve: (value: T) => resolve(value) } }
-function fixture(ui = false) {
+function fixture(ui = false, drops = false) {
   let uiLease = 'document-1'
   const progressReceivers = new Set<(event: { payload: unknown }) => void>(), progressHistory: Array<(event: { payload: unknown }) => void> = []
   const uiReceivers = new Set<(event: { payload: unknown }) => void>(), uiHistory: Array<(event: { payload: unknown }) => void> = []
+  const dropReceivers = new Set<(event: { payload: unknown }) => void>(), dropHistory: Array<(event: { payload: unknown }) => void> = []
   let epoch = 'engine-1', sequence = 0
   const receivers = new Set<(event: { payload: unknown }) => void>(), history: Array<(event: { payload: unknown }) => void> = []
   const results = new Map<string, unknown>([['settings:get', 'dark'], ['settings:getAll', {}], ['db:getTasks', []], ['project:getAll', []], ['agent:getAll', []], ['agentSession:getTranscriptSnapshot', []], ['agentSession:getTranscriptDelta', { parts: [], maxRev: 0 }], ['agentSession:approve', { success: true }]])
   const unlisten = vi.fn()
   const invoke = vi.fn(async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
-    if (command === 'engine_status') return { available: true, protocolVersion: 1, engineEpoch: epoch, ...(ui ? { uiLeaseId: uiLease } : {}) }
+    if (command === 'engine_status') return { available: true, protocolVersion: 1, engineEpoch: epoch, ...(ui ? { uiLeaseId: uiLease } : {}), ...(drops ? { nativeDropSupported: true } : {}) }
     const result = results.get(String(args?.operation))
     return { engineEpoch: epoch, result: result === undefined ? { defined: false } : { defined: true, value: result } }
   })
   const listen = vi.fn(async (_name: string, receive: (event: { payload: unknown }) => void) => {
+    if (_name === NATIVE_ATTACHMENT_DROP.event) { dropReceivers.add(receive); dropHistory.push(receive); return () => { dropReceivers.delete(receive); unlisten() } }
     if (_name === 'desktop:agent-installation-progress') { progressReceivers.add(receive); progressHistory.push(receive); return () => { progressReceivers.delete(receive); unlisten() } }
     if (_name === 'desktop:ui-command') { uiReceivers.add(receive); uiHistory.push(receive); return () => { uiReceivers.delete(receive); unlisten() } }
     receivers.add(receive); history.push(receive); return () => { receivers.delete(receive); unlisten() } })
@@ -41,11 +44,55 @@ function fixture(ui = false) {
     dispatch(ui && ['agent:incompatible-session', 'task:checkpointAnswered', 'task:source-action-failed'].includes(operation)
       ? { engineEpoch: epoch, leaseId: uiLease, event } : event)
   }
-  return { host, invoke, listen, unlisten, results, history, emit, dispatch, uiHistory, progressHistory,
+  return { host, invoke, listen, unlisten, results, history, emit, dispatch, uiHistory, progressHistory, dropHistory,
+    emitDrop: (drop: unknown) => { for (const receive of [...dropReceivers]) receive({ payload: { engineEpoch: epoch, leaseId: uiLease, drop } }) },
     emitProgress: (value: unknown) => { for (const receive of [...progressReceivers]) receive({ payload: value }) },
     emitUi: (value: unknown) => { for (const receive of [...uiReceivers]) receive({ payload: value }) },
     changeUiLease: () => { uiLease = 'document-2' }, changeEpoch: () => { epoch = 'engine-2'; sequence = 0 } }
 }
+
+const DROP_CONTEXT = '11111111-1111-4111-8111-111111111111'
+const DROP_RECEIPT = '22222222-2222-4222-8222-222222222222'
+it('exposes native Drop only from explicit bootstrap and transports exact context/accept/close physical receipts', async () => {
+  const unavailable = fixture(true); unavailable.host.setRehydrator(async () => {}); await unavailable.host.reconnect()
+  expect(unavailable.host.supports('attachments.onNativeDrop')).toBe(false)
+  expect(unavailable.listen.mock.calls.some(([event]) => event === NATIVE_ATTACHMENT_DROP.event)).toBe(false)
+  const f = fixture(true, true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(f.host.supports('attachments.setNativeDropContext')).toBe(true)
+  const api = f.host.api.attachments
+  let receipt!: NativeAttachmentDropReceipt, accepting!: Promise<void>
+  const off = api.onNativeDrop!(value => { receipt = value; accepting = value.accept() })
+  await api.setNativeDropContext!(DROP_CONTEXT)
+  f.emitDrop({ contextId: DROP_CONTEXT, dropId: DROP_RECEIPT, paths: ['/tmp/display-only.txt'] })
+  await accepting
+  expect(receipt.paths).toEqual(['/tmp/display-only.txt'])
+  await receipt.close(); off()
+  for (const operation of [NATIVE_ATTACHMENT_DROP.context, NATIVE_ATTACHMENT_DROP.accept, NATIVE_ATTACHMENT_DROP.close]) {
+    expect(f.invoke.mock.calls.some(([command,args]) => command === 'desktop_invoke' && args?.operation === operation && args.uiLease === 'document-1' && args.engineEpoch === 'engine-1')).toBe(true)
+  }
+  expect(f.invoke.mock.calls.some(([,args]) => args?.operation === 'attachments:save')).toBe(false)
+})
+it('rejects Drop context during hydration and fences retired event listeners across actual reconnect', async () => {
+  const f = fixture(true, true), hydration = deferred<void>()
+  f.host.setRehydrator(() => hydration.promise)
+  const connecting = f.host.reconnect()
+  await vi.waitFor(() => expect(f.host.connection.status).toBe('ready'))
+  const api = f.host.api.attachments
+  const before = f.invoke.mock.calls.length
+  await expect(api.setNativeDropContext!(DROP_CONTEXT)).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+  hydration.resolve(); await connecting
+  const listener = vi.fn((value: NativeAttachmentDropReceipt) => { void value.accept() })
+  api.onNativeDrop!(listener); await api.setNativeDropContext!(DROP_CONTEXT)
+  const retired = f.dropHistory[0]
+  f.changeUiLease(); await f.host.reconnect()
+  const next = '33333333-3333-4333-8333-333333333333'
+  await api.setNativeDropContext!(next)
+  retired({ payload: { engineEpoch: 'engine-1', leaseId: 'document-2', drop: { contextId: next, dropId: DROP_RECEIPT, paths: ['/tmp/not-current.txt'] } } })
+  expect(listener).not.toHaveBeenCalled()
+  f.emitDrop({ contextId: next, dropId: DROP_RECEIPT, paths: ['/tmp/current.txt'] })
+  await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1))
+})
 
 const lifecycleNotices = [
   { operation: 'agent:incompatible-session', payload: { taskId: 'task_fixture', agentId: 'agent_fixture', error: PRODUCTION_INCOMPATIBLE_SESSION_ERROR },

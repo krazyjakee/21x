@@ -88,3 +88,21 @@ it('adds one explicitly native-only optional raster contract without forging IPC
  const collision=createInventory({sources:[{file:'src/main/fixture.ts',source:"import { ipcMain } from 'electron'; ipcMain.handle('attachments:readImage', fn)"}]})
  expect(()=>buildOperationManifest(collision,'',undefined,true)).toThrow('collides')
 })
+
+it('audits optional native Drop lifecycle separately without adding Source operation/event/grant rows', () => {
+  const source = "import { ipcMain } from 'electron'; ipcMain.handle('attachments:open', fn);"
+  const inventory = createInventory({ sources: [{ file: 'src/main/fixture.ts', source }] })
+  const before = buildOperationManifest(inventory, ''), after = buildOperationManifest(inventory, '', undefined, true)
+  expect(after.operations.filter((row: { name: string }) => row.name !== 'attachments:readImage')).toEqual(before.operations)
+  expect(after.operations.some((row: { name: string }) => /[Dd]rop/.test(row.name))).toBe(false)
+  expect(after.nativeFacadeProtocols).toEqual([expect.objectContaining({
+    id: 'native-attachment-drop-v1', sourceOperations: [], sourceEvents: [], sourceGrants: [],
+    limits: { unacceptedTtlMs: 15000, activeDrops: 16, displayPaths: 16, dropIdsPerEpoch: 4096 },
+    nativeEvent: expect.objectContaining({ name: 'desktop:attachment-drop', stamp: ['engineEpoch', 'leaseId'] })
+  })])
+  const api = generateDesktopApi('interface ElectronAPI { attachments: { open: (id:string)=>Promise<void> } }')
+  expect(api).toContain('setNativeDropContext?: (contextId: string | null) => Promise<void>')
+  expect(api).toContain('onNativeDrop?: (listener: (receipt: NativeAttachmentDropReceipt) => void) => () => void')
+  expect(api).not.toContain('contextRevision')
+  expect(generateOperationTypes(after)).not.toMatch(/native\.attachment\.drop|attachments:setNativeDropContext|desktop:attachment-drop/)
+})

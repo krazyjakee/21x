@@ -199,6 +199,88 @@ fn physical_key(window: &WebviewWindow) -> Result<String, EngineError> {
         .map_err(|_| EngineError::new("DISCONNECTED"))
 }
 impl NativeUiOwner {
+    /// Capture in the actual native Drop callback without dispatching a Tauri
+    /// getter or minting a receipt. The returned fence never follows a new page.
+    pub(super) fn capture_drop_document(
+        &self,
+        ticket: u64,
+    ) -> Result<(String, String, super::native_attachment_drop::Guard), EngineError> {
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        let captured = state
+            .window
+            .clone()
+            .filter(|w| w.ticket == ticket && state.matches(w))
+            .ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        let (lease, epoch) = state
+            .document
+            .lease
+            .clone()
+            .filter(|(lease, epoch)| {
+                state
+                    .document
+                    .current(&captured.key, epoch, Some(lease), true)
+                    .is_some()
+            })
+            .ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        let owner = self.clone();
+        let generation = state.document.generation;
+        let (guard_epoch, guard_lease) = (epoch.clone(), lease.clone());
+        let guard = Arc::new(move || {
+            let state = owner
+                .0
+                .lock()
+                .map_err(|_| EngineError::new("DISCONNECTED"))?;
+            if !state.matches(&captured)
+                || state.document.generation != generation
+                || state
+                    .document
+                    .current(&captured.key, &guard_epoch, Some(&guard_lease), true)
+                    .is_none()
+            {
+                return Err(EngineError::new("STALE_EPOCH"));
+            }
+            Ok(())
+        });
+        Ok((epoch, lease, guard))
+    }
+    #[cfg(target_os = "linux")]
+    pub(super) fn attachment_drop(
+        &self,
+        app: &tauri::AppHandle,
+        epoch: &str,
+        lease: &str,
+        drop: Value,
+    ) -> Result<(), EngineError> {
+        if !super::native_attachment_drop::event(&drop) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let captured = self.captured(app, epoch)?;
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        if !state.matches(&captured)
+            || state
+                .document
+                .current(&captured.key, epoch, Some(lease), true)
+                .is_none()
+        {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        captured
+            .window
+            .emit_to(
+                EventTarget::WebviewWindow {
+                    label: "main".into(),
+                },
+                super::native_attachment_drop::EVENT,
+                json!({"engineEpoch":epoch,"leaseId":lease,"drop":drop}),
+            )
+            .map_err(|_| EngineError::new("DISCONNECTED"))
+    }
     /// App-owned native actions need the actual current physical window even
     /// when the Source service has failed; they do not mint a document lease.
     pub fn assert_window(&self, window: &WebviewWindow) -> Result<(), EngineError> {
@@ -326,6 +408,19 @@ impl NativeUiOwner {
                 .window
                 .as_ref()
                 .is_some_and(|captured| state.matches(captured))
+    }
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn activate_synthetic_document(
+        &self,
+        window: &WebviewWindow,
+        epoch: &str,
+    ) -> String {
+        authorize(window).unwrap();
+        let key = physical_key(window).unwrap();
+        let mut state = self.0.lock().unwrap();
+        let captured = state.window.as_ref().unwrap();
+        assert!(state.matches(captured) && captured.key == key);
+        state.document.activate(&key, epoch, true).unwrap()
     }
     /// App-owned reload invalidates before dispatch, including the interval
     /// before the next page-load event.

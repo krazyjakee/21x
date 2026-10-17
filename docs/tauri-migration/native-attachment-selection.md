@@ -106,10 +106,12 @@ regressions hold an accepted raw read, revoke its group, observe joined native
 retirement, unchanged task metadata and no leftover destination file. Existing
 regular-file/version/digest and retryable-close checks continue to apply.
 
-This cleanup route is a prerequisite for native file drop. File drop stays
-unavailable until the original opaque UI attachment context is captured at the
-actual native event, acceptance and close are acknowledged, and all FD/Source
-offers are retired across context change, refusal, ignored delivery and document
-loss. Public event/registration details remain under explicit coordination with
-the renderer owner; this continuation grants no raw path fallback or new UI
-capability. No installed all-platform or real user file/profile proof is claimed.
+This cleanup route supports the separately reviewed
+[native Drop context/accept/close protocol](native-attachment-drop.md). Its
+original opaque UI context is captured at the actual native event; held files
+cannot be read until acceptance, and group cleanup joins raw work across context
+change, refusal, ignored delivery and document loss. Renderer owner A owns UI
+activation after publication. No raw path fallback or Source public operation
+is granted; installed all-platform acceptance remains open. Explicit full-array
+metadata update also still needs a Source cross-writer append/CAS decision and
+regression; metadata-only save semantics are unchanged.

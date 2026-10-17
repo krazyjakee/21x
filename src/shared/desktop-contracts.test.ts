@@ -3,6 +3,7 @@ import { DESKTOP_OPERATION_MANIFEST } from './desktop-operations'
 import { DesktopOperationRegistry, type DesktopCallerContext } from '../service/transport/desktop-registry'
 import { HOST_OPERATION_SCHEMAS, isAbsoluteHostPath, isEncodedByteChunk, isHostPaths, isOptionalResult, optionalResult } from './host-services'
 import { isRecord, hasExactKeys } from './service-protocol'
+import { NATIVE_ATTACHMENT_DROP } from './native-attachment-drop'
 
 const caller: DesktopCallerContext = { principal: 'trusted-desktop-main', engineEpoch: 'epoch-1', webviewId: 'main', origin: 'tauri://localhost' }
 const signal = (): AbortSignal => new AbortController().signal
@@ -124,4 +125,15 @@ it('keeps native-only image admission outside the public Source registry',async(
  expect(DESKTOP_OPERATION_MANIFEST['command/attachments:readImage']).toMatchObject({owner:'native-host',caller:'trusted-desktop-main'})
  expect(()=>service.bindCommand('attachments:readImage',binding() as never)).toThrow('Unknown operation.')
  await expect(service.invoke('attachments:readImage',{taskId:'task_fixture',attachmentId:'00000000-0000-4000-8000-000000000001'},caller,signal())).rejects.toMatchObject({code:'UNKNOWN_OPERATION'})
+})
+
+it('refuses native Drop lifecycle names and the stamped event at the actual Source registry boundary', async () => {
+  const service = registry()
+  for (const operation of [NATIVE_ATTACHMENT_DROP.context, NATIVE_ATTACHMENT_DROP.accept, NATIVE_ATTACHMENT_DROP.close]) {
+    expect(Object.hasOwn(DESKTOP_OPERATION_MANIFEST, `command/${operation}`)).toBe(false)
+    expect(() => service.bindCommand(operation as never, binding() as never)).toThrow('Unknown operation.')
+    await expect(service.invoke(operation, { contextId: '11111111-1111-4111-8111-111111111111' }, caller, signal())).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+  }
+  expect(Object.hasOwn(DESKTOP_OPERATION_MANIFEST, `event/${NATIVE_ATTACHMENT_DROP.event}`)).toBe(false)
+  expect(() => service.bindEvent(NATIVE_ATTACHMENT_DROP.event as never, { validatePayload: () => true, encodePayload: (value: unknown) => value } as never)).toThrow('Unknown operation.')
 })

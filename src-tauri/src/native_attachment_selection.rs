@@ -1,6 +1,9 @@
 //! Native chooser/FD leases. Paths are display data; Source imports only
 //! private one-shot grants under its captured task/project authority.
-use super::{native_services::NativeWorkOwner, production_ui::NativeUiOwner};
+use super::{
+    native_attachment_drop::DropOwner, native_services::NativeWorkOwner,
+    production_ui::NativeUiOwner,
+};
 #[cfg(target_os = "linux")]
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -40,7 +43,7 @@ impl DialogRequest {
     }
 }
 #[cfg(target_os = "linux")]
-fn selection_id() -> Result<String, EngineError> {
+pub(super) fn selection_id() -> Result<String, EngineError> {
     use std::io::Read;
     let mut bytes = [0u8; 16];
     std::fs::File::open("/dev/urandom")
@@ -63,27 +66,39 @@ pub fn host(
     work: NativeWorkOwner,
     ui: NativeUiOwner,
     profile: PathBuf,
+    drops: DropOwner,
 ) -> Option<ProductionAttachmentSelectionHost> {
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (app, work, ui, profile);
+        let _ = (app, work, ui, profile, drops);
         None
     }
     #[cfg(target_os = "linux")]
     {
         let owner = SelectionAuthority::default();
+        configure_drop(
+            app,
+            work.clone(),
+            ui.clone(),
+            profile.clone(),
+            owner.clone(),
+            &drops,
+        )
+        .ok()?;
         let close_owner = owner.clone();
         let close_work = work.clone();
+        let close_drops = drops.clone();
         let app = app.clone();
         Some(ProductionAttachmentSelectionHost {
             invoke: Arc::new(
                 move |operation: String, payload: Value, epoch: String| -> HostFuture<Value> {
-                    let (app, work, ui, profile, owner) = (
+                    let (app, work, ui, profile, owner, drops) = (
                         app.clone(),
                         work.clone(),
                         ui.clone(),
                         profile.clone(),
                         owner.clone(),
+                        drops.clone(),
                     );
                     Box::pin(async move {
                         // Retirement drains the entry even after physical document loss.
@@ -104,9 +119,14 @@ pub fn host(
                         let engine = super::available_engine(&app, Some(&epoch))?;
                         let (guard_window, guard_work, guard_epoch, guard_lease) =
                             (window.clone(), work.clone(), epoch.clone(), lease.clone());
+                        let selected = payload["selectionId"].as_str().map(str::to_owned);
                         let current: Scope = Arc::new(move || {
                             guard_work.assert_open()?;
-                            ui.assert_publish(&guard_window, &guard_epoch, &guard_lease)
+                            ui.assert_publish(&guard_window, &guard_epoch, &guard_lease)?;
+                            if let Some(id) = &selected {
+                                drops.check_selection(id, &guard_lease)?;
+                            }
+                            Ok(())
                         });
                         if operation != "native.attachment.pick" {
                             return work
@@ -152,8 +172,10 @@ pub fn host(
                 },
             ),
             close: Arc::new(move || {
-                let (owner, work) = (close_owner.clone(), close_work.clone());
+                let (owner, work, drops) =
+                    (close_owner.clone(), close_work.clone(), close_drops.clone());
                 Box::pin(async move {
+                    drops.shutdown().await?;
                     owner.stop()?;
                     work.drain().await?;
                     owner.close()
@@ -161,6 +183,87 @@ pub fn host(
             }),
         })
     }
+}
+#[cfg(target_os = "linux")]
+fn configure_drop(
+    app: &tauri::AppHandle,
+    work: NativeWorkOwner,
+    ui: NativeUiOwner,
+    profile: PathBuf,
+    owner: SelectionAuthority,
+    drops: &DropOwner,
+) -> Result<(), EngineError> {
+    use super::native_attachment_drop::{Guard, RawReceipt};
+    let (close_app, close_work, close_owner) = (app.clone(), work.clone(), owner.clone());
+    drops.configure(Arc::new(move |group| {
+        let (app, work, owner) = (close_app.clone(), close_work.clone(), close_owner.clone());
+        Box::pin(async move {
+            // Raw capture has settled before this callback. Source revocation
+            // joins any admitted import before native descriptors are released.
+            if group.offered.load(Ordering::SeqCst) {
+                let engine = app
+                    .state::<super::ProductionState>()
+                    .engine
+                    .clone()
+                    .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                engine
+                    .revoke_attachment_selections(
+                        &group.context.epoch,
+                        json!({"leaseId":group.context.lease,"selectionIds":group.selection_ids}),
+                    )
+                    .await?;
+            }
+            work.run_cleanup(move || {
+                for id in &group.selection_ids {
+                    owner.invoke(
+                        "host.attachment.selection.retire",
+                        &json!({"leaseId":group.context.lease,"selectionId":id}),
+                        || Ok(()),
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+        })
+    }))?;
+    let app = app.clone();
+    drops.configure_capture(Arc::new(move |drops, paths, epoch, lease, document: Guard| {
+        // Validate the entire native batch before acquiring any file descriptor.
+        let path_values: Vec<_> = paths.iter().map(|p| p.to_str().map(|s| json!(s))).collect();
+        if paths.is_empty() || paths.len() > 16 || path_values.iter().any(|p| p.as_ref().is_none_or(|p| !twentyonex_engine::production_attachment_selection::path(p)))
+            || paths.iter().collect::<std::collections::HashSet<_>>().len() != paths.len() { return; }
+        let Ok(id) = selection_id() else { return; };
+        let Ok(ids) = paths.iter().map(|_| selection_id()).collect::<Result<Vec<_>,_>>() else { return; };
+        let Ok(group) = drops.capture(id, ids, &lease, &epoch, document) else { return; };
+        let (app, work, ui, profile, owner) = (app.clone(), work.clone(), ui.clone(), profile.clone(), owner.clone());
+        // Own the raw receipt before scheduling. Close cannot race the interval
+        // before the blocking driver's first poll and acknowledge early.
+        let receipt = RawReceipt(group.clone());
+        drops.expire(group.clone());
+        tauri::async_runtime::spawn(async move {
+            let (raw_group, checking) = (group.clone(), drops.clone());
+            let result = work.run(move || {
+                let _receipt = receipt;
+                let current = || {
+                    checking.check(&raw_group, false)?;
+                    let window = app.get_webview_window("main").ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+                    ui.assert_publish(&window, &epoch, &lease)
+                };
+                current()?;
+                let engine = super::available_engine(&app, Some(&epoch))?;
+                let mut selections = Vec::new();
+                for (path, id) in paths.into_iter().zip(&raw_group.selection_ids) {
+                    selections.push(owner.select_scoped(path, id, &lease, &profile, current)?);
+                }
+                current()?;
+                raw_group.offered.store(true, Ordering::SeqCst);
+                tauri::async_runtime::block_on(engine.offer_attachment_selections(&epoch, json!({"leaseId":lease,"selections":selections})))?;
+                current()?;
+                ui.attachment_drop(&app, &epoch, &lease, json!({"dropId":raw_group.id,"contextId":raw_group.context.id,"paths":selections.iter().map(|s| s["path"].clone()).collect::<Vec<_>>()}))
+            }).await;
+            if result.is_err() { let _ = drops.close_group(group).await; }
+        });
+    }))
 }
 #[cfg(target_os = "linux")]
 mod gtk_pick {

@@ -40,6 +40,8 @@ use native_energy::NativeEnergyOwner;
 pub(crate) mod native_artifact_clipboard;
 #[path = "native_attachment_download.rs"]
 pub(crate) mod native_attachment_download;
+#[path = "native_attachment_drop.rs"]
+mod native_attachment_drop;
 #[path = "native_attachment_selection.rs"]
 pub(crate) mod native_attachment_selection;
 #[path = "native_clipboard.rs"]
@@ -59,6 +61,7 @@ struct ProductionState {
     native_work: NativeWorkOwner,
     oauth: native_oauth::NativeOAuthOwner,
     ui: NativeUiOwner,
+    drops: native_attachment_drop::DropOwner,
     window: NativeWindowOwner,
     notifications: NativeNotificationOwner,
     tray: Option<NativeTrayOwner>,
@@ -416,6 +419,7 @@ fn engine_status(
         snapshot["available"] =
             json!(snapshot["available"] == true && state.native_work.assert_open().is_ok());
         snapshot["uiSupported"] = json!(true);
+        snapshot["nativeDropSupported"] = json!(state.drops.available());
         let mut notice = state
             .notice_document
             .lock()
@@ -445,6 +449,73 @@ async fn desktop_invoke(
     ui_lease: Option<String>,
 ) -> Result<Value, EngineError> {
     authorize(&window)?;
+    if matches!(
+        operation.as_str(),
+        native_attachment_drop::CONTEXT
+            | native_attachment_drop::ACCEPT
+            | native_attachment_drop::CLOSE
+    ) {
+        if !native_attachment_drop::request(&operation, &payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let engine = state
+            .engine
+            .as_ref()
+            .filter(|engine| engine.epoch() == engine_epoch)
+            .ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        let context = native_attachment_drop::Context {
+            id: payload["contextId"].as_str().unwrap_or("").to_owned(),
+            lease: lease.clone(),
+            epoch: engine_epoch.clone(),
+        };
+        if operation == native_attachment_drop::CLOSE {
+            // Exact receipt-only cleanup stays usable for the old document and
+            // during stopping. It cannot acquire, accept or read any new file.
+            state
+                .drops
+                .close(payload["dropId"].as_str().unwrap(), &context)
+                .await?;
+        } else {
+            state.native_work.assert_open()?;
+            state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+            if !state.drops.available() {
+                return Err(EngineError::new("UNKNOWN_OPERATION"));
+            }
+            if operation == native_attachment_drop::CONTEXT {
+                let (ui, work, guard_window, epoch, guard_lease) = (
+                    state.ui.clone(),
+                    state.native_work.clone(),
+                    window.clone(),
+                    engine_epoch.clone(),
+                    lease.clone(),
+                );
+                state
+                    .drops
+                    .register_numbered(
+                        if payload["contextId"].is_null() {
+                            None
+                        } else {
+                            Some(context)
+                        },
+                        Arc::new(move || {
+                            work.assert_open()?;
+                            ui.assert_publish(&guard_window, &epoch, &guard_lease)
+                        }),
+                        engine_epoch.clone(),
+                        lease.clone(),
+                        payload["contextRevision"].as_u64().unwrap(),
+                    )
+                    .await?;
+            } else {
+                state
+                    .drops
+                    .accept(payload["dropId"].as_str().unwrap(), &context)?;
+            }
+            state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        }
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":{"defined":false}}));
+    }
     state.native_work.assert_open()?;
     let engine = state
         .engine
@@ -775,6 +846,7 @@ async fn start(
     notifications: NativeNotificationOwner,
     tray_available: bool,
     energy: Option<NativeEnergyOwner>,
+    drops: native_attachment_drop::DropOwner,
 ) -> Result<ProductionEngine, EngineError> {
     let containment = production_containment()?;
     let resources = app
@@ -988,6 +1060,7 @@ async fn start(
         native_work.clone(),
         ui.clone(),
         descriptor.paths.profile_root.clone(),
+        drops,
     );
     ProductionEngine::start(
         TrustedProductionLaunch {
@@ -1085,6 +1158,7 @@ pub fn run() {
                     .collect::<Vec<_>>(),
             );
             let ui = NativeUiOwner::default();
+            let drops = native_attachment_drop::DropOwner::default();
             let notifications = NativeNotificationOwner::new(app.handle(), native_work.clone())
                 .map_err(|_| std::io::Error::other("PRODUCTION_NOTIFICATION_UNAVAILABLE"))?;
             let energy = NativeEnergyOwner::new(app.handle(), native_work.clone()).ok();
@@ -1106,6 +1180,7 @@ pub fn run() {
                 notifications.clone(),
                 tray.as_ref().is_some_and(|owner| owner.is_available()),
                 energy.clone(),
+                drops.clone(),
             ));
             let saved_window = match &started {
                 Ok(engine) => {
@@ -1126,6 +1201,7 @@ pub fn run() {
                     native_work: native_work.clone(),
                     oauth: oauth.clone(),
                     ui: ui.clone(),
+                    drops: drops.clone(),
                     window: window_owner.clone(),
                     notifications: notifications.clone(),
                     tray: tray.clone(),
@@ -1138,6 +1214,7 @@ pub fn run() {
                     native_work,
                     oauth: oauth.clone(),
                     ui: ui.clone(),
+                    drops: drops.clone(),
                     window: window_owner.clone(),
                     notifications: notifications.clone(),
                     tray: tray.clone(),
@@ -1150,6 +1227,7 @@ pub fn run() {
                 .reserve_window()
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
             let navigation_ui = ui.clone();
+            let navigation_drops = drops.clone();
             let page_ui = ui.clone();
             let media_navigation = native_media::StartupNavigation::default();
             let window = tauri::WebviewWindowBuilder::new(app, "main", native_media::initial_url())
@@ -1164,6 +1242,7 @@ pub fn run() {
                         return false;
                     }
                     media_navigation.application();
+                    navigation_drops.retire_document();
                     navigation_ui.navigation(ticket).is_ok()
                 })
                 .on_page_load(move |window, payload| match payload.event() {
@@ -1191,6 +1270,7 @@ pub fn run() {
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
             ui.watch_destroy(ticket, &window)
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
+            native_attachment_drop::watch(&window, ticket, ui.clone(), drops.clone());
             let restored =
                 native_window::apply_restore(&window, saved_window).unwrap_or_else(|_| {
                     eprintln!("PRODUCTION_WINDOW_RESTORE_UNAVAILABLE");
@@ -1240,6 +1320,7 @@ pub fn run() {
             if state.window.stop().is_err()
                 || state.oauth.stop().is_err()
                 || state.ui.close().is_err()
+                || state.drops.invalidate(true).is_err()
                 || state.native_work.close().is_err()
             {
                 eprintln!("PRODUCTION_NATIVE_WORK_DRAIN_BLOCKED");
@@ -1248,6 +1329,7 @@ pub fn run() {
             }
             let engine = state.engine.clone();
             let native_work = state.native_work.clone();
+            let drops = state.drops.clone();
             let window_owner = state.window.clone();
             let notifications = state.notifications.clone();
             let tray = state.tray.clone();
@@ -1256,6 +1338,11 @@ pub fn run() {
             let quitting = quitting.clone();
             tauri::async_runtime::spawn(async move {
                 let mut code = 0;
+                if drops.shutdown().await.is_err() {
+                    eprintln!("PRODUCTION_ATTACHMENT_DROP_DRAIN_BLOCKED");
+                    quitting.store(0, Ordering::SeqCst);
+                    return;
+                }
                 // Cancel the owned portal interaction before joining normal
                 // work, which can include an unanswered permission response.
                 if let Some(energy) = energy {

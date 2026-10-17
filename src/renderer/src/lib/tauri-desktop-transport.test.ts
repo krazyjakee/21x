@@ -1,6 +1,49 @@
 import type { JsonValue } from '@shared/service-protocol'
 import { expect, it, vi } from 'vitest'
 import { productionBootstrapMessage, getTauriEngineEpoch, getTauriUiDocument, createTauriDesktopTransport, type TauriDesktopApi } from './tauri-desktop-transport'
+import { hasTauriNativeDrops, invokeTauriNativeDrop } from './tauri-desktop-transport'
+import { NATIVE_ATTACHMENT_DROP as DROP } from '@shared/native-attachment-drop'
+
+it('binds finite native Drop operations to the exact bootstrap document and permits only captured cleanup after replacement', async () => {
+  const contextId = '11111111-1111-4111-8111-111111111111', dropId = '22222222-2222-4222-8222-222222222222'
+  let leaseId = 'document:1'
+  const invoke = vi.fn(async (command: string) => command === 'engine_status'
+    ? { available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: leaseId, nativeDropSupported: true }
+    : { engineEpoch: 'engine-1', result: { defined: false } })
+  const native = { core: { invoke } } as unknown as TauriDesktopApi
+  await getTauriEngineEpoch(native); const original = getTauriUiDocument(native)!
+  expect(hasTauriNativeDrops(native)).toBe(true)
+  await invokeTauriNativeDrop(native, DROP.context, { contextId, contextRevision: 1 }, original)
+  leaseId = 'document:2'; const bootstrap = getTauriEngineEpoch(native)
+  expect(hasTauriNativeDrops(native)).toBe(false)
+  await bootstrap
+  const before = invoke.mock.calls.length
+  await expect(invokeTauriNativeDrop(native, DROP.accept, { contextId, dropId }, original)).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  expect(invoke.mock.calls.length).toBe(before)
+  await invokeTauriNativeDrop(native, DROP.close, { contextId, dropId }, original)
+  expect(invoke).toHaveBeenLastCalledWith('desktop_invoke', { operation: DROP.close, payload: { contextId, dropId }, engineEpoch: 'engine-1', uiLease: 'document:1' })
+})
+it('rejects forged native Drop arguments and late/invalid acknowledgements without replay', async () => {
+  const contextId = '11111111-1111-4111-8111-111111111111'
+  let done!: (value: unknown) => void
+  const raw = new Promise(resolve => { done = resolve })
+  const invoke = vi.fn(async (command: string) => command === 'engine_status'
+    ? { available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document:1', nativeDropSupported: true } : raw)
+  const native = { core: { invoke } } as unknown as TauriDesktopApi
+  await getTauriEngineEpoch(native); const original = getTauriUiDocument(native)!
+  const before = invoke.mock.calls.length
+  for (const payload of [{ contextId }, { contextId, contextRevision: 0 }, { contextId, contextRevision: 1, path: '/etc/passwd' }]) {
+    await expect(invokeTauriNativeDrop(native, DROP.context, payload, original)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  }
+  expect(invoke.mock.calls.length).toBe(before)
+  const pending = invokeTauriNativeDrop(native, DROP.context, { contextId, contextRevision: 1 }, original)
+  await getTauriEngineEpoch(native); done({ engineEpoch: 'engine-1', result: { defined: false } })
+  await expect(pending).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  expect(invoke.mock.calls.length).toBe(before + 2)
+  const current = getTauriUiDocument(native)!
+  invoke.mockResolvedValueOnce({ engineEpoch: 'engine-1', result: { defined: true } } as never)
+  await expect(invokeTauriNativeDrop(native, DROP.context, { contextId, contextRevision: 2 }, current)).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+})
 
 it('unwraps only the exact three current document notices and revokes old listeners during same-epoch bootstrap', async () => {
   let leaseId = 'document:1'

@@ -3,6 +3,7 @@ import {
   SERVICE_ERROR_MESSAGES, ServiceProtocolError, hasExactKeys, isRecord, type ServiceErrorCode
 } from '@shared/service-protocol'
 import type { DesktopTransport } from './desktop-client'
+import { NATIVE_ATTACHMENT_DROP, isNativeDropContext } from '@shared/native-attachment-drop'
 
 /** Narrow surface available through Tauri's withGlobalTauri configuration. */
 export interface TauriDesktopApi {
@@ -13,8 +14,32 @@ export interface TauriDesktopApi {
 
 const bootstrapGenerations = new WeakMap<TauriDesktopApi, number>()
 const uiDocuments = new WeakMap<TauriDesktopApi, Readonly<{ engineEpoch: string; leaseId: string }>>()
+const dropDocuments = new WeakMap<TauriDesktopApi, Readonly<{ engineEpoch: string; leaseId: string }>>()
 const documentNotices = new Set(['agent:incompatible-session', 'task:checkpointAnswered', 'task:source-action-failed'])
 export function getTauriUiDocument(native: TauriDesktopApi): Readonly<{ engineEpoch: string; leaseId: string }> | undefined { return uiDocuments.get(native) }
+export type TauriUiDocument = NonNullable<ReturnType<typeof getTauriUiDocument>>
+export function hasTauriNativeDrops(native: TauriDesktopApi): boolean {
+  const document = uiDocuments.get(native)
+  return !!document && dropDocuments.get(native) === document
+}
+/** Exact native-only two-phase operations. Receipt close may clean its captured
+ * old document; context/accept can only use the current acknowledged bootstrap. */
+export async function invokeTauriNativeDrop(native: TauriDesktopApi, operation: typeof NATIVE_ATTACHMENT_DROP.context | typeof NATIVE_ATTACHMENT_DROP.accept | typeof NATIVE_ATTACHMENT_DROP.close,
+  payload: { contextId: string | null; dropId?: string; contextRevision?: number }, document: TauriUiDocument): Promise<void> {
+  const context = operation === NATIVE_ATTACHMENT_DROP.context
+  if (!isNativeDropContext(payload.contextId) || !context && payload.contextId === null
+    || ![NATIVE_ATTACHMENT_DROP.context, NATIVE_ATTACHMENT_DROP.accept, NATIVE_ATTACHMENT_DROP.close].includes(operation)
+    || !hasExactKeys(payload, context ? ['contextId', 'contextRevision'] : ['contextId', 'dropId'])
+    || context && (!Number.isSafeInteger(payload.contextRevision) || Number(payload.contextRevision) < 1)
+    || !context && (!isNativeDropContext(payload.dropId) || payload.dropId === null)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+  if (operation !== NATIVE_ATTACHMENT_DROP.close && (uiDocuments.get(native) !== document || !hasTauriNativeDrops(native))) throw new ServiceProtocolError('STALE_EPOCH')
+  try {
+    const value = await native.core.invoke('desktop_invoke', { operation, payload, engineEpoch: document.engineEpoch, uiLease: document.leaseId })
+    if (!isRecord(value) || !hasExactKeys(value, ['engineEpoch', 'result']) || value.engineEpoch !== document.engineEpoch
+      || !isRecord(value.result) || !hasExactKeys(value.result, ['defined']) || value.result.defined !== false) throw new ServiceProtocolError('INVALID_RESULT')
+    if (operation !== NATIVE_ATTACHMENT_DROP.close && uiDocuments.get(native) !== document) throw new ServiceProtocolError('STALE_EPOCH')
+  } catch (error) { throw nativeError(error) }
+}
 
 /** Fixed product wording only; native diagnostics, paths and credentials are
  * never part of the renderer's bootstrap failure. */
@@ -94,6 +119,7 @@ export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<stri
   const generation = (bootstrapGenerations.get(native) ?? 0) + 1
   bootstrapGenerations.set(native, generation)
   uiDocuments.delete(native)
+  dropDocuments.delete(native)
   let status: unknown
   try {
     for (let attempt = 0; attempt < 40; attempt++) {
@@ -110,7 +136,11 @@ export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<stri
     typeof status.engineEpoch !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(status.engineEpoch)) {
     throw new ServiceProtocolError('DISCONNECTED')
   }
-  if (isUiLeaseId(status.uiLeaseId)) uiDocuments.set(native, Object.freeze({ engineEpoch: status.engineEpoch, leaseId: status.uiLeaseId }))
+  if (isUiLeaseId(status.uiLeaseId)) {
+    const document = Object.freeze({ engineEpoch: status.engineEpoch, leaseId: status.uiLeaseId })
+    uiDocuments.set(native, document)
+    if (status.nativeDropSupported === true) dropDocuments.set(native, document)
+  }
   return status.engineEpoch
 }
 

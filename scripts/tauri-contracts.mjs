@@ -84,11 +84,28 @@ function attachmentImageApiMember() {
       ['taskId', 'attachmentId'].map(name => ts.factory.createParameterDeclaration(undefined, undefined, name, undefined, ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword), undefined)),
       ts.factory.createTypeReferenceNode('Promise', [ts.factory.createTypeReferenceNode('AttachmentImage')])) )
 }
+function attachmentDropApiMembers() {
+  const voidType = () => ts.factory.createKeywordTypeNode(ts.SyntaxKind.VoidKeyword)
+  const parameter = (name, type) => ts.factory.createParameterDeclaration(undefined, undefined, name, undefined, type, undefined)
+  const property = (name, parameters, result) => ts.factory.createPropertySignature(undefined, name,
+    ts.factory.createToken(ts.SyntaxKind.QuestionToken), ts.factory.createFunctionTypeNode(undefined, parameters, result))
+  return [
+    property('setNativeDropContext', [parameter('contextId', ts.factory.createUnionTypeNode([
+      ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword), ts.factory.createLiteralTypeNode(ts.factory.createNull())
+    ]))], ts.factory.createTypeReferenceNode('Promise', [voidType()])),
+    property('onNativeDrop', [parameter('listener', ts.factory.createFunctionTypeNode(undefined,
+      [parameter('receipt', ts.factory.createTypeReferenceNode('NativeAttachmentDropReceipt'))], voidType()))],
+      ts.factory.createFunctionTypeNode(undefined, [], voidType()))
+  ]
+}
 export function generateDesktopApi(declarationSource) {
   const sf = ts.createSourceFile('electron.d.ts', declarationSource, ts.ScriptTarget.Latest, true)
   const statements = [ts.factory.createImportDeclaration(undefined,
     ts.factory.createImportClause(true, undefined, ts.factory.createNamedImports([ts.factory.createImportSpecifier(false, undefined, ts.factory.createIdentifier('AttachmentImage'))])),
-    ts.factory.createStringLiteral('./attachment-image'), undefined)]
+    ts.factory.createStringLiteral('./attachment-image'), undefined),
+    ts.factory.createImportDeclaration(undefined,
+      ts.factory.createImportClause(true, undefined, ts.factory.createNamedImports([ts.factory.createImportSpecifier(false, undefined, ts.factory.createIdentifier('NativeAttachmentDropReceipt'))])),
+      ts.factory.createStringLiteral('./native-attachment-drop'), undefined)]
   for (const statement of sf.statements) {
     if (ts.isModuleDeclaration(statement)) continue // No global Window/electronAPI declaration.
     if (ts.isImportDeclaration(statement)) {
@@ -104,7 +121,7 @@ export function generateDesktopApi(declarationSource) {
         statement.members.filter(member => name(member.name) !== 'browser').map(member =>
           name(member.name) === 'attachments' && ts.isPropertySignature(member) && member.type && ts.isTypeLiteralNode(member.type)
             ? ts.factory.updatePropertySignature(member, member.modifiers, member.name, member.questionToken,
-              ts.factory.createTypeLiteralNode([...member.type.members, attachmentImageApiMember()])) : member)))
+              ts.factory.createTypeLiteralNode([...member.type.members, attachmentImageApiMember(), ...attachmentDropApiMembers()])) : member)))
     } else statements.push(statement)
   }
   const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed })
@@ -200,6 +217,23 @@ export function buildOperationManifest(inventory, preloadSource, forwardingRevie
     removedFeatures: ['embedded-browser', 'remote-webpage-panels', 'built-in-browser-tools', 'browser-recording-capture', 'browser-cookie-import'],
     retainedSecurity: ['trusted-app-webview', 'sandboxed-artifact-previews', 'external-OAuth', 'external-link-validation'],
     operations, unresolvedReferences: forwarding.references, forwardingReview: forwarding.review,
+    // This is a native document lifecycle protocol, not a retained Source
+    // command/event declaration. Do not synthesize Source handlers or grants.
+    nativeFacadeProtocols: includeNativeExtensions ? [{
+      id: 'native-attachment-drop-v1', review: '215/214 original physical-document/context and held FD; two-phase receipt',
+      availability: 'explicit native bootstrap; acknowledged current physical document and UI context',
+      api: [['attachments', 'setNativeDropContext'], ['attachments', 'onNativeDrop']],
+      nativeInvokes: [
+        { operation: 'attachments:setNativeDropContext', payload: ['contextId', 'contextRevision'], authority: 'current native document; monotonic facade revision; join old retirement before acknowledgement' },
+        { operation: 'native.attachment.drop.accept', payload: ['dropId', 'contextId'], authority: 'exact current physical-document/context drop; no paths or task selector' },
+        { operation: 'native.attachment.drop.close', payload: ['dropId', 'contextId'], authority: 'captured exact receipt-only cleanup; usable for retired document; joins raw accept/import/FD retirement' }
+      ],
+      nativeEvent: { name: 'desktop:attachment-drop', stamp: ['engineEpoch', 'leaseId'], payload: ['dropId', 'contextId', 'paths'], routing: 'captured main physical document only; separate from desktop:event' },
+      sourceOperations: [], sourceEvents: [], sourceGrants: [],
+      limits: { unacceptedTtlMs: 15000, activeDrops: 16, displayPaths: 16, dropIdsPerEpoch: 4096 },
+      result: 'exact undefined receipt; functions exist only in facade; accepted destination copies survive close',
+      scope: 'native-only extension; no Electron AST site; no change to retained operation policy'
+    }] : [],
     localOnlyPreloadMethods: [{ apiPath: ['webUtils', 'getPathForFile'], portableReplacement: 'required; File objects are not stdio payloads' }] }
 }
 
