@@ -6,6 +6,8 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #209 active-view continuation joins mounted overview/project-group lists and retained group snapshots in the native durable recovery barrier. Reference-counted sources retire listeners/timers and queued reads on last release, pagehide and HMR; replacement cohorts are joined in bounded passes, failed reads keep mutations fenced, and accepted group writes invalidate snapshots without replay. The existing overview debounce/poll and heartbeat early return remain. Thirteen new typed-native controls (27 total collection recovery controls) cover all three read-failure paths, accepted-write/list races, replacement/unmounted views and shared-reader publication/disposal races. Full1773 renderer/447 staged/20 contract tests, forced raw typecheck, lint0errors165baselinewarnings, both frontends and inventory906/contracts freshness passed; rebase inherits raster4fd1780a and reruns affected inputs. [Renderer recovery](production-renderer-recovery.md) records scope; revision-bound evidence follows. Installed/native/platform acceptance remains open; hosted Verify unavailable: repository Actions disabled, awaiting user decision.
+
 The #215/#214 saved-raster continuation adds optional native-only
 `attachments.readImage(taskId, attachmentId)`, with exact saved metadata/read
 scope and held no-follow FD authority. Native stamps and rechecks its current
