@@ -1,0 +1,461 @@
+{
+  "schemaVersion": 1,
+  "issues": [
+    215,
+    214
+  ],
+  "sourceRevision": "21b85e14feabd1cfbbe3896c70eafd0db8670e39",
+  "recordedAt": "2026-10-17T22:50:53.636348+00:00",
+  "status": "scoped Linux native startup/denied-media proof; issues OPEN; no whole acceptance checkbox tick",
+  "scope": "Linux native first-document media denial before application scripts; actual WebKit mock capture control; inherited A saved-raster hydration read-classification repair verified in own combined gate",
+  "changedFiles": [
+    "src-tauri/src/native_media.rs",
+    "src-tauri/src/native_window.rs",
+    "src-tauri/src/production_host.rs",
+    "docs/tauri-migration/native-media-admission.md"
+  ],
+  "behavior": {
+    "initialDocument": "fixed about:blank#21x-native-start; exact inert native URL and original physical main window required; blank and empty URLs mint no NativeUiOwner authority",
+    "media": "refuse initial capture states other than None; disable and verify WebKit MediaStream/WebRTC before dispatching trusted app navigation; retained permission callback stays Deny",
+    "navigation": "only initial exact inert URL allowed before first trusted application navigation; native admission and original physical window/URL rechecked after settings callback and before navigation",
+    "rawOwnership": "existing NativeWorkOwner retains WebView and later idle callbacks; dropped public waiters/close do not detach accepted native work; Tauri getters/navigation run outside the WebView borrow",
+    "failure": "fixed native unavailable title/body only on original inert open window; no raw diagnostics or application navigation",
+    "otherPlatforms": "retain existing startup; no media admission/revocation acceptance added"
+  },
+  "proof": {
+    "fixture": "actual Wry/Tauri WebKit with production CSP, synthetic app assets, explicitly isolated temporary XDG/config/data/cache/runtime, private D-Bus/Xvfb/Openbox; mock capture devices enabled only in permissive positive-control window",
+    "positiveControl": "mock audio getUserMedia resolves to live stream, native microphone state Active, startup-denial helper refuses active view, native set_microphone_capture_state(None) observed all mock tracks ended",
+    "firstApplicationScript": {
+      "getUserMedia": false,
+      "RTCPeerConnection": false
+    },
+    "permissionControl": "main fixture permission hook would allow requests but is never called (count0), proving denial does not depend on that hook; production hook remains Deny",
+    "negativeControls": [
+      "wrong label refuses native load",
+      "scripted/previously active window is not startup",
+      "blank aliases rejected; exact initial blank ceases to be allowed after app navigation",
+      "native preparation failure preserves inert URL with fixed wording/no app navigation/no document lease",
+      "native close after settings acknowledgement fences later idle navigation and accepted work drains to zero"
+    ],
+    "skips": "six pre-existing engine opt-in cases remain ignored; host default has old GTK picker, old Wry window and new media explicit GUI ignores. The old Wry window and new media are executed separately and pass; GTK chooser unchanged/not rerun in this slice."
+  },
+  "checks": [
+    {
+      "name": "app",
+      "command": "pnpm test:run src/shared/attachment-image.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "306 passed/0 skipped"
+    },
+    {
+      "name": "staged",
+      "command": "pnpm test:tauri src/shared/attachment-image.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "306 passed/0 skipped"
+    },
+    {
+      "name": "type",
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "forced raw noEmit build passes"
+    },
+    {
+      "name": "lint",
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "0 errors/165 existing warnings"
+    },
+    {
+      "name": "stage",
+      "command": "pnpm tauri:prepare:production",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "pass; exact report hash/tail recorded"
+    },
+    {
+      "name": "entry",
+      "command": "pnpm test:tauri --production-proofs scripts/production-service-proof.test.ts scripts/production-contracts-proof.test.ts src/service/production-service.test.ts",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "73 passed/0 skipped; actual staged private entry/compiled production engine raster-current-document case and contract corpus"
+    },
+    {
+      "name": "engine",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "148 passed/6 existing opt-in ignored"
+    },
+    {
+      "name": "host",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "86 passed/3 explicit GUI opt-in ignored; new media and existing Wry window proof executed separately below"
+    },
+    {
+      "name": "wry-media",
+      "command": "timeout --signal=TERM --kill-after=5s 100s bash /tmp/e2-media-wry-proof.sh",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "1 passed/0 ignored; mock live capture and native track end, first-app-script media absence, fixed failure UI and post-settings close fence/drain"
+    },
+    {
+      "name": "wry-window",
+      "command": "timeout --signal=TERM --kill-after=5s 100s bash /tmp/e2-window-wry-proof.sh",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "1 passed/0 ignored; actual existing native GTK editing/zoom/chrome/hide/reload/foreign-window proof"
+    },
+    {
+      "name": "linux",
+      "command": "cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "native host compile passes"
+    },
+    {
+      "name": "msvc",
+      "command": "env PATH=\"/usr/lib/llvm-20/bin:$PATH\" cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "native host MSVC cross-compile check passes; not executed on Windows"
+    },
+    {
+      "name": "contracts",
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "pass; exact report hash/tail recorded"
+    },
+    {
+      "name": "inventory",
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "911 runtime source files/736 legacy IPC operations/9 existing unresolved"
+    },
+    {
+      "name": "frontend",
+      "command": "pnpm tauri:production:frontend:build",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "pass; exact report hash/tail recorded"
+    },
+    {
+      "name": "diagnostic-frontend",
+      "command": "pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "pass; exact report hash/tail recorded"
+    },
+    {
+      "name": "diff",
+      "command": "git diff --check",
+      "exitCode": 0,
+      "expected": "exit0; all affected checks pass",
+      "actual": "pass; exact report hash/tail recorded"
+    }
+  ],
+  "gate": {
+    "lock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "outerCommand": "rtk proxy flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock bash /tmp/e2-media-final-gate.sh",
+    "exitCode": 0,
+    "rawExitCodes": true,
+    "scripts": {
+      "/tmp/e2-media-final-gate.sh": "#!/bin/bash\nset -uo pipefail\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\nfail=0\ncheck() { name=\"$1\"; shift; rtk proxy \"$@\" > \"/tmp/e2-media-final-${name}.log\" 2>&1; code=$?; printf \"%s:%s\\n\" \"$name\" \"$code\"; if [ \"$code\" -ne 0 ]; then fail=1; fi; }\ncheck app pnpm test:run src/shared/attachment-image.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts\ncheck staged pnpm test:tauri src/shared/attachment-image.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts\ncheck type pnpm exec tsc --build --noEmit --force\ncheck lint pnpm lint\ncheck stage pnpm tauri:prepare:production\ncheck entry pnpm test:tauri --production-proofs scripts/production-service-proof.test.ts scripts/production-contracts-proof.test.ts src/service/production-service.test.ts\ncheck engine cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2\ncheck host cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2\ncheck wry-media timeout --signal=TERM --kill-after=5s 100s bash /tmp/e2-media-wry-proof.sh\ncheck wry-window timeout --signal=TERM --kill-after=5s 100s bash /tmp/e2-window-wry-proof.sh\ncheck linux cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service\ncheck msvc env PATH=\"/usr/lib/llvm-20/bin:$PATH\" cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc\ncheck contracts node scripts/tauri-contracts.mjs --check\ncheck inventory node scripts/tauri-inventory.mjs --check\ncheck frontend pnpm tauri:production:frontend:build\ncheck diagnostic-frontend pnpm tauri:frontend:build\ncheck diff git diff --check\nexit \"$fail\"\n",
+      "/tmp/e2-media-wry-proof.sh": "#!/bin/bash\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\nproof_root=$(mktemp -d /tmp/21x-native-media-proof-XXXXXX) || exit 1\nmkdir -p \"$proof_root/config\" \"$proof_root/data\" \"$proof_root/cache\" \"$proof_root/runtime\"\nchmod 700 \"$proof_root/runtime\"\nrtk proxy env GSETTINGS_BACKEND=memory NO_AT_BRIDGE=1 PULSE_SERVER=\"unix:$proof_root/no-pulse-server\" XDG_CONFIG_HOME=\"$proof_root/config\" XDG_DATA_HOME=\"$proof_root/data\" XDG_CACHE_HOME=\"$proof_root/cache\" XDG_RUNTIME_DIR=\"$proof_root/runtime\" dbus-run-session -- xvfb-run -a -s '-screen 0 1920x1080x24' bash /tmp/e2-media-wry-inside.sh > /tmp/e2-media-wry-proof.log 2>&1\ncode=$?\nprintf 'media-wry-proof:%s\\n' \"$code\"\nrm -rf -- \"$proof_root\"\nexit \"$code\"\n",
+      "/tmp/e2-media-wry-inside.sh": "#!/bin/bash\nopenbox --sm-disable > /tmp/e2-media-openbox.log 2>&1 &\nowned_wm=$!\ntrap 'kill \"$owned_wm\" 2>/dev/null; wait \"$owned_wm\" 2>/dev/null' EXIT\nrtk proxy cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script -- --ignored --test-threads=1 --nocapture\n",
+      "/tmp/e2-window-wry-proof.sh": "#!/bin/bash\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\nproof_root=$(mktemp -d /tmp/21x-native-window-proof-XXXXXX) || exit 1\nmkdir -p \"$proof_root/config\" \"$proof_root/data\" \"$proof_root/cache\" \"$proof_root/runtime\"\nchmod 700 \"$proof_root/runtime\"\nrtk proxy env GSETTINGS_BACKEND=memory NO_AT_BRIDGE=1 XDG_CONFIG_HOME=\"$proof_root/config\" XDG_DATA_HOME=\"$proof_root/data\" XDG_CACHE_HOME=\"$proof_root/cache\" XDG_RUNTIME_DIR=\"$proof_root/runtime\" dbus-run-session -- xvfb-run -a -s '-screen 0 1920x1080x24' bash /tmp/e2-window-wry-inside.sh > /tmp/e2-window-wry-proof.log 2>&1\ncode=$?\nprintf 'wry-proof:%s\\n' \"$code\"\nrm -rf -- \"$proof_root\"\nexit \"$code\"\n",
+      "/tmp/e2-window-wry-inside.sh": "#!/bin/bash\nopenbox --sm-disable > /tmp/e2-window-openbox.log 2>&1 &\nowned_wm=$!\ntrap 'kill \"$owned_wm\" 2>/dev/null; wait \"$owned_wm\" 2>/dev/null' EXIT\ncargo test --manifest-path src-tauri/Cargo.toml --features production-service production_host::native_window::wry_proof::real_wry_window_restoration_chrome_editing_zoom_and_untrusted_window_denial -- --ignored --test-threads=1 --nocapture\n"
+    },
+    "sourceCommitHooks": "normal lint-staged and pnpm typecheck passed under heavy.lock; no bypass"
+  },
+  "repairs": [
+    "Own initial positive mock capture ran hidden and enabled fake devices after page load, leaving the promise pending. Enabled WebKit mock devices before navigating controlled app code and showed/focused the controlled window; actual live mock state and ended tracks now pass.",
+    "Own fixture initially borrowed WebviewWindow by value in three NativeUiOwner/prepare calls; repaired references, compiled normally.",
+    "Exact initial about:blank is special-cased by pinned Tauri runtime: it skips initial URL load, leaving WebKit URI empty (Tauri InvalidUrl RelativeUrlWithoutBase). Merely allowing blank in navigation policy did not commit a URL. Use fixed about:blank#21x-native-start to force a real inert load and reject empty or aliased URLs; real Wry proof passes.",
+    "A consumer reconnect regression found E2 raster facade lacked read-only classification during hydration. A published exact attachments:readImage read classification and pending-hydration read/mutation-denial controls in a3d8b291. E2 inherited and repeats all affected facade/transport/Markdown/source tests in own raw combined gate. No physical/Source authority relaxed."
+  ],
+  "initialFailures": [
+    {
+      "report": "/tmp/e2-media-blank-commit-failure.log",
+      "exitCode": 101,
+      "sha256": "cd29d896db897b3c4236723eb03502a11c60920cb527bc0285587a47e525f27a",
+      "bytes": 5548,
+      "resultTail": "el=\"unconfined\")\ndbus-daemon[229998]: Successfully activated service 'org.a11y.atspi.Registry'\nSpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry\nXlib:  extension \"DRI2\" missing on display \":102\".\nPRODUCTION_MEDIA_ADMISSION_UNAVAILABLE:STALE_EPOCH\n\nthread 'production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script' (229858) panicked at src/native_window.rs:770:13:\nreal Wry native-window proof deadline\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nFAILED\n\nfailures:\n\nfailures:\n    production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 88 filtered out; finished in 11.82s\n\nerror: test failed, to rerun pass `--bin twentyonex-tauri-feasibility`\nA connection to the bus can't be made\n",
+      "repaired": true
+    },
+    {
+      "report": "/tmp/e2-media-fixture-borrow-failure.log",
+      "exitCode": 101,
+      "sha256": "ad923827fd78792f1504149e8fd92995e4db626c7c83b722b78b4027f9dcbfe1",
+      "bytes": 3441,
+      "resultTail": "(), EngineError> {\n    |            ^^^^^^^^^^^^^                     ----------------------\nhelp: consider borrowing here\n    |\n317 |                         page_ui.page_finished(ticket, &window).unwrap();\n    |                                                       +\n\nwarning: variable does not need to be mutable\n   --> src/native_notifications.rs:686:13\n    |\n686 |         let mut batch = batch.borrow_mut();\n    |             ----^^^^^\n    |             |\n    |             help: remove this `mut`\n    |\n    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default\n\nFor more information about this error, try `rustc --explain E0308`.\nwarning: `twentyonex-tauri-feasibility` (bin \"twentyonex-tauri-feasibility\" test) generated 1 warning\nerror: could not compile `twentyonex-tauri-feasibility` (bin \"twentyonex-tauri-feasibility\" test) due to 3 previous errors; 1 warning emitted\n",
+      "repaired": true
+    },
+    {
+      "report": "/tmp/e2-media-hidden-control-failure.log",
+      "exitCode": 101,
+      "sha256": "e1fa2e480b4b07cb62c9ffb5172921c009a0c931e71632f3ed721ff3060df2ea",
+      "bytes": 5460,
+      "resultTail": "1.0' (uid=1000 pid=183407 comm=\"/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWeb\" label=\"unconfined\")\ndbus-daemon[183406]: Successfully activated service 'org.a11y.atspi.Registry'\nSpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry\n\nthread 'production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script' (183291) panicked at src/native_media.rs:185:13:\nmock capture receipt: expected active, actual pending\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nFAILED\n\nfailures:\n\nfailures:\n    production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 88 filtered out; finished in 11.82s\n\nerror: test failed, to rerun pass `--bin twentyonex-tauri-feasibility`\nA connection to the bus can't be made\n",
+      "repaired": true
+    },
+    {
+      "report": "/tmp/e2-media-initial-blank-denial-failure.log",
+      "exitCode": 101,
+      "sha256": "e0ba1596361b6d720fe9981385e78ea319f04c8e5e734805d3b533a5cded6fa0",
+      "bytes": 5536,
+      "resultTail": "bKitWeb\" label=\"unconfined\")\ndbus-daemon[201494]: Successfully activated service 'org.a11y.atspi.Registry'\nSpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry\nXlib:  extension \"DRI2\" missing on display \":102\".\nPRODUCTION_MEDIA_ADMISSION_UNAVAILABLE\n\nthread 'production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script' (201399) panicked at src/native_window.rs:770:13:\nreal Wry native-window proof deadline\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nFAILED\n\nfailures:\n\nfailures:\n    production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 88 filtered out; finished in 11.59s\n\nerror: test failed, to rerun pass `--bin twentyonex-tauri-feasibility`\nA connection to the bus can't be made\n",
+      "repaired": true
+    },
+    {
+      "report": "/tmp/e2-media-runtime-empty-url-failure.log",
+      "exitCode": 101,
+      "sha256": "0ece66a2c7e0f6ae52e95b547ddfe1b3f8cf544b192566695f3bf661b67006cb",
+      "bytes": 5536,
+      "resultTail": "KitWeb\" label=\"unconfined\")\ndbus-daemon[232212]: Successfully activated service 'org.a11y.atspi.Registry'\nSpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry\nXlib:  extension \"DRI2\" missing on display \":102\".\n\nthread 'production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script' (232082) panicked at src/native_media.rs:354:33:\ncalled `Result::unwrap()` on an `Err` value: InvalidUrl(RelativeUrlWithoutBase)\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nFAILED\n\nfailures:\n\nfailures:\n    production_host::native_media::proof::real_wry_mock_capture_then_native_denial_before_first_app_script\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 88 filtered out; finished in 1.55s\n\nerror: test failed, to rerun pass `--bin twentyonex-tauri-feasibility`\nA connection to the bus can't be made\n",
+      "repaired": true
+    }
+  ],
+  "versions": {
+    "os": "Linux x86_64",
+    "kernel": "6.8.0-139-generic",
+    "rootNode": "v22.22.0",
+    "bundledNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "WebKitGTK": "2.52.6",
+    "GTK": "3.24.41",
+    "Tauri": "2.12.3",
+    "tauriRuntimeWry": "2.12.1",
+    "Wry": "0.57.0",
+    "Vitest": "4.0.18",
+    "Electron": "44.0.0",
+    "SQLite": "13.0.3",
+    "schema": 37
+  },
+  "sourceFiles": {
+    "src-tauri/src/native_media.rs": {
+      "sha256": "fdaf856a3a53fbb14b54d49675d9c8ef7d14b4f6e011524d61eed5bb607369ee",
+      "bytes": 19465
+    },
+    "src-tauri/src/production_host.rs": {
+      "sha256": "196ad4c08c1dcce78a600d167cc8dade0530b819a25b7a76fe3f939afe574ac2",
+      "bytes": 57490
+    },
+    "src-tauri/src/native_window.rs": {
+      "sha256": "44d9484bde84d9c36395a55076c066b9d05b746a59cf17b7526fed3b1d654de9",
+      "bytes": 47518
+    },
+    "src-tauri/src/native_services.rs": {
+      "sha256": "4c453ab8522c9845949d6abb86803ddd33337fade6b6b396647ff341ef2c0ba3",
+      "bytes": 18227
+    },
+    "src-tauri/src/production_ui.rs": {
+      "sha256": "adf89cda64c9fb8ad050a5309401878b011d3e605dfe0930ad9754b27a6b170d",
+      "bytes": 36099
+    },
+    "src-tauri/Cargo.toml": {
+      "sha256": "b7cc27027410316ef1581267dc54a343c7b324e1968bf5559a44e94d048b0c2b",
+      "bytes": 1679
+    },
+    "src-tauri/Cargo.lock": {
+      "sha256": "4b474eed2e3c5401c2fa5536a97413b6492f6d08d5a69bafb69f31a719e1ae20",
+      "bytes": 135619
+    },
+    "src-tauri/tauri.production.conf.json": {
+      "sha256": "55bc453136551a171220cf8a1872cfd6ecf32a5dd7d52255144f1f7c01d3bcb1",
+      "bytes": 1155
+    },
+    "src/renderer/src/lib/native-desktop-host.ts": {
+      "sha256": "b7f33529aa18ff385a63fc90516932f0cd573eb71ab671783251fdc8a06be4a8",
+      "bytes": 33013
+    },
+    "src/renderer/src/lib/native-desktop-host.test.ts": {
+      "sha256": "5260b96b358054fa643136a6c42fc85542532a140f8ed16038d4c265b0055808",
+      "bytes": 109995
+    },
+    "src/renderer/src/lib/tauri-desktop-transport.ts": {
+      "sha256": "2c2d09ad309230ebfda69271a0c29560d68220258faf9aab666888f8358e1b73",
+      "bytes": 11264
+    },
+    "src/renderer/src/lib/tauri-desktop-transport.test.ts": {
+      "sha256": "7af7c640203d7a6db8b20d3535adb13fb6f298c70e2d485eda55b961441edfbf",
+      "bytes": 14552
+    },
+    "src/renderer/src/components/ui/Markdown.native-attachments.test.tsx": {
+      "sha256": "8f368667bc4800e5e4e6b0d8acc3f16f8e38f81bdde8630934ae080f2c627f2b",
+      "bytes": 14858
+    },
+    "src/main/task-attachment-file-owner.ts": {
+      "sha256": "d3906c287f22190f240d9a1ba526084da8b563250c9ae00256e103a1dc15d422",
+      "bytes": 31041
+    },
+    "src/service/task-attachment-backend.ts": {
+      "sha256": "e75665a0b51597f29826a88d5e6abf25f18b1de41d00bfe85ba77fd15022e9d0",
+      "bytes": 25513
+    },
+    "docs/tauri-migration/native-media-admission.md": {
+      "sha256": "6d390f842d91f18e052f25c932c77531075309574f8dbbc791fe5b874de69ab0",
+      "bytes": 4072
+    }
+  },
+  "artifacts": {
+    "/mnt/Rusty/cargo-target/debug/deps/twentyonex_tauri_feasibility-cb90ce0c4532bca0": {
+      "sha256": "a599810270a9d2accc8dd42acbd43a23ee51910cb31127dfb40cca97deffb073",
+      "bytes": 429190424
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "710a8bc0585f0a49226cc0c114a388e646afe9b701501c57dc7b95ae866c20f1",
+      "bytes": 6188374
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "9e3c60079bf1b6032fa2008cceeb8cbaaa4a1db8aed55462be6ff4b886f6ba1c",
+      "bytes": 1261784
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "reports": {
+    "app": {
+      "sha256": "6e6e2d1cbc26d2d4cd4479ddce6ab60e982381616e46d1af49e369984aebf91d",
+      "bytes": 197937,
+      "resultTail": "ase release\n[AgentManager] Stopping all 0 sessions\n[HeartbeatScheduler] Scheduler stopped\n[RecurrenceScheduler] Scheduler stopped\n[TaskAutomation] Scheduler stopped\n[WorkspaceCleanup] Scheduler stopped\n\nstdout | src/service/production-service.test.ts > retains a raw image document callback across requester cancellation and prevents premature Source database release\n[AgentManager] Stopping all 0 sessions\n\n \u2713 |main| src/service/production-service.test.ts (53 tests) 21422ms\n     \u2713 delivers periodic real adapter freshness through the scoped peer while the desktop detaches without replay or transition effects  8762ms\n     \u2713 carries a known adapter disconnect as activity invalidation through the private peer without replaying its prompt  1156ms\n     \u2713 retains late native initialization and fences database creation after cancellation  3079ms\n   \u2713 installs a controlled real package through private native ingress and the actual singleton, preserving external files  872ms\n   \u2713 uses open for real saved attachment metadata through private document ingress while its task agent is active under read grants  339ms\n   \u2713 uses download for real saved attachment metadata through private document ingress while its task agent is active under read grants  317ms\n     \u2713 registers only the native offer, refuses public path save, and returns one exact imported file without metadata append  437ms\n   \u2713 delivers bounded saved raster bytes only through native-stamped private ingress and repeated actual document receipts  312ms\n\n Test Files  9 passed (9)\n      Tests  306 passed (306)\n   Start at  23:43:34\n   Duration  24.01s (transform 6.24s, setup 515ms, import 6.70s, tests 37.48s, environment 724ms)\n\n"
+    },
+    "staged": {
+      "sha256": "fd7d2d401a42f23d1933df3b99aaf1c7f3b710deb2f0ba4cc24b79f943e6456c",
+      "bytes": 198103,
+      "resultTail": "-attachment-backend.test.ts (74 tests) 16523ms\n     \u2713 keeps literal Captain/member roots and requires former, anchor, project and group-agent read scope  495ms\n     \u2713 accepts saved files larger than the publication ceiling without Source byte transfer or metadata writes  1506ms\n     \u2713 keeps literal Captain/member roots and requires former, anchor, project and group-agent read scope  423ms\n     \u2713 accepts saved files larger than the publication ceiling without Source byte transfer or metadata writes  1418ms\n     \u2713 supports selection before task creation, returns metadata only, and cannot read an unselected path  2705ms\n     \u2713 refuses execution anchors and Captain file imports before claiming a selection or reading bytes  531ms\n \u2713 |portable-main| src/main/task-attachment-file-owner.test.ts (24 tests) 549ms\n     \u2713 streams and verifies larger files with bounded reads, preserves image limits, and removes the exact committed output  310ms\n \u2713 |portable-main| src/shared/attachment-image.test.ts (9 tests) 81ms\n \u2713 |portable-main| scripts/tauri-contracts.test.ts (7 tests) 42ms\n \u2713 |portable-main| src/shared/desktop-contracts.test.ts (8 tests) 17ms\n \u2713 |portable-renderer| src/renderer/src/lib/native-desktop-host.test.ts (97 tests) 115ms\n \u2713 |portable-renderer| src/renderer/src/components/ui/Markdown.native-attachments.test.tsx (24 tests) 1714ms\n   \u2713 bounds resident encoded bytes independently of image count/canvas  1289ms\n \u2713 |portable-renderer| src/renderer/src/lib/tauri-desktop-transport.test.ts (10 tests) 16ms\n\n Test Files  9 passed (9)\n      Tests  306 passed (306)\n   Start at  23:43:58\n   Duration  48.77s (transform 4.31s, setup 271ms, import 4.55s, tests 42.39s, environment 587ms)\n\n"
+    },
+    "type": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "resultTail": ""
+    },
+    "lint": {
+      "sha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+      "bytes": 16728,
+      "resultTail": "y a different type  @typescript-eslint/no-explicit-any\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/connectors/bridge/mapping.ts\n  277:1  warning  Unused eslint-disable directive (no problems were reported from 'no-control-regex')\n  279:1  warning  Unused eslint-disable directive (no problems were reported from 'no-control-regex')\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/oauth/oauth-manager-refresh.test.ts\n  109:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  121:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  137:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  154:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  169:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/task-api-server.test.ts\n  473:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/task-api/skill-routes.ts\n  106:28  warning  '_content' is assigned a value but never used  @typescript-eslint/no-unused-vars\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/renderer/src/components/canvas/BrowserPanelContent.tsx\n  348:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  357:68  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  518:30  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n\u2716 165 problems (0 errors, 165 warnings)\n  0 errors and 2 warnings potentially fixable with the `--fix` option.\n\n"
+    },
+    "stage": {
+      "sha256": "a8d0b83f30c76c7e3329e660d0f78d30cbeb1c1fe6dee9db016bb175075eac7d",
+      "bytes": 380,
+      "resultTail": "\n> 21x@0.0.161 tauri:prepare:production /mnt/Rusty/GitHub/21x-e2-215b\n> node scripts/tauri-stage-production.mjs\n\n{\n  \"staged\": true,\n  \"entry\": \"service/production-stdio.mjs\",\n  \"buildIdentity\": \"production-1668a2e5d255194a839c1c2152df6f03\",\n  \"resourceManifestSha256\": \"9e3c60079bf1b6032fa2008cceeb8cbaaa4a1db8aed55462be6ff4b886f6ba1c\",\n  \"redistributionReviewComplete\": false\n}\n"
+    },
+    "entry": {
+      "sha256": "d10428feed564ee5563768b2ea2c628b871e34b3597fb2b6e61e7488b6ef17b8",
+      "bytes": 150965,
+      "resultTail": "ping all 0 sessions\n\n \u2713 |portable-main| src/service/production-service.test.ts (54 tests) 25846ms\n     \u2713 delivers periodic real adapter freshness through the scoped peer while the desktop detaches without replay or transition effects  8973ms\n     \u2713 carries a known adapter disconnect as activity invalidation through the private peer without replaying its prompt  1165ms\n     \u2713 retains late native initialization and fences database creation after cancellation  3093ms\n   \u2713 installs a controlled real package through private native ingress and the actual singleton, preserving external files  825ms\n   \u2713 uses open for real saved attachment metadata through private document ingress while its task agent is active under read grants  332ms\n   \u2713 uses download for real saved attachment metadata through private document ingress while its task agent is active under read grants  365ms\n     \u2713 registers only the native offer, refuses public path save, and returns one exact imported file without metadata append  554ms\n   \u2713 delivers bounded saved raster bytes only through native-stamped private ingress and repeated actual document receipts  351ms\n   \u2713 uses the actual staged production engine for saved raster bytes and physical-document rejection  2835ms\n \u2713 |portable-main| scripts/production-service-proof.test.ts (2 tests) 2955ms\n     \u2713 verifies the staged closure, loads the real service graph and negotiates before granting domain access  2905ms\n \u2713 |portable-main| scripts/production-contracts-proof.test.ts (17 tests) 603ms\n\n Test Files  3 passed (3)\n      Tests  73 passed (73)\n   Start at  23:46:05\n   Duration  32.66s (transform 4.97s, setup 81ms, import 2.83s, tests 29.41s, environment 0ms)\n\n"
+    },
+    "engine": {
+      "sha256": "fefa3438fd05afb727be4b93302bf5759c1df8105e2239f9f1a9069184ee5968",
+      "bytes": 17560,
+      "resultTail": "ts::negative_secondary_and_dpi_change_preserve_size_without_offscreen_titlebar ... ok\ntest production_window::tests::small_and_invalid_monitors_cannot_invent_unbounded_geometry ... ok\ntest tests::error_message_from_child_is_never_forwarded ... ok\ntest tests::ids_reject_wrong_direction_and_leading_zero ... ok\ntest tests::mixed_runtime_bootstrap_is_rejected ... ok\ntest tests::staged_cancel_while_waiting_for_writer_releases_capacity ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_concurrent_requests_preserve_monotonic_wire_order ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_initialize_ping_unknown_operation_and_shutdown ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_shutdown_settles_concurrent_calls_and_reaps_child ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_synthetic_configuration_roundtrip_preserves_real_content_effects ... ignored, requires explicitly staged content configuration service and standalone SQLite\ntest tests::staged_synthetic_database_roundtrip_emits_real_target_events ... ignored, requires explicitly staged database-stdio.mjs and standalone native SQLite\ntest production::cleanup_observation::linux::tests::actual_retained_cwd_process_is_busy_and_reaped_process_is_never_fabricated_idle ... ok\n\ntest result: ok. 148 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 3.02s\n\n   Doc-tests twentyonex_engine\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+    },
+    "host": {
+      "sha256": "fe31e70b375fcdee1e807625c055a98aa85f32505ff94a1b84b6d22aad3d5bd4",
+      "bytes": 12850,
+      "resultTail": "ation_chrome_editing_zoom_and_untrusted_window_denial ... ignored, requires an explicitly isolated Xvfb/Wry session; execute --ignored --test-threads=1\ntest production_host::production_ui::tests::attachment_raw_open_receipt_holds_descriptors_and_drain_after_public_abort_and_reload ... ok\ntest production_host::production_ui::tests::bootstrap_only_activation_is_stable_and_reload_revokes_old_document ... ok\ntest production_host::production_ui::tests::callback_rechecks_document_after_queued_raw_work_and_never_claims_applied ... ok\ntest production_host::production_ui::tests::hidden_untrusted_physical_replacement_and_new_epoch_never_inherit_authority ... ok\ntest production_host::production_ui::tests::installer_progress_cancelled_waiter_retains_raw_work_and_rechecks_reload_before_emit ... ok\ntest production_host::production_ui::tests::late_destroy_and_page_events_cannot_retire_or_activate_reused_main_label ... ok\ntest production_host::production_ui::tests::no_completion_without_start_and_generation_exhaustion_grants_nothing ... ok\ntest production_host::production_ui::tests::public_callback_abort_cannot_release_raw_emit_receipt_or_shutdown ... ok\ntest production_host::production_ui::tests::same_url_overlapping_completions_are_unavailable_until_an_unambiguous_load ... ok\ntest production_host::tests::only_exact_validated_notices_receive_a_native_document_envelope ... ok\ntest production_host::tests::production_origins_are_exact_and_remote_windows_gain_no_authority ... ok\ntest production_host::native_window::tests::failed_persistence_is_explicit_without_fabricating_a_saved_receipt ... ok\n\ntest result: ok. 86 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.28s\n\n"
+    },
+    "wry-media": {
+      "sha256": "f67c12b162b2096f0fc2c9354c1e94d89b1893c90429677d7389506d54037d48",
+      "bytes": 18,
+      "resultTail": "media-wry-proof:0\n"
+    },
+    "wry-window": {
+      "sha256": "1d18a79312292e9cc5baf927b13696fed956fe846c6c9f376e0aa7f0c974dbd4",
+      "bytes": 12,
+      "resultTail": "wry-proof:0\n"
+    },
+    "linux": {
+      "sha256": "646ce8fb992570111bfffb5f8e311a71a8d91edbdf5f9be690e60377e994505d",
+      "bytes": 1157,
+      "resultTail": "   Compiling twentyonex-tauri-feasibility v0.1.0 (/mnt/Rusty/GitHub/21x-e2-215b/src-tauri)\n    Checking twentyonex-engine v0.1.0 (/mnt/Rusty/GitHub/21x-e2-215b/src-tauri/engine)\nwarning: variable does not need to be mutable\n   --> src/native_notifications.rs:686:13\n    |\n686 |         let mut batch = batch.borrow_mut();\n    |             ----^^^^^\n    |             |\n    |             help: remove this `mut`\n    |\n    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default\n\nwarning: field `0` is never read\n   --> src/native_notifications.rs:374:27\n    |\n374 |     struct SignalLifetime(std::sync::mpsc::Sender<()>);\n    |            -------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |            |\n    |            field in this struct\n    |\n    = help: consider removing this field\n    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: `twentyonex-tauri-feasibility` (bin \"twentyonex-tauri-feasibility\") generated 2 warnings (run `cargo fix --bin \"twentyonex-tauri-feasibility\" -p twentyonex-tauri-feasibility` to apply 1 suggestion)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.51s\n"
+    },
+    "msvc": {
+      "sha256": "e6a6e457609c3311dacc968c702c405d3f398f5da466b6ad41d5de96a14c31da",
+      "bytes": 15071,
+      "resultTail": "rning: function `empty` is never used\n  --> src/native_clipboard.rs:51:4\n   |\n51 | fn empty() -> Value {\n   |    ^^^^^\n\nwarning: function `encode` is never used\n  --> src/native_clipboard.rs:54:4\n   |\n54 | fn encode(bytes: &[u8]) -> String {\n   |    ^^^^^^\n\nwarning: function `image` is never used\n  --> src/native_clipboard.rs:75:4\n   |\n75 | fn image(bytes: &[u8]) -> Value {\n   |    ^^^^^\n\nwarning: enum `TargetChoice` is never used\n   --> src/native_clipboard.rs:160:6\n    |\n160 | enum TargetChoice {\n    |      ^^^^^^^^^^^^\n\nwarning: function `choose_targets` is never used\n   --> src/native_clipboard.rs:167:4\n    |\n167 | fn choose_targets<T: PartialEq>(\n    |    ^^^^^^^^^^^^^^\n\nwarning: struct `ActiveRequest` is never constructed\n   --> src/native_clipboard.rs:187:8\n    |\n187 | struct ActiveRequest(Arc<AtomicBool>);\n    |        ^^^^^^^^^^^^^\n\nwarning: struct `CallbackRequest` is never constructed\n   --> src/native_clipboard.rs:193:8\n    |\n193 | struct CallbackRequest {\n    |        ^^^^^^^^^^^^^^^\n\nwarning: method `finish` is never used\n   --> src/native_clipboard.rs:204:8\n    |\n203 | impl CallbackRequest {\n    | -------------------- method in this implementation\n204 |     fn finish(&self, value: Result<Value, EngineError>) {\n    |        ^^^^^^\n\nwarning: function `retained_read` is never used\n   --> src/native_clipboard.rs:209:10\n    |\n209 | async fn retained_read(\n    |          ^^^^^^^^^^^^^\n\nwarning: `twentyonex-tauri-feasibility` (bin \"twentyonex-tauri-feasibility\") generated 77 warnings (run `cargo fix --bin \"twentyonex-tauri-feasibility\" -p twentyonex-tauri-feasibility` to apply 11 suggestions)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.53s\n"
+    },
+    "contracts": {
+      "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "bytes": 43,
+      "resultTail": "Verified explicit desktop contract outputs\n"
+    },
+    "inventory": {
+      "sha256": "5b7c1972639ba480e1f5eab66e7a0286a843314285144d991ddac57fbb7d0503",
+      "bytes": 91,
+      "resultTail": "Verified docs/tauri-migration/inventory.json: 911 files, 736 IPC operations (9 unresolved)\n"
+    },
+    "frontend": {
+      "sha256": "930bc3b3ae06f8a88bd5744f01c3109a271e0e957e22bf7a56f949ccc68fd897",
+      "bytes": 9738,
+      "resultTail": "derer/assets/blockDiagram-VBNYF7ZC-iep3bRko.js            75.17 kB \u2502 gzip:  21.62 kB\n../../out/tauri-production-renderer/assets/cose-bilkent-JH36ORCC-CCUw2cRe.js            81.76 kB \u2502 gzip:  22.50 kB\n../../out/tauri-production-renderer/assets/sequenceDiagram-SI44F4Z6-_fG4vriR.js        117.49 kB \u2502 gzip:  31.29 kB\n../../out/tauri-production-renderer/assets/swimlanes-SLNWSIFB-BexYhS_P.js              120.33 kB \u2502 gzip:  44.01 kB\n../../out/tauri-production-renderer/assets/architectureDiagram-T3A2C74G-B19-J1b9.js    152.06 kB \u2502 gzip:  43.25 kB\n../../out/tauri-production-renderer/assets/SettingsWorkspace-DHvjBHfI.js               205.93 kB \u2502 gzip:  53.71 kB\n../../out/tauri-production-renderer/assets/katex-C5jXJg4s.js                           261.33 kB \u2502 gzip:  77.57 kB\n../../out/tauri-production-renderer/assets/index-DW-ZcPTd.js                           291.64 kB \u2502 gzip:  69.98 kB\n../../out/tauri-production-renderer/assets/cytoscape.esm-BjAbmLdb.js                   443.83 kB \u2502 gzip: 142.41 kB\n../../out/tauri-production-renderer/assets/mermaid.core-DbNDUvJl.js                    635.51 kB \u2502 gzip: 152.12 kB\n../../out/tauri-production-renderer/assets/cynefin-VYW2F7L2-03ECvBPK.js                690.83 kB \u2502 gzip: 155.11 kB\n../../out/tauri-production-renderer/assets/main-CPsr4pfm.js                          1,512.69 kB \u2502 gzip: 438.21 kB\n\n(!) Some chunks are larger than 500 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.\n\u2713 built in 12.12s\n"
+    },
+    "diagnostic-frontend": {
+      "sha256": "af05050eaf61e5608321cb63e62f38750a7c7dd9cd59da64a44d8f4b8d66744b",
+      "bytes": 498,
+      "resultTail": "\n> 21x@0.0.161 tauri:frontend:build /mnt/Rusty/GitHub/21x-e2-215b\n> vite build --config vite.tauri.config.ts\n\nvite v6.4.1 building for production...\ntransforming...\n\u2713 21 modules transformed.\nrendering chunks...\ncomputing gzip size...\n../../out/tauri-renderer/index.html                   1.62 kB \u2502 gzip:  0.74 kB\n../../out/tauri-renderer/assets/index-DDaJ-I4V.css    0.94 kB \u2502 gzip:  0.48 kB\n../../out/tauri-renderer/assets/index-DGOg_TXb.js   108.99 kB \u2502 gzip: 20.49 kB\n\u2713 built in 289ms\n"
+    },
+    "diff": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "resultTail": ""
+    },
+    "e2-media-wry-proof.log": {
+      "sha256": "846479e7d7a50c35cfa8ef4d0977d3183fa46a5619ca3cf9322611fae1993f5d",
+      "bytes": 5023,
+      "resultTail": "ouldn't connect to PipeWire\ndbus-daemon[250600]: [session uid=1000 pid=250600] Activating service name='org.freedesktop.secrets' requested by ':1.3' (uid=1000 pid=250756 comm=\"/usr/libexec/xdg-desktop-portal\" label=\"unconfined\")\n** Message: 23:46:48.661: couldn't access control socket: /tmp/21x-native-media-proof-PvaLvn/runtime/keyring/control: No such file or directory\ndiscover_other_daemon: 0dbus-daemon[250600]: [session uid=1000 pid=250600] Successfully activated service 'org.freedesktop.secrets'\ndbus-daemon[250600]: [session uid=1000 pid=250600] Successfully activated service 'org.freedesktop.portal.Desktop'\nlibEGL warning: DRI3 error: Could not get DRI3 device\nlibEGL warning: Ensure your X server supports DRI3 to get accelerated rendering\ndbus-daemon[250600]: [session uid=1000 pid=250600] Activating service name='org.a11y.Bus' requested by ':1.0' (uid=1000 pid=250708 comm=\"/mnt/Rusty/cargo-target/debug/deps/twentyonex_taur\" label=\"unconfined\")\ndbus-daemon[250600]: [session uid=1000 pid=250600] Successfully activated service 'org.a11y.Bus'\ndbus-daemon[250942]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=1000 pid=250943 comm=\"/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWeb\" label=\"unconfined\")\ndbus-daemon[250942]: Successfully activated service 'org.a11y.atspi.Registry'\nSpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry\nXlib:  extension \"DRI2\" missing on display \":102\".\nPRODUCTION_MEDIA_ADMISSION_UNAVAILABLE:INVALID_RESULT\nPRODUCTION_MEDIA_ADMISSION_UNAVAILABLE:DISCONNECTED\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 88 filtered out; finished in 1.92s\n\nA connection to the bus can't be made\n"
+    },
+    "e2-window-wry-proof.log": {
+      "sha256": "5d60f2895721a95f32b2e4986e9b10b2b3df8ea278443aaf031e5ef176098ca6",
+      "bytes": 5220,
+      "resultTail": "libexec/xdg-desktop-portal\" label=\"unconfined\")\n** Message: 23:46:51.140: couldn't access control socket: /tmp/21x-native-window-proof-07RU9k/runtime/keyring/control: No such file or directory\ndiscover_other_daemon: 0dbus-daemon[251196]: [session uid=1000 pid=251196] Successfully activated service 'org.freedesktop.secrets'\ndbus-daemon[251196]: [session uid=1000 pid=251196] Successfully activated service 'org.freedesktop.portal.Desktop'\nlibEGL warning: DRI3 error: Could not get DRI3 device\nlibEGL warning: Ensure your X server supports DRI3 to get accelerated rendering\ndbus-daemon[251196]: [session uid=1000 pid=251196] Activating service name='org.a11y.Bus' requested by ':1.0' (uid=1000 pid=251234 comm=\"/mnt/Rusty/cargo-target/debug/deps/twentyonex_taur\" label=\"unconfined\")\ndbus-daemon[251196]: [session uid=1000 pid=251196] Successfully activated service 'org.a11y.Bus'\ndbus-daemon[251325]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=1000 pid=251326 comm=\"/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWeb\" label=\"unconfined\")\ndbus-daemon[251325]: Successfully activated service 'org.a11y.atspi.Registry'\nSpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry\nWINDOW_PROOF: hidden document ready\nWINDOW_PROOF: styles applied\nWINDOW_PROOF: styles observed\nWINDOW_PROOF: selecting via GTK menu\nWINDOW_PROOF: GTK selection dispatched\nWINDOW_PROOF: selection observed, zoom via GTK menu\nWINDOW_PROOF: GTK zoom dispatched\nWINDOW_PROOF: normal/maximized/fullscreen/hide/reopen/reload ownership observed\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 88 filtered out; finished in 0.75s\n\nA connection to the bus can't be made\n"
+    }
+  },
+  "inherited": {
+    "nativeAttachments": "aff690a6",
+    "window": "28343c43",
+    "raster": "4fd1780abd066587dc12fa59f9deff4186bbd602",
+    "rasterEvidence": "1b839b11714096a27c024d4660e93a214043273e",
+    "rendererRepair": "a3d8b2915f4158d4f3542dc1229bf4d1c29e6fe9",
+    "rendererEvidence": "969f5b5de0460a90b85d2fd10d2e2ed18e9a8a18"
+  },
+  "limits": [
+    "No real microphone/camera/display capture, real audio samples, live profile/provider/credential, native permission grant, Source voice/capture/playback/shortcut binding, installed all-platform behavior, persistent-grant revocation lifecycle, final identity/scheme/login decision, release/cutover/retirement.",
+    "WebKit flags alone do not acknowledge closing an existing stream. Fresh inert startup rejects an already-active native capture state; actual mock stream-stop control is separate, and production voice stays unavailable.",
+    "Real Wry fixture copies relevant root navigation/document hooks and production CSP with synthetic assets; it is not an installed full Source application launch or OS device/portal acceptance."
+  ],
+  "remaining": [
+    "Exact per-document native permission/capture/playback/shortcut acquire/bind/publish/retire with persisted grant and pending request/raw stream acknowledgement is unimplemented; Source optional voice owners remain unregistered/unavailable.",
+    "Native file-drop receipts, protected durable ownership/digest import journaling/unreferenced-copy reconciliation, group/Captain file import append authority and remaining native keyboard/focus acceptance remain source gaps.",
+    "Login item/current+legacy handler authority depends on final installed identity decision; schemes stay OFF.",
+    "Installed supported macOS/Windows/Linux native behavior, actual device/portal acceptance and #202/#208 prerequisites remain open."
+  ],
+  "hostedCI": {
+    "lookupCommand": "gh run list -R krazyjakee/21x --commit 21b85e14feabd1cfbbe3896c70eafd0db8670e39 --json databaseId,status,conclusion,url",
+    "runs": [],
+    "blocker": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "settingsChanged": false,
+    "dispatch": false
+  },
+  "decisionsNotPreempted": [
+    "Actions settings",
+    "master-to-main merge",
+    "live provider/device runs",
+    "final app identity/current+legacy schemes/login items",
+    "release/cutover/Electron retirement",
+    "hosted voice remains deferred"
+  ]
+}
