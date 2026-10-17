@@ -79,13 +79,57 @@ to preserve registered provider redirect URLs. This recommendation does not
 authorize a handler transfer, installation or cutover. Preview builds must not
 automatically steal either installed Electron scheme.
 
+## Linux callback ingress
+
+The Linux-only plugin factory is implemented. Production-host installation is
+a serialized #208/#215 handoff, pending in this helper checkpoint. When
+installed, the pinned single-instance plugin precedes other plugins and
+Source/profile startup. Its transport uses the session bus only. The configured
+build identifier is hashed into an unambiguous valid
+D-Bus name; numeric segments in the existing preview identifiers cannot be used
+as literal D-Bus name segments. No final identifier is chosen by this mapping.
+The plugin's optional deep-link feature is disabled, and no plugin IPC grant
+or global callback event is introduced.
+
+The native callback accepts exactly an executable argument and one bounded,
+strictly parsed `twentyonex://oauth/callback` or `nuanu://oauth/callback` URL.
+Executable name and working directory confer no authority. Extra arguments,
+unrecognized query fields and malformed callbacks are refused. A running owner
+requires its captured engine epoch, open native work admission and a matching,
+opened, unexpired, unconsumed native lease before sending bounded callback
+fields through the private Source channel. A raw delivery permit remains owned
+until that private claim RPC settles; retirement joins it. Untrusted same-user
+bus clients can call the transport but cannot select a provider/source or
+redeem a foreign nonce. Parser bounds apply after D-Bus decoding; they do not
+bound all transport allocation.
+
+A first process given a valid callback argument reports only the fixed native
+diagnostic `PRODUCTION_OAUTH_FRESH_CONNECT_REQUIRED`. It does not queue or
+reconstruct a previous process's lost PKCE/intent. The user must start Connect
+again. This diagnostic is not an installed user-interface notification.
+
+The actual plugin and D-Bus method are exercised under `dbus-run-session` in a
+bounded subprocess with Tauri's MockRuntime and synthetic leases. The regression
+proves warm forwarding, current and legacy URI parsing, denial sanitization,
+foreign/multiple/extra-field rejection, one-shot claims, stop fencing and no
+public deep-link event. It does not launch an installed Wry application or
+complete a real provider/credential flow.
+
+The pinned plugin permits ordinary startup if the session bus is unavailable.
+Therefore installing this hook is not an attestation of available callback
+routing. Custom-scheme registration remains refused by the production native
+owner; future enablement needs both approved OS registration and positively
+established transport authority. macOS and Windows do not install this plugin
+in this slice. In particular, the plugin's macOS temporary-socket transport is
+not adopted as an approved bounded callback authority.
+
 ## Remaining acceptance
 
-OS scheme registration, native warm single-instance forwarding, cold-launch
-ingress/queue retirement, and an integrated real provider consumer/credential
-path remain unproven. The authority's warm parser/claim tests are not OS routing
-evidence. No deep-link plugin, global callback event or scheme registration is
-introduced. End-to-end Source/MCP/Linear and #216 connector consumer migrations
+OS scheme registration, installed warm/cold routing under the approved identity,
+and an integrated real provider consumer/credential path remain unproven. The
+isolated Linux transport regression is not installed OS-handler evidence. No
+deep-link plugin, global callback event or scheme registration is introduced.
+End-to-end Source/MCP/Linear and #216 connector consumer migrations
 must precede enabling `oauthBrowser`. Durable encrypted cold continuation, if
 required instead of rejecting stale flows and requiring Connect again, needs
 its own approved design.

@@ -321,6 +321,10 @@ impl OAuthAuthority {
         }
         loop {
             let settled = self.0.settled.notified();
+            tokio::pin!(settled);
+            // Register before checking active: a raw receipt may finish after
+            // the check but before await; notify_waiters stores no permit.
+            settled.as_mut().enable();
             {
                 let mut state = self
                     .0
@@ -409,6 +413,16 @@ fn parse_callback(raw: &str) -> Option<(String, String, Value)> {
     Some((uri.into(), nonce, outcome))
 }
 
+/// The executable name/cwd are never authority. Accept one bounded callback
+/// argument only; do not scan arbitrary flags or multiple URLs for routing.
+pub fn callback_argument(arguments: &[String]) -> Option<&str> {
+    if arguments.len() != 2 {
+        return None;
+    }
+    let raw = arguments[1].as_str();
+    parse_callback(raw).map(|_| raw)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +442,25 @@ mod tests {
     }
     fn success() -> String {
         format!("twentyonex://oauth/callback?state={NONCE}&code=synthetic-code")
+    }
+    #[test]
+    fn argv_requires_one_exact_bounded_callback_and_never_routes_by_executable() {
+        assert!(callback_argument(&["ignored executable".into(), success()]).is_some());
+        for args in [
+            vec![success()],
+            vec!["app".into(), "--callback".into(), success()],
+            vec!["app".into(), success(), success()],
+            vec!["app".into(), success() + "&sourceId=foreign"],
+            vec![
+                "app".into(),
+                format!(
+                    "twentyonex://oauth/callback?state={NONCE}&code={}",
+                    "x".repeat(8192)
+                ),
+            ],
+        ] {
+            assert!(callback_argument(&args).is_none());
+        }
     }
     #[tokio::test]
     async fn warm_delivery_is_one_shot_and_retirement_joins_open_and_delivery() {
@@ -457,6 +490,30 @@ mod tests {
         );
         assert!(owner.register(&request("custom-scheme")).is_err());
         owner.close().await.unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn retirement_joins_concurrent_raw_completion_without_lost_wakeup() {
+        for _ in 0..128 {
+            let owner = OAuthAuthority::new(false);
+            owner.register(&request("loopback")).unwrap();
+            let opening = owner.begin_open(ID).unwrap();
+            let ready = Arc::new(std::sync::Barrier::new(2));
+            let completing = ready.clone();
+            let raw = tokio::task::spawn_blocking(move || {
+                completing.wait();
+                drop(opening);
+            });
+            ready.wait();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(1), owner.retire(ID))
+                    .await
+                    .expect("raw completion must wake retirement")
+                    .unwrap(),
+                json!({"flowId":ID,"retired":true})
+            );
+            raw.await.unwrap();
+            owner.close().await.unwrap();
+        }
     }
     #[tokio::test]
     async fn foreign_or_malformed_callback_cannot_consume_matching_intent() {

@@ -30,10 +30,14 @@ tokio = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "=0.18.2", optional = true }
+tauri-plugin-single-instance = { version = "=2.5.4", default-features = false, optional = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+tauri = { version = "=2.12.3", features = ["test"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
 synthetic-desktop = ["twentyonex-engine/synthetic-desktop"]
 artifact-authorization-proof = ["synthetic-desktop"]
 synthetic-agent = ["synthetic-desktop", "twentyonex-engine/synthetic-agent"]
-production-service = ["tauri/tray-icon", "twentyonex-engine/production-service", "dep:raw-window-handle", "dep:sha2", "dep:tauri-plugin-opener", "dep:tokio", "dep:gtk"]
+production-service = ["tauri/tray-icon", "twentyonex-engine/production-service", "dep:raw-window-handle", "dep:sha2", "dep:tauri-plugin-opener", "dep:tauri-plugin-single-instance", "dep:tokio", "dep:gtk"]
