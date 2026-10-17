@@ -262,3 +262,28 @@ budget, including a reconnect regression that caught `readImage` missing from th
 client's read-only recovery list. The additive classification now allows this
 exact authorized read during hydration while mutation admission stays fenced.
 Physical-document and Source task/project/group/agent read guards are unchanged.
+
+## Skill and secret metadata recovery
+
+Skills and secret metadata use the existing bounded snapshot reader. Accepted
+create/update/delete/scope receipts invalidate held list reads; canonical rows
+replace same-ID creates so an event/read preceding the receipt cannot duplicate
+an entry. Writes and errors publish only into their captured document and
+connection. Reconnect recovery joins only metadata caches previously requested or
+populated by an accepted write, and never replays a mutation. Failed reads keep
+native mutation recovery fenced until an explicit read-only retry.
+
+One document-owned `skills:changed` subscription now also serves agent/task skill
+selectors; it replaces the Skills-sidebar-only listener. The exact retained event
+remains `{skillId, kind}` invalidation metadata. Source owns old/new project scope
+filtering; the renderer requests no additional row or grant from the event.
+Retirement/pagehide/HMR remove the listener and readers; old disposal cannot
+retire a replacement cohort. The existing secret boundary returns metadata only:
+this change never reads a secret value, adds credential storage, changes grants,
+or starts OAuth/probe/network/sync work during recovery.
+
+Twenty actual typed-native controls exercise accepted-write/list races,
+pre-receipt canonical reads, first-write demand, scope-event invalidation,
+eight-read backpressure, both failure barriers and retirement/replacement. The
+existing fifteen skill-store controls are retained. These renderer controls do
+not establish native credential-store or installed UI acceptance.

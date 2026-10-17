@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   onAgentStatus: vi.fn(),
   onTranscriptChanged: vi.fn()
 }))
-vi.mock('@/lib/ipc-client', () => mocks)
+vi.mock('@/lib/ipc-client', () => ({ ...mocks, skillApi: { getAll: vi.fn().mockResolvedValue([]), onChanged: vi.fn(() => () => {}) } }))
 vi.mock('./CommanderStage', () => ({ CommanderStage: () => null }))
 
 const api = mocks.commanderApi

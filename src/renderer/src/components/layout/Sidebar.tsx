@@ -10,7 +10,6 @@ import { useProjectTaskSources } from '@/hooks/use-project-tasks'
 import { useUserStore } from '@/stores/user-store'
 import { useSkillStore, matchesScopeFilter, type SkillScopeFilter } from '@/stores/skill-store'
 import { useProjectStore } from '@/stores/project-store'
-import { skillApi } from '@/lib/ipc-client'
 import { Select } from '@/components/ui/Select'
 import { useAgentSchedulerStore } from '@/stores/agent-scheduler-store'
 import { isSnoozed } from '@/lib/utils'
@@ -83,12 +82,6 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
   useEffect(() => {
     if (sidebarView === 'skills') fetchSkills()
   }, [sidebarView])
-
-  // The Commander's skill tools change skills behind the view (#74).
-  useEffect(() => {
-    if (sidebarView !== 'skills') return
-    return skillApi.onChanged(() => fetchSkills())
-  }, [sidebarView, fetchSkills])
 
   const handleSyncAll = async () => {
     setIsSyncingAll(true)

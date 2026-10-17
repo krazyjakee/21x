@@ -19,6 +19,7 @@ vi.mock('@/hooks/use-snooze-tick', () => ({
 
 // Mock ipc-client - prevent real API calls during tests
 vi.mock('@/lib/ipc-client', () => ({
+  skillApi: { getAll: vi.fn().mockResolvedValue([]), onChanged: vi.fn(() => () => {}) },
   taskApi: {
     getAll: vi.fn().mockResolvedValue([])
   },
