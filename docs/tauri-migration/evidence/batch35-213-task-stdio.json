@@ -1,0 +1,200 @@
+{
+  "evidenceVersion": 1,
+  "recordedAt": "2026-10-17",
+  "issue": 213,
+  "batch": "35",
+  "implementationRevision": "d62f7bd602c0c16c8b40fc5201c7ac1dc391af2a",
+  "baseRevision": "f7ae57fbe16038ce151a5ce6aaef24bfb7aa0efe",
+  "sourceSha256": {
+    "src/service/production-task-mcp.ts": "33dfa2ff7df6e9cff05de322259c7da07e442fc45663bf49261d29f77383b366",
+    "src/service/production-task-mcp.test.ts": "13e271e352554fd996927ec5bba62d75e8083bdda5472073a2a7f6360a9c976e",
+    "src/service/task-mcp-stdio-proxy.ts": "609b27ec64566930260d0d1da791a0d29dcd8dfb8529004ab658ddb30d73e48e",
+    "src/service/task-mcp-stdio-proxy.test.ts": "6acd1e193d387252a2a4cb1834c7abe26cfe1b9e15acde4aad8deff5fc020e6f",
+    "scripts/tauri-stage-production.mjs": "048cd96ecf2ffbda945ccdc0b000695a020e1c3e979fe1519e91d203e1722ded",
+    "src/main/task-api-server-core.ts": "386c095021a808b73b8a00cb9d61914f29c209b4af54e3135ce9a41c2eb8c46b",
+    "src/main/task-mcp-endpoint.ts": "c8e8bab4088acb0b04a32815304965b9273e3de9850d8099717d5176f9b65928",
+    "src/main/mcp-servers/task-management-core.ts": "cb0b9dd41253547980862ee4adfef30c40da5f626217b65527cb67c891b3d040",
+    "src/main/mcp-servers/task-group-stdio.ts": "96a2fa96ec47da0bdf705abc994d9b1fc529b285604eec03e6ff183319de532e",
+    "docs/tauri-migration/inventory.json": "c24a5d402e0e19ccdc191dede09b3073c7b7029f4bbe024f097eb9e4794be8fa"
+  },
+  "environment": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "systemNode": "22.22.0",
+    "selectedStandaloneNode": "22.23.2",
+    "sqlite": "13.0.3",
+    "electron": "44.0.0",
+    "WebView": "not exercised; no installed native GUI claim"
+  },
+  "fixtures": {
+    "database": "Actual portable DatabaseManager, current schema 32, in-memory SQLite with synthetic projects/tasks; fresh owned temporary artifact workspaces. Portable tests use memory-only authenticated storage, not an OS credential store.",
+    "transport": "Actual Task API/HMAC/token owner over loopback HTTP, real MCP client, actual standalone stdio child. Source-built bundle and actual staged resource tested separately.",
+    "environment": "Absolute pinned Node executable with empty PATH and explicit temporary HOME/USERPROFILE/TMPDIR/TEMP. Deliberately conflicting legacy scope fields do not override the signed endpoint.",
+    "network": "Loopback only; no model/vendor/marketplace/account network or live profile use."
+  },
+  "expectedActual": [
+    {
+      "expected": "HTTP and stdio task tools share token and signed task/project/artifact/parent authority",
+      "actual": "Actual server project filtering and cross-project refusal passed. Task-pinned artifact creation ignored foreign task/body and legacy environment IDs. Subtask tool visibility and refusal passed. Wrong tokens, signature/URL scope tampering, missing/malformed URLs and duplicate authority failed."
+    },
+    {
+      "expected": "Retired browser tools cannot be enabled by the production stdio path",
+      "actual": "Both source-built and actual staged children excluded all browser tools from listing and refused every browser call. Proxy also filters a legacy server advertisement before return."
+    },
+    {
+      "expected": "Private runtime paths and cleanup remain owned",
+      "actual": "Selected Node executed service/production-task-mcp.mjs with empty PATH. Client close acknowledged actual child exit and preserved an independently owned unrelated Node child. Held fetch/reader cancellation remained counted after public cancel and failed close, then joined on retry."
+    },
+    {
+      "expected": "Bound errors, requests, results and admission",
+      "actual": "16 MiB request/response budgets, four raw requests, 15-second default deadline, rejected redirect/status/wrong-ID/malformed response and fixed credential-redacted failures passed."
+    }
+  ],
+  "checks": [
+    {
+      "name": "typecheck",
+      "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lint",
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "logSha256": "ed0346fef44ed576dc35a47717f57b1a739bcbccaddb4a95896eb7ecb4c60a9a"
+    },
+    {
+      "name": "affected",
+      "command": "pnpm test:run src/service/task-mcp-stdio-proxy.test.ts src/service/production-task-mcp.test.ts src/main/agent-manager/mcp-probe-service.test.ts src/service/mcp-backend.test.ts src/main/task-mcp-endpoint.test.ts src/main/task-api-server.test.ts src/main/task-api-lifetime.test.ts src/main/mcp-servers/task-group-stdio.test.ts scripts/tauri-stage-production.test.ts --silent --reporter=json --outputFile=/tmp/e2-213-stdio-affected.json",
+      "exitCode": 0,
+      "logSha256": "7d5a94ae1298abf51a80cbeebb3bcf198e33135ebd870c2f7c1b8c0c2b21fc6d",
+      "success": true,
+      "numPassedTests": 177,
+      "numPendingTests": 2,
+      "numFailedTests": 0,
+      "reportSha256": "a165996b72e95d8d439b5b3a14825bad8e36a97075ef362e4967e512729920f1"
+    },
+    {
+      "name": "portable",
+      "command": "pnpm test:tauri -- src/service/task-mcp-stdio-proxy.test.ts src/service/production-task-mcp.test.ts src/main/agent-manager/mcp-probe-service.test.ts src/service/mcp-backend.test.ts src/main/task-mcp-endpoint.test.ts src/main/task-api-server.test.ts src/main/task-api-lifetime.test.ts src/main/mcp-servers/task-group-stdio.test.ts scripts/tauri-stage-production.test.ts --silent --reporter=json --outputFile=/tmp/e2-213-stdio-portable.json",
+      "exitCode": 0,
+      "logSha256": "956473d52790e730f5da934ea956709e72636afe59dfbad769aa58560435818a",
+      "success": true,
+      "numPassedTests": 179,
+      "numPendingTests": 0,
+      "numFailedTests": 0,
+      "reportSha256": "5093f0f98e9dbc64a59e3830824cfeb95db7757385f59ab61a4771e4e92c3fab"
+    },
+    {
+      "name": "staging",
+      "command": "pnpm tauri:prepare:production",
+      "exitCode": 0,
+      "logSha256": "8a2d01ff206c5f5666eb979c7275d58d5ed81c10a2b19cd8435c4d1c8e3cf3bf"
+    },
+    {
+      "name": "staged-entry",
+      "command": "TAURI_PRODUCTION_TASK_MCP_ENTRY=/mnt/Rusty/GitHub/21x-e2-213/src-tauri/resources/service/production-task-mcp.mjs pnpm test:tauri -- src/service/production-task-mcp.test.ts --silent --reporter=json --outputFile=/tmp/e2-213-stdio-staged-entry.json",
+      "exitCode": 0,
+      "logSha256": "2c99ee52468279741b37e10fc9bc96b4008b0aa4a11bd54143ad5b772e27dd67",
+      "success": true,
+      "numPassedTests": 1,
+      "numPendingTests": 0,
+      "numFailedTests": 0,
+      "reportSha256": "e691ff1eafa450349302ef6af4cabe9c95733662b85afdebf82df5e3f784e9a8"
+    },
+    {
+      "name": "freshness",
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "logSha256": "446d65960663d5dd4c52780b4b74bee555eeea343ce3ea340c2a92fbe4b34676"
+    },
+    {
+      "name": "contracts",
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    }
+  ],
+  "lock": "All combined gates, the bundled proof build and source/docs commit hooks used the shared heavy.lock. Single-file pure proxy unit checks ran as light checks.",
+  "warnings": {
+    "lintErrors": 0,
+    "lintWarnings": 165,
+    "newWarnings": 0,
+    "applicationSkips": "Two existing standalone-only subprocess proofs skip under Electron; both run in the zero-skip portable set."
+  },
+  "artifact": {
+    "buildIdentity": "production-355a7c1a5a0c6542f329997bae571a9b",
+    "manifestSha256": "5a75a885314bcb3a35b381b76a36c75f8a896d558f0931836261c4418823e8d6",
+    "entry": "service/production-task-mcp.mjs",
+    "sha256": "204909046a269c83e3eb099aaac8879d32adfad766f95b9db50de3de7211abb0",
+    "bytes": 755160,
+    "runtimePackages": {
+      "better-sqlite3": "13.0.3",
+      "node-pty": "1.1.0",
+      "@paralleldrive/cuid2": "2.3.1",
+      "@anthropic-ai/claude-agent-sdk": "0.3.260",
+      "@anthropic-ai/sdk": "0.123.0",
+      "@opencode-ai/sdk": "1.18.28"
+    },
+    "redistributionReviewComplete": false,
+    "checksums": {
+      "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "src-tauri/resources/native/twentyonex-credential-key": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83"
+    },
+    "nativeHelperScope": "Unchanged previously staged native helper was physically copied from the shared checkout solely to compose the actual resource closure; it was not rebuilt or invoked as OS-store/native-platform evidence."
+  },
+  "repairs": [
+    {
+      "failure": "TS2339: Vite build result includes RollupWatcher",
+      "repair": "Added an explicit watcher refusal rather than casting away the type; forced raw typecheck, affected/portable tests, actual staging and staged-entry proof then passed."
+    }
+  ],
+  "ci": {
+    "status": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "runs": [],
+    "policy": "Lead explicitly substitutes the full local gate until the user decides. No settings mutations or manual workflow dispatch after lead STOP. Earlier settings incident and lead restoration are retained in batch35-213-mcp-sse.json."
+  },
+  "acceptanceAudit": [
+    {
+      "criterion": 1,
+      "state": "Linux source and real bundled-Node controls advanced; full acceptance remains open",
+      "remaining": "Installed supported-target production task API/stdio behavior and prerequisite #208/#202 contract/lifecycle acceptance."
+    },
+    {
+      "criterion": 2,
+      "state": "Modern JSON/SSE probing and production managed stdio browser exclusion advanced; full acceptance remains open",
+      "remaining": "Native warm/cold OAuth depends on #215 and remains unavailable. Legacy HTTP+SSE server-directed endpoint fallback needs reviewed endpoint authority; full retained remote/client integration remains unproven."
+    },
+    {
+      "criterion": 3,
+      "state": "Existing master CLI/provider/plugin implementation preserved",
+      "remaining": "Supported-target installed CLI/Git/provider/plugin/catalog flows, Windows/system-tool installation and external Pi conversion remain unproven or unavailable in existing owners."
+    },
+    {
+      "criterion": 4,
+      "state": "Existing broker/shell owners preserved; production stdio uses explicit finite child environment in the real proof",
+      "remaining": "Installed provider shells, OS-store/native integration and full descendant lifecycle across supported targets require unavailable platform/hosted evidence."
+    },
+    {
+      "criterion": 5,
+      "state": "Actual token/scope/cancellation/metadata/process-preservation regressions advanced; full acceptance remains open",
+      "remaining": "Complete supported-target CLI/Git/worktree/provider failure matrix and process containment/recovery remain prerequisite #208 and installed-platform work."
+    }
+  ],
+  "remainingBlockers": [
+    "Repository Actions disabled pending user decision; no authorized hosted Verify/platform dispatch.",
+    "Native OAuth registration/callback lifecycle and final app identity are owned by #215 and remain unavailable.",
+    "Cross-platform production supervision/containment and installed lifecycle depend on #208; complete authority contracts remain under open #202.",
+    "This Linux source/bundle proof cannot establish macOS/Windows installed production behavior or live provider compatibility."
+  ],
+  "constraints": {
+    "checklistItemsTicked": 0,
+    "issueClosed": false,
+    "liveRelease": false,
+    "liveProfileAccess": false,
+    "ElectronRetirement": false,
+    "hostedVoice": "deferred by user decision",
+    "shippingLegacyStdio": "Unchanged separate Electron build input."
+  }
+}

@@ -6,6 +6,24 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #213 production stdio continuation forwards both tool listing and every
+retained tool call to the exact app-issued signed loopback MCP endpoint. It
+does not substitute legacy environment/body pins or plain JSON routes. The
+production entry excludes retired browser tools independently of the server's
+advertised list. Accepted fetch/read/cancel work stays owned through timeout,
+shutdown and failed-close retry. Production staging now selects this entry;
+the legacy shipping entry remains separate.
+
+The actual bundled standalone child proof uses empty PATH, the real task API
+and synthetic SQLite/projects. It rejects forged scope and wrong tokens,
+preserves project/artifact pins despite conflicting legacy environment fields,
+and leaves an unrelated child alive after close. See
+[task API ownership](task-api-owner.md) and
+[stdio evidence](evidence/batch35-213-task-stdio.json). This is local bundled
+integration evidence. Native OAuth (#215), prerequisites #208/#202 and installed
+supported-target production acceptance remain open. Hosted Verify awaits the
+user decision on repository Actions; no CI or issue closure is claimed.
+
 The #214 terminal continuation preserves logical recent text and escape-parser
 state across PTY callbacks. Production buffer reads select a Unicode-safe recent
 suffix within the existing encoded JSON limit, including long lines. Native PTY

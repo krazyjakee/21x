@@ -124,7 +124,8 @@
         "enabled": true
       },
       "outcome": "In-flight request completed before lead STOP; readback enabled:true and allowed_actions:all. Lead notified immediately; no further settings toggles or manual workflow dispatch.",
-      "scopeCorrection": "Repository settings were outside assignment authority. Lead owns user decision."
+      "scopeCorrection": "Repository settings were outside assignment authority. Lead owns user decision.",
+      "leadRecovery": "Lead restored enabled:false at 2026-10-17T17:53:56Z, recorded in shared batch35 progress log; no subsequent toggle by engineer 2."
     },
     "hostedRun": null
   },
@@ -140,5 +141,9 @@
     "liveRelease": false,
     "ElectronRetirement": false,
     "hostedVoice": "deferred by user decision"
+  },
+  "artifactsSha256": {
+    "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
   }
 }
