@@ -253,11 +253,17 @@ export class McpBackend {
     this.bind('mcp:testConnection', ([data], caller) => this.global(caller, 'write') && (data.id === undefined || this.serverAllowed(data.id, caller, 'write')), async ([data], caller, signal) => {
       if (data.id && this.mutatingServers.has(data.id)) throw new ServiceProtocolError('BACKPRESSURE')
       const input = this.transport(data as unknown as Record<string, unknown>, caller)
+      const expectedSources = data.id ? this.sourceSnapshot(data.id, caller) : undefined
+      const current = (): void => {
+        this.available(signal)
+        if (!this.global(caller, 'write') || data.id && (!this.serverAllowed(data.id, caller, 'write') || this.sourceSnapshot(data.id, caller) !== expectedSources) ||
+          !this.dataAllowed(input, caller) || this.options.configuredMcp !== 'enabled' || !this.options.canUseTransport(input, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
+      }
       let started!: (receipt: ReturnType<McpProbeService['probeOwned']>) => void
       const admitted = new Promise<ReturnType<McpProbeService['probeOwned']>>(resolve => { started = resolve })
       const launch = (): Promise<void> => {
         this.available(signal)
-        const receipt = probes.probeOwned(input, signal)
+        const receipt = probes.probeOwned(input, signal, { beforeEffect: current })
         started(receipt)
         return receipt.closed
       }
@@ -302,7 +308,10 @@ export class McpBackend {
     })
     this.bind('mcp:probeForAuth', (_args, caller) => this.global(caller, 'read'), async ([url], caller, signal) => {
       if (this.options.configuredMcp !== 'enabled' || !this.options.canUseTransport({ name: 'auth-probe', type: 'remote', url }, caller)) throw new ServiceProtocolError('DISCONNECTED')
-      const answer = await probes.probeForAuth(url, signal)
+      const answer = await probes.probeForAuth(url, signal, { beforeEffect: () => {
+        this.available(signal)
+        if (!this.global(caller, 'read') || this.options.configuredMcp !== 'enabled' || !this.options.canUseTransport({ name: 'auth-probe', type: 'remote', url }, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
+      } })
       this.available(signal)
       if (!this.options.canUseTransport({ name: 'auth-probe', type: 'remote', url }, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
       return answer

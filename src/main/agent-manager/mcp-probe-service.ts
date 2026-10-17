@@ -97,7 +97,7 @@ export class McpProbeService {
   }
 
   /** Unauthenticated auth probe, retaining response cleanup even after cancellation. */
-  probeForAuth(url: string, signal?: AbortSignal): Promise<{ requiresAuth: boolean }> {
+  probeForAuth(url: string, signal?: AbortSignal, controls?: McpProbeControls): Promise<{ requiresAuth: boolean }> {
     if (this.closing) return Promise.reject(new Error('MCP_PROBE_SERVICE_CLOSED'))
     if (this.work.size >= 16) return Promise.reject(new Error('MCP_PROBE_CAPACITY'))
     const controller = new AbortController()
@@ -106,13 +106,14 @@ export class McpProbeService {
     if (signal?.aborted) controller.abort()
     this.controllers.add(controller)
     const timer = setTimeout(cancel, this.timeoutMs)
+    const current = (): void => { controller.signal.throwIfAborted(); controls?.beforeEffect(); controller.signal.throwIfAborted() }
     const raw = Promise.resolve().then(async () => {
       const target = new URL(url)
       if (!['https:', 'http:'].includes(target.protocol) || target.username || target.password) throw new Error('MCP_AUTH_PROBE_FAILED')
-      controller.signal.throwIfAborted()
+      current()
       const response = await this.host.fetch(target.href, { method: 'GET', redirect: 'error', signal: controller.signal })
-      try { controller.signal.throwIfAborted() } finally { await response.body?.cancel() }
-      controller.signal.throwIfAborted()
+      try { current() } finally { await response.body?.cancel() }
+      current()
       return { requiresAuth: response.status === 401 }
     }).finally(() => {
       clearTimeout(timer); signal?.removeEventListener('abort', cancel)
@@ -230,13 +231,7 @@ export class McpProbeService {
     }
     const initialized = await post(mcpInitializeRequest())
     if (!initialized.ok) { await initialized.body?.cancel(); return failed(`MCP initialize HTTP ${initialized.status}`) }
-    // Preserve the existing reachability-only result for SSE endpoints. This
-    // does not claim a completed SSE handshake or discovered tools.
-    if (!initialized.headers.get('content-type')?.includes('application/json')) {
-      await initialized.body?.cancel()
-      return { status: 'connected' }
-    }
-    const initData = await this.readJson(initialized, current)
+    const initData = await this.readResponse(initialized, MCP_INITIALIZE_ID, signal, current)
     current()
     if (initData.id !== MCP_INITIALIZE_ID || initData.error || !initData.result) return failed('MCP initialize protocol error')
     const sessionId = initialized.headers.get('mcp-session-id')
@@ -247,11 +242,84 @@ export class McpProbeService {
     if (!notified.ok) return failed(`MCP initialized notification HTTP ${notified.status}`)
     const listed = await post(mcpToolsListRequest())
     if (!listed.ok) { await listed.body?.cancel(); return failed(`MCP tools HTTP ${listed.status}`) }
-    const data = await this.readJson(listed, current)
+    const data = await this.readResponse(listed, MCP_TOOLS_LIST_ID, signal, current)
     current()
     if (data.id !== MCP_TOOLS_LIST_ID || data.error || !data.result) return failed('MCP tools protocol error')
     const tools = summarizeMcpTools(data.result)
     return { status: 'connected', toolCount: tools.length, tools }
+  }
+
+  private async readResponse(response: Response, id: number, signal: AbortSignal, current: () => void): Promise<McpRpcResponse> {
+    const type = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase()
+    if (type === 'application/json') return this.readJson(response, current)
+    if (type === 'text/event-stream') return this.readEventResponse(response, id, signal, current)
+    await response.body?.cancel()
+    throw new Error('Unsupported MCP response content type')
+  }
+
+  /** POST SSE replies can stay open after their matching RPC response. Stop at
+   * that response, then join cancellation before advancing the handshake. No
+   * reconnect, endpoint fallback or server-directed URL is followed by a probe. */
+  private async readEventResponse(response: Response, id: number, signal: AbortSignal, current: () => void): Promise<McpRpcResponse> {
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    let cancellation: Promise<void> | undefined
+    const cancel = (): Promise<void> => cancellation ??= reader ? reader.cancel() : Promise.resolve()
+    const abort = (): void => { void cancel().catch(() => {}) }
+    try {
+      current()
+      reader = response.body?.getReader()
+      if (!reader) throw new Error('Missing MCP event stream')
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) abort()
+      const decoder = new TextDecoder('utf-8', { fatal: true })
+      let buffer = '', size = 0, data: string[] = [], event = ''
+      const line = (value: string): McpRpcResponse | undefined => {
+        if (value === '') {
+          const payload = data.join('\n'), kind = event
+          data = []; event = ''
+          if (!payload || kind && kind !== 'message') return
+          const message: unknown = JSON.parse(payload)
+          const batch = Array.isArray(message) ? message : [message]
+          for (const part of batch) {
+            if (!part || typeof part !== 'object' || Array.isArray(part)) throw new Error('Invalid MCP event')
+            if (part.id === id && !('method' in part) && ('result' in part || 'error' in part)) return part as McpRpcResponse
+          }
+          return
+        }
+        if (value.startsWith(':')) return
+        const colon = value.indexOf(':')
+        const field = colon === -1 ? value : value.slice(0, colon)
+        let content = colon === -1 ? '' : value.slice(colon + 1)
+        if (content.startsWith(' ')) content = content.slice(1)
+        if (field === 'data') data.push(content)
+        else if (field === 'event') event = content
+        return undefined
+      }
+      while (true) {
+        current()
+        const { done, value } = await reader.read()
+        current()
+        if (!done) {
+          size += value.length
+          if (size > MAX_RESPONSE_BYTES) throw new Error('MCP event stream exceeded its byte limit')
+          buffer += decoder.decode(value, { stream: true })
+        } else buffer += decoder.decode()
+        let match: RegExpExecArray | null
+        while ((match = /\r\n|\r|\n/.exec(buffer))) {
+          // Wait for the LF half of a CRLF that crosses a chunk boundary.
+          if (!done && match[0] === '\r' && match.index === buffer.length - 1) break
+          const answer = line(buffer.slice(0, match.index))
+          buffer = buffer.slice(match.index + match[0].length)
+          if (answer) return answer
+        }
+        // Incomplete events at EOF are not dispatched by the SSE protocol.
+        if (done) throw new Error('MCP event stream ended without its response')
+      }
+    } finally {
+      signal.removeEventListener('abort', abort)
+      if (reader) { try { await cancel() } finally { reader.releaseLock() } }
+      else await response.body?.cancel()
+    }
   }
 
   private async readJson(response: Response, current: () => void): Promise<McpRpcResponse> {

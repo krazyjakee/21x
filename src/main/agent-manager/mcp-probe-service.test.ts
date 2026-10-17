@@ -28,6 +28,116 @@ function fakeChild(): ChildProcessWithoutNullStreams {
 }
 const json = (id: number, result: unknown): Response => Response.json({ jsonrpc: '2.0', id, result })
 const remote = { name: 'fixture', type: 'remote', url: 'http://127.0.0.1:1/fixture', headers: { Authorization: 'Bearer fixture-private' } }
+const sse = (text: string, cancel = vi.fn()): Response => new Response(new ReadableStream<Uint8Array>({
+  start(controller) { controller.enqueue(new TextEncoder().encode(text)) }, cancel
+}), { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } })
+
+describe('bounded Streamable HTTP MCP discovery', () => {
+  it('discovers tools over actual authenticated SSE replies that remain open after each RPC response', async () => {
+    const received: string[] = []
+    const server = createServer((request, response) => {
+      let body = ''
+      request.on('data', chunk => { body += chunk })
+      request.on('end', () => {
+        if (request.headers.authorization !== remote.headers.Authorization) { response.writeHead(401).end(); return }
+        const message = JSON.parse(body)
+        received.push(message.method)
+        if (message.method !== 'initialize' && request.headers['mcp-session-id'] !== 'sse-fixture-session') { response.writeHead(400).end(); return }
+        if (!message.id) { response.writeHead(202).end(); return }
+        response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Mcp-Session-Id': 'sse-fixture-session' })
+        response.write(': keepalive\r\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{}}\r\n\r\n')
+        response.write('event: message\r\ndata: ' + JSON.stringify({ jsonrpc: '2.0', id: message.id, result: message.id === 1 ? {} : { tools: [{ name: 'sse_lookup', description: 'Synthetic loopback tool' }] } }) + '\r\n\r\n')
+      })
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const owner = own({ fetch })
+    try {
+      const port = (server.address() as { port: number }).port
+      expect(await owner.probe({ ...remote, url: `http://127.0.0.1:${port}/mcp` }, undefined)).toEqual({ status: 'connected', toolCount: 1, tools: [{ name: 'sse_lookup', description: 'Synthetic loopback tool' }] })
+      await owner.close()
+      expect(received).toEqual(['initialize', 'notifications/initialized', 'tools/list'])
+      expect(owner.pendingCount).toBe(0)
+    } finally {
+      await owner.close()
+      await new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections() })
+    }
+  })
+
+  it('handles split UTF-8, BOM, CR/LF/CRLF, comments, multiline data and batched notifications', async () => {
+    const cancelled = vi.fn()
+    const bytes = new TextEncoder().encode('\uFEFF: keepalive\r\nevent: ignored\rdata: not JSON\r\rdata: [{"method":"notifications/message"},\r\ndata: {"id":99,"result":{}},{"id":1,"result":{}}]\r\n\r\n')
+    const body = new ReadableStream<Uint8Array>({ start(controller) { for (const byte of bytes) controller.enqueue(Uint8Array.of(byte)) }, cancel: cancelled })
+    const tools = '\ndata: {"id":2,"result":{"tools":[{"name":"lookup","description":"雪 🐾"}]}}\n\n'
+    const toolBytes = new TextEncoder().encode(tools), toolCancel = vi.fn()
+    const toolBody = new ReadableStream<Uint8Array>({ start(controller) { for (const byte of toolBytes) controller.enqueue(Uint8Array.of(byte)) }, cancel: toolCancel })
+    const http = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(body, { headers: { 'Content-Type': 'Text/Event-Stream; charset=utf-8' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 202 })).mockResolvedValueOnce(new Response(toolBody, { headers: { 'Content-Type': 'text/event-stream' } }))
+    expect(await own({ fetch: http }).probe(remote)).toEqual({ status: 'connected', toolCount: 1, tools: [{ name: 'lookup', description: '雪 🐾' }] })
+    expect(cancelled).toHaveBeenCalledOnce(); expect(toolCancel).toHaveBeenCalledOnce(); expect(body.locked).toBe(false); expect(toolBody.locked).toBe(false)
+  })
+
+  it.each([
+    ['HTML', '<html>fixture-private</html>', 'text/html'],
+    ['missing type', 'fixture-private', ''],
+    ['JSON lookalike type', '{"id":1,"result":{}}', 'application/json-invalid'],
+    ['empty SSE', '', 'text/event-stream'],
+    ['notification only', 'data: {"method":"notifications/message"}\n\n', 'text/event-stream'],
+    ['wrong response ID', 'data: {"id":99,"result":{}}\n\n', 'text/event-stream'],
+    ['request with matching ID', 'data: {"id":1,"method":"ping"}\n\n', 'text/event-stream'],
+    ['unterminated event', 'data: {"id":1,"result":{}}\n', 'text/event-stream'],
+    ['malformed JSON', 'data: fixture-private\n\n', 'text/event-stream'],
+    ['malformed envelope', 'data: null\n\n', 'text/event-stream']
+  ])('rejects %s without claiming connected or advancing protocol', async (_label, text, type) => {
+    const http = vi.fn<typeof fetch>().mockResolvedValue(new Response(text, { headers: type ? { 'Content-Type': type } : undefined }))
+    const result = await own({ fetch: http }).probe(remote)
+    expect(result).toEqual({ status: 'failed', error: 'MCP probe failed' })
+    expect(JSON.stringify(result)).not.toContain('fixture-private'); expect(http).toHaveBeenCalledOnce()
+  })
+
+  it('bounds SSE bytes, cancels an unfinished response and redacts RPC error data', async () => {
+    const oversizedCancel = vi.fn(), errorCancel = vi.fn()
+    const http = vi.fn<typeof fetch>().mockResolvedValueOnce(sse(':' + 'x'.repeat(256 * 1024), oversizedCancel))
+      .mockResolvedValueOnce(sse('data: {"id":1,"error":{"message":"fixture-private"}}\n\n', errorCancel))
+    const owner = own({ fetch: http })
+    expect(await owner.probe(remote)).toEqual({ status: 'failed', error: 'MCP probe failed' })
+    expect(oversizedCancel).toHaveBeenCalledOnce()
+    expect(await owner.probe(remote)).toEqual({ status: 'failed', error: 'MCP initialize protocol error' })
+    expect(errorCancel).toHaveBeenCalledOnce()
+  })
+
+  it('joins successful SSE reader cancellation before sending the initialized notification', async () => {
+    const cleanup = deferred<void>(), cancel = vi.fn(() => cleanup.promise)
+    const http = vi.fn<typeof fetch>().mockResolvedValueOnce(sse('data: {"id":1,"result":{}}\n\n', cancel))
+      .mockResolvedValueOnce(new Response(null, { status: 202 })).mockResolvedValueOnce(json(2, { tools: [] }))
+    const owner = own({ fetch: http }), receipt = owner.probeOwned(remote)
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+    expect(http).toHaveBeenCalledOnce(); expect(owner.pendingCount).toBe(1)
+    cleanup.resolve()
+    expect(await receipt.result).toEqual({ status: 'connected', toolCount: 0, tools: [] }); await receipt.closed
+    expect(http).toHaveBeenCalledTimes(3)
+  })
+
+  it('cancels pending SSE reads on timeout, retains a held cancellation acknowledgement and fences later requests', async () => {
+    const cleanup = deferred<void>(), cancel = vi.fn(() => cleanup.promise)
+    const response = sse(': waiting for response\n\n', cancel)
+    const http = vi.fn<typeof fetch>().mockResolvedValueOnce(response)
+    const owner = own({ fetch: http }, 25), receipt = owner.probeOwned(remote)
+    expect(await receipt.result).toEqual({ status: 'failed', error: 'MCP probe timed out' })
+    expect(cancel).toHaveBeenCalledOnce()
+    await expect(owner.close(5)).rejects.toThrow('MCP_PROBE_SHUTDOWN_INCOMPLETE')
+    expect(owner.pendingCount).toBe(1)
+    cleanup.resolve(); await owner.close(); await receipt.closed
+    expect(response.body?.locked).toBe(false); expect(http).toHaveBeenCalledOnce(); expect(owner.pendingCount).toBe(0)
+  })
+
+  it('does not advance after authority is withdrawn while an SSE reply is being cancelled', async () => {
+    let allowed = true
+    const http = vi.fn<typeof fetch>().mockResolvedValueOnce(sse('data: {"id":1,"result":{}}\n\n', vi.fn(() => { allowed = false })))
+    const receipt = own({ fetch: http }).probeOwned(remote, undefined, { beforeEffect() { if (!allowed) throw new Error('private authority') } })
+    expect(await receipt.result).toEqual({ status: 'failed', error: 'MCP probe cancelled' }); await receipt.closed
+    expect(http).toHaveBeenCalledOnce()
+  })
+})
 
 describe('portable MCP probe ownership', () => {
   it('refuses retired authority before environment or spawn access', async () => {

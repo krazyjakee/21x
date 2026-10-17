@@ -148,6 +148,59 @@ describe('production MCP actual-owner bindings', () => {
     expect(db.getMcpServer(server.id)?.tools).toEqual(result.tools)
     expect(http).toHaveBeenCalledTimes(3); expect(JSON.stringify(events)).not.toContain('private')
   })
+  it('persists discovered SSE tools only after both owned readers close and preserves other server metadata', async () => {
+    const server = db.createMcpServer(remote)!, other = db.createMcpServer({ ...remote, name: 'Unrelated saved server' })!
+    const cancels: string[] = []
+    http.mockImplementation(async (_url, init) => {
+      expect(init?.redirect).toBe('error')
+      const message = JSON.parse(init!.body as string)
+      if (!message.id) return new Response(null, { status: 202 })
+      const result = message.id === 1 ? {} : { tools: [{ name: 'streamed_lookup', description: 'Fixture only' }] }
+      return new Response(new ReadableStream({
+        start(controller) { controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify({ id: message.id, result }) + '\n\n')) },
+        cancel() { cancels.push(message.method) }
+      }), { headers: { 'Content-Type': 'text/event-stream' } })
+    })
+    const result = await call('mcp:testConnection', [{ ...remote, id: server.id, headers: { Authorization: marker } }])
+    expect(result).toEqual({ status: 'connected', toolCount: 1, tools: [{ name: 'streamed_lookup', description: 'Fixture only' }] })
+    expect(cancels).toEqual(['initialize', 'tools/list']); expect(backend.pendingProbeCount).toBe(0)
+    expect(db.getMcpServer(server.id)?.tools).toEqual(result.tools); expect(db.getMcpServer(other.id)?.tools).toEqual([])
+    expect(db.getMcpServer(server.id)?.headers).toEqual(remote.headers)
+  })
+  it.each(['transport', 'configuration', 'server', 'environment', 'linked task'] as const)('fences the next network effect after %s authority loss during initialization', async kind => {
+    const server = db.createMcpServer({ ...remote, environment: { SERVICE_TOKEN: 'fixture-value' } })!
+    const source = db.createTaskSource({ name: 'Bound source', plugin_id: 'fixture', mcp_server_id: server.id })!
+    db.createTask({ title: 'Bound task', source_id: source.id, project_id: source.project_id })
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('data: {"id":1,"result":{}}\n\n')) },
+      cancel() {
+        if (kind === 'transport') options.canUseTransport = () => false
+        if (kind === 'configuration') options.canManageConfiguration = () => false
+        if (kind === 'server') options.canAccessServer = () => false
+        if (kind === 'environment') options.canUseEnvironmentName = () => false
+        if (kind === 'linked task') options.canAccessTask = () => false
+      }
+    })
+    http.mockResolvedValueOnce(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+    const result = await call('mcp:testConnection', [{ ...remote, environment: { SERVICE_TOKEN: 'fixture-value' }, id: server.id }]).catch(error => ({ code: error.code }))
+    expect(result).toEqual(kind === 'transport' ? { code: 'INVALID_REQUEST' } : { status: 'failed', error: 'MCP probe failed' })
+    expect(http).toHaveBeenCalledOnce(); expect(db.getMcpServer(server.id)?.tools).toEqual([]); expect(events).toEqual([])
+    expect(body.locked).toBe(false)
+  })
+  it('refuses queued auth probes after read authority is revoked before fetch', async () => {
+    const flight = call('mcp:probeForAuth', [remote.url])
+    options.canManageConfiguration = () => false
+    await expect(flight).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(http).not.toHaveBeenCalled()
+  })
+  it('preserves existing tools when a remote probe receives HTML rather than MCP', async () => {
+    const server = db.createMcpServer(remote)!
+    db.updateMcpServerTools(server.id, [{ name: 'previous_tool', description: 'Saved metadata' }])
+    http.mockResolvedValueOnce(new Response('<html>private-fixture</html>', { headers: { 'Content-Type': 'text/html' } }))
+    expect(await call('mcp:testConnection', [{ ...remote, id: server.id }])).toEqual({ status: 'failed', error: 'MCP probe failed' })
+    expect(db.getMcpServer(server.id)?.tools).toEqual([{ name: 'previous_tool', description: 'Saved metadata' }]); expect(events).toEqual([])
+    expect(http).toHaveBeenCalledOnce()
+  })
   it('owns a cancelled child through raw close with restricted environment and no stale tools', async () => {
     const server = db.createMcpServer(local)!, controller = new AbortController()
     const flight = call('mcp:testConnection', [{ ...local, id: server.id }], controller.signal)
