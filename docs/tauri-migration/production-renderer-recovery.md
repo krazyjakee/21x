@@ -181,3 +181,22 @@ twenty Commander recovery controls now use the actual typed native host,
 client, codec and transport with preload absent; their native responses are
 controlled. Installed WebView/history, image and provider acceptance remains
 separate and open. No native operation or voice capability was added.
+
+## Native titlebar theme continuation
+
+The titlebar hook now consumes the published exact native color contract. It
+waits for ready connection plus successful durable hydration before painting,
+then repaints once for a new theme or ready replacement connection. Only two
+six-digit RGB computed custom properties reach native; no CSS expression,
+selector or window identity is supplied. The typed transport supplies the
+physical-document receipt. Duplicate connection notices do not repeat a paint.
+
+Refused/unsupported operations keep the current chrome and are caught without
+a retry loop. A late old result cannot trigger further work. Pagehide, unmount
+and effect replacement release the connection observer and fence queued
+callbacks. Electron keeps its existing CSS/color contract and catches both
+synchronous and asynchronous bridge refusals; macOS leaves chrome to its native
+owner. Sixteen controlled native/compatibility hook regressions exercise these
+paths without preload. The actual isolated GTK symbol/header proof belongs to
+E2's native-window source28343c43/evidence8c9c2038; these renderer tests do not
+establish installed or non-Linux chrome parity.
