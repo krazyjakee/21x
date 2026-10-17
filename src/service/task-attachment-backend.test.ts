@@ -351,6 +351,15 @@ describe('native selection import under actual Source task ownership',()=>{
   db.updateTask(value.id,{attachments:[record]});expect(metadata(value.id)).toEqual([record])
   await expect(call('attachments:save',[value.id,selected.path],undefined,identity)).rejects.toMatchObject({code:'INVALID_REQUEST'});expect(reads).toBe(17)
  })
+ it('refuses execution anchors and Captain file imports before claiming a selection or reading bytes',async()=>{
+  await enable();const first=task(),second=task(),agent=db.createAgent({name:'Native group attachment scope'})!,group=db.createTaskGroup({title:'Native group import refusal',task_ids:[first.id,second.id],agent_id:agent.id})
+  await expect(call('attachments:save',[group.execution_task_id,selected.path],undefined,identity)).rejects.toMatchObject({code:'INVALID_REQUEST'})
+  db.ensureCoordinatorTask(projectId);const captain=db.getCoordinatorTask(projectId)!
+  await expect(call('attachments:save',[captain.id,selected.path],undefined,identity)).rejects.toMatchObject({code:'INVALID_REQUEST'})
+  expect(reads).toBe(0);expect(retire).not.toHaveBeenCalled();expect(existsSync(join(attachmentRoot,group.execution_task_id))).toBe(false)
+  const record=await call('attachments:save',[first.id,selected.path],undefined,identity)
+  expect(record.filename).toBe(selected.filename);expect(reads).toBe(17)
+ })
  it('refuses wrong document and revoked task/project write scope before reading',async()=>{
   await enable();const value=task()
   await expect(call('attachments:save',[value.id,selected.path],undefined,{...identity,uiLeaseId:'ui_other'})).rejects.toMatchObject({code:'INVALID_REQUEST'})

@@ -137,12 +137,12 @@ it('stamps notification document authority and rejects an old show acknowledgeme
 })
 
 
-it.each(['attachments:pick','attachments:save'] as const)('requires the exact physical document for %s and rejects late results during replacement bootstrap',async operation=>{
+it.each(['attachments:pick','attachments:save','app:setTitleBarOverlay'] as const)('requires the exact physical document for %s and rejects late results during replacement bootstrap',async operation=>{
  let finish!: (value:unknown)=>void, bootstrap!: (value:unknown)=>void
  const raw=new Promise(resolve=>{finish=resolve}), replacement=new Promise(resolve=>{bootstrap=resolve})
  const invoke=vi.fn().mockResolvedValueOnce({available:true,protocolVersion:1,engineEpoch:'engine-1',uiLeaseId:'document:1'}).mockImplementation((command:string)=>command==='engine_status'?replacement:raw)
  const native={core:{invoke},event:{listen:vi.fn()}} as unknown as TauriDesktopApi;await getTauriEngineEpoch(native)
- const transport=createTauriDesktopTransport(native);const payload:JsonValue=operation==='attachments:pick'?{}:{taskId:'task_fixture',filePath:'/tmp/selected.txt'}
+ const transport=createTauriDesktopTransport(native);const payload:JsonValue=operation==='attachments:pick'?{}:operation==='attachments:save'?{taskId:'task_fixture',filePath:'/tmp/selected.txt'}:{colors:{color:'#141414',symbolColor:'#8e8d91'}}
  const pending=transport.invoke(operation,payload,{engineEpoch:'engine-1',signal:new AbortController().signal}),failure=expect(pending).rejects.toMatchObject({code:'STALE_EPOCH'})
  expect(invoke).toHaveBeenLastCalledWith('desktop_invoke',{operation,payload,engineEpoch:'engine-1',uiLease:'document:1'})
  const refreshed=getTauriEngineEpoch(native);finish({engineEpoch:'engine-1',result:{defined:true,value:[]}});await failure

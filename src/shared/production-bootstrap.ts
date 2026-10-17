@@ -39,6 +39,7 @@ export interface ProductionLaunchDescriptor {
     attachmentFiles?: 'host' | 'unsupported'
     attachmentDownloads?: 'host' | 'unsupported'
     attachmentSelections?: 'host' | 'unsupported'
+    windowState?: 'host' | 'unsupported'
     artifactClipboard?: 'host' | 'unsupported'
     tray?: 'host' | 'unsupported'
     oauthFlows?: 'host' | 'unsupported'
@@ -62,7 +63,7 @@ export function isProductionLaunchDescriptor(value: unknown): value is Productio
     value.version === 1 && value.kind === 'production-private-launch' && isProductionLaunchId(value.launchId) && typeof value.profileId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value.profileId) &&
     choice(value.profileIntent, ['create-new', 'load-authenticated-copy']) && typeof value.buildIdentity === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value.buildIdentity) && isResourceDigest(value.resourceManifestSha256) &&
     isRecord(value.paths) && hasExactKeys(value.paths, ['profileRoot', 'workspaceRoot', 'attachmentRoot', 'reposRoot', 'resourceRoot', 'tempRoot']) && Object.values(value.paths).every(isAbsoluteHostPath) &&
-    isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp'], ['workspaceFiles', 'workspaceCleanup', 'attachmentFiles', 'attachmentDownloads', 'attachmentSelections', 'artifactClipboard', 'tray', 'oauthFlows']) &&
+    isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp'], ['workspaceFiles', 'workspaceCleanup', 'attachmentFiles', 'attachmentDownloads', 'attachmentSelections', 'windowState', 'artifactClipboard', 'tray', 'oauthFlows']) &&
     (capabilities.oauthFlows === undefined || choice(capabilities.oauthFlows, ['host', 'unsupported'])) &&
     (capabilities.oauthFlows !== 'host' || capabilities.externalUrls === 'host') &&
     (capabilities.tray === undefined || choice(capabilities.tray, ['host', 'unsupported'])) &&
@@ -73,6 +74,8 @@ export function isProductionLaunchDescriptor(value: unknown): value is Productio
     (capabilities.attachmentFiles !== 'host' || capabilities.ui === 'host') &&
     (capabilities.attachmentSelections === undefined || choice(capabilities.attachmentSelections, ['host', 'unsupported'])) &&
     (capabilities.attachmentSelections !== 'host' || capabilities.ui === 'host') &&
+    (capabilities.windowState === undefined || choice(capabilities.windowState, ['host', 'unsupported'])) &&
+    (capabilities.windowState !== 'host' || capabilities.ui === 'host') &&
     (capabilities.attachmentDownloads === undefined || choice(capabilities.attachmentDownloads, ['host', 'unsupported'])) &&
     (capabilities.attachmentDownloads !== 'host' || capabilities.ui === 'host') &&
     (capabilities.artifactClipboard === undefined || choice(capabilities.artifactClipboard, ['host', 'unsupported'])) &&

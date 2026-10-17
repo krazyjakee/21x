@@ -115,6 +115,9 @@ export class TaskAttachmentBackend {
     }
     try {
       current(); taskGrant(taskId, mutation); preflight(); const initialScope = scopeReader.capture(taskId, caller), scopeText = JSON.stringify(initialScope), initial = metadata(); let expectedMetadata = initial.raw
+      // Metadata-only file import needs the retained ordinary-task update
+      // route. Execution anchors/Captains require a separate domain append.
+      if (operation === 'attachments:save' && initialScope.task.role !== 'task') throw new ServiceProtocolError('INVALID_REQUEST')
       if (Buffer.byteLength(scopeText) + Buffer.byteLength(initial.raw) >= TASK_ATTACHMENT_LIMITS.wireBytes) throw new ServiceProtocolError('FRAME_TOO_LARGE')
       const relevant = db.prepare(relevantSql).all(...relevantParams) as Array<{ id: string; project_id: string; agent_id: string | null }>
       for (const task of relevant) { taskGrant(task.id); projectGrant(task.project_id); if (task.agent_id) { if (!isDatabaseId(task.agent_id) || !this.options.canAccessAgent(task.agent_id, caller, 'read')) throw new ServiceProtocolError('INVALID_REQUEST'); agents.add(task.agent_id) } }

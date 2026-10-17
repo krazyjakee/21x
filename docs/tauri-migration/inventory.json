@@ -4285,7 +4285,7 @@
       "expression": "desktopApi?.agentSession?.getTranscriptSnapshot",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "access",
-      "line": 148,
+      "line": 151,
       "path": [
         "agentSession",
         "getTranscriptSnapshot"
@@ -4293,11 +4293,11 @@
       "resolution": "literal"
     },
     {
-      "column": 57,
+      "column": 18,
       "expression": "desktopApi.agentSession.getTranscriptPage",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "call",
-      "line": 156,
+      "line": 163,
       "path": [
         "agentSession",
         "getTranscriptPage"
@@ -4309,7 +4309,7 @@
       "expression": "desktopApi?.agentSession?.getTranscriptDelta",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "access",
-      "line": 186,
+      "line": 194,
       "path": [
         "agentSession",
         "getTranscriptDelta"
@@ -4317,11 +4317,11 @@
       "resolution": "literal"
     },
     {
-      "column": 71,
+      "column": 20,
       "expression": "desktopApi.agentSession.getTranscriptPage",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "call",
-      "line": 198,
+      "line": 210,
       "path": [
         "agentSession",
         "getTranscriptPage"
@@ -6064,6 +6064,7 @@
     "src/service/heartbeat-backend.ts",
     "src/service/mcp-backend.ts",
     "src/service/mobile-backend.ts",
+    "src/service/native-window-state-store.ts",
     "src/service/oauth-flow-owner.ts",
     "src/service/production-adapters.ts",
     "src/service/production-agent-backend.ts",
@@ -6151,6 +6152,8 @@
     "src/shared/native-clipboard-codecs.ts",
     "src/shared/native-notification-codecs.ts",
     "src/shared/native-services-codecs.ts",
+    "src/shared/native-window-codecs.ts",
+    "src/shared/native-window-state.ts",
     "src/shared/oauth-native-callbacks.ts",
     "src/shared/pr-readiness.ts",
     "src/shared/production-agent-codecs.ts",
@@ -14470,7 +14473,7 @@
   "summary": {
     "desktopAPIConsumers": 362,
     "directAPIConsumers": 1,
-    "files": 902,
+    "files": 905,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

@@ -191,6 +191,8 @@ pub struct ProductionCapabilities {
     #[serde(default = "unsupported_host_capability")]
     pub attachment_selections: HostCapability,
     #[serde(default = "unsupported_host_capability")]
+    pub window_state: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
     pub artifact_clipboard: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub tray: HostCapability,
@@ -583,6 +585,8 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || capabilities.oauth_flows == HostCapability::Host
             && capabilities.external_urls != HostCapability::Host
         || capabilities.attachment_selections == HostCapability::Host
+            && capabilities.ui != HostCapability::Host
+        || capabilities.window_state == HostCapability::Host
             && capabilities.ui != HostCapability::Host
         || capabilities.attachment_files == HostCapability::Host
             && capabilities.ui != HostCapability::Host
@@ -1282,6 +1286,55 @@ impl ProductionEngine {
         self.attachment_request(epoch, payload, lease_id, true)
             .await
     }
+    pub async fn load_window_state(
+        &self,
+        epoch: &str,
+    ) -> Result<Option<crate::production_window::WindowState>, EngineError> {
+        self.assert_window_state(epoch)?;
+        let result = self.request("engine.windowState.load", json!({})).await?;
+        self.assert_window_state(epoch)?;
+        if result["state"].is_null() {
+            Ok(None)
+        } else {
+            crate::production_window::WindowState::parse(&result["state"])
+                .map(Some)
+                .ok_or_else(|| EngineError::new("INVALID_RESULT"))
+        }
+    }
+    pub async fn save_window_state(
+        &self,
+        epoch: &str,
+        state: crate::production_window::WindowState,
+    ) -> Result<(), EngineError> {
+        self.assert_window_state(epoch)?;
+        if crate::production_window::WindowState::parse(&state.value()).is_none() {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let result = self
+            .request("engine.windowState.save", json!({"state":state.value()}))
+            .await?;
+        self.assert_window_state(epoch)?;
+        if result == json!({"saved":true}) {
+            Ok(())
+        } else {
+            Err(EngineError::new("INVALID_RESULT"))
+        }
+    }
+    fn assert_window_state(&self, epoch: &str) -> Result<(), EngineError> {
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.window_state != HostCapability::Host {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        Ok(())
+    }
     /// Native pick delivery is private; no renderer can mint selection grants.
     pub async fn offer_attachment_selections(
         &self,
@@ -1744,6 +1797,8 @@ impl ProductionEngine {
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
                         "engine.ownerState" => valid_owner_state(result),
+                        "engine.windowState.load" => crate::production_window::load_result(result),
+                        "engine.windowState.save" => result == &json!({"saved":true}),
                         "engine.attachment.selection.offer" => {
                             contracts::object(result, &["accepted"], &[])
                                 && result["accepted"].is_boolean()
@@ -3172,6 +3227,7 @@ mod tests {
                 attachment_files: HostCapability::Unsupported,
                 attachment_downloads: HostCapability::Unsupported,
                 attachment_selections: HostCapability::Unsupported,
+                window_state: HostCapability::Unsupported,
                 artifact_clipboard: HostCapability::Unsupported,
                 tray: HostCapability::Unsupported,
                 oauth_flows: HostCapability::Unsupported,

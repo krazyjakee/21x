@@ -6,6 +6,24 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #215/#214 native window continuation adds profile-owned private geometry
+load/save, bounded monitor/DPI restoration, normal-bounds preservation across
+maximize/fullscreen, finite focused menus/zoom/editing, and exact current-document
+six-digit titlebar colors. Hidden startup records its physical document before
+page completion; reload invalidates old tickets before dispatch. Raw writes and
+native actions remain retained through waiter loss and are joined before Source
+profile shutdown. Actual isolated Wry/GTK/Openbox regressions exercise menu
+editing/zoom, symbol repaint, hide/reopen/reload, foreign-window and navigation
+denial. Controlled fixtures do not establish installed Source/window or
+multimonitor/platform acceptance. Nonordinary file imports now refuse before
+selection claim because no retained metadata append exists for those roles.
+Native viewer/drop, durable unreferenced-copy reconciliation, general global
+shortcuts, login items and native voice permission/stream revocation remain
+open. Final identity/schemes and hosted Actions await user decisions; no enablement
+or release is made. See [native window services](native-window-services.md).
+
+Renderer agent collection/document continuation (`8024737a`, #209): agent snapshots coalesce and retry bounded invalidation across accepted CRUD, stale document/connection reads cannot publish, and strict recovery keeps mutations fenced on failure. One status/transcript cohort disposes on pagehide/HMR; retired transcript reads cannot project artifacts or start another page. Existing heartbeat/disconnect early return preserved. Eighteen typed-native controls plus thirty-five legacy agent-store controls pass; full renderer1727/staged389, raw forced typecheck/lint0errors165baselinewarnings/both frontends pass. Revision-bound evidence follows in issue-209-agent-collection-local-20261017.json. Installed native lifecycle/platform proof and remaining retained operations stay open; hosted Verify unavailable: repository Actions disabled, awaiting user decision.
+
 The #218 local voice continuation repairs actual synthesis-worker ownership:
 system voice commands remain captured through buffered callback and native
 close; cancellation, worker TERM and IPC disconnect join owned descendants,

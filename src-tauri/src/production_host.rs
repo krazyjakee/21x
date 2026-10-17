@@ -47,6 +47,9 @@ pub(crate) mod native_clipboard;
 #[path = "production_ui.rs"]
 pub(crate) mod production_ui;
 use production_ui::NativeUiOwner;
+#[path = "native_window.rs"]
+mod native_window;
+use native_window::NativeWindowOwner;
 
 struct ProductionState {
     engine: Option<ProductionEngine>,
@@ -54,6 +57,7 @@ struct ProductionState {
     native_work: NativeWorkOwner,
     oauth: native_oauth::NativeOAuthOwner,
     ui: NativeUiOwner,
+    window: NativeWindowOwner,
     notifications: NativeNotificationOwner,
     tray: Option<NativeTrayOwner>,
     energy: Option<NativeEnergyOwner>,
@@ -518,6 +522,23 @@ async fn desktop_invoke(
         state.ui.assert_publish(&window, &engine_epoch, &lease)?;
         return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
     }
+    if operation == "app:setTitleBarOverlay" {
+        let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        let result = native_window::overlay(
+            window.clone(),
+            state.native_work.clone(),
+            state.ui.clone(),
+            engine_epoch.clone(),
+            lease.clone(),
+            payload,
+        )
+        .await?;
+        authorize(&window)?;
+        available_engine(window.app_handle(), Some(&engine_epoch))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
+    }
     if operation == native_clipboard::OPERATION {
         if !native_clipboard::request(&payload) {
             return Err(EngineError::new("INVALID_ARGUMENTS"));
@@ -832,6 +853,7 @@ async fn start(
             } else {
                 HostCapability::Unsupported
             },
+            window_state: HostCapability::Host,
             attachment_selections: if cfg!(target_os = "linux") {
                 HostCapability::Host
             } else {
@@ -1069,6 +1091,18 @@ pub fn run() {
                 tray.as_ref().is_some_and(|owner| owner.is_available()),
                 energy.clone(),
             ));
+            let saved_window = match &started {
+                Ok(engine) => {
+                    tauri::async_runtime::block_on(engine.load_window_state(&engine.epoch()))
+                        .unwrap_or_else(|_| {
+                            eprintln!("PRODUCTION_WINDOW_RESTORE_UNAVAILABLE");
+                            None
+                        })
+                }
+                Err(_) => None,
+            };
+            let window_owner =
+                NativeWindowOwner::new(native_work.clone(), started.as_ref().ok().cloned());
             let state = match started {
                 Ok(engine) => ProductionState {
                     engine: Some(engine),
@@ -1076,6 +1110,7 @@ pub fn run() {
                     native_work: native_work.clone(),
                     oauth: oauth.clone(),
                     ui: ui.clone(),
+                    window: window_owner.clone(),
                     notifications: notifications.clone(),
                     tray: tray.clone(),
                     energy: energy.clone(),
@@ -1087,6 +1122,7 @@ pub fn run() {
                     native_work,
                     oauth: oauth.clone(),
                     ui: ui.clone(),
+                    window: window_owner.clone(),
                     notifications: notifications.clone(),
                     tray: tray.clone(),
                     energy: energy.clone(),
@@ -1105,6 +1141,7 @@ pub fn run() {
                 tauri::WebviewUrl::App("index.html".into()),
             )
             .title("21x Production Preview")
+            .visible(false)
             .inner_size(1280.0, 850.0)
             .on_navigation(move |url| {
                 if !trusted_origin(url) {
@@ -1114,6 +1151,10 @@ pub fn run() {
             })
             .on_page_load(move |window, payload| match payload.event() {
                 tauri::webview::PageLoadEvent::Started => {
+                    // A hidden first load must obtain its physical handle
+                    // before recording the start; never infer readiness from
+                    // an unmatched completion after native realization.
+                    let _ = native_window::prepare(&window);
                     let _ = page_ui.page_started(ticket, &window);
                 }
                 tauri::webview::PageLoadEvent::Finished => {
@@ -1126,10 +1167,26 @@ pub fn run() {
             .on_download(|_, _| false)
             .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
             .build()?;
+            native_window::prepare(&window)
+                .map_err(|_| std::io::Error::other("PRODUCTION_WINDOW_CONTROLS_UNAVAILABLE"))?;
             ui.attach_window(ticket, &window)
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
             ui.watch_destroy(ticket, &window)
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
+            let restored =
+                native_window::apply_restore(&window, saved_window).unwrap_or_else(|_| {
+                    eprintln!("PRODUCTION_WINDOW_RESTORE_UNAVAILABLE");
+                    twentyonex_engine::production_window::restore(
+                        None,
+                        &native_window::monitors(&window),
+                    )
+                });
+            if window_owner.attach(&window, ui.clone(), restored).is_err() {
+                // Geometry/menu platform failures must not turn a usable
+                // trusted window into a blank startup failure.
+                eprintln!("PRODUCTION_WINDOW_CONTROLS_UNAVAILABLE");
+            }
+            window.show()?;
             if let Some(tray) = tray.filter(|owner| owner.is_available()) {
                 attach_tray_close(
                     &window,
@@ -1157,7 +1214,8 @@ pub fn run() {
             let state = handle.state::<ProductionState>();
             // Fence synchronously before another native command/callback can
             // reserve work; failed drains never allow application exit.
-            if state.oauth.stop().is_err()
+            if state.window.stop().is_err()
+                || state.oauth.stop().is_err()
                 || state.ui.close().is_err()
                 || state.native_work.close().is_err()
             {
@@ -1167,6 +1225,7 @@ pub fn run() {
             }
             let engine = state.engine.clone();
             let native_work = state.native_work.clone();
+            let window_owner = state.window.clone();
             let notifications = state.notifications.clone();
             let tray = state.tray.clone();
             let energy = state.energy.clone();
@@ -1179,6 +1238,17 @@ pub fn run() {
                 if let Some(energy) = energy {
                     if energy.close().await.is_err() {
                         eprintln!("PRODUCTION_ENERGY_DRAIN_BLOCKED");
+                        quitting.store(0, Ordering::SeqCst);
+                        return;
+                    }
+                }
+                // Flush only captured normal geometry while Source still owns
+                // the database. Raw writes remain joined across public timeout.
+                match window_owner.close().await {
+                    Ok(true) => {}
+                    Ok(false) => eprintln!("PRODUCTION_WINDOW_PERSISTENCE_UNAVAILABLE"),
+                    Err(_) => {
+                        eprintln!("PRODUCTION_WINDOW_DRAIN_BLOCKED");
                         quitting.store(0, Ordering::SeqCst);
                         return;
                     }

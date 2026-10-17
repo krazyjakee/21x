@@ -1,3 +1,4 @@
+import { NATIVE_WINDOW_STATE_SCHEMAS } from '../shared/native-window-state'
 import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer } from '../shared/attachment-selection-callbacks'
 import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
@@ -51,7 +52,7 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false, oauth = false, selections = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false, oauth = false, selections = false, windowState = false) {
   let selectedAdapter: CodingAgentAdapter | null = null
   let privateCallbacks: ProductionPrivateCallbacks | null = null
   let notificationAcknowledgement: Promise<void> | null = null
@@ -77,6 +78,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   if (workspaceFiles) launch.capabilities.workspaceFiles = 'host'
   if (ui) launch.capabilities.ui = 'host'
   if (selections) launch.capabilities.attachmentSelections = 'host'
+  if (windowState) launch.capabilities.windowState = 'host'
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
   if (attachmentDownloading) launch.capabilities.attachmentDownloads = 'host'
   if (artifactClipboard) launch.capabilities.artifactClipboard = 'host'
@@ -158,6 +160,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     nativeCalls.push(operation); fileReceipts.push((payload as { receipt: JsonValue }).receipt)
     await fileAcknowledgement; return {}
   } }
+  Object.assign(schemas, NATIVE_WINDOW_STATE_SCHEMAS)
   schemas['engine.attachment.selection.offer'] = { validatePayload: isSelectionOffer, validateResult: value => isRecord(value) && hasExactKeys(value, ['accepted']) && typeof value.accepted === 'boolean' }
   schemas['engine.attachment.save'] = { validatePayload: value => isRecord(value), validateResult: TASK_ATTACHMENT_CODECS['attachments:save'].validateWireResult }
   if (selections) for (const [operation, schema] of Object.entries(ATTACHMENT_SELECTION_SCHEMAS)) schemas[operation] = { ...schema, handle: async (payload): Promise<JsonValue> => {
@@ -898,4 +901,24 @@ describe('private selection receipts through actual service peer and SQLite owne
   await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED');expect(actual.db.db.open).toBe(true);expect(f.nativeCalls).not.toContain('host.attachment.selection.retire')
   gate.finish();await f.service.close();expect(actual.db.db.open).toBe(false);expect(f.nativeCalls.filter(v=>v==='host.attachment.selection.read')).toHaveLength(1);expect(f.nativeCalls).toContain('host.attachment.selection.retire')
  })
+})
+
+
+describe('private native window state under the actual profile owner', () => {
+  const state = { version: 1, x: -1920, y: 100, width: 1400, height: 900, scale: 1, maximized: true, fullscreen: false }
+  it('retains exact profile geometry privately while a document reload has no authority to choose a setting or profile', async () => {
+    const f = fixture(false, true, false, false, false, false, false, false, false, false, false, true)
+    await f.initialize(); f.changeUiLease(null)
+    expect(await f.host.request('engine.windowState.load', {})).toEqual({ state: null })
+    expect(await f.host.request('engine.windowState.save', { state })).toEqual({ saved: true })
+    expect(await f.host.request('engine.windowState.load', {})).toEqual({ state })
+    await expect(f.host.request('settings:get', { key: '__native_window_state_v1' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+    await expect(f.host.request('engine.windowState.save', { state, profileId: 'foreign' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+    expect(await f.host.request('engine.windowState.load', {})).toEqual({ state })
+  })
+  it('refuses missing native capability and parent shutdown before persistence', async () => {
+    const f = fixture(); await f.initialize()
+    await expect(f.host.request('engine.windowState.save', { state })).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    expect(f.service.getReadyServices()!.db.db.prepare("SELECT 1 FROM settings WHERE key='__native_window_state_v1'").get()).toBeUndefined()
+  })
 })

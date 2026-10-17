@@ -179,6 +179,14 @@ impl UiState {
             })
     }
 }
+/// In-memory fence for a callback already dispatched to the captured WebView.
+/// Querying Tauri getters from inside with_webview re-enters its dispatch lock.
+#[cfg(target_os = "linux")]
+pub(super) struct NativeWindowAction {
+    ticket: u64,
+    generation: u64,
+    key: String,
+}
 #[derive(Clone, Default)]
 pub struct NativeUiOwner(Arc<Mutex<UiState>>);
 
@@ -229,6 +237,56 @@ impl NativeUiOwner {
         }
         Ok(())
     }
+    #[cfg(target_os = "linux")]
+    pub(super) fn capture_window_action(
+        &self,
+        window: &WebviewWindow,
+    ) -> Result<NativeWindowAction, EngineError> {
+        self.assert_window(window)?;
+        let key = physical_key(window)?;
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        let captured = state
+            .window
+            .as_ref()
+            .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+        if captured.key != key
+            || !state.matches(captured)
+            || state.document.closed
+            || state.document.retired
+        {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        Ok(NativeWindowAction {
+            ticket: captured.ticket,
+            generation: state.document.generation,
+            key,
+        })
+    }
+    #[cfg(target_os = "linux")]
+    pub(super) fn assert_window_action(
+        &self,
+        action: &NativeWindowAction,
+    ) -> Result<(), EngineError> {
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        if state.document.closed
+            || state.document.retired
+            || state.document.attachment != action.ticket
+            || state.document.generation != action.generation
+            || state.document.physical.as_deref() != Some(action.key.as_str())
+            || !state.window.as_ref().is_some_and(|window| {
+                state.matches(window) && window.key == action.key && window.ticket == action.ticket
+            })
+        {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        Ok(())
+    }
     pub fn reserve_window(&self) -> Result<u64, EngineError> {
         let mut state = self
             .0
@@ -254,6 +312,38 @@ impl NativeUiOwner {
             ticket,
         });
         Ok(())
+    }
+    #[cfg(test)]
+    pub(super) fn completed_document_for_test(&self, window: &WebviewWindow) -> bool {
+        let Ok(key) = physical_key(window) else {
+            return false;
+        };
+        let Ok(state) = self.0.lock() else {
+            return false;
+        };
+        state.document.usable(&key, true)
+            && state
+                .window
+                .as_ref()
+                .is_some_and(|captured| state.matches(captured))
+    }
+    /// App-owned reload invalidates before dispatch, including the interval
+    /// before the next page-load event.
+    pub fn navigation_current(&self, window: &WebviewWindow) -> Result<(), EngineError> {
+        self.assert_window(window)?;
+        let key = physical_key(window)?;
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        let captured = state
+            .window
+            .clone()
+            .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+        if captured.key != key || !state.matches(&captured) {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        state.document.navigation(captured.ticket)
     }
     pub fn navigation(&self, ticket: u64) -> Result<(), EngineError> {
         self.0

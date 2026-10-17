@@ -1,3 +1,5 @@
+import { NativeWindowStateStore } from './native-window-state-store'
+import { NATIVE_WINDOW_STATE_SCHEMAS, type NativeWindowState } from '../shared/native-window-state'
 import { isUiLeaseId } from '../shared/ui-desktop-codecs'
 import { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer } from '../shared/attachment-selection-callbacks'
@@ -245,6 +247,18 @@ export class ProductionService {
         return this.retain(this.bindings.invoke(operation, payload, this.caller, signal))
       }
     }]))
+    // Native process-private geometry observations. The renderer dispatcher
+    // cannot select these routes or choose a database/profile/key.
+    for (const [operation, schema] of Object.entries(NATIVE_WINDOW_STATE_SCHEMAS)) operations[operation] = { ...schema, handle: payload => {
+      if (descriptor.capabilities.windowState !== 'host' || !this.initialized || this.closing || !this.services) throw new ServiceProtocolError('DISCONNECTED')
+      const lease = this.owner.getDatabaseBindingLease(), database = this.services.db.db
+      const current = (): void => {
+        if (!this.initialized || this.closing || this.services?.db.db !== database || this.owner.snapshot().epoch !== this.caller.engineEpoch) throw new ServiceProtocolError('DISCONNECTED')
+        lease.lock.assertHeld(); this.owner.getDatabaseBindingLease()
+      }
+      const store = new NativeWindowStateStore(database, current)
+      return operation === 'engine.windowState.load' ? store.load() as unknown as JsonValue : store.save((payload as unknown as { state: NativeWindowState }).state)
+    } }
     operations['engine.attachment.selection.offer'] = { validatePayload: isSelectionOffer,
       validateResult: value => isRecord(value) && hasExactKeys(value, ['accepted']) && typeof value.accepted === 'boolean',
       handle: value => this.attachmentSelections?.offer(value) ?? { accepted: false } }
