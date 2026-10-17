@@ -6,6 +6,23 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #216 Source continuation binds connector loopback OAuth to the private native
+flow owner captured at runtime construction. Only the connector binding gains
+browser availability; global MCP/Linear OAuth stays unavailable. The actual
+localhost listener, PKCE/state, token exchange and encrypted/session credential
+intent remain Source-owned. Captured scope checks fence register/open/redemption
+and prewrite; listener and per-flow retirement receipts retain raw work and
+credential admission across cancellation or failed cleanup. A synchronous SDK
+ownership observer also retains a lease when post-acknowledgement registration
+fails; browser opening stays fenced until the receipt and scope check succeed.
+Controlled SDK/HTTP-loopback/SQLite regressions and staged Node entry checks do
+not establish installed browser callbacks or live provider authorization. See
+[connector controls](connector-production.md) and
+[private loopback evidence](evidence/issue-216-native-loopback-local-20261017.json).
+#216 remains open for #208/#215 prerequisites, final identity/handler decisions,
+representative provider and installed platform evidence, and redistribution
+review. Hosted Verify is unavailable while Actions awaits the user's decision.
+
 The #208 Windows continuation adds an atomic kill-on-close Job and captured
 private asynchronous pipe handles to the production launcher. The bounded
 stdin descriptor prefix preserves pipelined RPC bytes; Linux retains fd3 and
@@ -44,6 +61,8 @@ through the actual plugin under an isolated session bus and Tauri MockRuntime.
 Cold callbacks receive a fixed fresh-Connect diagnostic; lost PKCE/intent is
 never reconstructed. Native retirement registers its notification waiter before
 checking raw work, preventing a lost completion wakeup.
+Retirement also reserves closed flow IDs so a delayed registration cannot
+recreate a lease after its close acknowledgement.
 
 The preview refuses custom-scheme registration and retains unavailable global
 production `oauthBrowser`; no callback code/state becomes a renderer event.

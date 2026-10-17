@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 1,
+  "issue": "https://github.com/krazyjakee/21x/issues/216",
+  "recordedAt": "2026-10-17T19:33:41.542122+00:00",
+  "implementationRevision": "ee426b76ddfcaaaae608d9386198e2fe4618febd",
+  "integrationBaseRevision": "7a218345b16d9247a651618576f7015cb7ae9760",
+  "scope": "Source connector consumption of the private native loopback authority; installed OAuth and whole-issue acceptance remain pending",
+  "sourceFilesSha256": {
+    "src/main/connectors/bridge/runtime-core.ts": "9bef5766fe1705041bfc30c42ff8aabb6895c48747ab60c92871591155da2a8d",
+    "src/main/connectors/oauth.ts": "2e06cb68b2e954b6fa50cb608ef8d6dba02fde82e0965c5b4411a976d9035e4e",
+    "src/main/oauth/connector-oauth-flow.ts": "3553a20034f0e06797ec03a3e3a0f6307e8229f22f11e3b3da08e5a912ba40de",
+    "src/service/production-owner.ts": "4e263b5ca0da75374ccc9236d489602a30d903a45022fabbcf0762b1fa2e8a32",
+    "src/service/production-service.ts": "2b09a3f525607e3ec076959639e529de8fcd71807aedede4ec98bf23a084653a",
+    "src/service/production-owner.test.ts": "26145a97f6aae5fde7cb9de41042afc998cf04e4b950adf07c9d74c46116602b",
+    "src/service/connector-native-oauth.test.ts": "03d377da2bd05d6e383df19fb067e0f945810b342d7fb9c4883cb3ab09620103",
+    "src/service/oauth-flow-owner.ts": "9b177369861193ff3e5ffba23e46ef29defea1a67684af999c0589b892b870a2",
+    "src/service/oauth-flow-owner.test.ts": "4936ef2c1537f81c80da9fe6d2278f149483d4cbb85f35e10bb12e6b72060c02"
+  },
+  "environment": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "standaloneNode": "v22.23.2",
+    "sqlite": "13.0.3",
+    "legacyElectron": "44.0.0",
+    "vitest": "4.0.18",
+    "schema": 37,
+    "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)"
+  },
+  "integratedNativeAuthority": {
+    "revision": "7a218345b16d9247a651618576f7015cb7ae9760",
+    "scope": "Inherited engineer 2 native-only retired UUID fence; no native/DTO/wire source edits by this continuation",
+    "focusedTests": {
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 107
+    },
+    "logSha256": "340292a0c39fdee4da5bef7577fd4108576a684afecdf9c212aac26929a64096"
+  },
+  "fixtures": {
+    "profile": "Disposable synthetic temporary profiles only; no live profile/data accessed",
+    "native": "Controlled NativeOAuthBridge receipts through the actual Source OAuthFlowOwner SDK. No OS browser or provider account used.",
+    "callback": "Actual HTTP localhost callback listener, exact ports 3000..3010 and /callback; one-shot state check and Source-owned PKCE/code exchange",
+    "credentials": "Actual authenticated encrypted store and session store with synthetic material; token fetch controlled, no external provider requests",
+    "lifecycle": "Only the per-flow lease retires; the SDK global owner remains under its production parent lifetime"
+  },
+  "controls": [
+    "Captured production runtime authority grants connector binding availability only; global integration oauthBrowser remains unavailable",
+    "PKCE verifier/client secret remain in Source; native registration receives only captured authorization URL/state digest/redirect and UUID lease",
+    "Session and persistent intent, encrypted refresh and invalid-grant revocation",
+    "Source scope withdrawn during registration or raw opening prevents launch/redemption",
+    "Source reference change after token exchange prevents credential write",
+    "Raw register/open/retire cancellation retains inflight work/database/key until receipts join",
+    "Failed native retirement retains admission; acknowledged retry repeats neither authorization nor redemption",
+    "Synchronous owned-lease observer retains post-ack failed-register retirement; early open has no effect until receipt and guard validation; observer throw joins cleanup and unrelated SDK flows survive retry",
+    "Existing source/worker/KV/lifetime controls plus staged actual pinned local hooks remain passing"
+  ],
+  "gate": {
+    "lock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "results": {
+      "observer-app": {
+        "passed": 148,
+        "failed": 0,
+        "skipped": 0,
+        "files": 9,
+        "reportSha256": "111b361279f23f4d909afbc1517b716bb917665247fb837384211902f96aa56a"
+      },
+      "observer-standalone": {
+        "passed": 148,
+        "failed": 0,
+        "skipped": 0,
+        "files": 9,
+        "reportSha256": "20c5debe2d31c306337bf7dcd8f99e2697227eea5a898176ad9160a7380e0749"
+      },
+      "staged-observer-entry": {
+        "passed": 92,
+        "failed": 0,
+        "skipped": 0,
+        "files": 6,
+        "reportSha256": "1c6fe3da05e3f56e68fe271f72b171a961eb7a11ce524249ff4b96b89ecca4cb"
+      },
+      "rebase": {
+        "passed": 148,
+        "failed": 0,
+        "skipped": 0,
+        "files": 9,
+        "reportSha256": "e0b24fd10baeccea5931f1fd45569de601b38bad40f8197ee46dbb0ff9c1a3b8"
+      },
+      "final-contract": {
+        "passed": 77,
+        "failed": 0,
+        "skipped": 0,
+        "files": 3,
+        "reportSha256": "8ea85f09e517dc07738425eebaaf97a790b7d0a3c66a5a5f4c55794f48363260"
+      }
+    },
+    "baselineBeforeObserverRepair": {
+      "app-final": {
+        "passed": 335,
+        "failed": 0,
+        "skipped": 12,
+        "files": 26,
+        "reportSha256": "e4fe3182fe272cb8028f9e72cacb180336aaef956b317a5af66b33519bb94d61"
+      },
+      "standalone-recheck": {
+        "passed": 341,
+        "failed": 0,
+        "skipped": 0,
+        "files": 25,
+        "reportSha256": "6be8f04f0e94eb2908e439821d027ab6091db6f03287896493a77e7cca2667b9"
+      }
+    },
+    "baselineScope": "Expanded connector/worker/source gate passed before the additive SDK observer/ready repair; final affected-source proof is the observer results above. Worker/checkpoint source did not change in that repair.",
+    "coverageNote": "Actual report file lists/counts define coverage. The shared/oauth-native-callbacks.test.ts filter matched no separate file; wire guard controls run inside oauth-flow-owner.test.ts. Rebase verification uses only existing files.",
+    "priorStandaloneFailure": {
+      "passed": 340,
+      "failed": 1,
+      "skipped": 0,
+      "files": 25,
+      "reportSha256": "29a6eddee4152474b4154b5be49a86505137cc517c1844339144caf747ec531d"
+    },
+    "rawTypecheck": "passed: pnpm exec tsc --build --noEmit --force",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "allowlistPinsLicenses": "passed: 35 packages, existing reviewed MIT metadata exceptions; no dependency or license policy changes",
+    "inventory": "passed without inventory source changes",
+    "contracts": "passed",
+    "staging": "Native Node/SQLite preparation and database/connector/production resource staging passed; production graph refuses Electron imports",
+    "expected": "All affected controls pass; revoked/cancelled intent never writes credentials; only acknowledged raw retirement releases admission",
+    "actual": "All affected controls passed under Electron app checks and standalone bundled Node checks; installed acceptance is not inferred"
+  },
+  "commands": [
+    "CI=true pnpm install --frozen-lockfile",
+    "node scripts/tauri-prepare.mjs --native --node /mnt/Rusty/GitHub/21x/src-tauri/resources/node/node --npm-cli /home/krazy/.nvm/versions/node/v22.22.0/lib/node_modules/npm/bin/npm-cli.js",
+    "pnpm test:run --maxWorkers=2 src/main/connectors src/main/oauth src/main/sync-manager-lifetime.test.ts src/service/connector-native-oauth.test.ts src/service/connector-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/service/oauth-flow-owner.test.ts src/shared/oauth-native-callbacks.test.ts --reporter=json --outputFile=/tmp/216-native-app-final.json",
+    "pnpm test:tauri -- src/main/connectors src/main/oauth src/main/sync-manager-lifetime.test.ts src/service/connector-native-oauth.test.ts src/service/connector-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/service/oauth-flow-owner.test.ts src/shared/oauth-native-callbacks.test.ts --reporter=json --outputFile=/tmp/216-native-standalone-final.json",
+    "pnpm tauri:prepare:database && pnpm tauri:prepare:connectors && pnpm tauri:prepare:production",
+    "pnpm test:tauri -- --service-proofs --production-proofs src/service/connector-native-oauth.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts scripts/tauri-stage-production.test.ts scripts/connector-worker-service-proof.test.ts scripts/production-service-proof.test.ts --reporter=json --outputFile=/tmp/216-native-staged-entry.json",
+    "pnpm test:run --project main --maxWorkers=2 src/service/connector-native-oauth.test.ts src/service/oauth-flow-owner.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/main/connectors/oauth-lifetime.test.ts src/main/connectors/bridge/runtime-lifetime.test.ts src/main/connectors/bridge/todoist-oauth.test.ts src/main/oauth/local-oauth-server.test.ts src/main/oauth/providers/connector-oauth-provider.test.ts src/shared/oauth-native-callbacks.test.ts --reporter=json --outputFile=/tmp/216-native-observer-app.json",
+    "pnpm test:tauri -- src/service/connector-native-oauth.test.ts src/service/oauth-flow-owner.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/main/connectors/oauth-lifetime.test.ts src/main/connectors/bridge/runtime-lifetime.test.ts src/main/connectors/bridge/todoist-oauth.test.ts src/main/oauth/local-oauth-server.test.ts src/main/oauth/providers/connector-oauth-provider.test.ts src/shared/oauth-native-callbacks.test.ts --reporter=json --outputFile=/tmp/216-native-observer-standalone.json",
+    "pnpm tauri:prepare:production",
+    "pnpm test:tauri -- --service-proofs --production-proofs src/service/connector-native-oauth.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts scripts/tauri-stage-production.test.ts scripts/connector-worker-service-proof.test.ts scripts/production-service-proof.test.ts --reporter=json --outputFile=/tmp/216-native-staged-observer-entry.json",
+    "pnpm test:tauri -- src/service/connector-native-oauth.test.ts src/service/oauth-flow-owner.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/main/connectors/oauth-lifetime.test.ts src/main/connectors/bridge/runtime-lifetime.test.ts src/main/connectors/bridge/todoist-oauth.test.ts src/main/oauth/local-oauth-server.test.ts src/main/oauth/providers/connector-oauth-provider.test.ts --reporter=json --outputFile=/tmp/216-native-rebase.json",
+    "CARGO_BUILD_JOBS=2 cargo test --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service production_oauth::tests -- --test-threads=2",
+    "pnpm test:tauri -- src/service/oauth-flow-owner.test.ts src/service/connector-native-oauth.test.ts src/service/production-service.test.ts --reporter=json --outputFile=/tmp/216-native-final-contract.json",
+    "pnpm exec tsc --build --noEmit --force",
+    "pnpm lint",
+    "node scripts/check-connector-pieces.mjs",
+    "node scripts/tauri-inventory.mjs --check",
+    "node scripts/tauri-contracts.mjs --check",
+    "git diff --check"
+  ],
+  "failureRepairs": [
+    {
+      "problem": "Initial raw typecheck rejected a generic vi.fn type for the browser mock",
+      "repair": "Explicit function signature; raw forced typecheck rerun"
+    },
+    {
+      "problem": "New production-owner connector test enabled connectors without its external transport boundary and correctly failed resource preflight",
+      "repair": "Use the fixture connector transport boundary; actual runtime/credential ownership retained, no worker needed for this constructor test"
+    },
+    {
+      "problem": "The first expanded standalone run reported STACK_TRACE_ERROR in the existing worker checkpoint beforeEach hook; 340 other cases passed",
+      "repair": "Reran the unchanged worker file with the normal reporter, then the unchanged expanded standalone gate. No assertion or deadline weakened; the initial failed report digest is retained"
+    }
+  ],
+  "artifacts": {
+    "node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "node/LICENSE": {
+      "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4",
+      "bytes": 145485
+    },
+    "native/twentyonex-credential-key": {
+      "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+      "bytes": 25759896
+    },
+    "service/production-engine.mjs": {
+      "sha256": "46b11a39caa08459107545328bc31c34cc82eb9d81334c435424a61ac9f56689",
+      "bytes": 6121064
+    },
+    "service/production-stdio.mjs": {
+      "sha256": "5967db192b9e7016be186444fdcc047ef35a44908950703f07ca7d726ea9e472",
+      "bytes": 16561
+    },
+    "service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "885d8622a80cad73309c0fd2754f43253779384b776efdbdec17f14b8534b1b0",
+      "bytes": 1261784
+    },
+    "service/piece-host.cjs": {
+      "sha256": "3b81e6581955b46ce3c1761bda9d9b51e7620a19811fa188bdff46f1b053eb33",
+      "bytes": 24496
+    },
+    "service/CONNECTOR_WORKER_MANIFEST.json": {
+      "sha256": "d1ccb14406afa54094a70cfcccb9bf2d79f64268b626e0b0b5697b5ef69d6a64",
+      "bytes": 2083
+    }
+  },
+  "localResourceProvenance": "Node, its companion LICENSE and the native credential helper were physically copied from the existing shared staged resources for local graph/staging checks. The helper was not used to read/write a real credential store by these controls; no OS store/final identity proof is claimed.",
+  "redistributionReviewComplete": false,
+  "hostedVerification": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runIds": [],
+    "authority": "Lead/user standing instruction; no settings endpoints or workflow dispatch"
+  },
+  "remainingGaps": [
+    "Prerequisites #208 and #215 remain open; platform lifecycle, native installed ingress and trusted final app identity are not established by controlled private receipts.",
+    "Warm/cold installed callbacks, supported twentyonex/nuanu handler registration and final identity/ownership need user decision and native/platform evidence. Global MCP/Linear OAuth remains unavailable.",
+    "Representative retained connector provider APIs and installed resource/credential behavior across macOS x64/arm64, Windows x64 and Linux remain unproven; no live provider authorization was run.",
+    "Complete redistribution review and installed connector/background acceptance remain pending. Hosted workflows remain unavailable while Actions is disabled.",
+    "No live release, profile cutover or Electron retirement; hosted voice remains deferred."
+  ],
+  "acceptance": "Scoped loopback consumer delivered. No whole checklist criterion is newly marked complete; issue remains open."
+}
