@@ -4,7 +4,8 @@ import { create } from 'zustand'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
 import { commanderApi } from '@/lib/ipc-client'
 import { seedCommanderImages, clearCommanderImageCache } from '@/lib/commander-images'
-import { getDesktopHost } from '@/lib/desktop-api'
+import { captureDesktopRead } from '@/lib/desktop-api'
+import { createDesktopSnapshotReader } from '@/lib/desktop-snapshot'
 import { ServiceProtocolError } from '@shared/service-protocol'
 import type { ChatImageInput } from '@shared/chat-images'
 
@@ -74,8 +75,25 @@ interface CommanderState {
   handleEvent: (event: CommanderEvent) => void
 }
 
-let unsubscribeEvents: (() => void) | null = null
-let eventSubscribers = 0
+let eventOwner: { active: boolean; subscribers: number; off?: () => void } | undefined
+let documentGeneration = 0
+let selectionGeneration = 0
+
+function captureCommanderRead() {
+  const generation = documentGeneration, scope = captureDesktopRead()
+  return { isCurrent: () => generation === documentGeneration && scope.isCurrent() }
+}
+
+/** Retire only this document's readers/listeners; durable service work stays owned there. */
+export function retireCommanderDesktopState(): void {
+  documentGeneration++
+  selectionGeneration++
+  desktopRecoveryGeneration++
+  sessionSnapshot.dispose()
+  clearCommanderImageCache()
+  if (eventOwner) { eventOwner.active = false; eventOwner.off?.(); eventOwner = undefined }
+  window.removeEventListener('pagehide', retireCommanderDesktopState)
+}
 /**
  * Turns whose `done` already arrived. `commander:send` resolves on the invoke
  * channel and events on another, so a fast turn's `done` can beat the reply;
@@ -101,46 +119,32 @@ function mergeMessages(existing: CommanderMessage[], incoming: CommanderMessage[
 }
 
 let desktopRecoveryGeneration = 0
-let desktopRecoverySessionUpdates: Map<string, CommanderSession> | undefined
 /** Reconnect reads durable state without marking reports read or sending a turn. */
 export async function rehydrateCommanderDesktopState(): Promise<void> {
   const generation = ++desktopRecoveryGeneration
-  const epoch = getDesktopHost().connection.engineEpoch
+  const scope = captureCommanderRead()
+  const selection = ++selectionGeneration
   clearCommanderImageCache()
   const { selectedSessionId, search, showArchived } = useCommanderStore.getState()
   finishedTurns.clear()
-  const updates = new Map<string, CommanderSession>()
-  desktopRecoverySessionUpdates = updates
   useCommanderStore.setState({ messages: selectedSessionId ? { [selectedSessionId]: [] } : {}, streaming: {}, turnErrors: {}, recentAction: null, undoingActions: [], undoneActions: [], unseenReports: {} })
-  try {
-    const [sessions, history, inboxSessions] = await Promise.all([
-      commanderApi.listSessions({ search: search || undefined, includeArchived: showArchived }),
-      selectedSessionId ? commanderApi.listMessages(selectedSessionId) : Promise.resolve(null),
-      search ? commanderApi.listSessions({ includeArchived: true }) : Promise.resolve(null)
-    ])
-    const current = useCommanderStore.getState()
-    if (generation !== desktopRecoveryGeneration || epoch !== getDesktopHost().connection.engineEpoch || selectedSessionId !== current.selectedSessionId || search !== current.search || showArchived !== current.showArchived) throw new ServiceProtocolError('STALE_EPOCH')
-    useCommanderStore.setState(state => {
-      const live = selectedSessionId ? state.streaming[selectedSessionId] : undefined
-      const turn = live && !finishedTurns.has(live.turnId) ? live
-        : history?.activeTurnId && !finishedTurns.has(history.activeTurnId) ? { turnId: history.activeTurnId, text: '', toolCalls: [] } : undefined
-      const observed = new Map(sessions.map(session => [session.id, session]))
-      for (const [id, session] of updates) {
-        if ((!session.archived || showArchived) && (!search || session.title.toLowerCase().includes(search.toLowerCase()))) observed.set(id, session)
-        else observed.delete(id)
-      }
-      const inbox = [...updates.values()].find(session => session.is_report_inbox) ?? (inboxSessions ?? sessions).find(session => session.is_report_inbox) ?? null
-      return {
-        sessions: sortSessions([...observed.values()]), reportInbox: inbox,
-        messages: selectedSessionId && history ? { [selectedSessionId]: mergeMessages(history.messages, state.messages[selectedSessionId] ?? []) } : {},
-        streaming: selectedSessionId && turn ? { [selectedSessionId]: turn } : {},
-        undoneActions: [...new Set([...state.undoneActions, ...(history?.messages.filter(message => message.tool_name === 'undo_action' && message.tool_call_id).map(message => message.tool_call_id!) ?? [])])],
-        error: null, isLoading: false
-      }
-    })
-  } finally {
-    if (generation === desktopRecoveryGeneration) desktopRecoverySessionUpdates = undefined
-  }
+  const [, history] = await Promise.all([
+    sessionSnapshot.refresh(),
+    selectedSessionId ? commanderApi.listMessages(selectedSessionId) : Promise.resolve(null)
+  ])
+  const current = useCommanderStore.getState()
+  if (generation !== desktopRecoveryGeneration || selection !== selectionGeneration || !scope.isCurrent() || selectedSessionId !== current.selectedSessionId || search !== current.search || showArchived !== current.showArchived) throw new ServiceProtocolError('STALE_EPOCH')
+  useCommanderStore.setState(state => {
+    const live = selectedSessionId ? state.streaming[selectedSessionId] : undefined
+    const turn = live && !finishedTurns.has(live.turnId) ? live
+      : history?.activeTurnId && !finishedTurns.has(history.activeTurnId) ? { turnId: history.activeTurnId, text: '', toolCalls: [] } : undefined
+    return {
+      messages: selectedSessionId && history ? { [selectedSessionId]: mergeMessages(history.messages, state.messages[selectedSessionId] ?? []) } : {},
+      streaming: selectedSessionId && turn ? { [selectedSessionId]: turn } : {},
+      undoneActions: [...new Set([...state.undoneActions, ...(history?.messages.filter(message => message.tool_name === 'undo_action' && message.tool_call_id).map(message => message.tool_call_id!) ?? [])])],
+      error: null, isLoading: false
+    }
+  })
 }
 
 export const useCommanderStore = create<CommanderState>((set, get) => ({
@@ -160,7 +164,9 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
   },
   reportInbox: null, unseenReports: {},
   readReports: async (id) => {
+    const scope = captureCommanderRead()
     const session = await commanderApi.markRead(id)
+    if (!scope.isCurrent()) return
     if (session) get().handleEvent({ type: 'session_updated', session })
     set(state => ({ unseenReports: { ...state.unseenReports, [id]: [] } }))
   },
@@ -174,46 +180,49 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
   error: null,
 
   subscribe: () => {
-    if (!unsubscribeEvents) {
-      unsubscribeEvents = commanderApi.onEvent((event) => get().handleEvent(event)) ?? null
+    if (!eventOwner) {
+      const owner = { active: true, subscribers: 0, off: undefined as (() => void) | undefined }
+      eventOwner = owner
+      owner.off = commanderApi.onEvent(event => { if (owner.active) get().handleEvent(event) }) ?? undefined
+      window.addEventListener('pagehide', retireCommanderDesktopState, { once: true })
     }
-    eventSubscribers++
+    const owner = eventOwner
+    owner.subscribers++
     let subscribed = true
     return () => {
       if (!subscribed) return
       subscribed = false
-      if (--eventSubscribers === 0) { unsubscribeEvents?.(); unsubscribeEvents = null }
+      if (owner.active && --owner.subscribers === 0) retireCommanderDesktopState()
     }
   },
 
   fetchSessions: async () => {
-    set({ isLoading: true, error: null })
-    try {
-      const { search, showArchived } = get()
-      const sessions = await commanderApi.listSessions({ search: search || undefined, includeArchived: showArchived })
-      set({ sessions: sortSessions(sessions), reportInbox: sessions.find(session => session.is_report_inbox) ?? get().reportInbox, isLoading: false })
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err), isLoading: false })
-    }
+    await sessionSnapshot.refresh().catch(() => {})
   },
 
   setSearch: async (search) => {
+    sessionSnapshot.invalidate()
     set({ search })
     await get().fetchSessions()
   },
 
   setShowArchived: async (showArchived) => {
+    sessionSnapshot.invalidate()
     set({ showArchived })
     await get().fetchSessions()
   },
 
   selectSession: async (id) => {
+    const selection = ++selectionGeneration, scope = captureCommanderRead()
+    const isCurrent = () => selection === selectionGeneration && scope.isCurrent() && get().selectedSessionId === id
+    const previousTurn = id ? get().streaming[id] : undefined
     set({ selectedSessionId: id })
     // Opening a thread marks its reports read; quiet delivery never buys a model turn.
     void Promise.resolve(commanderApi.setActiveSession(id)).catch(() => {})
     if (!id) return
     try {
       const { messages, activeTurnId } = await commanderApi.listMessages(id)
+      if (!isCurrent()) return
       set((state) => ({
         // mergeMessages(existing, incoming) drops `incoming` entries whose id is
         // already in `existing`, so the stored fetch dedupes against local state
@@ -222,22 +231,24 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
         undoneActions: [...new Set([...state.undoneActions, ...messages.filter(message => message.tool_name === 'undo_action' && message.tool_call_id).map(message => message.tool_call_id!)])],
         // Main is the truth about running turns: events may have been missed
         // while the view was closed, so a turn that ended meanwhile is cleared.
-        streaming: !activeTurnId
-          ? { ...state.streaming, [id]: undefined }
-          : state.streaming[id]?.turnId === activeTurnId
-            ? state.streaming
-            : { ...state.streaming, [id]: { turnId: activeTurnId, text: '', toolCalls: [] } }
+        streaming: state.streaming[id] && state.streaming[id] !== previousTurn && !finishedTurns.has(state.streaming[id]!.turnId)
+          ? state.streaming
+          : { ...state.streaming, [id]: activeTurnId && !finishedTurns.has(activeTurnId) ? { turnId: activeTurnId, text: '', toolCalls: [] } : undefined }
       }))
       // Opening a session reads its reports.
-      await get().readReports(id)
+      if (isCurrent()) await get().readReports(id)
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) })
+      if (isCurrent()) set({ error: err instanceof Error ? err.message : String(err) })
     }
   },
 
   createSession: async () => {
     try {
+      const scope = captureCommanderRead()
       const session = await commanderApi.createSession()
+      if (!scope.isCurrent()) return session
+      sessionSnapshot.invalidate()
+      selectionGeneration++
       set((state) => ({
         sessions: sortSessions([session, ...state.sessions.filter((s) => s.id !== session.id)]),
         messages: { ...state.messages, [session.id]: [] },
@@ -251,12 +262,16 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
   },
 
   renameSession: async (id, title) => {
+    const scope = captureCommanderRead()
     const session = await commanderApi.renameSession(id, title)
+    if (!scope.isCurrent()) return
     if (session) get().handleEvent({ type: 'session_updated', session })
   },
 
   archiveSession: async (id, archived) => {
+    const scope = captureCommanderRead()
     const session = await commanderApi.archiveSession(id, archived)
+    if (!scope.isCurrent()) return
     if (session) get().handleEvent({ type: 'session_updated', session })
     if (archived && get().selectedSessionId === id && !get().showArchived) set({ selectedSessionId: null })
   },
@@ -309,7 +324,8 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
         const inner = event.event
         if (inner.type === 'done') {
           rememberFinished(turnId)
-          set((state) => ({ streaming: { ...state.streaming, [sessionId]: undefined } }))
+          // A delayed terminal for an older turn cannot stop the newer one.
+          if (get().streaming[sessionId]?.turnId === turnId) set((state) => ({ streaming: { ...state.streaming, [sessionId]: undefined } }))
           return
         }
         if (finishedTurns.has(turnId)) return
@@ -362,7 +378,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
       }
       case 'session_updated': {
         const { session } = event
-        desktopRecoverySessionUpdates?.set(session.id, session)
+        sessionSnapshot.invalidate()
         set((state) => {
           const others = state.sessions.filter((s) => s.id !== session.id)
           // With a search active, only sessions already in the results are updated.
@@ -375,3 +391,22 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
     }
   }
 }))
+
+const sessionSnapshot = createDesktopSnapshotReader({
+  read: async () => {
+    const { search, showArchived } = useCommanderStore.getState()
+    const [sessions, all] = await Promise.all([
+      commanderApi.listSessions({ search: search || undefined, includeArchived: showArchived }),
+      search ? commanderApi.listSessions({ includeArchived: true }) : Promise.resolve(null)
+    ])
+    return { sessions, inbox: (all ?? sessions).find(session => session.is_report_inbox), search, showArchived }
+  },
+  start: () => useCommanderStore.setState({ isLoading: true, error: null }),
+  apply: ({ sessions, inbox, search, showArchived }) => {
+    const state = useCommanderStore.getState()
+    if (search !== state.search || showArchived !== state.showArchived) throw new ServiceProtocolError('STALE_EPOCH')
+    useCommanderStore.setState({ sessions: sortSessions(sessions), reportInbox: inbox ?? state.reportInbox, isLoading: false, error: null })
+  },
+  fail: error => useCommanderStore.setState({ error: error instanceof Error ? error.message : String(error), isLoading: false })
+})
+if (import.meta.hot) import.meta.hot.dispose(retireCommanderDesktopState)

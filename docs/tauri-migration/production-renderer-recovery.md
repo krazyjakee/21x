@@ -157,3 +157,27 @@ bounded invalidation, singleton listener replacement and held transcript page
 retirement. The existing thirty-five agent-store controls also run in the staged
 renderer suite. These are controlled native-boundary tests, not installed WebView
 or real provider evidence. Native window lifecycle/platform proof remains open.
+
+## Commander list, search and history ownership
+
+Commander list reads now coalesce and retry a snapshot crossed by a changed
+query, archive filter, accepted create/rename/archive, or session update. Search
+results come from the service, which searches both titles and stored message
+text; the renderer does not infer a content match from the title. The independent
+report-inbox read keeps the inbox discoverable during a filtered search. Eight
+continuously invalidated snapshots refuse recovery rather than looping forever.
+
+Session/history readers capture the document and connection generation. Changing
+selection, retiring the last event subscriber, pagehide or reconnect fences old
+history before it can publish or mark a report read. Reconnect remains read-only:
+it restores durable history and merges live messages/turns without selecting a
+service session, clearing unread reports or starting a model turn. A finished
+turn cannot be revived by a delayed history response, and a newer observed turn
+survives that response or an older turn terminal. Drafts remain in renderer state.
+
+Reference-counted event cohorts share one callback, retire queued callbacks on
+release, and permit a fresh cohort without an old unsubscriber removing it. The
+twenty Commander recovery controls now use the actual typed native host,
+client, codec and transport with preload absent; their native responses are
+controlled. Installed WebView/history, image and provider acceptance remains
+separate and open. No native operation or voice capability was added.
