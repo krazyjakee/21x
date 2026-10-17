@@ -1,0 +1,228 @@
+{
+  "version": 1,
+  "issue": 208,
+  "createdAt": "2026-10-17T18:39:17.128300+00:00",
+  "implementationRevision": "21095d42a493cc52e2d999dc0e7623437fc786e6",
+  "scope": "Production-only transactional reconciliation before constructing effect owners. Actual SQLite and production owner copied-state restart; real unrelated process remains responsive. No installed host/service crash or all-platform containment claim.",
+  "provenance": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "standaloneNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "sqliteAddon": "13.0.3",
+    "nodePty": "1.1.0",
+    "sqliteSchema": 37,
+    "vitest": "4.0.18",
+    "electronForAppTests": "44.0.0",
+    "webview": null,
+    "webviewReason": "No installed Tauri WebView launched; app transport tests use host doubles."
+  },
+  "applicationPackageVersion": "0.0.161",
+  "fixture": {
+    "profiles": "Synthetic SQLite and a closed temporary production profile seeded with interrupted claims; no live profile, external API, vendor model, user keys or live cutover.",
+    "schema": 37,
+    "privateProtocol": 1,
+    "webview": null,
+    "adapter": "Controlled adapter boundary in the actual ProductionOwner/AgentManager graph; startup adapter calls are asserted zero.",
+    "unrelatedProcess": "Actual process.execPath child answers alive on its private stdout after its PID is stored in an old lease. The fixture then kills/joins only that captured child.",
+    "queues": "queued/retrying/claimed/starting; old future-expiry claims included",
+    "deliveries": "agent_message/captain_request/captain_report/captain_handoff_seed; pending/claimed retired, accepted/acknowledged receipts preserved",
+    "providers": "sending/accepted/retrying/dispatching terminalized using existing generation-fenced store"
+  },
+  "expectedActual": [
+    {
+      "expected": "No old start, prompt, delivery or provider fallback is dispatched automatically after copied-state restart.",
+      "actual": "The real owner runs bootstrap, repeated AgentManager reconciliation, Captain delivery reconciliation and task automation without initialize/resume/send adapter calls. Original queue ID, delivery payload and provider intent/session evidence remain; automatic requestSession refuses the retired row."
+    },
+    {
+      "expected": "Explicit user continuation remains available without resurrecting an old instruction.",
+      "actual": "The existing explicitUserStart path enqueues the retained row at a new generation; the actual drain sends exactly one current task prompt. The old provider mutation instruction is not sent."
+    },
+    {
+      "expected": "Pause indirect automation and preserve actual outcomes.",
+      "actual": "Interrupted tasks and parent chains lose automatic start/completion flags. Completed members, group progress, assignment, saved backend IDs and accepted delivery receipts remain. Unrelated future task automation is retained."
+    },
+    {
+      "expected": "Recovery cannot kill a reused/unrelated PID or half-commit its decision.",
+      "actual": "An unrelated process still responds after reconciliation of a lease containing its PID; no process enumeration/signal exists in the production reconciliation. A refused journal write rolls back task and queue updates and prevents startup before effect owners."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "applicationBaseGate": {
+      "files": 3,
+      "passed": 85,
+      "failed": 0
+    },
+    "standaloneBaseGate": {
+      "files": 3,
+      "passed": 85,
+      "failed": 0
+    },
+    "finalUnrelatedProcessRegression": {
+      "applicationFilePassed": 17,
+      "standaloneFilePassed": 17,
+      "failed": 0,
+      "note": "One additional real-child case was added to the previously passing 16-case reconciliation file; the affected file was rerun in both runtimes. Effective unique changed-suite cases: 86. The three-file command itself ran 85."
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "contractTests": {
+      "files": 3,
+      "passed": 27,
+      "failed": 0
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run src/service/production-recovery.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "8c1cdbb3ce5ac1d4e6e7fd0ce15d7f8f0892f459f34d1c9415552ac2892236df",
+          "bytes": 177903
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/service/production-recovery.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "81d44a299889c01943ea810c3d69d7f441f97c55586e8fdcb8d0eb09ae333001",
+          "bytes": 177999
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/service/production-recovery.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "ef84591ba395498f9bfd121fb02e4b58476d74999713fc841c741236a34155de",
+          "bytes": 5965
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "a2998a81d1848b2e8c274ad48f58a63f74744f63319097108cc244461e6ad9fb",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "0c740a13d43658b7f8850c6c236dc88c21dc6c47ee3d0d9fdb7a3b311645edfb",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "a85303f7762d5e684db6795c6cacf55b96e55b2437137faeb6542689c98bb914",
+          "bytes": 637
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "7ec86e3a6c7f5f0f589a87f38d7f223cec98410b33f32dd9be32b1d36a2d834f",
+          "bytes": 29268
+        }
+      }
+    ],
+    "native": "No Rust/native/Cargo/transport/config change in this slice; prior source 4588741e recovery gate passed 101 native tests and three engine target cargo checks. Those earlier commands are not represented as rerun here.",
+    "buildLimits": "Shipping/mobile build passes with retained chunk warnings. No package installation or Tauri runtime launched."
+  },
+  "sourceSha256": {
+    "docs/tauri-migration/implementation-status.md": "0046b72dddc8b68e3cb854a6484be2763a11e879d1a77213139e04851432560f",
+    "docs/tauri-migration/inventory.json": "a3f7b88d467de3caff702bfaeb43632920a0a519c254debe6039fce73d00ae7e",
+    "docs/tauri-migration/production-owner.md": "54b26c28370f84a06f337e5566d2a9f34d3966c18df09cf31e5f8c527fc91372",
+    "docs/tauri-migration/production-restart-recovery.md": "9ada9e35f8e1e8eb6680b24e907f2558459b4fc63f87196dffb1f7c1f96bb758",
+    "src/service/production-owner.test.ts": "2dd7c2c47f8b500b171f7de4b8237600f59907d9a223ea0c1f779cdfebd0ca72",
+    "src/service/production-owner.ts": "aa6cbf9cc4f958b54f4dda66ceb24417cdf24ecfa8821b0b929636ae371a121e",
+    "src/service/production-recovery.test.ts": "3e28674afe49ef0e8683e877e001e45abf6e82eb6f2954cfc6b45a81e2d00068",
+    "src/service/production-recovery.ts": "7dae557bb965496ee2b9f6dc1524624496f9e75913f665fa62c13991d4a3a31c"
+  },
+  "artifacts": {
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": {
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "bytes": 2226168
+    },
+    "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node": {
+      "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5",
+      "bytes": 79968
+    }
+  },
+  "failuresAndRepairs": [
+    {
+      "failure": "Initial reconciliation fixtures expected createTask to assign agent_id and retried an outbox key with different destination fields.",
+      "repair": "Assign through updateTask and retry the exact original pinned destination/payload. Store validation was retained. All affected cases pass."
+    },
+    {
+      "failure": "Initial owner test treated ordinary requestSession as explicit continuation, then expected synchronous start from explicitUserStart.",
+      "repair": "Assert automatic refusal; use the actual explicit user start and wait for its queued drain, checking generation advancement and one real adapter prompt."
+    },
+    {
+      "failure": "Group-progress fixture expected note, but the schema field is message.",
+      "repair": "Assert preserved message and completed member state; no implementation or check weakened."
+    }
+  ],
+  "hostedCI": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runs": [],
+    "workflowDispatches": 0,
+    "settingsEndpointsCalled": false
+  },
+  "acceptance": {
+    "issueRemainsOpen": true,
+    "checkboxesCompleted": [],
+    "progress": "Linux/staged production restart no-replay behavior established. Complete supported-platform runtime acceptance is not claimed.",
+    "remaining": [
+      "Non-Linux production containment and private bootstrap remain unavailable.",
+      "Supported-OS real host/service/worker crash, forced quit, descendant cleanup and installed hidden-window/UI/provider acceptance remain unproven.",
+      "Runtime proof requires unavailable platform runners/hardware and the repository Actions user decision.",
+      "Dependency #202 remains open and unchanged."
+    ]
+  },
+  "constraints": {
+    "liveRelease": false,
+    "liveProfileCutover": false,
+    "electronRetired": false,
+    "hostedVoice": "deferred by user decision"
+  }
+}
