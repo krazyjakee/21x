@@ -226,7 +226,8 @@ export class TerminalBackend {
     })
     this.bind('terminal:getBuffer', 'read', ([id, lines], caller) => {
       const lease = this.lease(id, caller, 'read'); this.current(lease)
-      const result = core.getBuffer(id, lines)
+      // The retained codec conservatively counts one extra delimiter byte.
+      const result = core.getBuffer(id, lines, TERMINAL_DESKTOP_LIMITS.bufferBytes - 1)
       if (!TERMINAL_COMMAND_CODECS['terminal:getBuffer'].validateResult(result)) throw new ServiceProtocolError('FRAME_TOO_LARGE')
       return result
     })

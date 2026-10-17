@@ -25,15 +25,26 @@ export function createNodePty(
     env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
   })
 
-  ptyProcess.onData((data: string) => {
-    onData(data)
+  let exited = false
+  const subscriptions: { data?: { dispose(): void }; exit?: { dispose(): void } } = {}
+  const dispose = (subscription: { dispose(): void } | undefined): void => {
+    try { subscription?.dispose() } catch { /* Actual close must still reach the owner. */ }
+  }
+  subscriptions.data = ptyProcess.onData((data: string) => { if (!exited) onData(data) })
+  subscriptions.exit = ptyProcess.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
+    if (exited) return
+    exited = true
+    // A kill request is not listener retirement. Preserve both subscriptions
+    // through the real native exit, then release them before owner teardown.
+    dispose(subscriptions.data); dispose(subscriptions.exit)
+    onExit(ptyProcess.pid, exitCode, signal)
   })
-  ptyProcess.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => onExit(ptyProcess.pid, exitCode, signal))
+  if (exited) dispose(subscriptions.exit)
 
   return {
-    write: (data: string) => ptyProcess.write(data),
-    resize: (c: number, r: number) => ptyProcess.resize(c, r),
-    kill: () => ptyProcess.kill(),
+    write: (data: string) => { if (exited) return false; ptyProcess.write(data); return undefined },
+    resize: (c: number, r: number) => { if (exited) throw new Error('TERMINAL_PROCESS_EXITED'); ptyProcess.resize(c, r) },
+    kill: () => { if (!exited) ptyProcess.kill() },
     pid: ptyProcess.pid,
   }
 }

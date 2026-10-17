@@ -6,13 +6,24 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #214 terminal continuation preserves logical recent text and escape-parser
+state across PTY callbacks. Production buffer reads select a Unicode-safe recent
+suffix within the existing encoded JSON limit, including long lines. Native PTY
+subscriptions retire only at actual exit, before the core releases ownership.
+Live output, six terminal commands, process identities and shell policy retain
+their existing contracts. See [streaming terminal recovery](terminal-streaming-recovery.md).
+Installed keyboard/focus and supported-OS production lifecycle acceptance remain
+open; non-Linux production launch still requires #208 containment work. Hosted
+Verify is unavailable while repository Actions is disabled, awaiting user decision.
+
 The #213 continuation completes bounded Streamable HTTP MCP probe replies for
 JSON and SSE. A successful non-JSON HTTP response alone no longer counts as a
 connected server. SSE initialization and tools discovery require the matching
 RPC response, own reader cancellation through acknowledgement, and recheck
 current configuration/server/task/environment/transport authority between
 protocol effects. Existing saved tools survive rejected probes. Verify now
-watches `master` as well as `main`, so published team changes receive CI.
+watches `master` as well as `main`; hosted execution awaits the user decision
+on enabling repository Actions.
 
 See [MCP probe ownership](mcp-probe-owner.md) and the
 [batch35 evidence](evidence/batch35-213-mcp-sse.json) for commands, revisions,

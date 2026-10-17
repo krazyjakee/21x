@@ -110,6 +110,35 @@ describe.skipIf(!enabled)('explicit staged terminal proof scope', () => {
 })
 
 describe.skipIf(!enabled || !linux)('real staged Linux PTY and production terminal boundary', () => {
+  it('recovers fragmented shell text and a wire-bounded Unicode tail without changing the native PID', async () => {
+    const f = fixture(), active = await f.call('terminal:create', ['proof-text', 80, 24])
+    await f.ready('proof-text')
+    // A shell read holds the same command between writes. Separate interactive
+    // commands would add real readline newlines, legitimately splitting text.
+    await f.call('terminal:write', ['proof-text', "printf '\\033[31mSPLIT'; IFS= read -r proof_token; printf '_LINE\\033[0m\\n'; printf '\\033]0;PRIVATE_TITLE'; IFS= read -r proof_token; printf '\\007VISIBLE\\nTEXT_READY\\n'\r"])
+    await vi.waitFor(() => expect(f.text('proof-text')).toContain('\x1b[31mSPLIT'), { timeout: 5000 })
+    await f.call('terminal:write', ['proof-text', '\r'])
+    await vi.waitFor(() => expect(f.text('proof-text')).toContain('PRIVATE_TITLE'), { timeout: 5000 })
+    await f.call('terminal:write', ['proof-text', '\r'])
+    await vi.waitFor(() => expect(f.text('proof-text')).toContain('TEXT_READY'), { timeout: 5000 })
+    const small = await f.call('terminal:getBuffer', ['proof-text', 200])
+    expect(small.lines).toContain('SPLIT_LINE'); expect(small.lines).toContain('VISIBLE')
+    expect(small.lines.join('\n')).not.toContain('PRIVATE_TITLE')
+    await f.call('terminal:write', ['proof-text', "for ((i=0;i<100000;i++)); do printf '雪🧭'; done; printf 'LATEST_TEXT'\r"])
+    await vi.waitFor(() => expect(f.text('proof-text')).toContain('LATEST_TEXT'), { timeout: 15_000 })
+    const tail = await f.call('terminal:getBuffer', ['proof-text', 500])
+    expect(Buffer.byteLength(JSON.stringify(tail))).toBeLessThanOrEqual(512 * 1024)
+    expect(tail.lines.at(-1)?.endsWith('LATEST_TEXT')).toBe(true)
+    expect(tail.lines.at(-1)).not.toMatch(/^[\uDC00-\uDFFF]/)
+    expect(await f.call('terminal:create', ['proof-text', 100, 30])).toEqual(active)
+    expect(f.receipts).toHaveLength(1); expect(f.fatal).toEqual([])
+    await f.call('terminal:kill', ['proof-text', active.pid])
+    expect(f.receipts[0].exited).toBe(true)
+    console.info(JSON.stringify({ proof: 'production-terminal-streaming-text', nativeSpawns: 1,
+      rawUtf8Bytes: Buffer.byteLength(f.text('proof-text')), recentJsonBytes: Buffer.byteLength(JSON.stringify(tail)),
+      joinedSplitLine: small.lines.includes('SPLIT_LINE'), hiddenTitleOmitted: !small.lines.join('').includes('PRIVATE_TITLE'), nativeExitReceipts: 1 }))
+  }, 30_000)
+
   it('writes UTF8/control input, resizes, reads cwd, reconnects without respawn and observes native exit', async () => {
     const f = fixture(), result = await f.call('terminal:create', ['proof-shell', 80, 24, f.root])
     expect(result.pid).toBeGreaterThan(0); await f.ready('proof-shell')

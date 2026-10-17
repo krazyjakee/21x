@@ -1,3 +1,5 @@
+import { TerminalTextBuffer } from './terminal-text-buffer'
+
 export interface TerminalHandle {
   write(data: string): void | boolean
   resize?(cols: number, rows: number): void
@@ -27,13 +29,12 @@ interface Entry {
   generation: number
   handle?: TerminalHandle
   events: TerminalEventHost
-  buffer: string[]
+  buffer: TerminalTextBuffer
   closed: Promise<void>
   finish(): void
   exited: boolean
   killRequested: boolean
 }
-const ANSI_ESCAPES = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(\x07|\x1b\\)|\x1b[()][A-Z0-9]|\r/g
 const MAX_LINES = 500
 const MAX_CHARS = 1_000_000
 
@@ -59,7 +60,7 @@ export class TerminalServiceCore {
     if (existing) this.retire(existing)
     let finish!: () => void
     const entry: Entry = {
-      id: input.id, generation: ++this.nextGeneration, events, buffer: [], exited: false, killRequested: false,
+      id: input.id, generation: ++this.nextGeneration, events, buffer: new TerminalTextBuffer(MAX_LINES, MAX_CHARS), exited: false, killRequested: false,
       closed: new Promise<void>(resolve => { finish = resolve }), finish: () => finish()
     }
     this.current.set(input.id, entry)
@@ -69,7 +70,7 @@ export class TerminalServiceCore {
         ...input, shellPath: this.host.resolveShell(),
         onData: data => {
           if (!this.isCurrent(entry)) return
-          this.append(entry, data)
+          entry.buffer.append(data)
           try { entry.events.data(entry.id, data) } catch { /* window may disappear */ }
         },
         onExit: () => {
@@ -99,7 +100,7 @@ export class TerminalServiceCore {
     const entry = this.current.get(id)
     if (!entry?.handle) return null
     entry.events = events
-    return { pid: entry.handle.pid, lines: [...entry.buffer] }
+    return { pid: entry.handle.pid, lines: entry.buffer.snapshot(MAX_LINES) }
   }
 
   /** Current native identity; generation distinguishes same-PID replacements. */
@@ -147,10 +148,10 @@ export class TerminalServiceCore {
     try { entry.handle.resize(cols, rows); return { alive: this.isCurrent(entry) } } catch { return { alive: false } }
   }
 
-  getBuffer(id: string, lines = 200): { lines: string[] } {
+  getBuffer(id: string, lines = 200, maxJsonBytes?: number): { lines: string[] } {
     this.assertOpen()
     if (!Number.isSafeInteger(lines) || lines < 1) throw new Error('Invalid terminal line count')
-    return { lines: this.current.get(id)?.buffer.slice(-Math.min(lines, MAX_LINES)) ?? [] }
+    return { lines: this.current.get(id)?.buffer.snapshot(lines, maxJsonBytes) ?? [] }
   }
 
   kill(id: string, expectedPid?: number): void {
@@ -211,14 +212,6 @@ export class TerminalServiceCore {
 
   private isCurrent(entry: Entry): boolean {
     return !this.closing && !entry.exited && this.current.get(entry.id) === entry
-  }
-
-  private append(entry: Entry, raw: string): void {
-    const lines = raw.slice(-MAX_CHARS).replace(ANSI_ESCAPES, '').split('\n').filter(line => line.trim())
-    entry.buffer.push(...lines.slice(-MAX_LINES))
-    if (entry.buffer.length > MAX_LINES) entry.buffer.splice(0, entry.buffer.length - MAX_LINES)
-    let chars = entry.buffer.reduce((sum, line) => sum + line.length, 0)
-    while (chars > MAX_CHARS) chars -= entry.buffer.shift()!.length
   }
 
   private validateSize(cols: number, rows: number): void {

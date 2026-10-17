@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TerminalServiceCore, type PtyOptions, type TerminalProcessHost } from './terminal-service-core'
+import { TerminalTextBuffer } from './terminal-text-buffer'
 
 function held() {
   let finish!: () => void
@@ -26,6 +27,52 @@ function fixture() {
 
 describe('portable terminal ownership', () => {
   afterEach(() => vi.restoreAllMocks())
+
+  it('recovers identical logical text at every split inside Unicode, CSI, OSC and string escapes', async () => {
+    const raw = '雪🧭\x1b[38;2;1;2;3mco\x1b[0mlour\r\n' +
+      '\x1b]0;private title\x1b\\next\x1b]8;;https://example.invalid\x07 link\x1b]8;;\x07\n' +
+      '\x1bPprivate payload\x1b\\\x1b_hidden payload\x1b\\\x1b(Btail\x07\x00\nlast'
+    const f = fixture(); f.create()
+    for (let split = 0; split <= raw.length; split++) {
+      const log = new TerminalTextBuffer()
+      log.append(raw.slice(0, split)); log.append(raw.slice(split))
+      expect(log.snapshot(500), `split ${split}`).toEqual(['雪🧭colour', 'next link', 'tail', 'last'])
+    }
+    for (const character of raw) f.children[0].options.onData(character)
+    expect(f.owner.attach('panel', { data: vi.fn(), exit: vi.fn() })?.lines).toEqual(['雪🧭colour', 'next link', 'tail', 'last'])
+    // Raw live data is untouched; only the separately labeled text log is parsed.
+    expect(f.events.data.mock.calls.map(call => call[1]).join('')).toBe(raw)
+    f.exit(0); await f.owner.close()
+  })
+
+  it('retains a bounded recent suffix even for a single very long line and exact JSON escaping', async () => {
+    const f = fixture(); f.create()
+    const raw = 'old\n' + '雪🧭"\\\t'.repeat(200_000) + 'LATEST'
+    // Vary callback sizes independently of logical lines.
+    for (let i = 0; i < raw.length; i += 8191) f.children[0].options.onData(raw.slice(i, i + 8191))
+    const result = f.owner.getBuffer('panel', 500, 512 * 1024)
+    expect(result.lines).toHaveLength(1)
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(512 * 1024)
+    expect(result.lines[0].endsWith('LATEST')).toBe(true)
+    expect(raw.endsWith(result.lines[0])).toBe(true)
+    expect(result.lines[0]).not.toMatch(/^[\uDC00-\uDFFF]/)
+    f.children[0].options.onData('\nAFTER\n')
+    expect(f.owner.getBuffer('panel', 1, 512 * 1024)).toEqual({ lines: ['AFTER'] })
+    f.exit(0); await f.owner.close()
+  })
+
+  it('bounds unterminated escape bodies without leaking them on reconnect and resets parser per process', async () => {
+    const f = fixture(); f.create()
+    f.children[0].options.onData('before\n\x1b]title;')
+    for (let i = 0; i < 20; i++) f.children[0].options.onData('private'.repeat(10_000))
+    expect(f.owner.getBuffer('panel')).toEqual({ lines: ['before'] })
+    f.children[0].options.onData('\x1b'); f.children[0].options.onData('\\after\n')
+    expect(f.owner.getBuffer('panel')).toEqual({ lines: ['before', 'after'] })
+    f.children[0].options.onData('\x1b['); f.create()
+    f.children[1].options.onData('replacement\n')
+    expect(f.owner.getBuffer('panel')).toEqual({ lines: ['replacement'] })
+    f.exit(0); f.exit(1); await f.owner.close()
+  })
 
   it('guards stale PID kills and isolates replaced handles even when native PIDs are equal', async () => {
     const f = fixture()

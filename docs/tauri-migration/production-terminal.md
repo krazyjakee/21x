@@ -6,6 +6,12 @@ The native production owner must supply its actual staged, ABI-matched
 `node-pty` host and retain that one `TerminalServiceCore` through shutdown.
 The backend never creates another process runtime or falls back to a fake PTY.
 
+The [2026-10-17 streaming continuation](terminal-streaming-recovery.md) fixes
+logical recent-text recovery across callback/escape boundaries, returns a
+bounded recent suffix for oversized text, and retires native subscriptions at
+actual exit. Its evidence supersedes the earlier unexecuted-check note below
+for that tested scope; installed platform acceptance remains open.
+
 ## Exact API and owner
 
 `src/service/terminal-backend.ts` binds the six existing APIs: create, write,

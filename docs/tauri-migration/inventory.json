@@ -5626,6 +5626,7 @@
     "src/main/terminal-process.ts",
     "src/main/terminal-service-core.ts",
     "src/main/terminal-service.ts",
+    "src/main/terminal-text-buffer.ts",
     "src/main/transcript-display.ts",
     "src/main/tunnel-manager-core.ts",
     "src/main/tunnel-manager.ts",
@@ -14452,7 +14453,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 885,
+    "files": 886,
     "operations": 737,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,
