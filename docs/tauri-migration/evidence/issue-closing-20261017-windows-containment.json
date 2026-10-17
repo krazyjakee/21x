@@ -1,0 +1,404 @@
+{
+  "version": 1,
+  "issue": 208,
+  "createdAt": "2026-10-17T19:12:06.092366+00:00",
+  "implementationRevision": "75cce3adc2e45e3a8f13d410f048cc757cc36ab3",
+  "inheritedRevisions": {
+    "agentShutdown": "6991ea0359b7d27704a26fe98145dd787f4ce687",
+    "nativeOAuth": "d329f68576f529a4fb573ccf1f83c29a9dd5b48d",
+    "linuxOAuthIngress": "a3a84fedcc27a5f0ca6482c41e6de026f7f01489",
+    "restartRecovery": "21095d42",
+    "startupRecovery": "4588741e"
+  },
+  "scope": "Atomic Windows production Job and captured private IOCP pipes, bounded stdin bootstrap, same owner/lifecycle contract. Actual Linux/staged inherited-stdin proof and cross compilation only. No installed or Windows/macOS runtime acceptance.",
+  "applicationPackageVersion": "0.0.161",
+  "provenance": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "standaloneNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "sqliteAddon": "13.0.3",
+    "nodePty": "1.1.0",
+    "sqliteSchema": 37,
+    "vitest": "4.0.18",
+    "electronForAppTests": "44.0.0",
+    "webview": null,
+    "webviewReason": "No installed Tauri WebView launched; app transport tests use host doubles."
+  },
+  "fixture": {
+    "profiles": "Source/staged suites use synthetic temporary/copied profiles; prefix proof creates no profile, database, SDK or credential owner. No live profile or provider session.",
+    "schema": 37,
+    "protocol": 1,
+    "windowsMinimumForJobList": "Windows 10 / Server 2016 API requirement; supported product minimums remain a G0 decision.",
+    "privateChannel": "Host captures/connects one-instance local pipe endpoints and verifies its own client PID before atomic child creation; exact inherited handle list, no public path/name/argv/env authority. Windows one bounded descriptor line before RPC; Linux fd3 unchanged.",
+    "job": "Unnamed non-inheritable KILL_ON_JOB_CLOSE, assigned by CreateProcess JOB_LIST before initial thread execution. No breakaway grants or post-spawn assignment gap.",
+    "windowsRuntimeFixture": {
+      "file": "src-tauri/engine/examples/windows-production-containment.rs",
+      "compiledForWindows": true,
+      "executed": false,
+      "requiredRuntime": "Windows with explicit staged Node 22.23.2 path",
+      "plannedAssertions": [
+        "Normal zero-member drain",
+        "Last Job handle closes root and detached descendant",
+        "Leader-only drain remains blocked while descendant lives",
+        "Unrelated process survives",
+        "Unicode/space paths",
+        "Fixture cleanup joins only captured children"
+      ]
+    },
+    "linuxPrefixProof": {
+      "proof": "production-inherited-stdin-prefix",
+      "platform": "linux",
+      "arch": "x64",
+      "node": "v22.23.2",
+      "descriptorBytes": 978,
+      "preservedRpcBytes": 82,
+      "bootstrapSha256": "a3ae92b3a4e861a89b5e3cd96b6385ae1855a32d10c8e6282e61487b6f71a3cb",
+      "childClosed": true,
+      "databaseOrCredentialsStarted": false,
+      "windowsJobRuntimeProof": false
+    }
+  },
+  "expectedActual": [
+    {
+      "expected": "Enable Windows production launch under kernel-owned descendant containment and a private service channel.",
+      "actual": "Windows engine and full native Tauri host cross-check pass; production uses Job/IOCP pipe backend and one common owner initialization/recovery path. Win32 execution, Node handle compatibility and installed UI remain untested."
+    },
+    {
+      "expected": "Preserve pipelined RPC bytes and retire failed prefix/listeners without starting application state.",
+      "actual": "Eight parser regressions pass at every descriptor/UTF-8 split and exact limit; actual bundled Node Linux child preserves all 82 RPC bytes following 978 descriptor bytes, exits cleanly, and starts no DB/credentials."
+    },
+    {
+      "expected": "Keep the Linux lifecycle and #215 native OAuth contract intact.",
+      "actual": "113 native engine tests and 81 native host tests plus rebased 114 app/114 standalone cases pass. Existing optional OAuth host capability/field and register/open/retire/callback routes are preserved; global browser/scheme registration remains unavailable."
+    },
+    {
+      "expected": "Do not claim process exit or profile release after incomplete retirement.",
+      "actual": "Code uses owned Job/process handles and accounting, waits for leader-only drain and zero-member final retirement; failed observations retain/retry. Runtime validation of those Win32 conditions is explicitly pending."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "app": {
+      "files": 8,
+      "passed": 114,
+      "failed": 0,
+      "skipped": 0
+    },
+    "standalone": {
+      "files": 8,
+      "passed": 114,
+      "failed": 0,
+      "skipped": 0
+    },
+    "nativeEngine": {
+      "passed": 113,
+      "failed": 0,
+      "ignored": 4,
+      "note": "Four existing opt-in staged Node cases were not requested. Delegated cgroup fixture feature was not enabled; Windows executable fixture was cross-compiled, not run."
+    },
+    "nativeHost": {
+      "passed": 81,
+      "failed": 0,
+      "skipped": 0,
+      "note": "Includes isolated D-Bus/MockRuntime ingress tests, not installed UI execution."
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165,
+      "mjsPolicy": "Repository ESLint ignores .mjs; node --check and actual prefix execution validate the new proof script."
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run src/service/production-stdin-bootstrap.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/service/production-adapters.test.ts src/shared/production-bootstrap.test.ts scripts/tauri-stage-production.test.ts scripts/production-contracts-proof.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "274aa6a04346ceb209bd254df306d3ba45a5f09c0fde44efa9943325140838f7",
+          "bytes": 177810
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/service/production-stdin-bootstrap.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/service/production-adapters.test.ts src/shared/production-bootstrap.test.ts scripts/tauri-stage-production.test.ts scripts/production-contracts-proof.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "cfbc51e9c9e7ad0fce405d11c0cacb1d94669a4aa5b1ed54270619fb6316487b",
+          "bytes": 178426
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "57856072d99bf7b957c2e04889b2ce3480d2c52fad1d394b1059c7bfd7b20998",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service -- --test-threads=1",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "a4e44b6513d806e884ec6555b23914c973c1ade593fab2c8f992ee9633ce22a4",
+          "bytes": 13502
+        }
+      },
+      {
+        "command": "rtk proxy cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-tauri-feasibility --features production-service -- --test-threads=1",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "1e5586c2ea40c5694bedeba4409bfc1cde96cab9e18c3c7ffa704908dfa0ee2f",
+          "bytes": 11676
+        }
+      },
+      {
+        "command": "rtk proxy cargo build --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-credentials --bin twentyonex-credential-key",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "f4403412cb20dc7d8a0a94c08c9c8853e4bac9b3e8489158834f30512311ed97",
+          "bytes": 72
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-stage-production.mjs",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "a581edb49606a64e7f48fd0ffb5d3355dae49e39d3ec83f2a79fcda060db009f",
+          "bytes": 267
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/production-stdin-bootstrap-proof.mjs",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "d2932f571e76082b727788466b2de15829d1c14b2d0f80dfc693f93d83a5e378",
+          "bytes": 313
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "41413f5153406c43799006dce05c71b808e609a1e20536e0bca3278d6b86be96",
+          "bytes": 29268
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:frontend:build",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "320be71bb7e3f391fa005828be8f5913d2de1cbc6e96ff85a6c3e8b90a934bf7",
+          "bytes": 497
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "1714d28b400a7166557efec07d6278ff8e9e80ff17e9696153898ae8497d46b9",
+          "bytes": 9620
+        }
+      },
+      {
+        "command": "rtk proxy cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "263323ea7830e136e06be82186c54c48024fdd6686a0a905cba4ad64c7c78761",
+          "bytes": 1155
+        }
+      },
+      {
+        "command": "rtk proxy env PATH=/usr/lib/llvm-20/bin:$PATH cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "97558140d687104f86f91719d029b31fd252c86b3011848d5760d8a7437fafa4",
+          "bytes": 15156
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "60c5c52355623130f3188875951508792e0018b28da51476a2ce46367c415b93",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy cargo clippy --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --all-targets --target x86_64-pc-windows-msvc",
+        "exitCode": 0,
+        "result": "compile/lint only, no target runtime",
+        "log": {
+          "sha256": "c16b5e9bbccaba85f9796eb304a915506726dbb703b9e6cacf4d769040653e51",
+          "bytes": 4585
+        }
+      },
+      {
+        "command": "rtk proxy cargo clippy --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --all-targets --target x86_64-apple-darwin",
+        "exitCode": 0,
+        "result": "compile/lint only, no target runtime",
+        "log": {
+          "sha256": "7db5b01e0b50e19553f8dfe28f5441651a2d535b2826e6a7d2d6df879104d2c2",
+          "bytes": 11498
+        }
+      },
+      {
+        "command": "rtk proxy cargo clippy --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --all-targets --target aarch64-apple-darwin",
+        "exitCode": 0,
+        "result": "compile/lint only, no target runtime",
+        "log": {
+          "sha256": "fd24b746bf491732b09fffb8f21a00df25fc5ca464a246a732ee1d1511fa1026",
+          "bytes": 11498
+        }
+      }
+    ],
+    "crossCompilationLimits": [
+      "Linux host and full Windows native host cargo check pass; Windows resource compiler found through temporary PATH=/usr/lib/llvm-20/bin. No system/repository setting changed.",
+      "Windows host cross-check used the staged Linux resource manifest for compile-time identity only. It did not produce a Windows resource closure/package or run WebView2.",
+      "Both macOS engine/all-target clippy checks pass. macOS production containment remains explicitly unavailable; no full macOS app/runtime check is claimed.",
+      "Retained compiler/clippy warnings remain; no lint allowance or check was weakened."
+    ],
+    "cargoTargetDirectory": "/mnt/Rusty/cargo-target"
+  },
+  "resources": {
+    "buildIdentity": "production-5a0661fc568c1048dc85f8468bb48f6c",
+    "platform": "linux",
+    "arch": "x64",
+    "manifest": {
+      "sha256": "62583f9284db7d1ac6bdc0cdf68e35e5c9990155bcf1d64ddff37c4040851ab3",
+      "bytes": 1261481
+    }
+  },
+  "sourceSha256": {
+    "docs/tauri-migration/implementation-status.md": "f1aedcf4d3f974f16698faa95cdc11ac0ecb9e3c3add298f9cab4b927e1b8122",
+    "docs/tauri-migration/production-owner.md": "64da4e77eec61de494ca44c9f67a9263868deee70d271eaca6fba4dbd16d99d8",
+    "docs/tauri-migration/production-windows-containment.md": "6e11903bc05cc398090afceb6165c158ac97c2c92d268166525584728073cd23",
+    "scripts/production-stdin-bootstrap-proof.mjs": "b664619192884eba6df6000bfbb11fa4e7c2838fc14be66bc5f5d6bb4388b393",
+    "src-tauri/engine/Cargo.toml": "d4a1babe8c6cd756386e19ea165232b8909b5ff107124ec2fd877433115bf223",
+    "src-tauri/engine/examples/windows-production-containment.rs": "3be8b1cbd80662da642d4239c9d6cc2badaee90f43a20b947d4980280b856490",
+    "src-tauri/engine/src/production.rs": "78ecf6e5d2cfc0fb9a596f40fc81377eec6e4e056a5b08a65569442849647be8",
+    "src-tauri/engine/src/production_windows.rs": "2dcf24e36a8c8316d13a7d04508911860b03d28ce50db67670a8e6fb21baf492",
+    "src-tauri/src/production_host.rs": "2c03b8e20ec290eca11d8d2e6e438512495fe23d7c45182092b3aa2c79887ac9",
+    "src/renderer/src/lib/tauri-desktop-transport.test.ts": "bf403718c3b0d229b152939a554c8d8f56380f0edb49b4e45e823bc2a9cbe198",
+    "src/renderer/src/lib/tauri-desktop-transport.ts": "3f5e200ff24f26ce13b4fc1ec5853d9b9c3ba005a9814eb453a9385465352b65",
+    "src/service/production-stdin-bootstrap.test.ts": "5182db34e7b644838aeaefd7b8742c56e5082eab801d436df29036adca8d07a4",
+    "src/service/production-stdio.ts": "99ca9111eb43819bb7f4571bfc863c7fd4ba6fdd597a61efb4a3d5d43ad2a2c0"
+  },
+  "artifacts": {
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": {
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "bytes": 2226168
+    },
+    "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node": {
+      "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5",
+      "bytes": 79968
+    },
+    "src-tauri/resources/native/twentyonex-credential-key": {
+      "sha256": "ecef7318170e06553c7787549d0521b12027298b00ee8cb0e626a2e45db6735d",
+      "bytes": 25759904
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "a3ae92b3a4e861a89b5e3cd96b6385ae1855a32d10c8e6282e61487b6f71a3cb",
+      "bytes": 18621
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "ca9ff4fe40646b048791124e89c4e9c5bdff6406a389017575e3fee2d63ea198",
+      "bytes": 6117529
+    },
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "62583f9284db7d1ac6bdc0cdf68e35e5c9990155bcf1d64ddff37c4040851ab3",
+      "bytes": 1261481
+    }
+  },
+  "serializedPeerIntegration": {
+    "issue": 215,
+    "base": "a3a84fedcc27a5f0ca6482c41e6de026f7f01489",
+    "hostHook": "Exact peer-supplied production_host.rs integration: one captured context, Linux single-instance plugin first, bounded cold argv rejection after authority construction, build same context. No macOS/Windows plugin, public deep-link event, custom registration or global browser availability."
+  },
+  "failuresAndRepairs": [
+    {
+      "failure": "Integration gate initially selected cargo test --lib on the binary-only native host package (exit101).",
+      "repair": "Correct invocation selects the existing package binary tests; full native host tests and Linux/MSVC checks pass without changing targets or weakening checks."
+    },
+    {
+      "failure": "Initial standalone Windows fixture compile called private EngineError.startup.",
+      "repair": "Fixture uses the already-public startup_phase field; production visibility unchanged. Final engine/fixture cross-check passes."
+    },
+    {
+      "failure": "Source audit found the first unpublished pipe draft used generic blocking file wrappers, which can retain blocking reads through shutdown.",
+      "repair": "Replace with captured connected Tokio Windows named-pipe endpoints/IOCP; no blocking filesystem pipe operation remains."
+    },
+    {
+      "failure": "Resource staging copy assumed a local Cargo target directory.",
+      "repair": "Read cargo metadata; actual configured target is /mnt/Rusty/cargo-target. Copy freshly built helper under the lane, then stage and check actual host."
+    },
+    {
+      "failure": "Initial full Windows host check exited101: tauri-winres could not find llvm-rc.",
+      "repair": "Find installed LLVM20 tools, temporarily prepend its bin directory, retry full native host check successfully. No dependency or build-script check bypass."
+    },
+    {
+      "failure": "Additive status-doc conflict on rebase onto #211 publication.",
+      "repair": "Preserve agent, OAuth and earlier continuation notes; rerun affected Source/adapter and staged/build/host checks against that revision."
+    }
+  ],
+  "hostedCI": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runs": [],
+    "workflowDispatches": 0,
+    "settingsEndpointsCalled": false
+  },
+  "acceptance": {
+    "issueRemainsOpen": true,
+    "checkboxesCompleted": [],
+    "remaining": [
+      "Windows atomic Job/private-pipe and installed lifecycle behavior still require actual Windows runtime evidence; native compile success is not acceptance.",
+      "macOS detached-descendant containment/private production launch is unimplemented and remains fail-closed; a supported native authority and platform validation are still required.",
+      "All-family host/service/worker crash, forced quit, native helper/process-tree, hidden-window and installed UI/provider acceptance remains open.",
+      "Actual native OS recovery fault presentation, protected-store and vendor CLI runtime acceptance remain unproven outside scoped fixtures.",
+      "Dependency #202 remains open and unchanged; platform runners/hardware and hosted CI await the Actions user decision."
+    ]
+  },
+  "constraints": {
+    "liveRelease": false,
+    "liveProfileCutover": false,
+    "electronRetired": false,
+    "hostedVoice": "deferred by user decision"
+  }
+}
