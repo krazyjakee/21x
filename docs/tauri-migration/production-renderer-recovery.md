@@ -60,3 +60,29 @@ snapshot/delta and listener acceptance on supported native targets remains open.
 Repository Actions is disabled pending the user's decision; no settings endpoint
 or workflow dispatch is used. #209/#202 and migration gates remain open. No live
 release/profile cutover, Electron retirement or hosted voice change is made.
+
+## Native preferences and activity continuation
+
+General preferences load each supported native value independently. An unavailable
+login-at-startup operation no longer prevents notification permission or the tray
+preference from loading. The native host reconnect observer re-reads once for each
+connection generation and discards retired reads. Preference changes wait for the
+actual receipt, show a fixed retry-boundary error on refusal, and do not replay.
+Unmount disposes the observer. Captain prewarm remains unavailable in the native
+preview. The existing notification-off toggle remains local UI state; this slice
+does not introduce a persisted notification opt-out policy.
+
+The always-mounted update dialog and General settings use the existing native
+`app.getVersion` operation when updater version is unavailable. Native updater
+controls remain explicitly unavailable and issue no check/download/install calls.
+Version failures are caught. Electron retains its existing updater behavior and
+regressions; no feed, updater implementation or distribution policy is selected.
+
+Eight native preference/update React controls run through the actual typed host,
+transport and codecs with no preload. Eight additional agent-store controls consume
+#212's finite heartbeat/disconnect events through that same boundary. Freshness
+updates leave session state, turn bookkeeping, transcripts and commands untouched.
+Source sequence replay, foreign session heartbeats and malformed disconnect
+metadata are refused; same-epoch reconnect, source-epoch replacement and document
+disposal retire queued callbacks. These are controlled renderer tests rather than
+installed OS notification, tray, updater or process-recovery acceptance.

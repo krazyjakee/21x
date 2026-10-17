@@ -147,7 +147,7 @@ export default defineConfig({
           'src/renderer/src/lib/terminal-session.test.ts', 'src/renderer/src/lib/tauri-desktop-transport.test.ts', 'src/renderer/src/lib/desktop-api.test.ts', 'src/renderer/src/lib/native-desktop-host.test.ts', 'src/renderer/src/lib/shared-ipc-listeners.test.ts',
           'src/renderer/src/components/artifacts/viewers/HtmlArtifactView.test.tsx',
           'src/renderer/src/components/layout/DesktopHostStatus.test.tsx', 'src/renderer/src/stores/commander-desktop-recovery.test.ts',
-          'src/renderer/src/stores/production-list-recovery.test.ts', 'src/renderer/src/stores/task-store.test.ts',
+          'src/renderer/src/stores/production-list-recovery.test.ts', 'src/renderer/src/stores/native-agent-activity.test.ts', 'src/renderer/src/stores/task-store.test.ts',
           'src/renderer/src/stores/project-store.test.ts', 'src/renderer/src/stores/settings-store.test.ts',
           'src/renderer/src/stores/canvas-store.test.ts', 'src/renderer/src/stores/drawing-store.test.ts',
           'src/renderer/src/components/settings/native-general-settings.test.tsx', 'src/renderer/src/components/update/UpdateDialog.test.tsx'], setupFiles: [join(root, 'test/setup-renderer.ts')] } }
