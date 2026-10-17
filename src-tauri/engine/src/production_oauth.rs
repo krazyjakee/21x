@@ -339,7 +339,15 @@ impl OAuthAuthority {
                             return Ok(json!({"flowId":id,"retired":true}));
                         }
                     }
-                    None => return Ok(json!({"flowId":id,"retired":true})),
+                    None => {
+                        // A delayed registration must not recreate a flow after
+                        // its retirement acknowledgement. At the permanent ID
+                        // ceiling, every unseen registration is already refused.
+                        if state.issued.len() < MAX_ISSUED {
+                            state.issued.insert(id.into());
+                        }
+                        return Ok(json!({"flowId":id,"retired":true}));
+                    }
                 }
             }
             settled.await;
@@ -514,6 +522,44 @@ mod tests {
             raw.await.unwrap();
             owner.close().await.unwrap();
         }
+    }
+    #[tokio::test]
+    async fn retirement_ack_fences_a_registration_that_arrives_later() {
+        let owner = OAuthAuthority::new(false);
+        assert_eq!(
+            owner.retire(ID).await.unwrap(),
+            json!({"flowId":ID,"retired":true})
+        );
+        assert_eq!(
+            owner.register(&request("loopback")).unwrap_err().code,
+            "INVALID_ARGUMENTS"
+        );
+        // Closing this flow must not close the app owner or unrelated flows.
+        let mut other = request("loopback");
+        other["flowId"] = json!("cdf2af85-5898-414c-a64c-27c38ce72eb2");
+        owner.register(&other).unwrap();
+        drop(owner.begin_open(other["flowId"].as_str().unwrap()).unwrap());
+        owner.close().await.unwrap();
+    }
+    #[tokio::test]
+    async fn unknown_retirement_is_bounded_and_full_budget_still_fences_late_registration() {
+        let owner = OAuthAuthority::new(false);
+        for number in 0..MAX_ISSUED {
+            owner
+                .retire(&format!("{number:08x}-5898-414c-a64c-27c38ce72eb2"))
+                .await
+                .unwrap();
+        }
+        // A close beyond the permanent ceiling can acknowledge without growing
+        // the set: no unseen registration can ever be admitted by this owner.
+        owner.retire(ID).await.unwrap();
+        assert_eq!(owner.0.state.lock().unwrap().issued.len(), MAX_ISSUED);
+        assert_eq!(
+            owner.register(&request("loopback")).unwrap_err().code,
+            "BACKPRESSURE"
+        );
+        assert!(owner.begin_open(ID).is_err());
+        owner.close().await.unwrap();
     }
     #[tokio::test]
     async fn foreign_or_malformed_callback_cannot_consume_matching_intent() {

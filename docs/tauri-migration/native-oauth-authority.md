@@ -55,8 +55,12 @@ must remain in place. This slice does not replace that listener or enable the
 connector browser capability.
 
 Both owners admit at most 16 active leases with a maximum five-minute TTL.
-Native retains at most 4096 issued IDs/state digests for its lifetime, refusing
-new registration at the ceiling instead of evicting replay protection.
+Native retains at most 4096 issued/retired IDs and state digests for its
+lifetime, refusing new registration at the ceiling instead of evicting replay
+protection. Retirement also reserves an ID whose registration has not arrived:
+a delayed registration cannot recreate a flow after its close acknowledgement.
+At the permanent ID ceiling, unseen registrations are already refused, so
+unknown retirement can acknowledge without growing the registry further.
 Registration, raw opener calls and native retirement stay owned across public
 timeouts. Stop fences new admission/delivery synchronously; retirement remains
 available and failed close retains ownership for explicit retry. A fresh process
