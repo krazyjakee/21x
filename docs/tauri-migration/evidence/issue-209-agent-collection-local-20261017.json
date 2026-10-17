@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T21:25:47.158898+00:00",
+  "baseRevision": "cba725c0",
+  "implementationRevision": "8024737ae6de4c63b76beb1ae4bd24ea3e096119",
+  "scope": "Renderer agent collection snapshot ownership, strict reconnect recovery and document-owned status/transcript subscriptions. Existing typed native operations only; no native/backend/API expansion.",
+  "fixture": {
+    "profiles": "Synthetic actual typed NativeDesktopHost/client/codecs/transport and Zustand with controlled invoke/event boundary and no Electron preload. No OS WebView/provider/account accessed.",
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "stagedNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "expectedActual": [
+    {
+      "expected": "A held agent list cannot overwrite accepted create/update/delete or publish into a replacement connection/document.",
+      "actual": "Coalesced snapshot owner invalidates on each accepted CRUD receipt, retries reads only, captures host generation, and rejects retired results. Three independent held-CRUD controls, same-epoch replacement, coalescing and retired cohort controls pass."
+    },
+    {
+      "expected": "Recovery must fail closed on snapshot errors and continuous invalidation without replaying writes.",
+      "actual": "Strict rehydration awaits snapshot rejection; actual native mutation fence stays held on failed read and clears after explicit successful retry. Eight crossed snapshots produce BACKPRESSURE; exactly eight explicit writes occur, no replay."
+    },
+    {
+      "expected": "Listeners and transcript reads have one document owner.",
+      "actual": "Singleton cohort removes status/transcript callbacks on pagehide/HMR; explicit replacement registers one callback per event. Held valid transcript page after retirement cannot project artifacts or start a following delta read. Existing heartbeat records freshness then returns before transitions."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "fullRenderer": {
+      "passed": 1727,
+      "files": 150,
+      "skipped": 0
+    },
+    "stagedRenderer": {
+      "passed": 389,
+      "files": 20,
+      "skipped": 0
+    },
+    "nativeActivityControls": 18,
+    "existingAgentStoreControls": 35,
+    "contractUnitTests": 20,
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "commands": [
+      {
+        "name": "fullRenderer",
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "515b28b61bfba676cbda5174a6a9853a622d32588cc5f0c20c9df01d7a7a291a",
+          "bytes": 1126459
+        }
+      },
+      {
+        "name": "forcedTypecheck",
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "name": "lint",
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "name": "stagedRenderer",
+        "command": "rtk proxy pnpm test:tauri -- <20 files; exact gateScript below>",
+        "exitCode": 0,
+        "log": {
+          "sha256": "93a6814deffa39cdb836f2c95b722b73d3b16da316be383a5ff1466418135465",
+          "bytes": 116425
+        }
+      },
+      {
+        "name": "contractUnitTests",
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "738b1860b820fb5e312b277cc9487824a2381bd12a632d259a7d30b4462b3e6b",
+          "bytes": 533
+        }
+      },
+      {
+        "name": "shippingFrontend",
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "fad85380664b22f01196c52197f76a27fc313fcd9dbf0037fd26b217353796dc",
+          "bytes": 29344
+        }
+      },
+      {
+        "name": "productionFrontend",
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "bea76821ef93ea553e320072f196996a35309656e7fa9e6ed0c5cf298cef36aa",
+          "bytes": 9620
+        }
+      }
+    ],
+    "gateScript": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer --maxWorkers=4 > /tmp/ea209-agent-renderer.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-agent-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-agent-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-agent-staged.log 2>&1\nrtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts > /tmp/ea209-agent-contract-tests.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-agent-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-agent-production-build.log 2>&1\nrtk proxy git diff --check\n",
+    "diffCheck": {
+      "command": "rtk proxy git diff --check",
+      "exitCode": 0
+    },
+    "commitHooks": "Normal staged eslint and typecheck passed. Rebased over cba725c0 evidence JSON only; no source inputs changed.",
+    "inventoryFreshness": "Not run or claimed in this slice: E2 held inventory/status serialization. E2 requested to rebase source and regenerate combined inventory; contract unit tests above do not establish generated-file freshness."
+  },
+  "failureRepair": [
+    "Valid held transcript fixture replaced an invalid native delta shape so retirement control exercises actual typed codec and page reader. Pre-next-page generation guard added and verified.",
+    "Strict error fixture initially expected INTERNAL_ERROR; exact native finite mapping is DISCONNECTED. Corrected assertion; preserved mutation-fence refusal and successful explicit retry assertions. No product bound or check weakened."
+  ],
+  "sourceFiles": {
+    "src/renderer/src/stores/agent-store.ts": {
+      "sha256": "773c1abef4f2cc864dc98effe3776ea481cb3351e6bba82ce03e3ee8d9c0f466",
+      "bytes": 21807
+    },
+    "src/renderer/src/stores/native-agent-activity.test.ts": {
+      "sha256": "729a06e0198baf7d82d91d7cec9e7850e4440afd963cf3713b6c5e5eea839e57",
+      "bytes": 15499
+    },
+    "src/renderer/src/lib/desktop-api.ts": {
+      "sha256": "33701eb869e1d8d2a0d732b58aa17fba11127fa419c5a07c8d2b9c12fadf1b85",
+      "bytes": 3575
+    },
+    "src/renderer/src/lib/desktop-snapshot.ts": {
+      "sha256": "a5984bbeb9e5066fcb9ac563eb5017d0e1126308d60a55076b981ae7b99f223f",
+      "bytes": 1682
+    },
+    "vitest.tauri.config.ts": {
+      "sha256": "22a369c03dbbbc3c36efdb7134f69a0d9bd7dd10663149e886b012bd2280c09b",
+      "bytes": 12353
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "6877e54fe449587eb193fdc3be1f35718e88083543f805ed8d591c631f90f522",
+      "bytes": 10462
+    }
+  },
+  "buildArtifacts": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "4037f1f5a70ec302dd6aab140886461ffe5a0b3bf4b49e5201586e514734c2c3",
+      "bytes": 856
+    },
+    "out/tauri-production-renderer/assets/main-DnltPntL.js": {
+      "sha256": "1210fa0c0f65b383300b3557f6da96b795bcc4422de3684b3001d9cc226ca61f",
+      "bytes": 1510288
+    }
+  },
+  "acceptance": {
+    "newWholeCriteriaChecked": [],
+    "issueRemainsOpen": true,
+    "installedLifecycleProof": false
+  },
+  "remainingDefects": [
+    "Installed WebView reload/recreation/hide/crash/cleanup and non-Linux runtime proof unavailable.",
+    "Remaining retained native operations and UI window/theme/zoom/keyboard consumers pending owner contracts.",
+    "Unsupported group/Captain attachment mutations, native DOM-drop receipts and protected unreferenced import reconciliation remain domain gaps.",
+    "Migration umbrella #202 and other production prerequisites remain open."
+  ],
+  "hostedVerification": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runList": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "limits": [
+    "Controlled renderer boundary tests do not establish installed native UI, physical window lifetime or real provider behavior.",
+    "No voice authority enabled, no account/live data accessed, no release/cutover/Electron retirement; hosted voice deferred."
+  ]
+}
