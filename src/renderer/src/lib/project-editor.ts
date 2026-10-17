@@ -1,3 +1,4 @@
+import { captureDesktopRead } from './desktop-api'
 import { projectApi } from '@/lib/ipc-client'
 import { useProjectStore } from '@/stores/project-store'
 import type { ProjectRecord, ProjectRepoRecord, ProjectResourceRecord } from '@shared/projects'
@@ -199,11 +200,21 @@ export function validateProjectDraft(draft: ProjectDraft): string[] {
 export async function saveProjectDraft(
   projectId: string | null,
   draft: ProjectDraft,
-  original: ProjectDraftOriginal = { repos: [], resources: [] }
+  original: ProjectDraftOriginal = { repos: [], resources: [] },
+  owner: { assertCurrent?: () => void; onProjectAccepted?: (project: ProjectRecord) => void } = {}
 ): Promise<ProjectRecord> {
   const problems = validateProjectDraft(draft)
   if (problems.length > 0) throw new Error(problems[0])
 
+  const scope = captureDesktopRead()
+  const assertCurrent = () => { scope.assertCurrent(); owner.assertCurrent?.() }
+  const write = async <T,>(effect: () => Promise<T>): Promise<T> => {
+    assertCurrent()
+    const result = await effect()
+    assertCurrent()
+    return result
+  }
+  assertCurrent()
   const store = useProjectStore.getState()
   const fields = {
     name: draft.name.trim(),
@@ -217,12 +228,15 @@ export async function saveProjectDraft(
   const project = projectId
     ? await store.updateProject(projectId, fields)
     : await store.createProject(fields)
-  if (!project) throw new Error(useProjectStore.getState().error ?? 'The project could not be saved.')
+  if (!project) throw new Error('The project could not be saved. Review its current state before trying again.')
+  // Retain the known durable identity before fencing further effects.
+  owner.onProjectAccepted?.(project)
+  assertCurrent()
 
   // ── Repos ──
   const keptRepoIds = new Set(draft.repos.map((r) => r.id).filter(Boolean))
   for (const repo of original.repos) {
-    if (!keptRepoIds.has(repo.id)) await projectApi.removeRepo(repo.id)
+    if (!keptRepoIds.has(repo.id)) await write(() => projectApi.removeRepo(repo.id))
   }
   const originalRepos = new Map(original.repos.map((r) => [r.id, r]))
   const repoOrder: string[] = []
@@ -235,21 +249,23 @@ export async function saveProjectDraft(
     }
     const before = repo.id ? originalRepos.get(repo.id) : undefined
     if (!before) {
-      const added = await projectApi.addRepo(project.id, data)
-      if (added) repoOrder.push(added.id)
+      const added = await write(() => projectApi.addRepo(project.id, data))
+      if (!added) throw new Error('The repository could not be saved.')
+      repoOrder.push(added.id)
       continue
     }
     if (before.name !== data.name || before.provider !== data.provider || before.org !== data.org || (before.default_branch ?? null) !== data.default_branch) {
-      await projectApi.updateRepo(before.id, data)
+      const updated = await write(() => projectApi.updateRepo(before.id, data))
+      if (!updated) throw new Error('The repository could not be saved.')
     }
     repoOrder.push(before.id)
   }
-  if (repoOrder.length > 1) await projectApi.reorderRepos(project.id, repoOrder)
+  if (repoOrder.length > 1) await write(() => projectApi.reorderRepos(project.id, repoOrder))
 
   // ── Resources ──
   const keptResourceIds = new Set(draft.resources.map((r) => r.id).filter(Boolean))
   for (const resource of original.resources) {
-    if (!keptResourceIds.has(resource.id)) await projectApi.removeResource(resource.id)
+    if (!keptResourceIds.has(resource.id)) await write(() => projectApi.removeResource(resource.id))
   }
   const originalResources = new Map(original.resources.map((r) => [r.id, r]))
   const resourceOrder: string[] = []
@@ -261,16 +277,18 @@ export async function saveProjectDraft(
     }
     const before = resource.id ? originalResources.get(resource.id) : undefined
     if (!before) {
-      const added = await projectApi.addResource(project.id, data)
-      if (added) resourceOrder.push(added.id)
+      const added = await write(() => projectApi.addResource(project.id, data))
+      if (!added) throw new Error('The resource could not be saved.')
+      resourceOrder.push(added.id)
       continue
     }
     if (before.label !== data.label || (before.url ?? null) !== data.url || before.notes !== data.notes) {
-      await projectApi.updateResource(before.id, data)
+      const updated = await write(() => projectApi.updateResource(before.id, data))
+      if (!updated) throw new Error('The resource could not be saved.')
     }
     resourceOrder.push(before.id)
   }
-  if (resourceOrder.length > 1) await projectApi.reorderResources(project.id, resourceOrder)
+  if (resourceOrder.length > 1) await write(() => projectApi.reorderResources(project.id, resourceOrder))
 
   return project
 }

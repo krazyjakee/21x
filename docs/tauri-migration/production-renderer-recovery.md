@@ -287,3 +287,35 @@ pre-receipt canonical reads, first-write demand, scope-event invalidation,
 eight-read backpressure, both failure barriers and retirement/replacement. The
 existing fifteen skill-store controls are retained. These renderer controls do
 not establish native credential-store or installed UI acceptance.
+
+
+## Production project editor and overdue advisory
+
+The native facade uses the published production project configuration codecs as
+the final override for the same retained create/update operations. Full editor
+agent, provider, limits, Captain wake-up and scheduled review fields now reach
+the production lifecycle owner. Source retains the audited concurrency policy;
+the renderer does not gain a second cap/pin writer.
+
+Each save captures its editor lifetime and desktop connection, checks them before
+every repository/resource effect and after each reply, and joins writes
+sequentially. The form freezes during a save. Canonical project events refresh
+the shared project list and live limit state without replacing unsaved drafts.
+Closing and reopening even the same target retires the old save. Accepted global
+project receipts cannot publish into a replacement connection or document cache.
+
+Project saves are not atomic across the row, repositories and resources. If a
+later step fails, the editor keeps any known accepted project identity, blocks a
+repeat Save and offers an explicit reopen of that saved project. Reopening reads
+canonical children for review; it does not recreate accepted children, roll back
+other effects or replay an uncertain write. If creation itself has no accepted
+receipt, no guessed identity/retry is supplied. The user must review the project
+list after closing. There is no durable renderer mutation journal in this slice.
+
+The retained `overdue:check` empty wire event maps to its no-argument typed
+callback. Existing UI overdue notifications and snooze re-evaluation consume it
+as an advisory only, without task/session mutations. Notification refusals are
+owned and swallowed; queued effects, listener callbacks and local snooze timers
+retire on pagehide/unmount. The real Source minute timer, read-scope filtering
+and shutdown proofs belong to #210; these renderer controls use exact controlled
+native receipts and prove no installed notification delivery or physical UI.

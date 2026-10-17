@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { captureDesktopRead } from '@/lib/desktop-api'
 import { projectApi, settingsApi } from '@/lib/ipc-client'
 import { createDesktopSnapshotReader } from '@/lib/desktop-snapshot'
 import {
@@ -49,6 +50,12 @@ function replaceProject(projects: ProjectRecord[], updated: ProjectRecord): Proj
 }
 
 let selectionRevision = 0
+let projectDocumentGeneration = 0
+function captureProjectMutation() {
+  initializeProjectDesktopState()
+  const scope = captureDesktopRead(), document = projectDocumentGeneration
+  return () => document === projectDocumentGeneration && scope.isCurrent()
+}
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
@@ -75,46 +82,53 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: async (data) => {
+    const isCurrent = captureProjectMutation()
     try {
       const created = await projectApi.create(data)
       if (!created) return null
+      if (!isCurrent()) return created
       projectSnapshot.invalidate()
       set((state) => ({ projects: replaceProject(state.projects, created), error: null }))
       return created
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) })
+      if (isCurrent()) set({ error: err instanceof Error ? err.message : String(err) })
       return null
     }
   },
 
   updateProject: async (id, data) => {
+    const isCurrent = captureProjectMutation()
     try {
       const updated = await projectApi.update(id, data)
       if (!updated) return null
+      if (!isCurrent()) return updated
       projectSnapshot.invalidate()
       set((state) => ({ projects: replaceProject(state.projects, updated), error: null }))
       return updated
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) })
+      if (isCurrent()) set({ error: err instanceof Error ? err.message : String(err) })
       return null
     }
   },
 
   archiveProject: async (id, archived = true) => {
+    const isCurrent = captureProjectMutation()
     try {
       const updated = await projectApi.archive(id, archived)
       if (!updated) return null
+      if (!isCurrent()) return updated
       projectSnapshot.invalidate()
       set((state) => ({ projects: replaceProject(state.projects, updated), error: null }))
       if (updated.archived && get().currentProjectId === id) get().setCurrentProject(DEFAULT_PROJECT_ID)
       return updated
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) })
+      if (isCurrent()) set({ error: err instanceof Error ? err.message : String(err) })
       return null
     }
   },
 
   reorderProjects: async (orderedIds) => {
+    const isCurrent = captureProjectMutation()
     const previous = get().projects
     projectSnapshot.invalidate()
     const rank = new Map(orderedIds.map((id, index) => [id, index]))
@@ -126,10 +140,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
     try {
       await projectApi.reorder(orderedIds)
+      if (!isCurrent()) return
       projectSnapshot.invalidate()
       set(state => ({ projects: sortProjects(state.projects.map(p => rank.has(p.id) ? { ...p, sort_order: rank.get(p.id)! } : p)) }))
     } catch (err) {
-      set({ projects: previous, error: err instanceof Error ? err.message : String(err) })
+      if (isCurrent()) set({ projects: previous, error: err instanceof Error ? err.message : String(err) })
     }
   }
 }))
@@ -173,6 +188,7 @@ export function initializeProjectDesktopState(): () => void {
   const release = () => {
     if (!active) return
     active = false
+    projectDocumentGeneration++
     releaseProjectListener = undefined
     projectSnapshot.dispose()
     cleanup?.()

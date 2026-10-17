@@ -37,7 +37,7 @@ beforeEach(() => {
       id: `repo-${++seq}`, project_id: projectId, provider: data.provider, org: data.org, name: data.name,
       default_branch: data.default_branch, sort_order: seq, created_at: NOW
     })),
-    update: vi.fn(async () => undefined),
+    update: vi.fn(async (id: string, data: Partial<ProjectRepoRecord>) => ({ id, project_id: 'p', provider: 'github', org: 'acme', name: 'a', default_branch: null, sort_order: 0, created_at: NOW, ...data })),
     remove: vi.fn(async () => true),
     reorder: vi.fn(async () => undefined),
     list: vi.fn(async () => [])
@@ -46,7 +46,7 @@ beforeEach(() => {
     add: vi.fn(async (projectId: string, data: { label: string; url: string | null; notes: string }) => ({
       id: `res-${++seq}`, project_id: projectId, ...data, sort_order: seq, created_at: NOW
     })),
-    update: vi.fn(async () => undefined),
+    update: vi.fn(async (id: string, data: Partial<ProjectResourceRecord>) => ({ id, project_id: 'p', label: 'Synthetic', url: null, notes: '', sort_order: 0, created_at: NOW, ...data })),
     remove: vi.fn(async () => true),
     reorder: vi.fn(async () => undefined),
     list: vi.fn(async () => [])

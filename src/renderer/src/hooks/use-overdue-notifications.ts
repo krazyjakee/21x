@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { captureDesktopRead } from '@/lib/desktop-api'
 import { isOverdue, isDueSoon, isSnoozed } from '@/lib/utils'
 import { notificationApi, onOverdueCheck } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
@@ -19,7 +20,16 @@ export function useOverdueNotifications(tasks: Task[]): void {
   tasksRef.current = tasks
 
   useEffect(() => {
+    let active = true
+    const show = (title: string, body: string) => {
+      if (!active) return
+      const scope = captureDesktopRead()
+      // Notifications are advisory. A refusal is not a reason to replay a task
+      // operation or leave an unhandled native promise in the document.
+      void Promise.resolve().then(() => { if (active && scope.isCurrent()) return notificationApi.show(title, body); return undefined }).catch(() => {})
+    }
     const cleanup = onOverdueCheck(() => {
+      if (!active) return
       const current = tasksRef.current
       const notified = notifiedRef.current
       const snoozeNotified = snoozeNotifiedRef.current
@@ -44,7 +54,7 @@ export function useOverdueNotifications(tasks: Task[]): void {
         // Snooze wake-up: snoozed_until is in the past → task just reappeared
         if (task.snoozed_until && !isSnoozed(task.snoozed_until) && !snoozeNotified.has(task.id)) {
           snoozeNotified.add(task.id)
-          notificationApi.show(notificationTitle('Task Reminder', task), `"${task.title}" is back from snooze`)
+          show(notificationTitle('Task Reminder', task), `"${task.title}" is back from snooze`)
         }
 
         // Skip overdue/due-soon for currently snoozed tasks
@@ -53,14 +63,21 @@ export function useOverdueNotifications(tasks: Task[]): void {
 
         if (isOverdue(task.due_date)) {
           notified.add(task.id)
-          notificationApi.show(notificationTitle('Task Overdue', task), `"${task.title}" is past due`)
+          show(notificationTitle('Task Overdue', task), `"${task.title}" is past due`)
         } else if (isDueSoon(task.due_date)) {
           notified.add(task.id)
-          notificationApi.show(notificationTitle('Task Due Soon', task), `"${task.title}" is due within 24 hours`)
+          show(notificationTitle('Task Due Soon', task), `"${task.title}" is due within 24 hours`)
         }
       }
     })
 
-    return cleanup
+    const release = () => {
+      if (!active) return
+      active = false
+      cleanup?.()
+      window.removeEventListener('pagehide', release)
+    }
+    window.addEventListener('pagehide', release, { once: true })
+    return release
   }, [])
 }

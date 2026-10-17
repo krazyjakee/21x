@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import {
   ArrowDown, ArrowUp, Archive, ArchiveRestore, FolderGit2, Link2, Loader2, Plus, Trash2, Eye, Pencil
 } from 'lucide-react'
@@ -16,6 +16,8 @@ import { useUIStore } from '@/stores/ui-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { useSettingsStore, type GitProvider } from '@/stores/settings-store'
+import { captureDesktopRead } from '@/lib/desktop-api'
+import { ServiceProtocolError } from '@shared/service-protocol'
 import { projectApi, projectLimitsApi } from '@/lib/ipc-client'
 import {
   GIT_PROVIDER_LABELS,
@@ -116,6 +118,30 @@ export function ProjectEditorDialog() {
   const [repoInputProvider, setRepoInputProvider] = useState<GitProviderId>('github')
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
   const [externalRevision, setExternalRevision] = useState(0)
+  const [viewRevision, setViewRevision] = useState(0)
+  const [reviewRequired, setReviewRequired] = useState(false)
+  const [acceptedProjectId, setAcceptedProjectId] = useState<string | null>(null)
+  const lifetime = useRef({ active: true, revision: 0, saving: false })
+  useEffect(() => {
+    const current = lifetime.current
+    current.active = true
+    const retire = () => { current.active = false; current.revision++ }
+    const release = useUIStore.subscribe((next, previous) => {
+      if (next.projectEditorTarget === previous.projectEditorTarget) return
+      current.revision++
+      current.saving = false
+      setViewRevision(value => value + 1)
+    })
+    window.addEventListener('pagehide', retire, { once: true })
+    return () => { retire(); release(); window.removeEventListener('pagehide', retire) }
+  }, [])
+  const captureIntent = () => {
+    const revision = lifetime.current.revision, capturedTarget = target
+    const scope = captureDesktopRead()
+    const isViewCurrent = () => lifetime.current.active && lifetime.current.revision === revision && useUIStore.getState().projectEditorTarget === capturedTarget
+    return { isViewCurrent, isCurrent: () => isViewCurrent() && scope.isCurrent(),
+      assertCurrent() { scope.assertCurrent(); if (!isViewCurrent()) throw new ServiceProtocolError('STALE_EPOCH') } }
+  }
   /** The project's Captain memory file (#55). Read-only here: the Captain writes it. */
   const [memory, setMemory] = useState<CaptainMemory | null>(null)
   /** Which project events wake the Captain (#57): a keyed block of the draft's settings JSON, saved with it. */
@@ -152,16 +178,20 @@ export function ProjectEditorDialog() {
   }, [target])
 
   useEffect(() => projectApi.onChanged((event) => {
-    if (event.projectId !== target) return
-    void useProjectStore.getState().fetchProjects().then(() => {
-      setExternalRevision((revision) => revision + 1)
-    })
+    if (!lifetime.current.active || event.projectId !== target) return
+    // The global project owner refreshes canonical rows. An open editor keeps
+    // its draft; an event is not permission to overwrite unsaved fields.
+    setExternalRevision((revision) => revision + 1)
   }), [target])
 
   // Load the draft each time the editor opens.
   useEffect(() => {
     if (!target) return undefined
     setError(null)
+    setSaving(false)
+    setLoading(false)
+    setReviewRequired(false)
+    setAcceptedProjectId(null)
     setShowPreview(false)
     setRepoInput('')
     void useSettingsStore.getState().fetchSettings()
@@ -174,17 +204,19 @@ export function ProjectEditorDialog() {
     const record = useProjectStore.getState().projects.find((p) => p.id === target)
     if (!record) return undefined
     let cancelled = false
+    const intent = captureIntent()
     setLoading(true)
     Promise.all([projectApi.listRepos(target), projectApi.listResources(target)])
       .then(([repos, resources]) => {
-        if (cancelled) return
+        if (cancelled || !intent.isCurrent()) return
         setDraft(draftFromProject(record, repos, resources))
         setOriginal({ repos, resources })
       })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .catch(() => { if (!cancelled && intent.isViewCurrent()) setError('The project could not be loaded. Close and reopen it to retry.') })
+      .finally(() => { if (!cancelled && intent.isViewCurrent()) setLoading(false) })
     return () => { cancelled = true }
-  }, [target, externalRevision])
+    // Drafts reload on explicit editor replacement, never a canonical event.
+  }, [target, viewRevision])
 
   const effectiveProvider = (draft.git_provider || globalProvider || 'github') as GitProviderId
   const effectiveOrg = draft.git_org ?? globalOrg ?? ''
@@ -240,24 +272,45 @@ export function ProjectEditorDialog() {
   const removeResource = (key: string) => setDraft((d) => ({ ...d, resources: d.resources.filter((r) => r.key !== key) }))
 
   const handleSave = async () => {
+    if (lifetime.current.saving || loading || reviewRequired) return
+    const intent = captureIntent()
+    lifetime.current.saving = true
     setSaving(true)
     setError(null)
     try {
-      const saved = await saveProjectDraft(isNew ? null : project?.id ?? null, draft, original)
-      // A project just created is the one the user wants to work in.
+      const saved = await saveProjectDraft(isNew ? null : project?.id ?? null, draft, original, {
+        assertCurrent: intent.assertCurrent,
+        onProjectAccepted: record => { if (intent.isViewCurrent()) setAcceptedProjectId(record.id) }
+      })
+      intent.assertCurrent()
       if (isNew) setCurrentProject(saved.id)
       close()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+    } catch {
+      if (intent.isViewCurrent()) {
+        setReviewRequired(true)
+        setError('Some changes may have been saved. Reopen the saved project to review its current state before saving again.')
+      }
     } finally {
-      setSaving(false)
+      if (intent.isViewCurrent()) { lifetime.current.saving = false; setSaving(false) }
     }
   }
 
   const handleArchiveToggle = async () => {
-    if (!project) return
-    await archiveProject(project.id, !project.archived)
-    close()
+    if (!project || lifetime.current.saving || reviewRequired) return
+    const intent = captureIntent()
+    lifetime.current.saving = true
+    setSaving(true)
+    try {
+      intent.assertCurrent()
+      const saved = await archiveProject(project.id, !project.archived)
+      intent.assertCurrent()
+      if (!saved) throw new Error('Archive refused')
+      close()
+    } catch {
+      if (intent.isViewCurrent()) { setReviewRequired(true); setError('The project could not be archived. Reopen it to review its current state.') }
+    } finally {
+      if (intent.isViewCurrent()) { lifetime.current.saving = false; setSaving(false) }
+    }
   }
 
   const open = !!target && (isNew || !!project)
@@ -273,6 +326,7 @@ export function ProjectEditorDialog() {
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-8">
+            <fieldset disabled={saving || reviewRequired} className="contents">
             {loading ? (
               <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
                 <Loader2 className="size-icon-sm mr-2 animate-spin" /> Loading project…
@@ -628,17 +682,25 @@ export function ProjectEditorDialog() {
               </>
             )}
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            </fieldset>
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            {reviewRequired && (acceptedProjectId || project?.id) && (
+              <Button variant="outline" onClick={() => {
+                const id = acceptedProjectId || project!.id
+                close()
+                useUIStore.getState().openProjectEditor(id)
+              }}>Reopen saved project</Button>
+            )}
 
             <div className="flex items-center gap-2 border-t border-border pt-4">
               {project && project.id !== DEFAULT_PROJECT_ID && (
-                <Button variant="ghost" size="sm" onClick={handleArchiveToggle}>
+                <Button variant="ghost" size="sm" disabled={saving || loading || reviewRequired} onClick={handleArchiveToggle}>
                   {project.archived ? <><ArchiveRestore className="size-icon-sm" /> Restore</> : <><Archive className="size-icon-sm" /> Archive</>}
                 </Button>
               )}
               <div className="flex-1" />
               <Button variant="ghost" onClick={close}>Cancel</Button>
-              <Button onClick={handleSave} disabled={saving || loading || problems.length > 0} title={problems[0]}>
+              <Button onClick={handleSave} disabled={saving || loading || reviewRequired || problems.length > 0} title={problems[0]}>
                 {saving && <Loader2 className="size-icon-sm animate-spin" />}
                 {isNew ? (draft.repos.length === 0 ? 'Create without repos' : 'Create project') : 'Save'}
               </Button>

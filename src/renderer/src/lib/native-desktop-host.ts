@@ -1,3 +1,4 @@
+import { PROJECT_CONFIGURATION_CODECS } from '@shared/project-configuration-codecs'
 import { NATIVE_ATTACHMENT_IMAGE_CODECS } from '@shared/attachment-image-codecs'
 import { NATIVE_WINDOW_CODECS } from '@shared/native-window-codecs'
 import { NATIVE_ATTACHMENT_PICK_CODECS } from '@shared/native-attachment-pick-codecs'
@@ -43,7 +44,7 @@ import { DesktopClient, type DesktopClientState } from './desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, getTauriUiDocument, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_WINDOW_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_ATTACHMENT_PICK_CODECS, ...NATIVE_ATTACHMENT_IMAGE_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...TRAY_PREFERENCE_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_WINDOW_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_ATTACHMENT_PICK_CODECS, ...NATIVE_ATTACHMENT_IMAGE_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...TRAY_PREFERENCE_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS, ...PROJECT_CONFIGURATION_CODECS }
 const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS,
   ...TASK_FEEDBACK_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
@@ -129,6 +130,7 @@ export const NATIVE_COMMAND_BINDINGS = {
   'mobile:setCustomUrl': 'mobile.setCustomUrl', 'mobile:clearCustomUrl': 'mobile.clearCustomUrl', 'mobile:getPendingPin': 'mobile.getPendingPin', 'mobile:getSessions': 'mobile.getSessions', 'mobile:revokeSession': 'mobile.revokeSession', 'mobile:revokeAllSessions': 'mobile.revokeAllSessions'
 } as const satisfies Record<keyof typeof commands, ApiPath<DesktopApi>>
 export const NATIVE_EVENT_BINDINGS = {
+  'overdue:check': 'onOverdueCheck',
   'agent:incompatible-session': 'onAgentIncompatibleSession',
   'task:checkpointAnswered': 'onTaskCheckpointAnswered',
   'task:source-action-failed': 'onTaskSourceActionFailed',

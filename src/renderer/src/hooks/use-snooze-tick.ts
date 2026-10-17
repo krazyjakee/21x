@@ -25,6 +25,7 @@ export function useSnoozeTick(tasks: Task[]): number {
       timerRef.current = null
     }
 
+    let active = true
     const now = Date.now()
     let nearestExpiry = Infinity
 
@@ -49,25 +50,35 @@ export function useSnoozeTick(tasks: Task[]): number {
       const cappedDelay = Math.min(delayMs, 60 * 60 * 1000)
 
       timerRef.current = setTimeout(() => {
-        setTick((t) => t + 1)
+        if (active) setTick((t) => t + 1)
       }, cappedDelay)
     }
 
-    return () => {
+    const release = () => {
+      active = false
+      window.removeEventListener('pagehide', release)
       if (timerRef.current) {
         clearTimeout(timerRef.current)
         timerRef.current = null
       }
     }
+    window.addEventListener('pagehide', release, { once: true })
+    return release
   }, [tasks])
 
   // Also bump tick on every overdue:check event (every 60s from main process)
   // This ensures snooze state is re-evaluated even if the timer drifts
   useEffect(() => {
-    const cleanup = onOverdueCheck(() => {
-      setTick((t) => t + 1)
-    })
-    return cleanup
+    let active = true
+    const cleanup = onOverdueCheck(() => { if (active) setTick((t) => t + 1) })
+    const release = () => {
+      if (!active) return
+      active = false
+      cleanup?.()
+      window.removeEventListener('pagehide', release)
+    }
+    window.addEventListener('pagehide', release, { once: true })
+    return release
   }, [])
 
   return tick
