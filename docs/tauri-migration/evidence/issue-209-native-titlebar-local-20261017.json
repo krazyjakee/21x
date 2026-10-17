@@ -1,0 +1,239 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T21:52:11.431963+00:00",
+  "baseRevision": "a2a1d63ded03cb7bf34527d74258e43abbc44062",
+  "implementationRevision": "0a3c34f27bfba3fdbdb23b48273d38fdac2800e8",
+  "scope": "Native titlebar renderer hook through published exact current-document RGB contract; hydration/reconnect repaint, listener retirement and refusal handling. Electron color compatibility retained; no native/backend or voice authority added.",
+  "fixture": {
+    "profiles": "Actual React hook/theme store, typed NativeDesktopHost/client/codecs/transport with controlled native invoke/bootstrap and no preload. Controlled CSS token/native refusal fixtures; Electron compatibility bridge controls are separate. No OS WebView/header or Source SQLite in this renderer suite. E2 actual isolated GTK/Wry proof belongs to source28343c43/evidence8c9c2038, not this hook suite.",
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "stagedNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "expectedActual": [
+    {
+      "expected": "Native paints only exact current-document RGB values after successful durable hydration.",
+      "actual": "Two six-digit computed tokens pass the native codec with the private physical-document lease supplied by transport. Initial pending hydration and failed recovery produce no native invocation; successful explicit recovery paints once."
+    },
+    {
+      "expected": "A ready replacement connection repaints current theme without duplicate work or blind retry.",
+      "actual": "Connection observer waits through bootstrap/hydration and sends one paint for the replacement receipt. Duplicate ready notices are deduplicated; refused/unsupported operation does not loop. New theme remains a fresh decoration intent."
+    },
+    {
+      "expected": "Retirement/late results cannot repaint an old document.",
+      "actual": "Pagehide/unmount/effect replacement stop observation and fence queued callbacks. Cleanup is idempotent. Held old result after reconnect is caught without retry; only replacement receipt paints current chrome."
+    },
+    {
+      "expected": "Arbitrary CSS and unavailable authority do not become native control.",
+      "actual": "Five invalid computed token cases refuse before RPC, absent physical receipt refuses in transport, macOS skips this overlay path. No raw CSS selector/window/scheme or preload fallback supplied."
+    },
+    {
+      "expected": "Electron compatibility keeps existing color behavior and catches bridge refusals.",
+      "actual": "Existing Electron CSS contract is preserved; synchronous and asynchronous bridge failures are caught without native connection subscription."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "fullRenderer": {
+      "passed": 1760,
+      "files": 151,
+      "skipped": 0
+    },
+    "stagedRenderer": {
+      "passed": 427,
+      "files": 22,
+      "skipped": 0
+    },
+    "newHookControls": 16,
+    "contractUnitTests": 20,
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "91b2f86e80c1387bd226707ca234110b46cd3a81a253620398838bdd32c68a7a",
+          "bytes": 1123390
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "9a4db62ca937417919de09bda517cec4ec72a48dcd0acc95c7a3155a7f90d119",
+          "bytes": 118146
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "5c1102fa152386d695ca9ee095f18b637a9b95b94ffcf4ca226737a36d937b9b",
+          "bytes": 533
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "3b682c25578c1cf7434b93b46b4f03b3f6229bd97aace8bcb7d3790cafe9cb35",
+          "bytes": 29344
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "a52a74318772122069d86c3a1a0cd0dea386fb2bcf901a9f3d0ab9b542711234",
+          "bytes": 9620
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "56c9cd4b09dad0f8bc9cfc8dcd74afa4225db4590eacb39929b954d74a814ae0",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      }
+    ],
+    "gateScript": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer --maxWorkers=4 > /tmp/ea209-titlebar-renderer.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-titlebar-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-titlebar-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-titlebar-staged.log 2>&1\nrtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts > /tmp/ea209-titlebar-contract-tests.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-titlebar-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-titlebar-production-build.log 2>&1\nrtk proxy git diff --check\n",
+    "diffCheck": {
+      "command": "rtk proxy git diff --check",
+      "exitCode": 0
+    },
+    "commitHooks": "Both source and metadata normal hooks/typecheck passed. Final fetch/rebase reported up-to-date; no source inputs changed after final gate.",
+    "inventory": {
+      "files": 905,
+      "ipcOperations": 736,
+      "existingUnresolved": 9,
+      "directPreloadConsumers": 1,
+      "recognizedDesktopFacadeConsumers": 361,
+      "note": "Captured host.api.app call replaces previous late-bound desktopApi expression, so the recognized facade-expression count decreases by one. This is not removal of the retained titlebar operation; its exact typed mapping remains tested. Inventory regenerated under explicit short B release and final freshness passes."
+    }
+  },
+  "failureRepair": [
+    "Initial malformed CSS fixture used style.setProperty, whose DOM parser sanitized a semicolon suffix before the hook observed it. Fixture now supplies the computed token directly, preserving all five refusal assertions and exercising actual typed native boundary. Final16 controls pass.",
+    "Made effect release idempotent so pagehide then unmount invokes the owned unsubscriber once; queued callback remains fenced.",
+    "Read-only freshness initially reported the expected stale titlebar consumer entry while B held inventory/status. Acquired explicit short release, regenerated combined inventory without changing operation policies, and final inventory/contracts freshness passes.",
+    "One read-only preview command printed summary rather than full inventory; corrected dry preview via exported scanRepository/serializeInventory. No shared file changed by the failed preview."
+  ],
+  "sourceFiles": {
+    "src/renderer/src/hooks/use-title-bar-overlay-theme.ts": {
+      "sha256": "2809742ebf1fa0eb8ca2c59b9ccc1ba5201f287cfc739f33f6755fe4ac76b923",
+      "bytes": 2195
+    },
+    "src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx": {
+      "sha256": "84eaccb2cb02dc458b3f8cbf4b089d3afe65e2224106ff5e44434888eb76bc08",
+      "bytes": 9979
+    },
+    "src/renderer/src/stores/theme-store.ts": {
+      "sha256": "6467dd4f048cff7d9910478747a7852f3ebef94633633b48c412cc45807273a0",
+      "bytes": 2107
+    },
+    "src/renderer/src/lib/native-desktop-host.ts": {
+      "sha256": "91a6b5ba8560d9f3a40a37891f4d8fb4f7c6e3c73856436463b6c7b8150ff5d7",
+      "bytes": 32822
+    },
+    "src/renderer/src/lib/tauri-desktop-transport.ts": {
+      "sha256": "0495c21c4b9da2f5d29a7b5f81573be23d57037f1f4e1db47c43edefa0cc492f",
+      "bytes": 11223
+    },
+    "src/shared/native-window-codecs.ts": {
+      "sha256": "5b51ae9c54e495d1ffe2395d0e3ff110fc06fa2da03a9a3d900b85f0e3971391",
+      "bytes": 1665
+    },
+    "vitest.tauri.config.ts": {
+      "sha256": "c228155a954415dfcfbf9fe447e78cd559ec6ae7214730ca2578a1f2dda9952c",
+      "bytes": 12416
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "66735e52d4a8eb51cfa54ad231d13bdab714a9681654f3211af756d72c676fc5",
+      "bytes": 13176
+    },
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "699c911e37c514d1cac35a3dd17a0da167fb58f43af5519c8c601d37ec6908de",
+      "bytes": 67267
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "50aadcefa1ba7ad29e09f23e227a5e99af340216ca0cd987b0f70d8f5e982f6c",
+      "bytes": 379873
+    }
+  },
+  "buildArtifacts": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "1a91d1bdf588608568c85b91414031f219ce6c4b43477716bf5ddc7b0ac2de2c",
+      "bytes": 856
+    },
+    "out/tauri-production-renderer/assets/main-CtRdOLTv.js": {
+      "sha256": "d91a70e79d4e09e227c00b042afaf8d761d04afeafb2199f302bc5987b6f35e1",
+      "bytes": 1510745
+    },
+    "out/renderer/index.html": {
+      "sha256": "5e6d91f96ceb136ff20d166da8bd34eb71fec244d10bb37ebaaecf707ba71bd2",
+      "bytes": 3101
+    }
+  },
+  "acceptance": {
+    "newWholeCriteriaChecked": [],
+    "issueRemainsOpen": true,
+    "installedLifecycleProof": false
+  },
+  "remainingDefects": [
+    "Installed native theme/window/menu/zoom lifecycle and supported-platform runtime acceptance remain open; controlled renderer tests are not installed proof.",
+    "Native saved-raster preview readImage contract is in progress with E2; raw app-attachment scheme remains unregistered. No Markdown consumer wired before publication.",
+    "Attachment nonordinary mutation/drop/unreferenced-copy reconciliation, general shortcuts/login items and native voice permission/raw stream authority remain domain prerequisites.",
+    "Migration umbrella #202 remains open; Actions/final identity decisions not preempted."
+  ],
+  "hostedVerification": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runList": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "limits": [
+    "Controlled renderer boundary tests do not establish installed native UI, physical window lifetime or real provider behavior.",
+    "No voice authority enabled, no account/live data accessed, no release/cutover/Electron retirement; hosted voice deferred."
+  ],
+  "verificationRevision": "c9963670815e811ed107d7ffe9937b2b62df163e"
+}
