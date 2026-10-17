@@ -609,18 +609,6 @@
       "resolution": "literal"
     },
     {
-      "column": 10,
-      "expression": "desktopApi?.app?.setTitleBarOverlay",
-      "file": "src/renderer/src/hooks/use-title-bar-overlay-theme.ts",
-      "kind": "call",
-      "line": 21,
-      "path": [
-        "app",
-        "setTitleBarOverlay"
-      ],
-      "resolution": "literal"
-    },
-    {
       "column": 12,
       "expression": "desktopApi.ui.publishState",
       "file": "src/renderer/src/hooks/use-ui-remote-control.ts",
@@ -14471,7 +14459,7 @@
     "src/tauri-production"
   ],
   "summary": {
-    "desktopAPIConsumers": 362,
+    "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
     "files": 905,
     "operations": 736,
