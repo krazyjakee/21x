@@ -6,6 +6,9 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+#209 skill/secret metadata continuation uses bounded coalesced list snapshots, accepted-receipt invalidation and same-ID create deduplication. Only the captured document/connection publishes writes/errors; demanded metadata caches join strict read-only native recovery, while unused caches issue no reads. One document-owned exact `skills:changed` subscription replaces the sidebar-only listener and serves task/agent selectors, preserving Source old/new project-scope filtering. Twenty actual typed-native controls plus fifteen existing skill controls cover list/receipt/event races, first-write demand, bounded invalidation, both failure barriers and retirement/replacement. No credential values, OAuth/probe/sync, Source/native/grant change or mutation replay; [renderer recovery](production-renderer-recovery.md) records scope. Source `cf260669`; full renderer1820/153files, staged583/31files and21contract controls pass; rebase159app/159staged, forced typecheck, lint0/165existingwarnings, both frontend builds and combined inventory914/contracts pass. [Revision-bound evidence](evidence/issue-209-renderer-metadata-local-20261018.json) records failure repairs and proof limits. Installed native UI/credential/platform acceptance remains open; hosted Verify unavailable: repository Actions disabled, awaiting user decision.
+
+
 The #210 production project continuation accepts the existing full editor fields
 through a separate bounded codec and the actual SQLite/AgentManager owners.
 Captain edits join exact teardown before changing selection, preserve audited
