@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { fork, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { VoiceTtsWorkerClient, type VoiceTtsChunk, type VoiceTtsWorkerHost } from './voice-tts-worker-client'
@@ -428,6 +428,30 @@ describe('portable speech worker native receipt ownership', () => {
     expect(() => worker.load({ engine: 'system' })).toThrow('VOICE_TTS_WORKER_CLOSED'); expect(spawn).toHaveBeenCalledOnce()
     const joined = worker.close(); child.finish(); await joined; expect(worker.inflightCount).toBe(0)
   })
+  it('rejects stale same-ID replies and noncanonical, out-of-order or oversized portable PCM', async () => {
+    const child = new HeldChild()
+    const worker = new VoiceTtsWorkerClient({ scriptPath: SCRIPT, execPath: process.execPath, env: {}, fork: () => child as unknown as ChildProcess,
+      assertCurrent() {}, assertRuntimeModule() {}, assertModel() {} })
+    const chunks: VoiceTtsChunk[] = [], done: string[] = [], errors: string[] = []
+    worker.on('error', message => errors.push(message)); worker.on('chunk', value => chunks.push(value)); worker.on('done', id => done.push(id))
+    worker.load({ engine: 'system' }); child.emit('message', { t: 'status', state: 'ready' })
+    const speech = { speechId: 'reused', sentences: ['Synthetic'], speakerId: 0, speed: 1 }
+    worker.speak(speech); worker.speak(speech)
+    const epochs = child.send.mock.calls.map(call => call[0]).filter((value): value is {t:string;requestEpoch:number} => (value as {t:string}).t === 'speak').map(value => value.requestEpoch)
+    expect(epochs).toEqual([1, 2])
+    const chunk = { t: 'chunk', speechId: 'reused', requestEpoch: 1, index: 0, sampleRate: 24000, text: 'First.', pcm: 'AAA=' }
+    child.emit('message', chunk); child.emit('message', { t: 'done', speechId: 'reused', requestEpoch: 1 })
+    child.emit('message', { ...chunk, requestEpoch: 2 })
+    expect(chunks).toHaveLength(1); expect(done).toEqual([])
+    child.emit('message', { ...chunk, requestEpoch: 2, index: 1, pcm: 'AAB=' })
+    expect(chunks).toHaveLength(1); expect(errors).toEqual(['The speech worker returned invalid audio.'])
+    worker.speak(speech)
+    child.emit('message', { ...chunk, requestEpoch: 3, pcm: Buffer.alloc(128 * 1024 + 2).toString('base64') })
+    expect(chunks).toHaveLength(1); expect(errors).toHaveLength(2)
+    worker.speak(speech); child.emit('message', { ...chunk, requestEpoch: 4, index: 2 })
+    expect(chunks).toHaveLength(1); expect(errors).toHaveLength(3)
+    const close = worker.close(); child.finish(); await close
+  })
   it('keeps reusable stop pending and starts a requested replacement only after the prior raw close', async () => {
     const children: HeldChild[] = []
     const worker = new VoiceTtsWorkerClient({ scriptPath: SCRIPT, execPath: process.execPath, env: {}, fork: () => { const child = new HeldChild(); children.push(child); return child as unknown as ChildProcess }, assertCurrent() {}, assertRuntimeModule() { throw new Error('No runtime') }, assertModel() { throw new Error('No model') } })
@@ -444,4 +468,88 @@ describe('portable speech worker native receipt ownership', () => {
     try { const loading = ready(worker); worker.load({ engine: 'local', model: MODEL }); expect((await loading).state).toBe('ready'); const speech = await speakAndCollect(worker, 'portable-owned', ['Synthetic speech.']); expect(speech.chunks.length).toBeGreaterThan(0); expect(speech.chunks.every(chunk => chunk.pcm.length > 0)).toBe(true) }
     finally { await worker.close() }
   }, 20000)
+})
+
+
+describe.skipIf(process.platform !== 'linux' || Boolean(process.versions.electron))('bundled Node system voice raw ownership', () => {
+  let root = '', worker: VoiceTtsWorkerClient | undefined, unrelated: ChildProcess | undefined
+  const fixturePids = new Set<number>()
+  afterEach(async () => {
+    await worker?.close(); worker = undefined
+    if (unrelated) { const closed = new Promise<void>(resolve => unrelated!.once('close', () => resolve())); unrelated.kill('SIGKILL'); await closed; unrelated = undefined }
+    // Failure cleanup is restricted to a synthetic executable in this profile.
+    for (const pid of fixturePids) {
+      try { if (readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(root + '/espeak-ng')) process.kill(pid, 'SIGKILL') } catch { /* already joined */ }
+    }
+    fixturePids.clear()
+    if (root) rmSync(root, { recursive: true, force: true })
+  })
+  function setupSystem() {
+    root = mkdtempSync(join(tmpdir(), '21x-synthetic-system-voice-'))
+    const executable = join(root, 'espeak-ng')
+    // Never invokes the installed voice or an audio device. Silence/pattern PCM
+    // exercises the real execFile/WAV/IPC paths through an isolated PATH.
+    writeFileSync(executable, `#!${process.execPath}
+const fs = require('node:fs'); const path = require('node:path');
+const args = process.argv.slice(2), text = fs.readFileSync(args[args.indexOf('-f')+1], 'utf8');
+const receipt = path.join(${JSON.stringify(root)}, text === 'hold' ? 'held.json' : 'render.json');
+if (text === 'hold') process.on('SIGTERM', () => {});
+fs.writeFileSync(receipt, JSON.stringify({pid:process.pid,text,args}));
+if (text === 'hold') setInterval(() => {}, 1000);
+else {
+ const pcm = Buffer.alloc(256*1024+8); for(let i=0;i<pcm.length;i++) pcm[i]=i%251;
+ const wav = Buffer.alloc(44+pcm.length); wav.write('RIFF'); wav.writeUInt32LE(wav.length-8,4); wav.write('WAVEfmt ',8); wav.writeUInt32LE(16,16); wav.writeUInt16LE(1,20); wav.writeUInt16LE(1,22); wav.writeUInt32LE(24000,24); wav.writeUInt32LE(48000,28); wav.writeUInt16LE(2,32); wav.writeUInt16LE(16,34); wav.write('data',36); wav.writeUInt32LE(pcm.length,40); pcm.copy(wav,44); fs.writeFileSync(args[args.indexOf('-w')+1],wav);
+}
+`)
+    chmodSync(executable, 0o700)
+    worker = new VoiceTtsWorkerClient({ scriptPath: SCRIPT, execPath: process.execPath, env: { PATH: root, TMPDIR: root }, fork,
+      assertCurrent() {}, assertRuntimeModule() { throw new Error('No downloaded runtime') }, assertModel() { throw new Error('No downloaded model') } })
+    worker.on('error', () => {})
+    return worker
+  }
+  async function heldPid(): Promise<number> {
+    await vi.waitFor(() => expect(existsSync(join(root, 'held.json'))).toBe(true), {timeout:5000})
+    const pid = JSON.parse(readFileSync(join(root, 'held.json'), 'utf8')).pid as number
+    fixturePids.add(pid); return pid
+  }
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
+  async function loadSystem(w: VoiceTtsWorkerClient) { const loaded = ready(w); w.load({ engine: 'system' }); expect((await loaded).state).toBe('ready') }
+  it('fragments real command WAV output without losing bytes, ordering or first-fragment text', async () => {
+    const w = setupSystem(); await loadSystem(w)
+    const result = await speakAndCollect(w, 'fragmented', ['synthetic sentence'])
+    expect(result.chunks.map(chunk => chunk.index)).toEqual([0,1,2])
+    expect(result.chunks.map(chunk => chunk.pcm.length)).toEqual([128*1024,128*1024,8])
+    expect(result.chunks.map(chunk => chunk.text)).toEqual(['synthetic sentence','',''])
+    const expected = Buffer.alloc(256*1024+8); for(let i=0;i<expected.length;i++) expected[i]=i%251
+    expect(Buffer.concat(result.chunks.map(chunk => chunk.pcm))).toEqual(expected)
+    expect(result.chunks.every(chunk => chunk.sampleRate === 24000)).toBe(true)
+  })
+  it('joins a TERM-refusing command before cancellation receipt and replacement with the same speech ID', async () => {
+    const w = setupSystem(); await loadSystem(w)
+    w.speak({speechId:'same-id',sentences:['hold'],speakerId:0,speed:1}); const pid = await heldPid()
+    const done: string[] = []; w.on('done', id => done.push(id))
+    w.speak({speechId:'same-id',sentences:[],open:true,speakerId:0,speed:1})
+    await vi.waitFor(() => expect(alive(pid)).toBe(false), {timeout:5000})
+    // The retired request's cancelled done must not finish the new open one.
+    expect(done).toEqual([])
+    const completed = new Promise<void>(resolve => w.once('done', () => resolve()))
+    w.finish('same-id'); await completed; expect(done).toEqual(['same-id'])
+  })
+  it('keeps shutdown pending through a TERM-refusing descendant and preserves an unrelated process', async () => {
+    const w = setupSystem(); await loadSystem(w)
+    const otherScript = join(root, 'unrelated.js'); writeFileSync(otherScript, 'setInterval(() => {},1000)')
+    unrelated = fork(otherScript, [], {execPath:process.execPath,execArgv:[],env:{},stdio:['ignore','ignore','ignore','ipc']})
+    w.speak({speechId:'shutdown',sentences:['hold'],speakerId:0,speed:1}); const pid = await heldPid()
+    await expect(w.close(10)).rejects.toThrow('VOICE_TTS_WORKER_SHUTDOWN_INCOMPLETE')
+    expect(w.inflightCount).toBe(1); expect(alive(pid)).toBe(true)
+    await w.close(3000); expect(w.inflightCount).toBe(0); expect(alive(pid)).toBe(false)
+    expect(alive(unrelated.pid!)).toBe(true)
+    expect(existsSync(JSON.parse(readFileSync(join(root,'held.json'),'utf8')).args.find((value:string) => value.endsWith('text.txt')))).toBe(false)
+  })
+  it('does not acknowledge cancellation while its owned raw command remains alive', async () => {
+    const w = setupSystem(); await loadSystem(w)
+    w.speak({speechId:'cancel',sentences:['hold'],speakerId:0,speed:1}); const pid = await heldPid()
+    const finished = new Promise<void>(resolve => w.once('done', (_id:string,cancelled:boolean) => { expect(cancelled).toBe(true); expect(alive(pid)).toBe(false); resolve() }))
+    w.cancel('cancel'); await finished
+  })
 })

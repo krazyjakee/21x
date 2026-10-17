@@ -8,7 +8,7 @@
  * Protocol
  *   control : Node IPC channel, one JSON object per message
  *   audio   : the same IPC channel, base64 signed 16-bit little-endian PCM,
- *             one message per sentence
+ *             bounded fragments of at most 128 KiB
  *
  * Main to worker : load | speak | append | finish | cancel | unload | ping
  * Worker to main : status | chunk | done | error | pong
@@ -45,7 +45,7 @@
 'use strict'
 
 const { execFile } = require('child_process')
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require('fs')
+const { constants, closeSync, fstatSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } = require('fs')
 const { join } = require('path')
 const { tmpdir } = require('os')
 
@@ -58,7 +58,11 @@ let engineKind = null
 let tts = null
 let loaded = null
 let currentSpeech = null
-let child = null
+// Each receipt joins both execFile's buffered callback and native close.
+// Signalling a child never releases its handle or its private temporary files.
+const systemChildren = new Set()
+const MAX_PCM_CHUNK_BYTES = 128 * 1024
+let closing = false
 
 /**
  * Sends one control message.
@@ -69,15 +73,15 @@ let child = null
  * after the last one had been produced — playback would start at the end.
  */
 function send(message, onFlushed) {
-  if (!process.send) {
+  if (!process.send || !process.connected) {
     if (onFlushed) onFlushed()
     return
   }
-  process.send(message, undefined, undefined, onFlushed)
+  try { process.send(message, undefined, undefined, onFlushed) } catch { if (onFlushed) onFlushed() }
 }
 
-function fail(code, message, speechId) {
-  send({ t: 'error', code, message, speechId })
+function fail(code, message, speechId, requestEpoch) {
+  send({ t: 'error', code, message, speechId, requestEpoch })
 }
 
 // ── Loading ─────────────────────────────────────────────────
@@ -174,17 +178,18 @@ const handlers = {
   },
 
   speak(message) {
-    if (!loaded) return fail('not_ready', 'No voice is loaded.', message.speechId)
+    if (!loaded) return fail('not_ready', 'No voice is loaded.', message.speechId, message.requestEpoch)
     if (currentSpeech) handlers.cancel({ speechId: currentSpeech.speechId })
     const sentences = Array.isArray(message.sentences) ? message.sentences.filter(Boolean) : []
     // A streaming passage opens with nothing in it and is filled as the answer
     // is written, so only a closed passage with no words is already finished.
     if (sentences.length === 0 && !message.open) {
-      send({ t: 'done', speechId: message.speechId, chunks: 0, elapsedMs: 0 })
+      send({ t: 'done', speechId: message.speechId, requestEpoch: message.requestEpoch, chunks: 0, elapsedMs: 0 })
       return
     }
     currentSpeech = {
       speechId: message.speechId,
+      requestEpoch: message.requestEpoch,
       sentences,
       index: 0,
       chunks: 0,
@@ -202,7 +207,7 @@ const handlers = {
   /** More sentences for the passage that is already being read. */
   append(message) {
     const speech = currentSpeech
-    if (!speech || speech.speechId !== message.speechId) return
+    if (!speech || speech.speechId !== message.speechId || message.requestEpoch !== speech.requestEpoch) return
     const sentences = Array.isArray(message.sentences) ? message.sentences.filter(Boolean) : []
     if (sentences.length === 0) return
     speech.sentences.push(...sentences)
@@ -213,7 +218,7 @@ const handlers = {
   /** No more sentences are coming. The passage ends when it runs dry. */
   finish(message) {
     const speech = currentSpeech
-    if (!speech || speech.speechId !== message.speechId) return
+    if (!speech || speech.speechId !== message.speechId || message.requestEpoch !== speech.requestEpoch) return
     speech.open = false
     if (!speech.running) step()
   },
@@ -221,11 +226,13 @@ const handlers = {
   cancel(message) {
     const id = message && message.speechId
     if (!currentSpeech) return
-    if (id && id !== currentSpeech.speechId) return
-    const speechId = currentSpeech.speechId
+    if (id && id !== currentSpeech.speechId || message.requestEpoch !== undefined && message.requestEpoch !== currentSpeech.requestEpoch) return
+    const speech = currentSpeech
     currentSpeech = null
-    killChild()
-    send({ t: 'done', speechId, chunks: 0, elapsedMs: 0, cancelled: true })
+    // The terminal receipt follows actual descendant close, not kill intent.
+    void retireSystemChildren().then(() => {
+      send({ t: 'done', speechId: speech.speechId, requestEpoch: speech.requestEpoch, chunks: 0, elapsedMs: 0, cancelled: true })
+    })
   },
 
   unload() {
@@ -241,12 +248,13 @@ const handlers = {
 }
 
 process.on('message', (message) => {
+  if (closing) return
   const handler = handlers[message && message.t]
   if (!handler) return
   try {
     handler(message)
   } catch (err) {
-    fail('handler_failed', String((err && err.message) || err), message && message.speechId)
+    fail('handler_failed', String((err && err.message) || err), message && message.speechId, message && message.requestEpoch)
   }
 })
 
@@ -271,6 +279,7 @@ function step() {
     send({
       t: 'done',
       speechId: speech.speechId,
+      requestEpoch: speech.requestEpoch,
       chunks: speech.chunks,
       elapsedMs: Date.now() - speech.startedAt,
     })
@@ -283,30 +292,27 @@ function step() {
 
   synthesize(speech, sentence)
     .then((audio) => {
-      // The passage may have been cancelled while this sentence was produced.
-      if (!currentSpeech || currentSpeech.speechId !== speech.speechId) return
-      if (audio && audio.pcm.length > 0) {
-        speech.chunks += 1
-        send(
-          {
-            t: 'chunk',
-            speechId: speech.speechId,
-            index: speech.chunks - 1,
-            sampleRate: audio.sampleRate,
-            text: sentence,
-            pcm: audio.pcm.toString('base64'),
-          },
-          // Only start the next sentence once this one has left the process.
-          () => setImmediate(step)
-        )
-        return
+      // Object identity fences replacements even if a caller reuses speechId.
+      if (currentSpeech !== speech || closing) return
+      if (!audio || !audio.pcm.length) { setImmediate(() => { if (currentSpeech === speech) step() }); return }
+      if (audio.pcm.length % 2 || !Number.isInteger(audio.sampleRate) || audio.sampleRate < 8000 || audio.sampleRate > 48000) throw new Error('Invalid speech PCM format.')
+      let offset = 0
+      const fragment = () => {
+        if (currentSpeech !== speech || closing) return
+        const end = Math.min(offset + MAX_PCM_CHUNK_BYTES, audio.pcm.length)
+        const text = offset === 0 ? sentence : ''
+        const pcm = audio.pcm.subarray(offset, end).toString('base64')
+        offset = end
+        send({ t: 'chunk', speechId: speech.speechId, requestEpoch: speech.requestEpoch,
+          index: speech.chunks++, sampleRate: audio.sampleRate, text, pcm },
+        () => setImmediate(() => { if (currentSpeech === speech) { if (offset < audio.pcm.length) fragment(); else step() } }))
       }
-      setImmediate(step)
+      fragment()
     })
     .catch((err) => {
-      if (!currentSpeech || currentSpeech.speechId !== speech.speechId) return
+      if (currentSpeech !== speech || closing) return
       currentSpeech = null
-      fail('synthesis_failed', String((err && err.message) || err), speech.speechId)
+      fail('synthesis_failed', String((err && err.message) || err), speech.speechId, speech.requestEpoch)
     })
 }
 
@@ -361,7 +367,10 @@ function systemCommand() {
  * is never interpolated into a shell string, so an answer that contains quotes,
  * newlines or shell characters cannot change the command that runs.
  */
-function synthesizeSystem(speech, sentence) {
+async function synthesizeSystem(speech, sentence) {
+  // A replacement cannot outrun retirement of the previous owned command.
+  await Promise.all([...systemChildren].map(receipt => receipt.closed))
+  if (closing || currentSpeech !== speech) return null
   const command = systemCommand()
   if (!command) return Promise.reject(new Error('This system has no voice that 21x can use.'))
 
@@ -386,19 +395,29 @@ function synthesizeSystem(speech, sentence) {
     args = ['-NoProfile', '-NonInteractive', '-Command', windowsScript(textPath, wavPath, speech)]
   }
 
-  return new Promise((resolve, reject) => {
-    child = execFile(file, args, { timeout: SENTENCE_TIMEOUT_MS, windowsHide: true }, (err) => {
-      child = null
-      try {
-        if (err) throw new Error(describeSystemFailure(command.kind, err))
-        resolve(readWavAsPcm16(wavPath))
-      } catch (readError) {
-        reject(readError)
-      } finally {
-        rmSync(dir, { recursive: true, force: true })
-      }
-    })
+  let callbackDone, nativeDone, failure
+  const callback = new Promise(resolve => { callbackDone = resolve })
+  const nativeClose = new Promise(resolve => { nativeDone = resolve })
+  const receipt = { child: null, closed: null, timer: null, exited: false, terminating: false }
+  receipt.child = execFile(file, args, { timeout: SENTENCE_TIMEOUT_MS, windowsHide: true }, err => {
+    failure = err
+    callbackDone()
   })
+  receipt.child.once('close', () => { receipt.exited = true; clearTimeout(receipt.timer); nativeDone() })
+  receipt.child.once('exit', () => { receipt.exited = true; clearTimeout(receipt.timer) })
+  receipt.closed = Promise.all([callback, nativeClose]).then(() => {})
+  systemChildren.add(receipt)
+  // execFile's timeout only sends TERM; retain and escalate the exact handle.
+  receipt.timer = setTimeout(() => terminateSystemChild(receipt), SENTENCE_TIMEOUT_MS)
+  try {
+    await receipt.closed
+    if (failure) throw new Error(describeSystemFailure(command.kind, failure))
+    return readWavAsPcm16(wavPath)
+  } finally {
+    clearTimeout(receipt.timer)
+    systemChildren.delete(receipt)
+    rmSync(dir, { recursive: true, force: true })
+  }
 }
 
 /**
@@ -433,15 +452,28 @@ function describeSystemFailure(kind, err) {
   return String(err.message || err)
 }
 
-function killChild() {
-  if (!child) return
-  try {
-    child.kill()
-  } catch {
-    /* the process had already finished */
-  }
-  child = null
+function terminateSystemChild(receipt) {
+  if (receipt.exited || receipt.terminating) return
+  receipt.terminating = true
+  clearTimeout(receipt.timer)
+  try { receipt.child.kill('SIGTERM') } catch { /* retain receipt until close */ }
+  receipt.timer = setTimeout(() => {
+    if (!receipt.exited) { try { receipt.child.kill('SIGKILL') } catch { /* retain receipt */ } }
+  }, 200)
 }
+function retireSystemChildren() {
+  const receipts = [...systemChildren]
+  for (const receipt of receipts) terminateSystemChild(receipt)
+  return Promise.all(receipts.map(receipt => receipt.closed)).then(() => {})
+}
+function shutdown(code = 0) {
+  if (closing) return
+  closing = true
+  currentSpeech = null
+  void retireSystemChildren().then(() => process.exit(code))
+}
+process.on('SIGTERM', () => shutdown())
+process.on('disconnect', () => shutdown())
 
 // ── WAV ─────────────────────────────────────────────────────
 
@@ -452,22 +484,31 @@ function killChild() {
  * chunk between `fmt ` and `data`, so a fixed 44-byte header would read noise.
  */
 function readWavAsPcm16(path) {
-  const data = readFileSync(path)
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+  let data
+  try {
+    const stat = fstatSync(fd)
+    if (!stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error('The system voice sound file is too large or invalid.')
+    data = readFileSync(fd)
+    if (data.length > 8 * 1024 * 1024) throw new Error('The system voice sound file is too large.')
+  } finally { closeSync(fd) }
   if (data.length < 12 || data.toString('ascii', 0, 4) !== 'RIFF' || data.toString('ascii', 8, 12) !== 'WAVE') {
     throw new Error('The system voice did not produce a readable sound file.')
   }
   let offset = 12
-  let channels = 1
-  let sampleRate = 24000
-  let bits = 16
+  let channels = 0
+  let sampleRate = 0
+  let bits = 0
   while (offset + 8 <= data.length) {
     const id = data.toString('ascii', offset, offset + 4)
     const size = data.readUInt32LE(offset + 4)
     const body = offset + 8
-    if (id === 'fmt ' && body + 16 <= data.length) {
-      channels = data.readUInt16LE(body + 2) || 1
-      sampleRate = data.readUInt32LE(body + 4) || 24000
-      bits = data.readUInt16LE(body + 14) || 16
+    if (body + size > data.length) throw new Error('The system voice produced truncated audio.')
+    if (id === 'fmt ' && size >= 16) {
+      if (data.readUInt16LE(body) !== 1) throw new Error('The system voice did not produce PCM audio.')
+      channels = data.readUInt16LE(body + 2)
+      sampleRate = data.readUInt32LE(body + 4)
+      bits = data.readUInt16LE(body + 14)
     } else if (id === 'data') {
       const end = Math.min(data.length, body + size)
       return { pcm: toMonoPcm16(data.subarray(body, end), channels, bits), sampleRate }
@@ -479,6 +520,7 @@ function readWavAsPcm16(path) {
 
 function toMonoPcm16(body, channels, bits) {
   if (bits !== 16) throw new Error(`The system voice produced ${bits}-bit audio, which 21x cannot read.`)
+  if (!channels || channels > 8 || body.length % (2 * channels)) throw new Error('The system voice produced incomplete PCM frames.')
   if (channels === 1) return Buffer.from(body)
   const frames = Math.floor(body.length / (2 * channels))
   const out = Buffer.alloc(frames * 2)
@@ -492,5 +534,5 @@ function toMonoPcm16(body, channels, bits) {
 
 process.on('uncaughtException', (err) => {
   fail('worker_crashed', String((err && err.message) || err))
-  process.exit(1)
+  shutdown(1)
 })

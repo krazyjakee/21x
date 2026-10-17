@@ -25,6 +25,27 @@ child close, including spawn errors. Unavailable enumeration launches no
 executable. A public shutdown deadline reports incomplete cleanup and retains
 the raw owner for a later join; it does not establish that the child exited.
 
+The synthesis worker now also retains every system-voice command until both
+its `execFile` callback and native close finish. Cancellation synchronously
+fences the passage, signals only those captured handles, and escalates an
+unresponsive child after 200 ms. Its cancelled terminal receipt follows raw
+close. TERM and IPC disconnect fence new worker commands and join descendants
+before worker exit; replacement synthesis waits for earlier command retirement.
+This repairs the previous path which discarded a child after signalling it.
+It does not establish process-tree cleanup after uncatchable worker SIGKILL.
+
+Private worker IPC carries a monotonically increasing request epoch in addition
+to speech ID. Delayed chunks, errors or completion from an earlier same-ID
+request cannot retire its replacement. The portable client validates canonical
+PCM, exact chunk order, sample rate and text bounds before emitting audio.
+The worker sends at most 128 KiB decoded PCM per fragment, with monotonic indexes
+and sentence text on its first fragment. System WAV reads require bounded
+regular no-follow files, PCM encoding and complete frames; malformed rate or
+odd-length audio is refused. Synthetic Linux regressions exercise the real
+Node worker, `execFile`, WAV conversion and IPC; they invoke a private fixture
+executable, never the installed voice or audio device. See the optional
+[private voice authority contract](voice-native-authority.md).
+
 The model host supplies a trusted absolute root, download permission,
 current-owner checks, and authorization for every request. Portable installs
 use the fixed manifest, HTTPS publisher allowlist, at most four redirects,

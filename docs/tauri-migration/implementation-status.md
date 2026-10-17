@@ -6,6 +6,25 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #218 local voice continuation repairs actual synthesis-worker ownership:
+system voice commands remain captured through buffered callback and native
+close; cancellation, worker TERM and IPC disconnect join owned descendants,
+including TERM refusal. Private request epochs prevent late same-speech-ID
+messages from completing a replacement. PCM is emitted in ordered fragments of
+at most 128 KiB with strict portable bounds. A finite optional Source voice lease
+SDK adds exact turn/speech pairs, raw cleanup retention/retry, canonical audio
+budgets and a real fragmented-peer revocation regression. The SDK is not wired
+as a production capability: native microphone/capture/playback/shortcuts remain
+unavailable pending #215 physical-document permission and raw stream-revocation
+proof. Existing management controls remain governed by optional-runtime policy;
+no voice action writer or hosted provider is enabled. Linux evidence uses only
+synthetic audio and private fixture executables. Actual inference, hard-crash
+process trees, production scoped actions, custom directory/native selection and
+installed supported platforms remain open. Hosted Verify unavailable: repository
+Actions disabled, awaiting user decision. See
+[private voice authority](voice-native-authority.md) and
+[speech ownership](voice-speech-owner.md).
+
 #209 native attachment UI continuation: ordinary task/draft picker imports use E2’s published private one-shot selection contract with unchanged typed signatures. Native saves are sequential, explicit metadata append preserves accepted partial receipts, and failures/withdrawn intent/task replacement do not replay writes or target a replacement task. DOM drops stay non-authoritative and show chooser guidance. Nonordinary group/Captain file pickers are absent because no supported metadata mutation exists; saved reads remain, atomic chat images unchanged. Twenty-one actual typed-native attachment UI controls and two native browser-retirement controls pass, retaining four existing retirement controls. Full renderer1714/150files and staged341/19files baseline pass; final late-feedback delta73app/73staged, forced raw typecheck, lint0/165existingwarnings, both frontends and inventory900/736IPC/contracts pass. [Revision-bound evidence](evidence/issue-209-native-attachment-ui-local-20261017.json) records exact scope and failure repairs. Existing retirement source policy keeps saved browser/webpage records inert and new creation/control paths absent. No installed GUI/platform claim or #202 scope change.
 
 The #215/#214 attachment continuation adds a Linux GTK picker whose private

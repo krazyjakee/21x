@@ -6,6 +6,7 @@
  * running, and voice must simply go quiet.
  */
 
+import { voicePcmByteLength } from '../../shared/voice-native-callbacks'
 import { nodeWorkerRuntime } from '../node-worker-runtime'
 import { fork, type ChildProcess, type ForkOptions } from 'child_process'
 import { EventEmitter } from 'events'
@@ -53,6 +54,7 @@ interface WorkerMessage {
   message?: string
   code?: string
   speechId?: string
+  requestEpoch?: number
   index?: number
   text?: string
   pcm?: string
@@ -117,6 +119,9 @@ export class VoiceTtsWorkerClient extends EventEmitter {
    * that child was synthesising without guessing in the speech service.
    */
   private childSpeechId: string | null = null
+  private requestEpoch = 0
+  private childRequestEpoch = 0
+  private nextChunk = 0
   private readonly receipts = new Set<WorkerReceipt>()
   private pendingLoad: VoiceTtsLoadRequest | null = null
   private closing = false
@@ -211,8 +216,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
     this.clearIdleTimer()
 
     if (this.isLoaded) {
-      this.childSpeechId = request.speechId
-      this.send({ t: 'speak', ...request })
+      this.startSpeech(request)
       return
     }
 
@@ -237,7 +241,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
       this.pendingAppends.push(...sentences)
       return
     }
-    this.send({ t: 'append', speechId, sentences })
+    if (this.childSpeechId === speechId) this.send({ t: 'append', speechId, sentences, requestEpoch: this.childRequestEpoch })
   }
 
   /** Closes an open passage. It ends once the queued sentences are read. */
@@ -247,11 +251,14 @@ export class VoiceTtsWorkerClient extends EventEmitter {
       this.pendingFinish = true
       return
     }
-    this.send({ t: 'finish', speechId })
+    if (this.childSpeechId === speechId) this.send({ t: 'finish', speechId, requestEpoch: this.childRequestEpoch })
   }
 
   cancel(speechId?: string): void {
-    this.send({ t: 'cancel', speechId })
+    if (!speechId || this.pendingSpeak?.speechId === speechId) {
+      this.pendingSpeak = null; this.pendingAppends = []; this.pendingFinish = false; this.clearReloadTimeout()
+    }
+    if (!speechId || this.childSpeechId === speechId) this.send({ t: 'cancel', speechId, requestEpoch: this.childRequestEpoch })
     this.scheduleIdleUnload()
   }
 
@@ -374,6 +381,10 @@ export class VoiceTtsWorkerClient extends EventEmitter {
   }
 
   private onMessage(message: WorkerMessage): void {
+    // Passage messages must belong to this request, even if speechId is reused.
+    // The string-constructor compatibility lane still accepts old test peers.
+    if (['chunk', 'done', 'error'].includes(message.t) && message.speechId
+      && (message.speechId !== this.childSpeechId || (this.host || message.requestEpoch !== undefined) && message.requestEpoch !== this.childRequestEpoch)) return
     switch (message.t) {
       case 'status':
         if (message.state === 'ready') {
@@ -404,6 +415,16 @@ export class VoiceTtsWorkerClient extends EventEmitter {
         return
       case 'chunk':
         if (!message.speechId || !message.pcm) return
+        if (this.host && (voicePcmByteLength(message.pcm, 128 * 1024) === null
+          || !Number.isInteger(message.sampleRate) || message.sampleRate! < 8000 || message.sampleRate! > 48000
+          || message.index !== this.nextChunk || typeof message.text !== 'string' || Buffer.byteLength(message.text) > 65536)) {
+          const speechId = this.childSpeechId
+          this.cancel(speechId ?? undefined)
+          this.childSpeechId = null
+          this.emit('error', 'The speech worker returned invalid audio.', speechId ?? undefined)
+          return
+        }
+        this.nextChunk++
         this.emit('chunk', {
           speechId: message.speechId,
           index: message.index ?? 0,
@@ -420,7 +441,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
         return
       case 'error':
         if (message.speechId && this.childSpeechId === message.speechId) this.childSpeechId = null
-        this.emit('error', message.message ?? 'Speech synthesis failed.', message.speechId)
+        this.emit('error', this.host ? 'Speech synthesis failed.' : message.message ?? 'Speech synthesis failed.', message.speechId)
         return
       default:
         return
@@ -438,10 +459,17 @@ export class VoiceTtsWorkerClient extends EventEmitter {
     this.pendingFinish = false
     this.clearReloadTimeout()
 
-    this.childSpeechId = pending.speechId
-    this.send({ t: 'speak', ...pending })
-    if (appends.length > 0) this.send({ t: 'append', speechId: pending.speechId, sentences: appends })
-    if (finish) this.send({ t: 'finish', speechId: pending.speechId })
+    this.startSpeech(pending)
+    if (appends.length > 0) this.append(pending.speechId, appends)
+    if (finish) this.finish(pending.speechId)
+  }
+
+  private startSpeech(request: VoiceTtsSpeakRequest): void {
+    if (!Number.isSafeInteger(this.requestEpoch + 1)) throw new Error('VOICE_TTS_REQUEST_LIMIT')
+    this.childSpeechId = request.speechId
+    this.childRequestEpoch = ++this.requestEpoch
+    this.nextChunk = 0
+    this.send({ t: 'speak', ...request, requestEpoch: this.childRequestEpoch })
   }
 
   /**
