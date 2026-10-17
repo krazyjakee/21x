@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T20:45:55.047646+00:00",
+  "baseRevision": "fc3cfc63e66d98f954dea9fd9999db45381a0cd9",
+  "implementationRevision": "f3f6563eda2705bd70938b31e6324d02973a1526",
+  "scope": "Supported native general preferences, inert unsupported updater, and typed agent freshness/reconnect regressions. No new service/native operation.",
+  "fixture": {
+    "profiles": "Synthetic controlled native invoke/event boundary; actual React components, DesktopClient, codecs, transport and Zustand stores; no window.electronAPI in new controls. No live accounts/profile/OS calls.",
+    "schema": 37,
+    "protocol": 1,
+    "webview": null,
+    "installed": false
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "stagedNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "electronLauncher": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "expectedActual": [
+    {
+      "expected": "Unavailable login-at-startup does not block supported native tray/notification reads.",
+      "actual": "Independent settled reads populate actual native receipts; failed values show fixed redacted partial error. Tray writes use exact physical document lease and accepted boolean receipt."
+    },
+    {
+      "expected": "Reconnect/unmount fence preference publications and never replay writes.",
+      "actual": "Same-epoch replacement re-reads current values once; retired reads ignored; unmount releases connection observer; failed write retains prior value and explicit retry boundary."
+    },
+    {
+      "expected": "Always-mounted updater surfaces do not call an unavailable native operation.",
+      "actual": "Existing app.getVersion supplies version; no native updater check/download/install calls; unavailable copy and caught version failure. Thirteen existing Electron update-dialog regressions retained."
+    },
+    {
+      "expected": "Actual agent-store native event subscriber treats heartbeat/disconnect only as freshness.",
+      "actual": "Eight typed-boundary regressions prove no session/turn/command transition, replay/session/metadata rejection, same-epoch reconnect, source-epoch replacement and disposed-callback refusal; published212 observer/source proof remains separate."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "initialFullRenderer": {
+      "passed": 1681,
+      "files": 147,
+      "skipped": 0
+    },
+    "initialStagedRenderer": {
+      "passed": 258,
+      "files": 13,
+      "skipped": 0
+    },
+    "finalRebaseAffectedApp": {
+      "passed": 161,
+      "files": 6,
+      "skipped": 0
+    },
+    "finalRebaseAffectedStaged": {
+      "passed": 126,
+      "files": 5,
+      "skipped": 0
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "contractTests": {
+      "passed": 20,
+      "files": 2,
+      "skipped": 0
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "79c9e23658fe455c9adf8337b2455112a0621267d2eea70e90f2c5267eeb2b13",
+          "bytes": 1146499
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- <13 renderer files; exact command in gateScript>",
+        "exitCode": 0,
+        "log": {
+          "sha256": "251a450f23e53114a532f1b99d9977f6b997e13cba30252cd8612630e5b1658f",
+          "bytes": 78301
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e28b06ac65df8040d5ab069dd007590d9f921813c4ca94483f4de5073e451db9",
+          "bytes": 29267
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "46f1903baefd7a3318fbf2cdc5b7e61e29323eea9a109cc4077f8c57ecb36727",
+          "bytes": 9620
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run --project renderer <6 files; exact command in rebaseGateScript>",
+        "exitCode": 0,
+        "log": {
+          "sha256": "bd8f5e389d61d90c4bc308c40792a5ea1db397de93c0588075a95d41b98656a2",
+          "bytes": 9156
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- <5 files; exact command in rebaseGateScript>",
+        "exitCode": 0,
+        "log": {
+          "sha256": "4ad518af7aebd898cd672a00571f22242b0413ad1e11170cc0a391493bfa48a9",
+          "bytes": 7629
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check; node scripts/tauri-contracts.mjs --check; pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "84f2688f3aaefe3395d3771bcaeb39200ca68c0cb9ee2af2f1d3e673772f62b1",
+          "bytes": 667
+        }
+      }
+    ],
+    "gateScript": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer --maxWorkers=4 > /tmp/ea209-settings-renderer.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-settings-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-settings-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-settings-staged.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-settings-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-settings-production-build.log 2>&1\nrtk proxy git diff --check\n",
+    "rebaseGateScript": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx > /tmp/ea209-settings-rebase-app.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx > /tmp/ea209-settings-rebase-staged.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-settings-rebase-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-settings-rebase-lint.log 2>&1\nrtk proxy git diff --check\n"
+  },
+  "sourceFiles": [
+    {
+      "path": "docs/tauri-migration/implementation-status.md",
+      "sha256": "34b6fc8feb10d30f887c6a7b19bd2e6c29598d58e62659827113303fb8325003",
+      "bytes": 59213
+    },
+    {
+      "path": "docs/tauri-migration/inventory.json",
+      "sha256": "5bb96c009feed5929bc528aef042acdd1898ed7e52178eb65f30384e747b0746",
+      "bytes": 379754
+    },
+    {
+      "path": "docs/tauri-migration/production-renderer-recovery.md",
+      "sha256": "c94d8c89dabe3445d5b35e04ab48b68a638e61caff7b40d776b0b05201f19db4",
+      "bytes": 6017
+    },
+    {
+      "path": "src/renderer/src/components/settings/native-general-settings.test.tsx",
+      "sha256": "526aa50023d593169253b5ce5871fdae86f21c3fdc4da4a124e24bb6302c55a4",
+      "bytes": 7855
+    },
+    {
+      "path": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
+      "sha256": "a5254f7929e408a640db4f47345fe2b43cc3562ff3fea0a4d031a4ded92371bc",
+      "bytes": 7327
+    },
+    {
+      "path": "src/renderer/src/components/settings/tabs/general/UpdatesSection.tsx",
+      "sha256": "fb39bb8a7402641b90f978c9c25ddd96a3baece663300dab8219cb579e371d07",
+      "bytes": 4252
+    },
+    {
+      "path": "src/renderer/src/components/update/UpdateDialog.tsx",
+      "sha256": "30949ec454b5c0695fd6801b38b870e4255396a8e27612ee10791a58b766152b",
+      "bytes": 13592
+    },
+    {
+      "path": "src/renderer/src/lib/ipc-client.ts",
+      "sha256": "0528d2b570c1498dc5b01988f26c9866c636ae2797674bf7081a3e172557d684",
+      "bytes": 47297
+    },
+    {
+      "path": "src/renderer/src/stores/native-agent-activity.test.ts",
+      "sha256": "1d4fa28628283f1b0c5ec015750ebfc5b517f55bc668596a1465e71c19df9d21",
+      "bytes": 7427
+    },
+    {
+      "path": "vitest.tauri.config.ts",
+      "sha256": "de77d134460d89fc915d0898aeccd83ff283fb81d2833e0fcb83bdd724d68e38",
+      "bytes": 11956
+    }
+  ],
+  "failureRepair": [
+    {
+      "failure": "New native dialog test initially selected two accessible Close buttons.",
+      "repair": "Targeted the visible labeled Close action; eight native preferences/update controls then passed, with thirteen retained Electron controls."
+    },
+    {
+      "failure": "Inventory freshness check after UI/client edits reported stale coordinates.",
+      "repair": "Regenerated only after serialization release, preserving212/215 source and policies; final inventory/contracts checks pass."
+    }
+  ],
+  "limits": [
+    "Controlled renderer boundary is not actual Source database or installed OS notification/tray/window/runtime acceptance.",
+    "Captain prewarm remains native-disabled. Notification-off remains local UI state; no persisted opt-out policy introduced.",
+    "Updater/feed/signing policy, login-at-startup and complete settings/native parity remain unavailable; no invented operation or fallback.",
+    "Native attachment UI awaits215/214 private selection bindings. Installed keyboard/focus/window/theme/zoom require domain evidence.",
+    "Other209 checklist criteria and202 prerequisites remain open; first full typed-renderer build checkbox was evidenced in prior c0/9d slice."
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runs": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "decisionsNeeded": [
+    "Repository Actions enablement",
+    "Installed supported-platform runtime acceptance",
+    "Final application identity/schemes and approved provider runs remain user decisions"
+  ],
+  "constraints": {
+    "liveProfile": false,
+    "liveProvider": false,
+    "release": false,
+    "electronRetirement": false,
+    "hostedVoice": "deferred"
+  },
+  "artifactChecksums": [
+    {
+      "path": "out/tauri-production-renderer/index.html",
+      "sha256": "d4f64e37423aeb33d25b864d18d8c24eb4cd1fdfe3cc550a240182f5e2b70ff5",
+      "bytes": 856
+    },
+    {
+      "path": "src-tauri/resources/node/node",
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    {
+      "path": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "bytes": 2226168
+    },
+    {
+      "path": "out/tauri-production-renderer/assets/main-e8YpMI9g.js",
+      "sha256": "fa4680edb0531a58e8fa42ba8f99ac4c33a4f6698a81328b5ec8999c6961aaaf",
+      "bytes": 1506696
+    }
+  ]
+}
