@@ -70,7 +70,7 @@ and installed supported-platform acceptance remain separate open work.
 
 ## Evidence scope
 
-The continuation's evidence JSON records actual focused app/staged Node tests,
+[The local evidence](evidence/issue-215-214-native-attachments-local-20261017.json) records actual focused app/staged Node tests,
 real temporary-file/SQLite controls, native authority and host tests, source
 hashes, exact commands and failure repairs. An explicit isolated Xvfb proof exercises the real GTK chooser selection,
 cancellation, revocation and owned callback retirement, followed by actual FD

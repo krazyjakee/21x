@@ -1,0 +1,395 @@
+{
+  "schemaVersion": 1,
+  "issues": [
+    215,
+    214
+  ],
+  "kind": "controlled-linux-native-selection-source-import",
+  "recordedAt": "2026-10-17T20:44:07.434918+00:00",
+  "baseRevision": "58e095b170e86ed07afe87da0d1f8ed3442b7743",
+  "integrationRevision": "f3f6563eda2705bd70938b31e6324d02973a1526",
+  "implementationRevision": "aff690a6b0a03224bd2c48e937b4d25bc579807e",
+  "evidenceRevision": "this evidence commit",
+  "profile": "synthetic temporary SQLite/file roots only",
+  "fixtureSchema": {
+    "nativeSelection": [
+      "selectionId UUIDv4",
+      "physical document leaseId",
+      "display path",
+      "filename",
+      "size <=64MiB"
+    ],
+    "publicAPI": [
+      "attachments.pick(): Promise<string[]>",
+      "attachments.save(taskId,filePath): Promise<FileAttachment>"
+    ],
+    "privateOperations": [
+      "engine.attachment.selection.offer",
+      "engine.attachment.save",
+      "host.attachment.selection.read",
+      "host.attachment.selection.finish",
+      "host.attachment.selection.retire"
+    ],
+    "limits": {
+      "activeReceipts": 16,
+      "epochIdTombstones": 4096,
+      "selectionTtlMs": 300000,
+      "chunkBytes": 65536,
+      "fileBytes": 67108864,
+      "chooserBudgetMs": 120000,
+      "exactPublicBudgetMs": 180000,
+      "sourceCloseBudgetMs": 3000
+    }
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "22.22.0",
+    "bundledNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "tauri": "2.12.3",
+    "gtk": "3.24.41-4ubuntu1.3",
+    "webkitgtk": "2.52.6-0ubuntu0.24.04.1",
+    "vitest": "4.0.18",
+    "sqlitePackage": "13.0.3",
+    "fixtureDatabaseSchema": 37
+  },
+  "expected": [
+    "No path string, File, renderer-selected ID or general RPC can mint native file read authority",
+    "Native chooser holds no-follow descriptor chain and original regular file with digest and version; symlink, hardlink, replaced parent, traversal, protected profile and stale document refused",
+    "Source atomically claims once under literal task/project/group/agent scope before reading; scope checked around every raw read and destination write",
+    "Streams bounded chunks, validates final digest/EOF, joins native retirement, returns metadata without appending task attachments",
+    "Cancellation/public timeout retains raw native work/profile/database until actual cleanup ack; failed retirement retries cleanup without import replay",
+    "Typed native facade requires physical document; stale/reconnect results never replay"
+  ],
+  "results": [
+    {
+      "name": "app",
+      "exitCode": 0,
+      "logSha256": "95dbf2ffc55c9efa439ec8f9814e12f81f37fc21652dce1a00868348f7535156",
+      "actualSummary": [
+        "[AgentManager] Generated AGENTS.md and CLAUDE.md in workspace root",
+        "[AgentManager] Generated AGENTS.md and CLAUDE.md in workspace root",
+        "[AgentManager] Generated AGENTS.md and CLAUDE.md in workspace root",
+        "\u2713 delivers periodic real adapter freshness through the scoped peer while the desktop detaches without replay or transition effects  8228ms",
+        "Test Files  12 passed (12)",
+        "Tests  306 passed (306)"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "standalone",
+      "exitCode": 0,
+      "logSha256": "ead76186135769ecbd6e1e4f66cb3e0029664566f4bd2e1588de314e16baa27a",
+      "actualSummary": [
+        "[AgentManager] Generated AGENTS.md and CLAUDE.md in workspace root",
+        "[AgentManager] Generated AGENTS.md and CLAUDE.md in workspace root",
+        "[AgentManager] Generated AGENTS.md and CLAUDE.md in workspace root",
+        "\u2713 delivers periodic real adapter freshness through the scoped peer while the desktop detaches without replay or transition effects  7823ms",
+        "Test Files  12 passed (12)",
+        "Tests  306 passed (306)"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "engine",
+      "exitCode": 0,
+      "logSha256": "94200740553a0931340df6fc2e455d0a7999ffe0a4a7acbaeffbbc1932907dff",
+      "actualSummary": [
+        "Finished `test` profile [unoptimized + debuginfo] target(s) in 7.38s",
+        "test production_attachment_files::tests::aliases_and_nonliteral_metadata_paths_cannot_bypass_attachment_namespace ... ok",
+        "test production_ui_contracts::tests::full_snapshot_is_passive_exact_and_bounded ... ok",
+        "test result: ok. 142 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 2.79s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "production-stage",
+      "exitCode": 0,
+      "logSha256": "726164bf6159b1dc5ecca13847a92859698031f02ebfc89b854607b6f920d4d2",
+      "actualSummary": [],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "host",
+      "exitCode": 0,
+      "logSha256": "00fd38e4b7bb089455246424ca23034f60bf4aa1f5fe4a0793e3f35d0484dc63",
+      "actualSummary": [
+        "Finished `test` profile [unoptimized + debuginfo] target(s) in 7.20s",
+        "test result: ok. 82 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.12s"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "typecheck-final",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actualSummary": [],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "lint",
+      "exitCode": 0,
+      "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+      "actualSummary": [
+        "/mnt/Rusty/GitHub/21x-e2-215b/src/main/oauth/oauth-manager-refresh.test.ts",
+        "\u2716 165 problems (0 errors, 165 warnings)"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "contracts",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "actualSummary": [],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "frontend",
+      "exitCode": 0,
+      "logSha256": "ff4e8f60abb6cd6451e4141b899813c5d039f723925b7f279c96c7504d020714",
+      "actualSummary": [
+        "\u2713 built in 12.51s"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "diagnostic-frontend",
+      "exitCode": 0,
+      "logSha256": "a9f364d346d4bdac7152e93b965b62a6fe68b39ecba341e45d56fbf36f2d56a5",
+      "actualSummary": [
+        "\u2713 built in 300ms"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "staged-entry",
+      "exitCode": 0,
+      "logSha256": "757787cf0263bd3a21fb2b34791ff3f40e4959a1eebce07690fd8fef8bf485ed",
+      "actualSummary": [
+        "Test Files  2 passed (2)",
+        "Tests  19 passed (19)"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "host-linux-check",
+      "exitCode": 0,
+      "logSha256": "4cd3dcc4de250dedac116f818a64469c7144b44fbece5f68152f04dfb82e431c",
+      "actualSummary": [
+        "Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.61s"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "host-msvc-check",
+      "exitCode": 0,
+      "logSha256": "15e23ed453c81ba186ed4fef23ad253f648f542e9210cd54fadb764892dbd038",
+      "actualSummary": [
+        "Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.90s"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "engine-clippy-x86_64-pc-windows-msvc",
+      "exitCode": 0,
+      "logSha256": "fe9209a55bb24b6b13b1a320bafb8fa683319e2077f495dd0584d13625f603ad",
+      "actualSummary": [
+        "Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.50s"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "engine-clippy-x86_64-apple-darwin",
+      "exitCode": 0,
+      "logSha256": "1510e58f4b91b5e6072a936d1e34dbade7b48e26f79b8a52da1ff48f4968de93",
+      "actualSummary": [
+        "Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.32s"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "engine-clippy-aarch64-apple-darwin",
+      "exitCode": 0,
+      "logSha256": "a54bba260cf6a1d4fa2072b879c9e9a6879c9f39d59cdef5026fcc74650759bf",
+      "actualSummary": [
+        "Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.18s"
+      ],
+      "scope": "controlled tests/compile/build only, no installed runtime claim"
+    },
+    {
+      "name": "real-gtk-explicit",
+      "exitCode": 0,
+      "command": "#!/bin/bash\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\ngtk_proof_root=$(mktemp -d /tmp/21x-gtk-selection-config-XXXXXX) || exit 1\nmkdir -p \"$gtk_proof_root/config\" \"$gtk_proof_root/data\" \"$gtk_proof_root/cache\"\nenv GSETTINGS_BACKEND=memory NO_AT_BRIDGE=1 XDG_CONFIG_HOME=\"$gtk_proof_root/config\" XDG_DATA_HOME=\"$gtk_proof_root/data\" XDG_CACHE_HOME=\"$gtk_proof_root/cache\" dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' cargo test --manifest-path src-tauri/Cargo.toml --features production-service production_host::native_attachment_selection::gtk_tests::real_gtk_picker_selection_cancel_and_revocation_join_owned_closures -- --ignored --test-threads=1 > /tmp/e2-215b-gtk-proof.log 2>&1\ngtk_proof_exit=$?\nprintf 'gtk-proof:%s\\n' \"$gtk_proof_exit\"\nrm -rf -- \"$gtk_proof_root\"\nexit \"$gtk_proof_exit\"\n",
+      "actual": "1 passed/0 failed/0 ignored; actual GTK modal selection/cancel/document-revocation and closure retirement followed by native FD read/finish/retire",
+      "limitation": "Isolated GTK parent/Xvfb, not installed Wry or full Source GUI path; GTK virtual filesystem service warnings present",
+      "logSha256": "3610a339a112fc1382b7c04da56935412a5174e09f0f7bef98f986a1365169a7"
+    },
+    {
+      "name": "after-A-rebase-app",
+      "exitCode": 0,
+      "logSha256": "aa41093c9e4f853da9bdc9ca98b6d481a6bfb2f30f443f8a87d412b8c2976657",
+      "actual": "118pass/0skip"
+    },
+    {
+      "name": "after-A-rebase-staged",
+      "exitCode": 0,
+      "logSha256": "e5ac71c8d9e52620385757d5a22b2756d912eb15a4f2f25ac4622566eeaa2c6a",
+      "actual": "118pass/0skip"
+    },
+    {
+      "name": "after-A-rebase-typecheck",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "pass"
+    },
+    {
+      "name": "after-A-rebase-lint",
+      "exitCode": 0,
+      "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+      "actual": "0errors/165existingwarnings"
+    },
+    {
+      "name": "after-A-rebase-inventory",
+      "exitCode": 0,
+      "logSha256": "dcd5c0f07d1d4c0d3ccc44c756e654857b5f828114e2e89922a5542b09b7c62f",
+      "actual": "pass"
+    },
+    {
+      "name": "after-A-rebase-contracts",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "actual": "pass"
+    }
+  ],
+  "failuresAndRepair": [
+    {
+      "failure": "Same-size file change could share filesystem timestamps in native regression",
+      "repair": "Capture selection SHA256 and compare streaming read digest at exact EOF; explicit finish also validates empty files",
+      "verifiedBy": "final engine selection authority tests; real temporary files"
+    },
+    {
+      "failure": "Generic retained native result change left Err-only/panic tests without a type",
+      "repair": "Annotate exact unit result type; preserved assertions",
+      "verifiedBy": "final native host tests"
+    },
+    {
+      "failure": "New save corpus retained internal hardcoded operation count228",
+      "repair": "Update exact source codec count229 and keep every corpus validation; native corpus consumes actual emitted JSON",
+      "verifiedBy": "final TypeScript17 and Rust actual_typescript_golden_requests test"
+    },
+    {
+      "failure": "Picker was still asserted unavailable and facade operation count was old234",
+      "repair": "Update only exact authorized binding count236/picker controls; retain all other unavailable coverage",
+      "verifiedBy": "final actual native facade/transport regressions"
+    },
+    {
+      "failure": "Initial public-save rejection replaced codec payload validation",
+      "repair": "Preserve exact codec validator; reject public native-only ingress in handler",
+      "verifiedBy": "actual private-peer public forged path denial"
+    },
+    {
+      "failure": "Initial source fixture typing/build resource preflight and moved descriptor borrowing failed",
+      "repair": "Fix fixture type, explicitly stage pinned resources/build-only helper, capture native profile before descriptor move",
+      "verifiedBy": "forced typecheck, production staging and native build"
+    }
+  ],
+  "hostedCI": {
+    "status": "blocked",
+    "reason": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "settingsChanges": false,
+    "workflowDispatches": []
+  },
+  "remainingDefects": [
+    "Installed Wry/GTK/Source chooser-to-task end-to-end acceptance is not established by separated controlled GTK, FD, private-peer and SQLite proofs",
+    "Native file drop receipt and attachment viewer URLs remain unavailable; never use browser/Electron raw path fallback on Tauri",
+    "Keyboard/focus and window/chrome/titlebar/menu/shortcut/login semantics remain ongoing215/214 source work",
+    "macOS/Windows picker services remain explicitly unsupported; packaged native acceptance across supported targets remains open",
+    "Final app identity/approved current and legacy scheme handler authority needs user decision; scheme enablement remains off",
+    "Native microphone/capture/permission/shortcut integration for218 remains fail-closed until an exact native/Source lease contract and proof",
+    "208/202 dependencies and Actions/provider/installed-platform decisions remain open"
+  ],
+  "safetyScope": {
+    "liveProfiles": false,
+    "liveProviders": false,
+    "osCredentialsAccessed": false,
+    "credentialHelper": "physically staged build-only; never invoked by this proof",
+    "release": false,
+    "electronRetirement": false,
+    "appIdentityChanged": false,
+    "hostedVoice": "deferred"
+  },
+  "wholeIssueCriteriaChecked": [],
+  "commandsUnderSharedHeavyLock": [
+    "#!/bin/bash\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\nrun_check() { check_name=\"$1\"; shift; \"$@\" > \"/tmp/e2-215b-final-${check_name}.log\" 2>&1; printf '%s:%s\\n' \"$check_name\" \"$?\"; }\nexport TWENTYONEX_PRODUCTION_CONTRACTS_OUT=/tmp/e2-215b-contracts-corpus.json\nrun_check app pnpm test:run src/main/task-attachment-file-owner.test.ts src/service/attachment-selection-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/service/production-desktop-bindings.test.ts src/shared/attachment-selection-callbacks.test.ts src/shared/task-attachment-codecs.test.ts src/shared/production-bootstrap.test.ts src/service/transport/installer-deadline.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts scripts/production-contracts-proof.test.ts\nrun_check standalone pnpm test:tauri src/main/task-attachment-file-owner.test.ts src/service/attachment-selection-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/service/production-desktop-bindings.test.ts src/shared/attachment-selection-callbacks.test.ts src/shared/task-attachment-codecs.test.ts src/shared/production-bootstrap.test.ts src/service/transport/installer-deadline.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts scripts/production-contracts-proof.test.ts\nexport TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS=/tmp/e2-215b-contracts-corpus.json\nrun_check engine cargo test --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2\nrun_check production-stage pnpm tauri:prepare:production\nrun_check host cargo test --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2\nrun_check typecheck-final pnpm exec tsc --build --noEmit --force\nrun_check lint pnpm lint\n\nrun_check contracts node scripts/tauri-contracts.mjs --check\nrun_check frontend pnpm tauri:production:frontend:build\nrun_check diagnostic-frontend pnpm tauri:frontend:build\n",
+    "#!/bin/bash\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\nfail=0\ncheck() { name=\"$1\"; shift; rtk proxy \"$@\" > \"/tmp/e2-215b-final-${name}.log\" 2>&1; code=$?; printf '%s:%s\\n' \"$name\" \"$code\"; if [ \"$code\" -ne 0 ]; then fail=1; fi; }\ncheck staged-entry pnpm test:tauri --production-proofs scripts/production-service-proof.test.ts scripts/production-contracts-proof.test.ts\ncheck host-linux-check cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service\ncheck host-msvc-check env PATH=\"/usr/lib/llvm-20/bin:$PATH\" cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc\nfor target in x86_64-pc-windows-msvc x86_64-apple-darwin aarch64-apple-darwin; do\n check \"engine-clippy-${target}\" cargo clippy --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --all-targets --target \"$target\"\ndone\nexit \"$fail\"\n",
+    "#!/bin/bash\ncd /mnt/Rusty/GitHub/21x-e2-215b\nfail=0\ncheck() { name=\"$1\"; shift; rtk proxy \"$@\" > \"/tmp/e2-215b-rebase-${name}.log\" 2>&1; code=$?; printf '%s:%s\\n' \"$name\" \"$code\"; if [ \"$code\" -ne 0 ]; then fail=1; fi; }\ncheck app pnpm test:run src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/components/settings/native-general-settings.test.tsx\ncheck staged pnpm test:tauri src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/components/settings/native-general-settings.test.tsx\ncheck typecheck pnpm exec tsc --build --noEmit --force\ncheck lint pnpm lint\ncheck inventory node scripts/tauri-inventory.mjs --check\ncheck contracts node scripts/tauri-contracts.mjs --check\nexit \"$fail\"\n"
+  ],
+  "nativeWarnings": "Cross-target host/engine checks retain existing unused/unreachable/clippy style warnings outside new selection module; compile exit0 is not warning-free or runtime acceptance.",
+  "corpus": {
+    "operations": 229,
+    "requests": 474,
+    "sha256": "0f62b92b023fae7a86251e8dba0e7e4d5ea5b426ab89cd1e38289069f9e1c831",
+    "actual": "TypeScript-generated finite requests consumed by Rust actual_typescript_golden_requests_are_accepted_without_payload_grants with TWENTYONEX_PRODUCTION_CONTRACTS_CORPUS set"
+  },
+  "generatedInventory": {
+    "files": 899,
+    "ipcOperations": 736,
+    "unresolvedExisting": 9,
+    "retainedPublicOperationScopeChanged": false,
+    "generatedManifestDelta": "attachments:save nativeCallback false -> true only"
+  },
+  "artifactChecksums": {
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": "7e775e2c8676212b8e3faf56f3db27a4066545f302cf14cf8f80085b8794c652",
+    "src-tauri/resources/service/production-engine.mjs": "3a589c83f5073fe22a15634b69f6f77ab823ef72af587bf23d9283972e826bb6",
+    "src-tauri/resources/service/production-stdio.mjs": "b5061badfc93051968eb2b99d7f0e68d3954910efcb1e0da17ae87d7724d6e5c",
+    "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+  },
+  "publicationBaseRevision": "890a6738bd207d27e8f9d43127e263249f132e23",
+  "publication": {
+    "sourceSha": "aff690a6b0a03224bd2c48e937b4d25bc579807e",
+    "remoteMasterVerified": true,
+    "normalCommitHooks": "lint-staged eslint + pnpm typecheck, exit0",
+    "hostedRunList": []
+  },
+  "sourceChecksums": {
+    "docs/tauri-migration/implementation-status.md": "781c49ce09fae6cc792a01a95ea2a04280e8ff64a3f16d82dd359ce1481c5816",
+    "docs/tauri-migration/inventory.json": "4855efef45f517fcbc9d2db474b7e1792d87cd6bc04bc1b500c8efeecbd68521",
+    "docs/tauri-migration/native-attachment-selection.md": "a47a89b4396b8193de8f836928cc0e7cf108c75262456e7e81cfe3682e5ab044",
+    "docs/tauri-migration/operations.json": "3c60ea7516ee1090430dcec3fff99e6aae702e49a2745c214b659ca8c218f2e9",
+    "docs/tauri-migration/task-attachment-bindings.md": "b3a00684f9d40e8d6252d0be0b68cfa1761075070127e9448d4216a08508080d",
+    "scripts/production-contracts-proof.test.ts": "8ee2763360388d43ef3f9122a39f6f39709e5e8b6e640569e9f873fb3b83cfe7",
+    "scripts/production-contracts-proof.ts": "6aaaf765261aab14b199c61f08c3fe5c3480e049aad11e26e0b31e0ac7d90720",
+    "scripts/tauri-contracts.mjs": "8f963ee3d7872c715888083cdc54e8bc1808ee7d975c9e299ff948c201f528df",
+    "src-tauri/engine/src/lib.rs": "2ce8182be7f0d35f51711b9714be872804b2d7261238078cfa9d91ff77431d1e",
+    "src-tauri/engine/src/production.rs": "2bb15bfa317bd775ae9637ccb22e50385dfb935d307d685626a6a65dcb0cadc4",
+    "src-tauri/engine/src/production_attachment_selection.rs": "403a96f59ba146dc2818c9f9fe0e1da873ae4ff1f78c0fd565cb0b1c6228d8b8",
+    "src-tauri/engine/src/production_contracts.rs": "29467568ffb7484eb960ef64e52cbe2c59f7c1b7a9594794c8ff28ecd1d7592c",
+    "src-tauri/src/native_attachment_selection.rs": "d87fc8d768d7ef043c1b86def1a0b6cd70082b2bcbf7082c61a9ac423fc2f5b1",
+    "src-tauri/src/native_services.rs": "4c453ab8522c9845949d6abb86803ddd33337fade6b6b396647ff341ef2c0ba3",
+    "src-tauri/src/production_host.rs": "cb97a1d2a12d8144286f25a699a26961c829a5c800364ca889663c92712cc38d",
+    "src/main/task-attachment-file-owner.test.ts": "04719a7468c9d83727286731bd37ff89c4676d1b0bfffe0b6d841bdad0b1755a",
+    "src/main/task-attachment-file-owner.ts": "69ca8b3e2ffd661737702a04711fb813cfec606670dab77aa8151e0c78850982",
+    "src/renderer/src/lib/native-desktop-host.test.ts": "8c8e341ca0f77c9763cc9b69287a257daab432062aa6499a2c68d36cdbc955aa",
+    "src/renderer/src/lib/native-desktop-host.ts": "0b856305a95b89d6715c3052f4c5bfdc785eff6dedc66eacc5e876e0d46c5bb4",
+    "src/renderer/src/lib/tauri-desktop-transport.test.ts": "3144d1de6061ab3cb19964b518c0e72267a6501cd6339422a85c3ff45d817d9d",
+    "src/renderer/src/lib/tauri-desktop-transport.ts": "da2bf8b879f61993c6c1bb1f9e02597907728dee750515b3ce0006a22177f8ca",
+    "src/service/attachment-selection-owner.test.ts": "4b1abcf75e72fae90669aa6e9b39b128c4808cd113a8853906321c4efed1c306",
+    "src/service/attachment-selection-owner.ts": "75419dd3379c43414b817e093e04638574eaac01e5785d6899bebe365a2ceaf1",
+    "src/service/production-desktop-bindings.ts": "3db73eb87315b983dfbd22ea82c6d3e752c5149abd775231198d7350900591eb",
+    "src/service/production-service.test.ts": "60aaca8a8d5656ed9bdcb1c9e91bfe0ec89ff09adb1e4dcff40ed6ab12019270",
+    "src/service/production-service.ts": "b85967a4dc3ac382143fbd9e7f0d2ead50111179b8897c783c5256c0f264dbfa",
+    "src/service/task-attachment-backend.test.ts": "14abf81881c85aa118f5f1689b902213d84fe3a92dbbba8f5f906ae439a01252",
+    "src/service/task-attachment-backend.ts": "5da2a96a3d874b24f94fc11af64b91abbf493236d4564d852f21d5031d616088",
+    "src/service/transport/installer-deadline.test.ts": "61d43072f167baec64ec126521384b0146521fa68431ea937563971bd1524464",
+    "src/shared/attachment-selection-callbacks.test.ts": "c66252ea4742f23a4f4c4f86afa142371c32e300237973e0739402e2a0a0351a",
+    "src/shared/attachment-selection-callbacks.ts": "0445afc6fa2ef644c7a9f3c523c592fae077d07e72cc246d743df7ce82bda404",
+    "src/shared/native-attachment-pick-codecs.ts": "70a3c816fc069584c9eee6ba67ceaa801937b851af05b1fb17078bb0f2c75383",
+    "src/shared/production-bootstrap.ts": "ca444205d0078caa4317b603e5c363674d642be8d9ea5def770c13ee11c3aad9",
+    "src/shared/service-protocol.ts": "02a29fe83cdba26cf17b3d78c91159d4f3b05f489b2f68e9854a3931fe7a1c55",
+    "src/shared/task-attachment-codecs.test.ts": "551f5673cb8db1955b33e130dbebc03955437638c67f94bccd3acd980ba048d6",
+    "src/shared/task-attachment-codecs.ts": "7b923e757b997e838f37353211889acf9dc140026be954abf94c097273beb3a7"
+  }
+}
