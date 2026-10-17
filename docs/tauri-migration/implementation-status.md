@@ -6,6 +6,23 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #213 continuation completes bounded Streamable HTTP MCP probe replies for
+JSON and SSE. A successful non-JSON HTTP response alone no longer counts as a
+connected server. SSE initialization and tools discovery require the matching
+RPC response, own reader cancellation through acknowledgement, and recheck
+current configuration/server/task/environment/transport authority between
+protocol effects. Existing saved tools survive rejected probes. Verify now
+watches `master` as well as `main`, so published team changes receive CI.
+
+See [MCP probe ownership](mcp-probe-owner.md) and the
+[batch35 evidence](evidence/batch35-213-mcp-sse.json) for commands, revisions,
+results and limits. Legacy HTTP+SSE endpoint fallback and native OAuth are not
+implemented by this continuation. Native warm/cold callbacks still depend on
+#215 and remain unavailable; installed production integrations, prerequisites
+#208/#202 and complete G3 acceptance remain open.
+
+The preceding energy continuation retains its tested revision:
+
 The energy continuation connects the existing Manager session aggregate to a
 captured optional Linux suspend-inhibition owner. Source tickets describe
 intent; only the native portal acknowledgement describes an applied grant.
