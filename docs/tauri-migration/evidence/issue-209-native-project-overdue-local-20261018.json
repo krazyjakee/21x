@@ -1,0 +1,272 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T23:19:13.961374+00:00",
+  "implementationRevision": "b6bfe258f77662f61648556f2015a978a0204a21",
+  "verificationRevision": "b6bfe258f77662f61648556f2015a978a0204a21",
+  "gateRevision": "6fa0423bbdec39f41d2209c142d849499aa4e3f6",
+  "baseRevision": "f33f3a097c304cc10ea8bc0bff0e8e8414e0bf7b",
+  "scope": "Actual renderer project editor and retained overdue advisory through published production codec override and typed native facade. Captured save intent/connection, sequential child writes, canonical review after uncertain/partial save, owned advisory listeners/timers/notification promises. No Source/native/DTO/grant change.",
+  "fixture": {
+    "description": "Actual React project editor and save helper, real Zustand project store and NativeDesktopHost/client/codecs/transport, controlled native invoke/results/events with synthetic project/repo/config data; preload absent. RepoSelectorDialog mocked only to avoid unrelated provider browser. No real Source SQLite/Manager/private child or physical WebView in this renderer suite.",
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "sourceOwnerProof": {
+    "implementationRevision": "c1510f37b2975bc60e6cda96f99c5a784a2d1fa6",
+    "correctionRevision": "cf1032b9b8b8b291a5676e827adcdbe02a6ea680",
+    "evidenceRevision": "12ea16dc0dae434ac51677f874a15fafd2a455ab",
+    "files": [
+      "docs/tauri-migration/evidence/issue-210-production-project-configuration-20261017.json",
+      "docs/tauri-migration/evidence/issue-210-retained-reconciliation-20261017.json"
+    ],
+    "note": "B separately proved actual lifecycle/Captain/admission/project effects, real minute timer/read scope/shutdown. Renderer tests do not combine these with an installed physical UI; declared codec presence does not prove producer registration/delivery."
+  },
+  "expectedActual": [
+    {
+      "expected": "Existing full project editor fields use the production lifecycle codec, with invalid configuration refused before native invocation.",
+      "actual": "Create/update helper controls and actual rendered editor limit save pass; exact agent/provider/limits/wakeups/scheduled review payload is preserved. Three invalid settings cases invoke no native create. Source preserves authoritative concurrency separately."
+    },
+    {
+      "expected": "A save cannot cross connection or editor intent and start later child mutations.",
+      "actual": "Held first repository write then reconnect proves one create/one child call/no reorder or second child. Retired-view accepted project identity is retained before refusal, with no child call. Same-target close/reopen keeps replacement draft open; old reply cannot release its busy state or persist its selection."
+    },
+    {
+      "expected": "Partial/uncertain save cannot silently replay an accepted create or claim a missing child receipt succeeded.",
+      "actual": "Known project create plus refused child disables repeat Save and explicit Reopen saved project loads canonical accepted identity without duplicate create. Unknown create supplies no guessed saved ID. Absent add/update child receipts refuse completion. Accepted global project write cannot publish old metadata/error into replacement cache."
+    },
+    {
+      "expected": "Canonical events must not clobber an open unsaved draft.",
+      "actual": "Exact project:changed event refreshes canonical shared owner/live limits while preserving edited Name and avoiding another draft-child read. Held initial read is retired at pagehide."
+    },
+    {
+      "expected": "Retained empty overdue advisory reaches existing UI logic without mutation or leaked native work.",
+      "actual": "Eight actual typed-native controls prove empty-object decode to no-argument callback, snooze tick, two explicit notifications/dedup, malformed payload refusal, stale/duplicate cursor and old listener rejection, current reconnect receipt, pagehide/unmount timer/subscription cleanup, queued-notification withdrawal and owned refusal. No task/session operation invoked."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "renderer": {
+      "passed": 1844,
+      "files": 155,
+      "skipped": 0
+    },
+    "staged": {
+      "passed": 624,
+      "files": 35,
+      "skipped": 0
+    },
+    "newProjectControls": 16,
+    "newAdvisoryControls": 8,
+    "contractTests": 21,
+    "typecheck": "forced --build --noEmit passed; subsequent production edit removed only the invalid lint suppression comment",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "bothFrontends": "pass",
+    "inventory": {
+      "files": 914,
+      "ipcOperations": 736,
+      "existingUnresolved": 9,
+      "regenerationDiff": "none"
+    },
+    "nativeBindings": {
+      "commands": 238,
+      "events": 31,
+      "note": "One retained advisory callback mapping added. No new source operation, manifest grant or native capability."
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "dc482c884cb092795c8eee02afaa55b5d34934f4d81b251d48a1051298b861b7",
+          "bytes": 1124085
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/components/projects/ProjectEditorDialog.native.test.tsx src/renderer/src/lib/project-editor.test.ts src/renderer/src/hooks/native-overdue.test.tsx src/renderer/src/hooks/use-snooze-tick.test.ts src/renderer/src/components/commander/CommanderChatPane.images.test.tsx src/renderer/src/components/dashboard/DashboardWorkspace.test.tsx src/renderer/src/stores/native-configuration-recovery.test.ts src/renderer/src/stores/skill-store.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx src/renderer/src/stores/overview-store.test.ts src/renderer/src/stores/task-group-store.test.ts src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "203c8b5879ce4abd19ee66702dd57696d74ac39d042c9d925b3609234292bbc6",
+          "bytes": 160353
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "95fadc681a90dec595eeeae28e46d96e2ad85dc653392666ab1c2afaa6057d92",
+          "bytes": 533
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b53c303dc6f5d1344aa60c8d10e4eba63e1b8015a1c5f7649b19076afce284fe",
+          "bytes": 29267
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "bd74af8ada09685b5b23875290282e21c04cc0f1b0de71bac55118d0e8f58b6b",
+          "bytes": 9737
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "58634a3f3563dafa3525e567d4ffcead81bf8f1dc7d57ec80484fe8ae611daff",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      }
+    ],
+    "scripts": {
+      "completePlan": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer --maxWorkers=4 > /tmp/ea209-project-renderer.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-project-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-project-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/components/projects/ProjectEditorDialog.native.test.tsx src/renderer/src/lib/project-editor.test.ts src/renderer/src/hooks/native-overdue.test.tsx src/renderer/src/hooks/use-snooze-tick.test.ts src/renderer/src/components/commander/CommanderChatPane.images.test.tsx src/renderer/src/components/dashboard/DashboardWorkspace.test.tsx src/renderer/src/stores/native-configuration-recovery.test.ts src/renderer/src/stores/skill-store.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx src/renderer/src/stores/overview-store.test.ts src/renderer/src/stores/task-group-store.test.ts src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-project-staged.log 2>&1\nrtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts > /tmp/ea209-project-contract-tests.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-project-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-project-production-build.log 2>&1\nrtk proxy git diff --check\nrtk proxy node scripts/tauri-inventory.mjs --check > /tmp/ea209-project-inventory.log 2>&1\nrtk proxy node scripts/tauri-contracts.mjs --check > /tmp/ea209-project-contracts.log 2>&1\n",
+      "remainingAfterCommentRepair": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm lint > /tmp/ea209-project-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/components/projects/ProjectEditorDialog.native.test.tsx src/renderer/src/lib/project-editor.test.ts src/renderer/src/hooks/native-overdue.test.tsx src/renderer/src/hooks/use-snooze-tick.test.ts src/renderer/src/components/commander/CommanderChatPane.images.test.tsx src/renderer/src/components/dashboard/DashboardWorkspace.test.tsx src/renderer/src/stores/native-configuration-recovery.test.ts src/renderer/src/stores/skill-store.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx src/renderer/src/stores/overview-store.test.ts src/renderer/src/stores/task-group-store.test.ts src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-project-staged.log 2>&1\nrtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts > /tmp/ea209-project-contract-tests.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-project-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-project-production-build.log 2>&1\nrtk proxy git diff --check\nrtk proxy node scripts/tauri-inventory.mjs --check > /tmp/ea209-project-inventory.log 2>&1\nrtk proxy node scripts/tauri-contracts.mjs --check > /tmp/ea209-project-contracts.log 2>&1\n"
+    },
+    "combinedExitHistory": [
+      "First full renderer1842 passed; type failed only two unsupported test getByRole exact options. Fixed fixture options, same assertions.",
+      "Second full renderer1844 and forced type passed; lint failed solely own unnecessary suppression naming unconfigured react-hooks rule. Removed comment.",
+      "Remaining full lint/staged/contracts/builds/freshness gate passed with raw exit0; normal source hooks/typecheck passed.",
+      "Rebased f33f3a09 private selection/native change with no renderer/project/overdue input changes; combined inventory/contracts and clean status passed before publication."
+    ]
+  },
+  "failureRepair": [
+    {
+      "failure": "Initial actual partial-save UI fixture used wrong repo-input placeholder/button label;9/10 passed.",
+      "repair": "Used actual accessible input label and exact string Add button; no production/assertion weakened."
+    },
+    {
+      "failure": "Forced typecheck rejected testing-library role options exact:true at two call sites.",
+      "repair": "Removed unsupported option; exact string name matching is default, unchanged desired button assertions."
+    },
+    {
+      "failure": "Lint rejected suppression for react-hooks/exhaustive-deps because repository does not configure that rule.",
+      "repair": "Removed unnecessary suppression comment. Full lint0errors165existingwarnings; no configured rule/check disabled."
+    }
+  ],
+  "failureLogs": {
+    "projectUIInitial": {
+      "sha256": "3849170c8d2ce7f617ae31dbffc992883bb78c7a7731b29003727c2881da31c3",
+      "bytes": 10010
+    },
+    "typeInitial": {
+      "sha256": "7ee081ebf89f80c789f00a7352404eb63ac97bdbbfbe8039c96291e5f087d7cd",
+      "bytes": 1158
+    },
+    "lintInitial": {
+      "sha256": "13ed11649ec4c12b2f56ddabbc7a1ab6b2e284ae25a764002c96335f00c3a149",
+      "bytes": 16968
+    }
+  },
+  "sourceFiles": {
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "18856b1fbd7cf2527b36188141520e5cb67aa0610c7b0d7770117830a5aa07da",
+      "bytes": 20768
+    },
+    "src/renderer/src/components/projects/ProjectEditorDialog.native.test.tsx": {
+      "sha256": "a48e0a3f1aa3b370974b18eca651f51fd2713561bf2f0220c04cabd4fe855bf7",
+      "bytes": 13900
+    },
+    "src/renderer/src/components/projects/ProjectEditorDialog.tsx": {
+      "sha256": "59f9c31a838f388d9704415f6a78f8fd756be8725786ae389e6deb4a136de9be",
+      "bytes": 41297
+    },
+    "src/renderer/src/hooks/native-overdue.test.tsx": {
+      "sha256": "8a32a6816e90b8fc1e2e654fdab1e3c09d3e86c33d34a00b344a5939c63d0b8d",
+      "bytes": 6343
+    },
+    "src/renderer/src/hooks/use-overdue-notifications.ts": {
+      "sha256": "039f1b7b78051bf49f59b54e4cb1cbf46668bcb60a6f3e6933d7dda37123f151",
+      "bytes": 3350
+    },
+    "src/renderer/src/hooks/use-snooze-tick.ts": {
+      "sha256": "ee9d380e5e85e9c0fef9b059c9c51ad5d0a2707d792ab1e43eb6c39ebbed7524",
+      "bytes": 2875
+    },
+    "src/renderer/src/lib/native-desktop-host.ts": {
+      "sha256": "c80deceaaeed73c3399823eb372464373af64a0617a10375e9f1c7a6ea796e96",
+      "bytes": 33167
+    },
+    "src/renderer/src/lib/project-editor.test.ts": {
+      "sha256": "2d2893bece9255565677ccd21160d61a7eb7027dab3a76166581103b6ec30ff2",
+      "bytes": 9684
+    },
+    "src/renderer/src/lib/project-editor.ts": {
+      "sha256": "9d8b8f2449ea178a5968d3f8b3f931cac0796da94c6224bb32d6f78fe28cffa9",
+      "bytes": 10473
+    },
+    "src/renderer/src/stores/project-store.ts": {
+      "sha256": "7e4796726231901344a294acd5f8d0db6326ab51adebeb82bf7e7a7094084518",
+      "bytes": 8743
+    },
+    "vitest.tauri.config.ts": {
+      "sha256": "e0b8a030029702bc6e41c6468337bd0b921c23f99a0a15dd17be26f545f13a62",
+      "bytes": 13232
+    }
+  },
+  "acceptance": {
+    "newWholeCriteriaChecked": [],
+    "issueRemainsOpen": true,
+    "installedLifecycleProof": false
+  },
+  "remainingDefects": [
+    "Project/child writes remain non-atomic; uncertain creation without accepted identity requires explicit project-list review. No durable renderer mutation journal or rollback claim.",
+    "Native file Drop two-phase context/accept/close backend and facade are agreed but not yet published or bound to UI; browser drops remain inert.",
+    "Installed supported-target renderer/native lifecycle, orphan reconciliation, shortcuts/login/native voice and explicit #202 prerequisite remain open.",
+    "Further demanded resource catalogs and action/read races require scoped renderer audit; no claim all settings consumers accepted by this slice."
+  ],
+  "hostedVerification": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runList": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "statusParagraph": "Exact A source paragraph handed to E2 current implementation-status owner for next additive docs commit; no conflicting A status write.",
+  "limits": [
+    "Controlled native invoke/event proof is not installed physical UI, actual notification delivery or real Source owner proof.",
+    "No live profile/account/provider/microphone, release/cutover/identity decision or Electron retirement; hosted voice deferred."
+  ]
+}
