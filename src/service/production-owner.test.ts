@@ -79,6 +79,42 @@ async function startTask(services: ProductionServices) {
 }
 
 describe('actual production application owner', () => {
+  it('reopens interrupted durable work without adapter replay and allows an explicit new request', async () => {
+    const f = await fixture(), first = await f.owner.start(), agent = first.db.getAgents()[0]
+    first.db.updateAgent(agent.id, { config: { coding_agent: 'pi' } })
+    const task = first.db.createTask({ title: 'Interrupted production work' })!
+    first.db.updateTask(task.id, { agent_id: agent.id })
+    await f.owner.close()
+    // A closed/copied fixture is seeded with the state a dead owner left at
+    // the uncertain send boundary. This is not a forced-crash runtime proof.
+    const { DurableStartQueueStore } = await import('../main/sessions/start-queue-store')
+    const { DeliveryStore } = await import('../main/sessions/delivery-store')
+    const { ProviderRecoveryStore } = await import('../main/sessions/provider-recovery-store')
+    const raw = new SQLite(join(f.bootstrap.paths.profileRoot, '21x.db')), source = { db: raw }
+    const queue = new DurableStartQueueStore(source)
+    const row = queue.enqueue({ taskId: task.id, projectId: task.project_id, agentId: agent.id, priority: 'medium', reason: 'recovery', queuedAt: new Date().toISOString() }).record
+    const claim = queue.claim(task.id, 'dead-process')!; queue.markStarting(row.id, claim.generation)
+    raw.prepare('UPDATE tasks SET status=?, session_id=?, auto_start_agent=1, auto_complete_without_review=1 WHERE id=?').run('agent_working', 'saved-backend', task.id)
+    const deliveries = new DeliveryStore(source), delivery = deliveries.enqueue({ idempotencyKey: 'interrupted-send', kind: 'agent_message', taskId: task.id, projectId: task.project_id, payload: JSON.stringify({ message: 'Do not resend this mutation', taskId: task.id, agentId: agent.id }) }).record
+    deliveries.claim(delivery.id, 'dead-process', 86_400_000)
+    const providers = new ProviderRecoveryStore(source), intent = providers.begin({ taskId: task.id, sessionId: 'saved-backend', agentId: agent.id, prompt: 'Do not retry this mutation', remainingAgentIds: [], attemptedAgentIds: [agent.id] })
+    providers.change(intent, { state: 'retrying', nextRetryAt: Date.now() - 1000 })
+    raw.close()
+    const next = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, f.boundaries); owners.push(next)
+    const services = await next.start()
+    await services.automation.runNow(); await services.captainDelivery.reconcile(); await services.agents.reconcileStartup()
+    expect(f.adapter.initialize).not.toHaveBeenCalled(); expect(f.adapter.resumeSession).not.toHaveBeenCalled(); expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
+    expect(services.db.getTask(task.id)).toMatchObject({ status: 'not_started', session_id: 'saved-backend', auto_start_agent: false, auto_complete_without_review: false })
+    expect(new DurableStartQueueStore(services.db).get(task.id)).toMatchObject({ id: row.id, state: 'failed', recoveryCause: 'production_restart_review' })
+    expect(new DeliveryStore(services.db).get(delivery.id)).toMatchObject({ state: 'cancelled', payload: delivery.payload })
+    expect(new ProviderRecoveryStore(services.db).get(task.id)).toMatchObject({ state: 'failed', nextRetryAt: null, intentId: intent.intentId })
+    await expect(services.agents.requestSession(agent.id, task.id)).rejects.toThrow('explicit_continuation_required')
+    expect((await services.agents.startTask(task.id, { explicitUserStart: true })).action).toBe('queued')
+    await vi.waitFor(() => expect(f.adapter.sendPrompt).toHaveBeenCalledTimes(1))
+    expect(new DurableStartQueueStore(services.db).get(task.id)?.generation).toBeGreaterThan(claim.generation)
+    expect(f.adapter.sendPrompt.mock.calls.flat().join(' ')).not.toContain('Do not retry this mutation')
+  })
+
   it('refuses a missing managed CLI executable before key or application database access', async () => {
     const f = await fixture()
     f.bootstrap.managedTaskMcp = { command: join(f.root, 'missing-node'), args: [join(f.root, 'missing-task-mcp.mjs')], environment: {}, tools: [] }

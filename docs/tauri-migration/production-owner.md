@@ -1,5 +1,8 @@
 # Production application ownership
 
+The [restart reconciliation continuation](production-restart-recovery.md) retires
+old effect claims before service construction while preserving durable evidence.
+
 The [startup recovery continuation](production-startup-recovery.md) carries
 finite owner failures through the actual private/native status path without
 reflecting error text or retrying initialization.

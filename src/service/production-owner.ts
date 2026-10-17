@@ -90,6 +90,7 @@ import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiTaskGroupServi
 import { buildTaskMcpUrl } from '../main/task-mcp-endpoint'
 import { setTaskAutomationTrigger, setTaskSchedulers } from '../main/task-updates'
 import { PRODUCTION_OWNER_STAGES, PRODUCTION_RECOVERY_CODES, type ProductionOwnerState } from '../shared/production-bootstrap'
+import { reconcileProductionRestart } from './production-recovery'
 import type { UiCommand } from '../shared/ui-commands'
 
 export type ProductionOwnerPhase = 'new' | 'starting' | 'ready' | 'stopping' | 'blocked' | 'stopped' | 'failed'
@@ -745,6 +746,7 @@ export class ProductionOwner {
     this.db = new DatabaseManager(this.databaseRuntime)
     this.db.initialize()
     const db = this.db
+    reconcileProductionRestart(db)
     db.onTaskActivity = (taskId, last_activity_at) => this.emit('task:updated', { taskId, updates: { last_activity_at } })
     this.checkpoint('secret-broker')
     this.broker = new SecretBroker(db)

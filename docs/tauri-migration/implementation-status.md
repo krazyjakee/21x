@@ -6,6 +6,16 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #208 restart continuation reconciles old durable effect authority in one
+SQLite transaction before production constructs APIs, adapters or schedulers.
+Interrupted starts, unaccepted deliveries and provider retries require explicit
+continuation. Backend/session IDs, receipts and saved output remain evidence;
+recovery neither sends a backend prompt nor signals a saved PID. Affected task
+and parent-chain automation pauses for review. See
+[production restart reconciliation](production-restart-recovery.md).
+Installed forced-crash and supported-platform runtime acceptance remain open;
+hosted Verify is unavailable while Actions awaits the user decision.
+
 The #208 startup continuation carries finite owner failure metadata through a
 private read after failed initialization and the existing native status path.
 Fixed renderer guidance distinguishes missing resources/CLI, unavailable store,

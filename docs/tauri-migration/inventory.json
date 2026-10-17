@@ -6054,6 +6054,7 @@
     "src/service/production-installation-host.ts",
     "src/service/production-owner.ts",
     "src/service/production-provider-owner.ts",
+    "src/service/production-recovery.ts",
     "src/service/production-service.ts",
     "src/service/production-settings-backend.ts",
     "src/service/production-stdio.ts",
@@ -14456,7 +14457,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 889,
+    "files": 890,
     "operations": 737,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,
