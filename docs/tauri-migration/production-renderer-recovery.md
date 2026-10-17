@@ -356,3 +356,12 @@ global native OAuth-browser capability; connector-specific loopback authority
 does not grant MCP browser authority. Existing explicit credential revocation
 and connection tests keep their separate retained operations. Native Drop
 context/receipt work is independent and remains with #215/#214.
+
+
+### MCP form save receipts and draft ownership
+
+The actual MCP settings form now waits for its exact create/update receipt. Pending fields are frozen and duplicate submissions join no additional mutation. A missing or rejected receipt keeps the draft visible and requires closing it and reviewing canonical server metadata before another save; it never assumes that a lost reply means no write occurred. Cancel remains available and does not claim to cancel already admitted Source work. Accepted current CRUD clears a prior catalog error.
+
+Each settings dialog has a monotonically increasing local intent and a fresh keyed component lifetime. Late saves cannot close or unlock a replacement draft, including reopening the same server. Canonical metadata refresh does not reset an unsaved edit. Connection replacement, pagehide and unmount fence publication and browser followups; native browser authorization remains unavailable. Existing Electron authorization is retained only under its originating view guard, and an optional authentication failure does not undo an accepted configuration write.
+
+The portable controls use the real typed native facade and actual settings/form components with held synthetic receipts. They cover accepted create/update, missing/refused receipts, duplicate submit, canonical refresh, replacement draft, connection replacement, pagehide and accepted error clearing. Four corrected controls fail against the previous component source and pass after the repair. Initial test selectors were repaired to match the existing empty-state wording and distinguish the form submit button from key-value editor Add controls. These controls do not establish installed native UI or durable mutation-journal reconciliation; uncertain writes still require explicit review.

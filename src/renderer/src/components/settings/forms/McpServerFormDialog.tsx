@@ -1,3 +1,4 @@
+import { captureDesktopRead } from '@/lib/desktop-api'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Server, Globe, Loader2, KeyRound, LogOut } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody } from '@/components/ui/Dialog'
@@ -19,7 +20,7 @@ interface McpServerFormDialogProps {
   server?: McpServer
   open: boolean
   onClose: () => void
-  onSubmit: (data: CreateMcpServerDTO) => void
+  onSubmit: (data: CreateMcpServerDTO) => Promise<boolean>
   oauthConnected?: boolean
   browserSignInAvailable?: boolean
   oauth: OAuthCallbacks
@@ -34,6 +35,19 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
   const [url, setUrl] = useState(server?.url ?? '')
   const [headers, setHeaders] = useState<Record<string, string>>(server?.headers ?? {})
 
+  const [saving, setSaving] = useState(false)
+  const [reviewRequired, setReviewRequired] = useState(false)
+  const [operationError, setOperationError] = useState<string | null>(null)
+  const busy = useRef(false)
+  const authBusy = useRef(false)
+  const lifetime = useRef(0)
+  const active = useRef(false)
+  const probeRevision = useRef(0)
+  const captureView = () => {
+    const generation = lifetime.current, scope = captureDesktopRead()
+    return { viewCurrent: () => active.current && generation === lifetime.current, current: () => active.current && generation === lifetime.current && scope.isCurrent() }
+  }
+
   // OAuth state
   const [probing, setProbing] = useState(false)
   const [authNeeded, setAuthNeeded] = useState(false)
@@ -43,7 +57,16 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
   const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
+    ++lifetime.current
+    active.current = open
+    const retire = () => { active.current = false; ++lifetime.current; ++probeRevision.current }
+    window.addEventListener('pagehide', retire, { once: true })
     if (open) {
+      busy.current = false
+      authBusy.current = false
+      setSaving(false)
+      setReviewRequired(false)
+      setOperationError(null)
       setName(server?.name ?? '')
       setType(server?.type ?? 'local')
       setCommand(server?.command ?? '')
@@ -63,16 +86,20 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
       // For edit mode: if remote server with URL but no stored OAuth metadata, probe live
       else if (browserSignInAvailable && server?.type === 'remote' && server.url?.trim() && !oauthConnected) {
         setProbing(true)
-        oauth.probeForAuth(server.url.trim()).then((needed) => {
-          setAuthNeeded(needed)
+        const view = captureView(), revision = ++probeRevision.current
+        const current = () => view.current() && revision === probeRevision.current
+        void oauth.probeForAuth(server.url.trim()).then((needed) => {
+          if (current()) setAuthNeeded(needed)
         }).catch(() => {
-          setAuthNeeded(false)
+          if (current()) setAuthNeeded(false)
         }).finally(() => {
-          setProbing(false)
+          if (current()) setProbing(false)
         })
       }
     }
     return () => {
+      retire()
+      window.removeEventListener('pagehide', retire)
       if (probeTimer.current) clearTimeout(probeTimer.current)
     }
   }, [open, server?.id])
@@ -80,6 +107,8 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
   // Debounced probe when URL changes (only for remote type, only valid URLs)
   const handleUrlChange = useCallback((newUrl: string) => {
     setUrl(newUrl)
+    const view = captureView(), revision = ++probeRevision.current
+    const current = () => view.current() && revision === probeRevision.current
     if (probeTimer.current) clearTimeout(probeTimer.current)
 
     // Don't probe if editing an already-connected server (no need to re-probe)
@@ -93,13 +122,14 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
 
     setProbing(true)
     probeTimer.current = setTimeout(async () => {
+      if (!current()) return
       try {
         const needed = await oauth.probeForAuth(trimmed)
-        setAuthNeeded(needed)
+        if (current()) setAuthNeeded(needed)
       } catch {
-        setAuthNeeded(false)
+        if (current()) setAuthNeeded(false)
       } finally {
-        setProbing(false)
+        if (current()) setProbing(false)
       }
     }, 800)
   }, [server, oauthConnected, oauth, browserSignInAvailable])
@@ -108,40 +138,66 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
 
   const handleConnectOAuth = async () => {
     if (!browserSignInAvailable || !server) return
+    const view = captureView()
+    if (!view.current() || busy.current || authBusy.current) return
+    authBusy.current = true
+    setOperationError(null)
     setConnecting(true)
     try {
       const result = await oauth.startOAuthFlow(server.id)
+      if (!view.current()) return
       if (result.needsManualClientId) {
         setManualClientIdNeeded(true)
         setManualClientId('')
       }
+    } catch {
+      if (view.current()) setOperationError('Authentication could not be confirmed. Review the server before retrying.')
     } finally {
-      setConnecting(false)
+      if (view.viewCurrent()) { authBusy.current = false; setConnecting(false) }
     }
   }
 
   const handleSubmitManualClientId = async () => {
     if (!browserSignInAvailable || !server || !manualClientId.trim()) return
+    const view = captureView()
+    if (!view.current() || busy.current || authBusy.current) return
+    authBusy.current = true
+    setOperationError(null)
     setConnecting(true)
     try {
       const result = await oauth.submitManualClientId(server.id, manualClientId.trim())
+      if (!view.current()) return
       if (!result.needsManualClientId) {
         setManualClientIdNeeded(false)
         setManualClientId('')
       }
+    } catch {
+      if (view.current()) setOperationError('Authentication could not be confirmed. Review the server before retrying.')
     } finally {
-      setConnecting(false)
+      if (view.viewCurrent()) { authBusy.current = false; setConnecting(false) }
     }
   }
 
   const handleDisconnectOAuth = async () => {
     if (!server) return
-    await oauth.revokeOAuthToken(server.id)
+    const view = captureView()
+    if (!view.current() || busy.current || authBusy.current) return
+    authBusy.current = true
+    setConnecting(true)
+    try {
+      await oauth.revokeOAuthToken(server.id)
+    } catch {
+      if (view.current()) setOperationError('Disconnect could not be confirmed. Review the server before retrying.')
+    } finally {
+      if (view.viewCurrent()) { authBusy.current = false; setConnecting(false) }
+    }
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!isValid) return
+    if (!isValid || busy.current || reviewRequired || authBusy.current) return
+    const view = captureView()
+    if (!view.current()) return
 
     const data: CreateMcpServerDTO = { name: name.trim(), type }
     if (type === 'local') {
@@ -153,8 +209,24 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
       if (Object.keys(headers).length > 0) data.headers = headers
     }
 
-    onSubmit(data)
-    onClose()
+    busy.current = true
+    setSaving(true)
+    setOperationError(null)
+    try {
+      const accepted = await onSubmit(data)
+      if (accepted && view.current()) { onClose(); return }
+    } catch {
+      // An absent receipt does not prove that Source rejected the mutation.
+    } finally {
+      if (view.viewCurrent()) {
+        busy.current = false
+        setSaving(false)
+      }
+    }
+    if (view.viewCurrent()) {
+      setReviewRequired(true)
+      setOperationError('Save could not be confirmed. Close this draft and review the server list before saving again.')
+    }
   }
 
   // Show OAuth section for remote servers when auth is needed or already connected
@@ -162,12 +234,13 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>{server ? 'Edit MCP Server' : 'New MCP Server'}</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <form onSubmit={handleSubmit} className="space-y-3">
+            <fieldset disabled={saving || reviewRequired || connecting} className="space-y-3 border-0 p-0 m-0 min-w-0">
             <div className="space-y-1.5">
               <Label htmlFor="mcp-name">Name</Label>
               <Input
@@ -351,12 +424,14 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
               </div>
             )}
 
+            </fieldset>
+            {operationError && <p role="alert" className="text-xs text-destructive">{operationError}</p>}
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="outline" size="sm" onClick={onClose}>
                 Cancel
               </Button>
-              <Button type="submit" size="sm" disabled={!isValid}>
-                {server ? 'Save' : 'Add'}
+              <Button type="submit" size="sm" disabled={!isValid || saving || reviewRequired || connecting}>
+                {saving ? 'Saving...' : server ? 'Save' : 'Add'}
               </Button>
             </div>
           </form>

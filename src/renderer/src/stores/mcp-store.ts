@@ -63,7 +63,7 @@ export const useMcpStore = create<McpState>((set, get) => ({
       const server = await mcpServerApi.create(data)
       if (current()) {
         invalidateMetadata()
-        set((state) => ({ servers: [...state.servers.filter(item => item.id !== server.id), server] }))
+        set((state) => ({ error: null, servers: [...state.servers.filter(item => item.id !== server.id), server] }))
       }
       return server
     } catch (err) {
@@ -79,7 +79,7 @@ export const useMcpStore = create<McpState>((set, get) => ({
       if (updated && current()) {
         invalidateMetadata()
         set((state) => ({
-          servers: state.servers.map((s) => (s.id === id ? updated : s))
+          error: null, servers: state.servers.map((s) => (s.id === id ? updated : s))
         }))
       }
       return updated || null
@@ -96,7 +96,7 @@ export const useMcpStore = create<McpState>((set, get) => ({
       if (success && current()) {
         invalidateMetadata()
         set((state) => ({
-          servers: state.servers.filter((s) => s.id !== id)
+          error: null, servers: state.servers.filter((s) => s.id !== id)
         }))
       }
       return success

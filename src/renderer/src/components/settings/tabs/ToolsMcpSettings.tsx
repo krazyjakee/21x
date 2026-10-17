@@ -18,6 +18,7 @@ interface McpConnectionInfo {
 
 interface McpDialogState {
   open: boolean
+  intent: number
   server?: McpServer
 }
 
@@ -49,7 +50,13 @@ export function ToolsMcpSettings() {
     fetchAllOAuthStatuses, authRequired, probeForAuth, probeAllForAuth
   } = useMcpStore()
   const [connections, setConnections] = useState<Map<string, McpConnectionInfo>>(new Map())
-  const [mcpDialog, setMcpDialog] = useState<McpDialogState>({ open: false })
+  const [mcpDialog, setMcpDialog] = useState<McpDialogState>({ open: false, intent: 0 })
+  const dialogIntent = useRef(0)
+  const openDialog = (server?: McpServer) => setMcpDialog({ open: true, server, intent: ++dialogIntent.current })
+  const closeDialog = (intent: number) => {
+    if (dialogIntent.current !== intent) return
+    setMcpDialog({ open: false, intent: ++dialogIntent.current })
+  }
   useEffect(() => {
     setConnections(previous => {
       const next = new Map([...previous].filter(([id, value]) => servers.some(server => server.id === id && value.version === serverVersion(server))))
@@ -103,22 +110,27 @@ export function ToolsMcpSettings() {
   }
 
   const handleCreateServer = async (data: CreateMcpServerDTO) => {
+    const scope = captureDesktopRead(), intent = mcpDialog.intent
+    const current = () => alive.current && scope.isCurrent() && dialogIntent.current === intent
+    if (!current()) return false
     const server = await createServer(data)
-    setMcpDialog({ open: false })
-    if (!nativeDesktop && server && data.type === 'remote' && data.url) {
-      // Probe and auto-start OAuth if needed
-      const needed = await probeForAuth(server.id, data.url)
-      if (needed) {
-        startOAuthFlow(server.id)
-      }
+    if (!server || !current()) return false
+    if (!nativeDesktop && data.type === 'remote' && data.url) {
+      // Preserve Electron's automatic sign-in only for the originating view.
+      try {
+        const needed = await probeForAuth(server.id, data.url)
+        if (needed && current()) await startOAuthFlow(server.id)
+      } catch { /* An optional sign-in failure does not undo an accepted save. */ }
     }
+    return true
   }
 
   const handleUpdateServer = async (data: CreateMcpServerDTO) => {
-    if (mcpDialog.server) {
-      await updateServer(mcpDialog.server.id, data)
-      setMcpDialog({ open: false })
-    }
+    const scope = captureDesktopRead(), intent = mcpDialog.intent, server = mcpDialog.server
+    const current = () => alive.current && scope.isCurrent() && dialogIntent.current === intent
+    if (!server || !current()) return false
+    const saved = await updateServer(server.id, data)
+    return !!saved && current()
   }
 
   const handleDeleteServer = async (id: string) => {
@@ -185,7 +197,7 @@ export function ToolsMcpSettings() {
           <p className="text-xs text-muted-foreground">
             {servers.length} server{servers.length !== 1 ? 's' : ''} configured
           </p>
-          <Button size="sm" onClick={() => setMcpDialog({ open: true })}>
+          <Button size="sm" onClick={() => openDialog()}>
             <Plus className="h-3.5 w-3.5" />
             Add Server
           </Button>
@@ -194,7 +206,7 @@ export function ToolsMcpSettings() {
         {servers.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center border border-dashed border-border rounded-lg">
             <p className="text-sm text-muted-foreground mb-3">No MCP servers configured yet</p>
-            <Button size="sm" onClick={() => setMcpDialog({ open: true })}>
+            <Button size="sm" onClick={() => openDialog()}>
               <Plus className="h-3.5 w-3.5" />
               Add Your First Server
             </Button>
@@ -259,7 +271,7 @@ export function ToolsMcpSettings() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => setMcpDialog({ open: true, server })}
+                        onClick={() => openDialog(server)}
                         title="Edit"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
@@ -320,9 +332,10 @@ export function ToolsMcpSettings() {
       </SettingsSection>
 
       <McpServerFormDialog
+        key={mcpDialog.intent}
         server={mcpDialog.server}
         open={mcpDialog.open}
-        onClose={() => setMcpDialog({ open: false })}
+        onClose={() => closeDialog(mcpDialog.intent)}
         onSubmit={mcpDialog.server ? handleUpdateServer : handleCreateServer}
         oauthConnected={mcpDialog.server ? oauthStatuses[mcpDialog.server.id]?.connected : undefined}
         browserSignInAvailable={!nativeDesktop}
