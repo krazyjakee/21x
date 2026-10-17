@@ -63,6 +63,7 @@ export class TaskLifecycleBackend {
     this.bindCommands()
   }
   get inflightCount(): number { return this.flights.size }
+  shutdown(): void { this.closing = true }
   async close(timeoutMs = 2000): Promise<void> {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) throw new RangeError('Invalid task lifecycle shutdown deadline')
     this.closing = true

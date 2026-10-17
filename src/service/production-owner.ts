@@ -19,6 +19,7 @@ import { createProductionGitProviderOwner } from './production-git-provider-owne
 import { WorkspaceFileOwner, type WorkspaceFileOwnerOptions } from '../main/workspace-file-owner'
 import type { WorkspacePathReceipt, WorkspaceCleanupObserver } from '../shared/workspace-native-callbacks'
 import { GitProviderProcessOwner, type GitProviderProcessOwnerOptions } from '../main/git-provider-process-owner'
+import { ProductionVoiceActionOwner, type VoiceActionAuthority } from './production-voice-actions'
 import { createProductionVoiceOwner, type ProductionVoiceOwner, type ProductionVoiceResources } from './production-voice-owner'
 import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobileAccessSettings, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, type MobileApiDeps } from '../main/mobile-api-server'
 import { TunnelManagerCore } from '../main/tunnel-manager-core'
@@ -244,6 +245,7 @@ export class ProductionOwner {
   private connectorService: ConnectorBridgeService | null = null
   private removeReportBridge: (() => void) | null = null
   private apiOwned = false
+  private voiceActions: { authority: VoiceActionAuthority; owner: ProductionVoiceActionOwner } | null = null
   private readonly stopOwners: Array<() => void> = []
   private readonly drains = new Map<string, () => Promise<void>>()
   private nativeDrained = false
@@ -355,6 +357,28 @@ export class ProductionOwner {
       if (this.services !== services || owners.database !== database || owners.manager !== manager || services.db !== database || services.agents !== manager || (this.bootstrap.native.trayAvailable === true) !== trayAvailable) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
     } }
   }
+  /** Source-only transcript consumer; no desktop operation or native capability. */
+  createVoiceActions(authority: VoiceActionAuthority): ProductionVoiceActionOwner {
+    this.getDatabaseBindingLease()
+    if (this.voiceActions) {
+      if (this.voiceActions.authority !== authority) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      return this.voiceActions.owner
+    }
+    const owner = new ProductionVoiceActionOwner(this.getVoiceActionBindingLease(), authority, this.epoch)
+    this.voiceActions = { authority, owner }
+    this.retainCleanup('voice-actions', () => owner.shutdown(), () => owner.close())
+    return owner
+  }
+  getVoiceActionBindingLease() {
+    this.getDatabaseBindingLease()
+    const services = this.services!
+    return { database: services.db, manager: services.agents, sync: services.sync, registry: services.registry,
+      recurrence: services.recurrence, heartbeat: services.heartbeat, automation: services.automation,
+      emit: (operation: string, payload: import('../shared/service-protocol').JsonValue) => this.emit(operation, payload),
+      onFatalEvent: (_error: unknown) => { void this.close().catch(() => {}) },
+      assertOwners: () => { this.getDatabaseBindingLease(); if (this.services !== services) throw new ProductionOwnerError('SERVICE_OWNER_LOST') } }
+  }
+
   getVoiceBindingLease(): { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech']; assertVoiceOwners(owners: { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech'] }): void } | null {
     this.getDatabaseBindingLease()
     const services = this.services!, owned = services.voice

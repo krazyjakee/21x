@@ -6,6 +6,21 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #218 final-transcript continuation adds a Source-only production action
+owner: deterministic intent, exact turn/epoch confirmation and dismissal,
+bounded timeouts, offered choices, captured dictation/navigation and exact
+native HITL request scope. Effects delegate to the same task/agent backends as
+the UI; canonical task events cross the actual private peer, and starts use the
+single manager's admission, durable FIFO and project limits. Accepted queued
+starts survive turn disposal. Raw startup/write work remains owned through
+cancellation and failed drain. This closes the Source voice-start branch of
+#212 criterion 2, with no whole-criterion claim. The entry point is unregistered;
+production voice/native permission/capture/playback/shortcuts remain unavailable.
+See [transcript action ownership](voice-transcript-actions.md). Linux regressions
+use synthetic transcripts, isolated controlled Pi processes and the actual
+staged bundled engine; no microphone, hosted provider or live account is used.
+Hosted Verify unavailable: repository Actions disabled, awaiting user decision.
+
 #209 native titlebar theme continuation: the renderer consumes the published exact RGB/current-document operation after successful durable hydration and repaints once per new theme or ready replacement connection. It catches unsupported/refused/late results without a retry loop, rejects non-RGB native computed tokens, and retires connection observers on pagehide/unmount/effect replacement. Electron keeps its color contract and macOS leaves chrome to its native owner. Sixteen actual typed-native/compatibility hook controls, full renderer1760/151files and staged427/22files pass; raw forced typecheck, lint0errors165baselinewarnings, both frontends and contract unit tests pass. The inventory records the captured host API call replacing the previous late-bound facade expression; retained operation policy is unchanged. [Renderer recovery](production-renderer-recovery.md) records scope; revision-bound evidence follows. Installed/non-Linux chrome and remaining global shortcut/login/voice/platform acceptance stay open. Hosted Verify unavailable: repository Actions disabled, awaiting user decision.
 
 #209 Commander renderer continuation: list reads coalesce and retry changed search/archive filters, accepted create/rename/archive receipts and session observations using authoritative Source title/body search. Document/connection/selection generations fence stale history before publication or report-read effects. Reference-counted cohorts dispose on last release/pagehide/HMR; late terminals cannot clear a newer turn. Recovery restores durable messages and live turns without selecting a service session, reading reports or sending a model turn. Twenty actual typed-native controls replace the five mocked recovery controls. Full renderer1740 and staged408 baseline passed; final affected51 app/20 staged, forced typecheck, lint0errors165baselinewarnings and both frontends pass. Rebase onto E2's native window source passes142 app/142 staged controls, raw forced typecheck/lint/both frontends and inventory905/contracts freshness. [Renderer recovery](production-renderer-recovery.md) records scope; revision-bound evidence follows. Installed/native platform acceptance and remaining retained operations remain open; hosted Verify unavailable: repository Actions disabled, awaiting user decision.
@@ -41,7 +56,7 @@ unavailable pending #215 physical-document permission and raw stream-revocation
 proof. Existing management controls remain governed by optional-runtime policy;
 no voice action writer or hosted provider is enabled. Linux evidence uses only
 synthetic audio and private fixture executables. Actual inference, hard-crash
-process trees, production scoped actions, custom directory/native selection and
+process trees, native action binding, custom directory/native selection and
 installed supported platforms remain open. Hosted Verify unavailable: repository
 Actions disabled, awaiting user decision. See
 [private voice authority](voice-native-authority.md) and

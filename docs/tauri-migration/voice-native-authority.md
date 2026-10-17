@@ -1,8 +1,10 @@
 # Local voice authority continuation (#218)
 
 This continuation supplies an optional private Source lease consumer and repairs
-actual speech worker ownership. Production microphone, capture, playback, task
-actions and global voice shortcuts remain unavailable. The SDK is not registered
+actual speech worker ownership. A later [transcript action owner](voice-transcript-actions.md)
+provides the Source-only final-text path through existing domain services.
+Production microphone, capture, playback, public task actions and global voice
+shortcuts remain unavailable. The SDK is not registered
 in the production private peer or advertised as a native host capability. Hosted
 voice (#92) remains deferred by the user.
 
@@ -98,8 +100,7 @@ after worker close); the staged repaired worker passes. This tests graceful TERM
 retirement, not installed OS speech or an uncatchable worker crash.
 
 Whole-issue acceptance remains open: #215 native document permission/capture/
-playback/shortcut authority; production scoped action/HITL binding through the
-existing task/AgentManager admission services; actual system/downloaded-model
+playback/shortcut authority and public action binding; actual system/downloaded-model
 inference and interrupted hard-crash process-tree proof; a reviewed all-platform
 runtime installation pin; custom-directory selection; installed supported
 platform/device proof. Hosted Verify unavailable: repository Actions disabled,

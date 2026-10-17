@@ -51,6 +51,9 @@ export type VoiceActionAgents = Pick<
 export interface VoiceActionDeps {
   db: VoiceActionDb
   agents: VoiceActionAgents
+  /** Optional Source-only domain delegate. Resolution and confirmation policy
+   * stay shared; portable effects use the existing UI domain backends. */
+  execute?: (turnId: string, intent: VoiceIntent, context: VoiceUiContext, task: TaskRecord | null) => Promise<VoiceActionOutcome>
   /** Broadcasts one canonical event to the desktop renderer and mobile clients. */
   notify: (channel: string, data: unknown) => void
 }
@@ -121,7 +124,7 @@ export class VoiceActionService {
     }
 
     try {
-      return await this.execute(turnId, intent, context, task)
+      return await (this.deps.execute ? this.deps.execute(turnId, intent, context, task) : this.execute(turnId, intent, context, task))
     } catch (err) {
       return {
         status: 'rejected',
@@ -166,7 +169,7 @@ export class VoiceActionService {
         return task && task.agent_id ? null : 'policy'
       case 'assign_agent': {
         const agent = this.resolveAgent(intent.agentName)
-        return agent.ok ? null : 'ambiguous_agent'
+        return agent.ok && agent.match === 'exact' ? null : 'ambiguous_agent'
       }
       default:
         return null
