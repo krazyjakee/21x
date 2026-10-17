@@ -225,3 +225,40 @@ read, and a disposed queued reader refuses before its first RPC. The existing
 overview/group regressions remain, with asynchronous reads fully joined before
 asserting event-burst coalescing. No background owner, scheduler, native operation
 or renderer mutation writer was introduced. Installed UI proof remains open.
+
+## Bounded saved images in Markdown
+
+Native Markdown consumes the published optional `attachments.readImage` operation
+for literal `app-attachment://taskId/attachmentId` image references. Task IDs and
+saved UUIDs are validated without URL decoding/normalization; paths, aliases,
+query/fragment additions and extra segments never become requests. The actual
+native codec supplies its physical-document receipt and validates the finite
+PNG/JPEG/GIF/WebP response. The renderer reuses the shared container admission
+before creating a typed blob URL. Native attachment hyperlinks are inert with
+guidance to the existing attachment Open/Download controls. Electron retains its
+existing scheme image/link behavior; no native raw scheme is registered.
+
+One document-wide pool bounds public preview reads to four, queued requests to
+64, resident previews to 16, resident encoded image bytes to 4 MiB and admitted
+pixels to 16,777,216. Pixel accounting charges each canvas and every admitted
+animation frame. Each image still has the backend's 512 KiB, 4096-edge,
+8,388,608 canvas/frame-pixel and finite container/parser bounds. This bounds
+renderer admission and owned resident URLs; it does not claim control over
+implementation-dependent browser decoder caches. Actual WebView decode/runtime
+acceptance remains separate. Budget test fixtures exercise container dimensions
+and size, without claiming valid entropy decoding.
+
+Intersection observation delays offscreen requests and releases URLs outside the
+viewport. Component/connection generations fence late replies; cancelled queued
+requests never invoke. In-flight public read slots remain occupied through public
+settlement, while Source independently joins its raw FD reads and bounded queue.
+Unmount/pagehide/HMR/reconnect and browser decode errors release owned URLs and
+budget. Streamed surrounding Markdown preserves the image component. Capacity or
+format failures show fixed unavailable guidance, with no raw path/scheme fallback
+or automatic retry loop. A later visible/new connection/view is a fresh read.
+
+Twenty-four actual typed-native React controls cover the consumer and shared
+budget, including a reconnect regression that caught `readImage` missing from the
+client's read-only recovery list. The additive classification now allows this
+exact authorized read during hydration while mutation admission stays fenced.
+Physical-document and Source task/project/group/agent read guards are unchanged.

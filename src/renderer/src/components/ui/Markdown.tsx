@@ -21,6 +21,9 @@ import { Check, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { markIncompleteMermaidFences } from '@/lib/mermaid-fence'
 import { MermaidDiagram } from './MermaidDiagram'
+import { MarkdownAttachmentImage } from './MarkdownAttachmentImage'
+import { getDesktopHost } from '@/lib/desktop-api'
+import { isLegacyAttachmentUrl } from '@/lib/attachment-image-preview'
 
 /** Allow the default safe protocols plus our local app-attachment:// scheme */
 function urlTransform(url: string): string {
@@ -272,12 +275,12 @@ export const Markdown = memo(function Markdown({ children, size = 'sm', classNam
       )
     },
     // Links
-    a: ({ children, ...props }: React.ComponentPropsWithoutRef<'a'>) => (
-      <a className="text-primary hover:underline cursor-pointer" target={props.href?.startsWith('#') ? undefined : '_blank'} rel="noopener noreferrer" {...props} onClick={(event) => { if (props.href && linkClickRef.current?.(props.href)) event.preventDefault() }}>{highlightReactNode(children, highlightQuery)}</a>
-    ),
+    a: ({ children, ...props }: React.ComponentPropsWithoutRef<'a'>) => getDesktopHost().kind !== 'electron' && isLegacyAttachmentUrl(props.href)
+      ? <span title="Use Open or Download in attachments." className="text-muted-foreground">{highlightReactNode(children, highlightQuery)}</span>
+      : <a className="text-primary hover:underline cursor-pointer" target={props.href?.startsWith('#') ? undefined : '_blank'} rel="noopener noreferrer" {...props} onClick={(event) => { if (props.href && linkClickRef.current?.(props.href)) event.preventDefault() }}>{highlightReactNode(children, highlightQuery)}</a>,
     // Images
     img: ({ alt, src, ...props }: React.ComponentPropsWithoutRef<'img'>) => (
-      <img alt={alt || ''} src={src} className="max-w-full h-auto rounded my-2" loading="lazy" {...props} />
+      <MarkdownAttachmentImage alt={alt || ''} src={src} className="max-w-full h-auto rounded my-2" loading="lazy" {...props} />
     ),
     // Blockquotes
     blockquote: ({ children, ...props }: React.ComponentPropsWithoutRef<'blockquote'>) => (
