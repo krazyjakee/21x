@@ -319,3 +319,40 @@ owned and swallowed; queued effects, listener callbacks and local snooze timers
 retire on pagehide/unmount. The real Source minute timer, read-scope filtering
 and shutdown proofs belong to #210; these renderer controls use exact controlled
 native receipts and prove no installed notification delivery or physical UI.
+
+
+## MCP and task-source catalog recovery
+
+Demanded MCP configuration and task-source catalogs join the existing bounded
+snapshot reader and strict native recovery. Accepted create/update/delete
+receipts invalidate held lists and same-ID creates deduplicate. First accepted
+writes mark the cache as demanded; unused caches issue no recovery request.
+Pagehide/HMR retires each reader and captured document generation, so late writes
+and read failures cannot publish into replacement cache ownership. Recovery
+replays no sync, export, plugin action, process probe or browser sign-in.
+
+An explicit sync captures its literal source ID, checks the returned identity,
+and joins canonical task and source metadata reads after acknowledgement. It
+uses the stored Source timestamp rather than manufacturing `last_synced_at` in
+the renderer. Duplicate in-flight UI requests join one public sync promise.
+Sync-all uses the retained mutation lane sequentially and withdraws remaining
+starts when the captured connection or selected project changes. Accepted
+remote work remains with the Source owner; these guards cannot undo an accepted
+sync and do not claim raw remote-worker cancellation or a durable UI journal.
+
+MCP process tests, OAuth status reads and authentication probes retain captured
+connection/document and metadata revision checks. Status metadata reads are
+sequential; failed status reads remain unknown rather than fabricated
+disconnected values. Native settings mount/recovery reads configuration and
+local status metadata only. A connection test requires its explicit control and
+its UI result is fenced by the original server configuration and connection.
+Connection retirement clears old success state. The Source test/process owner
+and its grants remain unchanged. Shipping Electron keeps its existing initial
+probe behavior.
+
+The native remote form shows browser sign-in as unavailable and does not probe
+a URL or start sign-in on open, edit or creation. This reflects the current
+global native OAuth-browser capability; connector-specific loopback authority
+does not grant MCP browser authority. Existing explicit credential revocation
+and connection tests keep their separate retained operations. Native Drop
+context/receipt work is independent and remains with #215/#214.

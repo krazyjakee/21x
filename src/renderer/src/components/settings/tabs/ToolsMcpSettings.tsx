@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Plus, Loader2, Wifi, WifiOff, RefreshCw, Edit3, Trash2, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { SettingsSection } from '../SettingsSection'
 import { McpServerFormDialog } from '../forms/McpServerFormDialog'
 import { GlobalCliMcpSection } from '../GlobalCliMcpSection'
-import { useMcpStore } from '@/stores/mcp-store'
+import { useMcpStore, getMcpConfigurationRevision } from '@/stores/mcp-store'
 import type { McpServer, CreateMcpServerDTO } from '@/types'
 
 interface McpConnectionInfo {
@@ -12,6 +13,7 @@ interface McpConnectionInfo {
   error?: string
   errorDetail?: string
   toolCount?: number
+  version?: string
 }
 
 interface McpDialogState {
@@ -19,30 +21,65 @@ interface McpDialogState {
   server?: McpServer
 }
 
+const serverVersion = (server: McpServer) => JSON.stringify([getMcpConfigurationRevision(), server.id, server.type, server.url, server.command, server.args, server.headers, server.environment, server.updated_at])
 export function ToolsMcpSettings() {
+  const nativeDesktop = getDesktopHost().kind === 'tauri'
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    const host = getDesktopHost()
+    let generation = host.connectionGeneration, off: (() => void) | undefined
+    const retire = () => {
+      alive.current = false
+      off?.(); off = undefined
+      window.removeEventListener('pagehide', retire)
+    }
+    if (host.kind === 'tauri') off = host.subscribeConnection(() => {
+      if (!alive.current || generation === host.connectionGeneration) return
+      generation = host.connectionGeneration
+      setConnections(new Map())
+    })
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
+  }, [])
   const {
-    servers, fetchServers, createServer, updateServer, deleteServer,
+    servers, error, fetchServers, createServer, updateServer, deleteServer,
     testConnection: testMcpConnection,
     oauthStatuses, startOAuthFlow, submitManualClientId, revokeOAuthToken,
     fetchAllOAuthStatuses, authRequired, probeForAuth, probeAllForAuth
   } = useMcpStore()
   const [connections, setConnections] = useState<Map<string, McpConnectionInfo>>(new Map())
   const [mcpDialog, setMcpDialog] = useState<McpDialogState>({ open: false })
+  useEffect(() => {
+    setConnections(previous => {
+      const next = new Map([...previous].filter(([id, value]) => servers.some(server => server.id === id && value.version === serverVersion(server))))
+      return next.size === previous.size ? previous : next
+    })
+  }, [servers])
 
   useEffect(() => {
     fetchServers()
   }, [])
 
   useEffect(() => {
-    if (servers.length > 0) {
-      servers.forEach((s) => testServerConnection(s))
-      fetchAllOAuthStatuses()
-      probeAllForAuth()
+    if (nativeDesktop && servers.length > 0) void fetchAllOAuthStatuses()
+  }, [nativeDesktop, servers, fetchAllOAuthStatuses])
+
+  useEffect(() => {
+    // Shipping Electron keeps its existing initial probes. Native catalog
+    // mount/recovery only reads metadata; Test connection is explicit.
+    if (!nativeDesktop && servers.length > 0) {
+      servers.forEach((server) => { void testServerConnection(server) })
+      void fetchAllOAuthStatuses()
+      void probeAllForAuth()
     }
   }, [servers.length])
 
   const testServerConnection = async (server: McpServer) => {
-    setConnections((prev) => new Map(prev).set(server.id, { status: 'testing' }))
+    const scope = captureDesktopRead(), version = serverVersion(server)
+    const current = () => alive.current && scope.isCurrent() && useMcpStore.getState().servers.some(row => row.id === server.id && serverVersion(row) === version)
+    if (!current()) return
+    setConnections((prev) => new Map(prev).set(server.id, { status: 'testing', version }))
 
     try {
       const testData = server.type === 'remote'
@@ -50,16 +87,17 @@ export function ToolsMcpSettings() {
         : { id: server.id, name: server.name, type: 'local' as const, command: server.command, args: server.args, environment: server.environment }
 
       const result = await testMcpConnection(testData)
+      if (!current()) return
       setConnections((prev) => new Map(prev).set(server.id, {
-        status: result.status,
+        version, status: result.status,
         error: result.error,
         errorDetail: result.errorDetail,
         toolCount: result.toolCount
       }))
     } catch (err: unknown) {
+      if (!current()) return
       setConnections((prev) => new Map(prev).set(server.id, {
-        status: 'failed',
-        error: err instanceof Error ? err.message : 'Test failed'
+        version, status: 'failed', error: nativeDesktop ? 'Connection test failed. Review current settings before retrying.' : err instanceof Error ? err.message : 'Test failed'
       }))
     }
   }
@@ -67,7 +105,7 @@ export function ToolsMcpSettings() {
   const handleCreateServer = async (data: CreateMcpServerDTO) => {
     const server = await createServer(data)
     setMcpDialog({ open: false })
-    if (server && data.type === 'remote' && data.url) {
+    if (!nativeDesktop && server && data.type === 'remote' && data.url) {
       // Probe and auto-start OAuth if needed
       const needed = await probeForAuth(server.id, data.url)
       if (needed) {
@@ -91,6 +129,7 @@ export function ToolsMcpSettings() {
 
   // OAuth callbacks passed to the dialog
   const handleProbeForAuth = useCallback(async (url: string): Promise<boolean> => {
+    if (getDesktopHost().kind === 'tauri') return false
     try {
       const { requiresAuth } = await useMcpStore.getState().servers.length
         ? await (await import('@/lib/ipc-client')).mcpServerApi.probeForAuth(url)
@@ -141,6 +180,7 @@ export function ToolsMcpSettings() {
         title="MCP Servers"
         description="Manage Model Context Protocol servers for tools and integrations"
       >
+        {error && <p role="alert" className="text-sm text-destructive">MCP settings could not be loaded or saved. Review current values before retrying.</p>}
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
             {servers.length} server{servers.length !== 1 ? 's' : ''} configured
@@ -162,7 +202,8 @@ export function ToolsMcpSettings() {
         ) : (
           <div className="space-y-2">
             {servers.map((server) => {
-              const connection = connections.get(server.id) || { status: 'idle' }
+              const observed = connections.get(server.id)
+              const connection: McpConnectionInfo = observed && observed.version === serverVersion(server) ? observed : { status: 'idle' }
               const hideConnectionRow = shouldHideConnectionRow(server, connection)
               const oauthStatus = oauthStatuses[server.id]
               const hasOAuth = isOAuthServer(server)
@@ -284,6 +325,7 @@ export function ToolsMcpSettings() {
         onClose={() => setMcpDialog({ open: false })}
         onSubmit={mcpDialog.server ? handleUpdateServer : handleCreateServer}
         oauthConnected={mcpDialog.server ? oauthStatuses[mcpDialog.server.id]?.connected : undefined}
+        browserSignInAvailable={!nativeDesktop}
         oauth={oauthCallbacks}
       />
 

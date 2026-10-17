@@ -79,12 +79,13 @@ describe('useTaskSourceStore', () => {
         sources: [{ id: 'ts1', last_synced_at: null }] as unknown as TaskSource[]
       })
 
+      ;(mockElectronAPI.taskSources.getAll as unknown as Mock).mockResolvedValue([{ id: 'ts1', last_synced_at: '2026-10-17T12:00:00Z' }])
       const result = await useTaskSourceStore.getState().syncSource('ts1')
 
       expect(result).toEqual(syncResult)
       expect(useTaskSourceStore.getState().syncingIds.has('ts1')).toBe(false)
       expect(useTaskSourceStore.getState().lastSyncResults.get('ts1')).toEqual(syncResult)
-      expect(useTaskSourceStore.getState().sources[0].last_synced_at).toBeTruthy()
+      expect(useTaskSourceStore.getState().sources[0].last_synced_at).toBe('2026-10-17T12:00:00Z')
     })
 
     it('clears syncingIds on error', async () => {
@@ -113,7 +114,7 @@ describe('useTaskSourceStore', () => {
         await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce())
         expect(useTaskSourceStore.getState().syncingIds.has('slow')).toBe(true)
       } finally {
-        finishSlow(result)
+        finishSlow({ ...result, source_id: 'slow' })
         await all
         refresh.mockRestore()
       }
@@ -127,9 +128,9 @@ describe('useTaskSourceStore', () => {
           { id: 'ts3', enabled: true }
         ] as unknown as TaskSource[]
       })
-      ;(mockElectronAPI.taskSources.sync as unknown as Mock).mockResolvedValue({
-        source_id: '', imported: 0, updated: 0, errors: []
-      })
+      ;(mockElectronAPI.taskSources.sync as unknown as Mock).mockImplementation(async (source_id: string) => ({
+        source_id, imported: 0, updated: 0, errors: []
+      }))
 
       await useTaskSourceStore.getState().syncAllEnabled()
 

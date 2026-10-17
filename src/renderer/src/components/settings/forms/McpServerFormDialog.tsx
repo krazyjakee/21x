@@ -21,10 +21,11 @@ interface McpServerFormDialogProps {
   onClose: () => void
   onSubmit: (data: CreateMcpServerDTO) => void
   oauthConnected?: boolean
+  browserSignInAvailable?: boolean
   oauth: OAuthCallbacks
 }
 
-export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConnected, oauth }: McpServerFormDialogProps) {
+export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConnected, oauth, browserSignInAvailable = true }: McpServerFormDialogProps) {
   const [name, setName] = useState(server?.name ?? '')
   const [type, setType] = useState<'local' | 'remote'>(server?.type ?? 'local')
   const [command, setCommand] = useState(server?.command ?? '')
@@ -60,7 +61,7 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
         setAuthNeeded(true)
       }
       // For edit mode: if remote server with URL but no stored OAuth metadata, probe live
-      else if (server?.type === 'remote' && server.url?.trim() && !oauthConnected) {
+      else if (browserSignInAvailable && server?.type === 'remote' && server.url?.trim() && !oauthConnected) {
         setProbing(true)
         oauth.probeForAuth(server.url.trim()).then((needed) => {
           setAuthNeeded(needed)
@@ -82,7 +83,7 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
     if (probeTimer.current) clearTimeout(probeTimer.current)
 
     // Don't probe if editing an already-connected server (no need to re-probe)
-    if (server && oauthConnected) return
+    if (!browserSignInAvailable || server && oauthConnected) return
 
     const trimmed = newUrl.trim()
     if (!trimmed || !trimmed.startsWith('http')) {
@@ -101,12 +102,12 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
         setProbing(false)
       }
     }, 800)
-  }, [server, oauthConnected, oauth])
+  }, [server, oauthConnected, oauth, browserSignInAvailable])
 
   const isValid = name.trim() && (type === 'local' ? command.trim() : url.trim())
 
   const handleConnectOAuth = async () => {
-    if (!server) return
+    if (!browserSignInAvailable || !server) return
     setConnecting(true)
     try {
       const result = await oauth.startOAuthFlow(server.id)
@@ -120,7 +121,7 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
   }
 
   const handleSubmitManualClientId = async () => {
-    if (!server || !manualClientId.trim()) return
+    if (!browserSignInAvailable || !server || !manualClientId.trim()) return
     setConnecting(true)
     try {
       const result = await oauth.submitManualClientId(server.id, manualClientId.trim())
@@ -157,7 +158,7 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
   }
 
   // Show OAuth section for remote servers when auth is needed or already connected
-  const showOAuthSection = type === 'remote' && (authNeeded || oauthConnected)
+  const showOAuthSection = type === 'remote' && (!browserSignInAvailable || authNeeded || oauthConnected)
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -273,6 +274,8 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
                         <KeyRound className="h-3 w-3 text-emerald-400" />
                         <span className="text-emerald-400">OAuth Connected</span>
                       </>
+                    ) : !browserSignInAvailable ? (
+                      <span className="text-muted-foreground">Browser sign-in unavailable</span>
                     ) : (
                       <>
                         <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
@@ -300,7 +303,7 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
                       size="sm"
                       className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
                       onClick={handleConnectOAuth}
-                      disabled={connecting}
+                      disabled={!browserSignInAvailable || connecting}
                     >
                       {connecting ? (
                         <Loader2 className="h-3 w-3 animate-spin mr-1" />
@@ -323,7 +326,7 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
                       type="button"
                       size="sm"
                       className="h-7 px-3 text-xs"
-                      disabled={!manualClientId.trim() || connecting}
+                      disabled={!browserSignInAvailable || !manualClientId.trim() || connecting}
                       onClick={handleSubmitManualClientId}
                     >
                       {connecting ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Submit'}
@@ -339,7 +342,8 @@ export function McpServerFormDialog({ server, open, onClose, onSubmit, oauthConn
                     </Button>
                   </div>
                 )}
-                {!server && !oauthConnected && !probing && (
+                {!browserSignInAvailable && <p className="text-xs text-muted-foreground">Browser sign-in is unavailable in this preview.</p>}
+                {browserSignInAvailable && !server && !oauthConnected && !probing && (
                   <p className="text-[11px] text-muted-foreground">
                     OAuth will start automatically after adding the server.
                   </p>
