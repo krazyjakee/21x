@@ -3,7 +3,7 @@ import { Fragment, useState, useEffect, useMemo, type JSX, type ReactNode } from
 import { Dialog, DialogContent, DialogHeader, DialogBody, DialogTitle, DialogDescription } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Markdown } from '@/components/ui/Markdown'
-import { updaterApi } from '@/lib/ipc-client'
+import { desktopUpdaterAvailable, updaterApi } from '@/lib/ipc-client'
 import { Download, RotateCw, Loader2, ExternalLink, Check, RefreshCw } from 'lucide-react'
 
 /**
@@ -123,6 +123,7 @@ interface UpdateState {
 }
 
 export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
+  const available = desktopUpdaterAvailable()
   const [state, setState] = useState<UpdateState>({
     status: 'idle',
     version: null,
@@ -135,14 +136,19 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
 
   // Load current version on mount
   useEffect(() => {
+    let active = true
     updaterApi.getVersion().then((v) => {
-      setState((s) => ({ ...s, currentVersion: v }))
-    })
+      if (active) setState((s) => ({ ...s, currentVersion: v }))
+    }).catch(() => { if (active) setState(s => ({ ...s, error: 'The app version could not be loaded.' })) })
+    return () => { active = false }
   }, [])
 
   // Subscribe to updater status events
   useEffect(() => {
+    if (!available) return
+    let active = true
     const cleanup = updaterApi.onStatus((data) => {
+      if (!active) return
       setState((prev) => ({
         ...prev,
         status: data.status,
@@ -154,12 +160,12 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
         error: data.error ?? null
       }))
     })
-    return cleanup
-  }, [])
+    return () => { active = false; cleanup?.() }
+  }, [available])
 
   // When opened from menu and no update known yet, trigger a check
   useEffect(() => {
-    if (open && state.status === 'idle') {
+    if (available && open && state.status === 'idle') {
       setState((s) => ({ ...s, status: 'checking', error: null }))
       updaterApi.check().then((result) => {
         // In dev mode (or if check fails synchronously), the main process
@@ -170,16 +176,19 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
             : s
           )
         }
-      })
+      }).catch(() => setState(s => ({ ...s, status: 'error', error: 'Update check failed.' })))
     }
-  }, [open])
+  }, [open, available])
 
   const handleDownload = async () => {
-    await updaterApi.download()
+    try {
+      const result = await updaterApi.download()
+      if (!result.success) setState(s => ({ ...s, status: 'error', error: result.error ?? 'Update download failed.' }))
+    } catch { setState(s => ({ ...s, status: 'error', error: 'Update download failed.' })) }
   }
 
   const handleInstall = () => {
-    updaterApi.install()
+    void updaterApi.install().catch(() => setState(s => ({ ...s, status: 'error', error: 'Update installation failed.' })))
   }
 
   const handleRetry = () => {
@@ -191,7 +200,7 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
           : s
         )
       }
-    })
+    }).catch(() => setState(s => ({ ...s, status: 'error', error: 'Update check failed.' })))
   }
 
   const handleCheckForUpdates = () => {
@@ -203,10 +212,10 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
           : s
         )
       }
-    })
+    }).catch(() => setState(s => ({ ...s, status: 'error', error: 'Update check failed.' })))
   }
 
-  const hasUpdate = state.status === 'available' || state.status === 'downloading' || state.status === 'downloaded'
+  const hasUpdate = available && (state.status === 'available' || state.status === 'downloading' || state.status === 'downloaded')
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -214,7 +223,7 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
         <DialogHeader>
           <DialogTitle>{hasUpdate ? 'Update Available' : 'Software Update'}</DialogTitle>
           <DialogDescription>
-            {state.status === 'checking'
+            {!available ? 'Updates are unavailable in this preview.' : state.status === 'checking'
               ? 'Checking for updates\u2026'
               : state.status === 'up-to-date'
                 ? 'You\'re up to date!'
@@ -309,7 +318,7 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
 
             {/* Actions */}
             <div className="flex items-center gap-2 pt-2">
-              {state.status === 'downloaded' ? (
+              {available && (state.status === 'downloaded' ? (
                 <Button onClick={handleInstall} className="flex-1">
                   <RotateCw className="h-4 w-4 mr-2" />
                   Install &amp; Restart
@@ -334,7 +343,7 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
                   <RefreshCw className="h-4 w-4 mr-2" />
                   Check for Updates
                 </Button>
-              ) : null}
+              ) : null)}
               <Button variant="outline" onClick={onClose}>
                 {hasUpdate ? 'Later' : 'Close'}
               </Button>

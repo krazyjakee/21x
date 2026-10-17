@@ -1,4 +1,4 @@
-import { desktopApi, electronBrowserApi } from '@/lib/desktop-api'
+import { desktopApi, desktopSupports, electronBrowserApi } from '@/lib/desktop-api'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
 import type { AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent, AgentSessionStartResult, AgentTaskStartResult, AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
@@ -359,6 +359,11 @@ export const settingsApi = {
   }
 }
 
+/** Capability inspection only; this does not select an update feed or policy. */
+export function desktopUpdaterAvailable(): boolean {
+  return ['updater.check', 'updater.download', 'updater.install'].every(desktopSupports)
+}
+
 export const updaterApi = {
   check: (): Promise<{ success: boolean; version?: string; error?: string }> => {
     return desktopApi?.updater?.check() ?? Promise.resolve({ success: false, error: 'Not available' })
@@ -370,7 +375,9 @@ export const updaterApi = {
     return desktopApi?.updater?.install() ?? Promise.resolve()
   },
   getVersion: (): Promise<string> => {
-    return desktopApi?.updater?.getVersion() ?? Promise.resolve('?.?.?')
+    if (desktopSupports('updater.getVersion')) return desktopApi.updater.getVersion()
+    if (desktopSupports('app.getVersion')) return desktopApi.app.getVersion()
+    return Promise.resolve('?.?.?')
   },
   onStatus: (callback: (data: { status: string; version?: string; percent?: number; error?: string; releaseNotes?: string; releaseDate?: string; currentVersion?: string }) => void): (() => void) | undefined => {
     return desktopApi?.updater?.onStatus?.(callback)

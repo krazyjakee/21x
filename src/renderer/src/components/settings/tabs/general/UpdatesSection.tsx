@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { RefreshCw, Download, Check, Loader2 } from 'lucide-react'
 import { SettingsSection } from '../../SettingsSection'
 import { Button } from '@/components/ui/Button'
-import { updaterApi } from '@/lib/ipc-client'
+import { desktopUpdaterAvailable, updaterApi } from '@/lib/ipc-client'
 
 export function UpdatesSection() {
   const [updateStatus, setUpdateStatus] = useState<string>('idle')
@@ -10,20 +10,27 @@ export function UpdatesSection() {
   const [updatePercent, setUpdatePercent] = useState(0)
   const [updateError, setUpdateError] = useState<string | null>(null)
   const [currentVersion, setCurrentVersion] = useState<string | null>(null)
+  const available = desktopUpdaterAvailable()
 
   useEffect(() => {
-    return updaterApi.onStatus((data) => {
+    if (!available) return
+    let active = true
+    const cleanup = updaterApi.onStatus((data) => {
+      if (!active) return
       setUpdateStatus(data.status)
       if (data.version) setUpdateVersion(data.version)
       if (data.percent !== undefined) setUpdatePercent(data.percent)
       if (data.error) setUpdateError(data.error)
     })
-  }, [])
+    return () => { active = false; cleanup?.() }
+  }, [available])
 
   useEffect(() => {
+    let active = true
     updaterApi.getVersion()
-      .then(setCurrentVersion)
-      .catch((error) => console.error('Failed to load app version:', error))
+      .then(version => { if (active) setCurrentVersion(version) })
+      .catch(() => { if (active) setUpdateError('The app version could not be loaded.') })
+    return () => { active = false }
   }, [])
 
   return (
@@ -37,14 +44,18 @@ export function UpdatesSection() {
             Current version: v{currentVersion}
           </span>
         )}
-        {updateStatus === 'idle' || updateStatus === 'up-to-date' || updateStatus === 'error' ? (
+        {!available ? <span className="text-xs text-muted-foreground">Updates are unavailable in this preview.</span>
+          : updateStatus === 'idle' || updateStatus === 'up-to-date' || updateStatus === 'error' ? (
           <Button
             variant="outline"
             size="sm"
             onClick={async () => {
               setUpdateError(null)
               setUpdateStatus('checking')
-              await updaterApi.check()
+              try {
+                const result = await updaterApi.check()
+                if (!result.success) { setUpdateStatus('error'); setUpdateError(result.error ?? 'Update check failed.') }
+              } catch { setUpdateStatus('error'); setUpdateError('Update check failed.') }
             }}
           >
             <RefreshCw className="size-3.5 mr-1.5" />
@@ -56,7 +67,9 @@ export function UpdatesSection() {
             Checking...
           </Button>
         ) : updateStatus === 'available' ? (
-          <Button size="sm" onClick={() => updaterApi.download()}>
+          <Button size="sm" onClick={() => { void updaterApi.download().then(result => {
+            if (!result.success) { setUpdateStatus('error'); setUpdateError(result.error ?? 'Update download failed.') }
+          }).catch(() => { setUpdateStatus('error'); setUpdateError('Update download failed.') }) }}>
             <Download className="size-3.5 mr-1.5" />
             Download v{updateVersion}
           </Button>
@@ -66,7 +79,7 @@ export function UpdatesSection() {
             Downloading... {updatePercent}%
           </Button>
         ) : updateStatus === 'downloaded' ? (
-          <Button size="sm" onClick={() => updaterApi.install()}>
+          <Button size="sm" onClick={() => { void updaterApi.install().catch(() => { setUpdateStatus('error'); setUpdateError('Update installation failed.') }) }}>
             <Check className="size-3.5 mr-1.5" />
             Install & Restart (v{updateVersion})
           </Button>
