@@ -1,0 +1,308 @@
+{
+  "version": 1,
+  "issue": 208,
+  "createdAt": "2026-10-17T18:28:03.897253+00:00",
+  "implementationRevision": "4588741e4268b2a77b13f93b176e2d51ff4b61a0",
+  "scope": "Finite recovery observation from real ProductionOwner through the private peer, native response validator and existing renderer startup status. Linux source/staged tests and native engine tests; no installed production WebView proof.",
+  "applicationPackageVersion": "0.0.161",
+  "provenance": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "standaloneNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "sqliteAddon": "13.0.3",
+    "nodePty": "1.1.0",
+    "sqliteSchema": 37,
+    "vitest": "4.0.18",
+    "electronForAppTests": "44.0.0",
+    "webview": null,
+    "webviewReason": "No installed Tauri WebView launched; app transport tests use host doubles."
+  },
+  "fixture": {
+    "profiles": "Synthetic temporary profiles and copied fixture SQLite only; no live profile, user key or external provider.",
+    "privateProtocol": 1,
+    "publicCommandsAdded": 0,
+    "publicEventsAdded": 0,
+    "ownerMetadataFields": [
+      "phase",
+      "stage",
+      "code",
+      "owned"
+    ],
+    "sqliteBusyDeadlineMs": 1000,
+    "lowDiskPreflightBytes": 8388608,
+    "controlledFaults": [
+      "ENOSPC and EDQUOT before lock creation",
+      "statfs low capacity",
+      "CLI readiness refusal (projection test, not installed vendor CLI)"
+    ],
+    "actualFaults": [
+      "Missing managed executable/resource directory",
+      "Exclusive DELETE-mode SQLite lock with preserved row and later explicit successful launch",
+      "Corrupt SQLite bytes",
+      "Unavailable protected key store using retained owner seam"
+    ]
+  },
+  "expectedActual": [
+    {
+      "expected": "Expose useful classified startup failure without replay or leaking arbitrary internals.",
+      "actual": "Private exact finite ownerState works after failed initialization; native maps only failed/blocked allowlisted metadata; unknown values/private extra fields refuse; fixed renderer wording ignores canary text."
+    },
+    {
+      "expected": "Distinguish disk/quota and busy/corrupt database failures, preserve the existing profile.",
+      "actual": "Pre-lock ENOSPC/EDQUOT and low statfs capacity fail before credentials/adapters; exclusive SQLite lock returns PROFILE_DATABASE_LOCKED within the bounded preflight, preserves a row, and permits a later explicit launch after lock release; corrupt bytes classify separately."
+    },
+    {
+      "expected": "Observations must not admit, retry or prematurely release blocked ownership.",
+      "actual": "The private read has empty arguments, requires epoch ping, has no effect handler and remains available while failed/blocked; held raw-drain owner tests preserve profile ownership until acknowledgement."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "application": {
+      "files": 4,
+      "passed": 78,
+      "failed": 0,
+      "skipped": 0
+    },
+    "standalone": {
+      "files": 4,
+      "passed": 78,
+      "failed": 0,
+      "skipped": 0
+    },
+    "profileLockApp": {
+      "passed": 10,
+      "failed": 0
+    },
+    "profileLockStandalone": "Not selected by the existing portable project include list; its direct invocation returned 1/no tests. Actual production owner profile-lock paths ran in the 78-case standalone suite.",
+    "nativeEngine": {
+      "passed": 101,
+      "failed": 0,
+      "ignored": 4,
+      "ignoredReason": "Four existing opt-in staged standalone Node tests were not requested by this unit invocation."
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "commands": [
+      {
+        "command": "rtk proxy node scripts/tauri-prepare.mjs --native --node /tmp/21x-tauri-validation-1qysGG/node-v22.23.2-linux-x64/bin/node",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "e821dbc80cc699569c3ef8ef846f57d97088b134f561f19cae75040a14f4d06a",
+          "bytes": 124
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run src/service/production-owner.test.ts src/service/production-service.test.ts src/shared/production-bootstrap.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "a5f76bd87f8e40c6d5cea2d08ae2837871faadac8dad7d69298c3a0f0ef6bf50",
+          "bytes": 165783
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/service/production-owner.test.ts src/service/production-service.test.ts src/shared/production-bootstrap.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "14202b56294f7d1d1204b56e3134e41208a2d9b92feb9943bf77eae8fea7e5a8",
+          "bytes": 165772
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "a2998a81d1848b2e8c274ad48f58a63f74744f63319097108cc244461e6ad9fb",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service -- --test-threads=1",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "6049ecbdc884425d70119e3cd478cb62667366c2b83e3f9ce3545458a71fc1f9",
+          "bytes": 12363
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "c3c08d2b977eafd77ef1683070e4cddea1a376d9b49f80acde86468d175712a5",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "35861100e62b6f2ad4a997d39a912416291b5fb2382378621ccf7f0f9f50000f",
+          "bytes": 635
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "abf486e82b2dcb4e6b455697ec8248225567ae288719bba980565048badf4cd6",
+          "bytes": 29268
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:frontend:build",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "c8c8b6b67636f9586eef62948dfccecaec3d1404c4a333f330f453a686870003",
+          "bytes": 497
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "73e313f00c8091f52bae84ca30c073503e825241927b5d2bcf7c26972bb8f4db",
+          "bytes": 9620
+        }
+      },
+      {
+        "command": "rtk proxy cargo check --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --target x86_64-pc-windows-msvc",
+        "exitCode": 0,
+        "result": "compile only; no target runtime or linking",
+        "log": {
+          "sha256": "6a20ff72babd425689dff97f3441f968cdaa51b65b088ae4f227c96c3df56534",
+          "bytes": 9563
+        }
+      },
+      {
+        "command": "rtk proxy cargo check --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --target x86_64-apple-darwin",
+        "exitCode": 0,
+        "result": "compile only; no target runtime or linking",
+        "log": {
+          "sha256": "5200d740360b907c7671c5167e9a82c315bcc8bbd40c3f54441de84e5aa254c8",
+          "bytes": 8929
+        }
+      },
+      {
+        "command": "rtk proxy cargo check --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --target aarch64-apple-darwin",
+        "exitCode": 0,
+        "result": "compile only; no target runtime or linking",
+        "log": {
+          "sha256": "8a5248f037c0ff037ec9cbaab8105d716c2540ff960e7a42fd54f4c23a0c20c6",
+          "bytes": 8929
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      }
+    ],
+    "buildLimits": "Frontend and shipping/mobile builds only; existing chunk warnings retained. No installed package/runtime acceptance.",
+    "crossTargets": "All three production-engine cargo checks pass. Existing non-Linux dead-code/unused warnings remain. Cross compilation does not remove the production containment refusal or establish platform runtime safety.",
+    "contracts": {
+      "files": 3,
+      "passed": 27,
+      "failed": 0
+    }
+  },
+  "sourceSha256": {
+    "docs/tauri-migration/implementation-status.md": "97ab0a2011f4bfe1fe4eee91c6d75a4eb2076c1aafff46e973e19eb6e50e0475",
+    "docs/tauri-migration/production-owner.md": "a00c60956f95e3c7c430150a6e8e46dcf063e2532640af74e160d188b1f2b662",
+    "docs/tauri-migration/production-startup-recovery.md": "7882a611533a8840f3694a4c5f7d930725a593b8ad38470a44417fd58c46529c",
+    "src-tauri/engine/src/production.rs": "55ba242e4e4968fe6b068d4d5a4e7d78e481fe81f51736c9b15ab17d25280e5a",
+    "src/main/platform/profile-lock.ts": "a89adfdc9632f7267e8a98a918d4509d350313f36416b9365e24a9fbbe39b422",
+    "src/renderer/src/lib/tauri-desktop-transport.test.ts": "ae1531b12e14d4e5c5c3965bb7070a3c99cccfb4fc68794834bc218e2eaccdce",
+    "src/renderer/src/lib/tauri-desktop-transport.ts": "c6f6a9f15acf9620a3823fea70e20c48ab2d9857ed36f8f53342cb9071de23cc",
+    "src/service/production-owner.test.ts": "526ee431287b547da3f7b9cac7104a209311f1bf9fd8d5b5a4e17c7c2b5e1b03",
+    "src/service/production-owner.ts": "40376f78fb042f7e05d4cf6997ce152529c72ad36eacbe7be65c5687b393ce37",
+    "src/service/production-service.test.ts": "5a8904e9568411d8b9c51f8e8e65bcecbf48bb24daacd5f9515623289b98aadb",
+    "src/service/production-service.ts": "915fbe1191899d28058457e02fdd8e7aa58fe130c7c62c285ee13fd9cf66f980",
+    "src/shared/production-bootstrap.test.ts": "da5f8e55ffb4fb8000c3b81a06895048391eeda23db08caeb72d9fbfec71ad60",
+    "src/shared/production-bootstrap.ts": "2a6f87942167ae8b556d90196c97e84eeee19bb35bb690247947a31eb47469f4"
+  },
+  "artifacts": {
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": {
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "bytes": 2226168
+    },
+    "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node": {
+      "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5",
+      "bytes": 79968
+    }
+  },
+  "failuresAndRepairs": [
+    {
+      "failure": "Extra direct standalone profile-lock test invocation returned 1/no tests because the existing portable project does not include that file.",
+      "repair": "Keep the project boundary unchanged, retain ten app cases and actual profile-lock startup/failure paths in the passing staged production owner suite. No unsupported standalone pass is claimed."
+    },
+    {
+      "failure": "Initial service test expected INVALID_REQUEST before epoch ping; actual peer correctly returned STALE_EPOCH.",
+      "repair": "Assert the established epoch contract; final affected suites pass."
+    },
+    {
+      "failure": "Existing service installer case lacked staged pinned Node in the fresh worktree.",
+      "repair": "Prepare native runtime with tauri-prepare before the combined gate; no check weakened."
+    },
+    {
+      "failure": "Rebase conflict between additive Latest continuation paragraphs.",
+      "repair": "Preserve published connector, signed stdio, terminal and earlier notes; add recovery note and rerun the affected integration gate."
+    }
+  ],
+  "hostedCI": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runs": [],
+    "workflowDispatches": 0,
+    "settingsEndpointsCalled": false
+  },
+  "acceptance": {
+    "issueRemainsOpen": true,
+    "checkboxesCompleted": [],
+    "progress": "Useful recovery source and staged observation implemented; installed publication across supported platforms is not claimed.",
+    "remaining": [
+      "Conservative interrupted ownership/queue/effect reconciliation remains a following slice.",
+      "Production non-Linux containment and private bootstrap remain unavailable; supported-OS crash/forced-quit/native process-tree and installed background acceptance unproven.",
+      "Installed actual vendor CLI, keychain, UI recovery/focus and platform faults require runtime proof.",
+      "Dependency #202 remains open and unchanged. Hosted platform proof is blocked on Actions user decision."
+    ]
+  },
+  "constraints": {
+    "liveRelease": false,
+    "liveProfileCutover": false,
+    "electronRetired": false,
+    "hostedVoice": "deferred by user decision"
+  }
+}
