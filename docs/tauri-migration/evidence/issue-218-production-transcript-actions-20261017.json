@@ -1,0 +1,294 @@
+{
+  "issue": 218,
+  "relatedIssue": 212,
+  "sourceRevision": "3610e98667deaebf0a0baf2c4c5e41e38b6950e2",
+  "rebasedBaseRevision": "8321c454297a7fbe3963e3762f5a13b6dd982f32",
+  "initialBaseRevision": "cba725c02ead3d5f4bbc9c481290aab29f858a2f",
+  "recordedAtUtc": "2026-10-17T22:01:22.478725+00:00",
+  "scope": "Source-only final-transcript production action path. No renderer/native registration, availability or whole acceptance checkbox claimed.",
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "shellNode": "v22.22.0",
+    "bundledNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "webview": "Not exercised; native voice remains unavailable.",
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "typescript": "5.9.3",
+    "databaseSchema": 37,
+    "app": "0.0.161",
+    "stagedSqlite": "13.0.3"
+  },
+  "artifacts": {
+    "src/main/voice/voice-action-service.ts": {
+      "sha256": "49fed863da5b9e887293744b1aa06045908d1961e34fac85e04f8142e0f757d6",
+      "bytes": 17600
+    },
+    "src/service/production-owner.ts": {
+      "sha256": "4d6c66b7686b4ab7d054d03287f9d50af1c5de51359f9a296ec42f5ce8afb1d3",
+      "bytes": 96936
+    },
+    "src/service/task-lifecycle-backend.ts": {
+      "sha256": "ec6e5f4219fcc50df65b6f9dec7c80843c2938650d4f5127565f7dc7eb73ebe3",
+      "bytes": 29569
+    },
+    "src/service/production-voice-actions.ts": {
+      "sha256": "2615f896b26ea919abfa09dc11d7ae70f0750879c33d7b561d803b4682a4ac52",
+      "bytes": 28504
+    },
+    "src/service/production-voice-actions.test.ts": {
+      "sha256": "68f3391f5678028d37a02a22e9883c648c6895a7922db9073ab6cc2e84b045f1",
+      "bytes": 30266
+    },
+    "docs/tauri-migration/voice-transcript-actions.md": {
+      "sha256": "f268fd8c9e9b2a5b60c27fdbb4033cc95a839599a2f05c8f62ed94e0bc46055a",
+      "bytes": 5592
+    },
+    "docs/tauri-migration/voice-native-authority.md": {
+      "sha256": "c6a7c08e77704fba06e135df993367ea5f0231fa8faf1a7bff6925ea70e65042",
+      "bytes": 6977
+    },
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "785960c8d6b6c0124fc966da93449733d9bca8ea0a9b567c938fcf421f3a7e69",
+      "bytes": 68356
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "e48db6fbf96676bdf7696fc25f480ad54cedd8ef6ccb061c54d7a44c399f16a4",
+      "bytes": 379920
+    },
+    "docs/tauri-migration/operations.json": {
+      "sha256": "0bcdcc32b601b3b3b97504986ce86fc87e78274ddb92402ca008f4e308a586e9",
+      "bytes": 621926
+    },
+    "test/fixtures/agent-rpc-process.cjs": {
+      "sha256": "45ff726f375cc8acfa85f9b7f17cc809d6b4e19800a87e747c1654b7222cfee7",
+      "bytes": 4124
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "75840553a8766a63e83eaebc7da71e6c04b1bbbf79a0b5e6d4693ea25a36fe24",
+      "bytes": 6173873
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "398f2f20a5dc4de4926b2fa752e299767a1f1f89b74aa7009a55075c14c5bc74",
+      "bytes": 1261481
+    },
+    "src-tauri/resources/native/twentyonex-credential-key": {
+      "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+      "bytes": 25759896
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "executionPolicy": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "gateCommand": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock python3 /tmp/218b-final-gate.py",
+    "install": "CI=true pnpm install --frozen-lockfile (physical worktree-local dependencies, raw exit0)",
+    "nativePreparation": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock node scripts/tauri-prepare.mjs --native --node /mnt/Rusty/GitHub/21x/src-tauri/resources/node/node --npm-cli /home/krazy/.nvm/versions/node/v22.22.0/lib/node_modules/npm/bin/npm-cli.js (raw exit0)",
+    "nativeHelper": "Unchanged previously reviewed regular helper copied physically from shared staged resources; SHA256 recorded; no new native source/build or OS credential acceptance claimed.",
+    "normalHooks": "lint-staged plus pnpm typecheck, raw exit0, under heavy.lock",
+    "negativeControl": {
+      "oldCommand": "pnpm test:run --project main src/service/production-voice-actions.test.ts -t \"synchronous reentrant\" --reporter=json --outputFile=/tmp/218b-reentrant-old.json",
+      "oldRawExit": 1,
+      "fixedCommand": "pnpm test:run --project main src/service/production-voice-actions.test.ts -t \"synchronous reentrant\" --reporter=json --outputFile=/tmp/218b-reentrant-fixed.json",
+      "fixedRawExit": 0,
+      "scope": "One targeted negative control; the full final source/staged suites run without filters or skips."
+    }
+  },
+  "profilePolicy": {
+    "profiles": "Synthetic temporary profiles and isolated controlled executables only; no live ~/.config/21x access",
+    "microphoneRecorded": false,
+    "realProviderSessions": false,
+    "apiKeysUsed": false,
+    "hostedVoiceProviderRequests": false,
+    "liveReleaseOrCutover": false
+  },
+  "checks": [
+    {
+      "name": "app",
+      "command": [
+        "pnpm",
+        "test:run",
+        "src/service/production-voice-actions.test.ts",
+        "src/service/task-lifecycle-backend.test.ts",
+        "src/service/production-agent-backend.test.ts",
+        "src/service/production-owner.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/voice-flow-owner.test.ts",
+        "src/service/voice-management-backend.test.ts",
+        "src/main/voice/voice-action-service.test.ts",
+        "src/shared/voice-intent-parser.test.ts",
+        "src/shared/voice-native-callbacks.test.ts",
+        "scripts/tauri-inventory.test.ts",
+        "scripts/tauri-contracts.test.ts",
+        "scripts/tauri-stage-production.test.ts",
+        "--reporter=json",
+        "--outputFile=/tmp/218b-final-gate-app.json"
+      ],
+      "rawExit": 0,
+      "seconds": 22.06,
+      "actual": {
+        "numPassedTests": 233,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "success": true
+      },
+      "skippedTests": [],
+      "expected": "Raw exit 0; all selected checks pass without weakening checks."
+    },
+    {
+      "name": "stage",
+      "command": [
+        "node",
+        "scripts/tauri-stage-production.mjs"
+      ],
+      "rawExit": 0,
+      "seconds": 16.93,
+      "expected": "Raw exit 0; all selected checks pass without weakening checks."
+    },
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "scripts/tauri-test.mjs",
+        "--production-proofs",
+        "src/service/production-voice-actions.test.ts",
+        "src/service/task-lifecycle-backend.test.ts",
+        "src/service/production-agent-backend.test.ts",
+        "src/service/production-owner.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/voice-flow-owner.test.ts",
+        "src/service/voice-management-backend.test.ts",
+        "src/shared/voice-native-callbacks.test.ts",
+        "scripts/tauri-inventory.test.ts",
+        "scripts/tauri-contracts.test.ts",
+        "scripts/tauri-stage-production.test.ts",
+        "scripts/production-service-proof.test.ts",
+        "--reporter=json",
+        "--outputFile=/tmp/218b-final-gate-node.json"
+      ],
+      "rawExit": 0,
+      "seconds": 58.47,
+      "actual": {
+        "numPassedTests": 191,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "success": true
+      },
+      "skippedTests": [],
+      "expected": "Raw exit 0; all selected checks pass without weakening checks."
+    },
+    {
+      "name": "type",
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "rawExit": 0,
+      "seconds": 34.24,
+      "expected": "Raw exit 0; all selected checks pass without weakening checks."
+    },
+    {
+      "name": "lint",
+      "command": [
+        "pnpm",
+        "lint"
+      ],
+      "rawExit": 0,
+      "seconds": 19.15,
+      "expected": "Raw exit 0; all selected checks pass without weakening checks."
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "rawExit": 0,
+      "seconds": 3.75,
+      "expected": "Raw exit 0; all selected checks pass without weakening checks."
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "rawExit": 0,
+      "seconds": 3.91,
+      "expected": "Raw exit 0; all selected checks pass without weakening checks."
+    }
+  ],
+  "fixture": {
+    "graph": "Actual ProductionService, SQLite, single AgentManager, existing task/agent backends, fragmented private ServicePeer; repeated against the actual staged production-engine.mjs under bundled Node.",
+    "provider": "Controlled Pi protocol process only, isolated HOME/PI config/PATH. Runtime and exact prompt receipt checked; captured child gone before teardown acknowledges.",
+    "abortVariants": "Unmodified controlled peer refuses settlement; a copied fixture emits agent_settled before its abort receipt for the acknowledged variant. Both outcomes checked; no actual backend or check weakened.",
+    "publicAvailability": "voice:startTurn, voice:confirm and voice:dismiss remain UNKNOWN_OPERATION; capability remains unsupported.",
+    "voiceActions": "Canonical create/assign events through actual private peer; real admission/FIFO, separate pause and daily-cap refusal then capacity release; queued acceptance survives turn disposal; exact visual turn/epoch/choices/HITL request; dictation/conversation literal; delayed navigation/focused write cannot escape cancellation; raw blocked-drain ownership retained."
+  },
+  "failureHistory": [
+    {
+      "failure": "Actual reentrant focused-write negative control failed: synchronous close acknowledged before raw write joined.",
+      "repair": "Admit the raw promise before executing captured callbacks; old actual-owner control exit1, fixed control exit0, and full source/staged gates rerun."
+    },
+    {
+      "failure": "First cold staged bundle import exceeded the default action test deadline during a rebased gate.",
+      "repair": "Load the cold actual bundle in beforeAll fixture setup; keep action test deadlines and all assertions unchanged."
+    },
+    {
+      "failure": "Contract freshness found three legacy VoiceActionService notify source coordinates shifted by the optional delegate interface.",
+      "repair": "After E2 explicit shared-file release, regenerate only those three coordinates; no operation, grant or policy change."
+    },
+    {
+      "failure": "Static service module initialization produced SECRET_STORE_UNAVAILABLE in the initial synthetic fixture.",
+      "repair": "Use per-fixture resetModules plus dynamic ProductionService import, matching existing production-service tests; synthetic 32-byte key-store receipts unchanged."
+    },
+    {
+      "failure": "Direct database createTask does not persist agent_id; unassigned fixture task correctly required confirmation.",
+      "repair": "Assign fixture agent through actual database update before testing start; production policy unchanged."
+    },
+    {
+      "failure": "Question denial initially expected success against a controlled provider that deliberately refuses abort settlement.",
+      "repair": "Preserve refusal assertion and add an explicit acknowledged-settlement process variant; no false provider success."
+    },
+    {
+      "failure": "Forced typecheck caught optional fixture rows and required Pi status config; targeted lint caught forward let declaration prefer-const.",
+      "repair": "Explicit valid-fixture row assertions, exact required session config and const service declaration; final raw gates rerun."
+    },
+    {
+      "failure": "Runtime receipt initially assumed standalone Node in Electron compatibility tests.",
+      "repair": "Assert actual parent runtime for compatibility and exact bundled Node for standalone; runtime behavior unchanged."
+    }
+  ],
+  "remainingGaps": [
+    "Native #215 physical-document permission/capture/playback/global-shortcut authority and acknowledged media stream revocation; production capability and renderer binding remain off.",
+    "Installed Linux/macOS/Windows device/desktop-only audio/mobile exclusion proof and full #208/#215 prerequisites.",
+    "Actual system/downloaded-model inference, hard-crash speech process-tree proof, reviewed all-platform optional-runtime installation pin and native custom-model-directory selection remain open.",
+    "Whole #212 criterion2 remains open beyond this proven Source voice-start branch, with its other lifecycle/platform dependencies."
+  ],
+  "hostedCi": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "sourceCommitRunLookup": [],
+    "settingsChanged": false,
+    "workflowsDispatched": false
+  },
+  "decisionsNotPreempted": [
+    "Actions enablement",
+    "final app identity/schemes",
+    "live provider runs",
+    "master-to-main merge"
+  ],
+  "hostedVoice92": "Deferred by the user"
+}
