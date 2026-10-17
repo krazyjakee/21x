@@ -1,0 +1,336 @@
+{
+  "schemaVersion": 1,
+  "issues": [
+    215,
+    214
+  ],
+  "sourceRevision": "f33f3a097c304cc10ea8bc0bff0e8e8414e0bf7b",
+  "recordedAt": "2026-10-17T23:19:19.106409+00:00",
+  "status": "private cleanup foundation published; issues OPEN; no whole checkbox tick; public native Drop unavailable",
+  "scope": "Private grouped native selection revocation, late-offer tombstones, held raw read/retirement joining and producer finite-error preservation; public Drop stays OFF",
+  "authority": {
+    "privateRequest": {
+      "operation": "engine.attachment.selection.revoke",
+      "fields": [
+        "leaseId",
+        "selectionIds"
+      ],
+      "bounds": "one original UI document lease,1..16unique exact UUID selection IDs; no task/path/provider or public grant"
+    },
+    "source": "validate whole group before mutation; synchronously cancel matching entries and tombstone unseen IDs before any await; foreign-lease group refuses atomically; unrelated selections survive",
+    "retirement": "joins raw claimed read/finish and actual Native bridge retire receipts; failure leaves cancelled entries owned for retry; no global Source SDK close or raw read replay",
+    "native": "exact bounded request and retired:true result; private pending parser rejects extra fields/false receipt; public desktop dispatch refuses private operation; cleanup allowed while stopping with captured same epoch/capability and open pipe",
+    "destination": "protected no-follow/version/digest publication rollback unchanged; finite shared producer scope error preserved after actual owned rollback rather than misclassified destination IO failure"
+  },
+  "proof": {
+    "sdk": "held claimed native read + synchronous group fence + joined native retirement; unrelated selection remains readable; retire-before-offer tombstone; malformed/foreign group atomic refusal; failed retirement retry with no read replay",
+    "privatePeer": "actual ProductionService/SQLite owners and controlled native callback bridge; revoke while first raw import read held, wire-order ping barrier, no native retirement before read settles; exact refusal; unchanged task metadata and empty protected destination; before-offer revocation adds no native file call",
+    "nativeTransport": "controlled real private pipe fixture verifies pending exact group receipt, public-operation refusal, malformed result denial, cleanup accepted during stopping but fresh offer/foreign epoch refused",
+    "limits": "Source/native receipt/FD controls and staged-runtime proof scopes only; no actual OS drop or full native Drop-to-Source-to-renderer flow, no UI activation, no new GUI or installed supported-platform acceptance"
+  },
+  "checks": [
+    {
+      "name": "app",
+      "command": "pnpm test:run src/service/attachment-selection-owner.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "162passed/0skipped"
+    },
+    {
+      "name": "type",
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "forced noEmit check passes"
+    },
+    {
+      "name": "lint",
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "0errors/165existingwarnings"
+    },
+    {
+      "name": "stage",
+      "command": "pnpm tauri:prepare:production",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "pass; exact report hash/tail below"
+    },
+    {
+      "name": "staged",
+      "command": "pnpm test:tauri --production-proofs src/service/attachment-selection-owner.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts scripts/production-service-proof.test.ts scripts/production-contracts-proof.test.ts",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "183passed/0skipped incl2actual staged entry proofs and17contract corpus cases"
+    },
+    {
+      "name": "engine",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "150passed/6pre-existing opt-in ignored, before additional test-only stopping regression below"
+    },
+    {
+      "name": "host",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "86passed/3existing explicit GUI ignored; GUI not rerun in this private cleanup slice"
+    },
+    {
+      "name": "msvc",
+      "command": "env PATH=\"/usr/lib/llvm-20/bin:$PATH\" cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "pass; exact report hash/tail below"
+    },
+    {
+      "name": "contracts",
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "pass; exact report hash/tail below"
+    },
+    {
+      "name": "inventory",
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "914files/736IPC/9existing unresolved"
+    },
+    {
+      "name": "diff",
+      "command": "git diff --check",
+      "exitCode": 0,
+      "expected": "exit0, all affected checks pass",
+      "actual": "pass; exact report hash/tail below"
+    },
+    {
+      "name": "additional-stopping-cleanup",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent private_selection_group_cleanup_joins_exact_receipt_during_stopping_without_read_admission -- --test-threads=1",
+      "exitCode": 0,
+      "expected": "exact original native group cleanup works during stopping, fresh offer denied, foreign epoch denied, raw response awaited",
+      "actual": "1passed/0ignored/156othercases filtered; added after full150-case engine run; production runtime code unchanged after full gate"
+    }
+  ],
+  "gate": {
+    "lock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "outerCommand": "rtk proxy flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock bash /tmp/e2-drop-private-gate.sh",
+    "exitCode": 0,
+    "rawExitCodes": true,
+    "script": "#!/bin/bash\nset -uo pipefail\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\nfail=0\ncheck() { name=\"$1\"; shift; rtk proxy \"$@\" > \"/tmp/e2-drop-private-${name}.log\" 2>&1; code=$?; printf \"%s:%s\\n\" \"$name\" \"$code\"; if [ \"$code\" -ne 0 ]; then fail=1; fi; }\ncheck app pnpm test:run src/service/attachment-selection-owner.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts\ncheck type pnpm exec tsc --build --noEmit --force\ncheck lint pnpm lint\ncheck stage pnpm tauri:prepare:production\ncheck staged pnpm test:tauri --production-proofs src/service/attachment-selection-owner.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts scripts/production-service-proof.test.ts scripts/production-contracts-proof.test.ts\ncheck engine cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2\ncheck host cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2\ncheck msvc env PATH=\"/usr/lib/llvm-20/bin:$PATH\" cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc\ncheck contracts node scripts/tauri-contracts.mjs --check\ncheck inventory node scripts/tauri-inventory.mjs --check\ncheck diff git diff --check\nexit \"$fail\"\n",
+    "normalHooks": "lint-staged eslint and pnpm typecheck passed under heavy.lock"
+  },
+  "initialFailure": {
+    "command": "pnpm test:run src/service/production-service.test.ts",
+    "exitCode": 1,
+    "passed": 53,
+    "failed": 2,
+    "reasons": [
+      "Actual revoked producer scope error was misclassified as ATTACHMENT_IO_FAILED/INTERNAL_ERROR by protected writeStream rollback; preserve shared finite scope error after rollback; focused private peer then4pass.",
+      "Own no-file-read fixture expected nativeCalls empty but startup legitimately records prepare; compare unchanged baseline instead."
+    ]
+  },
+  "focusedChecks": [
+    {
+      "command": "pnpm test:run src/service/attachment-selection-owner.test.ts",
+      "exitCode": 0,
+      "passed": 9
+    },
+    {
+      "command": "pnpm test:run src/main/task-attachment-file-owner.test.ts --reporter=json --outputFile=/tmp/e2-drop-file-owner.json",
+      "exitCode": 0,
+      "passed": 24
+    },
+    {
+      "command": "pnpm test:run src/service/production-service.test.ts --testNamePattern 'private selection receipts' --reporter=json --outputFile=/tmp/e2-drop-private-source.json",
+      "exitCode": 0,
+      "passed": 4,
+      "otherTestsFiltered": 51
+    },
+    {
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service production_attachment_selection::tests -- --test-threads=2",
+      "exitCode": 0,
+      "passed": 8,
+      "otherTestsFiltered": 128,
+      "lock": true
+    }
+  ],
+  "versions": {
+    "os": "Linux x86_64",
+    "rootNode": "v22.22.0",
+    "bundledNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "Tauri": "2.12.3",
+    "WebKitGTK": "2.52.6",
+    "GTK": "3.24.41",
+    "Vitest": "4.0.18",
+    "Electron": "44.0.0",
+    "SQLite": "13.0.3",
+    "schema": 37
+  },
+  "sourceFiles": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "295778e092ad913c8b4882f637055e5b40d776be908bd9a9a9bcebab952b0944",
+      "bytes": 76792
+    },
+    "docs/tauri-migration/native-attachment-selection.md": {
+      "sha256": "0d82789d8387eb9e6fbc6183d42c72ede0eb7cce4cf35706df1727e67869703a",
+      "bytes": 7282
+    },
+    "src-tauri/engine/src/production.rs": {
+      "sha256": "072080052f92c42199c45f32c6e53090a3502b05c58e41ad5334cafc3fbfd443",
+      "bytes": 201372
+    },
+    "src-tauri/engine/src/production_attachment_selection.rs": {
+      "sha256": "ad5872fb5d39ebdda4bfe8773e5c499643cd617aeb893886f59fc247ec0e4dd1",
+      "bytes": 25782
+    },
+    "src/main/task-attachment-file-owner.test.ts": {
+      "sha256": "fa226b7cf8bd8383feef37ce340c37c3dbf54a645088c18b62ec47fdb481193e",
+      "bytes": 25578
+    },
+    "src/main/task-attachment-file-owner.ts": {
+      "sha256": "865245490d35b3f29c4f6afab806c62441ab48f82611520e0710e784c01ffca0",
+      "bytes": 31291
+    },
+    "src/service/attachment-selection-owner.test.ts": {
+      "sha256": "5a3ab6824c8d873c075960beef67ccb3e138c1892ba45e09ebc8159954d9a12f",
+      "bytes": 8132
+    },
+    "src/service/attachment-selection-owner.ts": {
+      "sha256": "c60bb8440f9b11308df394f9f0ff39bd9b7bc185f2986f440da27d52c2fb8a79",
+      "bytes": 7618
+    },
+    "src/service/production-service.test.ts": {
+      "sha256": "784feaf7f494af245fc340f31d94fa1a4af7f69d241e63e6d701527161625e0c",
+      "bytes": 88987
+    },
+    "src/service/production-service.ts": {
+      "sha256": "44d7cccf7ab5b8d7dc9ed0071a202c2bce18f737d9c47a13fe6c3f4de89be285",
+      "bytes": 46917
+    },
+    "src/shared/attachment-selection-callbacks.ts": {
+      "sha256": "62637bc3e4f4b0034df26f12f5ba66fe5068b00a4b82046122b9388fc555a5c1",
+      "bytes": 4306
+    }
+  },
+  "artifacts": {
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "a649c5e0957359fc0fbe3d99aaf557d9e6168946cb5a51b7e8d5d8954fe171bd",
+      "bytes": 6209626
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "7b93ab831ca3c98848a803a36889c71d35bd0654e610b5321af48de20f3b445f",
+      "bytes": 1261784
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "/mnt/Rusty/cargo-target/debug/deps/twentyonex_engine-76852ab08cc6789a": {
+      "sha256": "eeba11e05e39198d7da4f9cc1afad77d6b6564f82d3ee0dd7da1f25a52edadc2",
+      "bytes": 56689480
+    },
+    "/mnt/Rusty/cargo-target/debug/deps/twentyonex_tauri_feasibility-cb90ce0c4532bca0": {
+      "sha256": "ce69276fb648f3ab8b5caa069cbeef5b7a7579f3f1eb1e932b3dd7c993e98c94",
+      "bytes": 429263464
+    }
+  },
+  "artifactTiming": "ELF checksums captured after the added focused native test; final engine ELF corresponds to that focused run, not the earlier150-case binary before the test-only addition. No production runtime code changed between runs. Staged artifact checksums are actual own-worktree outputs used by the gate.",
+  "reports": {
+    "e2-drop-private-app.log": {
+      "sha256": "eb6f9c11e24735cb58ca3ce2f622c53d841d6d282af61126936f4ff1c96f1a2e",
+      "bytes": 202373,
+      "resultTail": "mage document callback across requester cancellation and prevents premature Source database release\n[AgentManager] Stopping all 0 sessions\n\n \u2713 |main| src/service/production-service.test.ts (55 tests) 20842ms\n     \u2713 delivers periodic real adapter freshness through the scoped peer while the desktop detaches without replay or transition effects  8743ms\n     \u2713 carries a known adapter disconnect as activity invalidation through the private peer without replaying its prompt  1126ms\n     \u2713 retains late native initialization and fences database creation after cancellation  3084ms\n   \u2713 installs a controlled real package through private native ingress and the actual singleton, preserving external files  738ms\n   \u2713 uses open for real saved attachment metadata through private document ingress while its task agent is active under read grants  308ms\n   \u2713 uses download for real saved attachment metadata through private document ingress while its task agent is active under read grants  306ms\n     \u2713 registers only the native offer, refuses public path save, and returns one exact imported file without metadata append  410ms\n\n Test Files  4 passed (4)\n      Tests  162 passed (162)\n   Start at  00:08:24\n   Duration  22.90s (transform 3.53s, setup 155ms, import 3.11s, tests 34.30s, environment 0ms)\n\n"
+    },
+    "e2-drop-private-contracts.log": {
+      "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "bytes": 43,
+      "resultTail": "Verified explicit desktop contract outputs\n"
+    },
+    "e2-drop-private-diff.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "resultTail": ""
+    },
+    "e2-drop-private-engine.log": {
+      "sha256": "3889cc51bb489ec458e4fc160195c9fb406e763b13ba877927ee751907bae53d",
+      "bytes": 17890,
+      "resultTail": "ting_for_writer_releases_capacity ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_concurrent_requests_preserve_monotonic_wire_order ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_initialize_ping_unknown_operation_and_shutdown ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_shutdown_settles_concurrent_calls_and_reaps_child ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_synthetic_configuration_roundtrip_preserves_real_content_effects ... ignored, requires explicitly staged content configuration service and standalone SQLite\ntest tests::staged_synthetic_database_roundtrip_emits_real_target_events ... ignored, requires explicitly staged database-stdio.mjs and standalone native SQLite\ntest production::cleanup_observation::linux::tests::actual_retained_cwd_process_is_busy_and_reaped_process_is_never_fabricated_idle ... ok\n\ntest result: ok. 150 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 3.03s\n\n   Doc-tests twentyonex_engine\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+    },
+    "e2-drop-private-host.log": {
+      "sha256": "31adf37b5285bb8c167adaa6cdbf148cd3b5fe0e3aacbfabadc21fab96e32d6a",
+      "bytes": 12937,
+      "resultTail": " ... ok\ntest production_host::production_ui::tests::callback_rechecks_document_after_queued_raw_work_and_never_claims_applied ... ok\ntest production_host::production_ui::tests::hidden_untrusted_physical_replacement_and_new_epoch_never_inherit_authority ... ok\ntest production_host::production_ui::tests::installer_progress_cancelled_waiter_retains_raw_work_and_rechecks_reload_before_emit ... ok\ntest production_host::production_ui::tests::late_destroy_and_page_events_cannot_retire_or_activate_reused_main_label ... ok\ntest production_host::production_ui::tests::no_completion_without_start_and_generation_exhaustion_grants_nothing ... ok\ntest production_host::production_ui::tests::public_callback_abort_cannot_release_raw_emit_receipt_or_shutdown ... ok\ntest production_host::production_ui::tests::same_url_overlapping_completions_are_unavailable_until_an_unambiguous_load ... ok\ntest production_host::tests::only_exact_validated_notices_receive_a_native_document_envelope ... ok\ntest production_host::tests::production_origins_are_exact_and_remote_windows_gain_no_authority ... ok\ntest production_host::native_window::tests::failed_persistence_is_explicit_without_fabricating_a_saved_receipt ... ok\n\ntest result: ok. 86 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.28s\n\n"
+    },
+    "e2-drop-private-inventory.log": {
+      "sha256": "58634a3f3563dafa3525e567d4ffcead81bf8f1dc7d57ec80484fe8ae611daff",
+      "bytes": 91,
+      "resultTail": "Verified docs/tauri-migration/inventory.json: 914 files, 736 IPC operations (9 unresolved)\n"
+    },
+    "e2-drop-private-lint.log": {
+      "sha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+      "bytes": 16728,
+      "resultTail": ".ts\n  109:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  121:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  137:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  154:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  169:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/task-api-server.test.ts\n  473:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/task-api/skill-routes.ts\n  106:28  warning  '_content' is assigned a value but never used  @typescript-eslint/no-unused-vars\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/renderer/src/components/canvas/BrowserPanelContent.tsx\n  348:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  357:68  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  518:30  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n\u2716 165 problems (0 errors, 165 warnings)\n  0 errors and 2 warnings potentially fixable with the `--fix` option.\n\n"
+    },
+    "e2-drop-private-msvc.log": {
+      "sha256": "630a3a9650feea7f2df19151f637413471f9b74a510225640d5cea9fc362c4e0",
+      "bytes": 15158,
+      "resultTail": " enum `TargetChoice` is never used\n   --> src/native_clipboard.rs:160:6\n    |\n160 | enum TargetChoice {\n    |      ^^^^^^^^^^^^\n\nwarning: function `choose_targets` is never used\n   --> src/native_clipboard.rs:167:4\n    |\n167 | fn choose_targets<T: PartialEq>(\n    |    ^^^^^^^^^^^^^^\n\nwarning: struct `ActiveRequest` is never constructed\n   --> src/native_clipboard.rs:187:8\n    |\n187 | struct ActiveRequest(Arc<AtomicBool>);\n    |        ^^^^^^^^^^^^^\n\nwarning: struct `CallbackRequest` is never constructed\n   --> src/native_clipboard.rs:193:8\n    |\n193 | struct CallbackRequest {\n    |        ^^^^^^^^^^^^^^^\n\nwarning: method `finish` is never used\n   --> src/native_clipboard.rs:204:8\n    |\n203 | impl CallbackRequest {\n    | -------------------- method in this implementation\n204 |     fn finish(&self, value: Result<Value, EngineError>) {\n    |        ^^^^^^\n\nwarning: function `retained_read` is never used\n   --> src/native_clipboard.rs:209:10\n    |\n209 | async fn retained_read(\n    |          ^^^^^^^^^^^^^\n\nwarning: `twentyonex-tauri-feasibility` (bin \"twentyonex-tauri-feasibility\") generated 77 warnings (run `cargo fix --bin \"twentyonex-tauri-feasibility\" -p twentyonex-tauri-feasibility` to apply 11 suggestions)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.23s\n"
+    },
+    "e2-drop-private-native-cleanup.log": {
+      "sha256": "f55cb2c4392a2532f8d9d3c347f43b006cf6c264017f27bfb25fed7cdd051d9c",
+      "bytes": 526,
+      "resultTail": "   Compiling twentyonex-engine v0.1.0 (/mnt/Rusty/GitHub/21x-e2-215b/src-tauri/engine)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.43s\n     Running unittests src/lib.rs (/mnt/Rusty/cargo-target/debug/deps/twentyonex_engine-76852ab08cc6789a)\n\nrunning 1 test\ntest production::tests::transport_integration::private_selection_group_cleanup_joins_exact_receipt_during_stopping_without_read_admission ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 156 filtered out; finished in 0.00s\n\n\n"
+    },
+    "e2-drop-private-stage.log": {
+      "sha256": "d3ca5f6a872130861e407da911b258beaf0b154070013672ce6f504a04a72046",
+      "bytes": 380,
+      "resultTail": "\n> 21x@0.0.161 tauri:prepare:production /mnt/Rusty/GitHub/21x-e2-215b\n> node scripts/tauri-stage-production.mjs\n\n{\n  \"staged\": true,\n  \"entry\": \"service/production-stdio.mjs\",\n  \"buildIdentity\": \"production-6fe070676f0a0a6f4100e9e069bf71cc\",\n  \"resourceManifestSha256\": \"7b93ab831ca3c98848a803a36889c71d35bd0654e610b5321af48de20f3b445f\",\n  \"redistributionReviewComplete\": false\n}\n"
+    },
+    "e2-drop-private-staged.log": {
+      "sha256": "dcb77884b3436c118f872ae0b47eb54b1961afe2cb55c96385a8b1b883aca44f",
+      "bytes": 205376,
+      "resultTail": "\n     \u2713 keeps literal Captain/member roots and requires former, anchor, project and group-agent read scope  430ms\n     \u2713 accepts saved files larger than the publication ceiling without Source byte transfer or metadata writes  1467ms\n     \u2713 keeps literal Captain/member roots and requires former, anchor, project and group-agent read scope  439ms\n     \u2713 accepts saved files larger than the publication ceiling without Source byte transfer or metadata writes  1377ms\n     \u2713 supports selection before task creation, returns metadata only, and cannot read an unselected path  2600ms\n     \u2713 refuses execution anchors and Captain file imports before claiming a selection or reading bytes  525ms\n \u2713 |portable-main| scripts/production-service-proof.test.ts (2 tests) 2887ms\n     \u2713 verifies the staged closure, loads the real service graph and negotiates before granting domain access  2836ms\n \u2713 |portable-main| scripts/production-contracts-proof.test.ts (18 tests) 591ms\n \u2713 |portable-main| src/main/task-attachment-file-owner.test.ts (24 tests) 415ms\n \u2713 |portable-main| src/service/attachment-selection-owner.test.ts (9 tests) 18ms\n\n Test Files  6 passed (6)\n      Tests  183 passed (183)\n   Start at  00:10:01\n   Duration  48.79s (transform 4.74s, setup 104ms, import 2.82s, tests 45.26s, environment 1ms)\n\n"
+    },
+    "e2-drop-private-type.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "resultTail": ""
+    }
+  },
+  "inherited": "e13f9135; contains c1510f37+cf1032b9 B stable domain source/correction and A cf260669 metadata plus own21b85e14/47f8fa5a media proof/status.",
+  "rendererContextAgreement": {
+    "owner": "engineerA209",
+    "status": "agreed; implementation not enabled in this source revision",
+    "publicShape": "optional setNativeDropContext(UUIDv4|null):Promise<void>; onNativeDrop local receipt{dropId,contextId,paths,accept():Promise<void>,close():Promise<void>}",
+    "requiredFences": [
+      "original opaque task/draft context captured at actual native Drop before awaits; no task/grant in nonce",
+      "accept records local ownership synchronously, then awaits exact native receipt; missing/ambiguous/ignored/unsubscribed observer retires offers",
+      "replacement/null fences old admission synchronously, joins native+Source retirement before new context ack; late completions cannot reopen old nonce",
+      "unaccepted TTL<=30s; drop ID tombstones<=4096; paths<=16display-only; close joins raw accept/claim/revoke/FD work, retryable failure",
+      "no DOM/raw path fallback, at-delivery retarget, Source public operation/grant/global event or accepted destination deletion"
+    ]
+  },
+  "remaining": [
+    "Native public context/settlement/event wiring, current physical-document capture and actual OS/native proof plus A UI binding remain unimplemented; native Drop stays unavailable.",
+    "Protected durable attachment ownership/digest journaling/unreferenced-copy reconciliation and group/Captain metadata append domain remain open.",
+    "Remaining native shortcuts/focus/services, full permission/capture/playback/raw stream ownership and installed supported-platform behavior; #202/#208 prerequisites remain open.",
+    "Final identity/current+legacy scheme/login authority, Actions and live provider/device decisions remain with user; hosted voice deferred."
+  ],
+  "hostedCI": {
+    "lookupCommand": "gh run list -R krazyjakee/21x --commit f33f3a097c304cc10ea8bc0bff0e8e8414e0bf7b --json databaseId,status,conclusion,url",
+    "runs": [],
+    "blocker": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "settingsChanged": false,
+    "dispatch": false
+  },
+  "constraints": "Synthetic profiles/files and controlled adapter/native callbacks only; no real user file/profile, provider/account/API key/microphone, release/cutover/Electron retirement or identity/scheme decision."
+}
