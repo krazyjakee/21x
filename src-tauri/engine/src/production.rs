@@ -189,6 +189,8 @@ pub struct ProductionCapabilities {
     pub artifact_clipboard: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub tray: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
+    pub oauth_flows: HostCapability,
     pub external_urls: HostCapability,
     pub notifications: HostCapability,
     pub energy: HostCapability,
@@ -244,7 +246,12 @@ pub struct ProductionCleanupHost {
     pub invoke: Arc<dyn Fn(Value, String) -> HostFuture<Value> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
 }
+pub struct ProductionOAuthHost {
+    pub invoke: Arc<dyn Fn(String, Value, String) -> HostFuture<Value> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
 pub struct ProductionNativeHost {
+    pub oauth: Option<ProductionOAuthHost>,
     pub workspace_cleanup: Option<ProductionCleanupHost>,
     pub workspace_file: Option<ProductionWorkspaceHost>,
     pub attachment_file: Option<ProductionAttachmentHost>,
@@ -558,6 +565,8 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || !token(&value.build_identity, 1, 128, true)
         || !digest(&value.resource_manifest_sha256)
         || capabilities.voice != HostCapability::Unsupported
+        || capabilities.oauth_flows == HostCapability::Host
+            && capabilities.external_urls != HostCapability::Host
         || capabilities.attachment_files == HostCapability::Host
             && capabilities.ui != HostCapability::Host
         || capabilities.attachment_downloads == HostCapability::Host
@@ -894,6 +903,8 @@ impl ProductionEngine {
         descriptor_bytes(&launch.descriptor)?;
         if (launch.descriptor.capabilities.workspace_cleanup == HostCapability::Host)
             != host.workspace_cleanup.is_some()
+            || (launch.descriptor.capabilities.oauth_flows == HostCapability::Host)
+                != host.oauth.is_some()
             || (launch.descriptor.capabilities.external_urls == HostCapability::Host
                 && host.open_external.is_none())
             || (launch.descriptor.capabilities.notifications == HostCapability::Host
@@ -938,6 +949,28 @@ impl ProductionEngine {
     }
     pub fn epoch(&self) -> String {
         self.0.epoch.lock().unwrap().clone()
+    }
+    /// Native-only ingress; never part of the retained renderer command surface.
+    pub async fn deliver_oauth(&self, epoch: &str, payload: Value) -> Result<Value, EngineError> {
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.oauth_flows != HostCapability::Host {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !crate::production_oauth::callback(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        // The response acknowledges only atomic Source claim, never exchange or
+        // persistence. Holding a native delivery receipt across exchange would
+        // deadlock when Source finally joins native retirement.
+        self.request("engine.oauth.callback", payload).await
     }
     pub fn snapshot(&self) -> Value {
         json!({"production":true,"engineEpoch":self.epoch(),"available":self.0.ready.load(Ordering::SeqCst)&&!self.0.closed.load(Ordering::SeqCst)&&!self.0.stopping.load(Ordering::SeqCst),"prepared":self.0.prepared.load(Ordering::SeqCst),"nativeDrainAcknowledged":self.0.drained.load(Ordering::SeqCst),"ownedTreeExited":*self.0.exited.borrow(),"nativeCallbacks":self.0.callback_work.load(Ordering::SeqCst),"containment":"linux-delegated-cgroup-v2-with-private-guardian"})
@@ -1466,6 +1499,9 @@ impl ProductionEngine {
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
                         "engine.ownerState" => valid_owner_state(result),
+                        "engine.oauth.callback" => {
+                            crate::production_oauth::delivery_receipt(result)
+                        }
                         "engine.tray.preference" => {
                             crate::production_tray_contracts::preference(result)
                         }
@@ -1605,6 +1641,47 @@ impl ProductionEngine {
         let payload = &frame["payload"];
         let operation = frame["operation"].as_str().unwrap_or("");
         match operation {
+            "host.oauth.register" | "host.oauth.open" | "host.oauth.retire" => {
+                let retire = operation == "host.oauth.retire";
+                let valid = if operation == "host.oauth.register" {
+                    crate::production_oauth::registration(payload)
+                } else {
+                    crate::production_oauth::flow_request(payload)
+                };
+                if !valid {
+                    return Err(EngineError::new("INVALID_ARGUMENTS"));
+                }
+                if self.0.descriptor.capabilities.oauth_flows != HostCapability::Host {
+                    return Err(EngineError::new("UNKNOWN_OPERATION"));
+                }
+                if !self.0.prepared.load(Ordering::SeqCst)
+                    || self.0.closed.load(Ordering::SeqCst)
+                    || !retire
+                        && (!self.0.ready.load(Ordering::SeqCst)
+                            || self.0.stopping.load(Ordering::SeqCst))
+                {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                let host = self
+                    .0
+                    .host
+                    .oauth
+                    .as_ref()
+                    .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?;
+                let result = (host.invoke)(operation.into(), payload.clone(), self.epoch()).await?;
+                let field = match operation {
+                    "host.oauth.register" => "registered",
+                    "host.oauth.open" => "opened",
+                    _ => "retired",
+                };
+                if !contracts::object(&result, &["flowId", field], &[])
+                    || result["flowId"] != payload["flowId"]
+                    || result[field] != true
+                {
+                    return Err(EngineError::new("INVALID_RESULT"));
+                }
+                Ok(result)
+            }
             "host.sleep.set" => {
                 if !contracts::object(payload, &["enabled"], &[])
                     || !payload["enabled"].is_boolean()
@@ -1782,6 +1859,9 @@ impl ProductionEngine {
                 })?;
                 if let Some(cleanup) = &self.0.host.workspace_cleanup {
                     (cleanup.close)().await?;
+                }
+                if let Some(oauth) = &self.0.host.oauth {
+                    (oauth.close)().await?;
                 }
                 if let Some(files) = &self.0.host.workspace_file {
                     (files.close)().await?;
@@ -2836,6 +2916,7 @@ mod tests {
                 attachment_downloads: HostCapability::Unsupported,
                 artifact_clipboard: HostCapability::Unsupported,
                 tray: HostCapability::Unsupported,
+                oauth_flows: HostCapability::Unsupported,
                 external_urls: HostCapability::Unsupported,
                 notifications: HostCapability::Unsupported,
                 energy: HostCapability::Unsupported,
@@ -2962,6 +3043,49 @@ mod tests {
                     .unwrap()
                     .unwrap();
             }
+        }
+        #[tokio::test]
+        async fn private_oauth_claim_receipt_uses_the_actual_pending_validator() {
+            let mut fixture = Fixture::new(ui_host());
+            let request = fixture.pending_request_for("engine.oauth.callback").await;
+            fixture.engine.accept(json!({"kind":"response","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"host:1","result":{"accepted":true}})).await.unwrap();
+            assert_eq!(request.await.unwrap().unwrap(), json!({"accepted":true}));
+            assert_eq!(
+                fixture
+                    .engine
+                    .invoke("transport-fixture", "engine.oauth.callback", json!({}))
+                    .await
+                    .unwrap_err()
+                    .code,
+                "UNKNOWN_OPERATION"
+            );
+            assert_eq!(
+                fixture
+                    .engine
+                    .deliver_oauth("foreign-epoch", json!({}))
+                    .await
+                    .unwrap_err()
+                    .code,
+                "STALE_EPOCH"
+            );
+            assert_eq!(
+                fixture
+                    .engine
+                    .deliver_oauth("transport-fixture", json!({}))
+                    .await
+                    .unwrap_err()
+                    .code,
+                "UNKNOWN_OPERATION"
+            );
+            fixture.reap().await;
+        }
+        #[tokio::test]
+        async fn private_oauth_claim_receipt_refuses_extra_authority_or_secrets() {
+            let mut fixture = Fixture::new(ui_host());
+            let request = fixture.pending_request_for("engine.oauth.callback").await;
+            assert_eq!(fixture.engine.accept(json!({"kind":"response","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"host:1","result":{"accepted":true,"sourceId":"foreign"}})).await.unwrap_err().code, "INVALID_RESULT");
+            assert_eq!(request.await.unwrap().unwrap_err().code, "INVALID_RESULT");
+            fixture.reap().await;
         }
         #[tokio::test]
         async fn owner_recovery_response_uses_the_real_pending_request_validator() {
@@ -3573,6 +3697,7 @@ mod tests {
     }
     fn ui_host() -> ProductionNativeHost {
         ProductionNativeHost {
+            oauth: None,
             workspace_cleanup: None,
             workspace_file: None,
             attachment_file: None,

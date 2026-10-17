@@ -22,8 +22,12 @@ import { NativeApplicationKeyStore } from '../main/platform/native-application-k
 import { FULL_ACCESS_SCOPE, listToolsForScope } from '../main/mcp-servers/task-management-core'
 import type { DesktopCallerContext } from './transport/desktop-registry'
 import { ServicePeer, type OperationSchema } from './transport/peer'
+import { OAuthFlowOwner } from './oauth-flow-owner'
+import { OAUTH_DELIVERY_SCHEMA, OAUTH_NATIVE_CALLBACK_SCHEMAS, type NativeOAuthBridge } from '../shared/oauth-native-callbacks'
 
 export interface ProductionPrivateCallbacks {
+  /** Private app-owned leases; does not enable legacy renderer OAuth routes. */
+  oauthFlows?: OAuthFlowOwner
   cleanupObservation: WorkspaceCleanupObserver
   copyArtifact(receipt: WorkspacePathReceipt, leaseId: string, beforeEffect: () => void): Promise<ArtifactCopyFileResult>
   openAttachment(receipt: AttachmentPathReceipt, leaseId: string): Promise<void>
@@ -80,6 +84,7 @@ export class ProductionService {
   private readonly downloadAuthorizations = new Map<string, () => void>()
   private sequence = 0
   private readonly caller: DesktopCallerContext
+  private readonly oauthFlows: OAuthFlowOwner | null
 
   constructor(host: SealedProductionServiceHost, transport: {
     write(bytes: Uint8Array): Promise<void>
@@ -88,7 +93,18 @@ export class ProductionService {
   }) {
     if (!sealed.has(host)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const construction = host.construction, descriptor = construction.descriptor
+    const oauthRequest = async (operation: keyof typeof OAUTH_NATIVE_CALLBACK_SCHEMAS, payload: object): Promise<unknown> => this.retain(this.peer.request(operation, payload as JsonValue))
+    const oauthBridge: NativeOAuthBridge = {
+      register: async request => await oauthRequest('host.oauth.register', request) as Awaited<ReturnType<NativeOAuthBridge['register']>>,
+      open: async request => await oauthRequest('host.oauth.open', request) as Awaited<ReturnType<NativeOAuthBridge['open']>>,
+      retire: async request => await oauthRequest('host.oauth.retire', request) as Awaited<ReturnType<NativeOAuthBridge['retire']>>
+    }
+    this.oauthFlows = descriptor.capabilities.oauthFlows === 'host' ? new OAuthFlowOwner(oauthBridge, () => {
+      if (!this.initialized || this.closing || !this.services || this.owner.snapshot().epoch !== this.caller.engineEpoch) throw new ServiceProtocolError('DISCONNECTED')
+      this.owner.getDatabaseBindingLease()
+    }) : null
     const callbacks: ProductionPrivateCallbacks = {
+      ...(this.oauthFlows ? { oauthFlows: this.oauthFlows } : {}),
       cleanupObservation: async (request, signal) => {
         if (descriptor.capabilities.workspaceCleanup !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
         if (request.action !== 'release' && signal.aborted) throw new ServiceProtocolError('CANCELLED')
@@ -217,6 +233,11 @@ export class ProductionService {
         return this.retain(this.bindings.invoke(operation, payload, this.caller, signal))
       }
     }]))
+    operations['engine.oauth.callback'] = { ...OAUTH_DELIVERY_SCHEMA, handle: payload => {
+      if (!this.initialized || this.closing || !this.oauthFlows) return { accepted: false }
+      // Synchronous claim only. The caller's owned waiter performs token work.
+      return this.oauthFlows.deliver(payload)
+    } }
     // Public invocation cannot manufacture a document lease. Only the native
     // window owner forwards this private request after checking physical identity.
     operations['ui:publishState'].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
@@ -308,6 +329,7 @@ export class ProductionService {
             if (this.initialized && !this.closing) this.publishScoped(operation, value)
           }, fatal: error => this.peer.disconnect(error.code) })
         this.owner.retainCleanup('private-service-flights', () => { this.closing = true }, () => this.drainDomains())
+        if (this.oauthFlows) this.owner.retainCleanup('private-oauth-flows', () => this.oauthFlows!.stop(), () => this.oauthFlows!.close())
         if (signal.aborted || this.closing) throw new ServiceProtocolError('CANCELLED')
         this.initialized = true
       })()
@@ -333,6 +355,7 @@ export class ProductionService {
         return { stopped: true }
       } }
     for (const [operation, schema] of Object.entries(PRODUCTION_HOST_SCHEMAS)) operations[operation] = schema
+    if (descriptor.capabilities.oauthFlows === 'host') for (const [operation, schema] of Object.entries(OAUTH_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.externalUrls === 'host') operations['host.shell.openExternal'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateResult }
     if (descriptor.capabilities.workspaceFiles === 'host') for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.workspaceCleanup === 'host') operations['host.workspace.cleanupObservation'] = WORKSPACE_CLEANUP_CALLBACK_SCHEMA

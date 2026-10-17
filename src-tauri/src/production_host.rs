@@ -22,6 +22,8 @@ use twentyonex_engine::{
     production_files::{NativeWorkspaceFileOwner, NativeWorkspaceReceipt},
     EngineError,
 };
+#[path = "native_oauth.rs"]
+mod native_oauth;
 #[path = "native_services.rs"]
 pub(crate) mod native_services;
 use native_services::NativeWorkOwner;
@@ -48,6 +50,7 @@ struct ProductionState {
     engine: Option<ProductionEngine>,
     failure: Option<EngineError>,
     native_work: NativeWorkOwner,
+    oauth: native_oauth::NativeOAuthOwner,
     ui: NativeUiOwner,
     notifications: NativeNotificationOwner,
     tray: Option<NativeTrayOwner>,
@@ -685,6 +688,7 @@ fn attach_tray_close(
 async fn start(
     app: &tauri::AppHandle,
     native_work: NativeWorkOwner,
+    oauth: native_oauth::NativeOAuthOwner,
     ui: NativeUiOwner,
     notifications: NativeNotificationOwner,
     tray_available: bool,
@@ -809,6 +813,7 @@ async fn start(
                 HostCapability::Unsupported
             },
             external_urls: HostCapability::Host,
+            oauth_flows: HostCapability::Host,
             notifications: if cfg!(target_os = "linux") {
                 HostCapability::Host
             } else {
@@ -906,6 +911,7 @@ async fn start(
             containment,
         },
         ProductionNativeHost {
+            oauth: Some(oauth.host(app, native_work.clone())),
             workspace_cleanup,
             workspace_file,
             attachment_file,
@@ -982,6 +988,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![engine_status, desktop_invoke])
         .setup(|app| {
             let native_work = NativeWorkOwner::default();
+            let oauth = native_oauth::NativeOAuthOwner::default();
             let ui = NativeUiOwner::default();
             let notifications = NativeNotificationOwner::new(app.handle(), native_work.clone())
                 .map_err(|_| std::io::Error::other("PRODUCTION_NOTIFICATION_UNAVAILABLE"))?;
@@ -999,6 +1006,7 @@ pub fn run() {
             let started = tauri::async_runtime::block_on(start(
                 app.handle(),
                 native_work.clone(),
+                oauth.clone(),
                 ui.clone(),
                 notifications.clone(),
                 tray.as_ref().is_some_and(|owner| owner.is_available()),
@@ -1009,6 +1017,7 @@ pub fn run() {
                     engine: Some(engine),
                     failure: None,
                     native_work: native_work.clone(),
+                    oauth: oauth.clone(),
                     ui: ui.clone(),
                     notifications: notifications.clone(),
                     tray: tray.clone(),
@@ -1019,6 +1028,7 @@ pub fn run() {
                     engine: None,
                     failure: Some(error),
                     native_work,
+                    oauth: oauth.clone(),
                     ui: ui.clone(),
                     notifications: notifications.clone(),
                     tray: tray.clone(),
@@ -1090,7 +1100,10 @@ pub fn run() {
             let state = handle.state::<ProductionState>();
             // Fence synchronously before another native command/callback can
             // reserve work; failed drains never allow application exit.
-            if state.ui.close().is_err() || state.native_work.close().is_err() {
+            if state.oauth.stop().is_err()
+                || state.ui.close().is_err()
+                || state.native_work.close().is_err()
+            {
                 eprintln!("PRODUCTION_NATIVE_WORK_DRAIN_BLOCKED");
                 quitting.store(0, Ordering::SeqCst);
                 return;

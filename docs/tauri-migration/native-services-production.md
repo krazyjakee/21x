@@ -38,6 +38,10 @@ killed by this owner. Once accepted, an external launch may be irreversible.
 External OAuth browser flows remain explicitly unavailable: native URL opening
 does not implement current/legacy deep-link registration or a correctly owned
 OAuth callback receiver. No new app URL scheme registration is added here.
+The later [private OAuth authority](native-oauth-authority.md) adds finite
+register/open/retire leases and one-shot private delivery infrastructure. It
+preserves that unavailable state until native ingress, approved identity and
+provider consumers are integrated and proven.
 
 Source tests cover finite URL/DTO policy, bounded admission, abandoned public
 requests retaining raw work, failed/panicked native calls and shutdown fencing.

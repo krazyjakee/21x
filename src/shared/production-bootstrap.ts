@@ -40,6 +40,7 @@ export interface ProductionLaunchDescriptor {
     attachmentDownloads?: 'host' | 'unsupported'
     artifactClipboard?: 'host' | 'unsupported'
     tray?: 'host' | 'unsupported'
+    oauthFlows?: 'host' | 'unsupported'
     externalUrls: 'host' | 'unsupported'
     notifications: 'host' | 'unsupported'
     energy: 'host' | 'unsupported'
@@ -60,7 +61,9 @@ export function isProductionLaunchDescriptor(value: unknown): value is Productio
     value.version === 1 && value.kind === 'production-private-launch' && isProductionLaunchId(value.launchId) && typeof value.profileId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value.profileId) &&
     choice(value.profileIntent, ['create-new', 'load-authenticated-copy']) && typeof value.buildIdentity === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value.buildIdentity) && isResourceDigest(value.resourceManifestSha256) &&
     isRecord(value.paths) && hasExactKeys(value.paths, ['profileRoot', 'workspaceRoot', 'attachmentRoot', 'reposRoot', 'resourceRoot', 'tempRoot']) && Object.values(value.paths).every(isAbsoluteHostPath) &&
-    isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp'], ['workspaceFiles', 'workspaceCleanup', 'attachmentFiles', 'attachmentDownloads', 'artifactClipboard', 'tray']) &&
+    isRecord(value.capabilities) && hasExactKeys(value.capabilities, ['externalUrls', 'notifications', 'energy', 'ui', 'voice', 'configuredMcp', 'connectors', 'managedTaskMcp'], ['workspaceFiles', 'workspaceCleanup', 'attachmentFiles', 'attachmentDownloads', 'artifactClipboard', 'tray', 'oauthFlows']) &&
+    (capabilities.oauthFlows === undefined || choice(capabilities.oauthFlows, ['host', 'unsupported'])) &&
+    (capabilities.oauthFlows !== 'host' || capabilities.externalUrls === 'host') &&
     (capabilities.tray === undefined || choice(capabilities.tray, ['host', 'unsupported'])) &&
     (capabilities.tray !== 'host' || capabilities.ui === 'host') &&
     (capabilities.workspaceFiles === undefined || choice(capabilities.workspaceFiles, ['host', 'unsupported'])) &&

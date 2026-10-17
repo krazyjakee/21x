@@ -6,6 +6,18 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #215 OAuth continuation adds finite private register/open/retire leases,
+a one-shot native state/URI authority, sanitized denial outcomes and a Source
+lease owner. Private delivery acknowledges atomic Source claim before async
+exchange; retirement joins raw native opening/delivery work. The preview refuses
+custom-scheme registration and retains unavailable production `oauthBrowser`.
+No callback code/state becomes a renderer event. See the
+[agreed callback contract and identity decision](native-oauth-authority.md).
+This is infrastructure evidence; OS registration, warm single-instance/cold
+routing and integrated provider credential consumers remain open. The user must
+approve final app identity and handler ownership; preview identifiers are unchanged.
+Hosted Verify remains unavailable while repository Actions is disabled.
+
 The #208 restart continuation reconciles old durable effect authority in one
 SQLite transaction before production constructs APIs, adapters or schedulers.
 Interrupted starts, unaccepted deliveries and provider retries require explicit

@@ -29,6 +29,7 @@ import { PRODUCTION_RESOURCE_PINS, verifyProductionResources } from './productio
 import { SessionStatus } from '../shared/constants'
 import { HOST_OPERATION_SCHEMAS } from '../shared/host-services'
 import { WORKSPACE_NATIVE_CALLBACK_SCHEMAS } from '../shared/workspace-native-callbacks'
+import { OAUTH_DELIVERY_SCHEMA, OAUTH_NATIVE_CALLBACK_SCHEMAS } from '../shared/oauth-native-callbacks'
 
 const roots: string[] = [], services: ProductionServiceType[] = [], hosts: ServicePeer[] = [], release: Array<() => void> = []
 afterEach(async () => {
@@ -47,7 +48,7 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false, oauth = false) {
   let privateCallbacks: ProductionPrivateCallbacks | null = null
   let notificationAcknowledgement: Promise<void> | null = null
   let notificationResult: 'shown' | 'denied' | 'error' | 'malformed' | 'timeout' = 'shown'
@@ -74,6 +75,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
   if (attachmentDownloading) launch.capabilities.attachmentDownloads = 'host'
   if (artifactClipboard) launch.capabilities.artifactClipboard = 'host'
+  if (oauth) { launch.capabilities.oauthFlows = 'host'; launch.capabilities.externalUrls = 'host' }
   const selectedNode = process.env.TAURI_NODE_RUNTIME ?? join(process.cwd(), 'src-tauri', 'resources', 'node', process.platform === 'win32' ? 'node.exe' : 'node')
   const fixtureNpm = join(root, 'npm-cli.js')
   if (installation) writeFileSync(fixtureNpm, `const fs=require('node:fs'),p=require('node:path');const prefix=process.argv[process.argv.indexOf('--prefix')+1];const pkg=p.join(prefix,'lib','node_modules','opencode-ai');fs.mkdirSync(pkg,{recursive:true});fs.mkdirSync(p.join(prefix,'bin'),{recursive:true});fs.writeFileSync(p.join(pkg,'package.json'),JSON.stringify({name:'opencode-ai',version:'1.0.0',bin:{opencode:'index.js'}}));fs.writeFileSync(p.join(pkg,'index.js'), '#!'+process.execPath+${JSON.stringify("\nconsole.log('1.0.0')\n")});fs.chmodSync(p.join(pkg,'index.js'),0o700);fs.symlinkSync(p.join(pkg,'index.js'),p.join(prefix,'bin','opencode'));`)
@@ -107,6 +109,12 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   schemas['engine.initialize'] = { validatePayload: value => isRecord(value), validateResult: isBootstrapResult }
   schemas['engine.ownerState'] = { validatePayload: value => isRecord(value) && hasExactKeys(value, []), validateResult: isProductionOwnerState }
   schemas['engine.shutdown'] = { validatePayload: value => isRecord(value), validateResult: value => isRecord(value) && value.stopped === true }
+  schemas['engine.oauth.callback'] = OAUTH_DELIVERY_SCHEMA
+  if (oauth) for (const [operation, schema] of Object.entries(OAUTH_NATIVE_CALLBACK_SCHEMAS)) schemas[operation] = { ...schema, handle: payload => {
+    nativeCalls.push(operation)
+    const field = operation === 'host.oauth.register' ? 'registered' : operation === 'host.oauth.open' ? 'opened' : 'retired'
+    return { flowId: (payload as { flowId: string }).flowId, [field]: true }
+  } }
   schemas['engine.tray.preference'] = { validatePayload: value => isRecord(value) && Object.keys(value).length === 0, validateResult: value => isRecord(value) && typeof value.enabled === 'boolean' }
   schemas['engine.tray.preferenceCommand'] = { validatePayload: value => isRecord(value), validateResult: value => isRecord(value) && value.defined === true && typeof value.value === 'boolean' }
   schemas['host.production.prepare'] = { ...PRODUCTION_HOST_SCHEMAS['host.production.prepare'], handle: async payload => {
@@ -225,6 +233,52 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
 }
 
 describe('actual private production peer', () => {
+  it('claims a private OAuth delivery before async exchange and preserves captured Source write authority', async () => {
+    const f = fixture(false, false, false, false, false, false, false, false, false, true); await f.initialize()
+    const db = f.service.getReadyServices()!.db
+    const source = db.createTaskSource({ name: 'Synthetic private OAuth', plugin_id: 'linear', mcp_server_id: null, config: { client_id: 'synthetic' } })!
+    const nonce = 'synthetic_nonce_0123456789', redirectUri = 'twentyonex://oauth/callback'
+    let permitted = true
+    const beforeEffect = (): void => { f.service.owner.getDatabaseBindingLease(); if (!permitted || db.getTaskSource(source.id)?.plugin_id !== 'linear') throw new Error('captured source intent retired') }
+    const lease = await f.privateCallbacks().oauthFlows!.register({ kind: 'custom-scheme', redirectUri, ttlMs: 300000,
+      authorizationUrl: `https://provider.example/authorize?state=${nonce}&redirect_uri=${encodeURIComponent(redirectUri)}` }, beforeEffect)
+    await lease.open()
+    const exchange = deferred(); release.push(exchange.finish)
+    let exchanges = 0
+    const raw = lease.waitForCallback().then(async () => {
+      exchanges++
+      await exchange.promise
+      beforeEffect()
+      db.createOAuthToken({ provider: 'linear', source_id: source.id, access_token: 'synthetic-token', refresh_token: null, expires_in: 3600, scope: null })
+    }).finally(() => lease.close())
+    void raw.catch(() => {})
+    const payload = { flowId: lease.flowId, kind: 'custom-scheme', redirectUri, state: nonce, outcome: { status: 'code', code: 'synthetic-code' } }
+    expect(await f.host.request('engine.oauth.callback', payload)).toEqual({ accepted: true })
+    expect(exchanges).toBe(1)
+    expect(db.getOAuthTokenBySource(source.id)).toBeUndefined()
+    expect(await f.host.request('engine.oauth.callback', payload)).toEqual({ accepted: false })
+    expect(f.nativeCalls.filter(value => value.startsWith('host.oauth'))).toEqual(['host.oauth.register', 'host.oauth.open'])
+    permitted = false
+    exchange.finish()
+    await expect(raw).rejects.toThrow('captured source intent retired')
+    expect(db.getOAuthTokenBySource(source.id)).toBeUndefined()
+    expect(f.nativeCalls.filter(value => value.startsWith('host.oauth'))).toEqual(['host.oauth.register', 'host.oauth.open', 'host.oauth.retire'])
+    expect(JSON.stringify(f.wireEvents)).not.toContain('synthetic-code')
+    expect(JSON.stringify(f.wireEvents)).not.toContain(nonce)
+    expect(Object.hasOwn(PRODUCTION_COMMAND_CODECS, 'engine.oauth.callback')).toBe(false)
+  }, 15000)
+  it('acknowledges private OAuth denial without token work or a delivery/retirement join cycle', async () => {
+    const f = fixture(false, false, false, false, false, false, false, false, false, true); await f.initialize()
+    const nonce = 'synthetic_nonce_0123456789', redirectUri = 'nuanu://oauth/callback'
+    const lease = await f.privateCallbacks().oauthFlows!.register({ kind: 'custom-scheme', redirectUri, ttlMs: 300000,
+      authorizationUrl: `https://provider.example/authorize?state=${nonce}&redirect_uri=${encodeURIComponent(redirectUri)}` }, () => {})
+    await lease.open()
+    const waiting = lease.waitForCallback()
+    expect(await f.host.request('engine.oauth.callback', { flowId: lease.flowId, kind: 'custom-scheme', redirectUri, state: nonce, outcome: { status: 'denied' } })).toEqual({ accepted: true })
+    await expect(waiting).rejects.toThrow('OAUTH_FLOW_DENIED')
+    expect(f.nativeCalls.filter(value => value === 'host.oauth.retire')).toHaveLength(0)
+    await lease.close()
+  }, 15000)
   it('publishes finite owner failure metadata after initialize fails without retrying its effects', async () => {
     const f = fixture()
     await expect(f.host.request('engine.ownerState', {})).rejects.toMatchObject({ code: 'STALE_EPOCH' })
