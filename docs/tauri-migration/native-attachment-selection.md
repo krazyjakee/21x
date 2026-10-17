@@ -82,3 +82,34 @@ Hosted Verify unavailable: repository Actions disabled
 (actions/permissions enabled:false), awaiting user decision. No settings endpoint
 or workflow dispatch is authorized. Final app identity/current+legacy scheme
 handler authority remains a user decision; no identifier or scheme is chosen.
+
+## Private selection-group retirement
+
+The native owner can revoke one exact group through private
+`engine.attachment.selection.revoke {leaseId,selectionIds}`. The group has one
+original document lease and one to sixteen unique UUID selection IDs; it
+contains no task, path, provider or public grant. Source validates the whole
+group before changing any entry, then synchronously cancels all matching
+selections and tombstones unseen IDs. A delayed offer cannot recreate them.
+Foreign-lease groups refuse atomically; unrelated selections remain usable.
+
+The acknowledgement follows the actual per-entry raw read and native retirement
+receipts. Failed retirement keeps the cancelled entry for explicit retry and
+does not reopen a read or repeat import. Cleanup remains callable through the
+original private owner while closing. It neither closes the global selection
+owner nor becomes a renderer operation. The native pending-result parser accepts
+only exact `{retired:true}`, and public dispatch refuses the private name.
+
+A revoked producer's finite scope error survives protected destination rollback;
+it is not reported as a destination I/O failure. Controlled private-peer/SQLite
+regressions hold an accepted raw read, revoke its group, observe joined native
+retirement, unchanged task metadata and no leftover destination file. Existing
+regular-file/version/digest and retryable-close checks continue to apply.
+
+This cleanup route is a prerequisite for native file drop. File drop stays
+unavailable until the original opaque UI attachment context is captured at the
+actual native event, acceptance and close are acknowledged, and all FD/Source
+offers are retired across context change, refusal, ignored delivery and document
+loss. Public event/registration details remain under explicit coordination with
+the renderer owner; this continuation grants no raw path fallback or new UI
+capability. No installed all-platform or real user file/profile proof is claimed.

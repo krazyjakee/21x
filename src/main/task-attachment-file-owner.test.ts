@@ -173,13 +173,15 @@ describe('bounded selection-stream publication', () => {
   })
   it('rolls back an acknowledged streamed prefix after producer refusal, short chunk or withdrawn scope', async () => {
     const record = { ...metadata, size: 131073 }
-    for (const mode of ['refused', 'short', 'withdrawn']) {
+    for (const mode of ['refused', 'short', 'withdrawn', 'revoked']) {
       let permitted = true
       const guarded = { signal: new AbortController().signal, beforeEffect() { if (!permitted) throw new ServiceProtocolError('INVALID_REQUEST') } }
-      await expect(owner.writeStream('task-' + mode, record, async (offset, length) => {
-        if (offset) { if (mode === 'refused') throw new Error('Controlled producer refusal'); if (mode === 'short') return Buffer.alloc(length - 1); permitted = false }
+      const failed = owner.writeStream('task-' + mode, record, async (offset, length) => {
+        if (offset) { if (mode === 'refused') throw new Error('Controlled producer refusal'); if (mode === 'short') return Buffer.alloc(length - 1); if (mode === 'revoked') throw new ServiceProtocolError('INVALID_REQUEST'); permitted = false }
         return Buffer.alloc(length, 3)
-      }, guarded)).rejects.toBeInstanceOf(Error)
+      }, guarded)
+      if (mode === 'revoked') await expect(failed).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+      else await expect(failed).rejects.toBeInstanceOf(Error)
       expect(await readdir(join(attachmentRoot, 'task-' + mode))).toEqual([])
     }
   })

@@ -1,4 +1,4 @@
-import { isSelectionOffer, type AttachmentSelection, type AttachmentSelectionBridge } from '../shared/attachment-selection-callbacks'
+import { isSelectionOffer, isSelectionRevocation, type AttachmentSelection, type AttachmentSelectionBridge } from '../shared/attachment-selection-callbacks'
 import { ServiceProtocolError } from '../shared/service-protocol'
 interface Entry {
   value: AttachmentSelection; leaseId: string; expires: number; claimed: boolean; cancelled: boolean
@@ -30,6 +30,24 @@ export class AttachmentSelectionOwner {
       this.used.add(selection.selectionId); this.entries.set(selection.selectionId, entry)
     }
     return { accepted: true }
+  }
+  /** Private native cleanup for one exact receipt group. Fence all matching
+   * entries before joining any raw read/retire; no other selection is stopped. */
+  revoke(value: unknown): Promise<{ retired: true }> {
+    if (!isSelectionRevocation(value)) return Promise.reject(new ServiceProtocolError('INVALID_ARGUMENTS'))
+    const entries = value.selectionIds.map(id => this.entries.get(id))
+    if (entries.some(entry => entry && entry.leaseId !== value.leaseId)) return Promise.reject(new ServiceProtocolError('INVALID_REQUEST'))
+    const fresh = value.selectionIds.filter(id => !this.used.has(id))
+    if (this.used.size + fresh.length > 4096) return Promise.reject(new ServiceProtocolError('BACKPRESSURE'))
+    // Retire-before-offer is permanent within this owner epoch, including a
+    // native registration receipt that arrives after its context was closed.
+    for (const id of fresh) this.used.add(id)
+    for (const entry of entries) if (entry) { entry.cancelled = true; clearTimeout(entry.timer) }
+    return (async () => {
+      const results = await Promise.allSettled(entries.filter((entry): entry is Entry => !!entry).map(entry => this.retire(entry)))
+      for (const result of results) if (result.status === 'rejected') throw result.reason
+      return { retired: true as const }
+    })()
   }
   /** Claim synchronously under the caller's exact captured task/project fence. */
   claim(path: string, leaseId: string, beforeEffect: () => void): AttachmentImportLease {

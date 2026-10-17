@@ -1374,6 +1374,32 @@ impl ProductionEngine {
         }
         Ok(())
     }
+    /// Revoke only a captured native selection group. This cleanup route can
+    /// join old-document work during shutdown; it admits no new file reads.
+    pub async fn revoke_attachment_selections(
+        &self,
+        epoch: &str,
+        payload: Value,
+    ) -> Result<(), EngineError> {
+        if epoch != self.epoch() {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.attachment_selections != HostCapability::Host
+            || !crate::production_attachment_selection::revocation(&payload)
+        {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst) || self.0.closed.load(Ordering::SeqCst) {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        let result = self
+            .request("engine.attachment.selection.revoke", payload)
+            .await?;
+        if result != json!({"retired":true}) {
+            return Err(EngineError::new("INVALID_RESULT"));
+        }
+        Ok(())
+    }
     pub async fn pick_attachments(&self, epoch: &str, lease: &str) -> Result<Value, EngineError> {
         if epoch != self.epoch() || !crate::production_ui_contracts::lease_id(&json!(lease)) {
             return Err(EngineError::new("STALE_EPOCH"));
@@ -1805,6 +1831,7 @@ impl ProductionEngine {
                             contracts::object(result, &["accepted"], &[])
                                 && result["accepted"].is_boolean()
                         }
+                        "engine.attachment.selection.revoke" => result == &json!({"retired":true}),
                         "engine.attachment.save" => {
                             crate::production_attachment_selection::save_result(result)
                         }
@@ -3362,12 +3389,59 @@ mod tests {
             }
         }
         #[tokio::test]
+        async fn private_selection_group_cleanup_joins_exact_receipt_during_stopping_without_read_admission(
+        ) {
+            let mut fixture = Fixture::new(ui_host());
+            Arc::get_mut(&mut fixture.engine.0)
+                .unwrap()
+                .descriptor
+                .capabilities
+                .attachment_selections = HostCapability::Host;
+            fixture.engine.0.ready.store(true, Ordering::SeqCst);
+            fixture.engine.0.stopping.store(true, Ordering::SeqCst);
+            let payload = json!({"leaseId":"ui_original","selectionIds":["61f07006-c85b-438e-83a7-497c77b0dcae"]});
+            assert_eq!(fixture.engine.offer_attachment_selections("transport-fixture", json!({"leaseId":"ui_original","selections":[{"selectionId":"61f07006-c85b-438e-83a7-497c77b0dcae","path":"/tmp/file.txt","filename":"file.txt","size":3}]})).await.unwrap_err().code,"DISCONNECTED");
+            assert_eq!(
+                fixture
+                    .engine
+                    .revoke_attachment_selections("foreign", payload.clone())
+                    .await
+                    .unwrap_err()
+                    .code,
+                "STALE_EPOCH"
+            );
+            let engine = fixture.engine.clone();
+            let revoke = tokio::spawn(async move {
+                engine
+                    .revoke_attachment_selections("transport-fixture", payload)
+                    .await
+            });
+            let mut written = [0; 8];
+            timeout(
+                Duration::from_secs(2),
+                fixture.stdout.as_mut().unwrap().read_exact(&mut written),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(&written, b"written\n");
+            assert!(!revoke.is_finished());
+            fixture.engine.accept(json!({"kind":"response","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"host:1","result":{"retired":true}})).await.unwrap();
+            revoke.await.unwrap().unwrap();
+            assert!(fixture.engine.0.pending.lock().unwrap().is_empty());
+            fixture.reap().await;
+        }
+        #[tokio::test]
         async fn private_attachment_selection_results_use_exact_pending_validators_and_no_public_dispatch(
         ) {
             for (operation, result) in [
                 (
                     "engine.attachment.selection.offer",
                     json!({"accepted":true}),
+                ),
+                (
+                    "engine.attachment.selection.revoke",
+                    json!({"retired":true}),
                 ),
                 (
                     "engine.attachment.save",
@@ -3397,6 +3471,14 @@ mod tests {
                 (
                     "engine.attachment.selection.offer",
                     json!({"accepted":true,"selectionId":"foreign"}),
+                ),
+                (
+                    "engine.attachment.selection.revoke",
+                    json!({"retired":false}),
+                ),
+                (
+                    "engine.attachment.selection.revoke",
+                    json!({"retired":true,"path":"/private/canary"}),
                 ),
                 (
                     "engine.attachment.save",

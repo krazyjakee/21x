@@ -1,6 +1,6 @@
 import { NATIVE_ATTACHMENT_IMAGE_CODECS } from '../shared/attachment-image-codecs'
 import { NATIVE_WINDOW_STATE_SCHEMAS } from '../shared/native-window-state'
-import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer } from '../shared/attachment-selection-callbacks'
+import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer, isSelectionRevocation } from '../shared/attachment-selection-callbacks'
 import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck } from '../shared/attachment-native-callbacks'
@@ -9,7 +9,7 @@ import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { UI_NATIVE_CALLBACK_SCHEMAS, isPrivateUiPublication, isPrivateAgentInstallation } from '../shared/ui-native-callbacks'
 import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -164,6 +164,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   } }
   Object.assign(schemas, NATIVE_WINDOW_STATE_SCHEMAS)
   schemas['engine.attachment.selection.offer'] = { validatePayload: isSelectionOffer, validateResult: value => isRecord(value) && hasExactKeys(value, ['accepted']) && typeof value.accepted === 'boolean' }
+  schemas['engine.attachment.selection.revoke'] = { validatePayload: isSelectionRevocation, validateResult: value => isRecord(value) && hasExactKeys(value, ['retired']) && value.retired === true }
   schemas['engine.attachment.save'] = { validatePayload: value => isRecord(value), validateResult: TASK_ATTACHMENT_CODECS['attachments:save'].validateWireResult }
   if (selections) for (const [operation, schema] of Object.entries(ATTACHMENT_SELECTION_SCHEMAS)) schemas[operation] = { ...schema, handle: async (payload): Promise<JsonValue> => {
     if (!isRecord(payload)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -903,6 +904,30 @@ describe('private selection receipts through actual service peer and SQLite owne
   await vi.waitFor(()=>expect(f.nativeCalls).toContain('host.attachment.selection.read'));abort.abort();await failure
   await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED');expect(actual.db.db.open).toBe(true);expect(f.nativeCalls).not.toContain('host.attachment.selection.retire')
   gate.finish();await f.service.close();expect(actual.db.db.open).toBe(false);expect(f.nativeCalls.filter(v=>v==='host.attachment.selection.read')).toHaveLength(1);expect(f.nativeCalls).toContain('host.attachment.selection.retire')
+ })
+ it('private group revocation fences an accepted import and joins its raw read before retirement without changing metadata',async()=>{
+  const f=create();await f.initialize();const actual=f.service.getReadyServices()!,task=actual.db.createTask(makeTask())!
+  await f.host.request('engine.attachment.selection.offer',{leaseId,selections:[selection]})
+  const gate=deferred();release.push(gate.finish);f.holdAttachmentAcknowledgement(gate.promise)
+  const pending=f.host.request('engine.attachment.save',{taskId:task.id,filePath:selection.path,leaseId})
+  const failed=expect(pending).rejects.toMatchObject({code:'INVALID_REQUEST'})
+  await vi.waitFor(()=>expect(f.nativeCalls).toContain('host.attachment.selection.read'))
+  let settled=false
+  const retired=f.host.request('engine.attachment.selection.revoke',{leaseId,selectionIds:[selection.selectionId]}).then(value=>{settled=true;return value})
+  // A subsequent private ping is a wire-order barrier, not a timing guess.
+  await f.host.request('engine.ping',{});expect(settled).toBe(false);expect(f.nativeCalls).not.toContain('host.attachment.selection.retire')
+  gate.finish();await failed;await expect(retired).resolves.toEqual({retired:true})
+  expect(actual.db.getTask(task.id)!.attachments).toEqual([])
+  expect(readdirSync(join(f.launch.paths.attachmentRoot,task.id))).toEqual([])
+  expect(f.nativeCalls.filter(v=>v==='host.attachment.selection.read')).toHaveLength(1)
+  expect(f.nativeCalls.filter(v=>v==='host.attachment.selection.retire')).toHaveLength(1)
+  await expect(f.host.request('engine.attachment.save',{taskId:task.id,filePath:selection.path,leaseId})).rejects.toMatchObject({code:'INVALID_REQUEST'})
+ })
+ it('private revocation before an offer refuses resurrection without reading files',async()=>{
+  const f=create();await f.initialize();const calls=[...f.nativeCalls]
+  await expect(f.host.request('engine.attachment.selection.revoke',{leaseId,selectionIds:[selection.selectionId]})).resolves.toEqual({retired:true})
+  await expect(f.host.request('engine.attachment.selection.offer',{leaseId,selections:[selection]})).resolves.toEqual({accepted:false})
+  expect(f.nativeCalls).toEqual(calls)
  })
 })
 

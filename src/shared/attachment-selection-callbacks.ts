@@ -6,6 +6,7 @@ export interface AttachmentSelection { selectionId: string; path: string; filena
 export interface AttachmentSelectionOffer { leaseId: string; selections: AttachmentSelection[] }
 export interface AttachmentSelectionRead { leaseId: string; selectionId: string; offset: number; length: number }
 export interface AttachmentSelectionRetire { leaseId: string; selectionId: string }
+export interface AttachmentSelectionRevocation { leaseId: string; selectionIds: string[] }
 export interface AttachmentSelectionBridge {
   read(request: AttachmentSelectionRead): Promise<{ data: string }>
   finish(request: AttachmentSelectionRetire): Promise<{ verified: true }>
@@ -22,6 +23,9 @@ export function isSelectionOffer(value: unknown): value is AttachmentSelectionOf
 }
 export function isSelectionRetire(value: unknown): value is AttachmentSelectionRetire {
   return isRecord(value) && hasExactKeys(value, ['leaseId','selectionId']) && isUiLeaseId(value.leaseId) && taskAttachmentId(value.selectionId)
+}
+export function isSelectionRevocation(value: unknown): value is AttachmentSelectionRevocation {
+  return isRecord(value) && hasExactKeys(value, ['leaseId','selectionIds']) && isUiLeaseId(value.leaseId) && Array.isArray(value.selectionIds) && value.selectionIds.length >= 1 && value.selectionIds.length <= 16 && value.selectionIds.every(taskAttachmentId) && new Set(value.selectionIds).size === value.selectionIds.length
 }
 export function isSelectionRead(value: unknown): value is AttachmentSelectionRead {
   return isRecord(value) && hasExactKeys(value, ['leaseId','selectionId','offset','length']) && isSelectionRetire({ leaseId: value.leaseId, selectionId: value.selectionId }) && Number.isSafeInteger(value.offset) && Number(value.offset) >= 0 && Number(value.offset) <= TASK_ATTACHMENT_LIMITS.openBytes && Number.isSafeInteger(value.length) && Number(value.length) >= 1 && Number(value.length) <= 65536 && Number(value.offset) + Number(value.length) <= TASK_ATTACHMENT_LIMITS.openBytes

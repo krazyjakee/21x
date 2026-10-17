@@ -63,6 +63,22 @@ pub fn offer(value: &Value) -> bool {
             && paths.insert(v["path"].as_str().unwrap())
     })
 }
+pub fn revocation(value: &Value) -> bool {
+    if !contracts::object(value, &["leaseId", "selectionIds"], &[])
+        || !production_ui_contracts::lease_id(&value["leaseId"])
+    {
+        return false;
+    }
+    let Some(ids) = value["selectionIds"]
+        .as_array()
+        .filter(|ids| !ids.is_empty() && ids.len() <= 16)
+    else {
+        return false;
+    };
+    let mut seen = HashSet::new();
+    ids.iter()
+        .all(|id| contracts::attachment_uuid(id) && seen.insert(id.as_str().unwrap()))
+}
 pub fn request(operation: &str, value: &Value) -> bool {
     let read = operation == "host.attachment.selection.read";
     if !read
@@ -536,6 +552,24 @@ mod tests {
         fn drop(&mut self) {
             self.owner.close().unwrap();
             fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+    #[test]
+    fn private_group_revocation_is_exact_bounded_and_not_public_file_authority() {
+        let valid = json!({"leaseId":LEASE,"selectionIds":[ID,OTHER]});
+        assert!(revocation(&valid));
+        assert!(!contracts::valid_request(
+            "engine.attachment.selection.revoke",
+            &valid
+        ));
+        for invalid in [
+            json!({"leaseId":LEASE,"selectionIds":[]}),
+            json!({"leaseId":LEASE,"selectionIds":[ID,ID]}),
+            json!({"leaseId":"../foreign","selectionIds":[ID]}),
+            json!({"leaseId":LEASE,"selectionIds":["/etc/passwd"]}),
+            json!({"leaseId":LEASE,"selectionIds":[ID],"path":"/etc/passwd"}),
+        ] {
+            assert!(!revocation(&invalid));
         }
     }
     #[test]

@@ -2,7 +2,7 @@ import { NativeWindowStateStore } from './native-window-state-store'
 import { NATIVE_WINDOW_STATE_SCHEMAS, type NativeWindowState } from '../shared/native-window-state'
 import { isUiLeaseId } from '../shared/ui-desktop-codecs'
 import { AttachmentSelectionOwner } from './attachment-selection-owner'
-import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer } from '../shared/attachment-selection-callbacks'
+import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer, isSelectionRevocation } from '../shared/attachment-selection-callbacks'
 import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isArtifactClipboardReceipt, isArtifactClipboardResult, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { TRAY_PREFERENCE_CODECS } from '../shared/tray-preference-codecs'
@@ -263,6 +263,14 @@ export class ProductionService {
     operations['engine.attachment.selection.offer'] = { validatePayload: isSelectionOffer,
       validateResult: value => isRecord(value) && hasExactKeys(value, ['accepted']) && typeof value.accepted === 'boolean',
       handle: value => this.attachmentSelections?.offer(value) ?? { accepted: false } }
+    operations['engine.attachment.selection.revoke'] = { validatePayload: isSelectionRevocation,
+      validateResult: value => isRecord(value) && hasExactKeys(value, ['retired']) && value.retired === true,
+      handle: value => {
+        // Cleanup remains available for the captured private native owner
+        // during closing; it cannot grant a fresh selection or raw read.
+        if (!this.attachmentSelections) throw new ServiceProtocolError('DISCONNECTED')
+        return this.retain(this.attachmentSelections.revoke(value))
+      } }
     operations['attachments:save'].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
     operations['engine.attachment.save'] = { validatePayload: value => isRecord(value) && hasExactKeys(value, ['taskId','filePath','leaseId']) && isUiLeaseId(value.leaseId) && TASK_ATTACHMENT_CODECS['attachments:save'].validateArguments([value.taskId,value.filePath]),
       validateResult: TASK_ATTACHMENT_CODECS['attachments:save'].validateWireResult,

@@ -289,7 +289,11 @@ export class TaskAttachmentFileOwner {
         }
         if (publication) await this.cleanup(publication)
         if (error instanceof TaskAttachmentFileError) throw error
-        this.current(guard); fail('ATTACHMENT_IO_FAILED')
+        this.current(guard)
+        // A revoked native producer is a scope refusal, not a destination I/O
+        // failure. Preserve its finite shared error after owned rollback.
+        if (error instanceof Error && error.name === 'ServiceProtocolError') throw error
+        fail('ATTACHMENT_IO_FAILED')
       }
     }, async () => { if (accepted && (this.retiring.has(accepted) || this.pendingPublications.has(accepted))) { this.retiring.add(accepted); await this.cleanup(accepted) } })
   }
