@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "issue": 211,
+  "recordedAt": "2026-10-17T18:58:39.949784+00:00",
+  "sourceRevision": "bdf703ee97317c523288420031d1a14dad29f9f1",
+  "priorSourceRevision": "850ae663454c6849277d0d85f6c42955e743dfa4",
+  "rebasedBase": "e3fedf92",
+  "nativePreparation": {
+    "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock node scripts/tauri-prepare.mjs --native --node /mnt/Rusty/GitHub/21x/src-tauri/resources/node/node --npm-cli /home/krazy/.nvm/versions/node/v22.22.0/lib/node_modules/npm/bin/npm-cli.js",
+    "actual": "Pinned standalone runtime and physical native/SDK packages prepared in this worktree; no borrowed node_modules symlink",
+    "exitCode": 0
+  },
+  "scope": "Controlled adapter/actual manager/service integration under Linux bundled Node; prepared live account harness only",
+  "environment": {
+    "os": "Ubuntu 24.04 / Linux 6.8.0-139-generic",
+    "architecture": "x86_64",
+    "webView": "WebKitGTK 2.52.6-0ubuntu0.24.04.1 installed; no desktop/WebView run claimed",
+    "stagedNode": "22.23.2",
+    "systemNode": "22.22.0",
+    "pnpm": "9.15.9",
+    "packages": {
+      "better-sqlite3": "13.0.3",
+      "node-pty": "1.1.0",
+      "@anthropic-ai/claude-agent-sdk": "0.3.260",
+      "@anthropic-ai/sdk": "0.123.0",
+      "@opencode-ai/sdk": "1.18.28"
+    }
+  },
+  "profilePolicy": {
+    "syntheticOnly": true,
+    "liveAppProfileAccessed": false,
+    "providerSessionsRun": 0,
+    "apiKeysUsed": false,
+    "accountDetection": "Read-only bounded metadata; no CLI execution, login, refresh or model request"
+  },
+  "retainedCommandAudit": {
+    "agentSessionCommands": 14,
+    "agentConfigCommands": 2,
+    "unbound": [],
+    "owners": {
+      "ProductionAgentBackend": 11,
+      "DatabaseDesktopBackend": 3,
+      "AgentConfigurationBackend": 2
+    }
+  },
+  "checks": [
+    {
+      "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock pnpm test:run --project main src/main/adapters/acp-adapter.test.ts src/main/adapters/pi-adapter.test.ts src/main/adapters/codex-app-server-adapter.test.ts src/main/adapters/opencode-adapter.test.ts src/main/adapters/claude-code-adapter.test.ts src/main/adapters/adapter-compaction.test.ts src/main/agent-manager-scoped-approval.test.ts src/service/agent-configuration-backend.test.ts src/service/production-adapters.test.ts src/service/agent-process-ownership.test.ts src/service/production-agent-backend.test.ts src/service/agent-backend-proof.test.ts scripts/agent-backend-detection.test.ts src/service/production-owner.test.ts src/service/production-recovery.test.ts src/service/production-service.test.ts src/service/oauth-flow-owner.test.ts src/shared/production-bootstrap.test.ts",
+      "expected": "Scoped app controls pass",
+      "actual": {
+        "passed": 485,
+        "skipped": 0
+      },
+      "exitCode": 0
+    },
+    {
+      "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock pnpm test:tauri src/main/adapters/acp-adapter.test.ts src/main/adapters/pi-adapter.test.ts src/main/adapters/codex-app-server-adapter.test.ts src/main/adapters/opencode-adapter.test.ts src/main/adapters/claude-code-adapter.test.ts src/main/adapters/adapter-compaction.test.ts src/main/agent-manager-scoped-approval.test.ts src/service/agent-configuration-backend.test.ts src/service/production-adapters.test.ts src/service/agent-process-ownership.test.ts src/service/production-agent-backend.test.ts src/service/agent-backend-proof.test.ts src/service/production-owner.test.ts src/service/production-recovery.test.ts src/service/production-service.test.ts src/service/oauth-flow-owner.test.ts src/shared/production-bootstrap.test.ts",
+      "expected": "Actual pinned standalone Node controls pass with zero skips",
+      "actual": {
+        "passed": 482,
+        "skipped": 0
+      },
+      "exitCode": 0
+    },
+    {
+      "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock pnpm test:run --project main src/main/adapters/acp-adapter.test.ts src/main/adapters/pi-adapter.test.ts src/main/adapters/codex-app-server-adapter.test.ts src/main/adapters/opencode-adapter.test.ts src/main/adapters/claude-code-adapter.test.ts src/main/adapters/adapter-compaction.test.ts src/service/agent-executable-resolution.test.ts src/service/agent-process-ownership.test.ts",
+      "expected": "Final executable fallback, three-way replacement and raw child controls pass",
+      "actual": {
+        "passed": 319,
+        "skipped": 0
+      },
+      "exitCode": 0
+    },
+    {
+      "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock pnpm test:tauri src/main/adapters/acp-adapter.test.ts src/main/adapters/pi-adapter.test.ts src/main/adapters/codex-app-server-adapter.test.ts src/main/adapters/opencode-adapter.test.ts src/main/adapters/claude-code-adapter.test.ts src/main/adapters/adapter-compaction.test.ts src/service/agent-executable-resolution.test.ts src/service/agent-process-ownership.test.ts",
+      "expected": "Same final controls pass under staged Node",
+      "actual": {
+        "passed": 319,
+        "skipped": 0
+      },
+      "exitCode": 0
+    },
+    {
+      "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock pnpm typecheck",
+      "expected": "No TypeScript errors; no emitted source JS",
+      "actual": "Passed raw tsc --build --noEmit; normal commit hook also passed",
+      "exitCode": 0
+    },
+    {
+      "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock pnpm lint",
+      "expected": "No new errors",
+      "actual": {
+        "errors": 0,
+        "warnings": 165,
+        "warningsPreexisting": true
+      },
+      "exitCode": 0
+    },
+    {
+      "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock node scripts/agent-backend-proof.mjs --prepare",
+      "expected": "Bundle the five real adapter constructors with staged pinned SDK imports and no Electron import; do not run providers",
+      "actual": {
+        "prepared": true,
+        "liveSessionsRun": false
+      },
+      "exitCode": 0
+    },
+    {
+      "command": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock node /tmp/211-staged-import.mjs",
+      "fixture": "Uses child_process.spawnSync with staged Node, PATH=staged Node directory, synthetic nonexistent account HOME; imports generated node_modules/.cache/21x-agent-backend-proof/proof.mjs and checks exported runLiveBackendProof is a function",
+      "expected": "Generated entry loads under owning Node without provider execution",
+      "actual": {
+        "stagedEntryImport": true,
+        "liveSessionsRun": false,
+        "nodeVersion": "v22.23.2"
+      },
+      "exitCode": 0
+    },
+    {
+      "command": "node scripts/agent-backend-proof.mjs --detect",
+      "expected": "Filesystem-only discovery without secret values or provider execution",
+      "actual": {
+        "installed": [
+          "opencode",
+          "claude-code",
+          "codex",
+          "pi"
+        ],
+        "absent": [
+          "cursor"
+        ],
+        "auth": {
+          "opencode": "metadata-unavailable",
+          "claude-code": "oauth-present-unverified",
+          "codex": "oauth-present-unverified",
+          "cursor": "unknown",
+          "pi": "subscription-not-detected"
+        }
+      },
+      "exitCode": 0
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "expected": "Retained inventory regenerated for new source entries",
+      "actual": "895 files; 737 IPC operations; 9 preexisting unresolved operations",
+      "exitCode": 0
+    },
+    {
+      "command": "git diff --check",
+      "expected": "No whitespace errors",
+      "actual": "Passed",
+      "exitCode": 0
+    }
+  ],
+  "expectedAndActual": [
+    {
+      "expected": "Signal acceptance and exit do not acknowledge process retirement",
+      "actual": "Fake raw-receipt controls keep Stop pending beyond exit; actual Pi/ACP/Codex children ignore TERM, remain alive before escalation and are closed/reaped before Stop returns; unrelated child preserved"
+    },
+    {
+      "expected": "Failed create without returned ID cannot escape owner cleanup",
+      "actual": "ProductionAdapters joins optional closeOwnedSessions; a controlled pending native cleanup blocks close; actual Pi startup rejection joins its stubborn child before failure returns"
+    },
+    {
+      "expected": "Accepted Pi interrupt cannot manufacture idle",
+      "actual": "Actual manager production abort refuses while the protocol peer remains busy; its owner remains until acknowledged Stop"
+    },
+    {
+      "expected": "Native replies preserve request/task/agent/session scope and verified private write outcomes",
+      "actual": "Actual Pi process receives permission/question replies through actual ProductionAgentBackend/AgentManager; stale and switched-session replies refused; denied reply after backend reload reaches only current native request"
+    },
+    {
+      "expected": "Switch and quota fallback preserve recap/remaining intent once",
+      "actual": "Actual protocol children verify outgoing child termination, distinct replacement native session, durable streamed recap, one fallback prompt with remaining intent, and pending approval reattachment"
+    },
+    {
+      "expected": "Native stream/tool/compaction semantics remain covered",
+      "actual": "Actual Pi protocol child emits text, tool error and compaction observation through manager path; all-five adapter and compaction suites retain controlled SDK/protocol semantics, including Claude background controls"
+    },
+    {
+      "expected": "Restricted PATH works without a lookup utility or system Node",
+      "actual": "Actual helper finds executable file without invoking it; child runtime equals owning staged Node with synthetic secret injection; no which/node required on PATH"
+    }
+  ],
+  "additionalChecks": [
+    {
+      "command": "pnpm test:run --project main src/main/chat/providers/codex-subscription.test.ts",
+      "expected": "Shared finder consumer regression remains intact",
+      "actual": "4 passed; no skips",
+      "exitCode": 0
+    }
+  ],
+  "failuresAndRepairs": [
+    "Old Pi process mock emitted exit without close and ACP spawn mocks lacked once: supplied real close receipt shape; kept production receipt requirement and test deadlines.",
+    "Harness control initially asserted a nonexistent respondToPermission hook: asserted the actual respondToApproval hook; pending decisions still produce no fabricated answer.",
+    "Harness build initially used CommonJS require.resolve against import-only SDK exports: select exact pinned package import export targets; build and actual staged-entry import pass.",
+    "Initial compaction file filter had the wrong parent directory; corrected to src/main/adapters/adapter-compaction.test.ts in final and rebase gates.",
+    "Initial strict-abort assertion expected private manager error text; production correctly sanitizes it. Assert public INTERNAL_ERROR plus actual native BUSY owner retention.",
+    "One staging-import shell command had a quoting syntax error before execution; moved the exact Node runner to a temporary .mjs file and reran under the lock."
+  ],
+  "artifacts": {
+    "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+    "scripts/agent-backend-proof.mjs": "bf129e41ee5c4a3a0a28dd5d2c32e3210632dd4d9e612df353bb0f0af6c060e1",
+    "src/main/adapters/shared/owned-process.ts": "b9b7906e49c70872b009df21d12d2b57c4a6df2ad36ec1d89b01277cf2806171",
+    "src/main/find-executable.ts": "6f33423ba7f60cda3638d746b5d2c5af634934d72fe4d303bc4e0f9fea7a49fc",
+    "test/fixtures/agent-rpc-process.cjs": "45ff726f375cc8acfa85f9b7f17cc809d6b4e19800a87e747c1654b7222cfee7",
+    "node_modules/.cache/21x-agent-backend-proof/proof.mjs": "68a4d3976fcd7f42ef9d1bfa61acec3c85ad66f01a2dfeb278207c84faefa957"
+  },
+  "hostedVerify": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "settingsChanged": false,
+    "workflowsDispatched": false
+  },
+  "remaining": [
+    "User approval is required before any real provider session/account/quota use. No live authenticated provider or real SDK session acceptance claimed.",
+    "Cursor CLI is absent. OpenCode metadata is unavailable; Pi subscription metadata not detected. Claude/Codex metadata presence does not establish authenticated or supported-model outcomes.",
+    "Real all-five create/resume/send/abort/stop/status/health, native HITL and provider streaming/background/compaction outcomes remain unproven under supported auth/model configurations.",
+    "Actual packaged desktop/native resource, secret-broker injection, provider/MCP descendant teardown and supported macOS/Windows acceptance remain open; direct-child close tests are not arbitrary process-tree proof.",
+    "Dependencies #202/#208 remain open. Hosted and non-Linux workflows blocked by Actions-disabled user decision. No release, cutover, identity change or Electron retirement authorized.",
+    "#211 remains OPEN; no whole acceptance checklist item newly ticked on controlled-only evidence."
+  ]
+}

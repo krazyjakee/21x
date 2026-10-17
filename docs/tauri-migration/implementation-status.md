@@ -6,6 +6,22 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The October 17 #211 agent continuation joins ACP/Codex/Pi raw child-close
+receipts, retains failed-create native cleanup, and keeps Pi busy until an
+actual abort settlement event. CLI discovery also works when a restricted PATH
+contains an executable but no system lookup utility. Controlled protocol children under bundled Node
+exercise native scoped permission/questions, tool failure, compaction observation,
+manual recap switch, pending reload, quota fallback, synthetic secret injection
+and acknowledged teardown with restricted PATH. All retained 14 session and two
+agent-configuration commands were already production-bound. The explicit
+five-backend account harness builds against staged SDKs; filesystem-only detection
+ran without provider sessions. Live account/auth/model/HITL runs await user
+approval; Cursor is absent, and installed platform acceptance remains pending.
+Hosted Verify is unavailable because repository Actions is disabled, awaiting the
+user's decision. #211 and G3 remain open. See
+[agent lifecycle](production-agent-lifecycle.md) and
+[local evidence](evidence/issue-211-agent-process-local-20261017.json).
+
 The #215 OAuth continuation adds finite private register/open/retire leases,
 a one-shot native state/URI authority, sanitized denial outcomes and a Source
 lease owner. Private delivery acknowledges atomic Source claim before async
