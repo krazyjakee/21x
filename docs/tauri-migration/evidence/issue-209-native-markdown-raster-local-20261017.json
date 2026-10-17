@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T22:35:37.326495+00:00",
+  "baseRevision": "afcae8b6195482a32114d2416cc82306a231f40c",
+  "implementationRevision": "a3d8b2915f4158d4f3542dc1229bf4d1c29e6fe9",
+  "verificationRevision": "a3d8b2915f4158d4f3542dc1229bf4d1c29e6fe9",
+  "scope": "Native Markdown saved-raster consumer through published optional readImage and exact physical-document typed transport; document-wide resource budgets, literal identity parsing, lifecycle cleanup and read-only recovery classification. No new operation/backend/native grant.",
+  "fixture": {
+    "description": "Actual React Markdown components, real NativeDesktopHost/client/codecs/transport with controlled native invoke and physical-document bootstrap receipts; preload absent. Blob URL creation/revocation mocked and asserted. PNG/GIF/WebP complete-container fixtures; dimension/size policy fixtures do not claim entropy decoding. No installed WebView, actual Source SQLite or filesystem read in this renderer suite.",
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "stagedNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "backendProof": {
+    "sourceRevision": "4fd1780abd066587dc12fa59f9deff4186bbd602",
+    "evidenceRevision": "1b839b11",
+    "path": "docs/tauri-migration/evidence/issue-215-214-saved-raster-local-20261017.json",
+    "note": "E2 separately proved actual staged production engine/Source held-FD/current-document paths. This renderer suite does not combine those with an installed physical WebView."
+  },
+  "budgets": {
+    "concurrentPublicReads": 4,
+    "queuedReads": 64,
+    "residentImages": 16,
+    "residentEncodedImageBytes": 4194304,
+    "admittedPixels": 16777216,
+    "pixelAccounting": "width*height*(frames+1), includes canvas plus every admitted frame",
+    "singleImageBytes": 524288,
+    "maxEdge": 4096,
+    "singleCanvasFramePixels": 8388608,
+    "gifFrames": 32,
+    "containerBlocks": 4096,
+    "jpegScans": 64,
+    "unavailable": [
+      "SVG",
+      "HTML",
+      "APNG",
+      "animated WebP",
+      "compressed/unknown PNG metadata",
+      "unknown/truncated/redefined/oversized containers"
+    ],
+    "note": "Bounds renderer admission/owned URLs; browser decoder/cache allocations are implementation-dependent."
+  },
+  "expectedActual": [
+    {
+      "expected": "Native saved images use exact typed task/attachment IDs and current document, never a URL/path grant.",
+      "actual": "Literal case-preserving task ID plus saved UUID reaches attachments:readImage with native-supplied uiLease. Six alias/query/fragment/extra-segment/credential/non-ID cases refuse before RPC. Native legacy links are inert with existing Open/Download guidance. Electron image/link scheme behavior remains."
+    },
+    {
+      "expected": "Retained resident images and read work remain bounded across all Markdown components.",
+      "actual": "Shared four-read/64-queue control refuses the69th admitted request; unmount removes queued requests before invocation. Separate-component controls prove16 residents,4MiB encoded bytes and16,777,216 pixels; capacity is released for a later view."
+    },
+    {
+      "expected": "No late publication or resident URL outlives its owner.",
+      "actual": "Visibility, unmount, pagehide, reconnect and browser decode error release exact blob once. Held old replies cannot create a URL after retirement or replace new connection output. Surrounding streamed Markdown keeps one image request."
+    },
+    {
+      "expected": "Authorized preview reads recover without lifting mutation fencing.",
+      "actual": "Consumer reconnect test failed on omitted readImage read classification, then passed after exact additive reads-set repair. Separate actual native host control reads while hydration remains pending and proves db:deleteTask still refuses before native invocation."
+    },
+    {
+      "expected": "Unsupported formats/failures cannot become a fallback file/scheme read or leak private errors.",
+      "actual": "Shared finite result codec and raster admission precede blob publication; missing physical receipt invokes no RPC. Refusal shows fixed guidance, with no private error text or raw scheme/path fallback."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "fullRendererBaseline": {
+      "passed": 1800,
+      "files": 152,
+      "skipped": 0,
+      "note": "Final production code; followed by fixture-only controlled-graph join repair."
+    },
+    "finalApp": {
+      "passed": 62,
+      "files": 3,
+      "skipped": 0
+    },
+    "finalStaged": {
+      "passed": 512,
+      "files": 27,
+      "skipped": 0
+    },
+    "newTypedNativeControls": 24,
+    "contractTests": 21,
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx",
+        "exitCode": 0,
+        "log": {
+          "sha256": "f4213cf20a0b3c1af9370f0045870658636cdc81c0b311de3f86e0d4476b3911",
+          "bytes": 902
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx src/renderer/src/stores/overview-store.test.ts src/renderer/src/stores/task-group-store.test.ts src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "201d1f3a9b5235bf1f64e5aeae3a8e184c7232b05e0d1d98a10451e1276e2f6c",
+          "bytes": 117579
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "0fae0396a452ea0aabc93669180b4208aba3d711b94a614915c26afadc7d782e",
+          "bytes": 534
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "2328195d98f38a62bec75574a2e29e8868742462eb99ef7dc3b513b78207e40a",
+          "bytes": 29343
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "192dcd5c5fa26006374692b6293bd905b42e7af3a6dbecbb40ca012f8014ed1f",
+          "bytes": 9737
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "5b7c1972639ba480e1f5eab66e7a0286a843314285144d991ddac57fbb7d0503",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      }
+    ],
+    "gateScript": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx > /tmp/ea209-raster-final-app.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-raster-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-raster-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx src/renderer/src/stores/overview-store.test.ts src/renderer/src/stores/task-group-store.test.ts src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-raster-final-staged.log 2>&1\nrtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts > /tmp/ea209-raster-contract-tests.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-raster-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-raster-production-build.log 2>&1\nrtk proxy git diff --check\nrtk proxy node scripts/tauri-inventory.mjs --check > /tmp/ea209-raster-inventory.log 2>&1\nrtk proxy node scripts/tauri-contracts.mjs --check > /tmp/ea209-raster-contracts.log 2>&1\n",
+    "fullRendererCommand": {
+      "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+      "exitCode": 0,
+      "log": {
+        "sha256": "4acc4470f29edbefe915ade13f49c5d8cb752f5d35e03cd09e2269754000afcc",
+        "bytes": 1125116
+      }
+    },
+    "commitHooks": "Normal source hooks/typecheck passed.",
+    "inventory": {
+      "files": 911,
+      "ipcOperations": 736,
+      "directPreloadReaders": 1,
+      "recognizedFacadeExpressions": 361,
+      "existingUnresolved": 9,
+      "note": "Two owned runtime modules added; every existing operation/grant/policy unchanged. Combined freshness passed under explicit B metadata release."
+    }
+  },
+  "failureRepair": [
+    "Initial22/23 native controls exposed readImage missing from native client read-only list. Reconnect ready notice during hydration correctly refused it and no later generation change triggered a preview. Exact read classification repaired;24 controls include explicit pending-hydration read/mutation-denial proof.",
+    "First staged broad gate511pass/1 own encoded-size fixture failure: repeated bounded canonical/container validation exceeded waitFor default1s on staged Node. Precomputed controlled payload and joined immediate read/render graph before same exact8images/1refusal assertion. No production bound, assertion or global test deadline changed. Final62app/512staged pass.",
+    "One single-file staged diagnostic was mistakenly launched outside heavy.lock. It passed, but is not the authoritative gate. Final complete staged/type/lint/build/contracts gate reran under shared lock."
+  ],
+  "failureLogs": {
+    "raster-ui-initial": {
+      "sha256": "578a4092fdb4754800a80b45536222d95af75f585fc9f9a015666641649d9ce4",
+      "bytes": 5164
+    },
+    "raster-staged-initial": {
+      "sha256": "1f1eaac60171a40f1bcea09899eda7e233464e2a81161d65dbbb071f88b14236",
+      "bytes": 131617
+    }
+  },
+  "sourceFiles": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "815bd5f86cf297783d384d60d7d3e75184a60f9a285c29b0b0663ae8841d1c7d",
+      "bytes": 71694
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "2cfccfb4213a91b7a056d6f44372a32705b9a20e16ae08a64d4a0f5b718f0e4b",
+      "bytes": 380164
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "542fddf88e1b3e460193f36e7fb3108c353da0d6710fe1ad1fb828b2cde57346",
+      "bytes": 17183
+    },
+    "src/renderer/src/components/ui/Markdown.native-attachments.test.tsx": {
+      "sha256": "8f368667bc4800e5e4e6b0d8acc3f16f8e38f81bdde8630934ae080f2c627f2b",
+      "bytes": 14858
+    },
+    "src/renderer/src/components/ui/Markdown.tsx": {
+      "sha256": "e5b1bbfe2eb70f201e43325d19ec0b82631bce12c8d0ba72c2469caba4e180e3",
+      "bytes": 14141
+    },
+    "src/renderer/src/components/ui/MarkdownAttachmentImage.tsx": {
+      "sha256": "9897c680d266cf8e9a27d1f9050624d4c2a68018640a0caaf6f618956d398ada",
+      "bytes": 3659
+    },
+    "src/renderer/src/lib/attachment-image-preview.ts": {
+      "sha256": "394043beae285a8c993aa3ccd7149b60cc6f0c8f607d8e111224beda025110bf",
+      "bytes": 4606
+    },
+    "src/renderer/src/lib/native-desktop-host.ts": {
+      "sha256": "b7f33529aa18ff385a63fc90516932f0cd573eb71ab671783251fdc8a06be4a8",
+      "bytes": 33013
+    },
+    "vitest.tauri.config.ts": {
+      "sha256": "6ea174a9f8e724bedb568ca89298fef7cf12517fe658401e2182a6fcbba027cd",
+      "bytes": 12713
+    },
+    "src/shared/attachment-image.ts": {
+      "sha256": "80b65d774c3aac6672a6bd31d43ff1221b135635df11a97db75a5af592efd905",
+      "bytes": 1501
+    },
+    "src/shared/attachment-image-codecs.ts": {
+      "sha256": "b285ab94fe0987e1786a0fbad567afdbf758d4630a7a171b3df8a24cf1417848",
+      "bytes": 1899
+    },
+    "src/shared/attachment-raster.ts": {
+      "sha256": "8a740b41bc3d7405f330c1849866729a4ec3220be2e13995ec7052bc98828071",
+      "bytes": 7587
+    },
+    "src/renderer/src/lib/tauri-desktop-transport.ts": {
+      "sha256": "2c2d09ad309230ebfda69271a0c29560d68220258faf9aab666888f8358e1b73",
+      "bytes": 11264
+    }
+  },
+  "buildArtifacts": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "42d94d770f951da46a7b8aeccdd2f8f15e6000b456a566fa8ab9f1242bab511e",
+      "bytes": 856
+    },
+    "out/tauri-production-renderer/assets/main-CPsr4pfm.js": {
+      "sha256": "50ee905dc26c8379799f02f5fb2bd0bf1f54a172faaba3f0a481ee70a32e8995",
+      "bytes": 1512690
+    },
+    "out/renderer/index.html": {
+      "sha256": "8521f2203f6848bed063d95b70c11e8b87329a293a62e7a0dbba089aeedb2694",
+      "bytes": 3101
+    }
+  },
+  "acceptance": {
+    "newWholeCriteriaChecked": [],
+    "issueRemainsOpen": true,
+    "installedLifecycleProof": false
+  },
+  "remainingDefects": [
+    "Installed actual WebView raster decoding and all-platform document/window lifecycle acceptance remain open.",
+    "Native attachment links remain inert; existing task attachment Open/Download controls supply explicit file actions. SVG/HTML/unsupported/oversized formats deliberately have no inline preview.",
+    "Native dropped/nonordinary mutation/orphan reconciliation, shortcuts/login/native voice and #202 prerequisites remain open.",
+    "B is proving project configuration fields; A typed editor integration/receipt preservation is next after publication."
+  ],
+  "hostedVerification": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runList": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "limits": [
+    "Controlled renderer/codec/blob ownership proof is not installed native UI or browser decoder proof.",
+    "No microphone, live account/provider/profile data, release/cutover, identity decision or Electron retirement; hosted voice deferred."
+  ]
+}
