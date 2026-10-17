@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 
 export const PROFILE_LOCK_FILE = '.21x-profile-lock.sqlite'
-export type ProfileLockErrorCode = 'PROFILE_IN_USE' | 'PROFILE_DUPLICATE_OWNER' | 'PROFILE_LOCK_INVALID' | 'PROFILE_LOCK_LOST'
+export type ProfileLockErrorCode = 'PROFILE_IN_USE' | 'PROFILE_DUPLICATE_OWNER' | 'PROFILE_LOCK_INVALID' | 'PROFILE_LOCK_LOST' | 'PROFILE_LOW_DISK'
 export class ProfileLockError extends Error {
   constructor(readonly code: ProfileLockErrorCode) {
     super(code)
@@ -95,6 +95,7 @@ export function acquireProfileLock(profileRoot: string, options: { timeoutMs?: n
     if (ownerKey && !(error instanceof ProfileLockError && error.code === 'PROFILE_DUPLICATE_OWNER')) owners.delete(ownerKey)
     if (error instanceof ProfileLockError) throw error
     const code = (error as { code?: string }).code
+    if (code === 'ENOSPC' || code === 'EDQUOT' || code === 'SQLITE_FULL') return fail('PROFILE_LOW_DISK')
     return fail(code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' ? 'PROFILE_IN_USE' : 'PROFILE_LOCK_INVALID')
   }
 }

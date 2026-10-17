@@ -46,6 +46,14 @@ it('projects only known startup failures into fixed redacted provisioning guidan
   for (const phase of ['production-resources', 'production-manifest-build-digest', 'production-manifest-build-identity']) expect(productionBootstrapMessage(status('INVALID_RESULT', phase))).toContain('resources could not be verified')
   expect(productionBootstrapMessage(status('PROFILE_IN_USE', 'profile-lock'))).toContain('Another desktop service owns this profile')
   expect(productionBootstrapMessage(status('SECRET_STORE_UNAVAILABLE', 'credentials'))).toContain('protected credential store is unavailable')
+  for (const [code, phase, text] of [
+    ['PROFILE_LOW_DISK', 'resources', 'Free space'], ['PROFILE_DATABASE_LOCKED', 'database-preflight', 'database is busy'],
+    ['RESOURCE_UNAVAILABLE', 'resources', 'Repair the preview installation'], ['AGENT_CLI_UNAVAILABLE', 'services', 'configured CLI'],
+    ['OWNER_DRAIN_BLOCKED', 'credentials', 'owned work stops'], ['PROFILE_DATABASE_CORRUPT', 'database-preflight', 'opened safely']
+  ]) {
+    expect(productionBootstrapMessage(status(code, phase))).toContain(text)
+    expect(productionBootstrapMessage(status(code, '/private/canary'))).toBeNull()
+  }
   expect(productionBootstrapMessage(status('PRIVATE:/path', 'private credential detail'))).toBeNull()
   expect(productionBootstrapMessage(status('PRODUCTION_CONTAINMENT_UNAVAILABLE', '/private/profile'))).toBeNull()
   expect(productionBootstrapMessage({ ...status('PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-delegation-missing'), production: false })).toBeNull()

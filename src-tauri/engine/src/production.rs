@@ -30,6 +30,78 @@ use tokio::{
 const MAX_FRAME: usize = 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
 
+const OWNER_PHASES: &[&str] = &[
+    "new", "starting", "ready", "stopping", "blocked", "stopped", "failed",
+];
+const OWNER_STAGES: &[&str] = &[
+    "new",
+    "profile-lock",
+    "resources",
+    "native-readiness",
+    "credentials",
+    "database-preflight",
+    "database",
+    "secret-broker",
+    "task-api",
+    "services",
+    "recovery",
+    "background",
+    "ready",
+    "released",
+];
+const OWNER_RECOVERY_CODES: &[&str] = &[
+    "PROFILE_IN_USE",
+    "PROFILE_DUPLICATE_OWNER",
+    "PROFILE_LOCK_INVALID",
+    "PROFILE_LOCK_LOST",
+    "PROFILE_NOT_EMPTY",
+    "PROFILE_LOW_DISK",
+    "PROFILE_DATABASE_LOCKED",
+    "PROFILE_DATABASE_CORRUPT",
+    "PROFILE_DATABASE_PATH_INVALID",
+    "PROFILE_CREDENTIAL_FORMAT_INCOMPATIBLE",
+    "PROFILE_CREDENTIAL_OR_DATABASE_INVALID",
+    "DATABASE_UNAVAILABLE",
+    "RESOURCE_UNAVAILABLE",
+    "MANAGED_MCP_RESOURCE_UNAVAILABLE",
+    "CONNECTOR_RESOURCES_REQUIRED",
+    "AGENT_CLI_UNAVAILABLE",
+    "NATIVE_RUNTIME_UNAVAILABLE",
+    "SECRET_STORE_UNAVAILABLE",
+    "OWNER_CLOSING",
+    "OWNER_DRAIN_BLOCKED",
+    "OWNER_FENCE_FAILED",
+    "BOOTSTRAP_FAILED",
+];
+fn valid_owner_state(value: &Value) -> bool {
+    contracts::object(value, &["phase", "stage", "code", "owned"], &[])
+        && value["phase"]
+            .as_str()
+            .is_some_and(|v| OWNER_PHASES.contains(&v))
+        && value["stage"]
+            .as_str()
+            .is_some_and(|v| OWNER_STAGES.contains(&v))
+        && (value["code"].is_null()
+            || value["code"]
+                .as_str()
+                .is_some_and(|v| OWNER_RECOVERY_CODES.contains(&v)))
+        && value["owned"].is_boolean()
+}
+fn owner_recovery_error(value: &Value) -> Option<EngineError> {
+    if !valid_owner_state(value) || !matches!(value["phase"].as_str(), Some("failed" | "blocked")) {
+        return None;
+    }
+    let code = OWNER_RECOVERY_CODES
+        .iter()
+        .copied()
+        .find(|code| value["code"] == *code)?;
+    let stage = OWNER_STAGES
+        .iter()
+        .copied()
+        .find(|stage| value["stage"] == *stage)?;
+    Some(EngineError::new(code).startup(stage))
+}
+
 // A complete frame has a bounded lifetime even when the peer trickles bytes.
 // An idle pipe is allowed: only an unfinished frame starts this deadline.
 #[derive(Default)]
@@ -1393,6 +1465,7 @@ impl ProductionEngine {
                                 && result["nodeVersion"] == "v22.23.2"
                         }
                         "engine.shutdown" => result == &json!({"stopped":true}),
+                        "engine.ownerState" => valid_owner_state(result),
                         "engine.tray.preference" => {
                             crate::production_tray_contracts::preference(result)
                         }
@@ -2554,13 +2627,22 @@ mod linux {
                 .request("engine.ping", json!({}))
                 .await
                 .map_err(|error| error.startup("production-epoch-ping"))?;
-            engine
+            if let Err(error) = engine
                 .request(
                     "engine.initialize",
                     json!({"protocolVersion":1,"launchId":descriptor.launch_id}),
                 )
                 .await
-                .map_err(|error| error.startup("production-owner-initialize"))?;
+            {
+                // Observe finite metadata before the startup guard retires this
+                // epoch. This never retries initialization or a domain effect.
+                if let Ok(state) = engine.request("engine.ownerState", json!({})).await {
+                    if let Some(recovery) = owner_recovery_error(&state) {
+                        return Err(recovery);
+                    }
+                }
+                return Err(error.startup("production-owner-initialize"));
+            }
             if !engine.0.prepared.load(Ordering::SeqCst) || engine.0.closed.load(Ordering::SeqCst) {
                 return Err(problem(
                     "PRODUCTION_CONTAINMENT_UNAVAILABLE",
@@ -2676,6 +2758,38 @@ mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn owner_failures_accept_only_finite_metadata_and_preserve_recovery_phase() {
+        for code in OWNER_RECOVERY_CODES {
+            let value =
+                json!({"phase":"failed","stage":"database-preflight","code":code,"owned":false});
+            assert!(valid_owner_state(&value));
+            let error = owner_recovery_error(&value).unwrap();
+            assert_eq!(error.code, *code);
+            assert_eq!(error.startup_phase, Some("database-preflight"));
+        }
+        let mut value = json!({"phase":"blocked","stage":"credentials","code":"OWNER_DRAIN_BLOCKED","owned":true});
+        assert_eq!(
+            owner_recovery_error(&value).unwrap().code,
+            "OWNER_DRAIN_BLOCKED"
+        );
+        value["error"] = json!("private canary");
+        assert!(!valid_owner_state(&value));
+        assert!(owner_recovery_error(&value).is_none());
+        for (key, bad) in [
+            ("phase", "unknown"),
+            ("stage", "/private/profile"),
+            ("code", "PROFILE_PRIVATE_CANARY"),
+        ] {
+            let mut value = json!({"phase":"failed","stage":"resources","code":"RESOURCE_UNAVAILABLE","owned":false});
+            value[key] = json!(bad);
+            assert!(!valid_owner_state(&value));
+            assert!(owner_recovery_error(&value).is_none());
+        }
+        let ready = json!({"phase":"ready","stage":"ready","code":null,"owned":true});
+        assert!(valid_owner_state(&ready));
+        assert!(owner_recovery_error(&ready).is_none());
+    }
     static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
     pub(super) struct Temporary(pub(super) PathBuf);
     impl Temporary {
@@ -2819,9 +2933,15 @@ mod tests {
             async fn pending_request(
                 &mut self,
             ) -> tokio::task::JoinHandle<Result<Value, EngineError>> {
+                self.pending_request_for("engine.ping").await
+            }
+            async fn pending_request_for(
+                &mut self,
+                operation: &'static str,
+            ) -> tokio::task::JoinHandle<Result<Value, EngineError>> {
                 let engine = self.engine.clone();
                 let call =
-                    tokio::spawn(async move { engine.request_raw("engine.ping", json!({})).await });
+                    tokio::spawn(async move { engine.request_raw(operation, json!({})).await });
                 let mut written = [0; 8];
                 timeout(
                     Duration::from_secs(2),
@@ -2842,6 +2962,19 @@ mod tests {
                     .unwrap()
                     .unwrap();
             }
+        }
+        #[tokio::test]
+        async fn owner_recovery_response_uses_the_real_pending_request_validator() {
+            let mut fixture = Fixture::new(ui_host());
+            let request = fixture.pending_request_for("engine.ownerState").await;
+            let result = json!({"phase":"failed","stage":"database-preflight","code":"PROFILE_DATABASE_LOCKED","owned":false});
+            fixture.engine.accept(json!({"kind":"response","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"host:1","result":result})).await.unwrap();
+            let state = request.await.unwrap().unwrap();
+            let error = owner_recovery_error(&state).unwrap();
+            assert_eq!(error.code, "PROFILE_DATABASE_LOCKED");
+            assert_eq!(error.startup_phase, Some("database-preflight"));
+            assert!(fixture.engine.0.pending.lock().unwrap().is_empty());
+            fixture.reap().await;
         }
         async fn retired(engine: &ProductionEngine) {
             timeout(Duration::from_secs(2), async {

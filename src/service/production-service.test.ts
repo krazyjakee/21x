@@ -18,7 +18,7 @@ beforeEach(async () => {
   ;({ ProductionService, sealProductionServiceHost } = await import('./production-service'))
 })
 import { PRODUCTION_COMMAND_CODECS, PRODUCTION_EVENT_CODECS, validateProductionEventWire, type ProductionDesktopBindingOptions } from './production-desktop-bindings'
-import { PRODUCTION_HOST_SCHEMAS, type ProductionLaunchDescriptor } from '../shared/production-bootstrap'
+import { PRODUCTION_HOST_SCHEMAS, isProductionOwnerState, type ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { ServicePeer, type OperationSchema } from './transport/peer'
 import { hasExactKeys, isBootstrapResult, isRecord, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
 import type { CodingAgentAdapter } from '../main/adapters/coding-agent-adapter'
@@ -105,6 +105,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   }]))
   schemas['engine.ping'] = { validatePayload: value => isRecord(value) && hasExactKeys(value, []), validateResult: isBootstrapResult }
   schemas['engine.initialize'] = { validatePayload: value => isRecord(value), validateResult: isBootstrapResult }
+  schemas['engine.ownerState'] = { validatePayload: value => isRecord(value) && hasExactKeys(value, []), validateResult: isProductionOwnerState }
   schemas['engine.shutdown'] = { validatePayload: value => isRecord(value), validateResult: value => isRecord(value) && value.stopped === true }
   schemas['engine.tray.preference'] = { validatePayload: value => isRecord(value) && Object.keys(value).length === 0, validateResult: value => isRecord(value) && typeof value.enabled === 'boolean' }
   schemas['engine.tray.preferenceCommand'] = { validatePayload: value => isRecord(value), validateResult: value => isRecord(value) && value.defined === true && typeof value.value === 'boolean' }
@@ -224,6 +225,21 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
 }
 
 describe('actual private production peer', () => {
+  it('publishes finite owner failure metadata after initialize fails without retrying its effects', async () => {
+    const f = fixture()
+    await expect(f.host.request('engine.ownerState', {})).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+    await f.host.request('engine.ping', {})
+    expect(await f.host.request('engine.ownerState', {})).toEqual({ phase: 'new', stage: 'new', code: null, owned: false })
+    rmSync(f.launch.paths.resourceRoot, { recursive: true, force: true })
+    await expect(f.host.request('engine.initialize', { protocolVersion: 1, launchId: f.launch.launchId })).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    const expected = { phase: 'failed', stage: 'resources', code: 'RESOURCE_UNAVAILABLE', owned: false }
+    expect(await f.host.request('engine.ownerState', {})).toEqual(expected)
+    expect(await f.host.request('engine.ownerState', {})).toEqual(expected)
+    await expect(f.host.request('engine.ownerState', { path: '/private/canary' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+    expect(f.adapter.initialize).not.toHaveBeenCalled()
+    expect(f.nativeCalls).toEqual(['drain'])
+    expect(existsSync(join(f.launch.paths.profileRoot, '21x.db'))).toBe(false)
+  }, 15_000)
   it('persists tray preferences through the actual owner and keeps the app-owned close lookup separate from renderer authority', async () => {
     const f = fixture(false, true, false, false, false, false, false, true); await f.initialize()
     const command = (operation: string, payload: JsonValue = {}, leaseId = 'document_fixture_1') => f.host.request('engine.tray.preferenceCommand', { operation, payload, leaseId })

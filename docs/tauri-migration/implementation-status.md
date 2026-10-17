@@ -6,6 +6,15 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #208 startup continuation carries finite owner failure metadata through a
+private read after failed initialization and the existing native status path.
+Fixed renderer guidance distinguishes missing resources/CLI, unavailable store,
+profile/database ownership or corruption, low disk and blocked cleanup. Real
+SQLite busy refusal preserves rows and permits only a later explicit launch;
+observing state never retries initialization. See
+[startup recovery states](production-startup-recovery.md). Cross-target engine
+checks are compile evidence only; Actions remains disabled pending user decision.
+
 The October 17 connector continuation stages call-scoped KV edits until a
 successful worker result. Import accepts that result inside one synchronous
 SQLite transaction with task upserts, sync state and the worker checkpoint;
@@ -37,6 +46,8 @@ and leaves an unrelated child alive after close. See
 integration evidence. Native OAuth (#215), prerequisites #208/#202 and installed
 supported-target production acceptance remain open. Hosted Verify awaits the
 user decision on repository Actions; no CI or issue closure is claimed.
+
+The preceding terminal continuation retains its tested scope:
 
 
 The #214 terminal continuation preserves logical recent text and escape-parser

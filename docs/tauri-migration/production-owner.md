@@ -1,5 +1,9 @@
 # Production application ownership
 
+The [startup recovery continuation](production-startup-recovery.md) carries
+finite owner failures through the actual private/native status path without
+reflecting error text or retrying initialization.
+
 `src/service/production-owner.ts` supplies an application lifetime for the portable
 service. It is separate from the disposable deterministic fixture in
 `database-service.ts`. It does not select a live profile, change production

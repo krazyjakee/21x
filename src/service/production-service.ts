@@ -12,7 +12,7 @@ import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
 import { UI_NATIVE_CALLBACK_SCHEMAS, isNativeUiSnapshot, isNativeUiAcknowledgement, isPrivateUiPublication, isPrivateAgentInstallation } from '../shared/ui-native-callbacks'
 import type { ProductionUiNativeHost } from '../main/production-ui-owner'
 import type { ProductionLaunchDescriptor } from '../shared/production-bootstrap'
-import { isProductionLaunchDescriptor, isProductionInitialize, PRODUCTION_HOST_SCHEMAS } from '../shared/production-bootstrap'
+import { isProductionLaunchDescriptor, isProductionInitialize, isProductionOwnerState, PRODUCTION_HOST_SCHEMAS } from '../shared/production-bootstrap'
 import { HOST_OPERATION_SCHEMAS } from '../shared/host-services'
 import { isWorkspacePathReceipt, WORKSPACE_NATIVE_CALLBACK_SCHEMAS, WORKSPACE_CLEANUP_CALLBACK_SCHEMA, matchesWorkspaceCleanupObservation, type WorkspaceCleanupObserver, type WorkspacePathReceipt } from '../shared/workspace-native-callbacks'
 import { hasExactKeys, isBootstrapResult, isRecord, SERVICE_PROTOCOL_VERSION, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
@@ -289,6 +289,11 @@ export class ProductionService {
         return this.retain(this.bindings.readTrayPreference().then(enabled => ({ enabled })))
       } }
     operations['engine.ping'] = { validatePayload: empty, validateResult: isBootstrapResult, handle: () => { this.pinged = true; return result } }
+    operations['engine.ownerState'] = { validatePayload: empty, validateResult: isProductionOwnerState,
+      handle: () => {
+        if (!this.pinged) throw new ServiceProtocolError('INVALID_REQUEST')
+        return this.owner.recoveryState() as unknown as JsonValue
+      } }
     operations['engine.initialize'] = { validatePayload: isProductionInitialize, validateResult: isBootstrapResult, handle: async (payload, signal) => {
       if (!this.pinged || this.initialized || this.initializing || this.closing || !isProductionInitialize(payload) || payload.launchId !== descriptor.launchId || signal.aborted) throw new ServiceProtocolError('INVALID_REQUEST')
       this.initializing = true

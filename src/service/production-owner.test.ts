@@ -1,7 +1,7 @@
 import { open } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SQLite from 'better-sqlite3'
-import { linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync } from 'node:fs'
+import { linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProductionOwner, ProductionOwnerBootstrap, ProductionServices } from './production-owner'
@@ -9,6 +9,11 @@ import type { CodingAgentAdapter } from '../main/adapters/coding-agent-adapter'
 import type { ChatProvider, ChatProviderEvent } from '../main/chat/providers/types'
 import type { ProtectedApplicationKeyStore } from '../main/platform/authenticated-secret-storage'
 import { makeTask } from '../../test/helpers/task-fixtures'
+
+vi.mock('node:fs', async original => {
+  const fs = await original<typeof import('node:fs')>()
+  return { ...fs, statfsSync: vi.fn(fs.statfsSync), mkdirSync: vi.fn(fs.mkdirSync) }
+})
 
 function held<T = void>() {
   let finish!: (value: T) => void
@@ -74,6 +79,53 @@ async function startTask(services: ProductionServices) {
 }
 
 describe('actual production application owner', () => {
+  it('refuses a missing managed CLI executable before key or application database access', async () => {
+    const f = await fixture()
+    f.bootstrap.managedTaskMcp = { command: join(f.root, 'missing-node'), args: [join(f.root, 'missing-task-mcp.mjs')], environment: {}, tools: [] }
+    await expect(f.owner.start()).rejects.toThrow('MANAGED_MCP_RESOURCE_UNAVAILABLE')
+    expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'resources', code: 'MANAGED_MCP_RESOURCE_UNAVAILABLE', owned: false })
+    expect(f.store.create).not.toHaveBeenCalled(); expect(f.adapter.initialize).not.toHaveBeenCalled()
+  })
+
+  it('projects a CLI readiness refusal to fixed guidance without reflecting its internal code', async () => {
+    const f = await fixture({ prepare: async () => { throw Object.assign(new Error('private CLI canary'), { code: 'AGENT_CLI_PRIVATE_CANARY' }) } })
+    await expect(f.owner.start()).rejects.toThrow('AGENT_CLI_PRIVATE_CANARY')
+    expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'native-readiness', code: 'AGENT_CLI_UNAVAILABLE', owned: false })
+    expect(JSON.stringify(f.owner.recoveryState())).not.toContain('CANARY')
+    expect(f.store.create).not.toHaveBeenCalled()
+  })
+  it.each(['ENOSPC', 'EDQUOT'])('preserves a useful %s recovery state even before profile lock creation', async code => {
+    const f = await fixture()
+    vi.mocked(mkdirSync).mockImplementationOnce(() => { throw Object.assign(new Error('private filesystem canary'), { code }) })
+    await expect(f.owner.start()).rejects.toThrow('PROFILE_LOW_DISK')
+    expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'profile-lock', code: 'PROFILE_LOW_DISK', owned: false })
+    expect(f.store.create).not.toHaveBeenCalled(); expect(f.adapter.initialize).not.toHaveBeenCalled()
+  })
+  it('refuses low filesystem capacity before native/credential/database initialization with finite recovery metadata', async () => {
+    const f = await fixture()
+    vi.mocked(statfsSync).mockReturnValueOnce({ ...statfsSync(f.root), bavail: 0 } as ReturnType<typeof statfsSync>)
+    await expect(f.owner.start()).rejects.toThrow('PROFILE_LOW_DISK')
+    expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'resources', code: 'PROFILE_LOW_DISK', owned: false })
+    expect(f.store.create).not.toHaveBeenCalled(); expect(f.adapter.initialize).not.toHaveBeenCalled()
+  })
+
+  it('classifies actual locked SQLite without migrating or changing its rows and allows a later explicit launch', async () => {
+    const f = await fixture(), first = await f.owner.start()
+    const task = first.db.createTask({ title: 'Preserve busy profile' })!
+    await f.owner.close()
+    const raw = new SQLite(join(f.bootstrap.paths.profileRoot, '21x.db'))
+    raw.pragma('journal_mode = DELETE'); raw.exec('BEGIN EXCLUSIVE')
+    const next = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, f.boundaries)
+    owners.push(next)
+    try {
+      await expect(next.start()).rejects.toThrow('PROFILE_DATABASE_LOCKED')
+      expect(next.recoveryState()).toEqual({ phase: 'failed', stage: 'database-preflight', code: 'PROFILE_DATABASE_LOCKED', owned: false })
+      expect(raw.prepare('SELECT title FROM tasks WHERE id=?').get(task.id)).toEqual({ title: 'Preserve busy profile' })
+    } finally { raw.exec('ROLLBACK'); raw.close() }
+    const retry = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, f.boundaries)
+    owners.push(retry)
+    expect((await retry.start()).db.getTask(task.id)?.title).toBe('Preserve busy profile')
+  })
   it('retains the actual profile while a task attachment descriptor refuses close, then retries cleanup', async () => {
     const f = await fixture(); await f.owner.close()
     const { TaskAttachmentFileOwner } = await import('../main/task-attachment-file-owner')
@@ -340,7 +392,7 @@ describe('actual production application owner', () => {
     writeFileSync(databaseFile, bytes)
     await f.store.create(f.bootstrap.profileId, Buffer.alloc(32, 9))
     f.bootstrap.credentials.mode = 'load'
-    await expect(f.owner.start()).rejects.toThrow(/PROFILE_CREDENTIAL_OR_DATABASE_INVALID|DATABASE_UNAVAILABLE/)
+    await expect(f.owner.start()).rejects.toThrow('PROFILE_DATABASE_CORRUPT')
     expect(readFileSync(databaseFile)).toEqual(bytes)
     expect(f.adapter.initialize).not.toHaveBeenCalled()
     expect(f.owner.snapshot()).toMatchObject({ phase: 'failed', owned: false })

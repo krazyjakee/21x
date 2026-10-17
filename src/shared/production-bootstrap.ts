@@ -3,6 +3,27 @@ import { isAbsoluteHostPath } from './host-services'
 
 export const PRODUCTION_BOOTSTRAP_VERSION = 1 as const
 export const PRODUCTION_DESCRIPTOR_MAX_BYTES = 32 * 1024
+/** Private owner observations contain finite metadata only, never error text,
+ * paths, credentials, queue payloads or process identifiers. */
+export const PRODUCTION_OWNER_PHASES = ['new', 'starting', 'ready', 'stopping', 'blocked', 'stopped', 'failed'] as const
+export const PRODUCTION_OWNER_STAGES = ['new', 'profile-lock', 'resources', 'native-readiness', 'credentials', 'database-preflight',
+  'database', 'secret-broker', 'task-api', 'services', 'recovery', 'background', 'ready', 'released'] as const
+export const PRODUCTION_RECOVERY_CODES = ['PROFILE_IN_USE', 'PROFILE_DUPLICATE_OWNER', 'PROFILE_LOCK_INVALID', 'PROFILE_LOCK_LOST',
+  'PROFILE_NOT_EMPTY', 'PROFILE_LOW_DISK', 'PROFILE_DATABASE_LOCKED', 'PROFILE_DATABASE_CORRUPT', 'PROFILE_DATABASE_PATH_INVALID',
+  'PROFILE_CREDENTIAL_FORMAT_INCOMPATIBLE', 'PROFILE_CREDENTIAL_OR_DATABASE_INVALID', 'DATABASE_UNAVAILABLE',
+  'RESOURCE_UNAVAILABLE', 'MANAGED_MCP_RESOURCE_UNAVAILABLE', 'CONNECTOR_RESOURCES_REQUIRED', 'AGENT_CLI_UNAVAILABLE',
+  'NATIVE_RUNTIME_UNAVAILABLE', 'SECRET_STORE_UNAVAILABLE', 'OWNER_CLOSING', 'OWNER_DRAIN_BLOCKED', 'OWNER_FENCE_FAILED', 'BOOTSTRAP_FAILED'] as const
+export interface ProductionOwnerState {
+  phase: typeof PRODUCTION_OWNER_PHASES[number]
+  stage: typeof PRODUCTION_OWNER_STAGES[number]
+  code: typeof PRODUCTION_RECOVERY_CODES[number] | null
+  owned: boolean
+}
+export function isProductionOwnerState(value: unknown): value is ProductionOwnerState {
+  return isRecord(value) && hasExactKeys(value, ['phase', 'stage', 'code', 'owned']) &&
+    PRODUCTION_OWNER_PHASES.some(phase => phase === value.phase) && PRODUCTION_OWNER_STAGES.some(stage => stage === value.stage) &&
+    (value.code === null || PRODUCTION_RECOVERY_CODES.some(code => code === value.code)) && typeof value.owned === 'boolean'
+}
 export interface ProductionLaunchDescriptor {
   version: 1
   kind: 'production-private-launch'

@@ -89,6 +89,7 @@ import { startTaskApiServer, stopTaskApiServer, closeTaskApiServer, waitForTaskA
 import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiTaskGroupService, setTaskApiUiState, setTaskApiUiOwner, assertTaskApiUiOwner, setTranscriptProvider } from '../main/task-api/state'
 import { buildTaskMcpUrl } from '../main/task-mcp-endpoint'
 import { setTaskAutomationTrigger, setTaskSchedulers } from '../main/task-updates'
+import { PRODUCTION_OWNER_STAGES, PRODUCTION_RECOVERY_CODES, type ProductionOwnerState } from '../shared/production-bootstrap'
 import type { UiCommand } from '../shared/ui-commands'
 
 export type ProductionOwnerPhase = 'new' | 'starting' | 'ready' | 'stopping' | 'blocked' | 'stopped' | 'failed'
@@ -258,6 +259,17 @@ export class ProductionOwner {
       owned: processRegistry[registryKey] === this.identity, ...(this.code ? { code: this.code } : {}),
       capabilities: { connectors: this.bootstrap.connectors.kind,
         managedTaskMcp: 'disabled' in this.bootstrap.managedTaskMcp ? 'disabled' : 'enabled' } }
+  }
+
+  /** Read-only private observation remains available after failed admission or
+   * blocked cleanup. Unknown internal error codes cannot cross this boundary. */
+  recoveryState(): ProductionOwnerState {
+    const state = this.snapshot()
+    const stage = PRODUCTION_OWNER_STAGES.find(value => value === state.stage) ?? 'services'
+    let code = PRODUCTION_RECOVERY_CODES.find(value => value === state.code) ?? null
+    if (state.code && !code) code = state.code.startsWith('AGENT_CLI_') ? 'AGENT_CLI_UNAVAILABLE'
+      : state.code.startsWith('CONNECTOR_') ? 'CONNECTOR_RESOURCES_REQUIRED' : 'BOOTSTRAP_FAILED'
+    return { phase: state.phase, stage, code, owned: state.owned }
   }
 
   start(): Promise<ProductionServices> {
@@ -1187,6 +1199,9 @@ async function bounded<T>(raw: Promise<T>, timeoutMs: number): Promise<T> {
 function safeStartupCode(error: unknown, stage: string): string {
   if (error instanceof ProductionOwnerError) return error.code
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  if (code === 'ENOSPC' || code === 'EDQUOT' || code === 'SQLITE_FULL') return 'PROFILE_LOW_DISK'
+  if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') return 'PROFILE_DATABASE_LOCKED'
+  if (code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB') return 'PROFILE_DATABASE_CORRUPT'
   if (/^(PROFILE_|SECRET_|RESOURCE_|MANAGED_MCP_|CONNECTOR_|AGENT_CLI_|NATIVE_RUNTIME_|AMBIGUOUS_MANAGED_MCP_)[A-Z_]*$/.test(code)) return code
   if (stage === 'resources') return 'RESOURCE_UNAVAILABLE'
   if (stage === 'native-readiness') return 'NATIVE_RUNTIME_UNAVAILABLE'
@@ -1203,7 +1218,7 @@ function preflightProfile(path: string, storage: AuthenticatedSecretStorage): vo
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new ProductionOwnerError('PROFILE_DATABASE_PATH_INVALID')
   }
   if (!existsSync(path)) return
-  const probe = new SQLite(realpathSync(path), { readonly: true, fileMustExist: true })
+  const probe = new SQLite(realpathSync(path), { readonly: true, fileMustExist: true, timeout: 1000 })
   try {
     const result = probe.pragma('quick_check', { simple: true })
     if (result !== 'ok') throw new ProductionOwnerError('PROFILE_DATABASE_CORRUPT')
@@ -1236,6 +1251,8 @@ function preflightProfile(path: string, storage: AuthenticatedSecretStorage): vo
     }
   } catch (error) {
     if (error instanceof ProductionOwnerError) throw error
+    const code = safeStartupCode(error, 'database-preflight')
+    if (code === 'PROFILE_DATABASE_LOCKED' || code === 'PROFILE_DATABASE_CORRUPT' || code === 'PROFILE_LOW_DISK') throw new ProductionOwnerError(code)
     throw new ProductionOwnerError('PROFILE_CREDENTIAL_OR_DATABASE_INVALID')
   } finally { probe.close() }
 }

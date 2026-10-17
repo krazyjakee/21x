@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isProductionInitialize, isProductionLaunchDescriptor, PRODUCTION_HOST_SCHEMAS, type ProductionLaunchDescriptor } from './production-bootstrap'
+import { isProductionInitialize, isProductionLaunchDescriptor, isProductionOwnerState, PRODUCTION_RECOVERY_CODES, PRODUCTION_HOST_SCHEMAS, type ProductionLaunchDescriptor } from './production-bootstrap'
 
 export function launchDescriptor(root = '/private-fixture'): ProductionLaunchDescriptor {
   return { version: 1, kind: 'production-private-launch', launchId: 'launch_fixture_001', profileId: 'synthetic-profile',
@@ -11,6 +11,12 @@ export function launchDescriptor(root = '/private-fixture'): ProductionLaunchDes
 }
 
 describe('sealed production launch descriptor codecs', () => {
+  it('accepts only finite redacted owner metadata, including failures after initialization', () => {
+    for (const code of PRODUCTION_RECOVERY_CODES) expect(isProductionOwnerState({ phase: 'failed', stage: 'database', code, owned: false })).toBe(true)
+    const value = { phase: 'new', stage: 'new', code: null, owned: false }
+    expect(isProductionOwnerState(value)).toBe(true)
+    for (const patch of [{ error: 'secret' }, { path: '/private/profile' }, { phase: 'private' }, { stage: '/secret' }, { code: 'PROFILE_PRIVATE_CANARY' }, { owned: 1 }]) expect(isProductionOwnerState({ ...value, ...patch })).toBe(false)
+  })
   it('requires explicit fresh/copy intent and exact trusted path/capability fields', () => {
     const value = launchDescriptor()
     expect(isProductionLaunchDescriptor(value)).toBe(true)
