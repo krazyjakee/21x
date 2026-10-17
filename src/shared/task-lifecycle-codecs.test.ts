@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { TASK_LIFECYCLE_CODECS as codecs, TASK_LIFECYCLE_EVENT_CODECS as events, projectTaskLifecycleTask } from './task-lifecycle-codecs'
+import { TASK_LIFECYCLE_CODECS as codecs, TASK_LIFECYCLE_EVENT_CODECS as events, projectTaskLifecycleTask, OVERDUE_EVENT_CODEC } from './task-lifecycle-codecs'
 import { TaskStatus } from './constants'
+import type { JsonValue } from './service-protocol'
 
 const task = {
   id: 'task-one', title: 'Task', description: '', type: 'coding', priority: 'high', status: 'ready_for_review', assignee: '', due_date: null,
@@ -62,5 +63,15 @@ describe('full task lifecycle codecs', () => {
     expect(action).toEqual({ defined: true, value: { success: true, taskUpdate: { status: 'completed' } } })
     expect(codecs['plugin:executeAction'].validateWireResult(action)).toBe(true)
     expect(codecs['plugin:executeAction'].validateResult({ success: true, taskUpdate: { oauth_token: 'private' } })).toBe(false)
+  })
+  it('keeps the overdue advisory void at the public API and exact empty on the wire', () => {
+    expect(OVERDUE_EVENT_CODEC.encodePayload(undefined)).toEqual({})
+    expect(OVERDUE_EVENT_CODEC.decodePayload({})).toBeUndefined()
+    expect(OVERDUE_EVENT_CODEC.validatePayload(undefined)).toBe(true)
+    expect(OVERDUE_EVENT_CODEC.validatePayload({})).toBe(false)
+    const invalid: JsonValue[] = [null, false, [], { taskId: 'task' }, { projectId: 'project' }, { authority: true }]
+    for (const payload of invalid)
+      expect(() => OVERDUE_EVENT_CODEC.decodePayload(payload)).toThrow()
+    expect(() => OVERDUE_EVENT_CODEC.encodePayload({})).toThrow()
   })
 })

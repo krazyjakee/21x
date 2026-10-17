@@ -42,6 +42,13 @@ describe('actual production TypeScript-to-native golden request corpus', () => {
       expect(() => codec.decodeArguments({ ...(row.payload as Record<string, unknown>), authority: { namespace: '*' } } as never), `${row.operation}/${row.case}`).toThrow()
     }
   })
+  it('includes complete production project editor inputs without granting concurrency mutation', () => {
+    const rows = createProductionRequestCorpus().requests.filter(row => row.case.startsWith('full-project-editor'))
+    expect(rows).toHaveLength(2)
+    expect(rows[0].payload).toMatchObject({ data: { name: 'Project🌱', default_agent_id: 'agent_fixture', captain_agent_id: null, settings: { limits: { daily_session_cap: 10 }, concurrency: { pinned: { agent_fixture: 1 } } } } })
+    for (const settings of [{ limits: { paused: 'true' } }, { captain_wakeups: { enabled: true, kinds: ['unknown'] } }, { nested: { api_keys: 'private' } }])
+      expect(() => PROOF_COMMAND_CODECS['project:update'].encodeArguments(['project_fixture', { settings }])).toThrow()
+  })
   it('covers CLI UTF16 limits, finite maps and ECMA trim without exceeding the native envelope', () => {
     const corpus = createProductionRequestCorpus(), rows = corpus.requests.filter(row => row.case.startsWith('cli-'))
     expect(rows.map(row => row.case)).toEqual(['cli-ecma-nonwhitespace-name-command', 'cli-utf16-args-env-boundaries', 'cli-http-url-header-boundaries', 'cli-sse-empty-records', 'cli-utf16-tool-boundary'])

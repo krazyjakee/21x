@@ -6,6 +6,23 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #210 production project continuation accepts the existing full editor fields
+through a separate bounded codec and the actual SQLite/AgentManager owners.
+Captain edits join exact teardown before changing selection, preserve audited
+concurrency, recheck current task/session/agent/project authority and reconcile
+the real start queue. Private old/new skill scope receipts preserve project-only
+invalidation, deletion and scope moves without expanding the public event DTO.
+The existing single overdue timer now delivers a scoped, exact empty advisory
+through the private peer, with no task transition/start/replay and clean shutdown.
+Every current retained #202 row is listed separately by runtime, codec,
+authorization and observed proof in the revision-bound reconciliation evidence;
+registration is not parity. See [production project configuration](production-project-configuration.md).
+Renderer facade/editor integration is a #209 handoff; installed supported-target,
+live-provider and remaining native/settings effects and #202 remain open.
+Hosted Verify is unavailable: repository Actions disabled, awaiting user decision.
+
+Linux native media denial continuation (`21b85e14`, #215/#214): the production WebView first commits a fixed inert blank URL, verifies no active native capture, disables MediaStream/WebRTC, then navigates to trusted app code with physical-window/admission rechecks. Blank pages mint no document lease; failure shows fixed native wording and post-settings close joins raw work without app navigation. Actual isolated Wry uses mock devices only: live capture/stop positive control, first-app-script denial, failure and close controls pass. Own gate306app/306staged/73entry,148engine with6existing ignores,86host with3explicit GUI ignores; media/window Wry each pass separately, raw forced typecheck/lint0errors165baselinewarnings/Linux+MSVC/both frontends/freshness pass. Inherits A saved-image read-only hydration repair and repeats its real facade/transport/Markdown controls. Evidence follows in issue-215-214-native-media-denial-local-20261017.json. Native voice stays unavailable; existing stream/persisted-grant ownership and installed supported-platform acceptance remain open. Hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision.
+
 #209 saved-raster Markdown continuation consumes the published optional native image read using literal saved IDs and the current physical-document receipt. The renderer creates only validated bounded raster blob URLs, keeps native legacy links inert with existing Open/Download guidance, and preserves Electron scheme behavior. One document-wide pool bounds concurrent/queued reads, resident images, encoded bytes and admitted canvas/frame pixels; visibility, generation, unmount/pagehide/HMR/reconnect and decode-failure cleanup release owned previews. Twenty-four actual typed-native React controls include a reconnect consumer regression that found and repaired the missing read-only client classification, while native mutation recovery remains fenced. [Renderer recovery](production-renderer-recovery.md) records exact budgets and limits. No raw scheme/native voice authority enabled; installed WebView decode and platform acceptance remain open. Hosted Verify unavailable: repository Actions disabled, awaiting user decision.
 
 The #209 active-view continuation joins mounted overview/project-group lists and retained group snapshots in the native durable recovery barrier. Reference-counted sources retire listeners/timers and queued reads on last release, pagehide and HMR; replacement cohorts are joined in bounded passes, failed reads keep mutations fenced, and accepted group writes invalidate snapshots without replay. The existing overview debounce/poll and heartbeat early return remain. Thirteen new typed-native controls (27 total collection recovery controls) cover all three read-failure paths, accepted-write/list races, replacement/unmounted views and shared-reader publication/disposal races. Full1773 renderer/447 staged/20 contract tests, forced raw typecheck, lint0errors165baselinewarnings, both frontends and inventory906/contracts freshness passed; rebase inherits raster4fd1780a and reruns affected inputs. [Renderer recovery](production-renderer-recovery.md) records scope; revision-bound evidence follows. Installed/native/platform acceptance remains open; hosted Verify unavailable: repository Actions disabled, awaiting user decision.

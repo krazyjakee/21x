@@ -156,8 +156,19 @@ const eventCheck: Record<TaskLifecycleEvent, Check> = {
   'task:subtasks-reordered': value => isRecord(value) && hasExactKeys(value, ['parentId', 'orderedIds']) && isDatabaseId(value.parentId) && ids(value.orderedIds),
   'tasks:refresh': value => isRecord(value) && hasExactKeys(value, [])
 }
-export const TASK_LIFECYCLE_EVENT_CODECS = Object.fromEntries(TASK_LIFECYCLE_EVENTS.map(operation => [operation, {
+const taskLifecycleEventCodecs = Object.fromEntries(TASK_LIFECYCLE_EVENTS.map(operation => [operation, {
   validatePayload: (value: unknown) => eventCheck[operation](value) && bounded(value),
   encodePayload(value: unknown): JsonValue { if (!eventCheck[operation](value) || !bounded(value)) return fail('INVALID_ARGUMENTS'); return value },
   decodePayload(value: JsonValue): unknown { if (!eventCheck[operation](value) || !bounded(value)) return fail('INVALID_RESULT'); return value }
 }])) as { [K in TaskLifecycleEvent]: { validatePayload(value: unknown): boolean; encodePayload(value: DesktopEventMap[K]): JsonValue; decodePayload(value: JsonValue): DesktopEventMap[K] } }
+/** Advisory tick from the already owned OverdueNotifier. It carries no task,
+ * project, observation or mutation authority. Public callback remains void. */
+export const OVERDUE_EVENT_CODEC = {
+  validatePayload(value: unknown): value is undefined { return value === undefined },
+  encodePayload(value: unknown): JsonValue { if (value !== undefined) return fail('INVALID_ARGUMENTS'); return {} },
+  decodePayload(value: JsonValue): DesktopEventMap['overdue:check'] {
+    if (!isRecord(value) || !hasExactKeys(value, [])) return fail('INVALID_RESULT')
+    return undefined
+  }
+}
+export const TASK_LIFECYCLE_EVENT_CODECS = { ...taskLifecycleEventCodecs, 'overdue:check': OVERDUE_EVENT_CODEC }

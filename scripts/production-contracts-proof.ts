@@ -6,6 +6,7 @@ import { HEARTBEAT_CODECS } from '../src/shared/heartbeat-codecs'
 import { WORKTREE_RUNTIME_CODECS } from '../src/shared/worktree-runtime-codecs'
 import { TASK_GROUP_CODECS } from '../src/shared/task-group-codecs'
 import { PROJECT_RUNTIME_CODECS } from '../src/shared/project-runtime-codecs'
+import { PROJECT_CONFIGURATION_CODECS } from '../src/shared/project-configuration-codecs'
 import { VOICE_MANAGEMENT_CODECS } from '../src/shared/voice-management-codecs'
 import { GIT_PROVIDER_CODECS } from '../src/shared/git-provider-codecs'
 import { WORKSPACE_FILE_CODECS } from '../src/shared/workspace-file-codecs'
@@ -34,7 +35,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 // settings and agent CRUD schemas must not supply these proof payloads.
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS, ...TRAY_PREFERENCE_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
-  ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
+  ...PROJECT_CONFIGURATION_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
   ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
@@ -143,6 +144,9 @@ const cliBoundaryArgs = Array.from({ length: 128 }, (_, i) => i === 127 ? '🌱'
 const cliBoundaryEnvironment = Object.fromEntries(Array.from({ length: 128 }, (_, i) => [`FIXTURE_${i}`, i === 127 ? '🌱'.repeat(8192) : '${FIXTURE_SOURCE}']))
 const cliBoundaryHeaders = Object.fromEntries(Array.from({ length: 128 }, (_, i) => [`X-Fixture-${i}`, i === 127 ? '🌱'.repeat(8192) : 'fixture']))
 export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
+  { operation: 'project:create', case: 'full-project-editor', args: [{ name: 'Project🌱', description: 'Full editor', default_agent_id: agent, captain_agent_id: null, git_provider: 'forgejo', git_org: 'synthetic', settings: { limits: { max_concurrent_agents: 2, daily_session_cap: 10, daily_token_cap: null, paused: false }, captain_wakeups: { enabled: false, kinds: ['approval_pending'] }, scheduled_review: { enabled: true, cron: '0 9 * * 1-5' }, concurrency: { captain_control: true, levels: { [agent]: 2 }, pinned: { [agent]: 1 } }, note: 'Kept' } }] },
+  { operation: 'project:update', case: 'full-project-editor-update', args: [project, { default_agent_id: null, captain_agent_id: agent, settings: { limits: { paused: true }, captain_wakeups: { enabled: false }, scheduled_review: { enabled: false, cron: '0 9 * * 1-5' } } }] },
+  { operation: 'project:create', case: 'project-editor-ecma-nonwhitespace-name', args: [{ name: '\u0085', settings: { scheduled_review: { enabled: false, cron: '\uFEFF0\uFEFF9 * * 1-5\uFEFF' } } }] },
   { operation: 'app:setMinimizeToTray', case: 'tray-disabled-preference', args: [false] },
   { operation: 'ui:publishState', case: 'ui-full-finite-state', args: [{ view: 'canvas', projectId: project, modal: 'edit', selectedTaskId: task, selectedTaskTitle: 'Local🌱state', dashboardPreviewTaskId: task, captainOpen: true, settingsTab: 'voice', waitingForYou: true, visibleTaskIds: [task], canvas: { viewport: { x: -10000000, y: 10000000, zoom: 3 }, panels: [{ panelId: 'panel:fixture', type: 'task', taskId: task, title: 'Local🌱panel', x: 10000000, y: -10000000, width: 1000000, height: 1 }] } }] },
 

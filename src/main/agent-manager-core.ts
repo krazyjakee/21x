@@ -1279,6 +1279,14 @@ export class AgentManager extends EventEmitter {
     })())
   }
 
+  /** Project editor changes borrow the Captain's existing task exclusion.
+   * Candidate switches and ordinary Captain deliveries cannot race this lease. */
+  runProjectConfigurationMutation<T>(projectId: string, mutation: () => Promise<T>): Promise<T> {
+    const captain = this.db.getCoordinatorTask(projectId)
+    if (!captain || this.captainSwitches.has(projectId)) return Promise.reject(new Error('The project Captain is being updated. Retry after it finishes.'))
+    return this.runTaskLifecycleMutation([captain.id], mutation)
+  }
+
   /** Production cleanup borrows the existing task leases, then excludes ALL
    * new managed work (including other task/captain/heartbeat namespaces).
    * No process is killed; an already owned process or raw start refuses. */
@@ -3750,6 +3758,9 @@ export class AgentManager extends EventEmitter {
    * SQLite transaction commits the candidate and its session binding.
    */
   switchCaptainAgent(projectId: string, candidateAgentId: string, retry = false): Promise<CaptainRuntimeState> {
+    const captain = this.db.getCoordinatorTask(projectId)
+    try { if (captain) this.assertNoTaskGroupMutation(captain.id) }
+    catch (error) { return Promise.reject(error) }
     const active = this.captainSwitches.get(projectId)
     if (active) {
       if (active.agentId === candidateAgentId) return active.promise
@@ -3882,6 +3893,7 @@ export class AgentManager extends EventEmitter {
   rollbackCaptainSwitch(projectId: string): CaptainRuntimeState {
     const runtime = this.captainRuntimes.getByProject(projectId)
     if (!runtime?.lastGoodAgentId) throw new Error('There is no last-known-good Captain to restore.')
+    this.assertNoTaskGroupMutation(runtime.ownerId)
     const project = this.db.getProject(projectId)
     if (!project) throw new Error(`Project not found: ${projectId}`)
     this.db.updateProject(projectId, { captain_agent_id: runtime.lastGoodAgentId })

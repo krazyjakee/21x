@@ -15,7 +15,7 @@ import type { OperationSchema } from './transport/peer'
 export const CONFIGURATION_BOUND_OPERATIONS = CONFIGURATION_CONTENT_OPERATIONS
 type Operation = typeof CONFIGURATION_BOUND_OPERATIONS[number]
 type Access = 'read' | 'write'
-type Notify = (operation: ConfigurationDesktopEvent, payload: JsonValue) => void
+type Notify = (operation: ConfigurationDesktopEvent, payload: JsonValue, skillScopes?: readonly (string | null)[]) => void
 
 export interface ConfigurationBackendOptions {
   database: DatabaseManager
@@ -29,7 +29,9 @@ export interface ConfigurationBackendOptions {
   canChangeSkillScope(caller: DesktopCallerContext): boolean
   canReorderProjects(caller: DesktopCallerContext): boolean
   /** Trusted desktop invalidation sink; the service transport supplies sequence/epoch. */
-  emit: Notify
+  emit(operation: ConfigurationDesktopEvent, payload: JsonValue): void
+  /** Source-private scope receipts; never added to the retained event DTO. */
+  emitSkillInvalidation?(payload: JsonValue, scopes: readonly (string | null)[]): void
 }
 
 /** Content-only bindings sharing the actual database; no alternate state writer. */
@@ -94,7 +96,7 @@ export class ConfigurationBackend {
       invoke: (args, caller, signal) => {
         this.options.assertAvailable()
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
-        const notifications: Array<{ operation: ConfigurationDesktopEvent; payload: JsonValue }> = []
+        const notifications: Array<{ operation: ConfigurationDesktopEvent; payload: JsonValue; skillScopes?: readonly (string | null)[] }> = []
         let result: DesktopCommandMap[K]['result']
         try {
           result = this.options.database.db.transaction(() => {
@@ -103,9 +105,9 @@ export class ConfigurationBackend {
             this.options.assertAvailable()
             if (!authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
             if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
-            const encoded = codec.encodeResult(effect(args, caller, (event, payload) => {
+            const encoded = codec.encodeResult(effect(args, caller, (event, payload, skillScopes) => {
               const validated = this.registry.encodeEvent(event, payload, { principal: 'service', engineEpoch: this.options.engineEpoch })
-              notifications.push({ operation: event, payload: validated })
+              notifications.push({ operation: event, payload: validated, skillScopes })
             }))
             // Projection/result failures roll back the mutation before any event.
             return codec.decodeResult(encoded.defined ? encoded.value : undefined)
@@ -114,7 +116,10 @@ export class ConfigurationBackend {
           if (error instanceof SkillVersionConflictError) throw new ServiceProtocolError('SKILL_VERSION_CONFLICT')
           throw error
         }
-        for (const event of notifications) this.options.emit(event.operation, event.payload)
+        for (const event of notifications) {
+          if (event.operation === 'skills:changed' && event.skillScopes && this.options.emitSkillInvalidation) this.options.emitSkillInvalidation(event.payload, event.skillScopes)
+          else this.options.emit(event.operation, event.payload)
+        }
         return result
       },
       validateResult: codec.validateResult, encodeResult: codec.encodeResult
@@ -123,14 +128,14 @@ export class ConfigurationBackend {
 
   private bindCommands(): void {
     const db = this.options.database
-    const skillChanged = (notify: Notify, id: string, kind: string): void => notify('skills:changed', { skillId: id, kind })
+    const skillChanged = (notify: Notify, id: string, kind: string, scopes: readonly (string | null)[]): void => notify('skills:changed', { skillId: id, kind }, scopes)
     const projectChanged = (notify: Notify, id: string, kind: string): void => notify('project:changed', { projectId: id, kind })
     this.bind('skills:getAll', () => true, (_args, caller) => db.getSkills().filter(skill => this.skillScopeAllowed(skill.project_id, caller, 'read')))
     this.bind('skills:create', ([data], caller) => this.skillScopeAllowed((data.project_id as string | null | undefined) ?? null, caller, 'write'), ([data], _caller, notify) => {
       if (db.getSkillByName(data.name as string)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
       const skill = db.createSkill(data as unknown as CreateSkillData)
       if (!skill) throw new ServiceProtocolError('INTERNAL_ERROR')
-      skillChanged(notify, skill.id, 'created')
+      skillChanged(notify, skill.id, 'created', [skill.project_id])
       return skill
     })
     this.bind('skills:update', ([id], caller) => this.skillAllowed(id, caller), ([id, data], _caller, notify) => {
@@ -139,12 +144,13 @@ export class ConfigurationBackend {
       const collision = data.name === undefined ? undefined : db.getSkillByName(data.name as string)
       if (collision && collision.id !== id) throw new ServiceProtocolError('INVALID_ARGUMENTS')
       const skill = db.updateSkill(id, data as unknown as UpdateSkillData)
-      if (skill && (skill.version !== existing.version || skill.uses !== existing.uses || skill.last_used !== existing.last_used)) skillChanged(notify, id, 'updated')
+      if (skill && (skill.version !== existing.version || skill.uses !== existing.uses || skill.last_used !== existing.last_used)) skillChanged(notify, id, 'updated', [existing.project_id])
       return skill
     })
     this.bind('skills:delete', ([id], caller) => this.skillAllowed(id, caller), ([id], _caller, notify) => {
+      const scope = db.getSkill(id)?.project_id
       const deleted = db.deleteSkill(id)
-      if (deleted) skillChanged(notify, id, 'removed')
+      if (deleted && scope !== undefined) skillChanged(notify, id, 'removed', [scope])
       return deleted
     })
     this.bind('skills:setProject', ([id, destination], caller) => this.options.canChangeSkillScope(caller) && this.skillAllowed(id, caller) && this.skillScopeAllowed(destination, caller, 'write'), ([id, destination], _caller, notify) => {
@@ -154,7 +160,7 @@ export class ConfigurationBackend {
         throw new ServiceProtocolError('INVALID_REQUEST')
       }
       const skill = db.setSkillProject(id, destination)
-      if (skill) skillChanged(notify, id, 'scope')
+      if (skill) skillChanged(notify, id, 'scope', [existing.project_id, destination])
       return skill
     })
     // These DTOs cannot replace settings/default-agent/Captain fields. The codec

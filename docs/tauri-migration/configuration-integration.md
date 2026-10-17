@@ -1,5 +1,10 @@
 # Synthetic content configuration integration
 
+This page records the earlier diagnostic slice. Current production project editor
+fields, actual Captain/queue effects and scoped invalidation are described in
+[production project configuration](production-project-configuration.md). Its
+production override leaves the content-only diagnostic restrictions below intact.
+
 Scoped continuation for [#210](https://github.com/krazyjakee/21x/issues/210) and [#202](https://github.com/krazyjakee/21x/issues/202). The existing 18 content-only bindings now share the actual packaged synthetic service's database, writer lock, caller identity, epoch and event sequence. This advances the debug slice from 20 to **38 commands** (15 database, 18 content configuration, 5 fixture-agent). All 38 remain scoped synthetic declarations; production readiness and Electron retirement remain false.
 
 `ConfigurationBackend` is instantiated only after the same owned initialization as `DatabaseBackend`. It never chooses another profile, opens another state writer or supplies a substitute lifecycle owner. Its availability assertion rejects closing service, missing lock or closed database and checks the actual lifetime lock. The marked temporary profile grants content editing to the private host pipe; native trusted-window authorization still precedes forwarding. Live profiles and production scope grants remain unimplemented.

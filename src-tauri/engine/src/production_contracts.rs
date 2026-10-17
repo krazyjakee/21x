@@ -263,6 +263,7 @@ pub const EVENTS: &[&str] = &[
     "task:deleted",
     "task:subtasks-reordered",
     "tasks:refresh",
+    "overdue:check",
     "project:changed",
     "skills:changed",
     "transcript:changed",
@@ -1984,6 +1985,9 @@ fn fields(operation: &str) -> Option<(&'static [&'static str], &'static [&'stati
     })
 }
 fn data_fields(operation: &str, value: &Value) -> bool {
+    if matches!(operation, "project:create" | "project:update") {
+        return project_configuration(value, operation == "project:create");
+    }
     let allowed: &[&str] = match operation {
         "db:createTask" => &[
             "title",
@@ -2063,8 +2067,6 @@ fn data_fields(operation: &str, value: &Value) -> bool {
             "preferred_model",
             "expected_version",
         ],
-        "project:create" => &["name", "description"],
-        "project:update" => &["name", "description", "git_provider", "git_org"],
         "projectRepo:add" | "projectRepo:update" => &["name", "provider", "org", "default_branch"],
         "projectResource:add" | "projectResource:update" => &["label", "url", "notes"],
         "secrets:create" | "secrets:update" => &["name", "description", "env_var_name", "value"],
@@ -2094,6 +2096,147 @@ fn data_fields(operation: &str, value: &Value) -> bool {
             ) && config
                 .get("api_keys")
                 .is_none_or(|keys| agent_keys(keys, false))
+        })
+}
+fn project_configuration(value: &Value, create: bool) -> bool {
+    object(
+        value,
+        if create { &["name"] } else { &[] },
+        &[
+            "name",
+            "description",
+            "default_agent_id",
+            "captain_agent_id",
+            "git_provider",
+            "git_org",
+            "settings",
+        ],
+    ) && value.as_object().is_some_and(|fields| {
+        fields.iter().all(|(key, item)| match key.as_str() {
+            "name" => text(item, 512) && item.as_str().is_some_and(|s| !js_trim(s).is_empty()),
+            "description" => text(item, 65_536),
+            "default_agent_id" | "captain_agent_id" => item.is_null() || id(item),
+            "git_provider" => {
+                item.is_null() || matches!(item.as_str(), Some("github" | "gitlab" | "forgejo"))
+            }
+            "git_org" => item.is_null() || text(item, 512),
+            "settings" => project_configuration_settings(item),
+            _ => false,
+        })
+    })
+}
+fn project_configuration_settings(value: &Value) -> bool {
+    fn public_json(value: &Value, depth: usize, nodes: &mut usize) -> bool {
+        *nodes += 1;
+        if depth > 8 || *nodes > 4096 {
+            return false;
+        }
+        match value {
+            Value::String(_) => text(value, 65_536),
+            Value::Array(items) => {
+                items.len() <= 128 && items.iter().all(|v| public_json(v, depth + 1, nodes))
+            }
+            Value::Object(fields) => {
+                fields.len() <= 128
+                    && fields.iter().all(|(key, v)| {
+                        key.encode_utf16().count() <= 128
+                            && !key.contains('\0')
+                            && !matches!(
+                                key.as_str(),
+                                "__proto__"
+                                    | "constructor"
+                                    | "prototype"
+                                    | "api_keys"
+                                    | "mcp_scope_nonce"
+                            )
+                            && !key.ends_with("_api_key")
+                            && public_json(v, depth + 1, nodes)
+                    })
+            }
+            _ => true,
+        }
+    }
+    let mut nodes = 0;
+    value.is_object()
+        && public_json(value, 0, &mut nodes)
+        && serde_json::to_vec(value).is_ok_and(|v| v.len() <= 65_536)
+        && value.get("limits").is_none_or(|limits| {
+            object(
+                limits,
+                &[],
+                &[
+                    "max_concurrent_agents",
+                    "daily_session_cap",
+                    "daily_token_cap",
+                    "paused",
+                ],
+            ) && limits.as_object().is_some_and(|fields| {
+                fields.iter().all(|(key, v)| {
+                    if key == "paused" {
+                        v.is_boolean()
+                    } else {
+                        v.is_null() || integer(v) && v.as_u64().is_some_and(|n| n > 0)
+                    }
+                })
+            })
+        })
+        && value.get("captain_wakeups").is_none_or(|wakeups| {
+            object(wakeups, &[], &["enabled", "kinds"])
+                && wakeups.get("enabled").is_none_or(Value::is_boolean)
+                && wakeups.get("kinds").is_none_or(|kinds| {
+                    kinds.as_array().is_some_and(|items| {
+                        items.len() <= 6
+                            && items.iter().all(|kind| {
+                                matches!(
+                                    kind.as_str(),
+                                    Some(
+                                        "task_ready_for_review"
+                                            | "task_failed"
+                                            | "approval_pending"
+                                            | "chain_stuck"
+                                            | "heartbeat_finding"
+                                            | "task_synced"
+                                    )
+                                )
+                            })
+                            && items
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .collect::<std::collections::HashSet<_>>()
+                                .len()
+                                == items.len()
+                    })
+                })
+        })
+        && value.get("scheduled_review").is_none_or(|review| {
+            object(review, &["enabled", "cron"], &[])
+                && review["enabled"].is_boolean()
+                && text(&review["cron"], 256)
+                && review["cron"].as_str().is_some_and(|s| {
+                    let fields = s.split(|c| matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')).filter(|s| !s.is_empty()).collect::<Vec<_>>();
+                    fields.len() == 5
+                        && fields.iter().all(|f| {
+                            f.bytes().all(|b| {
+                                b.is_ascii_digit() || matches!(b, b'*' | b'/' | b',' | b'-')
+                            })
+                        })
+                })
+        })
+        && value.get("concurrency").is_none_or(|concurrency| {
+            object(concurrency, &[], &["captain_control", "levels", "pinned"])
+                && concurrency
+                    .get("captain_control")
+                    .is_none_or(Value::is_boolean)
+                && ["levels", "pinned"].iter().all(|key| {
+                    concurrency.get(key).is_none_or(|levels| {
+                        levels.as_object().is_some_and(|fields| {
+                            fields.iter().all(|(key, level)| {
+                                id(&Value::String(key.clone()))
+                                    && level.as_u64().is_some_and(|n| (1..=10).contains(&n))
+                            })
+                        })
+                    })
+                })
         })
 }
 fn agent_keys(value: &Value, masked: bool) -> bool {
@@ -3806,7 +3949,7 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
                 && mcp_id(&value["sessionId"])
                 && mcp_text(&value["deviceName"], 256)
         }
-        "tasks:refresh" => object(value, &[], &[]),
+        "tasks:refresh" | "overdue:check" => object(value, &[], &[]),
         "task:created" => object(value, &["task"], &[]),
         "task:updated" => {
             object(value, &["taskId", "updates"], &[])
@@ -4389,7 +4532,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 33);
+        assert_eq!(EVENTS.len(), 34);
         let requests = [
             ("mobile:getInfo", json!({})),
             (
@@ -5499,6 +5642,61 @@ mod tests {
             "skills:update",
             &json!({"id":"skill_fixture","data":{"confidence":0.5,"uses":3,"last_used":null,"expected_version":1}})
         ));
+    }
+    #[test]
+    fn project_editor_configuration_is_exact_bounded_public_input() {
+        let data = json!({"name":"Project","description":"Context","default_agent_id":"agent_one","captain_agent_id":null,"git_provider":"forgejo","git_org":"synthetic","settings":{
+            "limits":{"max_concurrent_agents":2,"daily_session_cap":10,"daily_token_cap":null,"paused":false},
+            "captain_wakeups":{"enabled":false,"kinds":["approval_pending"]},
+            "scheduled_review":{"enabled":true,"cron":"0 9 * * 1-5"},
+            "concurrency":{"captain_control":true,"levels":{"agent_one":2},"pinned":{"agent_one":1}},"note":"Kept"
+        }});
+        assert!(valid_request("project:create", &json!({"data":data})));
+        assert!(valid_request(
+            "project:update",
+            &json!({"id":"project_one","data":data})
+        ));
+        for invalid in [
+            json!({"name":""}),
+            json!({"name":"x","archived":true}),
+            json!({"name":"x","captain_agent_id":"../foreign"}),
+            json!({"name":"x","git_provider":"other"}),
+            json!({"name":"x","settings":{"limits":{"paused":"true"}}}),
+            json!({"name":"x","settings":{"limits":{"max_concurrent_agents":0}}}),
+            json!({"name":"x","settings":{"limits":{"daily_session_cap":1.5}}}),
+            json!({"name":"x","settings":{"captain_wakeups":{"kinds":["task_failed","task_failed"]}}}),
+            json!({"name":"x","settings":{"scheduled_review":{"enabled":true,"cron":"not cron"}}}),
+            json!({"name":"x","settings":{"concurrency":{"pinned":{"agent_one":11}}}}),
+            json!({"name":"x","settings":{"nested":{"api_keys":"hidden"}}}),
+            json!({"name":"x","settings":{"note":"x".repeat(65_537)}}),
+        ] {
+            assert!(
+                !valid_request("project:create", &json!({"data":invalid})),
+                "{invalid}"
+            );
+            assert!(
+                !valid_request(
+                    "project:update",
+                    &json!({"id":"project_one","data":invalid})
+                ),
+                "{invalid}"
+            );
+        }
+    }
+    #[test]
+    fn overdue_advisory_is_only_an_empty_service_event_not_a_command_or_observation() {
+        assert!(valid_event("overdue:check", &json!({})));
+        assert!(!valid_request("overdue:check", &json!({})));
+        for payload in [
+            json!(null),
+            json!(false),
+            json!([]),
+            json!({"taskId":"task"}),
+            json!({"projectId":"project"}),
+            json!({"authority":true}),
+        ] {
+            assert!(!valid_event("overdue:check", &payload));
+        }
     }
     #[test]
     fn generic_input_uses_the_protocol_ceiling_without_shrinking_domain_json() {
