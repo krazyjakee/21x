@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { createDesktopSnapshotReader } from '@/lib/desktop-snapshot'
+import { ServiceProtocolError } from '@shared/service-protocol'
 import { isAgentStatusHeartbeat } from '@shared/activity'
 import {
   overviewApi,
@@ -39,44 +41,42 @@ interface OverviewState {
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
-let inFlight: Promise<void> | null = null
-let refetchAfter = false
-let subscribers = 0
-let unsubscribeAll: (() => void) | null = null
-let pollTimer: ReturnType<typeof setInterval> | null = null
+let owner: { active: boolean; subscribers: number; stop: () => void } | undefined
 
-export const useOverviewStore = create<OverviewState>((set, get) => ({
+export function retireOverviewDesktopState(): void {
+  if (owner) { owner.active = false; owner.stop(); owner = undefined }
+  if (debounceTimer) clearTimeout(debounceTimer)
+  debounceTimer = null
+  overviewSnapshot.dispose()
+  window.removeEventListener('pagehide', retireOverviewDesktopState)
+}
+
+/** Only mounted overview consumers participate in durable reconnect recovery. */
+export async function rehydrateOverviewDesktopState(): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const owned = owner
+    if (!owned) return
+    overviewSnapshot.invalidate()
+    try { await overviewSnapshot.refresh() }
+    catch (error) { if (owner === owned) throw error }
+    if (owner === owned) return
+  }
+  throw new ServiceProtocolError('BACKPRESSURE')
+}
+
+export const useOverviewStore = create<OverviewState>((_set, get) => ({
   entries: [],
   isLoading: false,
   error: null,
   loadedAt: null,
 
   fetchAll: async () => {
-    // A change that lands mid-fetch is not lost: one more fetch follows.
-    if (inFlight) {
-      refetchAfter = true
-      return inFlight
-    }
-    set({ isLoading: true })
-    inFlight = (async () => {
-      try {
-        const entries = await overviewApi.getAllStatuses()
-        set({ entries, error: null, loadedAt: Date.now() })
-      } catch (err) {
-        set({ error: err instanceof Error ? err.message : String(err) })
-      } finally {
-        set({ isLoading: false })
-        inFlight = null
-      }
-    })()
-    await inFlight
-    if (refetchAfter) {
-      refetchAfter = false
-      await get().fetchAll()
-    }
+    overviewSnapshot.invalidate()
+    await overviewSnapshot.refresh().catch(() => {})
   },
 
   scheduleRefresh: () => {
+    overviewSnapshot.invalidate()
     if (debounceTimer) clearTimeout(debounceTimer)
     debounceTimer = setTimeout(() => {
       debounceTimer = null
@@ -85,51 +85,42 @@ export const useOverviewStore = create<OverviewState>((set, get) => ({
   },
 
   start: () => {
-    subscribers += 1
-    if (subscribers === 1) {
-      const refresh = (): void => get().scheduleRefresh()
+    if (!owner) {
+      const owned = { active: true, subscribers: 0, stop: () => {} }
+      owner = owned
+      const refresh = (): void => { if (owned.active) get().scheduleRefresh() }
       const offs = [
-        onTaskUpdated(refresh),
-        onTaskCreated(refresh),
-        onTaskDeleted(refresh),
-        // Heartbeats (#95) carry no change; only transitions refresh.
-        onAgentStatus((event) => { if (!isAgentStatusHeartbeat(event)) refresh() }),
-        onAgentStartQueueChanged(refresh),
-        projectApi.onStatusChanged(refresh),
-        projectApi.onChanged(refresh)
+        onTaskUpdated(refresh), onTaskCreated(refresh), onTaskDeleted(refresh),
+        onAgentStatus(event => { if (!isAgentStatusHeartbeat(event)) refresh() }),
+        onAgentStartQueueChanged(refresh), projectApi.onStatusChanged(refresh), projectApi.onChanged(refresh)
       ]
-      pollTimer = setInterval(() => { void get().fetchAll() }, OVERVIEW_FALLBACK_POLL_MS)
-      unsubscribeAll = () => {
-        for (const off of offs) off?.()
-        if (pollTimer) clearInterval(pollTimer)
-        pollTimer = null
-      }
+      const poll = setInterval(() => { if (owned.active) void get().fetchAll() }, OVERVIEW_FALLBACK_POLL_MS)
+      owned.stop = () => { for (const off of offs) off?.(); clearInterval(poll) }
+      window.addEventListener('pagehide', retireOverviewDesktopState, { once: true })
     }
+    const owned = owner
+    owned.subscribers++
     void get().fetchAll()
-
     let stopped = false
     return () => {
       if (stopped) return
       stopped = true
-      subscribers -= 1
-      if (subscribers === 0) {
-        unsubscribeAll?.()
-        unsubscribeAll = null
-        if (debounceTimer) clearTimeout(debounceTimer)
-        debounceTimer = null
-      }
+      if (owned.active && --owned.subscribers === 0) retireOverviewDesktopState()
     }
   }
+
 }))
 
-/** Test seam: drops listeners and timers so a test starts clean. */
+const overviewSnapshot = createDesktopSnapshotReader({
+  read: () => overviewApi.getAllStatuses(),
+  start: () => useOverviewStore.setState({ isLoading: true }),
+  apply: entries => useOverviewStore.setState({ entries, error: null, loadedAt: Date.now(), isLoading: false }),
+  fail: error => useOverviewStore.setState({ error: error instanceof Error ? error.message : String(error), isLoading: false })
+})
+if (import.meta.hot) import.meta.hot.dispose(retireOverviewDesktopState)
+
+/** Test seam: drops listeners, readers and timers so a test starts clean. */
 export function resetOverviewStoreForTests(): void {
-  unsubscribeAll?.()
-  unsubscribeAll = null
-  if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = null
-  inFlight = null
-  refetchAfter = false
-  subscribers = 0
+  retireOverviewDesktopState()
   useOverviewStore.setState({ entries: [], isLoading: false, error: null, loadedAt: null })
 }

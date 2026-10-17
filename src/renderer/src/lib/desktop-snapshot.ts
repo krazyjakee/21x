@@ -11,28 +11,31 @@ export function createDesktopSnapshotReader<T>(options: {
   fail: (error: unknown) => void
 }): { refresh: () => Promise<void>; invalidate: () => void; dispose: () => void } {
   let revision = 0
-  let active: { scope: ReturnType<typeof captureDesktopRead>; promise: Promise<void> } | undefined
+  let active: { scope: ReturnType<typeof captureDesktopRead>; promise: Promise<void>; reading: boolean } | undefined
   return {
     invalidate() { revision++ },
     dispose() { revision++; active = undefined },
     refresh() {
-      if (active?.scope.isCurrent()) return active.promise
+      if (active?.reading && active.scope.isCurrent()) return active.promise
       const scope = captureDesktopRead()
-      const run = { scope, promise: Promise.resolve() }
+      const run = { scope, promise: Promise.resolve(), reading: true }
       active = run
       run.promise = Promise.resolve().then(async () => {
         for (let attempt = 0; attempt < 8; attempt++) {
           scope.assertCurrent()
+          if (active !== run) throw new ServiceProtocolError('STALE_EPOCH')
           const observed = revision
           const snapshot = await options.read()
           scope.assertCurrent()
           if (active !== run) throw new ServiceProtocolError('STALE_EPOCH')
           if (observed !== revision) continue
+          run.reading = false
           options.apply(snapshot)
           return
         }
         throw new ServiceProtocolError('BACKPRESSURE')
       }).catch(error => {
+        run.reading = false
         if (active === run && scope.isSameConnection()) options.fail(error)
         throw error
       }).finally(() => { if (active === run) active = undefined })

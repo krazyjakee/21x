@@ -200,3 +200,28 @@ owner. Sixteen controlled native/compatibility hook regressions exercise these
 paths without preload. The actual isolated GTK symbol/header proof belongs to
 E2's native-window source28343c43/evidence8c9c2038; these renderer tests do not
 establish installed or non-Linux chrome parity.
+
+## Active overview and task-group recovery
+
+Durable native recovery now joins active overview/project-group lists and
+retained group snapshots before admitting mutations. Unmounted caches cause no
+reads. A replaced view cohort is joined in bounded recovery passes, rather than
+letting an old view publish or lifting the fence ahead of its replacement. Read
+failures keep recovery fenced and support explicit read-only retry. Accepted
+group mutations invalidate snapshots without replay; follow-up reads stay in
+the captured connection.
+
+Overview preserves its existing debounce, thirty-second fallback poll and
+heartbeat early return. One reference-counted cohort owns timers/listeners and
+retires them on final release/pagehide/HMR. Group project sources and retained
+snapshot readers have matching disposers; a queued read cannot run after
+retirement or publish into a replacement. Thirteen additional actual typed-native
+controls extend the collection recovery file to twenty-seven, including the
+real native mutation fence and all three active read-failure paths.
+
+The shared snapshot reader also distinguishes an in-flight read from a snapshot
+being published: a synchronous refresh requested by publication starts a fresh
+read, and a disposed queued reader refuses before its first RPC. The existing
+overview/group regressions remain, with asynchronous reads fully joined before
+asserting event-burst coalescing. No background owner, scheduler, native operation
+or renderer mutation writer was introduced. Installed UI proof remains open.

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Task } from '@/types'
+import { TaskStatus } from '@/types'
 import type { ProjectRecord } from '@shared/projects'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import { installDesktopHost } from '@/lib/desktop-api'
@@ -9,6 +10,10 @@ import { initializeTaskDesktopState, rehydrateTaskDesktopState, useTaskStore } f
 import { initializeProjectDesktopState, rehydrateProjectDesktopState, useProjectStore } from './project-store'
 import { rehydrateSettingsDesktopState, useSettingsStore } from './settings-store'
 import { rehydrateProductionDesktop } from '@/lib/desktop-rehydration'
+import { rehydrateOverviewDesktopState, resetOverviewStoreForTests, useOverviewStore } from './overview-store'
+import { rehydrateTaskGroupDesktopState, retireTaskGroupDesktopState, useTaskGroupStore } from './task-group-store'
+import type { TaskGroupRecord } from '@shared/task-groups'
+import type { ProjectOverviewEntry } from '@shared/project-overview'
 import { readProjectScopedSetting } from '@/lib/project-scoped-setting'
 
 function held<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(done => { resolve = done }), resolve: (value: T) => resolve(value) } }
@@ -34,16 +39,16 @@ function fixture() {
   const values = new Map<string, unknown>([
     ['db:getTasks', []], ['project:getAll', [project()]], ['settings:get', DEFAULT_PROJECT_ID],
     ['settings:getAll', { github_org: 'current-org', git_provider: 'github' }],
-    ['agent:getAll', []], ['commander:listSessions', []]
+    ['agent:getAll', []], ['commander:listSessions', []], ['project:getAllStatuses', []], ['taskGroups:list', []], ['taskGroups:get', groupSnapshot()]
   ])
-  const handlers = new Map<string, () => Promise<unknown>>()
+  const handlers = new Map<string, (payload: Record<string, unknown>) => Promise<unknown>>()
   let bootstrap: (() => Promise<unknown>) | undefined
   const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
     if (command === 'engine_status') return bootstrap ? bootstrap() : { available: true, protocolVersion: 1, engineEpoch: 'engine-1' }
     const operation = String(args?.operation)
     const nonProjectSetting = operation === 'settings:get' && (args?.payload as { key?: string })?.key !== 'current_project_id'
     const result = nonProjectSetting ? values.get(`settings:get:${(args?.payload as { key: string }).key}`) ?? null
-      : handlers.has(operation) ? await handlers.get(operation)!() : values.get(operation)
+      : handlers.has(operation) ? await handlers.get(operation)!(args?.payload as Record<string, unknown>) : values.get(operation)
     return { engineEpoch: 'engine-1', result: result === undefined ? { defined: false } : { defined: true, value: result } }
   })
   const native = { core: { invoke }, event: { listen: vi.fn(async (_name: string, receive: (event: { payload: unknown }) => void) => {
@@ -63,6 +68,8 @@ let releaseTasks: () => void
 let releaseProjects: () => void
 const legacyBridge = window.electronAPI
 beforeEach(async () => {
+  retireTaskGroupDesktopState(); resetOverviewStoreForTests()
+  useTaskGroupStore.setState({ projects: {}, snapshots: {}, errors: {}, busy: {} })
   initializeTaskDesktopState()(); initializeProjectDesktopState()()
   f = fixture(); releaseHost = installDesktopHost(f.host)
   await f.host.reconnect()
@@ -73,6 +80,7 @@ beforeEach(async () => {
   useSettingsStore.setState({ githubOrg: null, gitProvider: null, error: null, isLoading: false })
 })
 afterEach(async () => {
+  retireTaskGroupDesktopState(); resetOverviewStoreForTests()
   // Project changes also start the actual layout owners; join those read-only
   // loads before retiring the fixture's captured native connection.
   const [{ useCanvasStore }, { useDrawingStore }] = await Promise.all([import('./canvas-store'), import('./drawing-store')])
@@ -224,4 +232,177 @@ it.each(['canvas_state', 'drawing_state'])('reads legacy %s only for Default wit
   f.values.set(`settings:get:${base}_migrated_to_projects`, '1')
   expect(await readProjectScopedSetting(base, DEFAULT_PROJECT_ID)).toBeNull()
   expect(f.calls('settings:set')).toBe(0)
+})
+
+
+function groupSnapshot(title = 'Group') {
+  const group: TaskGroupRecord = { id: 'group-1', title, project_id: DEFAULT_PROJECT_ID, agent_id: 'agent-1', execution_task_id: 'execution-1',
+    state: 'active', status: 'not_started', task_ids: ['member-1', 'member-2'], former_task_ids: [], progress: [], created_at: '2026-10-17', updated_at: '2026-10-17' }
+  return { group, task: task('execution-1', { title, role: 'task_group', agent_id: 'agent-1' }), members: group.task_ids.map(id => task(id, { group_id: group.id })) }
+}
+function overview(running = 0): ProjectOverviewEntry {
+  return { project_id: DEFAULT_PROJECT_ID, name: 'Default', brief: '', is_default: true, sort_order: 0,
+    status: { project_id: DEFAULT_PROJECT_ID, counts: { running, queued: 0, awaiting_review: 0, awaiting_approval: 0, blocked: 0 }, summary: '', top_blockers: [], updated_at: null },
+    pending_approvals: 0, running_agents: running, paused: false, all_projects_paused: false, blocked_by: null, last_activity_at: null, needs_attention: false }
+}
+const turn = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+
+it('retires a queued snapshot before its first native RPC starts', async () => {
+  const read = rehydrateTaskDesktopState(), rejected = expect(read).rejects.toMatchObject({ code: 'STALE_EPOCH' })
+  releaseTasks()
+  await rejected
+  expect(f.calls('db:getTasks')).toBe(0)
+})
+
+it('starts a fresh read requested synchronously by a just-published snapshot', async () => {
+  let requested = false, next: Promise<void> | undefined
+  f.handlers.set('db:getTasks', async () => [task(f.calls('db:getTasks') === 1 ? 'first' : 'second')])
+  const off = useTaskStore.subscribe(state => {
+    if (!requested && state.tasks[0]?.id === 'first') { requested = true; next = useTaskStore.getState().fetchTasks() }
+  })
+  try { await useTaskStore.getState().fetchTasks(); await next }
+  finally { off() }
+  expect(f.calls('db:getTasks')).toBe(2)
+  expect(useTaskStore.getState().tasks[0].id).toBe('second')
+})
+
+it('joins active overview, group list and retained group snapshot before lifting the actual native mutation fence', async () => {
+  const snapshot = groupSnapshot(), updated = groupSnapshot('Recovered group')
+  f.values.set('taskGroups:list', [snapshot.group]); f.values.set('project:getAllStatuses', [overview()])
+  const stopOverview = useOverviewStore.getState().start(), stopGroup = useTaskGroupStore.getState().subscribe(DEFAULT_PROJECT_ID), stopSnapshot = useTaskGroupStore.getState().retainSnapshot(snapshot.group.id)
+  await Promise.all([useOverviewStore.getState().fetchAll(), useTaskGroupStore.getState().fetch(DEFAULT_PROJECT_ID), useTaskGroupStore.getState().load(snapshot.group.id)])
+  const list = held<unknown>(), detail = held<unknown>(), totals = held<unknown>()
+  f.handlers.set('taskGroups:list', () => list.promise); f.handlers.set('taskGroups:get', () => detail.promise); f.handlers.set('project:getAllStatuses', () => totals.promise)
+  f.host.setRehydrator(rehydrateProductionDesktop)
+  const recovering = f.host.reconnect()
+  await vi.waitFor(() => expect(f.host.connection.status).toBe('ready'))
+  expect(f.host.hydrationPending).toBe(true)
+  await expect(f.host.api.taskGroups.move(snapshot.group.id, 'completed')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  list.resolve([updated.group]); detail.resolve(updated)
+  await turn()
+  expect(f.host.hydrationPending).toBe(true)
+  f.values.set('taskGroups:list', [updated.group]); f.values.set('taskGroups:get', updated); f.values.set('project:getAllStatuses', [overview(2)])
+  f.handlers.clear(); totals.resolve([overview(2)])
+  await recovering
+  expect(f.host.hydrationPending).toBe(false)
+  expect(useTaskGroupStore.getState().snapshots[snapshot.group.id].group.title).toBe('Recovered group')
+  expect(useTaskGroupStore.getState().projects[DEFAULT_PROJECT_ID][0].title).toBe('Recovered group')
+  expect(useOverviewStore.getState().entries[0].running_agents).toBe(2)
+  expect(f.calls('taskGroups:move')).toBe(0)
+  stopSnapshot(); stopGroup(); stopOverview()
+})
+
+it.each(['overview', 'group-list', 'group-snapshot'] as const)('leaves actual native recovery fenced on a failed active %s and supports explicit read-only retry', async target => {
+  const snapshot = groupSnapshot()
+  useOverviewStore.getState().start(); useTaskGroupStore.getState().subscribe(DEFAULT_PROJECT_ID); useTaskGroupStore.getState().retainSnapshot(snapshot.group.id)
+  await Promise.all([useOverviewStore.getState().fetchAll(), useTaskGroupStore.getState().fetch(DEFAULT_PROJECT_ID), useTaskGroupStore.getState().load(snapshot.group.id)])
+  const operation = target === 'overview' ? 'project:getAllStatuses' : target === 'group-list' ? 'taskGroups:list' : 'taskGroups:get'
+  f.handlers.set(operation, async () => { throw new Error('private failure must not cross boundary') })
+  f.host.setRehydrator(rehydrateProductionDesktop)
+  await expect(f.host.reconnect()).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.host.hydrationPending).toBe(true)
+  await expect(f.host.api.db.deleteTask('member-1')).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  expect(f.calls('db:deleteTask')).toBe(0)
+  f.handlers.clear(); await f.host.reconnect()
+  expect(f.host.hydrationPending).toBe(false)
+  expect(useOverviewStore.getState().error).toBeNull()
+  expect(useTaskGroupStore.getState().errors[snapshot.group.id]).toBeUndefined()
+  expect(useTaskGroupStore.getState().errors[`project:${DEFAULT_PROJECT_ID}`]).toBeUndefined()
+})
+
+it('ignores a held overview response after final release and keeps a replacement cohort current', async () => {
+  f.values.set('project:getAllStatuses', [overview()])
+  const stop = useOverviewStore.getState().start(); await useOverviewStore.getState().fetchAll()
+  const pending = held<unknown>(), before = f.calls('project:getAllStatuses')
+  f.handlers.set('project:getAllStatuses', () => pending.promise)
+  const old = useOverviewStore.getState().fetchAll()
+  await vi.waitFor(() => expect(f.calls('project:getAllStatuses')).toBeGreaterThan(before))
+  stop(); f.handlers.clear(); f.values.set('project:getAllStatuses', [overview(3)])
+  const next = useOverviewStore.getState().start(); await useOverviewStore.getState().fetchAll()
+  pending.resolve([overview(1)]); await old
+  expect(useOverviewStore.getState().entries[0].running_agents).toBe(3)
+  expect(useOverviewStore.getState().error).toBeNull()
+  next()
+})
+
+it('retires a queued group source before reading and fences old unsubscribers from its replacement', async () => {
+  const old = useTaskGroupStore.getState().subscribe(DEFAULT_PROJECT_ID)
+  old(); await turn()
+  expect(f.calls('taskGroups:list')).toBe(0)
+  const replacement = useTaskGroupStore.getState().subscribe(DEFAULT_PROJECT_ID)
+  await useTaskGroupStore.getState().fetch(DEFAULT_PROJECT_ID)
+  old()
+  const before = f.calls('taskGroups:list')
+  f.emit('tasks:refresh', {})
+  await vi.waitFor(() => expect(f.calls('taskGroups:list')).toBeGreaterThan(before))
+  replacement(); const retired = f.calls('taskGroups:list')
+  f.emit('tasks:refresh', {}); await turn()
+  expect(f.calls('taskGroups:list')).toBe(retired)
+})
+
+it('cannot publish a group snapshot after the final retained consumer leaves', async () => {
+  const pending = held<unknown>()
+  f.handlers.set('taskGroups:get', () => pending.promise)
+  const stop = useTaskGroupStore.getState().retainSnapshot('group-1')
+  await vi.waitFor(() => expect(f.calls('taskGroups:get')).toBe(1))
+  stop(); pending.resolve(groupSnapshot()); await turn()
+  expect(useTaskGroupStore.getState().snapshots['group-1']).toBeUndefined()
+  expect(useTaskGroupStore.getState().errors['group-1']).toBeUndefined()
+})
+
+it('reconciles a replacement group view while durable recovery is already in flight', async () => {
+  const pending = held<unknown>(), next = held<unknown>()
+  f.handlers.set('taskGroups:list', async ({ projectId }) => projectId === DEFAULT_PROJECT_ID ? pending.promise : next.promise)
+  const old = useTaskGroupStore.getState().subscribe(DEFAULT_PROJECT_ID)
+  const recovering = rehydrateTaskGroupDesktopState()
+  await vi.waitFor(() => expect(f.calls('taskGroups:list')).toBe(1))
+  old(); const replacement = useTaskGroupStore.getState().subscribe('replacement-project')
+  pending.resolve([])
+  await vi.waitFor(() => expect(f.calls('taskGroups:list')).toBeGreaterThan(1))
+  next.resolve([]); await recovering
+  expect(useTaskGroupStore.getState().projects['replacement-project']).toEqual([])
+  replacement()
+})
+
+it('does not read unmounted overview/group caches during reconnect', async () => {
+  await Promise.all([rehydrateOverviewDesktopState(), rehydrateTaskGroupDesktopState()])
+  expect(f.calls('project:getAllStatuses')).toBe(0)
+  expect(f.calls('taskGroups:list')).toBe(0)
+  expect(f.calls('taskGroups:get')).toBe(0)
+})
+
+
+it('preserves an accepted group mutation across the delayed project list without replay', async () => {
+  f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  const pending = held<unknown>(), original = groupSnapshot(), updated = groupSnapshot('Accepted update')
+  f.handlers.set('taskGroups:list', () => pending.promise)
+  const stop = useTaskGroupStore.getState().subscribe(DEFAULT_PROJECT_ID)
+  await vi.waitFor(() => expect(f.calls('taskGroups:list')).toBe(1))
+  f.values.set('taskGroups:move', updated.group); f.values.set('taskGroups:get', updated)
+  const moving = useTaskGroupStore.getState().move(original.group.id, TaskStatus.Completed)
+  void moving.catch(() => {}) // Keep a held assertion failure from orphaning its public waiter.
+  await vi.waitFor(() => expect(useTaskGroupStore.getState().snapshots[original.group.id]?.group.title).toBe('Accepted update'))
+  f.handlers.delete('taskGroups:list'); f.values.set('taskGroups:list', [updated.group])
+  pending.resolve([original.group]); await moving
+  expect(useTaskGroupStore.getState().projects[DEFAULT_PROJECT_ID][0].title).toBe('Accepted update')
+  expect(f.calls('taskGroups:move')).toBe(1)
+  expect(f.calls('taskGroups:list')).toBe(2)
+  stop()
+})
+
+it('joins a replacement overview cohort when its old retained recovery read retires', async () => {
+  const pending = held<unknown>(), replacement = held<unknown>()
+  f.handlers.set('project:getAllStatuses', () => pending.promise)
+  const old = useOverviewStore.getState().start(), recovering = rehydrateOverviewDesktopState()
+  let settled = false
+  const joined = recovering.then(() => { settled = true })
+  await vi.waitFor(() => expect(f.calls('project:getAllStatuses')).toBe(1))
+  old(); f.handlers.set('project:getAllStatuses', () => replacement.promise)
+  const next = useOverviewStore.getState().start()
+  pending.resolve([overview(1)])
+  await vi.waitFor(() => expect(f.calls('project:getAllStatuses')).toBeGreaterThan(1))
+  expect(settled).toBe(false)
+  replacement.resolve([overview(4)]); await joined
+  expect(useOverviewStore.getState().entries[0].running_agents).toBe(4)
+  next()
 })
