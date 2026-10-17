@@ -2,7 +2,7 @@
 
 Issue #215 now has a private per-flow contract agreed with the #216 consumer
 owner. This is callback authority infrastructure, not installed OAuth parity.
-Production `oauthBrowser` remains `unavailable`. The production preview admits
+Global production `oauthBrowser` remains `unavailable`. The production preview admits
 private loopback registration/open/retirement; its custom-scheme registration
 is refused until app identity and OS registration authority are approved.
 
@@ -47,12 +47,25 @@ The legacy `OAuthManager.exchangeCode(providerId,code,state,sourceId)` is not
 this private callback contract and is not called by the bridge. Its existing
 binding/replay limitations remain a consumer migration prerequisite.
 
+The Source SDK's optional synchronous `onOwnedLease` registration observer
+publishes a frozen lease before awaiting raw registration. A consumer that
+owns extra admission records that lease for cleanup even if the post-ack scope
+check and native retirement both fail before `register` can return. The
+observer only records ownership; `open()` refuses until native receipt
+validation and the post-ack scope check succeed. Observer failure also cancels
+and joins cleanup. Failed retirement retains the specific lease and admission
+for retry; a connector never closes the parent SDK or unrelated flows. This is
+a Source-only API addition, with no native DTO or wire change.
+
 Loopback is a separate discriminator. Todoist keeps its current listener and
 exact `http://localhost:3000..3010/callback` redirect URI. It receives native
-register/open/retire receipts, not custom-scheme delivery. Connector integration
-remains owned by #216; its existing instance/scope/cancellation prewrite fence
-must remain in place. This slice does not replace that listener or enable the
-connector browser capability.
+register/open/retire receipts, not custom-scheme delivery. The #216 consumer at
+`ee426b76` captures this authority during runtime construction. Only its
+connector binding derives browser availability from that captured runtime;
+MCP/Linear retain unavailable global browser capability. Source keeps PKCE,
+provider/config/storage intent and its instance/scope/cancellation prewrite
+fence. Controlled real-listener/SQLite tests do not establish an installed
+browser or actual provider account flow.
 
 Both owners admit at most 16 active leases with a maximum five-minute TTL.
 Native retains at most 4096 issued/retired IDs and state digests for its
@@ -127,14 +140,20 @@ established transport authority. macOS and Windows do not install this plugin
 in this slice. In particular, the plugin's macOS temporary-socket transport is
 not adopted as an approved bounded callback authority.
 
+The [retirement fence and consumer integration evidence](evidence/batch35-215-oauth-retirement-fence.json)
+records the reproducible pre-fix native failure, verified repair, own checks
+after #216 publication, test ELF checksums and remaining acceptance gaps.
+
 ## Remaining acceptance
 
 OS scheme registration, installed warm/cold routing under the approved identity,
 and an integrated real provider consumer/credential path remain unproven. The
 isolated Linux transport regression is not installed OS-handler evidence. No
 deep-link plugin, global callback event or scheme registration is introduced.
-End-to-end Source/MCP/Linear and #216 connector consumer migrations
-must precede enabling `oauthBrowser`. Durable encrypted cold continuation, if
+Source/MCP/Linear consumer migration, approved registration authority and
+installed provider acceptance must precede enabling global `oauthBrowser`.
+The #216 local loopback consumer is delivered; its installed real-provider
+acceptance remains open. Durable encrypted cold continuation, if
 required instead of rejecting stale flows and requiring Connect again, needs
 its own approved design.
 
