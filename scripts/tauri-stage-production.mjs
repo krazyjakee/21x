@@ -134,7 +134,7 @@ export async function stageProductionService(root = repository) {
   }
   const external = id => isBuiltin(id) || Object.keys(packages).some(name => id === name || id.startsWith(name + '/'))
   const entries = { node, credentialHelper, mobile: 'mobile/index.html', stdio: 'service/production-stdio.mjs', engine: 'service/production-engine.mjs', taskMcp: 'service/production-task-mcp.mjs', voiceWorker: 'service/voice-worker.cjs', voiceTtsWorker: 'service/voice-tts-worker.cjs' }
-  const sources = { stdio: 'src/service/production-stdio.ts', engine: 'src/service/production-service.ts', taskMcp: 'src/main/mcp-servers/task-management-mcp.ts' }
+  const sources = { stdio: 'src/service/production-stdio.ts', engine: 'src/service/production-service.ts', taskMcp: 'src/service/production-task-mcp.ts' }
   const outputs = {}
   // These existing isolated workers are CommonJS resources. Their exact bytes
   // participate in the same trusted closure as the service and bundled Node.
