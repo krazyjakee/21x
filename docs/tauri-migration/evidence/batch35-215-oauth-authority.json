@@ -1,0 +1,254 @@
+{
+  "version": 1,
+  "issue": 215,
+  "createdAt": "2026-10-17T18:46:45.979378+00:00",
+  "implementationRevision": "d329f68576f529a4fb573ccf1f83c29a9dd5b48d",
+  "baseRevision": "b7a18f7aed9582388844d56036df384c117920a0",
+  "scope": "Private per-flow native OAuth lease authority/Source consumer SDK and finite pipe routing. Infrastructure proof only; no installed native OAuth routing, actual provider redemption or final app identity acceptance.",
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "hostNode": "v22.22.0",
+    "standaloneNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)"
+  },
+  "packageVersion": "0.0.161",
+  "electronAppTests": "44.0.0",
+  "vitest": "4.0.18",
+  "sqlite": "13.0.3",
+  "schema": 37,
+  "fixtures": {
+    "profiles": "Synthetic temporary profiles/in-memory protected-store doubles only; no live profile or external account",
+    "nativeOpener": "Host double in Source integration; native Rust callback compiles but no actual OS browser is launched",
+    "tokenExchange": "Controlled pending Source-owned closure in private-peer test, not a live OAuth provider",
+    "rendererEvents": "No callback code/state events; finite callback operation absent from retained public command manifest",
+    "nativeAuthority": "Eight direct Rust authority cases plus two actual private pending-response validator cases",
+    "sourceLease": "17 SDK cases; two additional actual private-peer/SQLite cases"
+  },
+  "expectedActual": [
+    {
+      "expected": "Bind each launch to the captured app/profile epoch and a private unpredictable flow ID; do not route using callback-selected provider/source IDs.",
+      "actual": "Native owner binds its first epoch; finite private registrations carry UUIDv4, kind, captured HTTPS URL, state digest, exact redirect and bounded TTL. Source captures prewrite intent/owner fences in closures. Extra callback authority fields refuse."
+    },
+    {
+      "expected": "Consume matching state once before any async exchange; sanitize provider denial/error.",
+      "actual": "Native parser rejects malformed/foreign/replayed/expired callbacks without burning a valid unmatched lease. Source delivers synchronously to a one-shot waiter, returning accepted before controlled exchange completes. Denied/failed outcomes reject the waiter without redeeming and omit arbitrary provider descriptions."
+    },
+    {
+      "expected": "Shutdown cannot release pending browser/register/delivery work on public timeout.",
+      "actual": "Source tests retain late registration/open receipts and failed retirement for explicit close retry. Rust retirement waits for actual open and delivery receipt drops; stop fences new admission. Production native host stops OAuth before native-work drain."
+    },
+    {
+      "expected": "Keep Todoist loopback and unapproved application scheme identities separate.",
+      "actual": "Exact localhost ports 3000..3010 and callback redirect policy retained. Preview refuses custom-scheme registrations. Current/legacy twentyonex/nuanu policy preserved without any OS handler registration or final app identity choice."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "commands": [
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "result": "forced raw compiler; zero diagnostics",
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run --project main src/service/oauth-flow-owner.test.ts src/service/production-service.test.ts src/shared/production-bootstrap.test.ts src/main/oauth/oauth-manager-host.test.ts",
+        "exitCode": 0,
+        "result": "71 passed, zero failed/skipped",
+        "log": {
+          "sha256": "a7b114cb3a5227ce517d86a0a1eb9819f9efcb49a2f0a1489db41568d522a73d",
+          "bytes": 125044
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/service/oauth-flow-owner.test.ts src/service/production-service.test.ts src/shared/production-bootstrap.test.ts src/main/oauth/oauth-manager-host.test.ts",
+        "exitCode": 0,
+        "result": "71 passed, zero failed/skipped using staged Node/SQLite",
+        "log": {
+          "sha256": "88ded30084a53a06cbbbd96654e6b05340492ee22c3923bace6eaa18073b9a0f",
+          "bytes": 125159
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:prepare:production",
+        "exitCode": 0,
+        "result": "physical closure staged; no Electron dependency",
+        "log": {
+          "sha256": "cb49e53ea0f05aa44d09be070366a6038fdf01b25b2e51536932c1fa81047f52",
+          "bytes": 379
+        }
+      },
+      {
+        "command": "rtk proxy CARGO_BUILD_JOBS=2 cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+        "exitCode": 0,
+        "result": "native production host compiles; two existing native_notifications warnings",
+        "log": {
+          "sha256": "15b40a03ccbba8add298f930df2f3f1cfd0fb1dd83634d0f6160765dc631b0a3",
+          "bytes": 1155
+        }
+      },
+      {
+        "command": "rtk proxy cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service -- --test-threads=1",
+        "exitCode": 0,
+        "result": "111 passed, zero failed, four existing explicitly gated staged tests ignored",
+        "log": {
+          "sha256": "411aaf6c90ed2c6b7193f86508b1935234567105e083c8564e61783ecba26bc2",
+          "bytes": 13379
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "result": "zero errors, 165 existing warnings",
+        "log": {
+          "sha256": "9b5fdbb0df72de283d9f5299696d4a854104ac3ed1422ee1aff3006494ad8e7c",
+          "bytes": 16720
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:frontend:build",
+        "exitCode": 0,
+        "result": "pass",
+        "log": {
+          "sha256": "e6d271841cc8ca0bf32bfd6fa8ab382f32942251690b114518988c96b66dc608",
+          "bytes": 497
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "result": "pass; existing chunk size warning",
+        "log": {
+          "sha256": "9ae2c4f066bd2b26344cf96e8ec33930eb2b87a21b8353e1680d48e63a7fb547",
+          "bytes": 9620
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "result": "892 source files; no command/event additions",
+        "log": {
+          "sha256": "524e6636ae705054e6878de652f8321ce076929743e00d961a7ca995b102f2f1",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "result": "explicit contract outputs fresh",
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts",
+        "exitCode": 0,
+        "result": "27 passed",
+        "log": {
+          "sha256": "956a48a0243c52db0a145afd919dd6c1d2c28051a1f7b29dcf300a1a0df0d5aa",
+          "bytes": 635
+        }
+      }
+    ],
+    "rebase": "Inherited #208 startup/restart source through b7a18f7; affected 71 app/71 standalone, forced typecheck, staging/native host check and contract freshness repeated after rebase. Engine suite repeated after final private response regressions.",
+    "ignoredTests": "Four pre-existing opt-in engine staged transport tests were not requested; no new test skipped."
+  },
+  "sourceSha256": {
+    "docs/tauri-migration/implementation-status.md": "5680d92084bb3822f5946b6e17cc2fb9f29b4b30e42588b02fead8031c01caf3",
+    "docs/tauri-migration/inventory.json": "7389ed6c3e6d2b9eb91d5231fd375f3a53ce4407be401e4fbcd4f490c4ac21f2",
+    "docs/tauri-migration/native-oauth-authority.md": "ce9cdb4a9befd24155f2c572692ffe161d72b35c46b2ee9297ce4bfe685e73d8",
+    "docs/tauri-migration/native-services-production.md": "9aacc74056922e55c74ceee72920993e82539525f35a994ba910f42ba162e4d5",
+    "src-tauri/engine/src/lib.rs": "2c9edac786fe4b6ebf7e5fa03aabb1c0351101fac5eace04606925fa489ab9cf",
+    "src-tauri/engine/src/production.rs": "758b19325750dc23b9eecbf2d67875520bbd754a303ad6b888a00b92c007f126",
+    "src-tauri/engine/src/production_oauth.rs": "94e3b18d3906783c8ae6bff7d3d593a2358126cdd3cc8d3210c5a23b6a0ff750",
+    "src-tauri/src/native_oauth.rs": "0f29cfa6bd41b9c13a900058b18deac163d77432bf17b2c1e23a3597f73ed272",
+    "src-tauri/src/production_host.rs": "963ce11cc274ebce7f87e798c58fefd5bc2549e62f5a5f3f8cc182caf77b46ea",
+    "src/service/oauth-flow-owner.test.ts": "2c929738357ff3bff9e52fad1114bade330405e8615d767d8bfdbd4c861f2dc3",
+    "src/service/oauth-flow-owner.ts": "e3332ed45de62a70fc23eecd55d0f7eadc56c1752f6f1bfcd52d235a58faace8",
+    "src/service/production-service.test.ts": "578e069ae793d24676f78fb3fc06d6b53ac22e2be56f4ad33afa20fb3256e8df",
+    "src/service/production-service.ts": "4716fd79fb5314676d38935324eae984b0e42da9d79a75ce9bcfced894430d30",
+    "src/shared/oauth-native-callbacks.ts": "eed1279f6eadece8651f23dfe6b9845fda3b9af187dbb946129c965e406400a2",
+    "src/shared/production-bootstrap.ts": "5f3f673d2211871d77ace74d43b02d20c4049c960386f6baed0a41abc471a0be"
+  },
+  "stagedArtifacts": {
+    "buildIdentity": "production-108bfd6c18d59b7a05407ef4849a086e",
+    "manifest": {
+      "sha256": "af8261f60bee2feef0229983a5fddcdc80a1f722f6808238ff463dba05ddd637",
+      "bytes": 1263999
+    },
+    "node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "credentialHelper": {
+      "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+      "bytes": 25759896,
+      "provenance": "Copied the existing physical helper from the shared checkout into this isolated staging directory, unchanged. Build-only resource; no helper/protected-store invocation or new helper behavior is claimed."
+    }
+  },
+  "failuresAndRepairs": [
+    {
+      "failure": "New synthetic private-peer test expected null for absent OAuth record; the DB returns undefined. Its premature assertion also allowed held synthetic work to reject after owner cleanup.",
+      "repair": "Assert undefined and attach rejection ownership immediately; both runtime suites now pass."
+    },
+    {
+      "failure": "Fresh worktree lacked staged standalone Node for existing real CLI installer test.",
+      "repair": "Prepared the pinned runtime before rerunning, preserving the real package install regression."
+    },
+    {
+      "failure": "First native preparation used host npm/node-gyp headers and failed ABI smoke verification.",
+      "repair": "Reprepared using /tmp/21x-tauri-validation-1qysGG/node-v22.23.2-linux-x64/bin/node and its matching bundled npm; native smoke marker and staged suite pass."
+    },
+    {
+      "failure": "Production staging refused missing real credential helper.",
+      "repair": "Copied existing physical helper for build-only staging and recorded its hash/provenance; no fake helper or success marker synthesized."
+    }
+  ],
+  "identityDecision": {
+    "currentElectronId": "com.krazyjakee.21x",
+    "previewIdsUnchanged": [
+      "com.krazyjakee.21x.tauri-feasibility",
+      "com.krazyjakee.21x.tauri-production-preview"
+    ],
+    "schemes": [
+      "twentyonex",
+      "nuanu"
+    ],
+    "options": [
+      "Retain existing ID/current+legacy schemes with explicitly approved later installer/handler ownership transfer",
+      "Approve a distinct final Tauri ID and separate scheme/provider registration migration"
+    ],
+    "recommendation": "Retain current app ID/twentyonex and nuanu read compatibility to preserve provider redirects; user must approve. No identity selected, scheme handler transfer, installation or cutover authorized here."
+  },
+  "hostedCI": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "runs": [],
+    "workflowDispatches": 0,
+    "settingsEndpointsCalled": false
+  },
+  "acceptance": {
+    "issueRemainsOpen": true,
+    "checkboxesCompleted": [],
+    "remaining": [
+      "Final application identity and current/legacy OS handler registration authority need user decision.",
+      "Native OS warm single-instance forwarding and cold-launch ingress/queue retirement are not implemented/proven by this slice; previous-process pending state is rejected, no durable cold completion.",
+      "Real Source/Linear/MCP and #216 connector consumers must integrate the lease, PKCE/intent binding and credential prewrite fences before enabling production oauthBrowser. Legacy four-argument exchange is not exposed by the new private contract and remains unmigrated.",
+      "Complete native service/permission/navigation denial review, supported-platform installed GUI behavior and remaining #215 services remain open; #208 production containment and #202 authority prerequisites remain open.",
+      "macOS/Windows installed proof and hosted CI unavailable while Actions is disabled pending user decision."
+    ]
+  },
+  "constraints": {
+    "liveRelease": false,
+    "liveProfileCutover": false,
+    "electronRetired": false,
+    "hostedVoice": "deferred by user decision"
+  }
+}
