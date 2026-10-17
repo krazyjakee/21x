@@ -125,3 +125,43 @@ Verify/platform dispatch is unavailable pending the user's decision.
 Local command results, source/resource digests, fixture/schema/Node versions,
 failure repairs and remaining gaps are retained in the
 [October 17 checkpoint evidence](evidence/issue-216-connector-checkpoint-local-20261017.json).
+
+## Private native loopback consumption (October 17 continuation)
+
+The sealed production callback owner now supplies its optional flow authority to
+the connector runtime at construction. Only the connector binding derives
+browser availability from that captured authority; global OAuth for MCP and
+Linear stays unavailable. Main-process connector code uses a structural
+per-flow interface and does not import the service SDK or close its parent owner.
+
+The Source-owned flow starts its actual localhost listener on ports 3000–3010,
+arms the one-shot callback waiter, and registers the exact authorization URL and
+redirect URI before opening the browser through its private lease. PKCE/state,
+provider/client configuration, code exchange and encrypted/session credential
+intent remain in Source. The captured instance/source/task/project/storage guard
+runs before registration, launch, redemption and credential persistence. A
+withdrawn grant or changed source reference requires a fresh Connect action.
+
+Every path joins the listener and the owned lease. Cancellation retains raw
+registration/open/retirement work. A refused retirement retains credential
+admission until an acknowledged retry; it does not repeat authorization or code
+exchange. A connector retires only its own lease, while the production parent
+retains the global SDK lifecycle.
+
+The SDK synchronously exposes a frozen owned lease before awaiting registration,
+so a post-acknowledgement scope refusal followed by failed retirement cannot lose
+connector admission. The consumer observer only records ownership. Browser
+opening remains refused until the native receipt and post-acknowledgement guard
+both succeed. Observer exceptions still cancel and join the captured registration
+and retirement work; retrying one lease preserves unrelated SDK flows.
+
+Local regressions use the actual Source SDK, portable SQLite, bridge/runtime,
+encrypted credential store and HTTP loopback listener with controlled native
+receipts and token responses. They cover both storage intents, PKCE separation,
+scope withdrawal, changed references, held raw receipts, retirement refusal and
+retry, refresh and invalid-grant revocation. These controls do not prove an OS
+browser launch, provider account authorization, custom-scheme registration,
+warm/cold installed callbacks or final application identity. Those #215/#208 and
+packaged-platform acceptance gaps keep #216 open. Repository Actions remain
+disabled pending the user's decision. Command results and limitations are in the
+[private loopback evidence](evidence/issue-216-native-loopback-local-20261017.json).

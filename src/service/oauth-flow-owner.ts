@@ -15,6 +15,7 @@ interface Entry {
   beforeEffect: () => void
   expires: number
   openRequested: boolean
+  ready: boolean
   consumed: boolean
   cancelled: boolean
   registration: Promise<unknown>
@@ -37,7 +38,7 @@ export class OAuthFlowOwner {
   private readonly entries = new Map<string, Entry>()
   constructor(private readonly native: NativeOAuthBridge, private readonly assertCurrent: () => void, private readonly now: () => number = () => performance.now()) {}
 
-  async register(input: Omit<NativeOAuthRegistration, 'flowId' | 'stateSha256'>, beforeEffect: () => void): Promise<OAuthFlowLease> {
+  async register(input: Omit<NativeOAuthRegistration, 'flowId' | 'stateSha256'>, beforeEffect: () => void, onOwnedLease?: (lease: OAuthFlowLease) => void): Promise<OAuthFlowLease> {
     this.requireOpen(); this.assertCurrent(); beforeEffect()
     if (this.entries.size >= 16) throw new Error('OAUTH_FLOW_CAPACITY')
     const fields = oauthAuthorizationFields(input.authorizationUrl)
@@ -49,7 +50,7 @@ export class OAuthFlowOwner {
     // A browser/native failure may precede the consumer attaching its waiter.
     void callback.catch(() => {})
     const entry: Entry = {
-      request, beforeEffect, expires: this.now() + input.ttlMs, openRequested: false, consumed: false, cancelled: false,
+      request, beforeEffect, expires: this.now() + input.ttlMs, openRequested: false, ready: false, consumed: false, cancelled: false,
       registration: Promise.resolve(), callback, resolve, reject,
       timer: setTimeout(() => { this.cancel(entry); void this.retire(entry).catch(() => {}) }, input.ttlMs)
     }
@@ -59,10 +60,9 @@ export class OAuthFlowOwner {
       const result = await this.native.register(structuredClone(request))
       if (result.flowId !== request.flowId || result.registered !== true) throw failure()
       this.assertEntry(entry)
+      entry.ready = true
     })
-    try { await entry.registration }
-    catch (error) { this.cancel(entry); await this.retire(entry); throw error }
-    return Object.freeze({
+    const lease: OAuthFlowLease = Object.freeze({
       flowId: request.flowId,
       open: () => this.open(entry),
       waitForCallback: () => {
@@ -71,6 +71,11 @@ export class OAuthFlowOwner {
       },
       close: () => { this.cancel(entry); return this.retire(entry) }
     })
+    // Publish only cleanup ownership synchronously. Opening stays fenced until
+    // the receipt and post-ack binding check have both succeeded.
+    try { onOwnedLease?.(lease); await entry.registration }
+    catch (error) { this.cancel(entry); await this.retire(entry); throw error }
+    return lease
   }
 
   /** Called exclusively by the finite engine.oauth.callback private request. */
@@ -120,6 +125,7 @@ export class OAuthFlowOwner {
   }
   private open(entry: Entry): Promise<void> {
     try {
+      if (!entry.ready) throw failure()
       this.assertEntry(entry)
       if (entry.openRequested || entry.consumed) throw failure()
       entry.openRequested = true

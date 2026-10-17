@@ -38,7 +38,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-async function fixture(options: { prepare?: ProductionOwnerBootstrap['native']['prepareRuntime']; drain?: ProductionOwnerBootstrap['native']['drainOwnedProcesses']; provider?: ChatProvider } = {}) {
+async function fixture(options: { prepare?: ProductionOwnerBootstrap['native']['prepareRuntime']; drain?: ProductionOwnerBootstrap['native']['drainOwnedProcesses']; provider?: ChatProvider; connectors?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), '21x-production-owner-'))
   roots.push(root)
   const resourceRoot = join(root, 'resources'); mkdirSync(resourceRoot)
@@ -64,7 +64,8 @@ async function fixture(options: { prepare?: ProductionOwnerBootstrap['native']['
   }
   const { ProductionOwner } = ownerModule
   const provider: ChatProvider = options.provider ?? { id: 'fixture', model: 'fixture', async *stream(): AsyncGenerator<ChatProviderEvent> { yield { type: 'message_end', stopReason: 'end_turn' } } }
-  const boundaries = { cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider }
+  const boundaries = { cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider,
+    ...(options.connectors ? { connectorTransport: () => { throw new Error('This ownership scenario must not start a worker') } } : {}) }
   const owner = new ProductionOwner(bootstrap, boundaries); owners.push(owner)
   return { owner, bootstrap, boundaries, store, root, adapter, emit, ProductionOwner }
 }
@@ -79,6 +80,23 @@ async function startTask(services: ProductionServices) {
 }
 
 describe('actual production application owner', () => {
+  it('captures private connector flow authority without granting global OAuth browser availability', async () => {
+    const f = await fixture({ connectors: true })
+    const authority = { register: vi.fn(async () => ({ open: async () => {}, close: async () => {} })) }
+    f.bootstrap.connectors = { kind: 'enabled' }
+    f.bootstrap.native.oauthBrowser = 'unavailable'
+    f.bootstrap.native.connectorOAuthFlows = authority
+    await f.owner.start()
+    const lease = f.owner.getConnectorBindingLease()!
+    expect(lease.runtime.credentials.usesNativeFlows).toBe(true)
+    expect(lease.oauthBrowser).toBe('available')
+    expect(f.owner.getIntegrationBindingLease().oauthBrowser).toBe('unavailable')
+    f.bootstrap.native.connectorOAuthFlows = undefined
+    expect(f.owner.getConnectorBindingLease()!.oauthBrowser).toBe('available')
+    expect(f.owner.getIntegrationBindingLease().oauthBrowser).toBe('unavailable')
+    expect(authority.register).not.toHaveBeenCalled()
+  })
+
   it('reopens interrupted durable work without adapter replay and allows an explicit new request', async () => {
     const f = await fixture(), first = await f.owner.start(), agent = first.db.getAgents()[0]
     first.db.updateAgent(agent.id, { config: { coding_agent: 'pi' } })

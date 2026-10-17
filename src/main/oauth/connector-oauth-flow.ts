@@ -21,6 +21,15 @@ export interface LoopbackCallbackServer {
   close?(): Promise<void>
 }
 
+/** Captured host authority; a connector can retire only its own lease. */
+export interface ConnectorOAuthFlowLease {
+  open(): Promise<void>
+  close(): Promise<void>
+}
+export interface ConnectorOAuthFlowAuthority {
+  register(input: { kind: 'loopback'; redirectUri: string; authorizationUrl: string; ttlMs: number }, beforeEffect: () => void, onOwnedLease?: (lease: ConnectorOAuthFlowLease) => void): Promise<ConnectorOAuthFlowLease>
+}
+
 export interface ConnectorOAuthFlowOptions {
   provider: OAuthProvider
   /** `client_id` and, for confidential clients, `client_secret`. */
@@ -28,6 +37,8 @@ export interface ConnectorOAuthFlowOptions {
   openExternal: (url: string) => Promise<void> | void
   server?: LoopbackCallbackServer
   signal?: AbortSignal
+  nativeFlows?: ConnectorOAuthFlowAuthority
+  beforeEffect?: () => void
 }
 
 export interface ConnectorOAuthFlowResult {
@@ -37,29 +48,44 @@ export interface ConnectorOAuthFlowResult {
 
 export async function runLoopbackOAuthFlow(options: ConnectorOAuthFlowOptions): Promise<ConnectorOAuthFlowResult> {
   const server = options.server ?? new LocalOAuthServer()
+  let nativeLease: ConnectorOAuthFlowLease | undefined
+  const beforeEffect = (): void => { options.signal?.throwIfAborted(); options.beforeEffect?.() }
   const stopOnAbort = () => server.stop()
   options.signal?.addEventListener('abort', stopOnAbort, { once: true })
   try {
-    options.signal?.throwIfAborted()
+    beforeEffect()
     const redirectUri = await server.start()
-    options.signal?.throwIfAborted()
+    beforeEffect()
     const { verifier, challenge } = generatePkce()
     const state = createId()
     const authUrl = options.provider.generateAuthUrl(options.config, state, challenge, redirectUri)
     // Listen before the browser opens so a fast redirect cannot be missed.
     const callback = server.waitForCallback()
     callback.catch(() => undefined)
-    await options.openExternal(authUrl)
-    options.signal?.throwIfAborted()
+    if (options.nativeFlows) {
+      nativeLease = await options.nativeFlows.register({ kind: 'loopback', redirectUri, authorizationUrl: authUrl, ttlMs: 300000 }, beforeEffect)
+      beforeEffect()
+      await nativeLease.open()
+    } else await options.openExternal(authUrl)
+    beforeEffect()
     const received = await callback
-    options.signal?.throwIfAborted()
+    beforeEffect()
     if (received.state !== state) throw new Error('OAuth state mismatch - possible CSRF attack')
+    // Validation and the one-shot listener claim precede any asynchronous exchange.
     const token = await options.provider.exchangeCode(received.code, verifier, options.config, redirectUri)
-    options.signal?.throwIfAborted()
+    beforeEffect()
     return { token, redirectUri }
   } finally {
     options.signal?.removeEventListener('abort', stopOnAbort)
-    server.stop()
-    await server.close?.()
+    let stopError: unknown
+    try { server.stop() } catch (error) { stopError = error }
+    // Neither close may prevent the other owner from receiving its retirement.
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => server.close?.()),
+      ...(nativeLease ? [Promise.resolve().then(() => nativeLease!.close())] : [])
+    ])
+    if (stopError) throw stopError
+    const failed = results.find(result => result.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
   }
 }

@@ -489,6 +489,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         ...(descriptor.capabilities.artifactClipboard === 'host' ? { copyArtifact: callbacks.copyArtifact } : {}),
         // Browser opening alone does not register or own OAuth deep-link callbacks.
         oauthBrowser: 'unavailable',
+        ...(descriptor.capabilities.oauthFlows === 'host' && callbacks.oauthFlows ? { connectorOAuthFlows: callbacks.oauthFlows } : {}),
         ...(descriptor.capabilities.ui === 'host' ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         notify: callbacks.notify, emit: callbacks.emitOwnerEvent,
         sendUiCommand: () => ({ ok: false, detail: 'Private production launch has no reviewed UI command callback' }) }

@@ -1,4 +1,4 @@
-import { runLoopbackOAuthFlow, type LoopbackCallbackServer } from '../oauth/connector-oauth-flow'
+import { runLoopbackOAuthFlow, type LoopbackCallbackServer, type ConnectorOAuthFlowAuthority, type ConnectorOAuthFlowLease } from '../oauth/connector-oauth-flow'
 import { ConnectorOAuthProvider, OAuthTokenRequestError } from '../oauth/providers/connector-oauth-provider'
 import { CONNECTOR_PIECE_ALLOWLIST, getAllowedPiece, type AllowedPieceOAuth, type ConnectorPieceAllowlist } from './allowlist'
 import type { ConnectorStore } from './connector-store'
@@ -88,6 +88,7 @@ export interface ConnectorOAuthServiceOptions {
   /** Loopback server factory; tests inject one on a known port. */
   createServer?: () => LoopbackCallbackServer
   credentialAdmission?: import('./credential-admission').ConnectorCredentialAdmission
+  nativeFlows?: ConnectorOAuthFlowAuthority
 }
 
 const MAX_CLIENT_FIELD_CHARS = 4096
@@ -105,6 +106,7 @@ export class ConnectorOAuthService implements PieceCredentialSource {
   private readonly now: () => number
   private readonly refreshing = new Map<string, Promise<ConnectorCredentials | null>>()
   private readonly pendingWork = new Set<Promise<unknown>>()
+  private readonly nativeLeases = new Map<ConnectorOAuthFlowLease, { release?: () => void; closing?: Promise<void> }>()
   private closing = false
   private readonly shutdown = new AbortController()
 
@@ -114,6 +116,9 @@ export class ConnectorOAuthService implements PieceCredentialSource {
     this.allowlist = options.allowlist ?? CONNECTOR_PIECE_ALLOWLIST
     this.now = options.now ?? Date.now
   }
+
+  /** Capability reflects the authority captured by this runtime's construction. */
+  get usesNativeFlows(): boolean { return !!this.options.nativeFlows }
 
   /** The allowlist's OAuth2 settings for a piece, or undefined when it is not an OAuth2 piece. */
   oauthSpec(pieceName: string): AllowedPieceOAuth | undefined {
@@ -129,13 +134,13 @@ export class ConnectorOAuthService implements PieceCredentialSource {
   async connect(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage = 'persistent', admission?: import('./credential-admission').ConnectorCredentialMutationToken, beforeCredentialWrite?: () => void): Promise<void> {
     this.requireOpen()
     const release = this.options.credentialAdmission?.enter(instanceId, admission)
-    return this.ownWork(this.connectInternal(instanceId, input, storage, beforeCredentialWrite).catch(error => {
+    return this.ownWork(this.connectInternal(instanceId, input, storage, beforeCredentialWrite, admission).catch(error => {
       this.requireOpen()
       throw error
     }).finally(() => release?.()))
   }
 
-  private async connectInternal(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage, beforeCredentialWrite?: () => void): Promise<void> {
+  private async connectInternal(instanceId: string, input: ConnectorOAuthConnectInput, storage: ConnectorCredentialStorage, beforeCredentialWrite?: () => void, admission?: import('./credential-admission').ConnectorCredentialMutationToken): Promise<void> {
     const instance = this.store.getInstance(instanceId)
     if (!instance) throw new Error(`Connector instance not found: ${instanceId}`)
     const spec = this.oauthSpec(instance.pieceName)
@@ -154,12 +159,19 @@ export class ConnectorOAuthService implements PieceCredentialSource {
 
     const scopes = narrowScopes(spec.scopes, input.scopes)
     const provider = this.provider(instance.pieceName, { ...spec, scopes })
+    const capturedInstance = JSON.stringify(instance)
+    const beforeEffect = (): void => {
+      this.requireOpen()
+      beforeCredentialWrite?.()
+      if (JSON.stringify(this.store.getInstance(instanceId)) !== capturedInstance) throw new Error('Connector changed during authentication. Start Connect again.')
+    }
     const { token } = await runLoopbackOAuthFlow({
       provider,
       config: clientSecret ? { client_id: clientId, client_secret: clientSecret } : { client_id: clientId },
       openExternal: this.options.openExternal,
       server: this.options.createServer?.(),
-      signal: this.shutdown.signal
+      signal: this.shutdown.signal,
+      ...(this.options.nativeFlows ? { nativeFlows: this.flowAuthority(instanceId, admission), beforeEffect } : {})
     })
     this.requireOpen()
     const creds: ConnectorOAuth2Credentials = {
@@ -172,7 +184,8 @@ export class ConnectorOAuthService implements PieceCredentialSource {
       tokenType: token.token_type ?? 'Bearer',
       scope: token.scope ?? (scopes.length ? scopes.join(' ') : null)
     }
-    beforeCredentialWrite?.()
+    if (this.options.nativeFlows) beforeEffect()
+    else beforeCredentialWrite?.()
     this.credentials.set(instanceId, creds, storage)
   }
 
@@ -220,8 +233,13 @@ export class ConnectorOAuthService implements PieceCredentialSource {
       timer = setTimeout(() => reject(new ConnectorOAuthShutdownIncompleteError()), timeoutMs)
     })
     try {
-      do { await Promise.race([Promise.allSettled([...this.pendingWork]), expired]) }
-      while (this.pendingWork.size)
+      do {
+        const leases = [...this.nativeLeases.keys()]
+        const results = await Promise.race([Promise.allSettled([
+          ...this.pendingWork, ...leases.map(lease => this.closeNativeLease(lease))
+        ]), expired])
+        if (leases.length && results.slice(results.length - leases.length).some(result => result.status === 'rejected')) throw new ConnectorOAuthShutdownIncompleteError()
+      } while (this.pendingWork.size || this.nativeLeases.size)
     } finally { if (timer) clearTimeout(timer) }
   }
 
@@ -233,6 +251,39 @@ export class ConnectorOAuthService implements PieceCredentialSource {
 
   private requireOpen(): void {
     if (this.closing) throw new ConnectorOAuthClosedError()
+  }
+
+  private flowAuthority(instanceId: string, admission?: import('./credential-admission').ConnectorCredentialMutationToken): ConnectorOAuthFlowAuthority {
+    return { register: async (input, beforeEffect) => {
+      const release = this.options.credentialAdmission?.enter(instanceId, admission)
+      let owned: ConnectorOAuthFlowLease | undefined
+      const retain = (lease: ConnectorOAuthFlowLease): void => {
+        owned = lease
+        if (!this.nativeLeases.has(lease)) this.nativeLeases.set(lease, { release })
+      }
+      try {
+        const lease = await this.options.nativeFlows!.register(input, beforeEffect, retain)
+        retain(lease)
+        return { open: () => lease.open(), close: () => this.closeNativeLease(lease) }
+      } catch (error) {
+        if (owned) {
+          try { await this.closeNativeLease(owned) } catch { /* Receipt and admission remain owned for close retry. */ }
+        } else release?.()
+        throw error
+      }
+    } }
+  }
+
+  private closeNativeLease(lease: ConnectorOAuthFlowLease): Promise<void> {
+    const entry = this.nativeLeases.get(lease)
+    if (!entry) return Promise.resolve()
+    if (entry.closing) return entry.closing
+    const raw = Promise.resolve().then(() => lease.close()).then(() => {
+      if (this.nativeLeases.get(lease) === entry) { this.nativeLeases.delete(lease); entry.release?.() }
+    })
+    entry.closing = raw
+    void raw.then(() => {}, () => { if (entry.closing === raw) entry.closing = undefined })
+    return raw
   }
 
   private ownWork<T>(work: Promise<T>): Promise<T> {

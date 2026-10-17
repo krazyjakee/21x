@@ -60,6 +60,7 @@ import { NotionPlugin } from '../main/plugins/notion-plugin'
 import { YouTrackPlugin } from '../main/plugins/youtrack-plugin'
 import { ConnectorBridgeCore } from '../main/plugins/connector-bridge-core'
 import { getConnectorRuntime, disposeConnectorRuntime, closeConnectorRuntime, type ConnectorRuntimeHost, type ConnectorRuntime } from '../main/connectors/bridge/runtime-core'
+import type { ConnectorOAuthFlowAuthority } from '../main/oauth/connector-oauth-flow'
 import { ConnectorBridgeService } from '../main/connectors/bridge/service'
 import { SessionContextService } from '../main/sessions/context-service'
 import { createPackagedConnectorTransport, validateConnectorResources } from '../main/connectors/piece-host/packaged-resources'
@@ -134,6 +135,7 @@ export interface ProductionOwnerBootstrap {
     showItemInFolder?(path: string, receipt: WorkspacePathReceipt): Promise<void>
     /** Trusted capability, separate from merely having an erroring callback. */
     oauthBrowser?: 'available' | 'unavailable'
+    connectorOAuthFlows?: ConnectorOAuthFlowAuthority
     notify(title: string, body: string): void
     emit(channel: string, data: unknown): void
     ui?: ProductionUiNativeHost
@@ -585,7 +587,7 @@ export class ProductionOwner {
     if (!runtime || !service || !connector) return null
     const engine = connector.engineFor(services.db)
     return { runtime, service, engine, credentialStore: runtime.credentialStore, secretStorage: storage,
-      oauthBrowser: this.bootstrap.native.oauthBrowser ?? 'unavailable', assertConnectorOwners: owners => {
+      oauthBrowser: runtime.credentials.usesNativeFlows ? 'available' : 'unavailable', assertConnectorOwners: owners => {
         this.getDatabaseBindingLease()
         if (this.services !== services || this.connectorRuntime !== runtime || this.connectorService !== service || this.connector !== connector || this.storage !== storage ||
           owners.database !== services.db || owners.sync !== services.sync || owners.service !== service || owners.runtime !== runtime || owners.engine !== engine ||
@@ -891,6 +893,7 @@ export class ProductionOwner {
     for (const plugin of [new LinearPlugin(), new HubSpotPlugin(), new GitHubIssuesPlugin(github), new ForgejoIssuesPlugin(forgejo), new NotionPlugin(), new YouTrackPlugin()]) registry.register(plugin)
     if (this.bootstrap.connectors.kind === 'enabled') {
       const connectorHost: ConnectorRuntimeHost = { openExternal: url => native.openExternal(url),
+        ...(native.connectorOAuthFlows ? { nativeFlows: native.connectorOAuthFlows } : {}),
         createTransport: this.boundaries.connectorTransport ?? (() => createPackagedConnectorTransport(this.bootstrap.paths.resourceRoot)) }
       // Construct real credential/OAuth/runtime ownership now, even if no piece is active.
       this.connectorRuntime = getConnectorRuntime(db, connectorHost)

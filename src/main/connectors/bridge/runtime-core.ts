@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import { ConnectorStore } from '../connector-store'
 import { ConnectorCredentialStore } from '../credentials'
 import { ConnectorOAuthService } from '../oauth'
+import type { ConnectorOAuthFlowAuthority } from '../../oauth/connector-oauth-flow'
 import { kvBackendFromConnectorStore, PieceHostClient } from '../piece-host/client'
 import type { BridgeRuntime } from './engine'
 import type { PieceHostTransportFactory } from '../piece-host/client'
@@ -31,6 +32,7 @@ export type DbSource = { db: Database.Database }
 export interface ConnectorRuntimeHost {
   openExternal: (url: string) => Promise<void> | void
   createTransport: PieceHostTransportFactory
+  nativeFlows?: ConnectorOAuthFlowAuthority
 }
 
 const runtimes = new WeakMap<object, ConnectorRuntime>()
@@ -52,7 +54,8 @@ export function getConnectorRuntime(source: DbSource, host: ConnectorRuntimeHost
     store,
     credentials: credentialStore,
     credentialAdmission,
-    openExternal: host.openExternal
+    openExternal: host.openExternal,
+    ...(host.nativeFlows ? { nativeFlows: host.nativeFlows } : {})
   })
   const client = new PieceHostClient({
     createTransport: host.createTransport,

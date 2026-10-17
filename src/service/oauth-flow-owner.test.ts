@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { OAuthFlowOwner } from './oauth-flow-owner'
+import { OAuthFlowOwner, type OAuthFlowLease } from './oauth-flow-owner'
 import { isNativeOAuthCallback, isNativeOAuthRegistration, OAUTH_NATIVE_CALLBACK_SCHEMAS, type NativeOAuthBridge, type NativeOAuthRegistration } from '../shared/oauth-native-callbacks'
 
 const nonce = 'private_nonce_0123456789'
@@ -27,6 +27,63 @@ function setup() {
   return { native, scope, binding, owner, callback, registration: () => registered, setNow: (value: number) => { now = value } }
 }
 describe('private OAuth flow owner', () => {
+  it('publishes cleanup ownership synchronously but refuses opening before a validated registration', async () => {
+    const s = setup(), register = deferred<{ flowId: string; registered: true }>()
+    vi.mocked(s.native.register).mockReturnValue(register.promise)
+    let observed!: OAuthFlowLease
+    const pending = s.owner.register(input(), s.binding, lease => { observed = lease })
+    expect(Object.isFrozen(observed)).toBe(true)
+    await expect(observed.open()).rejects.toThrow('OAUTH_FLOW_UNAVAILABLE')
+    expect(s.native.open).not.toHaveBeenCalled()
+    register.resolve({ flowId: observed.flowId, registered: true })
+    expect(await pending).toBe(observed)
+    await observed.open()
+    expect(s.native.open).toHaveBeenCalledExactlyOnceWith({ flowId: observed.flowId })
+    await observed.close(); await s.owner.close()
+  })
+
+  it('retains failed post-ack registration cleanup without opening or retiring an unrelated flow', async () => {
+    const s = setup(), unrelatedState = 'unrelated_nonce_0123456789'
+    const unrelated = await s.owner.register({ ...input(), authorizationUrl: input().authorizationUrl.replace(nonce, unrelatedState) }, () => {})
+    const register = deferred<{ flowId: string; registered: true }>()
+    vi.mocked(s.native.register).mockReturnValueOnce(register.promise)
+    let observed!: OAuthFlowLease, refuse = true
+    vi.mocked(s.native.retire).mockImplementation(async ({ flowId }) => {
+      if (flowId === observed.flowId && refuse) throw new Error('native close blocked')
+      return { flowId, retired: true }
+    })
+    const pending = s.owner.register(input(), s.binding, lease => { observed = lease })
+    const failed = expect(pending).rejects.toThrow('native close blocked')
+    await Promise.resolve()
+    s.binding.mockImplementation(() => { throw new Error('binding changed') })
+    register.resolve({ flowId: observed.flowId, registered: true }); await failed
+    s.binding.mockImplementation(() => {})
+    await expect(observed.open()).rejects.toThrow('OAUTH_FLOW_UNAVAILABLE')
+    await expect(observed.close()).rejects.toThrow('native close blocked')
+    expect(s.native.open).not.toHaveBeenCalled()
+    refuse = false; await observed.close()
+    expect(s.native.retire).not.toHaveBeenCalledWith({ flowId: unrelated.flowId })
+    await unrelated.open()
+    expect(s.owner.deliver(s.callback(unrelated.flowId, { state: unrelatedState }))).toEqual({ accepted: true })
+    await expect(unrelated.waitForCallback()).resolves.toEqual({ code: 'synthetic-code', state: unrelatedState })
+    await unrelated.close(); await s.owner.close()
+  })
+
+  it('joins cleanup when the synchronous ownership observer throws', async () => {
+    const s = setup(), retire = deferred<{ flowId: string; retired: true }>()
+    vi.mocked(s.native.retire).mockReturnValue(retire.promise)
+    let observed!: OAuthFlowLease
+    const observer = vi.fn((lease: OAuthFlowLease) => { observed = lease; throw new Error('observer refused') })
+    const failed = expect(s.owner.register(input(), s.binding, observer)).rejects.toThrow('observer refused')
+    await vi.waitFor(() => expect(s.native.retire).toHaveBeenCalledOnce())
+    expect(observer).toHaveBeenCalledOnce(); expect(s.native.register).not.toHaveBeenCalled()
+    expect(s.native.open).not.toHaveBeenCalled()
+    await expect(s.owner.close(5)).rejects.toThrow('OAUTH_FLOW_DRAIN_BLOCKED')
+    retire.resolve({ flowId: observed.flowId, retired: true }); await failed
+    await s.owner.close()
+    expect(s.native.retire).toHaveBeenCalledOnce()
+  })
+
   it('captures a private UUID registration before one-shot browser opening', async () => {
     const s = setup(), lease = await s.owner.register(input(), s.binding)
     expect(s.native.open).not.toHaveBeenCalled()
