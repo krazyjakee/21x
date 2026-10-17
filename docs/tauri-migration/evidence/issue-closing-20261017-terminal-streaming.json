@@ -1,0 +1,711 @@
+{
+  "version": 1,
+  "issue": 214,
+  "createdAt": "2026-10-17T18:04:37.296085+00:00",
+  "implementationRevision": "763d20e48308506d6daf70a7d14b7ae701121f72",
+  "assignmentBaseRevision": "1a96edc4e9518efca8b386bd41d9484cf638af6c",
+  "sharedPayloadBaseline": "ff400aceeeaef7ad5999e4996fd9ad3cd13e43c6",
+  "applicationPackageVersion": "0.0.161",
+  "scope": "Source terminal recent-text integrity and native subscription lifetime; staged standalone Node with real Linux PTYs and the #207 production-private-peer workload. No installed Tauri GUI or all-platform acceptance.",
+  "provenance": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "distribution": {
+      "NAME": "Linux Mint",
+      "ID": "linuxmint",
+      "PRETTY_NAME": "Linux Mint 22.3",
+      "VERSION": "22.3 (Zena)",
+      "ID_LIKE": "ubuntu debian",
+      "VERSION_ID": "22.3",
+      "HOME_URL": "https://www.linuxmint.com/",
+      "SUPPORT_URL": "https://forums.linuxmint.com/",
+      "BUG_REPORT_URL": "http://linuxmint-troubleshooting-guide.readthedocs.io/en/latest/",
+      "PRIVACY_POLICY_URL": "https://www.linuxmint.com/",
+      "VERSION_CODENAME": "zena",
+      "UBUNTU_CODENAME": "noble"
+    },
+    "node": "v22.23.2",
+    "nodePty": "1.1.0",
+    "sqliteAddon": "13.0.3",
+    "sqliteSchema": 37,
+    "vitest": "4.0.18",
+    "electronForApplicationTests": "44.0.0",
+    "webview": null,
+    "webviewReason": "No installed Tauri WebView launched by these source/staged checks. Electron application suites run host mocks."
+  },
+  "fixture": {
+    "profiles": "Only synthetic temporary profiles and fixture shell HOME; no ~/.config/21x access. Actual proof cleanup waits for native onExit before removing temporary data.",
+    "schema": "Retained terminal commands/events; protocolVersion 1, exact JSON codecs; application schema 37 for the #207 production owner.",
+    "commands": 6,
+    "events": 2,
+    "newCommandsOrEvents": 0,
+    "coreLimits": {
+      "logicalLines": 500,
+      "utf16CodeUnits": 1000000
+    },
+    "wireRecentJsonBytesMaximum": 524288,
+    "nativeProof": "One staged bash PTY with --noprofile --norc, fixed synthetic environment, builtin read barriers, 100000 Unicode repetitions; raw real native exit receipts.",
+    "externalServices": "No live model/provider, credential-store calls, live profiles or live API effects."
+  },
+  "expectedActual": [
+    {
+      "expected": "Join fragments at any callback split, strip complete/split terminal escape bodies, preserve Unicode and the unfinished final line.",
+      "actual": "Every split offset in the controlled stream yields the same logical lines; raw event text remains identical."
+    },
+    {
+      "expected": "Very long, JSON-expensive output must leave readable recent text within the retained codec without respawning.",
+      "actual": {
+        "proof": "production-terminal-streaming-text",
+        "nativeSpawns": 1,
+        "rawUtf8Bytes": 700225,
+        "recentJsonBytes": 524283,
+        "joinedSplitLine": true,
+        "hiddenTitleOmitted": true,
+        "nativeExitReceipts": 1
+      }
+    },
+    {
+      "expected": "Kill is not exit; dispose both native subscriptions only on actual exit and fence later callbacks/handle methods.",
+      "actual": "Controlled listener tests pass, real staged PTY proofs join actual native exits; source payload proof records all four native exits before reopen."
+    },
+    {
+      "expected": "Keep existing production throughput/recovery bounds and accepted-mutation no-replay behavior.",
+      "actual": {
+        "counterCount": 60,
+        "allCountersPassed": true,
+        "nativePtyExits": 4,
+        "profileRemoved": true
+      }
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "application": {
+      "passed": 53,
+      "failed": 0,
+      "skipped": 0,
+      "files": 5
+    },
+    "standalone": {
+      "passed": 56,
+      "failed": 0,
+      "skipped": 0,
+      "files": 6
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "commands": [
+      {
+        "command": "rtk node scripts/tauri-prepare.mjs --native --node /tmp/21x-tauri-validation-1qysGG/node-v22.23.2-linux-x64/bin/node",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "fd1999b47aad8a95e19bbe56c29a83830fb8986d69f660c7ec47301a0ee7f293",
+        "logBytes": 124
+      },
+      {
+        "command": "rtk proxy pnpm test:run src/main/terminal-service-core.test.ts src/main/terminal-process.test.ts src/service/terminal-backend.test.ts src/renderer/src/lib/terminal-session.test.ts src/renderer/src/components/canvas/TerminalPanelContent.test.tsx",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "7fab842753d67707da0823cc155fe27f577f7cc6210a2e83bb5d5098bcb32437",
+        "logBytes": 1524
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- --terminal-proofs src/main/terminal-service-core.test.ts src/main/terminal-process.test.ts src/service/terminal-backend.test.ts src/renderer/src/lib/terminal-session.test.ts scripts/production-terminal-proof.test.ts scripts/production-payload-recovery-proof.test.ts",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "2a4abfe88c850522402e9b20fd865410f9f23c720cd04f044124b6e3f16a2500",
+        "logBytes": 16772
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "logBytes": 0
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "21425113cb3db76e93d5002313185deb6751aaa62603bab890d65cc256a129eb",
+        "logBytes": 16719
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "ea2a3c110166c35d7798811f5e9b28447f6fa9d24039e672266f8b9edb1eabb6",
+        "logBytes": 91
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "logBytes": 43
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "c2d5f20a6f278f150f233826e9169afd92aa6ceb97c27a152689fab3199e8e8e",
+        "logBytes": 29267
+      },
+      {
+        "command": "rtk proxy pnpm tauri:frontend:build",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "e9ca21430188bd0960989d8194d74707cf8fb0337de0cae0409b4d986c241250",
+        "logBytes": 497
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "result": "pass",
+        "logSha256": "4f360d54b0f0820a0435ed24bdf737b763633c093d63da0360e5178f53fb5ff6",
+        "logBytes": 9620
+      }
+    ],
+    "cargo": "Not rerun: no Rust, Cargo, capability or native host source changes; staged actual node-pty suites exercise the changed native-module bridge.",
+    "buildLimits": "Shipping/mobile and both Tauri frontend builds pass; existing large-chunk warnings remain. No installed package was built or launched."
+  },
+  "sourceSha256": {
+    "src/main/terminal-text-buffer.ts": "3f332940fa4a3e2f7addf22ff301ed78bf93570e56183fbbf53b7a1d4d1e8d9d",
+    "src/main/terminal-service-core.ts": "ba8d21742bde9c101edd63149b3540d592915bf19cc3fdf9e7334c895df7627d",
+    "src/main/terminal-process.ts": "93f7b4d5212d84640e7e2e48b8e7d2b189c4cef9730f20fe363f61e93f522d6d",
+    "src/service/terminal-backend.ts": "17755fbb0d952efc32880bc52a6c94f86e3f3c3d4bab7f1da001d6e4be9f425b",
+    "src/main/terminal-service-core.test.ts": "f34b59ee585a36d62bc91e4e54058bcc6e84e3dd96784e280eb7dadcc81fb75b",
+    "src/main/terminal-process.test.ts": "72234cedbc566a717039aaebc32a672aee23f37634b5e2a52c4d931a0fe0ddc0",
+    "src/service/terminal-backend.test.ts": "269b287bc3618e7a0b7e0f324c67763a67c481d9d1154fb3022aa0692e2df4a9",
+    "scripts/production-terminal-proof.test.ts": "2e03a6c8f4b144a984ef62636288d53a6dad78d95ce9fd79f627669f4cbb362b",
+    "docs/tauri-migration/production-terminal.md": "b3af0867d4b3903b4d13261b36ae44bc91a6bc535b00579de5dfbe1ab69ba082",
+    "docs/tauri-migration/terminal-streaming-recovery.md": "7a9bc537a813518147b204e0740e4b470b50c813910b238af81244e9aec2208d",
+    "docs/tauri-migration/implementation-status.md": "2d5503ee0dba695ef1a79565cf826dbb841589c571750a305c4711b2c885d8cd",
+    "docs/tauri-migration/inventory.json": "c16a60db24b64e9308eb9483d37f3ae4e53a9ee03e668a6b9d384fce45904ebe"
+  },
+  "artifacts": {
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node": {
+      "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5",
+      "bytes": 79968
+    },
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": {
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "bytes": 2226168
+    },
+    "out/main/index.js": {
+      "sha256": "7175b479c14a78f5ae63b691f97b8cc216c8f777c554ffd66c59a7d3bf0c4e23",
+      "bytes": 3835159
+    },
+    "out/mobile/index.html": {
+      "sha256": "522be5c3be1fde89fe43744a8eef72f988a9d9fb552b377649a6274497bf6c45",
+      "bytes": 900
+    },
+    "out/tauri-renderer/index.html": {
+      "sha256": "6c6bd9a8d05facb1d2369b47e4d5bce6b9c981345b647d365d91971f5ef6f7c0",
+      "bytes": 1618
+    },
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "7affa780c47323f07144aad67c6d42982fcede673c2fa4a3a395988927f3c66d",
+      "bytes": 856
+    },
+    "out/tauri-renderer/assets/index-mFwRnFt4.js": {
+      "sha256": "7d381d0d2889deb68f5ee6b471b694d8d44e74a270c0c4abe5f4992016e9e9ac",
+      "bytes": 106177
+    },
+    "out/tauri-production-renderer/assets/index-CjmI6cVL.js": {
+      "sha256": "225778520fe6e1b0b65a03999e52360a62e52a35a8f2676db3c24d53c2ddd382",
+      "bytes": 281964
+    }
+  },
+  "payloadRecoveryProof": {
+    "version": 1,
+    "scope": "source-production-private-peer-real-linux-pty-controlled-native-attachment-callback",
+    "fixture": {
+      "version": 1,
+      "transcriptParts": 1024,
+      "partChars": 4096,
+      "largeToolChars": 400000,
+      "terminals": 4,
+      "terminalLines": 256,
+      "terminalLineChars": 1024,
+      "fragmentBytes": 79,
+      "attachmentBytes": 524288,
+      "deadlineMs": 15000
+    },
+    "provenance": {
+      "platform": "linux",
+      "architecture": "x64",
+      "node": "v22.23.2",
+      "electron": null,
+      "webview": null,
+      "sources": {
+        "scripts/production-payload-recovery-proof.ts": "2bd36f20203b0ab844ffa5d49d49eed0f94ca4aef0149eb6358b21a9d70505e5",
+        "scripts/production-payload-recovery-proof.test.ts": "1b89106d0ab5b01bceb95598321072028f6c900d8d658317a2516880f80fc103",
+        "src/service/production-service.ts": "091fa19fe37dff89302f61695d50fd56bfa549cd696d569dc5a733e4f58d79db",
+        "src/service/production-owner.ts": "2d4ddd943722f7bfd6a76e6ece89597e0c6775971184272e9f6ba9d53af67fea",
+        "src/service/production-desktop-bindings.ts": "439ceb9c177b64f58488495659a3f52005f38b138df2ad43e354266a15cb0549",
+        "src/service/transport/peer.ts": "c93b2693033af6e63d192afb21a1cd54d7aacc20b81fbce4fd0c15f54901acbc",
+        "src/service/transport/framing.ts": "c265d241b966ff0b555cf34a44232a3c0ce5e16148e3716e6d1f8d6f04f81d9d",
+        "src/service/task-attachment-backend.ts": "67adad0576045ab07c038eeb459e6536adc2c562b3b4def3958b1ba6692b7c63",
+        "src/main/task-attachment-file-owner.ts": "85f9bfae784e17f760bba6446eb12ca9d566057374b03d50ad5910980efe9139",
+        "src/main/terminal-service-core.ts": "ba8d21742bde9c101edd63149b3540d592915bf19cc3fdf9e7334c895df7627d",
+        "src/main/terminal-process.ts": "93f7b4d5212d84640e7e2e48b8e7d2b189c4cef9730f20fe363f61e93f522d6d",
+        "src/service/terminal-backend.ts": "17755fbb0d952efc32880bc52a6c94f86e3f3c3d4bab7f1da001d6e4be9f425b",
+        "src/main/database/manager.ts": "14f4206d12fbfd5b58b4a081c24d0361840f901bf0a696e69b9c639d877957d2",
+        "src/renderer/src/lib/transcript-pagination.ts": "f4a4817a89017e3e7efc6c3944105ad7c49b5903606cccfe9d8d0544ce0d1eb9",
+        "src/shared/transcript/projection.ts": "2f5e289e68060ebcc3d79f7abf042611cb7731cced9eb95098f569bc8fe63e8c",
+        "src/shared/service-protocol.ts": "7f8a4a9c8b9b640e03252bcf17a3eb5097f7910d7af814e5ea51c4dfc3b56500",
+        "src/shared/transcript-page.ts": "77db964521d1d518a022bc9437be458cbb4e37471af8fe59302a39f8159be90b",
+        "src/shared/task-attachment-codecs.ts": "08eb2a3a55cd2daa32ca5f62c875e2ff8c9f0502bfc7b0cb4d0aa67e1923c4e6",
+        "src/shared/terminal-desktop-codecs.ts": "d049cbf307ea593f8392e439248479550e260e073e069b2e3d4c597d1ad0c7f0",
+        "scripts/tauri-runtime.json": "23fe6fb61778a75e30729951e3817640ea48380f6285c9255f8ec34ac7fa5e82"
+      },
+      "artifacts": {
+        "better-sqlite3/package.json": "6c9ea355190dfce3646ad4d2a31c9506de36d884a6461b3655a2a0c4ba3d1695",
+        "better-sqlite3/native-addon": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+        "node-pty/package.json": "f8b6a14f7022c14f1cd5d109486f5dacd32bffb63a9a63e38eced37dacb47439",
+        "node-pty/native-addon": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5",
+        "node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+      }
+    },
+    "counters": [
+      {
+        "name": "hydrated unique parts after revision race",
+        "expected": 1026,
+        "actual": 1026,
+        "comparison": "equal"
+      },
+      {
+        "name": "projection sorted uniqueness",
+        "expected": 1026,
+        "actual": 1026,
+        "comparison": "equal"
+      },
+      {
+        "name": "newest racing revision retained",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "indexed durable identity/revision/content mismatches",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "snapshot pages",
+        "expected": 2,
+        "actual": 52,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "delta pages",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "largest page JSON bytes",
+        "expected": 262144,
+        "actual": 261250,
+        "comparison": "atMost"
+      },
+      {
+        "name": "largest page part count",
+        "expected": 64,
+        "actual": 21,
+        "comparison": "atMost"
+      },
+      {
+        "name": "stored full large tool characters",
+        "expected": 400000,
+        "actual": 400000,
+        "comparison": "equal"
+      },
+      {
+        "name": "unmounted hydration cancelled",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "late page never applied after unmount",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "attachment published exact byte digest",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "authorized native download callbacks",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "attachment reply cancellation",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "retired callback does not accept another download",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "attachment read syscall bytes",
+        "expected": 65536,
+        "actual": 65536,
+        "comparison": "atMost"
+      },
+      {
+        "name": "attachment write syscall bytes",
+        "expected": 65536,
+        "actual": 65536,
+        "comparison": "atMost"
+      },
+      {
+        "name": "attachment active descriptors",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 0 reconnect keeps native PID",
+        "expected": 2970853,
+        "actual": 2970853,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 0 bounded recovery tail",
+        "expected": 524288,
+        "actual": 263048,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 0 completion in recovery tail",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 0 minimum delivered bytes",
+        "expected": 262144,
+        "actual": 262819,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "terminal 0 exact sequential payload lines",
+        "expected": 256,
+        "actual": 256,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 0 duplicate or out-of-order payload lines",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 1 reconnect keeps native PID",
+        "expected": 2970856,
+        "actual": 2970856,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 1 bounded recovery tail",
+        "expected": 524288,
+        "actual": 263048,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 1 completion in recovery tail",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 1 minimum delivered bytes",
+        "expected": 262144,
+        "actual": 262819,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "terminal 1 exact sequential payload lines",
+        "expected": 256,
+        "actual": 256,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 1 duplicate or out-of-order payload lines",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 2 reconnect keeps native PID",
+        "expected": 2970858,
+        "actual": 2970858,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 2 bounded recovery tail",
+        "expected": 524288,
+        "actual": 263048,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 2 completion in recovery tail",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 2 minimum delivered bytes",
+        "expected": 262144,
+        "actual": 262819,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "terminal 2 exact sequential payload lines",
+        "expected": 256,
+        "actual": 256,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 2 duplicate or out-of-order payload lines",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 3 reconnect keeps native PID",
+        "expected": 2970862,
+        "actual": 2970862,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 3 bounded recovery tail",
+        "expected": 524288,
+        "actual": 263048,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal 3 completion in recovery tail",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 3 minimum delivered bytes",
+        "expected": 262144,
+        "actual": 262819,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "terminal 3 exact sequential payload lines",
+        "expected": 256,
+        "actual": 256,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal 3 duplicate or out-of-order payload lines",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "parallel native PTY spawns",
+        "expected": 4,
+        "actual": 4,
+        "comparison": "equal"
+      },
+      {
+        "name": "terminal event byte bound",
+        "expected": 16384,
+        "actual": 4095,
+        "comparison": "atMost"
+      },
+      {
+        "name": "terminal event deliveries",
+        "expected": 4,
+        "actual": 266,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "uncertain mutation reply cancelled",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "all native PTYs exited before profile reopen",
+        "expected": 4,
+        "actual": 4,
+        "comparison": "equal"
+      },
+      {
+        "name": "replacement epoch differs",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "durable parts rehydrated after epoch replacement",
+        "expected": 1026,
+        "actual": 1026,
+        "comparison": "equal"
+      },
+      {
+        "name": "replacement projection identity/revision/content mismatches",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "replacement owner stopped before durable inspection",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "replacement writer closed before durable inspection",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "uncertain mutation committed exactly once without replay",
+        "expected": 1,
+        "actual": 1,
+        "comparison": "equal"
+      },
+      {
+        "name": "stale epoch mutation effects",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "independent read-only inspection handle closed",
+        "expected": 0,
+        "actual": 0,
+        "comparison": "equal"
+      },
+      {
+        "name": "fragments delivered",
+        "expected": 100,
+        "actual": 363463,
+        "comparison": "atLeast"
+      },
+      {
+        "name": "frame bytes including newline",
+        "expected": 1048577,
+        "actual": 699317,
+        "comparison": "atMost"
+      },
+      {
+        "name": "peer queued bytes",
+        "expected": 4194304,
+        "actual": 699317,
+        "comparison": "atMost"
+      },
+      {
+        "name": "peer queued frames",
+        "expected": 128,
+        "actual": 3,
+        "comparison": "atMost"
+      },
+      {
+        "name": "peer pending calls",
+        "expected": 128,
+        "actual": 4,
+        "comparison": "atMost"
+      }
+    ],
+    "memory": {
+      "startRss": 200876032,
+      "peakSampledRss": 307073024,
+      "peakSampledHeap": 152606936,
+      "note": "Sampled process memory includes Vitest/runtime. Logical page/frame/FD/tail bounds are asserted; RSS is diagnostic, not a constant-memory claim."
+    },
+    "epochs": [
+      "b1da681a-3871-46ce-b98e-5f1211631dc0",
+      "1933aa80-e82e-471e-9109-88a6299007bf"
+    ],
+    "cleanup": {
+      "ownerClosed": true,
+      "nativeExits": 4,
+      "profileRemoved": true
+    },
+    "remaining": [
+      "Installed supported OS/architecture/WebView runs, actual native Save dialog/copy, native host process-tree drain and packaged stdio load proof.",
+      "Terminal getBuffer is a bounded volatile tail; saturation retires its owner and cannot recover discarded output losslessly.",
+      "Audio/binary ServiceStreams foundation has no production Rust consumer; this proof uses existing domain payload paths.",
+      "#202 closure dependency remains open; source readiness does not close #207 or pass migration gates."
+    ]
+  },
+  "failuresAndRepairs": [
+    {
+      "failure": "Direct vitest.tauri config invocation refused missing staged runtime authority before tests.",
+      "repair": "Use scripts/tauri-test.mjs and physically staged pinned Node/SQLite/node-pty."
+    },
+    {
+      "failure": "Initial backend regressions: 16 pass, 2 fail; exact JSON budget was one byte larger than retained codec allowance.",
+      "repair": "Reserve existing conservative delimiter byte; backend tests now pass without weakening the codec."
+    },
+    {
+      "failure": "Initial standalone proof: 52 pass, 1 fail; separate interactive bash commands emitted real readline newlines, so SPLIT and _LINE correctly remained separate.",
+      "repair": "One shell command with builtin read barriers creates separate callbacks without those actual newlines. Final real-PTY proof passes."
+    },
+    {
+      "failure": "Lint: two prefer-const errors in uninitialized subscription locals.",
+      "repair": "Use a const subscription holder, preserving synchronous-exit handling. Final lint 0 errors."
+    },
+    {
+      "failure": "Inventory freshness refused the new source file.",
+      "repair": "Claimed shared file, regenerated only source listing and file count (885 to 886); command/event surfaces unchanged."
+    },
+    {
+      "failure": "Normal pre-commit hook rejected TS7030 in PTY write after an earlier filtered/incremental typecheck reported success. No commit was created.",
+      "repair": "Return explicit undefined on successful write; rerun full affected gate with raw rtk proxy output and forced tsc --build --noEmit --force. Commit hooks must pass."
+    }
+  ],
+  "hostedCI": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "workflowTriggerRevision": "f54f1f1a8159c85dc3328e3e9491603210d0674b",
+    "authority": "Lead explicitly instructed no settings endpoints, repository/org setting changes or workflow dispatch; local gate substitutes pending user decision.",
+    "runs": []
+  },
+  "acceptance": {
+    "checkboxesCompleted": [],
+    "issueRemainsOpen": true,
+    "remaining": [
+      "Installed Tauri shell/CLI environment, native keyboard/focus, Commander/chat provider/model/image operations and native attachment picker/import/drag-drop/viewer acceptance remain unproven.",
+      "Native host attachment/clipboard callbacks beyond existing Linux scopes require #215 ownership and platform integration; this source slice does not add alternate path authority.",
+      "Each supported OS must prove hidden-window continuation, service crash/reconnect and safe process-tree shutdown. #208 is a stated prerequisite; ProductionEngine::start currently refuses every non-Linux launch with PRODUCTION_CONTAINMENT_UNAVAILABLE (Windows private-fd3 / macOS detached-descendant containment).",
+      "#202 remains open and unchanged. Existing feasibility/synthetic packaged workflows do not exercise this production host; dispatching them would not close these criteria.",
+      "Hosted Verify cannot run until the user decides whether to enable repository Actions. No settings endpoint was called by engineer A."
+    ]
+  },
+  "constraints": {
+    "liveRelease": false,
+    "liveProfileCutover": false,
+    "electronRetired": false,
+    "hostedVoice": "deferred by user decision"
+  }
+}
