@@ -1,0 +1,323 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T20:26:13.176399+00:00",
+  "baseRevision": "58e095b1",
+  "implementationRevision": "c0c813641736de29e824f9d7fb9d206b5296e40a",
+  "scope": "Renderer snapshot consistency/reconnect/read-only recovery and listener lifetime using existing production operations. Full production App build and controlled typed-native renderer regressions, not installed native UI acceptance.",
+  "fixture": {
+    "profiles": "No live profile/accounts/credentials. Native invoke/event boundary controlled; actual renderer DesktopClient/codecs/transport adapter/Zustand owners; legacy preload removed during new controls. Existing compatibility suites retain their fake preload. No actual production Source database in the new controls.",
+    "schema": 37,
+    "protocol": 1,
+    "webview": null,
+    "installed": false
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "stagedNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "electronLauncher": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "expectedActual": [
+    {
+      "expected": "Task/project events and accepted writes cannot be overwritten by a pending snapshot.",
+      "actual": "Crossed reads are discarded and re-read; concurrent reads coalesce. Fourteen new actual typed-host controls pass, including task create/update/delete, project invalidation, explicit Default selection and settings receipts."
+    },
+    {
+      "expected": "Recovery cannot unlock mutation after a swallowed settings/project/task failure or stale same-epoch read.",
+      "actual": "Strict snapshot owners join native hydration. Replacement reconnect disconnects immediately, before native bootstrap await. Failed/busy recovery retains mutation fence; no write/approval replay."
+    },
+    {
+      "expected": "Restore saved project/canvas/drawing state without effects during native recovery.",
+      "actual": "Project selection is local hydration; only explicit choices persist. Native scoped layout reads fall back to legacy Default only without a scoped value/marker, preserving cleared-value semantics. Electron migration policy unchanged."
+    },
+    {
+      "expected": "Retire event listeners and pending publications with their document.",
+      "actual": "Task/project cohorts retain unsubscribe functions, guard queued callbacks and release on pagehide/HMR; project subscription precedes first snapshot. Shared listener reference-count regressions retained."
+    },
+    {
+      "expected": "Build real task/project/dashboard/settings/Commander/canvas App against the typed client.",
+      "actual": "Full renderer regressions and opt-in production frontend build pass with existing foundation. Historical368 direct preload references were already reduced to one central Electron compatibility reader; this slice repairs behavior rather than claiming a new bulk port."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "applicationRenderer": {
+      "passed": 1673,
+      "files": 146,
+      "failed": 0,
+      "skipped": 0
+    },
+    "stagedRenderer": {
+      "passed": 237,
+      "files": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    "contractTests": {
+      "passed": 20,
+      "files": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "667ed24c6acfcc2e8ad41dd976bb2829e786104ec15f7b706091710c09e216ad",
+          "bytes": 1146387
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:prepare:native --node /mnt/Rusty/GitHub/21x/src-tauri/resources/node/node --npm-cli /tmp/21x-tauri-validation-1qysGG/node-v22.23.2-linux-x64/lib/node_modules/npm/bin/npm-cli.js",
+        "exitCode": 0,
+        "log": {
+          "sha256": "dedbc3d19e2e611a9a86ff475398c45452f0d5d095bc753fdb87e733c49cdbb6",
+          "bytes": 5208
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "627ec098eac1aa85c0cdd350c4f8b0c20a5cfb4eea44e81dc42e883644e2c537",
+          "bytes": 71417
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "208f3c7f8c7d625961c23bbec057f831a09e3eee8a9227746f54e3484ff6d3d6",
+          "bytes": 534
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "7757d5ee643f0a7a72c9ca462aa81ced93f33b58319479ac6e1542176b81cd4a",
+          "bytes": 29267
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "662f12e55ae1ce5f3fb39b15d52a59b38f037fef20dbeb64df003035d0e8d869",
+          "bytes": 9620
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "a6af7cc33d5e11ffeb384cff6222037a86bc575140617761070f66587c86ad9c",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      }
+    ],
+    "nativeCargo": "Not run: no Rust/native source changed."
+  },
+  "sourceAudit": {
+    "directPreloadConsumers": [
+      {
+        "column": 54,
+        "expression": "window.electronAPI",
+        "file": "src/renderer/src/lib/desktop-api.ts",
+        "kind": "access",
+        "line": 25,
+        "path": [],
+        "resolution": "literal"
+      }
+    ],
+    "nativeCommandBindings": 234,
+    "nativeEventBindings": 30,
+    "unboundRetainedCommands": [
+      "app:getLoginItemSettings",
+      "app:setLoginItemSettings",
+      "app:setTitleBarOverlay",
+      "attachments:pick",
+      "attachments:save",
+      "oauth:exchangeCode",
+      "oauth:getValidToken",
+      "oauth:revokeToken",
+      "oauth:startFlow",
+      "oauth:startLocalhostFlow",
+      "updater:check",
+      "updater:download",
+      "updater:getVersion",
+      "updater:install",
+      "voice:answerNotExpected",
+      "voice:cancelTurn",
+      "voice:commander:bargeIn",
+      "voice:commander:send",
+      "voice:commander:setActive",
+      "voice:confirm",
+      "voice:dismiss",
+      "voice:endTurn",
+      "voice:expectAnswer",
+      "voice:getPermission",
+      "voice:pickModelDir",
+      "voice:pushAudio",
+      "voice:requestPermission",
+      "voice:setCustomModelDir",
+      "voice:setShortcut",
+      "voice:startTurn",
+      "voice:tts:elevenlabs:acceptDisclosure",
+      "voice:tts:elevenlabs:clearKey",
+      "voice:tts:elevenlabs:refresh",
+      "voice:tts:elevenlabs:setKey",
+      "voice:tts:elevenlabs:setModel",
+      "voice:tts:preview",
+      "voice:tts:speak",
+      "voice:tts:stop"
+    ],
+    "unboundRetainedEvents": [
+      "agent:output",
+      "agent:output-batch",
+      "agent:recoveryStateChanged",
+      "artifact:updated",
+      "menu:check-for-updates",
+      "oauth:callback",
+      "overdue:check",
+      "task:subtasks-reordered",
+      "updater:status",
+      "voice:dictate",
+      "voice:error",
+      "voice:final",
+      "voice:hotkey",
+      "voice:navigate",
+      "voice:outcome",
+      "voice:partial",
+      "voice:segment",
+      "voice:speech:chunk",
+      "voice:speech:end",
+      "voice:speech:start",
+      "voice:state",
+      "workspace:cleanup-complete"
+    ],
+    "note": "Binding presence is not native availability or authority. Production build uses typed facade; central compatibility reader remains for shipping Electron."
+  },
+  "sourceSha256": {
+    "docs/tauri-migration/implementation-status.md": "1a00cf448ac7701b877400f2220016d012bc4a46a80184b8ff0e86f775d738e2",
+    "docs/tauri-migration/inventory.json": "058f7f52914fa9f065ae11dba9c7b5222d25b655f02b64cad57afa62b1aaff97",
+    "docs/tauri-migration/production-renderer-recovery.md": "b5c5ac2d496238706990e9dc6589f20654340ce01be4913d261c9d5f4abd9c1c",
+    "src/renderer/src/components/layout/AppLayout.tsx": "2ce884510481cf2930133fb499e21d2671844a33cfaa4df95693a3a88abb9da2",
+    "src/renderer/src/lib/desktop-api.ts": "33701eb869e1d8d2a0d732b58aa17fba11127fa419c5a07c8d2b9c12fadf1b85",
+    "src/renderer/src/lib/desktop-rehydration.ts": "0000d71a17570f72e5cd5edb6477505cd860b5de3ffb4aa5e30abfd039129e6b",
+    "src/renderer/src/lib/desktop-snapshot.ts": "a5984bbeb9e5066fcb9ac563eb5017d0e1126308d60a55076b981ae7b99f223f",
+    "src/renderer/src/lib/ipc-client.ts": "35dde32eb5dfd0749727515aa7fce17ba870d33770dca442532178fe318162f7",
+    "src/renderer/src/lib/native-desktop-host.ts": "6e3c04a50c0b519a572bf3415d5fc1a9154ce0b1a1357a8545f42cbdf5c56a8a",
+    "src/renderer/src/lib/project-scoped-setting.ts": "1f846a63ad422b9d149093a60ac8495a8a8525aa7da6747d4e57cdd0178e264b",
+    "src/renderer/src/stores/canvas-store.ts": "6f9e6364ff113a8d52e31eb310f92162a69fc32bfadb1e23b0b6dd86f1a22726",
+    "src/renderer/src/stores/drawing-store.ts": "ea58c4c6e6c810fb4a2f3201755435c228f165572ef3c22371e25d49fb6ab8bd",
+    "src/renderer/src/stores/production-list-recovery.test.ts": "a8634f1c7250293de2dc6e5623b9b51e271dd52fcbb2df84a025a5b78b8d7e5c",
+    "src/renderer/src/stores/project-store.ts": "ba7acf7289f7918396c9cdca0fac9efc993f5d1c7234c63cc4f39fc59ed9a678",
+    "src/renderer/src/stores/settings-store.ts": "157da6eac9dabde630af34c541b7b8508778c7b5e0f2320e927f473c1d23962e",
+    "src/renderer/src/stores/task-store.ts": "b4576afbecff3429033ccad2e96aa5cf85f74fe8548abfe5739070b1e8eddcf9",
+    "vitest.tauri.config.ts": "ed4e7e03ee234d089a662dd92fe1c8832928d7c17318ab0b92790bd8e7ffd19e"
+  },
+  "artifacts": {
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src-tauri/resources/service/node_modules/better-sqlite3/package.json": {
+      "sha256": "6c9ea355190dfce3646ad4d2a31c9506de36d884a6461b3655a2a0c4ba3d1695",
+      "bytes": 1838
+    },
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": {
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "bytes": 2226168
+    },
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "f50a9bca82ef85eebcc1554e2dbf21ed460e44d702f709de58c8b741e39d7b67",
+      "bytes": 856
+    },
+    "out/tauri-production-renderer/assets/index-Db7ZMBnz.js": {
+      "sha256": "dd05360d6c6e961c0d6d8a4384171dcd6967d1ceec2efbc98da1fff1285ae712",
+      "bytes": 284630
+    },
+    "out/tauri-production-renderer/assets/index-BIZWmUBl.css": {
+      "sha256": "380996d768bf8b9d08075a9ea920bd0eb069ba816cefea801ebfa8d365b16592",
+      "bytes": 130723
+    }
+  },
+  "failuresAndRepairs": [
+    {
+      "failure": "Initial new fixtures omitted required task role and supplied nonempty tasks:refresh payload.",
+      "repair": "Use complete exact task DTO and existing empty-object refresh wire payload; actual codecs enforce both."
+    },
+    {
+      "failure": "Full renderer first failed10 imports after eager project listener setup in helper-only consumers; second had one partial legacy listener failure.",
+      "repair": "Install project listener lazily before first snapshot and preserve optional legacy event support; full146-file renderer run then passes."
+    },
+    {
+      "failure": "Actual project restore exposed native canvas migration-marker write while hydration fenced; fixture teardown also left a raw layout read running.",
+      "repair": "Native layout restore reads scoped/legacy data without writes; Electron copy/marker policy preserved. Fixture joins actual canvas/drawing reads before native host retirement."
+    },
+    {
+      "failure": "Initial standalone preparation refused hostNode22.22, then missing adjacent npm-cli for supplied22.23.2 binary; distro npm/node-gyp selected /usr/include/nodejs headers, native verification failed and explicit node-pty smoke exited139.",
+      "repair": "Use the verified pinned Node22.23.2 distribution and its accompanying npm-cli, then rebuild/verify staged physical addons under the lane. No borrowed node_modules or linked addons; final standalone tests require successful resource verification."
+    }
+  ],
+  "hostedCI": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runs": [],
+    "workflowDispatches": 0,
+    "settingsEndpointsCalled": false
+  },
+  "acceptance": {
+    "issueRemainsOpen": true,
+    "buildCriterion": "Full production renderer build verified; effective feature parity and installed UI remain separate pending criteria.",
+    "remaining": [
+      "Native attachment chooser/import/drop receipt UI and keyboard/window/platform operations coordinate with #214/#215.",
+      "Unbound retained OAuth/updater/voice operations/events remain explicit; final app identity/scheme, Actions and live provider decisions unchanged.",
+      "Complete settings UX, native pending reload/reconnect/recovery, transcript snapshot/delta and listener races require installed native UI evidence on supported targets.",
+      "Dependency #202 and migration gates remain open; no release or data cutover."
+    ]
+  },
+  "constraints": {
+    "liveRelease": false,
+    "liveProfileCutover": false,
+    "electronRetired": false,
+    "hostedVoice": "deferred by user decision"
+  }
+}
