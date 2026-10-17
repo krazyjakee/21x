@@ -1,0 +1,1044 @@
+{
+  "schemaVersion": 1,
+  "issue": 210,
+  "sourceRevision": "cf1032b9b8b8b291a5676e827adcdbe02a6ea680",
+  "baseRevision": "a3d8b2915f4158d4f3542dc1229bf4d1c29e6fe9",
+  "platform": "linux-x64",
+  "scope": "Full existing production project editor configuration, actual Captain/queue effects, Source-private unchanged skill invalidation scopes and every retained #202 row reconciled separately; existing overdue timer advisory reaches scoped private-peer consumers without task transitions",
+  "fixtures": {
+    "profiles": "isolated synthetic only",
+    "provider": "controlled in-memory adapter plus real local Pi protocol child; no account/network/tools",
+    "PATH": "empty directory for actual child",
+    "credentials": "synthetic strings through actual authenticated production owner; no live keys",
+    "microphone": "not used",
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred"
+  },
+  "expected": {
+    "projectEditor": "full existing fields accepted by production-specific codecs; diagnostic owners stay restrictive",
+    "captain": "raw teardown acknowledged before changed selection; failure preserves old config; unrelated session survives; active candidate/edit excludes the other",
+    "queue": "real paused start resumes through same durable admission/FIFO on accepted unpause; stored concurrency survives draft echo",
+    "events": "canonical project events at accepted transaction; project-only skill create/update/delete and old side of scope move; global skill read does not grant foreign project IDs",
+    "credentials": "already implemented authenticated record encryption and marker preservation verified via private peer; documentation corrected",
+    "reconciliation": "each retained command/event has separate runtime registration, codec, authorization and observed proof fields; absent optional/native runtime remains explicit",
+    "overdue": "Actual singleton minute timer, scoped exact empty wire/void API, no task/session/start effects, shutdown quiet"
+  },
+  "initialFailures": [
+    {
+      "command": "pnpm exec vitest --project app",
+      "exitCode": 1,
+      "reason": "Wrong project filter; corrected to main without changing test requirements"
+    },
+    {
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "exitCode": 2,
+      "reason": "New fixture typing/unused imports; helper moved under existing src/service project include, no tsconfig scope change"
+    },
+    {
+      "command": "single-file production project tests",
+      "exitCode": 1,
+      "reason": "Own codec optional-result validator used method this after detachment; corrected to captured validator. Own post-commit receipt rejected its accepted write; updated expected receipt and committed event at transaction boundary. Controlled teardown fixture initially waited on abort rather than actual destroy and attempted prohibited automatic restart; fixture now checks real teardown and no-replay behavior."
+    },
+    {
+      "command": "new final merged settings regression against preceding implementation",
+      "exitCode": 1,
+      "reason": "Preserved concurrency could push combined settings over the bound after the incoming draft passed. Reproduced persisted oversized row despite refused reply; fixed by checking merged settings inside transaction before write. Fixed regression passed."
+    },
+    {
+      "command": "publication gate forced tsc --build --noEmit --force",
+      "exitCode": 1,
+      "reason": "New overdue negative payload array inferred optional undefined union members; annotated actual finite values as JsonValue[]. Validation unchanged."
+    },
+    {
+      "command": "pnpm test:run --project main src/service/project-configuration-backend.test.ts --testNamePattern \"reconciles every\" --reporter=dot",
+      "exitCode": 1,
+      "reason": "Evidence review identified hasOwnerEvent() as codec-table membership, not emitter registration. New actual-owner control reproduced true where runtime registration must remain null/uninspected for event rows; helper now separates actual command registration, uninspected event producers, codec declarations and observed deliveries."
+    }
+  ],
+  "checks": [
+    {
+      "name": "app",
+      "command": [
+        "pnpm",
+        "test:run",
+        "--project",
+        "main",
+        "src/shared/project-configuration-codecs.test.ts",
+        "src/shared/task-lifecycle-codecs.test.ts",
+        "src/main/overdue-notifier.test.ts",
+        "src/shared/configuration-desktop-codecs.test.ts",
+        "src/shared/agent-configuration-codecs.test.ts",
+        "src/shared/project-runtime-codecs.test.ts",
+        "scripts/production-contracts-proof.test.ts",
+        "src/main/agent-manager-project-captains.test.ts",
+        "src/main/agent-manager-configuration.test.ts",
+        "src/main/agent-manager-scoped-approval.test.ts",
+        "src/main/agent-manager-admission.test.ts",
+        "src/service/project-configuration-backend.test.ts",
+        "src/service/agent-configuration-backend.test.ts",
+        "src/service/production-settings-backend.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/production-voice-actions.test.ts",
+        "src/service/project-runtime-backend.test.ts",
+        "src/main/agent-manager-captain-managed.test.ts",
+        "src/main/agent-manager-captain-rollover.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/210-publish-app.json"
+      ],
+      "exitCode": 0,
+      "seconds": 23.97,
+      "log": "/tmp/210-publish-gate-app.log"
+    },
+    {
+      "name": "type",
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "seconds": 34.68,
+      "log": "/tmp/210-publish-gate-type.log"
+    },
+    {
+      "name": "lint",
+      "command": [
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "seconds": 17.11,
+      "log": "/tmp/210-publish-gate-lint.log"
+    },
+    {
+      "name": "stage-database",
+      "command": [
+        "pnpm",
+        "tauri:prepare:database"
+      ],
+      "exitCode": 0,
+      "seconds": 1.42,
+      "log": "/tmp/210-publish-gate-stage-database.log"
+    },
+    {
+      "name": "stage-production",
+      "command": [
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "seconds": 16.31,
+      "log": "/tmp/210-publish-gate-stage-production.log"
+    },
+    {
+      "name": "node",
+      "command": [
+        "pnpm",
+        "test:tauri",
+        "--production-proofs",
+        "src/shared/project-configuration-codecs.test.ts",
+        "src/shared/task-lifecycle-codecs.test.ts",
+        "src/main/overdue-notifier.test.ts",
+        "src/shared/configuration-desktop-codecs.test.ts",
+        "src/shared/agent-configuration-codecs.test.ts",
+        "src/shared/project-runtime-codecs.test.ts",
+        "scripts/production-contracts-proof.test.ts",
+        "src/main/agent-manager-configuration.test.ts",
+        "src/main/agent-manager-scoped-approval.test.ts",
+        "src/service/project-configuration-backend.test.ts",
+        "src/service/agent-configuration-backend.test.ts",
+        "src/service/production-settings-backend.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/production-voice-actions.test.ts",
+        "src/service/project-runtime-backend.test.ts",
+        "src/main/agent-manager-captain-managed.test.ts",
+        "src/main/agent-manager-captain-rollover.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/210-publish-node.json"
+      ],
+      "exitCode": 0,
+      "seconds": 92.4,
+      "log": "/tmp/210-publish-gate-node.log"
+    },
+    {
+      "name": "staged-entry",
+      "command": [
+        "pnpm",
+        "test:tauri",
+        "--production-proofs",
+        "scripts/production-service-proof.test.ts",
+        "--reporter=json",
+        "--outputFile=/tmp/210-publish-staged-entry.json"
+      ],
+      "exitCode": 0,
+      "seconds": 3.58,
+      "log": "/tmp/210-publish-gate-staged-entry.log"
+    },
+    {
+      "name": "engine",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--features",
+        "production-service,synthetic-agent"
+      ],
+      "exitCode": 0,
+      "seconds": 5.9,
+      "log": "/tmp/210-publish-gate-engine.log"
+    },
+    {
+      "name": "engine-production-check",
+      "command": [
+        "cargo",
+        "check",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "-p",
+        "twentyonex-engine",
+        "--no-default-features",
+        "--features",
+        "production-service"
+      ],
+      "exitCode": 0,
+      "seconds": 0.67,
+      "log": "/tmp/210-publish-gate-engine-production-check.log"
+    },
+    {
+      "name": "contract-unit",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "scripts/tauri-contracts.test.ts",
+        "src/shared/desktop-contracts.test.ts",
+        "src/shared/desktop-event-forwarding.test.ts",
+        "--project",
+        "main",
+        "--reporter=json",
+        "--outputFile=/tmp/210-publish-contract-unit.json"
+      ],
+      "exitCode": 0,
+      "seconds": 1.22,
+      "log": "/tmp/210-publish-gate-contract-unit.log"
+    },
+    {
+      "name": "production-frontend",
+      "command": [
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "seconds": 11.56,
+      "log": "/tmp/210-publish-gate-production-frontend.log"
+    },
+    {
+      "name": "shipping-mobile-build",
+      "command": [
+        "pnpm",
+        "build"
+      ],
+      "exitCode": 0,
+      "seconds": 24.29,
+      "log": "/tmp/210-publish-gate-shipping-mobile-build.log"
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "seconds": 3.63,
+      "log": "/tmp/210-publish-gate-inventory.log"
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "seconds": 3.64,
+      "log": "/tmp/210-publish-gate-contracts.log"
+    },
+    {
+      "name": "diff",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "seconds": 0.07,
+      "log": "/tmp/210-publish-gate-diff.log"
+    }
+  ],
+  "remaining": [
+    "Renderer project facade spread/editor regression is coordinated #209 handoff to A after this source publication",
+    "Installed production/native supported-target evidence not run at this revision",
+    "Whole #202 prerequisite remains open; scope unchanged",
+    "Native-dependent settings/identity/auth/voice features remain with their actual domain owners, unsupported effects remain refused",
+    "Real configured provider acceptance and broader learning/checkpoint/source-completion parity retain their separate issue gates; controlled protocols do not prove live providers",
+    "Explicit overdue callback mapping and native project facade/editor are coordinated renderer #209 work; native event codec already finite/accepted"
+  ],
+  "hostedVerify": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+  "workflowDispatches": [],
+  "repositorySettingsChanges": false,
+  "releaseOrLiveCutover": false,
+  "fixtureSchema": {
+    "database": "actual DatabaseManager migrations, synthetic profile only",
+    "transport": "actual fragmented private peer; host-selected caller epoch and domain grant closures",
+    "native": "actual TypeScript request corpus consumed by engine validators",
+    "WebView": "not run by this Source proof; no physical document or installed GUI assertion",
+    "databaseSchemaVersion": 37
+  },
+  "versions": {
+    "hostNode": "v22.22.0",
+    "bundledNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "kernel": "Linux 6.8.0-139-generic x86_64 GNU/Linux",
+    "better-sqlite3": "13.0.3",
+    "node-pty": "1.1.0",
+    "electron": "44.0.0",
+    "vitest": "4.0.18"
+  },
+  "criteria": [
+    {
+      "criterion": 1,
+      "result": "Full editor Source production bindings and real-owner regressions added; renderer/native installed proof not inferred"
+    },
+    {
+      "criterion": 2,
+      "result": "Actual project cap/queue and overdue timer covered; broader learning/checkpoint/remote source parity not claimed"
+    },
+    {
+      "criterion": 3,
+      "result": "Existing actual Agent CRUD/notify/listing/acknowledged teardown reverified with controlled provider"
+    },
+    {
+      "criterion": 4,
+      "result": "Existing authenticated credential format and marker masking reverified; missing native owner effects remain refused"
+    },
+    {
+      "criterion": 5,
+      "result": "Current retained rows individually reconciled; runtime, codec, required authorization and actual observed proof recorded separately"
+    }
+  ],
+  "failureRepairArtifacts": {
+    "210-budget-negative.log": {
+      "sha256": "092d0f00dea941b496b404945b5e95601fcf9b4b3603f7ca80ddbe72349f1780",
+      "bytes": 3861
+    },
+    "210-budget-fixed.log": {
+      "sha256": "1cfe448de5816392db7d8e9a1b8144e2f3085dc69d4cb6ef67b4b39ea2cbceb3",
+      "bytes": 694
+    },
+    "210-overdue-target.log": {
+      "sha256": "de917ed560454bf98e92d5e03f4a8d80460719da19a3ddf6c3e1a534175c1a96",
+      "bytes": 725
+    },
+    "210-publish-attempt-type-failure.json": {
+      "sha256": "723c3c66d7229ca72cd361f57b6db27a4ffcf6773ec421fdf6b470c8c02e0c4e",
+      "bytes": 1604
+    },
+    "210-reconciliation-negative.log": {
+      "sha256": "b67ef6b51ee8c954608d5af1d1e34d67c8890c109f23a598f7e509ff0e894ad4",
+      "bytes": 4113
+    }
+  },
+  "publication": {
+    "fastForwardPush": true,
+    "lsRemoteConfirmed": true,
+    "normalHooks": "passed eslint and tsc --build --noEmit",
+    "rebase": "Native-only21b85e14 plus evidence-only969f5b5d/47f8fa5a; all affected Source/shared/engine/script inputs unchanged; final inventory/contracts/diff rechecked",
+    "concurrentPush": "Initial FF push refused after peer evidence publication; fetched/rebased evidence-only commit and pushed fast-forward. No force push.",
+    "domainSourceRevision": "c1510f37b2975bc60e6cda96f99c5a784a2d1fa6",
+    "reconciliationSourceRevision": "cf1032b9b8b8b291a5676e827adcdbe02a6ea680",
+    "reconciliationSourceLsRemoteConfirmed": true,
+    "unpublishedDraft": "The unpushed evidence draft was replaced locally with the tested reporting correction; no incorrect draft report was published."
+  },
+  "recordedAt": "2026-10-17T23:01:26.831659+00:00",
+  "sourceBaseRevision": "c1510f37b2975bc60e6cda96f99c5a784a2d1fa6",
+  "reconciliationCorrectionChecks": [
+    {
+      "name": "app",
+      "command": [
+        "pnpm",
+        "test:run",
+        "--project",
+        "main",
+        "src/service/project-configuration-backend.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/210-correction-app.json"
+      ],
+      "exitCode": 0,
+      "seconds": 8.53,
+      "log": "/tmp/210-correction-app.log"
+    },
+    {
+      "name": "node",
+      "command": [
+        "pnpm",
+        "test:tauri",
+        "--production-proofs",
+        "src/service/project-configuration-backend.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/210-correction-node.json"
+      ],
+      "exitCode": 0,
+      "seconds": 17.97,
+      "log": "/tmp/210-correction-node.log"
+    },
+    {
+      "name": "type",
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "seconds": 37.64,
+      "log": "/tmp/210-correction-type.log"
+    },
+    {
+      "name": "lint",
+      "command": [
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "seconds": 18.67,
+      "log": "/tmp/210-correction-lint.log"
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "seconds": 3.72,
+      "log": "/tmp/210-correction-inventory.log"
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "seconds": 3.86,
+      "log": "/tmp/210-correction-contracts.log"
+    },
+    {
+      "name": "diff",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "seconds": 0.03,
+      "log": "/tmp/210-correction-diff.log"
+    }
+  ],
+  "actual": {
+    "application": {
+      "numTotalTests": 376,
+      "numPassedTests": 376,
+      "numPendingTests": 0,
+      "numTotalTestSuites": 61,
+      "numPassedTestSuites": 61
+    },
+    "standalone": {
+      "numTotalTests": 304,
+      "numPassedTests": 304,
+      "numPendingTests": 0,
+      "numTotalTestSuites": 44,
+      "numPassedTestSuites": 44
+    },
+    "stagedEntry": {
+      "numTotalTests": 2,
+      "numPassedTests": 2,
+      "numPendingTests": 0,
+      "numTotalTestSuites": 2,
+      "numPassedTestSuites": 2
+    },
+    "contracts": {
+      "numTotalTests": 18,
+      "numPassedTests": 18,
+      "numPendingTests": 0,
+      "numTotalTestSuites": 7,
+      "numPassedTestSuites": 7
+    },
+    "engine": {
+      "passed": 149,
+      "ignored": 6,
+      "failed": 0,
+      "note": "Existing opt-in ignores remain explicit; no new own controls skipped"
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 165,
+      "baselineWarnings": 165
+    },
+    "newProjectControlsPerRuntime": 23,
+    "reconciliationCorrection": {
+      "application": {
+        "numTotalTests": 23,
+        "numPassedTests": 23,
+        "numPendingTests": 0,
+        "numTotalTestSuites": 2,
+        "numPassedTestSuites": 2
+      },
+      "standalone": {
+        "numTotalTests": 46,
+        "numPassedTests": 46,
+        "numPendingTests": 0,
+        "numTotalTestSuites": 3,
+        "numPassedTestSuites": 3
+      }
+    },
+    "appProjectAssertions": [
+      {
+        "name": "actual source production project configuration creates the full editor configuration and one durable Captain with canonical invalidation",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration preserves audited concurrency and drains the real paused project FIFO after a settings update",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration checks the final merged settings budget before persisting preserved concurrency plus new metadata",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration joins exact old Captain teardown before changing selection and preserves an unrelated session",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration refuses selection changes after raw stop failure without persisting or publishing them",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rechecks exact task retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rechecks exact session retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rechecks exact agent retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration keeps the same live Captain on metadata/settings edits and applies real pause state",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration holds raw retirement through cancellation and failed close; revoked scope cannot write after acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rejects project/agent/session scope withdrawal and changed project receipts before any late write",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration retains raw teardown after a real private-peer caller cancellation and suppresses the late project write",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration publishes the accepted project invalidation once when cancellation arrives during event delivery",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration refuses a project edit while an already admitted Captain candidate owns verification",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rejects missing or forbidden references and malformed private requests without a project or Captain",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration uses canonical repo/resource/skill owners, conflict checks and invalidations on the same project",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration keeps agent CRUD/configuration/model notification and teardown on the real lifecycle owner",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration delivers project skill create/update/deletion to a project-only reader with the unchanged event DTO",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration does not disclose a foreign project skill ID to a global-skills reader",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration invalidates the old readable project after a scope move without adding scope metadata to the event",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration retires a real controlled Pi child before project selection publication with system PATH absent",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration delivers the actual single overdue timer through the private peer only to readable scope and stops it at shutdown",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration reconciles every current retained command and event without treating codec presence as a proof",
+        "status": "passed"
+      }
+    ],
+    "nodeProjectAssertions": [
+      {
+        "name": "actual source production project configuration creates the full editor configuration and one durable Captain with canonical invalidation",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration preserves audited concurrency and drains the real paused project FIFO after a settings update",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration checks the final merged settings budget before persisting preserved concurrency plus new metadata",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration joins exact old Captain teardown before changing selection and preserves an unrelated session",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration refuses selection changes after raw stop failure without persisting or publishing them",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rechecks exact task retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rechecks exact session retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rechecks exact agent retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration keeps the same live Captain on metadata/settings edits and applies real pause state",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration holds raw retirement through cancellation and failed close; revoked scope cannot write after acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rejects project/agent/session scope withdrawal and changed project receipts before any late write",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration retains raw teardown after a real private-peer caller cancellation and suppresses the late project write",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration publishes the accepted project invalidation once when cancellation arrives during event delivery",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration refuses a project edit while an already admitted Captain candidate owns verification",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration rejects missing or forbidden references and malformed private requests without a project or Captain",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration uses canonical repo/resource/skill owners, conflict checks and invalidations on the same project",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration keeps agent CRUD/configuration/model notification and teardown on the real lifecycle owner",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration delivers project skill create/update/deletion to a project-only reader with the unchanged event DTO",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration does not disclose a foreign project skill ID to a global-skills reader",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration invalidates the old readable project after a scope move without adding scope metadata to the event",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration retires a real controlled Pi child before project selection publication with system PATH absent",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration delivers the actual single overdue timer through the private peer only to readable scope and stops it at shutdown",
+        "status": "passed"
+      },
+      {
+        "name": "actual source production project configuration reconciles every current retained command and event without treating codec presence as a proof",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration creates the full editor configuration and one durable Captain with canonical invalidation",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration preserves audited concurrency and drains the real paused project FIFO after a settings update",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration checks the final merged settings budget before persisting preserved concurrency plus new metadata",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration joins exact old Captain teardown before changing selection and preserves an unrelated session",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration refuses selection changes after raw stop failure without persisting or publishing them",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration rechecks exact task retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration rechecks exact session retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration rechecks exact agent retirement scope after raw teardown acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration keeps the same live Captain on metadata/settings edits and applies real pause state",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration holds raw retirement through cancellation and failed close; revoked scope cannot write after acknowledgement",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration rejects project/agent/session scope withdrawal and changed project receipts before any late write",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration retains raw teardown after a real private-peer caller cancellation and suppresses the late project write",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration publishes the accepted project invalidation once when cancellation arrives during event delivery",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration refuses a project edit while an already admitted Captain candidate owns verification",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration rejects missing or forbidden references and malformed private requests without a project or Captain",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration uses canonical repo/resource/skill owners, conflict checks and invalidations on the same project",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration keeps agent CRUD/configuration/model notification and teardown on the real lifecycle owner",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration delivers project skill create/update/deletion to a project-only reader with the unchanged event DTO",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration does not disclose a foreign project skill ID to a global-skills reader",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration invalidates the old readable project after a scope move without adding scope metadata to the event",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration retires a real controlled Pi child before project selection publication with system PATH absent",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration delivers the actual single overdue timer through the private peer only to readable scope and stops it at shutdown",
+        "status": "passed"
+      },
+      {
+        "name": "actual staged production project configuration reconciles every current retained command and event without treating codec presence as a proof",
+        "status": "passed"
+      }
+    ]
+  },
+  "hashes": {
+    "committedSource": {
+      "docs/tauri-migration/agent-configuration.md": {
+        "sha256": "96a98dc338db3dd45f7a62f16b819ae1314bce4eb60d996d0ef6d56d852f60e5",
+        "bytes": 4944
+      },
+      "docs/tauri-migration/configuration-integration.md": {
+        "sha256": "546a0d3841e3f478fe652b2d93c3f1f19c1f868ddebe40f37a3bc1686d6f0591",
+        "bytes": 4544
+      },
+      "docs/tauri-migration/event-forwarding-review.json": {
+        "sha256": "e28cc5e167306468eb128ed0ec975e99ca0855edfe1209fed138c916108dc600",
+        "bytes": 15842
+      },
+      "docs/tauri-migration/implementation-status.md": {
+        "sha256": "d1d1f14a7ef82dde0b5c3f33cda1064f056b117b240195f5fbbff36f8c9ea97d",
+        "bytes": 74027
+      },
+      "docs/tauri-migration/inventory.json": {
+        "sha256": "560b3eb734930f9d20da8acfa322d552fcae0f8f5c0670eb69eb70d794714b81",
+        "bytes": 380321
+      },
+      "docs/tauri-migration/operations.json": {
+        "sha256": "dcea0f5b72b146e4a8cd28dea0f0858b752f27e6571d46111901f4cff644ccd1",
+        "bytes": 623379
+      },
+      "docs/tauri-migration/production-project-configuration.md": {
+        "sha256": "c186d929ef053a3799712299af041c1a13c2b960598d83702b7d1e141ec547b5",
+        "bytes": 6313
+      },
+      "docs/tauri-migration/production-settings.md": {
+        "sha256": "01b8b2bf7076dbfd637d621adbf16a11ac5e37b0d93a471ad29b5527a647487d",
+        "bytes": 9132
+      },
+      "scripts/production-contracts-proof.test.ts": {
+        "sha256": "abd2f12924125d85bd9b835d6e5b2b5b543912459bd083adfd733a79cb9d61a6",
+        "bytes": 34022
+      },
+      "scripts/production-contracts-proof.ts": {
+        "sha256": "9bed0d5913ad6746aaa0684e46027e6ae2848d61f5c4c8c0d3ce48245e086211",
+        "bytes": 42089
+      },
+      "src-tauri/engine/src/production_contracts.rs": {
+        "sha256": "bb055a432c759755b4ecaf869a6f99959d8ab0a9905d1b78ff6e9eab45853859",
+        "bytes": 229213
+      },
+      "src/main/agent-manager-core.ts": {
+        "sha256": "e943333e2cc6a15ab307ac47b84658b29fed6ec6e88bfb8e0836c0df3834964a",
+        "bytes": 374262
+      },
+      "src/service/configuration-backend.ts": {
+        "sha256": "53208dd2152b982dc9769634d183316a4335c42d512079d68bbe3d2e3b702cb6",
+        "bytes": 14047
+      },
+      "src/service/production-desktop-bindings.ts": {
+        "sha256": "32dab65ed7e54c2915dbe5eec7b321652a6c7e5d3bd991e1529af690aa0fc41c",
+        "bytes": 47635
+      },
+      "src/service/production-domain-reconciliation.ts": {
+        "sha256": "ee96bf1793dbb0902643197fbc7721bd508ae0cda1e663c5630b61e068f12bb2",
+        "bytes": 9040
+      },
+      "src/service/project-configuration-backend.test.ts": {
+        "sha256": "b03a52878df43dbf3a4d11deff366315edb9162a472746860262b9a29885d66a",
+        "bytes": 40182
+      },
+      "src/service/project-configuration-backend.ts": {
+        "sha256": "6ffc163eb96b0de7b790aa1ab8fc2df75fb8a50a2d8afc43098f47df1d716e2a",
+        "bytes": 12988
+      },
+      "src/shared/desktop-event-forwarding.ts": {
+        "sha256": "46f555d3b8464043204d2d8f98a05eddd25c3a81826165586865e8dc4e07e5d7",
+        "bytes": 15462
+      },
+      "src/shared/project-configuration-codecs.test.ts": {
+        "sha256": "3dcb0a2cd0b532f284d1df47448f790497e43d80fe5c1dc0e49dccef742aad79",
+        "bytes": 3046
+      },
+      "src/shared/project-configuration-codecs.ts": {
+        "sha256": "371375b1554b15a97b9982f8caaa025a4a002457eb57bb6771ccf4752f185056",
+        "bytes": 6993
+      },
+      "src/shared/task-lifecycle-codecs.test.ts": {
+        "sha256": "6c769a8478aa553010f0ebf0741de063173d5470c40f2406d519373d02f3db73",
+        "bytes": 6810
+      },
+      "src/shared/task-lifecycle-codecs.ts": {
+        "sha256": "86141a81720ccb433eba7568c4710dce77ea7ad7d24828542acb83575ef73ab6",
+        "bytes": 14934
+      }
+    },
+    "stagedArtifacts": {
+      "src-tauri/resources/node/node": {
+        "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+        "bytes": 124836408
+      },
+      "src-tauri/resources/native/twentyonex-credential-key": {
+        "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+        "bytes": 25759896
+      },
+      "src-tauri/resources/service/production-engine.mjs": {
+        "sha256": "e8ab58b2bf2c34286fac31eb90d9257d9eced976303463e86ddbf2a2df9eb52b",
+        "bytes": 6207595
+      },
+      "src-tauri/resources/service/production-stdio.mjs": {
+        "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+        "bytes": 19033
+      },
+      "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": {
+        "sha256": "7a9c95346ea62c4bae49119fa6de1b0223b4c29d7938e5084f3ae00f155a6cc1",
+        "bytes": 1261481
+      },
+      "scripts/tauri-runtime.json": {
+        "sha256": "23fe6fb61778a75e30729951e3817640ea48380f6285c9255f8ec34ac7fa5e82",
+        "bytes": 453
+      }
+    },
+    "rawChecks": {
+      "app": {
+        "sha256": "72145d3b2e38111fe4f109777fe6b6d3b6ced56e721ae3b0e0dd173fb5ff1b3c",
+        "bytes": 1165
+      },
+      "type": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "lint": {
+        "sha256": "f315b39cb53e623b5d67bada8e07eb569b5f55d25633bf8083cb4e36f7b031e1",
+        "bytes": 16719
+      },
+      "stage-database": {
+        "sha256": "beafe9efa5d288b68cc28c976bdcd5ebfae38cca05310b74534d52ee787cb95a",
+        "bytes": 306
+      },
+      "stage-production": {
+        "sha256": "bd12acf91db8c4ba75963dbe16988df2d7b528c0dd05174e9190f9d2f6865dae",
+        "bytes": 379
+      },
+      "node": {
+        "sha256": "18bbfe98af574513ebb8546ea027cdc78a038f99de6a055f8dec68459e67f9ab",
+        "bytes": 1544
+      },
+      "staged-entry": {
+        "sha256": "5b96c78648bb4c5ac8aa4c1f7cae7186147637264901ada8aa2f1202168200c6",
+        "bytes": 271
+      },
+      "engine": {
+        "sha256": "ca94b1f525ca433e284e849fb9fd1ba635210158f832e3e4d216621cd0eee799",
+        "bytes": 17765
+      },
+      "engine-production-check": {
+        "sha256": "35852ac2d1aa4cb15cb354cfb795a630cf2892d4c73b6c589e3d1b280147a15f",
+        "bytes": 158
+      },
+      "contract-unit": {
+        "sha256": "962246a1156260c8adeb3fc9ff8ea84eb6d2b7e56e1f6c67f2b852be887f21c5",
+        "bytes": 59
+      },
+      "production-frontend": {
+        "sha256": "b6eee3f297fd9659ac648815f490ef3472e40fd2a16a9f8ae57caa9acf890d31",
+        "bytes": 9737
+      },
+      "shipping-mobile-build": {
+        "sha256": "c0164b598fdeee5e10efbbcb2adc9398ea68e599fba1ca240c85101bd412ab83",
+        "bytes": 29344
+      },
+      "inventory": {
+        "sha256": "58634a3f3563dafa3525e567d4ffcead81bf8f1dc7d57ec80484fe8ae611daff",
+        "bytes": 91
+      },
+      "contracts": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      },
+      "diff": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "rawCorrectionChecks": {
+      "app": {
+        "sha256": "07858672ba125567561a5ead19127a8e804c72229cba3af6c542d9db0ab0b4a8",
+        "bytes": 321
+      },
+      "node": {
+        "sha256": "fa29638c7a338d703254485477d3bfa9ff2dcc00663ba48b9b6a42613c9214bf",
+        "bytes": 449
+      },
+      "type": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "lint": {
+        "sha256": "f315b39cb53e623b5d67bada8e07eb569b5f55d25633bf8083cb4e36f7b031e1",
+        "bytes": 16719
+      },
+      "inventory": {
+        "sha256": "58634a3f3563dafa3525e567d4ffcead81bf8f1dc7d57ec80484fe8ae611daff",
+        "bytes": 91
+      },
+      "contracts": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      },
+      "diff": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    }
+  },
+  "domainOwnerRevision": "c1510f37b2975bc60e6cda96f99c5a784a2d1fa6",
+  "stagedOwnerBuildRevision": "c1510f37b2975bc60e6cda96f99c5a784a2d1fa6",
+  "reconciliation": {
+    "path": "docs/tauri-migration/evidence/issue-210-retained-reconciliation-20261017.json",
+    "sha256": "e49b0315a24d5d5385b019cc6fa455e961afebf77fea73daf12a17096496cbdb",
+    "bytes": 553547,
+    "counts": {
+      "retained": 325,
+      "commands": 273,
+      "events": 52,
+      "sourceRegisteredCommands": 182,
+      "eventRegistrationsNotInspected": 52,
+      "sourceEventCodecs": 34,
+      "sourceCodecs": 263,
+      "nativeClientCodecs": 9
+    }
+  },
+  "hostedRuns": [
+    {
+      "revision": "c1510f37b2975bc60e6cda96f99c5a784a2d1fa6",
+      "runs": [],
+      "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision"
+    },
+    {
+      "revision": "cf1032b9b8b8b291a5676e827adcdbe02a6ea680",
+      "runs": [],
+      "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision"
+    }
+  ]
+}
