@@ -1,0 +1,319 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T23:44:25.791555+00:00",
+  "implementationRevision": "926552c5c8ef9c27ec18118ed7b2e8b08e3027e0",
+  "verificationRevision": "926552c5c8ef9c27ec18118ed7b2e8b08e3027e0",
+  "baseRevision": "0f5154da3541e7b48efcf657fe5a29316f38f0d9",
+  "scope": "Demanded renderer MCP/task-source configuration snapshots and read-only reconnect, accepted CRUD races, explicit sync canonical readback/dedup/sequential selection-bound batch, native per-server MCP UI effect/receipt fences and unavailable browser sign-in. No Source/native/DTO/grant change.",
+  "fixture": {
+    "installed": false,
+    "webview": null,
+    "description": "Actual NativeDesktopHost/client/codecs/transport, real Zustand stores and Tools MCP subsection/form. Controlled native invoke returns exact finite masked metadata. Electron preload absent. Unrelated GlobalCliMcpSection mocked only. No actual Source DB/remote provider/process probe/credential store or installed notification/device work.",
+    "schema": 37,
+    "protocol": 1
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "expectedActual": [
+    {
+      "expected": "Demanded catalogs hydrate without replaying an effect, and unused catalogs issue no read.",
+      "actual": "Both held snapshots join native mutation barrier; each failure leaves it fenced until explicit successful recovery; each repeated invalidation is bounded to eight readbacks. No sync/export/action/probe/browser/process RPC is emitted by these recovery owners."
+    },
+    {
+      "expected": "Accepted catalog writes cannot be overwritten or duplicated by stale list replies.",
+      "actual": "Six create/update/delete versus held-list controls and two canonical-read-before-create controls pass. Two first-create demand controls prove recovery reads without a second write. Two pagehide controls reject late write publication."
+    },
+    {
+      "expected": "Explicit source sync stays literal, joined, canonical and independent from reconnect.",
+      "actual": "Duplicate calls join one public sync. Exact source_id required before canonical task/metadata reads; stored Source last_synced_at is used. Sync-all is sequential and withdraws later starts on selection change. Reconnect never replays sync/readback; exact public busy owner clears on settlement. Preflight retirement releases the queued slot with zero RPC."
+    },
+    {
+      "expected": "Native per-server MCP mount/recovery is metadata-only and stale tests cannot publish success.",
+      "actual": "Actual settings subsection mounts and reconnects with zero testConnection/probe/sign-in calls; explicit button tests once. Reconnect clears old success. Accepted configuration change fences old tools; identical public mask/timestamp credential rotation fences old UI success using local configuration revision."
+    },
+    {
+      "expected": "Browser sign-in remains unavailable until its separate native authority exists.",
+      "actual": "Actual native remote form displays fixed unavailable wording, Connect disabled; editing URL across existing debounce interval invokes no auth probe/sign-in. Existing explicit test/revocation operations retain Source ownership."
+    },
+    {
+      "expected": "OAuth status work remains bounded and cannot become an authority claim.",
+      "actual": "Sequential status-read control stops after first held request on retirement; no late status publication. Code review of OAuthManager.getMcpServerOAuthStatus confirms local DB metadata only. Failed reads are omitted as unknown by the renderer; no installed store-lock or real-provider revocation proof is claimed."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "fullBaseline": {
+      "rendererPassed": 1871,
+      "rendererFiles": 156,
+      "stagedPassed": 668,
+      "stagedFiles": 38,
+      "skipped": 0,
+      "note": "Before final masked-revision and exact-busy cleanup controls. No full-final-suite count is invented."
+    },
+    "finalAffected": {
+      "appPassed": 45,
+      "stagedPassed": 45,
+      "files": 3,
+      "skipped": 0
+    },
+    "finalBusyCleanup": {
+      "appPassed": 28,
+      "stagedPassed": 28,
+      "files": 1,
+      "skipped": 0
+    },
+    "actualTypedNativeControls": 28,
+    "legacyStoreControls": 17,
+    "contractTests": 21,
+    "typecheck": "forced --build --noEmit final affected gate passed; final exact-busy statement also checked by normal source hooks/typecheck",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165,
+      "note": "Final full lint plus final source hook ESLint for all eight touched TS/TSX files passed."
+    },
+    "bothFrontends": "pass",
+    "inventory": {
+      "files": 914,
+      "ipcOperations": 736,
+      "existingUnresolved": 9,
+      "note": "No runtime module added; combined freshness unchanged. E2 inherited exact A project/overdue status paragraph in0f5154da."
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "7a5d76e6ae98ce3eb3b8b81aed1e6ca09a5d5f871a465bd7b3b6551405eb517f",
+          "bytes": 1125707
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/stores/native-resource-catalog-recovery.test.tsx src/renderer/src/stores/mcp-store.test.ts src/renderer/src/stores/task-source-store.test.ts src/renderer/src/components/projects/ProjectEditorDialog.native.test.tsx src/renderer/src/lib/project-editor.test.ts src/renderer/src/hooks/native-overdue.test.tsx src/renderer/src/hooks/use-snooze-tick.test.ts src/renderer/src/components/commander/CommanderChatPane.images.test.tsx src/renderer/src/components/dashboard/DashboardWorkspace.test.tsx src/renderer/src/stores/native-configuration-recovery.test.ts src/renderer/src/stores/skill-store.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx src/renderer/src/stores/overview-store.test.ts src/renderer/src/stores/task-group-store.test.ts src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "f5582085cdfe807a8df9b6956f7518a28aeb6a1f30f2e69b18cb199d5f88772e",
+          "bytes": 161044
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "16fe93ce661b0232010f0c6c3d9b445af35a37e3152bd4c6c8834b304c4a7fbd",
+          "bytes": 533
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "82826a552b00bebf0438af8f19fd5f7c17f9c64c6194a3ec69738e1c7b230418",
+          "bytes": 29267
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "2dfc634b112c6a78f67068c12a1a0ac80c957fa3816a02a46c85a4e86ce2455b",
+          "bytes": 9737
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "58634a3f3563dafa3525e567d4ffcead81bf8f1dc7d57ec80484fe8ae611daff",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run --project renderer src/renderer/src/stores/native-resource-catalog-recovery.test.tsx src/renderer/src/stores/mcp-store.test.ts src/renderer/src/stores/task-source-store.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "3fef4c4456fb1a18866dcb24347371680e38b8ad0d1d296dd0a1d8e09c6cf13c",
+          "bytes": 1167
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/stores/native-resource-catalog-recovery.test.tsx src/renderer/src/stores/mcp-store.test.ts src/renderer/src/stores/task-source-store.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "0babb6eef443b47d2c86b84e1fbe30cc0d9b5184ad4a9f97f09104b524fc39f0",
+          "bytes": 1129
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "45873ad92208c920a7c9de360bc35e8a6d10d2a8b210ecb328eae1cde6955bfc",
+          "bytes": 29267
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "04eb29464fcb281e6fea8da15ecd75e016d5bd93cda6fa3c7e948cd0290dc67a",
+          "bytes": 9737
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "58634a3f3563dafa3525e567d4ffcead81bf8f1dc7d57ec80484fe8ae611daff",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run --project renderer src/renderer/src/stores/native-resource-catalog-recovery.test.tsx",
+        "exitCode": 0,
+        "note": "Final exact public sync busy-owner cleanup, after final45/45 gate",
+        "log": {
+          "sha256": "2e9b268f1252f58fde6b06f46c104f753cd28d0e89bb05dff2d39b5367a96953",
+          "bytes": 920
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/stores/native-resource-catalog-recovery.test.tsx",
+        "exitCode": 0,
+        "note": "Final exact public sync busy-owner cleanup, after final45/45 gate",
+        "log": {
+          "sha256": "225969c445931d3a58c34a28369b85ff516d2382642a221a929558acde885446",
+          "bytes": 864
+        }
+      }
+    ],
+    "scripts": {
+      "ea209-catalog-gate.sh": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer --maxWorkers=4 > /tmp/ea209-catalog-renderer.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-catalog-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/stores/native-resource-catalog-recovery.test.tsx src/renderer/src/stores/mcp-store.test.ts src/renderer/src/stores/task-source-store.test.ts src/renderer/src/components/projects/ProjectEditorDialog.native.test.tsx src/renderer/src/lib/project-editor.test.ts src/renderer/src/hooks/native-overdue.test.tsx src/renderer/src/hooks/use-snooze-tick.test.ts src/renderer/src/components/commander/CommanderChatPane.images.test.tsx src/renderer/src/components/dashboard/DashboardWorkspace.test.tsx src/renderer/src/stores/native-configuration-recovery.test.ts src/renderer/src/stores/skill-store.test.ts src/renderer/src/components/ui/Markdown.native-attachments.test.tsx src/renderer/src/components/ui/Markdown.test.tsx src/renderer/src/components/ui/Markdown.stability.test.tsx src/renderer/src/stores/overview-store.test.ts src/renderer/src/stores/task-group-store.test.ts src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-catalog-staged.log 2>&1\nrtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts > /tmp/ea209-catalog-contract-tests.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-catalog-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-catalog-production-build.log 2>&1\nrtk proxy git diff --check\nrtk proxy node scripts/tauri-inventory.mjs --check > /tmp/ea209-catalog-inventory.log 2>&1\nrtk proxy node scripts/tauri-contracts.mjs --check > /tmp/ea209-catalog-contracts.log 2>&1\n",
+      "ea209-catalog-final-gate.sh": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer src/renderer/src/stores/native-resource-catalog-recovery.test.tsx src/renderer/src/stores/mcp-store.test.ts src/renderer/src/stores/task-source-store.test.ts > /tmp/ea209-catalog-final-app.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/stores/native-resource-catalog-recovery.test.tsx src/renderer/src/stores/mcp-store.test.ts src/renderer/src/stores/task-source-store.test.ts > /tmp/ea209-catalog-final-staged.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-catalog-final-type.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-catalog-final-lint.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-catalog-final-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-catalog-final-production-build.log 2>&1\nrtk proxy node scripts/tauri-inventory.mjs --check > /tmp/ea209-catalog-final-inventory.log 2>&1\nrtk proxy node scripts/tauri-contracts.mjs --check > /tmp/ea209-catalog-final-contracts.log 2>&1\nrtk proxy git diff --check\n"
+    },
+    "hooks": "Final28Node under heavy.lock then normal source hooks/typecheck pass; rebased docs-only0f5154da, combined inventory/contracts and clean status pass before FF publish."
+  },
+  "repairsAndLimits": [
+    "Existing legacy sync fixtures now return the exact literal requested source_id and canonical stored timestamp; assertions are stronger rather than a local invented clock value.",
+    "Initial native24 controls passed; expanded27 and44affected/type passed; baseline1871/668/21contracts passed. Final masked-revision race added and passed45/45, then exact busy-owner cleanup passed28/28 with normal source hooks. No failed gate was masked, no check/bound/assertion weakened.",
+    "The masked-credential race was identified by audit and covered by the new control; no unexecuted old-revision failure is claimed.",
+    "Existing Radix form accessibility description warning remains in console; full lint retains165baseline warnings and zero errors."
+  ],
+  "portableHandoff": {
+    "authorizedBy": "E2 exact request",
+    "includedPaths": [
+      "src/renderer/src/lib/native-attachment-drop-owner.test.ts",
+      "src/shared/native-attachment-drop.test.ts"
+    ],
+    "note": "Only portable config includes carried. E2 modules are not yet in this Source tree; no execution, public native Drop activation or UI binding is claimed."
+  },
+  "sourceFiles": {
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "bb0bb5ff7b615ba09127d0857ec1020356583bc87a9ddefd4935485307212129",
+      "bytes": 23054
+    },
+    "src/renderer/src/components/settings/forms/McpServerFormDialog.tsx": {
+      "sha256": "8708b33536936cd300ba4ff4c797a4699bb859b0e396b93201baf9708bab6056",
+      "bytes": 14371
+    },
+    "src/renderer/src/components/settings/tabs/ToolsMcpSettings.tsx": {
+      "sha256": "f63268e01a5b80ac29d33e3cce12ad175dfda2c768a3c1540d563b5559077c0f",
+      "bytes": 15081
+    },
+    "src/renderer/src/lib/desktop-rehydration.ts": {
+      "sha256": "0460860ed2bd33c3a7fc77cac13c965e4ba523537d1505c5cd0e07fbdac67cef",
+      "bytes": 1290
+    },
+    "src/renderer/src/stores/mcp-store.ts": {
+      "sha256": "b07673c5f2f65c4ea2d543cd4e272c4ae3bb8e1a9bbb095a4cc6f5ab18228eb9",
+      "bytes": 8970
+    },
+    "src/renderer/src/stores/native-resource-catalog-recovery.test.tsx": {
+      "sha256": "a778df9e6e7d79574193f52f30e5a2a5f8e793db8d8c8655b60b183e263b95cb",
+      "bytes": 19116
+    },
+    "src/renderer/src/stores/task-source-store.test.ts": {
+      "sha256": "db6f010634a95bad79035fd1d9b64113f1021a18178be14092097abd93a1d851",
+      "bytes": 6434
+    },
+    "src/renderer/src/stores/task-source-store.ts": {
+      "sha256": "a5109a81220316d0eeaf473dc55b541eb063f5fee681db7aadd0a4d003732071",
+      "bytes": 7152
+    },
+    "vitest.tauri.config.ts": {
+      "sha256": "93ef99f19e3206b9ee62daf97bade3dd66c855f6862ac5535350f9d7a4c3b4fc",
+      "bytes": 13515
+    }
+  },
+  "acceptance": {
+    "newWholeCriteriaChecked": [],
+    "issueRemainsOpen": true,
+    "installedLifecycleProof": false
+  },
+  "remainingDefects": [
+    "Installed supported-target native/renderer lifecycle and explicit #202 prerequisite remain open.",
+    "Native Drop original-context/accept/close graph is in E2 implementation; A UI binding waits published proven contract. DOM drops remain inert.",
+    "Attachment full-array metadata lost-update risk is an A source audit, acknowledged by B/E2; actual Source reproducer/atomic append or CAS contract pending. No UI-only atomicity or implicit save append claimed. Orphan journal remains open.",
+    "MCP form currently closes before async save receipt; per-view receipt/error/draft handling remains a separate renderer gap to repair next.",
+    "Further demanded plugin/artifact resource caches and installed native services/voice/shortcuts/login acceptance remain; external catalog changes without a retained event refresh on explicit read/reconnect."
+  ],
+  "hostedVerification": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runList": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "statusParagraph": "Exact additive catalog paragraph sent to B/E2 current status owner after source publication; no conflicting A status edit.",
+  "limits": [
+    "Controlled invoke/read-model proof does not establish real Source worker, remote provider, system store or installed physical UI behavior.",
+    "No live profile/account/provider/microphone, release/cutover/identity decision or Electron retirement; hosted voice deferred."
+  ]
+}
