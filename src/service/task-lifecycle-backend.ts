@@ -1,3 +1,4 @@
+import { TaskGroupRequestScopeError } from '../main/agent-manager/task-group-request-scope'
 import type { DatabaseManager } from '../main/database/manager'
 import type { CreateTaskData, UpdateTaskData, TaskRecord } from '../main/database/types'
 import type { AgentManager } from '../main/agent-manager-core'
@@ -214,7 +215,14 @@ export class TaskLifecycleBackend {
       invoke: (args, caller, signal) => this.retain((async () => {
         this.available(signal)
         if (!authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
-        const value = await effect(args, caller, signal)
+        const current = (): void => {
+          this.available(signal)
+          if (!authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
+        }
+        const value = await this.options.manager.withTaskGroupRequestGuard(async () => effect(args, caller, signal), current, signal).catch(error => {
+          if (error instanceof TaskGroupRequestScopeError) throw new ServiceProtocolError(error.code)
+          throw error
+        })
         this.available(signal)
         if (read && !authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
         const result = codec.encodeResult(value)
@@ -256,7 +264,7 @@ export class TaskLifecycleBackend {
       const parentIds = [requested.parent_task_id, requested.recurrence_parent_id].filter((id): id is string => !!id)
       const task = parentIds.length ? await manager.runTaskLifecycleMutation(parentIds, create) : await create()
       try {
-        afterTaskCreated(task)
+        manager.runAcceptedTaskEffects(() => afterTaskCreated(task))
         this.available(signal)
         if (start) await startPreparedTask(manager, task.id, true)
         return db.getTask(task.id)
@@ -291,7 +299,7 @@ export class TaskLifecycleBackend {
           if (effects.data.heartbeat_enabled === false) this.options.heartbeat.disableHeartbeat(id)
           else if (effects.data.heartbeat_enabled === true || effects.data.heartbeat_interval_minutes !== undefined && effects.updated.heartbeat_enabled)
             this.options.heartbeat.enableHeartbeat(id, effects.data.heartbeat_interval_minutes ?? undefined)
-          afterTaskUpdated(db, manager, effects.previous, effects.data, db.getTask(id)!)
+          manager.runAcceptedTaskEffects(() => afterTaskUpdated(db, manager, effects.previous, effects.data, db.getTask(id)!))
         }
         this.available(signal)
         if (!this.updateAllowed(id, data, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
@@ -384,7 +392,7 @@ export class TaskLifecycleBackend {
         return { result, effects: result.success ? { previous, updated: db.getTask(id)! } : undefined }
       })
       if (effects) {
-        try { afterTaskUpdated(db, manager, effects.previous, effects.previous.status === effects.updated.status ? {} : { status: effects.updated.status }, effects.updated) }
+        try { manager.runAcceptedTaskEffects(() => afterTaskUpdated(db, manager, effects.previous, effects.previous.status === effects.updated.status ? {} : { status: effects.updated.status }, effects.updated)) }
         finally { this.updated(ids) }
       }
       return result.error === undefined ? result : { ...result, error: 'The task source action could not be completed' }

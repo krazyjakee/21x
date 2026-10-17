@@ -1,3 +1,4 @@
+import { TaskGroupRequestScopeError } from '../main/agent-manager/task-group-request-scope'
 import type { DatabaseManager } from '../main/database/manager'
 import type { AgentRecord, CreateSecretData, UpdateSecretData, SecretRecord } from '../main/database/types'
 import type { AgentManager } from '../main/agent-manager-core'
@@ -155,7 +156,18 @@ export class ProductionSettingsBackend {
       authorize: (args, caller) => { this.available(); return authorize(args, caller) }, invoke: (args, caller, signal) => this.retain((async () => {
         this.available(signal)
         if (!authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
-        const result = await effect(args, caller, signal)
+        const affected = operation === 'secrets:update' || operation === 'secrets:delete'
+          ? this.options.manager.getProductionCredentialAffectedAgents({ kind: 'secret', secretId: args[0] as string }) : []
+        const projects = [...new Set(affected.flatMap(id => this.options.manager.getAgentConfigurationProjectIds(id)))]
+        const current = (): void => {
+          this.available(signal)
+          if (!authorize(args, caller) || projects.some(id => !this.options.canAccessProject(id, caller, 'write')) ||
+            affected.some(id => !this.options.canAccessAgent(id, caller, 'write'))) throw new ServiceProtocolError('INVALID_REQUEST')
+        }
+        const result = await this.options.manager.withTaskGroupRequestGuard(async () => effect(args, caller, signal), current, signal).catch(error => {
+          if (error instanceof TaskGroupRequestScopeError) throw new ServiceProtocolError(error.code)
+          throw error
+        })
         this.available(signal)
         if (read && !authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
         const value = codec.encodeResult(result)

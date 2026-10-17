@@ -21,6 +21,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     if (request.type === 'get_state' && process.argv.some(arg => arg.includes('TWENTYX_SYNTHETIC_CREATE_FAIL'))) out({ type: 'response', command: 'get_state', id: request.id, success: false, error: 'Synthetic startup rejection' })
     else if (request.type === 'get_state') reply(request, { sessionId, isStreaming: true })
     else if (request.type === 'get_messages') reply(request, { messages: [] })
+    else if (request.type === 'get_available_models') reply(request, { models: [{ provider: 'synthetic-provider', id: 'synthetic-model', name: 'Synthetic model' }] })
     else if (request.type === 'prompt') {
       receipt.promptCount++
       receipt.recapReceived = /Synthetic retained reply/.test(request.message)
@@ -49,6 +50,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     else if (request.method === 'session/new') reply(request, { sessionId })
     else if (request.method === 'thread/start') reply(request, { thread: { id: sessionId } })
     else if (request.method === 'thread/read') reply(request, { thread: { id: sessionId, turns: [] } })
+    else if (request.method === 'model/list') reply(request, { data: [{ id: 'synthetic-model', displayName: 'Synthetic model' }], nextCursor: null })
     else reply(request, { data: [] })
   }
 })

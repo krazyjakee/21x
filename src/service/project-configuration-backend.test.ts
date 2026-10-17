@@ -14,7 +14,10 @@ import type { ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { ServicePeer, type OperationSchema } from './transport/peer'
 import type { CodingAgentAdapter } from '../main/adapters/coding-agent-adapter'
 import { PiAdapter } from '../main/adapters/pi-adapter'
+import { CodexAppServerAdapter } from '../main/adapters/codex-app-server-adapter'
 import type { ChatProvider } from '../main/chat/providers/types'
+import type { TaskSourcePlugin, ActionResult } from '../main/plugins/types'
+import { TaskStatus, PluginActionId } from '../shared/constants'
 import type { ProjectRecord } from '../shared/projects'
 import type { AgentRecord } from '../main/database/types'
 import type { ProjectConfigurationBackend } from './project-configuration-backend'
@@ -26,15 +29,17 @@ const cleanups: Array<() => Promise<void>> = []
 const releases: Array<()=>void> = []
 afterEach(async () => {
   for (const release of releases.splice(0)) release()
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
+  const failures: unknown[] = []
+  for (const cleanup of cleanups.splice(0).reverse()) { try { await cleanup() } catch (error) { failures.push(error) } }
   vi.restoreAllMocks()
   vi.useRealTimers()
   vi.unstubAllEnvs()
+  if (failures.length) throw new AggregateError(failures, 'Owned fixture cleanup failed')
 })
 let stagedModule: typeof sourceModule | undefined
 const cases = ['source', ...(process.env.TAURI_PRODUCTION_SERVICE_ENTRY ? ['staged'] : [])]
 const observations = new Map<string, DomainObservations>()
-async function fixture(kind: string) {
+async function fixture(kind: string, controlledProvider?: ChatProvider) {
   const observed = observations.get(kind) ?? { commands: new Map(), events: new Map() }
   observations.set(kind, observed)
   vi.resetModules()
@@ -74,18 +79,18 @@ async function fixture(kind: string) {
   let allowed = true, createProject = true, globalSkillRead = true,
     writes = true,
     adapterChoice: CodingAgentAdapter | undefined
-  const blockedProjects = new Set<string>(), blockedAgents = new Set<string>(), blockedProjectReads = new Set<string>(), blockedSessions = new Set<string>(), blockedTaskWrites = new Set<string>()
+  const blockedProjects = new Set<string>(), blockedAgents = new Set<string>(), blockedProjectReads = new Set<string>(), blockedSessions = new Set<string>(), blockedTaskWrites = new Set<string>(), blockedSources = new Set<string>(), blockedBackendUrls = new Set<string>()
   const check = () => allowed
   const authority: ProductionDesktopBindingOptions['authority'] = {
     isTrustedDesktop: check,
     canAccessTask: (id, _caller, access) => allowed && (access === 'read' || writes && !blockedTaskWrites.has(id)),
     canAccessProject: (id, _caller, access) => allowed && !blockedProjects.has(id) && (access === 'read' ? !blockedProjectReads.has(id) : writes),
     canAccessAgent: (id, _caller, access) => allowed && !blockedAgents.has(id) && (access === 'read' || writes),
-    canAccessSource: check,
+    canAccessSource: id => allowed && !blockedSources.has(id),
     canAccessSession: id => allowed && !blockedSessions.has(id),
     canAccessGlobalCommander: check,
     canManageGlobalConfiguration: check,
-    canQueryBackend: check,
+    canQueryBackend: (_backend, url) => allowed && (url === undefined || !blockedBackendUrls.has(url)),
     canCreateProject: () => allowed && createProject,
     canEditSettings: check,
     canAccessGlobalSkills: (_caller, access) => allowed && (access !== 'read' || globalSkillRead),
@@ -196,7 +201,7 @@ async function fixture(kind: string) {
       boundaries: {
         cliMcp: { homeDir: root, environment: {} },
         createAdapter: () => adapterChoice ?? (adapter as unknown as CodingAgentAdapter),
-        createProvider: () => provider
+        createProvider: () => controlledProvider ?? provider
       },
       constructBootstrap: (callbacks) => ({
         profileId: descriptor.profileId,
@@ -256,20 +261,21 @@ async function fixture(kind: string) {
     return db.getTask(row.id)!
   }
   const bindings = Reflect.get(service, 'bindings') as import('./production-desktop-bindings').ProductionDesktopBindings
-  const command = async (operation: string, args: unknown[]) => {
+  const command = async (operation: string, args: unknown[], signal?: AbortSignal) => {
     const codec = PRODUCTION_COMMAND_CODECS[operation as keyof typeof PRODUCTION_COMMAND_CODECS]
     const payload = codec.encodeArguments(args as never)
     const counter = observed.commands.get(operation) ?? { attempted: 0, succeeded: 0 }; observed.commands.set(operation, counter); counter.attempted++
-    const result = await host.request(operation, payload)
+    const result = await host.request(operation, payload, { signal })
     if (!isOptionalResult(result)) throw new Error('Invalid synthetic peer result')
     const decoded = codec.decodeResult(result.defined ? result.value : undefined); counter.succeeded++
     return decoded as unknown
   }
   return {
-    command, bindings, blockedProjects, blockedProjectReads, blockedAgents, blockedSessions, blockedTaskWrites, onEvent: (hook: typeof eventHook) => { eventHook = hook }, denyGlobalSkillRead: () => { globalSkillRead = false }, denyCreate: () => { createProject = false },
+    command, bindings, blockedBackendUrls, blockedProjects, blockedProjectReads, blockedAgents, blockedSessions, blockedTaskWrites, blockedSources, onEvent: (hook: typeof eventHook) => { eventHook = hook }, denyGlobalSkillRead: () => { globalSkillRead = false }, denyCreate: () => { createProject = false },
     root,
     db,
     manager,
+    services: actual,
     project,
     caller,
     host,
@@ -569,6 +575,311 @@ for (const kind of cases) describe(`actual ${kind} production project configurat
     await f.service.close(); await vi.advanceTimersByTimeAsync(120_000)
     expect(f.events.filter(e => e.operation === 'overdue:check')).toHaveLength(2)
   })
+  it('withdraws agent configuration authority between acknowledged Stops without stopping the next owner', async () => {
+    const f = await fixture(kind), first = f.task('First config owner'), second = f.task('Second config owner'), agent = f.db.getAgents()[0]
+    f.db.updateAgent(agent.id, { config: { coding_agent: 'pi', max_parallel_sessions: 3 } })
+    await f.command('concurrency:pin', [f.project.id, agent.id, 3])
+    await f.manager.startSession(agent.id, first.id, undefined, true)
+    const secondSession = await f.manager.startSession(agent.id, second.id, undefined, true)
+    expect(secondSession).not.toBe(''); expect(f.manager.findSessionByTaskId(second.id)).toBeDefined()
+    const hold = deferred()
+    f.adapter.destroySession.mockImplementationOnce(async () => { await hold.promise })
+    const write = f.command('agent:update', [agent.id, { config: { coding_agent: 'pi', model: 'changed-model', max_parallel_sessions: 3 } }])
+    const rejected = expect(write).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await vi.waitFor(() => expect(f.adapter.destroySession).toHaveBeenCalledTimes(1))
+    f.deny(); hold.resolve(); await rejected
+    expect(f.adapter.destroySession).toHaveBeenCalledTimes(1)
+    expect(f.manager.getSession(secondSession)).toBeDefined()
+    expect(f.db.getAgent(agent.id)?.config.model).toBeUndefined()
+  })
+  it('withdraws secret authority between acknowledged Stops without mutating the key or stopping the next owner', async () => {
+    const f = await fixture(kind), secret = await f.command('secrets:create', [{ name: 'Scoped token', description: '', env_var_name: 'SYNTHETIC_DOMAIN_TOKEN', value: 'synthetic-old' }]) as { id: string }
+    const first = f.task('First secret owner'), second = f.task('Second secret owner'), agent = f.db.getAgents()[0]
+    f.db.updateAgent(agent.id, { config: { coding_agent: 'pi', max_parallel_sessions: 3, secret_ids: [secret.id] } })
+    await f.command('concurrency:pin', [f.project.id, agent.id, 3])
+    await f.manager.startSession(agent.id, first.id, undefined, true)
+    const secondSession = await f.manager.startSession(agent.id, second.id, undefined, true)
+    expect(secondSession).not.toBe(''); expect(f.manager.findSessionByTaskId(second.id)).toBeDefined()
+    const before = f.db.db.prepare('SELECT value FROM secrets WHERE id=?').get(secret.id)
+    const hold = deferred()
+    f.adapter.destroySession.mockImplementationOnce(async () => { await hold.promise })
+    const write = f.command('secrets:update', [secret.id, { value: 'synthetic-new' }])
+    const rejected = expect(write).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await vi.waitFor(() => expect(f.adapter.destroySession).toHaveBeenCalledTimes(1))
+    f.deny(); hold.resolve(); await rejected
+    expect(f.adapter.destroySession).toHaveBeenCalledTimes(1)
+    expect(f.manager.getSession(secondSession)).toBeDefined()
+    expect(f.db.db.prepare('SELECT value FROM secrets WHERE id=?').get(secret.id)).toEqual(before)
+  })
+  it('withdraws subtree authority between acknowledged Stops without deleting rows or stopping the next child', async () => {
+    const f = await fixture(kind), parent = f.db.createTask({ title: 'Owned parent', project_id: f.project.id })!
+    const first = f.task('First child'), second = f.task('Second child'), agent = f.db.getAgents()[0]
+    f.db.updateTask(first.id, { parent_task_id: parent.id }); f.db.updateTask(second.id, { parent_task_id: parent.id })
+    f.db.updateAgent(agent.id, { config: { coding_agent: 'pi', max_parallel_sessions: 3 } })
+    await f.command('concurrency:pin', [f.project.id, agent.id, 3])
+    const firstSession = await f.manager.startSession(agent.id, first.id, undefined, true)
+    const secondSession = await f.manager.startSession(agent.id, second.id, undefined, true)
+    expect(secondSession).not.toBe(''); expect(f.manager.findSessionByTaskId(second.id)).toBeDefined()
+    const hold = deferred()
+    f.adapter.destroySession.mockImplementationOnce(async () => { await hold.promise })
+    const write = f.command('db:deleteTask', [parent.id])
+    const rejected = expect(write).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await vi.waitFor(() => expect(f.adapter.destroySession).toHaveBeenCalledTimes(1))
+    const firstStopped = f.adapter.destroySession.mock.calls[0][0]
+    const retained = firstStopped === firstSession ? { taskId: second.id, sessionId: secondSession } : { taskId: first.id, sessionId: firstSession }
+    f.blockedTaskWrites.add(retained.taskId); hold.resolve(); await rejected
+    expect(f.adapter.destroySession).toHaveBeenCalledTimes(1)
+    expect(f.manager.findSessionByTaskId(retained.taskId)?.sessionId).toBe(retained.sessionId)
+    expect(f.db.getTask(parent.id)).toBeDefined(); expect(f.db.getTask(first.id)).toBeDefined(); expect(f.db.getTask(second.id)).toBeDefined()
+  })
+  it('acknowledges real configuration Stop and notification while metadata edits preserve the live owner', async () => {
+    const f = await fixture(kind), agent = await f.command('agent:create', [{ name: 'Lifecycle agent', config: { coding_agent: 'pi' } }]) as AgentRecord
+    const task = f.db.createTask({ title: 'Configuration target', project_id: f.project.id })!
+    f.db.updateTask(task.id, { agent_id: agent.id })
+    const sessionId = await f.manager.startSession(agent.id, task.id, undefined, true)
+    const renamed = await f.command('agent:update', [agent.id, { name: 'Renamed owner' }]) as AgentRecord
+    expect(renamed.name).toBe('Renamed owner'); expect(f.manager.getSession(sessionId)).toBeDefined()
+    expect(f.adapter.destroySession).not.toHaveBeenCalled(); expect(f.adapter.notifyConfigChanged).not.toHaveBeenCalled()
+    const stop = deferred(), notify = deferred()
+    f.adapter.destroySession.mockImplementationOnce(async () => { await stop.promise })
+    f.adapter.notifyConfigChanged.mockImplementationOnce(async () => { await notify.promise })
+    let settled = false
+    const update = f.command('agent:update', [agent.id, { config: { coding_agent: 'pi', model: 'changed-model' } }]).finally(() => { settled = true })
+    await vi.waitFor(() => expect(f.adapter.destroySession).toHaveBeenCalledTimes(1))
+    expect(f.db.getAgent(agent.id)?.config.model).toBeUndefined(); expect(settled).toBe(false)
+    stop.resolve(); await vi.waitFor(() => expect(f.adapter.notifyConfigChanged).toHaveBeenCalledTimes(1))
+    expect(f.db.getAgent(agent.id)?.config.model).toBe('changed-model'); expect(settled).toBe(false)
+    notify.resolve(); await update
+    expect(f.manager.getSession(sessionId)).toBeUndefined()
+    expect((await f.command('agent:getAll', []) as AgentRecord[]).find(row => row.id === agent.id)?.config.model).toBe('changed-model')
+    expect(await f.command('agent:delete', [agent.id])).toBe(true)
+    expect(f.db.getTask(task.id)?.agent_id).toBeNull()
+  })
+  it('retains accepted configuration on notification refusal and requires explicit successful refresh before another start', async () => {
+    const f = await fixture(kind), task = f.task('Notification target'), agent = f.db.getAgents()[0]
+    await f.manager.startSession(agent.id, task.id, undefined, true)
+    f.adapter.notifyConfigChanged.mockRejectedValueOnce(new Error('Synthetic refresh refusal'))
+    const before = f.events.filter(event => event.operation === 'tasks:refresh').length
+    await expect(f.command('agent:update', [agent.id, { config: { coding_agent: 'pi', model: 'accepted-model' } }])).rejects.toBeDefined()
+    expect(f.db.getAgent(agent.id)?.config.model).toBe('accepted-model')
+    expect(f.events.filter(event => event.operation === 'tasks:refresh')).toHaveLength(before + 1)
+    const next = f.db.createTask({ title: 'After failed refresh', project_id: f.project.id })!
+    f.db.updateTask(next.id, { agent_id: agent.id })
+    await expect(f.manager.startSession(agent.id, next.id, undefined, true)).rejects.toThrow()
+    expect(f.adapter.notifyConfigChanged).toHaveBeenCalledTimes(1)
+    await f.command('agent:update', [agent.id, { config: { coding_agent: 'pi', model: 'accepted-model' } }])
+    expect(f.adapter.notifyConfigChanged).toHaveBeenCalledTimes(2)
+    expect(await f.manager.startSession(agent.id, next.id, undefined, true)).not.toBe('')
+  })
+  it('discovers providers and CLI models through actual controlled Pi and Codex processes with no system PATH or prompts', async () => {
+    const f = await fixture(kind), node = process.env.TAURI_NODE_RUNTIME ?? (!process.versions.electron ? process.execPath : join(process.cwd(), 'src-tauri/resources/node/node'))
+    const empty = join(f.root, 'empty-discovery-path'); mkdirSync(empty)
+    vi.stubEnv('HOME', f.root); vi.stubEnv('PATH', empty); vi.stubEnv('PI_CODING_AGENT_DIR', f.root)
+    vi.stubEnv('TWENTYX_SYNTHETIC_AGENT', '1')
+    for (const protocol of ['pi', 'codex'] as const) {
+      const cli = join(f.root, `controlled-${protocol}.cjs`), receipt = join(f.root, `${protocol}-discovery.json`)
+      writeFileSync(cli, `#!${node}\n` + readFileSync(join(process.cwd(), 'test/fixtures/agent-rpc-process.cjs'), 'utf8'), { mode: 0o700 })
+      vi.stubEnv('TWENTYX_FIXTURE_PROTOCOL', protocol); vi.stubEnv('TWENTYX_FIXTURE_RECEIPT', receipt)
+      if (protocol === 'pi') {
+        const adapter = new PiAdapter(); Object.assign(adapter, { piExecutablePath: cli }); f.useAdapter(adapter); cleanups.push(() => adapter.closeOwnedSessions())
+        expect(await f.command('agentConfig:getProviders', [undefined, 'pi'])).toMatchObject({ providers: [{ id: 'synthetic-provider', models: [{ id: 'synthetic-model' }] }] })
+      } else {
+        const adapter = new CodexAppServerAdapter(); Object.assign(adapter, { codexExecutablePath: cli }); f.useAdapter(adapter); cleanups.push(() => adapter.closeOwnedSessions())
+        expect(await f.command('agentConfig:listModels', ['codex'])).toEqual([{ id: 'synthetic-model', name: 'Synthetic model' }])
+      }
+      const raw = JSON.parse(readFileSync(receipt, 'utf8')) as { pid: number; path: string; promptCount: number }
+      expect(raw.path).toBe(empty); expect(raw.promptCount).toBe(0); expect(() => process.kill(raw.pid, 0)).toThrow()
+    }
+  })
+  it('suppresses a cancelled raw model reply while keeping the actual provider work owned', async () => {
+    const f = await fixture(kind), hold = deferred(), abort = new AbortController()
+    f.adapter.getProviders.mockImplementationOnce(async () => { await hold.promise; return { providers: [{ id: 'synthetic', name: 'Synthetic', models: [{ id: 'late-model', name: 'Late model' }] }], default: {} } })
+    const request = f.command('agentConfig:getProviders', [undefined, 'pi'], abort.signal)
+    const rejected = expect(request).rejects.toMatchObject({ code: 'CANCELLED' })
+    await vi.waitFor(() => expect(f.adapter.getProviders).toHaveBeenCalledTimes(1))
+    abort.abort(); await rejected
+    expect(f.service.owner.snapshot().phase).toBe('ready')
+    hold.resolve(); await vi.waitFor(() => expect(f.host.pendingCount).toBe(0))
+  })
+  it('returns unavailable for a missing cached Codex executable and joins its failed spawn without uncaught errors', async () => {
+    const f = await fixture(kind), adapter = new CodexAppServerAdapter()
+    Object.assign(adapter, { codexExecutablePath: join(f.root, 'absent-codex') }); f.useAdapter(adapter)
+    cleanups.push(() => adapter.closeOwnedSessions())
+    expect(await f.command('agentConfig:listModels', ['codex'])).toBeNull()
+    expect(f.service.owner.snapshot().phase).toBe('ready')
+    expect(await f.command('agent:getAll', [])).toBeInstanceOf(Array)
+    await adapter.closeOwnedSessions()
+  })
+  it('round trips the full provider and secret storage formats through actual peer masking and exact clear/omitted semantics', async () => {
+    const f = await fixture(kind), marker = '__21x_api_key_set__', value = '\uFEFF  synthetic-雪\nsecond-line  '
+    for (const key of ['openai_api_key', 'anthropic_api_key', 'google_api_key', 'cursor_api_key']) {
+      await f.command('settings:set', [key, value])
+      const row = f.db.db.prepare('SELECT value FROM settings WHERE key=?').get(key) as { value: string }
+      expect(row.value).toMatch(/^21x-credential:21x\.aes256gcm\.v1:/); expect(row.value).not.toContain('synthetic-雪')
+      expect(f.db.getSetting(key)).toBe(value); expect(await f.command('settings:get', [key])).toBe(marker)
+      await f.command('settings:set', [key, marker]); expect(f.db.db.prepare('SELECT value FROM settings WHERE key=?').get(key)).toEqual(row)
+      await f.command('settings:set', [key, '']); expect(await f.command('settings:get', [key])).toBe('')
+    }
+    expect(await f.command('settings:get', ['heartbeat_global_instructions'])).toBeNull()
+    const secret = await f.command('secrets:create', [{ name: 'Scoped secret', description: '', env_var_name: 'SYNTHETIC_DOMAIN_TOKEN', value }]) as { id: string }
+    const raw = f.db.db.prepare('SELECT value FROM secrets WHERE id=?').get(secret.id) as { value: Buffer }
+    expect(Buffer.isBuffer(raw.value)).toBe(true); expect(raw.value.toString()).not.toContain('synthetic-雪')
+    expect(f.db.getSecretsWithValues([secret.id])[0]?.value).toBe(value)
+    await f.command('secrets:update', [secret.id, { description: 'Metadata only' }]); expect(f.db.db.prepare('SELECT value FROM secrets WHERE id=?').get(secret.id)).toEqual(raw)
+    const metadata = await f.command('secrets:getAll', []); expect(JSON.stringify(metadata)).not.toContain('synthetic-雪'); expect(JSON.stringify(metadata)).not.toContain('"value"')
+    await f.command('secrets:update', [secret.id, { value: '' }]); expect(f.db.getSecretsWithValues([secret.id])[0]?.value).toBe('')
+    expect(await f.command('secrets:delete', [secret.id])).toBe(true)
+    expect(JSON.stringify(f.events)).not.toContain('synthetic-雪')
+  })
+  it('fences and drains actual Chat Commander and briefing work before the private settings write', async () => {
+    const hold = deferred(), signals: AbortSignal[] = []
+    const provider: ChatProvider = { id: 'controlled', model: 'controlled', async *stream(_request, signal) { signals.push(signal); await hold.promise; yield { type: 'message_end', stopReason: 'end_turn' } } }
+    const f = await fixture(kind, provider)
+    const chat = f.services.chat.startTurn({ provider, messages: [{ role: 'user', content: 'Synthetic chat' }] }, () => {})
+    const session = f.services.commanderStore.createSession(), commander = f.services.commander.sendUserMessage(session.id, 'Synthetic commander'), briefing = f.services.coordination.runBriefingNow()
+    await vi.waitFor(() => expect(signals).toHaveLength(3))
+    const write = f.command('settings:set', ['openai_api_key', 'synthetic-new-key'])
+    await vi.waitFor(() => expect(signals.every(signal => signal.aborted)).toBe(true))
+    expect(f.db.getSetting('openai_api_key')).toBeUndefined()
+    expect(() => f.services.chat.startTurn({ provider, messages: [] }, () => {})).toThrow('CONFIGURATION_CHANGING')
+    hold.resolve(); await Promise.all([chat.done, commander.done, briefing, write])
+    expect(await f.command('settings:get', ['openai_api_key'])).toBe('__21x_api_key_set__')
+    await f.services.chat.startTurn({ provider, messages: [] }, () => {}).done
+  })
+  it('uses real subtask order and recurrence owners while snoozed automation remains dormant', async () => {
+    const f = await fixture(kind), parent = await f.command('db:createTask', [{ title: 'Parent', auto_start_agent: false }]) as import('../main/database/types').TaskRecord
+    const one = await f.command('db:createTask', [{ title: 'First child', parent_task_id: parent.id }]) as typeof parent
+    const two = await f.command('db:createTask', [{ title: 'Second child', parent_task_id: parent.id }]) as typeof parent
+    expect(await f.command('db:reorderSubtasks', [parent.id, [two.id, one.id]])).toBe(true)
+    expect((await f.command('db:getSubtasks', [parent.id]) as typeof parent[]).map(t => t.id)).toEqual([two.id, one.id])
+    await expect(f.command('db:reorderSubtasks', [parent.id, [one.id]])).rejects.toBeDefined()
+    const template = await f.command('db:createTask', [{ title: 'Recurring', is_recurring: true, recurrence_pattern: '0 9 * * 1', auto_start_agent: false }]) as typeof parent
+    expect(template.next_occurrence_at).not.toBeNull()
+    f.db.db.prepare('UPDATE tasks SET next_occurrence_at=? WHERE id=?').run('2026-10-12T09:00:00.000Z', template.id)
+    await f.services.recurrence.runNow(); expect(f.service.owner.snapshot().phase).toBe('ready'); await f.services.recurrence.runNow()
+    expect(f.db.db.prepare('SELECT COUNT(*) AS count FROM tasks WHERE recurrence_parent_id=?').get(template.id)).toEqual({ count: 1 })
+    const instance = f.db.db.prepare('SELECT id FROM tasks WHERE recurrence_parent_id=?').get(template.id) as { id: string }
+    const notice = f.events.find(event => event.operation === 'task:created' && isRecord(event.payload) && isRecord(event.payload.task) && event.payload.task.id === instance.id)
+    expect(notice).toBeDefined(); expect(JSON.stringify(notice)).not.toContain('mcp_scope_nonce')
+    const task = f.task('Snoozed owner')
+    await f.command('db:updateTask', [task.id, { snoozed_until: '2099-01-01T00:00:00.000Z', auto_start_agent: true }])
+    await f.services.automation.runNow(); expect(f.manager.findSessionByTaskId(task.id)).toBeUndefined()
+    await f.command('db:updateTask', [task.id, { snoozed_until: null }]); await f.services.automation.runNow()
+    await vi.waitFor(() => expect(f.manager.findSessionByTaskId(task.id)).toBeDefined())
+    expect(f.events.some(e => e.operation === 'task:subtasks-reordered')).toBe(true)
+  })
+  it('routes source completion through the actual SyncManager and preserves review after refusal or withdrawn source authority', async () => {
+    const f = await fixture(kind)
+    let result: ActionResult = { success: false, error: 'Synthetic refusal' }, wait: Promise<void> | undefined
+    const execute = vi.fn(async (): Promise<ActionResult> => { await wait; return result })
+    const plugin: TaskSourcePlugin = { id: 'notion', displayName: 'Controlled source', description: 'Synthetic local provider boundary', icon: '', getConfigSchema: () => [], getActions: () => [{ id: PluginActionId.Complete, label: 'Complete' }],
+      resolveOptions: async () => [], importTasks: async () => ({ imported: 0, updated: 0, errors: [] }), exportUpdate: async () => {}, executeAction: execute }
+    f.services.registry.register(plugin)
+    const source = await f.command('taskSource:create', [{ name: 'Controlled source', plugin_id: 'notion', mcp_server_id: null, config: { data_source_id: 'synthetic-data' } }]) as { id: string }
+    await f.command('taskSource:update', [source.id, { enabled: false }])
+    const task = f.db.createTask({ title: 'Imported source task', source: 'Controlled source', source_id: source.id, external_id: 'synthetic-external', status: TaskStatus.ReadyForReview, project_id: f.project.id })!
+    expect(await f.command('plugin:executeAction', [PluginActionId.Complete, task.id, source.id])).toMatchObject({ success: false })
+    expect(f.db.getTask(task.id)?.status).toBe(TaskStatus.ReadyForReview)
+    result = { success: true, taskUpdate: { status: TaskStatus.Completed } }; const hold = deferred(); wait = hold.promise
+    const write = f.command('plugin:executeAction', [PluginActionId.Complete, task.id, source.id]); const rejected = expect(write).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2)); f.blockedSources.add(source.id); hold.resolve(); await rejected
+    expect(f.db.getTask(task.id)?.status).toBe(TaskStatus.ReadyForReview)
+    f.blockedSources.clear(); wait = undefined
+    expect(await f.command('plugin:executeAction', [PluginActionId.Complete, task.id, source.id])).toMatchObject({ success: true })
+    expect(f.db.getTask(task.id)?.status).toBe(TaskStatus.Completed)
+    expect(f.events.some(e => e.operation === 'task:updated' && isRecord(e.payload) && e.payload.taskId === task.id)).toBe(true)
+  })
+  it('finishes actual session learning only after workspace skill sync and the user completion choice', async () => {
+    const f = await fixture(kind), task = f.task('Learning owner'), agent = f.db.getAgents()[0]
+    const sessionId = await f.manager.startSession(agent.id, task.id, undefined, true)
+    const session = f.manager.getSession(sessionId)!
+    expect(session.workspaceDir).toBeTruthy()
+    const skillDir = join(session.workspaceDir!, '.agents', 'skills', 'learned-locally')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: learned-locally\ndescription: Synthetic learning\n---\n\nRemember the controlled result.')
+    await f.command('db:updateTask', [task.id, { status: TaskStatus.AgentLearning, feedback_rating: 5, complete_at_source: false }])
+    expect(f.db.getTask(task.id)?.status).toBe(TaskStatus.AgentLearning)
+    const entries = Reflect.get(f.manager, 'pollingEntries') as Map<string, unknown>
+    const entry = entries.get(sessionId)
+    expect(entry).toBeDefined()
+    // Exercise the actual poll/transition owner using controlled provider status;
+    // no DB transition, learning callback or skill-sync result is substituted.
+    const poll = () => Reflect.apply(Reflect.get(f.manager, 'pollSingleSession'), f.manager, [entry]) as Promise<void>
+    await poll()
+    f.adapter.getStatus.mockResolvedValue({ type: 'idle' })
+    await poll()
+    await vi.waitFor(() => expect(f.db.getTask(task.id)?.status).toBe(TaskStatus.Completed))
+    expect(f.db.getSkillByName('learned-locally')).toMatchObject({ content: 'Remember the controlled result.', project_id: f.project.id })
+    expect(f.db.getSetting(`session-feedback-completion:${task.id}`)).toBeUndefined()
+    expect(f.events.some(event => event.operation === 'task:updated' && isRecord(event.payload) && event.payload.taskId === task.id && isRecord(event.payload.updates) && event.payload.updates.status === TaskStatus.Completed)).toBe(true)
+    expect(f.service.owner.snapshot().phase).toBe('ready')
+  })
+  it('enforces the real daily session cap and admits the retained FIFO request only after an authorized limit increase', async () => {
+    const f = await fixture(kind), first = f.task('Daily first'), second = f.task('Daily queued'), agent = f.db.getAgents()[0]
+    f.db.updateAgent(agent.id, { config: { coding_agent: 'pi', max_parallel_sessions: 3 } })
+    await f.command('concurrency:pin', [f.project.id, agent.id, 3])
+    await f.command('project:update', [f.project.id, { settings: { captain_wakeups: { enabled: false }, limits: { daily_session_cap: 1 } } }])
+    const one = await f.command('agentSession:start', [agent.id, first.id, undefined, true]) as { sessionId: string }
+    expect(one.sessionId).not.toBe('')
+    const queued = await f.command('agentSession:start', [agent.id, second.id, undefined, true])
+    expect(queued).toMatchObject({ queued: true, queuePosition: 1, queueReason: 'project_daily_cap' })
+    expect(await f.command('projectLimits:getState', [f.project.id])).toMatchObject({ dailySessionCap: 1, sessionsStartedToday: 1, blockedBy: 'project_daily_cap' })
+    await f.command('agentSession:stopByTaskId', [first.id])
+    expect(f.manager.findSessionByTaskId(second.id)).toBeUndefined()
+    await f.command('project:update', [f.project.id, { settings: { captain_wakeups: { enabled: false }, limits: { daily_session_cap: 2 } } }])
+    await vi.waitFor(() => expect(f.manager.findSessionByTaskId(second.id)).toBeDefined())
+    expect(await f.command('projectLimits:getState', [f.project.id])).toMatchObject({ dailySessionCap: 2, sessionsStartedToday: 2, blockedBy: 'project_daily_cap', queued: [] })
+  })
+  it.each(['agentConfig:getProviders', 'agentConfig:listModels'] as const)('rejects a held %s result after the authorized default endpoint changes instead of publishing the old endpoint models', async operation => {
+    const f = await fixture(kind), agent = f.db.getAgents()[0], hold = deferred(), oldUrl = agent.server_url
+    if (operation === 'agentConfig:getProviders') f.adapter.getProviders.mockImplementationOnce(async () => { await hold.promise; return { providers: [{ id: 'old-target', name: 'Old target', models: [{ id: 'old-model', name: 'Old model' }] }], default: {} } })
+    else f.adapter.listModels.mockImplementationOnce(async () => { await hold.promise; return [{ id: 'old-model', name: 'Old model' }] })
+    const request = f.command(operation, operation === 'agentConfig:getProviders' ? [undefined, 'pi'] : ['pi'])
+    const rejected = expect(request).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await vi.waitFor(() => expect(operation === 'agentConfig:getProviders' ? f.adapter.getProviders : f.adapter.listModels).toHaveBeenCalledTimes(1))
+    await f.command('agent:update', [agent.id, { server_url: 'http://localhost:4097' }])
+    f.blockedBackendUrls.add(oldUrl); hold.resolve(); await rejected
+    expect(f.service.owner.snapshot().phase).toBe('ready')
+    expect((await f.command('agent:getAll', []) as AgentRecord[]).find(row => row.id === agent.id)?.server_url).toBe('http://localhost:4097')
+  })
+  it('keeps the accepted destination backend fenced when the previous backend notification refuses during a backend switch', async () => {
+    const f = await fixture(kind), task = f.task('Switch owner'), agent = f.db.getAgents()[0]
+    await f.manager.startSession(agent.id, task.id, undefined, true)
+    const second = { ...f.adapter, createSession: vi.fn(async () => 'synthetic_codex_session'), notifyConfigChanged: vi.fn(async () => {}) }
+    const other = await f.command('agent:create', [{ name: 'Cached Codex', config: { coding_agent: 'codex' } }]) as AgentRecord
+    const cache = f.db.createTask({ title: 'Cached backend task', project_id: f.project.id })!
+    f.db.updateTask(cache.id, { agent_id: other.id }); f.useAdapter(second as unknown as CodingAgentAdapter)
+    await f.manager.startSession(other.id, cache.id, undefined, true); await f.manager.stopByTaskId(cache.id)
+    f.adapter.notifyConfigChanged.mockRejectedValueOnce(new Error('Synthetic old backend refusal'))
+    await expect(f.command('agent:update', [agent.id, { config: { coding_agent: 'codex', model: 'accepted-model' } }])).rejects.toBeDefined()
+    expect(f.db.getAgent(agent.id)?.config.coding_agent).toBe('codex'); expect(second.notifyConfigChanged).not.toHaveBeenCalled()
+    const next = f.db.createTask({ title: 'New backend task', project_id: f.project.id })!; f.db.updateTask(next.id, { agent_id: agent.id })
+    await expect(f.manager.startSession(agent.id, next.id, undefined, true)).rejects.toThrow()
+    await f.command('agent:update', [agent.id, { config: { coding_agent: 'codex', model: 'accepted-model' } }])
+    expect(second.notifyConfigChanged).toHaveBeenCalledTimes(1)
+    expect(await f.manager.startSession(agent.id, next.id, undefined, true)).not.toBe('')
+  })
+  it('keeps every unrefreshed credential backend fenced after the first actual notification refuses', async () => {
+    const f = await fixture(kind), secret = await f.command('secrets:create', [{ name: 'Shared refresh token', description: '', env_var_name: 'SYNTHETIC_REFRESH_TOKEN', value: 'synthetic-old' }]) as { id: string }
+    const task = f.task('Pi credential owner'), agent = f.db.getAgents()[0]
+    f.db.updateAgent(agent.id, { config: { coding_agent: 'pi', secret_ids: [secret.id] } })
+    await f.manager.startSession(agent.id, task.id, undefined, true)
+    const second = { ...f.adapter, createSession: vi.fn(async () => 'synthetic_other_session'), notifyConfigChanged: vi.fn(async (): Promise<void> => { throw new Error('Synthetic second refusal') }) }
+    const other = await f.command('agent:create', [{ name: 'Other credential owner', config: { coding_agent: 'codex', secret_ids: [secret.id] } }]) as AgentRecord
+    const otherTask = f.db.createTask({ title: 'Codex credential task', project_id: f.project.id })!
+    f.db.updateTask(otherTask.id, { agent_id: other.id }); f.useAdapter(second as unknown as CodingAgentAdapter)
+    await f.manager.startSession(other.id, otherTask.id, undefined, true)
+    f.adapter.notifyConfigChanged.mockRejectedValueOnce(new Error('Synthetic first refusal'))
+    await expect(f.command('secrets:update', [secret.id, { value: 'synthetic-new' }])).rejects.toBeDefined()
+    expect(f.db.getSecretsWithValues([secret.id])[0]?.value).toBe('synthetic-new')
+    const unrefreshed = f.adapter.notifyConfigChanged.mock.calls.length === 0 ? agent : other
+    const next = f.db.createTask({ title: 'Unrefreshed backend task', project_id: f.project.id })!; f.db.updateTask(next.id, { agent_id: unrefreshed.id })
+    await expect(f.manager.startSession(unrefreshed.id, next.id, undefined, true)).rejects.toThrow()
+    f.adapter.notifyConfigChanged.mockReset().mockResolvedValue(undefined); second.notifyConfigChanged.mockReset().mockImplementation(async () => {})
+    await f.command('secrets:update', [secret.id, { value: 'synthetic-new' }])
+    expect(f.adapter.notifyConfigChanged).toHaveBeenCalled(); expect(second.notifyConfigChanged).toHaveBeenCalled()
+    expect(await f.manager.startSession(unrefreshed.id, next.id, undefined, true)).not.toBe('')
+  })
   it('reconciles every current retained command and event without treating codec presence as a proof', async () => {
     const f = await fixture(kind), runtime = f.bindings.operationSchemas(f.caller)
     await f.command('project:update', [f.project.id, { description: 'Reconciliation observation' }])
@@ -584,4 +895,5 @@ for (const kind of cases) describe(`actual ${kind} production project configurat
     expect(report.rows.find(row => row.name === 'voice:startTurn')?.runtimeBinding.sourceRegisteredInThisLaunch).toBe(false)
     if (process.env.TAURI_DOMAIN_RECONCILIATION_REPORT && kind === 'staged') writeFileSync(process.env.TAURI_DOMAIN_RECONCILIATION_REPORT, JSON.stringify({ ...report, runtime: { node: process.version, electron: !!process.versions.electron }, kind }, null, 2) + '\n')
   })
+
 })

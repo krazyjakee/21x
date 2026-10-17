@@ -1,3 +1,4 @@
+import { TaskGroupRequestScopeError } from '../main/agent-manager/task-group-request-scope'
 import type { DatabaseManager } from '../main/database/manager'
 import type { CreateAgentData, UpdateAgentData, AgentConfigRecord } from '../main/database/types'
 import type { AgentManager } from '../main/agent-manager-core'
@@ -123,14 +124,17 @@ export class AgentConfigurationBackend {
     if (db.db.prepare("SELECT 1 FROM task_groups WHERE agent_id=? AND state='active' LIMIT 1").get(id)) return false
     return db.getAgents().filter(agent => agent.config.fallback_agent_ids?.includes(id)).every(agent => this.agentAllowed(agent.id, caller, 'write'))
   }
-  private backendRequest(serverUrl: string | undefined, backend: string | undefined, caller: DesktopCallerContext): AgentConfigurationBackendType | null {
+  private backendTarget(serverUrl: string | undefined, backend: string | undefined, caller: DesktopCallerContext): { backend: AgentConfigurationBackendType; url: string } | null {
     if (!this.options.canManageGlobalConfiguration(caller, 'read')) return null
     const defaults = this.options.database.getAgents()
     const selected = defaults.find(agent => agent.is_default) ?? defaults[0]
     const resolved = backend ?? selected?.config.coding_agent ?? 'opencode'
     const url = serverUrl ?? selected?.server_url ?? DEFAULT_SERVER_URL
     return isAgentConfigurationBackendType(resolved) && isAgentConfigurationServerUrl(url) &&
-      this.options.canQueryBackend(resolved, url, caller) ? resolved : null
+      this.options.canQueryBackend(resolved, url, caller) ? { backend: resolved, url } : null
+  }
+  private backendRequest(serverUrl: string | undefined, backend: string | undefined, caller: DesktopCallerContext): AgentConfigurationBackendType | null {
+    return this.backendTarget(serverUrl, backend, caller)?.backend ?? null
   }
   private committed(): void {
     const payload = this.registry.encodeEvent('tasks:refresh', {}, { principal: 'service', engineEpoch: this.options.engineEpoch })
@@ -148,7 +152,23 @@ export class AgentConfigurationBackend {
         this.available()
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
         if (!authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
-        const result = await effect(args, caller, signal)
+        const query = operation === 'agentConfig:getProviders' ? this.backendTarget(args[0] as string | undefined, args[1] as string | undefined, caller)
+          : operation === 'agentConfig:listModels' ? this.backendTarget(undefined, args[0] as string, caller) : null
+        const projects = operation === 'agent:update' || operation === 'agent:delete' ? this.referencedProjects(args[0] as string) : []
+        const current = (): void => {
+          this.available()
+          if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
+          if (!authorize(args, caller) || projects.some(id => !this.options.canAccessProject(id, caller, 'write'))) throw new ServiceProtocolError('INVALID_REQUEST')
+          if (query) {
+            const now = this.backendTarget(operation === 'agentConfig:getProviders' ? args[0] as string | undefined : undefined,
+              operation === 'agentConfig:getProviders' ? args[1] as string | undefined : args[0] as string, caller)
+            if (!now || now.backend !== query.backend || now.url !== query.url) throw new ServiceProtocolError('INVALID_REQUEST')
+          }
+        }
+        const result = await this.options.manager.withTaskGroupRequestGuard(async () => effect(args, caller, signal), current, signal).catch(error => {
+          if (error instanceof TaskGroupRequestScopeError) throw new ServiceProtocolError(error.code)
+          throw error
+        })
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
         this.available()
         if ((operation.startsWith('agentConfig:') || operation === 'agent:getAll') && !authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
@@ -223,12 +243,13 @@ export class AgentConfigurationBackend {
       } finally { if (accepted) this.committed() }
     })
     this.bind('agentConfig:getProviders', ([url, type], caller) => this.backendRequest(url, type, caller) !== null, async ([url, type], caller, signal) => {
-      const backend = this.backendRequest(url, type, caller)
-      if (!backend) throw new ServiceProtocolError('INVALID_REQUEST')
-      const raw = await manager.getProviders(url, undefined, backend)
+      const target = this.backendTarget(url, type, caller)
+      if (!target) throw new ServiceProtocolError('INVALID_REQUEST')
+      const raw = await manager.getProviders(target.url, undefined, target.backend)
       const projected = AGENT_CONFIGURATION_CODECS['agentConfig:getProviders'].encodeResult(raw)
       const result = AGENT_CONFIGURATION_CODECS['agentConfig:getProviders'].decodeResult(projected.defined ? projected.value : undefined)
-      if (!this.closing && !signal.aborted && this.backendRequest(url, type, caller) !== null) rememberBackendModels(backend, flattenProviderModels(result))
+      const current = this.backendTarget(url, type, caller)
+      if (!this.closing && !signal.aborted && current?.backend === target.backend && current.url === target.url) rememberBackendModels(target.backend, flattenProviderModels(result))
       return result
     })
     this.bind('agentConfig:listModels', ([type], caller) => this.backendRequest(undefined, type, caller) !== null, async ([type]) => manager.listModels(type))

@@ -687,6 +687,17 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     this.liveSessions.add(session)
     this.startOrphanSweep()
 
+    const rejectPending = (message: string): void => {
+      for (const pending of session.pendingRequests.values()) pending.reject(new Error(message))
+      session.pendingRequests.clear()
+    }
+    child.once('error', () => {
+      session.status = SessionStatusType.ERROR
+      session.lastError = 'Codex app-server could not start'
+      session.terminated = true
+      rejectPending(session.lastError)
+    })
+
     onJsonLines(child.stdout, (line) => {
       try {
         this.handleRpcMessage(session, JSON.parse(line) as JsonRpcMessage)
@@ -704,6 +715,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
         session.status = SessionStatusType.ERROR
         session.lastError = `Codex app-server exited with code ${code}`
       }
+      rejectPending(session.lastError ?? 'Codex app-server exited before an RPC reply')
     })
 
     return session

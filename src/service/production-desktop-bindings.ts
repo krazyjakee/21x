@@ -59,7 +59,7 @@ import { AgentConfigurationBackend, type AgentConfigurationBackendOptions } from
 import type { ProductionOwner } from './production-owner'
 import type { DesktopCallerContext } from './transport/desktop-registry'
 import type { OperationSchema } from './transport/peer'
-import { TASK_LIFECYCLE_CODECS, TASK_LIFECYCLE_EVENT_CODECS } from '../shared/task-lifecycle-codecs'
+import { TASK_LIFECYCLE_CODECS, TASK_LIFECYCLE_EVENT_CODECS, projectTaskLifecycleTask } from '../shared/task-lifecycle-codecs'
 import { PRODUCTION_AGENT_CODECS } from '../shared/production-agent-codecs'
 import { PRODUCTION_AGENT_EVENT_CODECS } from '../shared/production-agent-events'
 import { COMMANDER_COMMAND_CODECS, COMMANDER_EVENT_CODECS } from '../shared/commander-desktop-codecs'
@@ -67,7 +67,7 @@ import { AGENT_CONFIGURATION_EVENT_CODECS } from '../shared/agent-configuration-
 import { DATABASE_COMMAND_CODECS, DATABASE_EVENT_CODECS } from '../shared/database-desktop-codecs'
 import { CONFIGURATION_CONTENT_OPERATIONS, CONFIGURATION_COMMAND_CODECS, CONFIGURATION_EVENT_CODECS } from '../shared/configuration-desktop-codecs'
 import { AGENT_CONFIGURATION_CODECS } from '../shared/agent-configuration-codecs'
-import { ServiceProtocolError, isRecord, isJsonValue, type JsonValue } from '../shared/service-protocol'
+import { ServiceProtocolError, isRecord, isJsonValue, hasExactKeys, type JsonValue } from '../shared/service-protocol'
 
 type Authority = Pick<AgentConfigurationBackendOptions, 'isTrustedDesktop' | 'canAccessAgent' | 'canManageGlobalConfiguration' | 'canAccessProject' | 'canQueryBackend'> & {
   canAccessTask(id: string, caller: DesktopCallerContext, access: 'read' | 'write'): boolean
@@ -355,6 +355,7 @@ export class ProductionDesktopBindings {
     if (!this.hasOwnerEvent(operation)) throw new ServiceProtocolError('UNKNOWN_OPERATION')
     try {
       if (operation === 'transcript:changed') payload = encodeDurableTranscriptEvent(this.services.db, payload)
+      if (operation === 'task:created' && isRecord(payload) && hasExactKeys(payload, ['task'])) payload = { task: projectTaskLifecycleTask(payload.task) }
       if (operation === 'tasks:refresh' && payload === undefined) payload = {}
       const codec = PRODUCTION_EVENT_CODECS[operation as keyof typeof PRODUCTION_EVENT_CODECS]
       if ('encodePayload' in codec) return codec.encodePayload(payload as never)

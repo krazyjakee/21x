@@ -1232,6 +1232,10 @@ export class AgentManager extends EventEmitter {
   /** Accepted heartbeat monitoring belongs to the application, after admission. */
   detachedHeartbeatWork<T>(effect: () => T): T { return this.taskGroupRequests.detached(effect) }
 
+  /** Follow-ups of an accepted stored task belong to application schedulers,
+   * not the lifetime of the request which committed that task. */
+  runAcceptedTaskEffects<T>(effect: () => T): T { return this.taskGroupRequests.detached(effect) }
+
   /** A definition/review lease blocks new dispatches while source effects or
    * acknowledged idle teardown finish. Shutdown joins this work before SQLite. */
   async runTaskGroupMutation<T>(taskIds: string[], mutation: () => Promise<T>): Promise<T> {
@@ -1338,6 +1342,7 @@ export class AgentManager extends EventEmitter {
    * leave live sessions intact; runtime edits and deletion acknowledge Stop
    * before committing. Shared backend adapters cannot disrupt another agent. */
   async runAgentConfigurationMutation<T>(agentId: string, kind: 'update' | 'delete', mutation: () => T | Promise<T>, changes?: UpdateAgentData): Promise<T> {
+    this.taskGroupRequests.assertCurrent()
     this.assertWorkspaceCleanupAvailable()
     if (this.shuttingDown) throw new Error('The app is shutting down.')
     if (this.productionCredentialMutation) throw new Error('Wait for the credential change to finish before changing agents.')
@@ -1380,12 +1385,20 @@ export class AgentManager extends EventEmitter {
         }
         if (disruptive) await Promise.all([...taskIds].map(taskId => serializeTaskSend(this, taskId, async () => undefined)))
         if (this.shuttingDown) throw new Error('The app is shutting down.')
+        this.taskGroupRequests.assertCurrent()
         const result = await mutation()
         if (disruptive) {
+          // Every accepted backend must remain fenced until its own refresh
+          // succeeds, even when an earlier notification refuses or loses scope.
+          for (const type of backends) this.failedBackendConfigurations.add(type)
           for (const type of backends) {
             const adapter = this.adapters.get(type)
             if (adapter?.notifyConfigChanged) {
-              try { await this.retainWorkspaceProcessWork(() => adapter.notifyConfigChanged!()) }
+              try {
+                this.taskGroupRequests.assertCurrent()
+                await this.retainWorkspaceProcessWork(() => adapter.notifyConfigChanged!())
+                this.taskGroupRequests.assertCurrent()
+              }
               catch (error) { this.failedBackendConfigurations.add(type); throw error }
             }
             this.failedBackendConfigurations.delete(type)
@@ -1621,6 +1634,7 @@ export class AgentManager extends EventEmitter {
   }
 
   runProductionCredentialMutation<T>(input: ProductionCredentialMutation, mutation: () => T | Promise<T>): Promise<T> {
+    this.taskGroupRequests.assertCurrent()
     this.assertWorkspaceCleanupAvailable()
     if (this.shuttingDown || this.productionCredentialMutation || this.agentConfigurationMutations.size || this.backendConfigurationMutations.size)
       return Promise.reject(new Error('The credential lifecycle is unavailable. Retry after current changes finish.'))
@@ -1657,10 +1671,14 @@ export class AgentManager extends EventEmitter {
         if (this.shuttingDown) throw new Error('The app is shutting down.')
         const current = this.getProductionCredentialAffectedAgents(input)
         if (current.length !== ids.size || current.some(id => !ids.has(id))) throw new Error('Credential references changed. Retry with current scope.')
+        this.taskGroupRequests.assertCurrent()
         const result = await mutation()
+        for (const backend of backends) this.failedBackendConfigurations.add(backend)
         for (const backend of backends) {
           try {
+            this.taskGroupRequests.assertCurrent()
             await this.retainWorkspaceProcessWork(() => this.adapters.get(backend)!.notifyConfigChanged!())
+            this.taskGroupRequests.assertCurrent()
             this.failedBackendConfigurations.delete(backend)
           } catch (error) { this.failedBackendConfigurations.add(backend); throw error }
         }
