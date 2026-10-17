@@ -1,0 +1,553 @@
+{
+  "schemaVersion": 1,
+  "issue": "https://github.com/krazyjakee/21x/issues/216",
+  "recordedAt": "2026-10-17T18:20:57.002998+00:00",
+  "scope": "Local service/worker checkpoint and restart continuation; installed provider/native OAuth acceptance remains open",
+  "implementationRevision": "e40e81e7096108f02bb4e3de709753e06df4d2de",
+  "originalBaseRevision": "1a96edc4",
+  "integrationBaseRevision": "ac318df139c0e55c08589760646975e4040c163e",
+  "sourceFilesSha256": {
+    "src/main/connectors/bridge/engine.ts": "e2ad1e45839f9c94e03ad6bcde3598fdd312325190fc199dddfbe7cf7f47c7f6",
+    "src/main/connectors/connector-store.ts": "e8cf74564421e086c467a038c06749eefd8f9381fadd60a3bb6980185c4e8d2a",
+    "src/main/connectors/piece-host/client.ts": "f2332f863b65053efed2034562514c7551eef3841a662133fba5bc57e524bba9",
+    "src/main/connectors/piece-host/kv-call.ts": "97c8e586fe95d85732ead46fb540ba31808e55aaf80808dcbb029c36c9ac34ea",
+    "src/main/connectors/piece-host/node-transport.ts": "461d5b6ffced00bd0323df806443dea49555ba289596891c6b9c81d05d967f07",
+    "src/main/connectors/piece-host/node-transport.test.ts": "120a9ed2067a791d7e428d30bab636a8e93e92a6b981b495f367cd26e5e354a9",
+    "src/main/connectors/piece-host/piece-host.test.ts": "fbd42e941b46ca3d3ac3fbf42eb4273e8bcc9d313d73dcdc37947a32812498ad",
+    "test/fixtures/piece-lifecycle-worker.ts": "6482900b3c9ff542284be28c579fcd61833485055c9afe309960c3893993f37d",
+    "docs/tauri-migration/connector-production.md": "4f1a32bd3774ac922b6bce483420fa8694b5e7087de599ffffe0ff84c0d2a5cd",
+    "docs/tauri-migration/implementation-status.md": "6962f81830ac22fd7b432d50d23e4eec4e2b9ac82202bf43c3f23b16ee163ca5"
+  },
+  "environment": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "distribution": {
+      "NAME": "Linux Mint",
+      "ID": "linuxmint",
+      "PRETTY_NAME": "Linux Mint 22.3",
+      "VERSION": "22.3 (Zena)",
+      "ID_LIKE": "ubuntu debian",
+      "VERSION_ID": "22.3",
+      "HOME_URL": "https://www.linuxmint.com/",
+      "SUPPORT_URL": "https://forums.linuxmint.com/",
+      "BUG_REPORT_URL": "http://linuxmint-troubleshooting-guide.readthedocs.io/en/latest/",
+      "PRIVACY_POLICY_URL": "https://www.linuxmint.com/",
+      "VERSION_CODENAME": "zena",
+      "UBUNTU_CODENAME": "noble"
+    },
+    "standaloneNode": "v22.23.2",
+    "legacyElectron": "44.0.0",
+    "sqlite": "13.0.3",
+    "vitest": "4.0.18",
+    "webView": "Not exercised by service/worker checks"
+  },
+  "fixtures": {
+    "profiles": "Only disposable synthetic temporary SQLite files; no live profile/data accessed",
+    "schema": 37,
+    "credentials": "Authenticated AES-256-GCM test provider and synthetic canaries; persistent ciphertext reopened under the same test provider. Existing credential suite checks session-only behavior. No OS-store/final-identity acceptance claimed.",
+    "provider": "Compiled production host loop with explicit synthetic package loader for failure controls; separate staged proof loads unchanged pinned Trello/Todoist local hooks. No real provider account/API or external browser flow used."
+  },
+  "additionalChecks": {
+    "results": {
+      "journal-final": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "files": 1,
+        "reportSha256": "1f517653341e93ba61bcd9e955a2a59d7777120514a50266a74860300fd74d9c"
+      },
+      "rebase": {
+        "passed": 191,
+        "failed": 0,
+        "skipped": 0,
+        "files": 9,
+        "reportSha256": "d0d902e37b73e45142e9fae201640cde6e7361d37cc9c3ed716d682870f4aaa6"
+      },
+      "final-integration": {
+        "passed": 80,
+        "failed": 0,
+        "skipped": 0,
+        "files": 5,
+        "reportSha256": "d8b4f32847b96b4af008fdf1c053d17a309154a6f7b05640250317cfbe6325cd"
+      }
+    },
+    "finalCommands": [
+      "rtk proxy pnpm exec tsc --build --noEmit --force > /tmp/216-final-typecheck.log 2>&1",
+      "rtk pnpm test:tauri -- src/service/production-owner.test.ts src/service/production-service.test.ts src/service/production-task-mcp.test.ts src/service/task-mcp-stdio-proxy.test.ts scripts/tauri-stage-production.test.ts --reporter=json --outputFile=/tmp/216-final-integration.json > /tmp/216-final-integration.log 2>&1",
+      "rtk node scripts/tauri-inventory.mjs --check > /tmp/216-final-inventory.log 2>&1",
+      "rtk node scripts/tauri-contracts.mjs --check > /tmp/216-final-contracts.log 2>&1",
+      "rtk git diff --check > /tmp/216-final-diff.log 2>&1"
+    ],
+    "journalFinal": "Focused 22-case journal/client suite passed after improving the key-count limit error, then normal source commit hooks passed.",
+    "rebaseIntegration": "191 actual standalone cases, including all real child controls, passed after inheriting MCP/terminal source. Final integration additionally checks the signed task-stdio publication.",
+    "inventoryRepair": "Coordinated #213 live-claim release, inherited d62f7bd6, then added only kv-call.ts to generated inventory and incremented the source count from 888 to 889. Public operation metadata is unchanged."
+  },
+  "gate": {
+    "ownership": "Every combined gate and commit-hook typecheck runs under flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "commands": [
+      "rtk proxy pnpm typecheck > /tmp/216-typecheck.log 2>&1",
+      "rtk pnpm lint > /tmp/216-lint.log 2>&1",
+      "rtk node scripts/check-connector-pieces.mjs > /tmp/216-pieces.log 2>&1",
+      "rtk pnpm test:run --maxWorkers=2 src/main/connectors src/main/oauth src/main/sync-manager.test.ts src/main/sync-manager-lifetime.test.ts src/service/connector-backend.test.ts src/service/task-source-backend.test.ts src/service/task-source-plugin-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts --reporter=json --outputFile=/tmp/216-legacy.json > /tmp/216-legacy.log 2>&1",
+      "rtk pnpm tauri:prepare:database > /tmp/216-stage-database.log 2>&1",
+      "rtk pnpm tauri:prepare:connectors > /tmp/216-stage-connectors.log 2>&1",
+      "rtk pnpm test:tauri -- --service-proofs src/main/connectors src/main/oauth src/main/sync-manager.test.ts src/main/sync-manager-lifetime.test.ts src/service/connector-backend.test.ts src/service/task-source-backend.test.ts src/service/task-source-plugin-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts scripts/connector-worker-service-proof.test.ts --reporter=json --outputFile=/tmp/216-standalone.json > /tmp/216-standalone.log 2>&1",
+      "rtk git diff --check > /tmp/216-diff-check.log 2>&1"
+    ],
+    "expected": "All affected tests pass; Node-only controls run under standalone; prior cursor survives failed calls/writes; successful task import, sync state and KV commit atomically; actual child closes before resources release; no raw credentials in errors.",
+    "actual": {
+      "legacy": {
+        "passed": 360,
+        "failed": 0,
+        "skipped": 12,
+        "files": 27,
+        "reportSha256": "e18db39a87df8066cc15afe78099f1d2d752e959ff2fcc861430b3ea5fe7f784",
+        "controls": [
+          {
+            "test": "standalone connector worker transport shares the minimal HTTP environment without inheriting credentials, preloads or Electron mode",
+            "status": "passed",
+            "durationMs": 1.03
+          },
+          {
+            "test": "standalone connector worker transport rejects a PATH-based entry before launching a worker",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "standalone connector worker transport uses owning Node, preserves structured data and joins actual close with system Node hidden",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "standalone connector worker transport runs the real compiled host and pinned Trello disable hook over Node IPC",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership commits call-local reads, writes and deletes only to its instance and reopens encrypted credentials",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership keeps the durable checkpoint after error and admits a fresh worker call",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership keeps the durable checkpoint after crash and admits a fresh worker call",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership keeps the durable checkpoint after timeout and admits a fresh worker call",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership keeps the durable checkpoint after cancel and admits a fresh worker call",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership rolls back the entire successful result if a later SQLite edit fails",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership commits imported tasks and worker checkpoint together, retaining the old cursor across failed commit and reopen",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership rolls back trigger initialization when its durable enable marker cannot be saved",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership retains the previous checkpoint if a staged value exceeds the existing cap",
+            "status": "skipped",
+            "durationMs": 0
+          },
+          {
+            "test": "piece host credential-read lifetime retains a raw credential read after public disposal and a bounded close deadline",
+            "status": "passed",
+            "durationMs": 11.6
+          },
+          {
+            "test": "piece host credential-read lifetime requires an actual worker exit acknowledgement after requesting kill",
+            "status": "passed",
+            "durationMs": 11.81
+          },
+          {
+            "test": "piece host credential-read lifetime joins a raw KV callback after its call and worker have been cancelled",
+            "status": "passed",
+            "durationMs": 10.93
+          },
+          {
+            "test": "piece host credential-read lifetime joins normal worker exit and refuses new calls after close",
+            "status": "passed",
+            "durationMs": 0.5
+          },
+          {
+            "test": "piece host credential-read lifetime does not spawn a worker when credentials resolve after cancel",
+            "status": "passed",
+            "durationMs": 0.74
+          },
+          {
+            "test": "piece host credential-read lifetime does not spawn a worker when credentials resolve after timeout",
+            "status": "passed",
+            "durationMs": 10.64
+          },
+          {
+            "test": "piece host credential-read lifetime does not spawn a worker when credentials resolve after dispose",
+            "status": "passed",
+            "durationMs": 0.28
+          },
+          {
+            "test": "piece host credential-read lifetime does not let a cancelled credential read replace the next call owner",
+            "status": "passed",
+            "durationMs": 1.2
+          },
+          {
+            "test": "PieceHostClient + host runtime runs an action through IPC and returns its output, with auth resolved per call",
+            "status": "passed",
+            "durationMs": 0.9
+          },
+          {
+            "test": "PieceHostClient + host runtime scopes context.store to the calling instance",
+            "status": "passed",
+            "durationMs": 0.76
+          },
+          {
+            "test": "PieceHostClient + host runtime surfaces a host crash as PieceHostCrashedError and restarts on the next call",
+            "status": "passed",
+            "durationMs": 0.46
+          },
+          {
+            "test": "PieceHostClient + host runtime kills the host on timeout and serves the next call from a fresh one",
+            "status": "passed",
+            "durationMs": 50.98
+          },
+          {
+            "test": "PieceHostClient + host runtime cancels through an AbortSignal and kills the host",
+            "status": "passed",
+            "durationMs": 20.81
+          },
+          {
+            "test": "PieceHostClient + host runtime throws UnsupportedPieceContext for flow control, webhook URLs and scheduling, even when swallowed",
+            "status": "passed",
+            "durationMs": 1.32
+          },
+          {
+            "test": "PieceHostClient + host runtime refuses non-allowlisted pieces, versions, actions and non-polling triggers",
+            "status": "passed",
+            "durationMs": 0.71
+          },
+          {
+            "test": "PieceHostClient + host runtime redacts the credential from piece error messages",
+            "status": "passed",
+            "durationMs": 0.53
+          },
+          {
+            "test": "PieceHostClient + host runtime applies the SSRF guard to allowlisted URL props",
+            "status": "passed",
+            "durationMs": 2.29
+          },
+          {
+            "test": "polling trigger cursor in connector_kv atomic checkpoint failures does not advance the polling cursor when the piece throws after its store write",
+            "status": "passed",
+            "durationMs": 3451.39
+          },
+          {
+            "test": "polling trigger cursor in connector_kv atomic checkpoint failures rolls back earlier edits if a later edit fails during atomic SQLite commit",
+            "status": "passed",
+            "durationMs": 2838.94
+          },
+          {
+            "test": "polling trigger cursor in connector_kv persists the cursor across a simulated app restart",
+            "status": "passed",
+            "durationMs": 2957.93
+          },
+          {
+            "test": "bounded call KV journal isolates scopes, snapshots values and prevents late writes after discard",
+            "status": "passed",
+            "durationMs": 0.51
+          },
+          {
+            "test": "bounded call KV journal bounds delete-only and overwritten journals before durable writes",
+            "status": "passed",
+            "durationMs": 3.95
+          }
+        ]
+      },
+      "standalone": {
+        "passed": 367,
+        "failed": 0,
+        "skipped": 0,
+        "files": 27,
+        "reportSha256": "647aac2ddbaaf0c386154e81f72d2aa971a3f9f42b3a52cff7ccce33cb2a4249",
+        "controls": [
+          {
+            "test": "staged connector worker resources runs both pinned local hooks from contained resources with system Node hidden",
+            "status": "passed",
+            "durationMs": 158.24
+          },
+          {
+            "test": "standalone connector worker transport shares the minimal HTTP environment without inheriting credentials, preloads or Electron mode",
+            "status": "passed",
+            "durationMs": 1.42
+          },
+          {
+            "test": "standalone connector worker transport rejects a PATH-based entry before launching a worker",
+            "status": "passed",
+            "durationMs": 0.77
+          },
+          {
+            "test": "standalone connector worker transport uses owning Node, preserves structured data and joins actual close with system Node hidden",
+            "status": "passed",
+            "durationMs": 26.17
+          },
+          {
+            "test": "standalone connector worker transport runs the real compiled host and pinned Trello disable hook over Node IPC",
+            "status": "passed",
+            "durationMs": 293.45
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership commits call-local reads, writes and deletes only to its instance and reopens encrypted credentials",
+            "status": "passed",
+            "durationMs": 3038.27
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership keeps the durable checkpoint after error and admits a fresh worker call",
+            "status": "passed",
+            "durationMs": 3169.73
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership keeps the durable checkpoint after crash and admits a fresh worker call",
+            "status": "passed",
+            "durationMs": 3170.47
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership keeps the durable checkpoint after timeout and admits a fresh worker call",
+            "status": "passed",
+            "durationMs": 3634.02
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership keeps the durable checkpoint after cancel and admits a fresh worker call",
+            "status": "passed",
+            "durationMs": 3189.17
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership rolls back the entire successful result if a later SQLite edit fails",
+            "status": "passed",
+            "durationMs": 3164.96
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership commits imported tasks and worker checkpoint together, retaining the old cursor across failed commit and reopen",
+            "status": "passed",
+            "durationMs": 3437.21
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership rolls back trigger initialization when its durable enable marker cannot be saved",
+            "status": "passed",
+            "durationMs": 3502.37
+          },
+          {
+            "test": "real Node connector failure and checkpoint ownership retains the previous checkpoint if a staged value exceeds the existing cap",
+            "status": "passed",
+            "durationMs": 3118.82
+          },
+          {
+            "test": "piece host credential-read lifetime retains a raw credential read after public disposal and a bounded close deadline",
+            "status": "passed",
+            "durationMs": 11.83
+          },
+          {
+            "test": "piece host credential-read lifetime requires an actual worker exit acknowledgement after requesting kill",
+            "status": "passed",
+            "durationMs": 12.14
+          },
+          {
+            "test": "piece host credential-read lifetime joins a raw KV callback after its call and worker have been cancelled",
+            "status": "passed",
+            "durationMs": 11.19
+          },
+          {
+            "test": "piece host credential-read lifetime joins normal worker exit and refuses new calls after close",
+            "status": "passed",
+            "durationMs": 0.59
+          },
+          {
+            "test": "piece host credential-read lifetime does not spawn a worker when credentials resolve after cancel",
+            "status": "passed",
+            "durationMs": 0.7
+          },
+          {
+            "test": "piece host credential-read lifetime does not spawn a worker when credentials resolve after timeout",
+            "status": "passed",
+            "durationMs": 10.51
+          },
+          {
+            "test": "piece host credential-read lifetime does not spawn a worker when credentials resolve after dispose",
+            "status": "passed",
+            "durationMs": 0.38
+          },
+          {
+            "test": "piece host credential-read lifetime does not let a cancelled credential read replace the next call owner",
+            "status": "passed",
+            "durationMs": 1.33
+          },
+          {
+            "test": "PieceHostClient + host runtime runs an action through IPC and returns its output, with auth resolved per call",
+            "status": "passed",
+            "durationMs": 1.07
+          },
+          {
+            "test": "PieceHostClient + host runtime scopes context.store to the calling instance",
+            "status": "passed",
+            "durationMs": 0.92
+          },
+          {
+            "test": "PieceHostClient + host runtime surfaces a host crash as PieceHostCrashedError and restarts on the next call",
+            "status": "passed",
+            "durationMs": 0.57
+          },
+          {
+            "test": "PieceHostClient + host runtime kills the host on timeout and serves the next call from a fresh one",
+            "status": "passed",
+            "durationMs": 50.04
+          },
+          {
+            "test": "PieceHostClient + host runtime cancels through an AbortSignal and kills the host",
+            "status": "passed",
+            "durationMs": 19.77
+          },
+          {
+            "test": "PieceHostClient + host runtime throws UnsupportedPieceContext for flow control, webhook URLs and scheduling, even when swallowed",
+            "status": "passed",
+            "durationMs": 1.38
+          },
+          {
+            "test": "PieceHostClient + host runtime refuses non-allowlisted pieces, versions, actions and non-polling triggers",
+            "status": "passed",
+            "durationMs": 0.78
+          },
+          {
+            "test": "PieceHostClient + host runtime redacts the credential from piece error messages",
+            "status": "passed",
+            "durationMs": 0.6
+          },
+          {
+            "test": "PieceHostClient + host runtime applies the SSRF guard to allowlisted URL props",
+            "status": "passed",
+            "durationMs": 4.89
+          },
+          {
+            "test": "polling trigger cursor in connector_kv atomic checkpoint failures does not advance the polling cursor when the piece throws after its store write",
+            "status": "passed",
+            "durationMs": 2725.4
+          },
+          {
+            "test": "polling trigger cursor in connector_kv atomic checkpoint failures rolls back earlier edits if a later edit fails during atomic SQLite commit",
+            "status": "passed",
+            "durationMs": 2703.44
+          },
+          {
+            "test": "polling trigger cursor in connector_kv persists the cursor across a simulated app restart",
+            "status": "passed",
+            "durationMs": 3041.25
+          },
+          {
+            "test": "bounded call KV journal isolates scopes, snapshots values and prevents late writes after discard",
+            "status": "passed",
+            "durationMs": 0.63
+          },
+          {
+            "test": "bounded call KV journal bounds delete-only and overwritten journals before durable writes",
+            "status": "passed",
+            "durationMs": 4.43
+          }
+        ]
+      }
+    },
+    "typecheck": "passed",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "allowlistPinsLicenses": "passed with existing reviewed MIT license exceptions; no pin/license changes",
+    "stagedPinnedWorker": "passed actual Trello 0.6.0/Todoist 0.5.0 local hooks, owning Node, PATH empty",
+    "diffCheck": "passed"
+  },
+  "failureRepairs": [
+    {
+      "problem": "Initial preparation used system Node 22.22.0 instead of required 22.23.2",
+      "repair": "Explicitly copied pinned standalone Node into this worktree using tauri-prepare --node."
+    },
+    {
+      "problem": "System npm selected incompatible system Node headers for staged node-pty; native smoke failed",
+      "repair": "Removed only generated isolated node-pty build output and reran native preparation using Node-managed npm; verification passed. No live or shared node_modules used."
+    },
+    {
+      "problem": "Two new legacy tests included on-disk schema creation in the five-second test body and exceeded the deadline during parallel execution (5.8/6.7 seconds).",
+      "repair": "Moved setup into beforeEach fixtures; assertions and test deadlines unchanged. Reran the entire affected gate with bounded legacy worker concurrency.",
+      "initialReportSha256": "eb073db20428e291a6575c1ab7db6d74471a21cae270469074ddce24e9f89c2e"
+    }
+  ],
+  "precommitRepair": {
+    "problem": "Normal unfiltered commit-hook typecheck caught TS18046 in a new assertion after the initial RTK-filtered typecheck reported success.",
+    "repair": "Assert redaction through String(error), retain the explicit error-class assertion, rerun actual pnpm typecheck through rtk proxy and repeat the affected gate and normal hooks."
+  },
+  "diagnosticRedaction": {
+    "canaryScan": "Synthetic connector credential absent from retained current legacy/standalone/rebase reports and logs. Actual canary value omitted."
+  },
+  "localLicensePreparation": {
+    "command": "cp /mnt/Rusty/GitHub/21x/src-tauri/resources/node/LICENSE src-tauri/resources/node/LICENSE",
+    "actual": "Copied the companion license from the same pinned Node source directory used for this worktree runtime; local tauri-prepare --node copied only its executable. Redistribution review remains incomplete."
+  },
+  "artifacts": {
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src-tauri/resources/node/LICENSE": {
+      "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4",
+      "bytes": 145485
+    },
+    "src-tauri/resources/service/piece-host.cjs": {
+      "sha256": "3b81e6581955b46ce3c1761bda9d9b51e7620a19811fa188bdff46f1b053eb33",
+      "bytes": 24496
+    },
+    "src-tauri/resources/service/CONNECTOR_WORKER_MANIFEST.json": {
+      "sha256": "d1ccb14406afa54094a70cfcccb9bf2d79f64268b626e0b0b5697b5ef69d6a64",
+      "bytes": 2083
+    },
+    "src-tauri/resources/service/.native-prepared.json": {
+      "sha256": "9eff3c971ce9eeba197c0ac4b049dea30bc5301b7311e25a84151d49c854d4ef",
+      "bytes": 396
+    },
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": {
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+      "bytes": 2226168
+    }
+  },
+  "redistributionReviewComplete": false,
+  "hostedVerification": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "authority": "Lead/user standing instruction; no settings endpoints called and no workflow dispatched",
+    "runIds": []
+  },
+  "remainingGaps": [
+    "Full issue prerequisites #208 and #215 remain open; production hidden-window, crash/process-tree and installed native acceptance are not established by this local continuation.",
+    "Native OAuth warm/cold callbacks, token refresh/revoke under final app identity and supported twentyonex/nuanu registration are not implemented/proven here; production oauthBrowser remains unavailable.",
+    "Representative retained connector provider APIs and installed production resources/credentials on macOS x64/arm64, Windows x64 and Linux remain unproven. The preview app identifier is not the final shipping identity.",
+    "Redistribution review and all complete G3/platform acceptance remain open. SQLite rollback cannot undo accepted external provider side effects.",
+    "Hosted Verify and platform workflows blocked by Actions-disabled user decision. No live release/data cutover or Electron retirement authorized."
+  ],
+  "acceptance": "No whole checklist criterion is newly marked complete from local service/fixture evidence; issue must remain open.",
+  "documentationRebase": {
+    "base": "ac318df139c0e55c08589760646975e4040c163e",
+    "actual": "Inherited #213 documentation/evidence-only follow-up, preserving all published Latest continuation sections. Runtime source matches the tested signed-stdio base plus the connector source commit."
+  }
+}

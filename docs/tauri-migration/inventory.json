@@ -5430,6 +5430,7 @@
     "src/main/connectors/piece-host/host-entry.ts",
     "src/main/connectors/piece-host/host-runtime.ts",
     "src/main/connectors/piece-host/index.ts",
+    "src/main/connectors/piece-host/kv-call.ts",
     "src/main/connectors/piece-host/node-transport.ts",
     "src/main/connectors/piece-host/packaged-resources.ts",
     "src/main/connectors/piece-host/piece-registry.ts",
@@ -14455,7 +14456,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 888,
+    "files": 889,
     "operations": 737,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,
