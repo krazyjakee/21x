@@ -1,6 +1,8 @@
 //! Finite production ingress/egress policy, independent of diagnostic grants.
 //! Native bounds/outer DTO checks complement the service's exact domain codecs.
 use serde_json::Value;
+#[path = "agent_activity.rs"]
+mod activity;
 #[path = "production_agent_installer.rs"]
 pub mod agent_installer;
 #[path = "production_cli_attachments.rs"]
@@ -3824,7 +3826,7 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
             object(
                 value,
                 &["sessionId", "agentId", "taskId", "status"],
-                &["epoch", "seq", "heartbeat", "activityOutcome"],
+                &["epoch", "seq", "heartbeat", "activityOutcome", "disconnected"],
             ) && ["sessionId", "agentId", "taskId"]
                 .iter()
                 .all(|key| id(&value[*key]))
@@ -3832,6 +3834,7 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
                     value["status"].as_str(),
                     Some("working" | "idle" | "waiting_approval" | "error")
                 )
+                && activity::valid_metadata(value)
         }
         "agent:startQueueChanged" => {
             object(value, &["queue"], &["failed"])

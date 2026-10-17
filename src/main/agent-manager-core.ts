@@ -66,6 +66,18 @@ import type { HandoffRecord, HandoffTurn } from './sessions/handoff'
 
 const DONE_TODO_STATUSES = ['completed', 'cancelled', 'done', 'removed']
 
+/** An actual poll observation; it cannot carry a lifecycle outcome. */
+export interface AgentActivityObservation {
+  sessionId: string
+  agentId: string
+  taskId: string
+  status: 'idle' | 'working' | 'error' | 'waiting_approval'
+  epoch: string
+  seq: number
+  heartbeat: true
+  disconnected?: true
+}
+
 /** Yields to the event loop between bursts of synchronous DB / FS calls so IPC
  *  and rendering are not starved (better-sqlite3 calls block the main thread). */
 const yieldEventLoop = (): Promise<void> => new Promise((r) => setImmediate(r))
@@ -235,6 +247,7 @@ export class AgentManager extends EventEmitter {
   private forgejoManager: ForgejoManager | null = null
   private oauthManager: import('./oauth/oauth-manager-core').OAuthManager | null = null
   private externalListeners: Array<(channel: string, data: unknown) => void> = []
+  private readonly activityListeners = new Set<(event: Readonly<AgentActivityObservation>) => void>()
   private readonly captainRuntimes: CaptainRuntimeStore
   private readonly captainEngine: AdapterEngine | null
   private readonly taskEngine: AdapterEngine | null
@@ -2667,27 +2680,37 @@ export class AgentManager extends EventEmitter {
 
   /**
    * Freshness heartbeat for an active session (#95): its current, unchanged
-   * status, at most once per revalidation interval. Sent to the window only,
-   * straight past sendToRenderer, so transition consumers (notifications,
-   * lastSentStatus, the voice bridge, mobile clients) never see it.
+   * status, at most once per revalidation interval. Desktop observation sinks
+   * bypass sendToRenderer and general external listeners, so notifications,
+   * lastSentStatus, the voice bridge and mobile clients never see it.
    */
   private publishActivityHeartbeat(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session || !shouldPublishHeartbeat(session.status)) return
     if (!this.activityObservations.takeHeartbeat(sessionId)) return
-    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
-    for (const taskId of this.taskGroupActivityTargets(session.taskId, session.status))
-      this.sendHostEvent(this.mainWindow.webContents, 'agent:status', {
-        sessionId, agentId: session.agentId, taskId, status: session.status, ...this.activityObservations.stamp(true)
+    for (const taskId of this.taskGroupActivityTargets(session.taskId, session.status)) {
+      const { epoch, seq } = this.activityObservations.stamp(true)
+      this.sendActivityObservation({
+        sessionId, agentId: session.agentId, taskId, status: session.status, epoch, seq, heartbeat: true
       })
+    }
   }
 
   private publishActivityDisconnect(sessionId: string, session: AgentSession): void {
     this.activityObservations.forget(sessionId)
-    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
-    for (const taskId of this.taskGroupActivityTargets(session.taskId, session.status))
-      this.sendHostEvent(this.mainWindow.webContents, 'agent:status', { sessionId, agentId: session.agentId,
-        taskId, status: session.status, ...this.activityObservations.stamp(true), disconnected: true })
+    for (const taskId of this.taskGroupActivityTargets(session.taskId, session.status)) {
+      const { epoch, seq } = this.activityObservations.stamp(true)
+      this.sendActivityObservation({ sessionId, agentId: session.agentId,
+        taskId, status: session.status, epoch, seq, heartbeat: true, disconnected: true })
+    }
+  }
+
+  private sendActivityObservation(event: AgentActivityObservation): void {
+    if (this.shuttingDown) return
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) this.sendHostEvent(this.mainWindow.webContents, 'agent:status', event)
+    for (const listener of [...this.activityListeners]) {
+      try { listener(event) } catch { /* A detached desktop cannot interrupt polling. */ }
+    }
   }
 
   private taskGroupActivityTargets(ownerId: string, status: AgentSession['status']): string[] {
@@ -6842,6 +6865,14 @@ export class AgentManager extends EventEmitter {
    */
   addExternalListener(fn: (channel: string, data: unknown) => void): void {
     this.externalListeners.push(fn)
+  }
+
+  /** Desktop freshness only. Never a transition, mobile or voice subscription.
+   * The returned release removes exactly this registration. */
+  addActivityListener(fn: (event: Readonly<AgentActivityObservation>) => void): () => void {
+    const receive = (event: Readonly<AgentActivityObservation>): void => fn(event)
+    this.activityListeners.add(receive)
+    return () => { this.activityListeners.delete(receive) }
   }
 
   /** Releases exactly one registration without affecting other consumers. */

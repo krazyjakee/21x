@@ -37,6 +37,23 @@ not establish installed browser callbacks or live provider authorization. See
 representative provider and installed platform evidence, and redistribution
 review. Hosted Verify is unavailable while Actions awaits the user's decision.
 
+The #212 background continuation carries actual AgentManager poll freshness to
+an owned portable desktop activity subscription without an Electron window.
+Existing polling, five-second rate, epoch/sequence and retirement fences remain
+in force. The private peer applies current read authority; periodic observations
+bypass status-transition/mobile/voice fanout and leave tasks, project events,
+admission and all six scheduler starts unchanged. Finite TypeScript and native
+validators now agree on heartbeat/disconnect and terminal outcome metadata.
+A real Pi adapter with a controlled child proves detach/regrant, one prompt,
+queued admission and joined teardown. Existing #208 interrupted-profile
+reconciliation remains the sole startup no-replay policy. This is Linux service
+and native validator evidence, not installed WebView/window/crash acceptance.
+#212 remains open for #208/#210 prerequisites, retained local voice starts
+under #218, installed platforms and approved real-provider evidence. Hosted
+Verify is unavailable: repository Actions disabled, awaiting user decision.
+See [background activity ownership](production-background-activity.md) and
+[local evidence](evidence/issue-212-background-activity-local-20261017.json).
+
 The #208 Windows continuation adds an atomic kill-on-close Job and captured
 private asynchronous pipe handles to the production launcher. The bounded
 stdin descriptor prefix preserves pipelined RPC bytes; Linux retains fd3 and

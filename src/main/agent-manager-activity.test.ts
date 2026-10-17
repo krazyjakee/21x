@@ -98,6 +98,36 @@ describe('AgentManager activity heartbeats (#95)', () => {
     vi.restoreAllMocks()
   })
 
+  it('delivers real successful polls to detached desktop sinks without general status listeners', async () => {
+    const { mgr, entry, sendToRenderer } = setup(async () => ({ type: SessionStatusType.BUSY }))
+    ;(mgr as any).mainWindow = null
+    const activity = vi.fn(), external = vi.fn()
+    const releaseBroken = mgr.addActivityListener(() => { throw new Error('Detached desktop') })
+    const release = mgr.addActivityListener(activity)
+    mgr.addExternalListener(external)
+    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).pollSingleSession(entry)
+    expect(activity).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ heartbeat: true, status: 'working' }))
+    now += 5000; await (mgr as any).pollSingleSession(entry)
+    expect(activity).toHaveBeenCalledTimes(2)
+    expect(activity.mock.calls[1][0].seq).toBeGreaterThan(activity.mock.calls[0][0].seq)
+    expect(external).not.toHaveBeenCalled()
+    expect(sendToRenderer.mock.calls.some(([, data]) => (data as any)?.heartbeat)).toBe(false)
+    release(); release(); releaseBroken()
+    now += 5000; await (mgr as any).pollSingleSession(entry)
+    expect(activity).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a real disconnect to a portable sink without manufacturing a live poll', async () => {
+    const { mgr, entry } = setup(async () => { throw Object.assign(new Error('Socket closed'), { code: 'ECONNRESET' }) })
+    ;(mgr as any).mainWindow = null
+    const activity = vi.fn(); const release = mgr.addActivityListener(activity)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await (mgr as any).pollSingleSession(entry)
+    expect(activity).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ heartbeat: true, disconnected: true }))
+    release()
+  })
+
   it('a successful quiet poll publishes one heartbeat per 5 s to the window only', async () => {
     const { mgr, entry, heartbeats, sendToRenderer } = setup(async () => ({ type: SessionStatusType.BUSY }))
     await (mgr as any).pollSingleSession(entry)
@@ -123,15 +153,18 @@ describe('AgentManager activity heartbeats (#95)', () => {
 
   it('an idle session publishes no heartbeat', async () => {
     const { mgr, entry, heartbeats } = setup(async () => ({ type: SessionStatusType.IDLE }))
+    const activity = vi.fn(); mgr.addActivityListener(activity)
     ;(mgr as any).sessions.get('session-1').status = 'idle'
     await (mgr as any).pollSingleSession(entry)
     expect(heartbeats()).toHaveLength(0)
+    expect(activity).not.toHaveBeenCalled()
   })
 
   it('an in-flight poll cannot publish a heartbeat after Stop fenced its session generation', async () => {
     let finishStatus!: (status: unknown) => void
     const status = new Promise<unknown>((resolve) => { finishStatus = resolve })
     const { mgr, entry, session, heartbeats, adapter } = setup(() => status)
+    const activity = vi.fn(); mgr.addActivityListener(activity)
     const polling = (mgr as any).pollSingleSession(entry)
     await vi.waitFor(() => expect(adapter.getStatus).toHaveBeenCalled())
 
@@ -142,11 +175,13 @@ describe('AgentManager activity heartbeats (#95)', () => {
     await polling
 
     expect(heartbeats()).toHaveLength(0)
+    expect(activity).not.toHaveBeenCalled()
     expect((mgr as any).pollingEntries.size).toBe(0)
   })
 
   it('a delayed output read cannot update a replacement that reused the session id', async () => {
     const { mgr, entry, session, heartbeats, adapter, sendToRenderer } = setup(async () => ({ type: SessionStatusType.BUSY }))
+    const activity = vi.fn(); mgr.addActivityListener(activity)
     let finish!: (parts: unknown[]) => void
     adapter.pollMessages.mockImplementation(() => new Promise(resolve => { finish = resolve }))
     const polling = (mgr as any).pollSingleSession(entry)
@@ -156,17 +191,20 @@ describe('AgentManager activity heartbeats (#95)', () => {
     expect(sendToRenderer).not.toHaveBeenCalled()
     expect(adapter.getStatus).not.toHaveBeenCalled()
     expect(heartbeats()).toHaveLength(0)
+    expect(activity).not.toHaveBeenCalled()
   })
 
   it('a delayed status read cannot renew a replacement that reused the session id', async () => {
     let finish!: (status: unknown) => void
     const { mgr, entry, session, heartbeats, adapter } = setup(() => new Promise(resolve => { finish = resolve }))
+    const activity = vi.fn(); mgr.addActivityListener(activity)
     const polling = (mgr as any).pollSingleSession(entry)
     await vi.waitFor(() => expect(adapter.getStatus).toHaveBeenCalled())
     ;(mgr as any).sessions.set('session-1', { ...session, createdAt: new Date() })
     finish({ type: SessionStatusType.BUSY })
     await polling
     expect(heartbeats()).toHaveLength(0)
+    expect(activity).not.toHaveBeenCalled()
   })
 
   it('transition pushes carry the same epoch and an increasing sequence', () => {

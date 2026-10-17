@@ -33,6 +33,12 @@ describe('retained synthetic agent desktop codecs', () => {
     const status = { sessionId: 'session-1', agentId: 'agent-1', taskId: 'task-1', status: 'waiting_approval' }
     expect(events['agent:status'].validatePayload(status)).toBe(true)
     expect(events['agent:status'].validatePayload({ ...status, epoch: 'owner:1', seq: 1, heartbeat: true })).toBe(true)
+    expect(events['agent:status'].validatePayload({ ...status, epoch: 'owner:1', seq: 1, heartbeat: true, disconnected: true })).toBe(true)
+    for (const extra of [{ disconnected: true }, { epoch: 'owner:1', seq: 1, disconnected: true },
+      { epoch: 'owner:1', seq: 1, heartbeat: true, disconnected: false },
+      { epoch: 'owner:1', seq: 1, heartbeat: true, disconnected: true, activityOutcome: 'failed', status: 'error' }]) {
+      expect(events['agent:status'].validatePayload({ ...status, ...extra })).toBe(false)
+    }
     for (const activityOutcome of ['completed', 'cancelled', 'interrupted']) {
       expect(events['agent:status'].validatePayload({ ...status, status: 'idle', epoch: 'owner:1', seq: 2, activityOutcome })).toBe(true)
     }

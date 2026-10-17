@@ -813,6 +813,13 @@ export class ProductionOwner {
     this.stopOwners.push(() => { void this.own(agents.stopAllSessions()).catch(() => undefined) })
     this.drains.set('agents', async () => { await agents.stopAllSessions(); await agents.stopServer() })
     agents.addExternalListener((channel, data) => this.emit(channel, data))
+    const releaseActivity = agents.addActivityListener(data => {
+      if (this.abort.signal.aborted) return
+      // Freshness goes only to the trusted desktop event path, never mobile or
+      // general status listeners that treat a push as a lifecycle transition.
+      try { native.emit('agent:status', data) } catch { /* Desktop attachment is optional. */ }
+    })
+    this.register('agent-activity', releaseActivity, async () => { releaseActivity() })
     const gitProviders = createProductionGitProviderOwner({ database: db, profileRoot, reposRoot: this.bootstrap.paths.reposRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, tempRoot: this.bootstrap.paths.tempRoot,
       createProcess: this.boundaries.gitProviderProcess, assertCurrent: () => {
         if (this.abort.signal.aborted || !['starting', 'ready'].includes(this.phase) || processRegistry[registryKey] !== this.identity) throw new ProductionOwnerError('OWNER_CLOSING')

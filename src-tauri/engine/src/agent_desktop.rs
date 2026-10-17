@@ -3,6 +3,8 @@
 //! Keep exact fields/bounds aligned with agent-desktop-codecs.ts and its public
 //! agent DTO from configuration-desktop-codecs.ts.
 use serde_json::Value;
+#[path = "agent_activity.rs"]
+mod activity;
 use std::collections::HashSet;
 
 const OPERATIONS: &[&str] = &[
@@ -294,15 +296,6 @@ pub(super) fn valid_result(operation: &str, value: &Value) -> bool {
         _ => false,
     }
 }
-fn activity_epoch(value: &Value) -> bool {
-    value.as_str().is_some_and(|s| {
-        !s.is_empty()
-            && s.len() <= 128
-            && s.as_bytes()[0].is_ascii_alphanumeric()
-            && s.bytes()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b':' | b'-'))
-    })
-}
 fn recovery_token(value: &Value) -> bool {
     value.as_str().is_some_and(|s| {
         !s.is_empty()
@@ -357,7 +350,13 @@ pub(super) fn valid_event(frame: &Value) -> bool {
             object(
                 payload,
                 &["sessionId", "agentId", "taskId", "status"],
-                &["epoch", "seq", "heartbeat"],
+                &[
+                    "epoch",
+                    "seq",
+                    "heartbeat",
+                    "disconnected",
+                    "activityOutcome",
+                ],
             ) && ["sessionId", "agentId", "taskId"]
                 .iter()
                 .all(|key| id(&payload[*key]))
@@ -365,12 +364,7 @@ pub(super) fn valid_event(frame: &Value) -> bool {
                     &payload["status"],
                     &["idle", "working", "waiting_approval", "error"],
                 )
-                && payload.get("epoch").is_some() == payload.get("seq").is_some()
-                && payload.get("epoch").is_none_or(activity_epoch)
-                && payload.get("seq").is_none_or(positive)
-                && payload
-                    .get("heartbeat")
-                    .is_none_or(|item| *item == true && payload.get("epoch").is_some())
+                && activity::valid_metadata(payload)
         }
         Some("agent:startQueueChanged") => {
             object(payload, &["queue"], &["failed"])
@@ -527,6 +521,45 @@ mod tests {
         assert!(!valid_event(
             &json!({"operation":"agent:recoveryStateChanged","payload":{"taskId":"task-1","cause":"fixture_restart","action":"resume","result":"failed","error":"private provider error"}})
         ));
+    }
+
+    #[test]
+    #[cfg(feature = "production-service")]
+    fn diagnostic_and_production_activity_metadata_have_the_same_finite_authority() {
+        let valid = json!({"sessionId":"session-1","agentId":"agent-1","taskId":"task-1","status":"working","epoch":"owner:1","seq":1,"heartbeat":true,"disconnected":true});
+        let check = |payload: &Value| {
+            let frame = json!({"operation":"agent:status","payload":payload});
+            let diagnostic = valid_event(&frame);
+            assert_eq!(
+                diagnostic,
+                crate::production::contracts::valid_event("agent:status", payload)
+            );
+            diagnostic
+        };
+        assert!(check(&valid));
+        for change in [
+            json!({"heartbeat":null}),
+            json!({"disconnected":false}),
+            json!({"epoch":"bad epoch"}),
+            json!({"seq":0}),
+            json!({"seq":9007199254740992_u64}),
+            json!({"activityOutcome":"failed","status":"error"}),
+            json!({"providerDetails":"private"}),
+        ] {
+            let mut value = valid.clone();
+            for (key, item) in change.as_object().unwrap() {
+                value[key] = item.clone();
+            }
+            assert!(!check(&value));
+        }
+        let mut outcome = valid.clone();
+        outcome.as_object_mut().unwrap().remove("heartbeat");
+        outcome.as_object_mut().unwrap().remove("disconnected");
+        outcome["status"] = json!("idle");
+        outcome["activityOutcome"] = json!("completed");
+        assert!(check(&outcome));
+        outcome["status"] = json!("working");
+        assert!(!check(&outcome));
     }
     #[test]
     fn string_bounds_match_utf16_and_ecmascript_trim() {

@@ -30,6 +30,7 @@ import { SessionStatus } from '../shared/constants'
 import { HOST_OPERATION_SCHEMAS } from '../shared/host-services'
 import { WORKSPACE_NATIVE_CALLBACK_SCHEMAS } from '../shared/workspace-native-callbacks'
 import { OAUTH_DELIVERY_SCHEMA, OAUTH_NATIVE_CALLBACK_SCHEMAS } from '../shared/oauth-native-callbacks'
+import { PiAdapter } from '../main/adapters/pi-adapter'
 
 const roots: string[] = [], services: ProductionServiceType[] = [], hosts: ServicePeer[] = [], release: Array<() => void> = []
 afterEach(async () => {
@@ -38,6 +39,7 @@ afterEach(async () => {
   for (const host of hosts.splice(0)) { host.disconnect(); await host.waitForHandlers() }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
 })
 function deferred() { let finish!: () => void; const promise = new Promise<void>(done => { finish = done }); return { promise, finish } }
 function descriptor(root: string): ProductionLaunchDescriptor {
@@ -49,6 +51,7 @@ function descriptor(root: string): ProductionLaunchDescriptor {
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
 function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false, oauth = false) {
+  let selectedAdapter: CodingAgentAdapter | null = null
   let privateCallbacks: ProductionPrivateCallbacks | null = null
   let notificationAcknowledgement: Promise<void> | null = null
   let notificationResult: 'shown' | 'denied' | 'error' | 'malformed' | 'timeout' = 'shown'
@@ -205,7 +208,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   hosts.push(host)
   const service = new ProductionService(sealProductionServiceHost({ descriptor: launch, authority,
     caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' }, unbridgedOwnerEvent: vi.fn(),
-    boundaries: { ...(installation ? { agentInstallation: { nodeExecutable: selectedNode, homeDir: root, environment: {}, npmCliPath: fixtureNpm } } : {}), cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter as unknown as CodingAgentAdapter, createProvider: () => provider },
+    boundaries: { ...(installation ? { agentInstallation: { nodeExecutable: selectedNode, homeDir: root, environment: {}, npmCliPath: fixtureNpm } } : {}), cliMcp: { homeDir: root, environment: {} }, createAdapter: () => selectedAdapter ?? adapter as unknown as CodingAgentAdapter, createProvider: () => provider },
     constructBootstrap: callbacks => { privateCallbacks = callbacks; return ({ profileId: launch.profileId, paths: launch.paths,
       credentials: { mode: 'create', store: { create: async (id, key) => { keys.set(id, Buffer.from(key)) }, load: async id => Buffer.from(keys.get(id)!) } },
       connectors: { kind: 'disabled', reason: 'Controlled fixture has no packaged connectors' }, managedTaskMcp: { disabled: true },
@@ -223,6 +226,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     await host.request('engine.initialize', { protocolVersion: 1, launchId: launch.launchId })
   }
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
+    useAdapter: (value: CodingAgentAdapter) => { selectedAdapter = value }, allow: () => { permitted = true },
     notificationCalls, privateCallbacks: () => privateCallbacks!, holdNotificationAcknowledgement: (raw: Promise<void> | null) => { notificationAcknowledgement = raw }, setNotificationResult: (value: typeof notificationResult) => { notificationResult = value },
     energyCalls, holdEnergyAcknowledgement: (raw: Promise<void> | null) => { energyAcknowledgement = raw }, setEnergyResult: (value: typeof energyResult) => { energyResult = value },
     attachmentReceipts, attachmentAuthorizations, denyWrites: () => { grantWrites = false }, holdAttachmentAcknowledgement: (raw: Promise<void>) => { attachmentAcknowledgement = raw },
@@ -233,6 +237,89 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
 }
 
 describe('actual private production peer', () => {
+  it('delivers periodic real adapter freshness through the scoped peer while the desktop detaches without replay or transition effects', async () => {
+    const f = fixture(), cli = join(f.root, 'controlled-pi.cjs'), receiptFile = join(f.root, 'child-receipt.json')
+    const emptyPath = join(f.root, 'empty-path'); mkdirSync(emptyPath)
+    writeFileSync(cli, `#!${process.execPath}\n` + readFileSync(join(process.cwd(), 'test/fixtures/agent-rpc-process.cjs'), 'utf8'), { mode: 0o700 })
+    vi.stubEnv('HOME', f.root); vi.stubEnv('PATH', emptyPath); vi.stubEnv('PI_CODING_AGENT_DIR', f.root)
+    vi.stubEnv('TWENTYX_SYNTHETIC_AGENT', '1'); vi.stubEnv('TWENTYX_FIXTURE_PROTOCOL', 'pi'); vi.stubEnv('TWENTYX_FIXTURE_RECEIPT', receiptFile)
+    const adapter = new PiAdapter(); Object.assign(adapter, { piExecutablePath: cli }); f.useAdapter(adapter)
+    const polls = vi.spyOn(adapter, 'getStatus')
+    let clock = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    await f.initialize()
+    const actual = f.service.getReadyServices()!, db = actual.db, project = db.getProjects()[0]
+    const { projectEvents } = await import('../main/project-events')
+    const projectEvent = vi.fn(); release.push(projectEvents.onEvent(projectEvent))
+    db.updateProject(project.id, { settings: { ...project.settings, captain_wakeups: { enabled: false } } })
+    const agent = db.getAgents()[0]; db.updateAgent(agent.id, { config: { coding_agent: 'pi', auth_method: 'subscription', max_parallel_sessions: 1 } })
+    const task = db.createTask(makeTask())!; db.updateTask(task.id, { agent_id: agent.id })
+    const started = await f.host.request('agentSession:start', { agentId: agent.id, taskId: task.id }) as { value: { sessionId: string } }
+    let waitingId: string | undefined
+    try {
+      const heartbeatEvents = () => f.wireEvents.filter(event => event.operation === 'agent:status' && isRecord(event.payload) && event.payload.heartbeat === true)
+      await expect.poll(() => heartbeatEvents().length, { timeout: 4000 }).toBe(1)
+      expect(heartbeatEvents()[0].payload).toMatchObject({ sessionId: started.value.sessionId, taskId: task.id, status: 'waiting_approval', epoch: expect.any(String), seq: expect.any(Number) })
+      await expect.poll(() => f.wireEvents.some(event => event.operation === 'transcript:changed'
+        && JSON.stringify(event.payload).includes('native-permission-211')), { timeout: 4000 }).toBe(true)
+      const waiting = db.createTask(makeTask({ title: 'Held by real admission' }))!; db.updateTask(waiting.id, { agent_id: agent.id })
+      waitingId = waiting.id
+      expect(await f.host.request('agentSession:start', { agentId: agent.id, taskId: waiting.id })).toMatchObject({ value: { queued: true, queuePosition: 1 } })
+      // Positive control: observe the real initial permission transition on
+      // the same module instance used by the reset production service graph.
+      expect(projectEvent).toHaveBeenCalled(); projectEvent.mockClear()
+      const external = vi.fn(); actual.agents.addExternalListener(external)
+      release.push(() => actual.agents.removeExternalListener(external))
+      const before = db.db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id)
+      const schedulerStarts = [actual.automation, actual.recurrence, actual.heartbeat, actual.wakeups, actual.coordination, actual.cleanup].map(owner => vi.spyOn(owner, 'start'))
+      expect(await f.service.owner.start()).toBe(actual)
+      clock += 5000
+      await expect.poll(() => heartbeatEvents().length, { timeout: 4000 }).toBe(2)
+      const visible = heartbeatEvents()[1].payload as Record<string, JsonValue>, count = polls.mock.calls.length
+      f.deny(); clock += 5000
+      await expect.poll(() => polls.mock.calls.length, { timeout: 4000 }).toBeGreaterThan(count)
+      await f.host.drain(); expect(heartbeatEvents()).toHaveLength(2)
+      f.allow(); clock += 5000
+      await expect.poll(() => heartbeatEvents().length, { timeout: 4000 }).toBe(3)
+      const restored = heartbeatEvents()[2].payload as Record<string, JsonValue>
+      expect(restored.epoch).toBe(visible.epoch); expect(restored.seq).toBeGreaterThan(visible.seq as number)
+      expect(external).not.toHaveBeenCalled(); expect(projectEvent).not.toHaveBeenCalled()
+      expect(schedulerStarts.every(start => start.mock.calls.length === 0)).toBe(true)
+      expect(db.db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id)).toEqual(before)
+      expect(actual.agents.getStartQueue()).toEqual([expect.objectContaining({ taskId: waiting.id, reason: 'agent_limit' })])
+      const receipt = JSON.parse(readFileSync(receiptFile, 'utf8'))
+      expect(receipt).toMatchObject({ runtime: process.execPath, path: emptyPath, promptCount: 1 })
+    } finally {
+      f.allow()
+      // Cancel the real queue before retiring the only occupied slot. Teardown
+      // joins the TERM-refusing child before the ordinary application close.
+      if (waitingId) await actual.agents.stopByTaskId(waitingId)
+      await actual.agents.stopByTaskId(task.id)
+      await f.service.close()
+    }
+    const receipt = JSON.parse(readFileSync(receiptFile, 'utf8'))
+    expect(() => process.kill(receipt.pid, 0)).toThrow()
+    expect(db.db.open).toBe(false)
+  }, 15_000)
+
+  it('carries a known adapter disconnect as activity invalidation through the private peer without replaying its prompt', async () => {
+    const f = fixture(); await f.initialize(); const actual = f.service.getReadyServices()!
+    const agent = actual.db.getAgents()[0]; actual.db.updateAgent(agent.id, { config: { coding_agent: 'pi' } })
+    const task = actual.db.createTask(makeTask())!; actual.db.updateTask(task.id, { agent_id: agent.id })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await f.host.request('agentSession:start', { agentId: agent.id, taskId: task.id })
+    // The readiness probe must succeed before simulating an observed polling
+    // disconnect; startup failure is a different lifecycle outcome.
+    f.adapter.getStatus.mockRejectedValueOnce(Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }))
+    await expect.poll(() => f.wireEvents.find(event => event.operation === 'agent:status'
+      && isRecord(event.payload) && event.payload.disconnected === true), { timeout: 4000 }).toBeDefined()
+    const disconnected = f.wireEvents.find(event => isRecord(event.payload) && event.payload.disconnected === true)!.payload
+    expect(disconnected).toMatchObject({ taskId: task.id, heartbeat: true, disconnected: true, epoch: expect.any(String), seq: expect.any(Number) })
+    expect(disconnected).not.toHaveProperty('activityOutcome')
+    expect(f.adapter.sendPrompt).toHaveBeenCalledOnce()
+    expect(f.service.owner.snapshot().phase).toBe('ready')
+    await f.service.close()
+  })
+
   it('claims a private OAuth delivery before async exchange and preserves captured Source write authority', async () => {
     const f = fixture(false, false, false, false, false, false, false, false, false, true); await f.initialize()
     const db = f.service.getReadyServices()!.db

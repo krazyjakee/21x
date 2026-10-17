@@ -93,11 +93,12 @@ export const AGENT_COMMAND_CODECS: { [K in AgentDesktopOperation]: Codec<K> } = 
   'agentSession:approve': codec('agentSession:approve'), 'agentSession:stop': codec('agentSession:stop')
 }
 
-const statusPayload = (value: unknown): boolean => object(value, ['sessionId', 'agentId', 'taskId', 'status'], ['epoch', 'seq', 'heartbeat', 'activityOutcome']) &&
+const statusPayload = (value: unknown): boolean => object(value, ['sessionId', 'agentId', 'taskId', 'status'], ['epoch', 'seq', 'heartbeat', 'activityOutcome', 'disconnected']) &&
   [value.sessionId, value.agentId, value.taskId].every(isDatabaseId) && ['idle', 'working', 'waiting_approval', 'error'].includes(value.status as string) &&
   (Object.hasOwn(value, 'epoch') === Object.hasOwn(value, 'seq')) &&
   (!Object.hasOwn(value, 'epoch') || typeof value.epoch === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.epoch) && positive(value.seq)) &&
   (!Object.hasOwn(value, 'heartbeat') || value.heartbeat === true && Object.hasOwn(value, 'epoch')) &&
+  (!Object.hasOwn(value, 'disconnected') || value.disconnected === true && value.heartbeat === true) &&
   (!Object.hasOwn(value, 'activityOutcome') || isAgentActivityOutcome(value.activityOutcome) && Object.hasOwn(value, 'epoch')
     && !Object.hasOwn(value, 'heartbeat') && (value.activityOutcome === 'failed' ? value.status === 'error' : value.status === 'idle'))
 const projectInvalidation = (value: unknown): boolean => object(value, ['projectId']) && isDatabaseId(value.projectId)
