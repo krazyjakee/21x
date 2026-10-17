@@ -18,6 +18,21 @@ function fixture() {
 }
 
 describe('production adapter cleanup acknowledgement', () => {
+  it('retains native cleanup after a failed create returned no session identity', async () => {
+    const cleanup = held<void>()
+    const source = { createSession: vi.fn(async () => { throw new Error('no identity returned') }),
+      destroySession: vi.fn(async () => {}), closeOwnedSessions: vi.fn(() => cleanup.promise) }
+    const owner = new ProductionAdapters(), adapter = owner.wrap(source as unknown as CodingAgentAdapter)!
+    await expect(adapter.createSession({} as SessionConfig)).rejects.toThrow('no identity returned')
+    let closed = false
+    const close = owner.close().then(() => { closed = true })
+    await vi.waitFor(() => expect(source.closeOwnedSessions).toHaveBeenCalledOnce())
+    expect(closed).toBe(false)
+    expect(source.destroySession).not.toHaveBeenCalled()
+    cleanup.finish(); await close
+    expect(closed).toBe(true)
+  })
+
   it('joins a late accepted create, destroys its exact identity, and sends no prompt', async () => {
     const { source, owner, adapter, config } = fixture()
     const create = held<string>(), destroy = held<void>()

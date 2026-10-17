@@ -1,3 +1,4 @@
+import { observeAgentProcess } from './shared/owned-process'
 import { writeJsonRpcAcknowledged } from './shared/json-rpc'
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 import { AdapterCompactionTracker, compactionFingerprint, promptContextTokens, type AdapterCompactionObservation } from '../sessions/compaction'
@@ -345,6 +346,7 @@ export class PiAdapter implements CodingAgentAdapter {
       detached: process.platform !== 'win32',
     })
 
+    observeAgentProcess(child, true)
     const tempId = resumeId || randomUUID()
     const session = this.createSessionState(tempId, child, config, mcpConfigPath)
     this.sessions.set(tempId, session)
@@ -364,9 +366,9 @@ export class PiAdapter implements CodingAgentAdapter {
       await this.applySelection(session, config)
       return session
     } catch (error) {
-      this.sessions.delete(tempId)
-      this.sessions.delete(session.id)
       await this.terminateProcess(session)
+      if (this.sessions.get(tempId) === session) this.sessions.delete(tempId)
+      if (this.sessions.get(session.id) === session) this.sessions.delete(session.id)
       if (mcpConfigPath && existsSync(mcpConfigPath)) unlinkSync(mcpConfigPath)
       throw error
     }
@@ -435,6 +437,7 @@ export class PiAdapter implements CodingAgentAdapter {
   }
 
   private handleEvent(session: PiSession, event: Record<string, unknown>): void {
+    if (session.closing) return
     if (typeof event.sessionId === 'string' && event.sessionId !== session.id && event.sessionId !== session.nativeSessionId) return
     if (event.type === 'response') {
       const response = event as unknown as PiRpcResponse
@@ -711,7 +714,7 @@ export class PiAdapter implements CodingAgentAdapter {
   }
 
   private command(session: PiSession, command: Record<string, unknown>): Promise<PiRpcResponse> {
-    if (session.process.exitCode !== null || !session.process.stdin.writable) {
+    if (session.closing || session.process.exitCode !== null || !session.process.stdin.writable) {
       return Promise.reject(new Error('Pi process is not running'))
     }
     const id = randomUUID()
@@ -731,7 +734,7 @@ export class PiAdapter implements CodingAgentAdapter {
   }
 
   private sendRecord(session: PiSession, record: Record<string, unknown>): void {
-    if (session.process.exitCode !== null || !session.process.stdin.writable) {
+    if (session.closing || session.process.exitCode !== null || !session.process.stdin.writable) {
       throw new Error('Pi process is not running')
     }
     session.process.stdin.write(`${JSON.stringify(record)}\n`, (error) => {
@@ -993,34 +996,12 @@ export class PiAdapter implements CodingAgentAdapter {
     this.cancelPendingUiRequests(session, 'This request was cancelled when the turn stopped.', true)
     await this.command(session, { type: 'clear_queue' }).catch(() => undefined)
     await this.command(session, { type: 'abort' })
-    session.status = 'idle'
+    // The RPC acknowledges the interrupt; agent_settled acknowledges the turn.
   }
 
   private async terminateProcess(session: PiSession): Promise<void> {
     session.closing = true
-    if (session.process.exitCode !== null || !session.process.pid) return
-    if (process.platform === 'win32') {
-      await execFileAsync('taskkill', ['/PID', String(session.process.pid), '/T', '/F'], {
-        timeout: 5_000,
-        windowsHide: true,
-      }).catch(() => session.process.kill())
-      return
-    }
-
-    const processGroup = -session.process.pid
-    try {
-      process.kill(processGroup, 'SIGTERM')
-    } catch {
-      session.process.kill()
-      return
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1_000))
-    if (session.process.exitCode !== null) return
-    try {
-      process.kill(processGroup, 'SIGKILL')
-    } catch {
-      // The process group exited during the grace period.
-    }
+    await observeAgentProcess(session.process, true).stop()
   }
 
   async destroySession(sessionId: string): Promise<void> {
@@ -1035,10 +1016,15 @@ export class PiAdapter implements CodingAgentAdapter {
     }
     session.pendingUiRequests.clear()
     await this.terminateProcess(session)
-    this.sessions.delete(sessionId)
+    if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId)
     if (session.mcpConfigPath && existsSync(session.mcpConfigPath)) {
       unlinkSync(session.mcpConfigPath)
     }
+  }
+
+  async closeOwnedSessions(): Promise<void> {
+    const results = await Promise.allSettled([...this.sessions.keys()].map(id => this.destroySession(id)))
+    if (results.some(result => result.status === 'rejected')) throw new Error('PI_PROCESS_CLEANUP_UNACKNOWLEDGED')
   }
 
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {

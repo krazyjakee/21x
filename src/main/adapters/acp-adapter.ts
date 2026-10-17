@@ -1,3 +1,4 @@
+import { observeAgentProcess } from './shared/owned-process'
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 import { AdapterCompactionTracker, type AdapterCompactionObservation } from '../sessions/compaction'
 /**
@@ -69,6 +70,7 @@ interface AcpSession extends AcpTurnState, JsonRpcPeer {
   /** ACP protocol session ID */
   acpSessionId: string | null
   process: ChildProcess
+  closing?: boolean
   status: SessionStatusType
   /** Buffered ACP events (cleared after poll) */
   messageBuffer: unknown[]
@@ -228,6 +230,7 @@ export class AcpAdapter implements CodingAgentAdapter {
     // Every pipe needs an error listener before the first write. The agent can
     // exit at any moment, and an unhandled EPIPE on its stdin takes the whole
     // main process down with a crash dialog.
+    observeAgentProcess(acpProcess)
     guardChildStreams(acpProcess, this.label)
 
     const session: AcpSession = {
@@ -361,8 +364,7 @@ export class AcpAdapter implements CodingAgentAdapter {
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error)
       if (errMsg.includes('not found') || errMsg.includes('does not exist')) {
-        session.process.kill('SIGTERM')
-        this.sessions.delete(sessionId)
+        await this.destroySession(sessionId, config)
         throw new Error(
           `INCOMPATIBLE_SESSION_ID: This ${this.agentType} session does not exist or has expired. Please start a new session.`
         )
@@ -505,12 +507,12 @@ export class AcpAdapter implements CodingAgentAdapter {
 
     console.log(`[${this.label}] Destroying session ${sessionId}`)
 
-    session.process.kill('SIGTERM')
-    setTimeout(() => {
-      if (!session.process.killed) {
-        session.process.kill('SIGKILL')
-      }
-    }, 1000)
+    session.closing = true
+    session.pendingApproval = null
+    // Reject outstanding RPCs promptly, but keep the owner until pipes close.
+    for (const pending of session.pendingRequests.values()) pending.reject(new Error('ACP session stopped'))
+    session.pendingRequests.clear()
+    await observeAgentProcess(session.process).stop()
 
     // Eagerly clear large data structures to free memory immediately
     session.permanentMessages.length = 0
@@ -518,7 +520,12 @@ export class AcpAdapter implements CodingAgentAdapter {
     session.toolCallMetadata.clear()
     session.pendingRequests.clear()
 
-    this.sessions.delete(sessionId)
+    if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId)
+  }
+
+  async closeOwnedSessions(): Promise<void> {
+    const results = await Promise.allSettled([...this.sessions].map(([id, session]) => this.destroySession(id, session.config)))
+    if (results.some(result => result.status === 'rejected')) throw new Error('ACP_PROCESS_CLEANUP_UNACKNOWLEDGED')
   }
 
   async getAllMessages(sessionId: string, _config: SessionConfig): Promise<SessionMessage[]> {
@@ -617,7 +624,7 @@ export class AcpAdapter implements CodingAgentAdapter {
     requestId?: string
   ): Promise<boolean> {
     const session = this.sessions.get(sessionId)
-    if (!session || !session.pendingApproval) {
+    if (!session || session.closing || !session.pendingApproval) {
       console.warn(`[${this.label}] No pending approval for session ${sessionId}`)
       return false
     }
@@ -655,6 +662,7 @@ export class AcpAdapter implements CodingAgentAdapter {
   }
 
   private handleRpcMessage(session: AcpSession, message: JsonRpcMessage): void {
+    if (session.closing) return
     if (this.debugRpcLogs) {
       console.log(`[${this.label}] Received RPC message:`, JSON.stringify(message))
     }
@@ -932,6 +940,7 @@ export class AcpAdapter implements CodingAgentAdapter {
   }
 
   private sendRpcRequest(session: AcpSession, method: string, params?: unknown): Promise<unknown> {
+    if (session.closing) return Promise.reject(new Error('ACP session stopped'))
     return sendJsonRpcRequest(session, method, params, this.label)
   }
 

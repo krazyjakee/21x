@@ -178,6 +178,8 @@ export interface MessagePart {
  * Common interface for all coding agent backends (OpenCode, Claude Code, etc.)
  */
 export interface CodingAgentAdapter {
+  /** Join native children, including failed creates that returned no session ID. */
+  closeOwnedSessions?(): Promise<void>
   /**
    * Initialize the adapter (e.g., load SDK, validate config)
    */

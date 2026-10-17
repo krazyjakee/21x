@@ -22,6 +22,7 @@ vi.mock('child_process', () => ({
       write: vi.fn()
     },
     on: vi.fn(),
+    once: vi.fn(),
     kill: vi.fn()
   }))
 }))

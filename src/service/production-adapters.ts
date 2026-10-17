@@ -6,6 +6,7 @@ export class ProductionAdapters {
   private closing = false
   private readonly raw = new Set<Promise<unknown>>()
   private readonly proxies = new WeakMap<CodingAgentAdapter, CodingAgentAdapter>()
+  private readonly adapters = new Set<CodingAgentAdapter>()
   private readonly sessions = new Map<CodingAgentAdapter, Map<string, SessionConfig>>()
   private readonly destroying = new Map<CodingAgentAdapter, Map<string, Promise<void>>>()
 
@@ -13,6 +14,7 @@ export class ProductionAdapters {
     if (!adapter) return null
     const existing = this.proxies.get(adapter)
     if (existing) return existing
+    this.adapters.add(adapter)
     const proxy = new Proxy(adapter, {
       get: (target, property) => {
         const value: unknown = Reflect.get(target, property, target)
@@ -69,8 +71,10 @@ export class ProductionAdapters {
   async close(): Promise<void> {
     this.shutdown()
     while (this.raw.size) await Promise.allSettled([...this.raw])
-    const results = await Promise.allSettled([...this.sessions].flatMap(([adapter, sessions]) =>
-      [...sessions].map(([id, config]) => this.destroy(adapter, id, config))))
+    const results = await Promise.allSettled([
+      ...[...this.sessions].flatMap(([adapter, sessions]) => [...sessions].map(([id, config]) => this.destroy(adapter, id, config))),
+      ...[...this.adapters].map(adapter => adapter.closeOwnedSessions?.())
+    ])
     if (results.some(result => result.status === 'rejected')) throw new Error('PRODUCTION_ADAPTER_CLEANUP_FAILED')
     while (this.raw.size) await Promise.allSettled([...this.raw])
     if ([...this.sessions.values()].some(sessions => sessions.size)) throw new Error('PRODUCTION_ADAPTER_CLEANUP_UNACKNOWLEDGED')

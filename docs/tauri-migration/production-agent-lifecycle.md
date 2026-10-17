@@ -77,3 +77,79 @@ provider compaction/background behavior or process-tree teardown on supported
 platforms. Those require credentialed isolated/copied-profile integration evidence
 under [the validation contract](validation.md); #211, G3 and live cutover are not
 claimed complete by these imports or fixtures.
+
+## #211 continuation: native child receipts and account proof harness
+
+The retained preload audit found 14 `agentSession:*` commands and two
+`agentConfig:*` commands, all already bound in production. Eleven session
+commands belong to `ProductionAgentBackend`; snapshot/delta/page belong to
+`DatabaseDesktopBackend`; provider/model discovery belongs to
+`AgentConfigurationBackend`. This continuation repairs actual adapter outcomes
+rather than adding a second implementation of those commands.
+
+ACP, Codex app-server and Pi now observe child `close` at spawn. Stop sends TERM,
+escalates after one second even when `ChildProcess.killed` is true, and joins the
+pipe-close receipt. Five seconds without that receipt rejects cleanup and retains
+ownership for retry. Exit, signal acceptance and PID absence do not substitute for
+the receipt. Pi retains its existing POSIX process-group/Windows tree-stop policy;
+ACP/Codex retain their existing direct-child signaling policy. This is not a proof
+that arbitrary detached descendants on every platform were reaped.
+
+Codex serializes replacement claims and joins displaced-child teardown, including
+failed create/resume and model discovery. Production adapter shutdown also joins
+`closeOwnedSessions`, covering children from failed creates that returned no
+session ID. Pi no longer marks a turn idle on an accepted abort RPC: only its
+settlement event supplies that outcome.
+
+`src/service/agent-process-ownership.test.ts` uses actual protocol child processes,
+the actual portable database/manager, production session registry and production
+adapter owner. With a PATH containing an empty directory it proves owning-runtime
+launch, synthetic secret injection, TERM refusal/KILL/close, scoped native
+permission/questions, a tool failure, native compaction observation, refused
+unsettled abort, manual recap switch, pending reload, and quota fallback with one
+recap/remaining-intent delivery. Existing adapter suites retain all-five backend
+request, background-work and compaction controls. These children are controlled
+peers, not real provider sessions.
+
+The filesystem-only detection command invokes no CLI, login, model request or
+refresh and emits no credential values:
+
+```sh
+node scripts/agent-backend-proof.mjs --detect
+```
+
+`--prepare` builds the actual five-adapter graph with pinned physically staged
+SDK imports and no Electron import, without running a provider. It requires
+`tauri:prepare:native` resources. Only the explicit `--live` mode contacts a
+provider. **Live runs await user approval and were not executed for this evidence.**
+After approval, prepare a separate temporary `21x-agent-proof-<name>` profile with
+only that provider's copied OAuth credentials, never API keys or application data,
+then run one command per backend (select a supported subscription model):
+
+```sh
+node scripts/agent-backend-proof.mjs --live --backend opencode --model <provider/model> --profile-root /tmp/21x-agent-proof-opencode
+node scripts/agent-backend-proof.mjs --live --backend claude-code --model <model> --profile-root /tmp/21x-agent-proof-claude
+node scripts/agent-backend-proof.mjs --live --backend codex --model <model> --profile-root /tmp/21x-agent-proof-codex
+node scripts/agent-backend-proof.mjs --live --backend cursor --model <model> --profile-root /tmp/21x-agent-proof-cursor
+node scripts/agent-backend-proof.mjs --live --backend pi --model <provider/model> --profile-root /tmp/21x-agent-proof-pi
+```
+
+The runner uses staged Node, strips inherited API-key/agent options, requires
+matching OAuth metadata for OpenCode/Pi, requires subscription metadata for
+Claude/Codex, and uses Cursor's documented read-only
+[`status` command](https://docs.cursor.com/en/cli/reference/authentication)
+before a Cursor attempt. It checks create, health, text reply, an active-turn
+interrupt and actual idle settlement, acknowledged Stop, resume and a second
+reply. A pending human decision is reported without manufacturing an answer.
+Reports contain fixed phases and booleans, not provider errors or transcripts.
+The adapter account harness does not replace production-manager HITL or installed
+desktop evidence. Keep a synthetic account profile until teardown is acknowledged;
+remove it explicitly after review, including any refreshed copied credentials.
+
+Local detection found OpenCode/Claude/Codex/Pi installed and Cursor absent. Claude
+and Codex have OAuth metadata present, unverified; OpenCode metadata was
+unavailable and Pi had no detected subscription entry. Installed CLI versions,
+supported auth/model outcomes, real background work, real HITL and installed
+platform teardown still require live/provider/platform evidence. Repository
+Actions is disabled: hosted Verify and non-Linux workflows are unavailable,
+awaiting the user's decision. #211 and G3 remain open.

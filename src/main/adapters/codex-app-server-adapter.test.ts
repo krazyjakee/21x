@@ -1475,7 +1475,9 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
     }
     session.sessionId = sessionId
     session.threadId = null
-    session.process = { pid, kill: vi.fn(), once: vi.fn(), stdin: { write: vi.fn() } }
+    const child = Object.assign(new EventEmitter(), { pid, kill: vi.fn(), stdin: { write: vi.fn() } })
+    child.kill.mockImplementation(() => { queueMicrotask(() => child.emit('close', null, 'SIGTERM')); return true })
+    session.process = child as unknown as typeof session.process
     return session
   }
 
@@ -1575,7 +1577,7 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
     child.stdin = Object.assign(new EventEmitter(), { write: vi.fn(), writable: true })
     child.stdout = new EventEmitter()
     child.stderr = new EventEmitter()
-    child.kill = vi.fn()
+    child.kill = vi.fn(() => { queueMicrotask(() => child.emit('close', null, 'SIGTERM')); return true })
     return child
   }
 
@@ -1609,6 +1611,8 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
     expect(child.kill).not.toHaveBeenCalled()
 
     child.emit('exit', 0, null)
+    expect(adapter.liveSessions.size).toBe(1)
+    child.emit('close', 0, null)
     expect(adapter.liveSessions.size).toBe(0)
   })
 
@@ -1714,10 +1718,11 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
 
     const session = adapter.sessions.get('thread-1')!
     const inFlight = new Promise((resolve, reject) => session.pendingRequests.set(7, { resolve, reject }))
+    const rejected = expect(inFlight).rejects.toThrow('Codex app-server stopped')
 
     await adapterInstance.destroySession('thread-1', config as never)
 
-    await expect(inFlight).rejects.toThrow('Codex app-server stopped')
+    await rejected
   })
 })
 

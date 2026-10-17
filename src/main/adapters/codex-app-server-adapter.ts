@@ -1,3 +1,4 @@
+import { observeAgentProcess } from './shared/owned-process'
 /**
  * Codex App Server adapter.
  *
@@ -56,17 +57,6 @@ import { groupPartsIntoMessages } from './shared/session-messages'
 
 const DEFAULT_CODEX_APP_SERVER_MODEL = 'gpt-6-astra'
 const LABEL = 'CodexAppServerAdapter'
-
-/**
- * How long an app-server gets to honour SIGTERM before it is killed outright.
- *
- * SIGTERM is the signal that matters, and it is enough: measured on a live
- * tree, terminating the node wrapper also removed the vendored `codex` binary
- * beneath it AND the `npm exec @google-cloud/observability-mcp` grandchild with
- * its own node child — four processes for one signal. The escalation exists for
- * a wrapper that is wedged rather than merely busy.
- */
-const APP_SERVER_KILL_GRACE_MS = 1000
 
 /**
  * How often to look for app-server children that escaped their session.
@@ -194,6 +184,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
    * is what tells the sweep which app-servers still have an owner.
    */
   private liveSessions = new Set<AppServerSession>()
+  private readonly sessionClaims = new Map<string, Promise<void>>()
   private orphanSweepTimer: NodeJS.Timeout | null = null
   private codexExecutablePath: string | null = null
 
@@ -208,7 +199,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   async createSession(config: SessionConfig): Promise<string> {
     const session = await this.startAppServerProcess(config, config.taskId)
-    this.trackSession(config.taskId, session)
 
     // From here on the child exists. Every exit from this method that is not a
     // thread id must take it with it: `initialize` and `thread/start` each
@@ -217,9 +207,10 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     // app-server — and the MCP servers it has already spawned — stay resident
     // with nothing left to speak to them.
     try {
+      await this.trackSession(config.taskId, session)
       return await this.startThread(session, config)
     } catch (error) {
-      this.terminateSession(session, `create failed: ${errorText(error)}`)
+      await this.terminateSession(session, `create failed: ${errorText(error)}`)
       if (this.sessions.get(config.taskId) === session) this.sessions.delete(config.taskId)
       throw error
     }
@@ -250,7 +241,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
     session.threadId = threadId
     if (this.sessions.get(config.taskId) === session) this.sessions.delete(config.taskId)
-    this.trackSession(threadId, session)
+    await this.trackSession(threadId, session)
     void this.logMcpServerInventory(session, threadId, 'thread/start')
     return threadId
   }
@@ -263,12 +254,12 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     // overwrote the only handle to the first one — which then ran on, with its
     // MCP children, until the app quit. This was the larger half of the leak:
     // one workspace with a single live session was measured holding three.
-    this.trackSession(sessionId, session)
 
     try {
+      await this.trackSession(sessionId, session)
       return await this.resumeThread(session, sessionId, config)
     } catch (error) {
-      this.terminateSession(session, `resume failed: ${errorText(error)}`)
+      await this.terminateSession(session, `resume failed: ${errorText(error)}`)
       if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId)
       throw error
     }
@@ -438,9 +429,18 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   async destroySession(sessionId: string, _config: SessionConfig): Promise<void> {
     const session = this.sessions.get(sessionId)
-    this.sessions.delete(sessionId)
     if (!session) return
-    this.terminateSession(session, `session ${sessionId} destroyed`)
+    await this.terminateSession(session, `session ${sessionId} destroyed`)
+    if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId)
+  }
+
+  async closeOwnedSessions(): Promise<void> {
+    const sessions = new Set([...this.liveSessions, ...this.sessions.values()])
+    const results = await Promise.allSettled([...sessions].map(async session => {
+      await this.terminateSession(session, 'owner closing')
+      for (const [key, current] of this.sessions) if (current === session) this.sessions.delete(key)
+    }))
+    if (results.some(result => result.status === 'rejected')) throw new Error('CODEX_PROCESS_CLEANUP_UNACKNOWLEDGED')
   }
 
   /**
@@ -450,46 +450,28 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
    * leaks the process it pointed at. Every write goes through here so that
    * cannot be forgotten again.
    */
-  private trackSession(key: string, session: AppServerSession): void {
-    const displaced = this.sessions.get(key)
-    if (displaced && displaced !== session) {
-      this.terminateSession(displaced, `replaced by a new app-server for ${key}`)
-    }
-    this.sessions.set(key, session)
+  private async trackSession(key: string, session: AppServerSession): Promise<void> {
+    const prior = this.sessionClaims.get(key) ?? Promise.resolve()
+    const raw = prior.catch(() => undefined).then(async () => {
+      const displaced = this.sessions.get(key)
+      if (displaced && displaced !== session) {
+        await this.terminateSession(displaced, `replaced by a new app-server for ${key}`)
+      }
+      this.sessions.set(key, session)
+    })
+    this.sessionClaims.set(key, raw)
+    try { await raw }
+    finally { if (this.sessionClaims.get(key) === raw) this.sessionClaims.delete(key) }
   }
 
-  /**
-   * Stops one app-server child and releases everything it held.
-   *
-   * SIGTERM on the node wrapper is enough to take the whole tree: verified on a
-   * live process group that the vendored `codex` binary and the
-   * `npm exec @google-cloud/observability-mcp` grandchild beneath it both went
-   * with it. SIGKILL follows only if the wrapper is still there after the grace
-   * period — and it is scheduled against the child's own `exit`, not against
-   * `ChildProcess.killed`, which reports that a SIGNAL WAS SENT rather than
-   * that the process died and so was true immediately every time.
-   */
-  private terminateSession(session: AppServerSession, reason: string): void {
-    if (session.terminated) return
-    session.terminated = true
-    this.liveSessions.delete(session)
-
-    const child = session.process
-    console.log(`[CodexAppServerAdapter] Stopping app-server pid ${child.pid ?? '?'} — ${reason}`)
-    try {
-      child.kill('SIGTERM')
-    } catch {
-      // Already gone. Nothing left to stop.
+  /** Stop work immediately; release the child ledger only after raw close. */
+  private async terminateSession(session: AppServerSession, reason: string): Promise<void> {
+    if (session.terminated) {
+      await observeAgentProcess(session.process).stop()
+      this.liveSessions.delete(session)
+      return
     }
-    const escalation = setTimeout(() => {
-      try {
-        child.kill('SIGKILL')
-      } catch {
-        // Exited during the grace period, which is the outcome we wanted.
-      }
-    }, APP_SERVER_KILL_GRACE_MS)
-    escalation.unref()
-    child.once('exit', () => clearTimeout(escalation))
+    session.terminated = true
 
     // An in-flight RPC would otherwise sit on its 30 s timeout against a pipe
     // that is already closed, holding its caller open for no reason.
@@ -504,6 +486,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     session.assistantTextKeysByTurn.clear()
     session.runningTools.clear()
     session.bufferedThreadItemIds.clear()
+    await observeAgentProcess(session.process).stop()
+    this.liveSessions.delete(session)
   }
 
   /**
@@ -574,7 +558,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       } while (cursor)
       return models
     } finally {
-      this.terminateSession(session, 'model list done')
+      await this.terminateSession(session, 'model list done')
     }
   }
 
@@ -668,6 +652,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     // Every pipe needs an error listener before the first write. The app server
     // can exit at any moment, and an unhandled EPIPE on its stdin crashes the
     // main process.
+    observeAgentProcess(child)
     guardChildStreams(child, LABEL)
 
     const session: AppServerSession = {
@@ -711,9 +696,9 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     child.stderr?.on('data', (chunk: Buffer) => {
       console.log('[CodexAppServerAdapter] stderr:', chunk.toString())
     })
+    child.once('close', () => this.liveSessions.delete(session))
     child.on('exit', (code, signal) => {
       console.log(`[CodexAppServerAdapter] process exited: code=${code}, signal=${signal}`)
-      this.liveSessions.delete(session)
       if (code !== 0 && code !== null) {
         session.status = SessionStatusType.ERROR
         session.lastError = `Codex app-server exited with code ${code}`

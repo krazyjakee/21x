@@ -140,6 +140,7 @@ describe('PiAdapter', () => {
       child.stderr.emit('data', 'unknown model: cerebras/gpt-oss-120b\n')
       child.emit('exit', 1, null)
       child.exitCode = 1
+      child.emit('close', 1, null)
       callback?.(null)
       return true
     })
@@ -548,6 +549,8 @@ describe('PiAdapter', () => {
       expect.any(Function),
     )
     expect(session.pendingUiRequests.size).toBe(0)
+    expect(session.status).toBe('busy')
+    ;(adapter as any).handleEvent(session, { type: 'agent_settled' })
     expect(session.status).toBe('idle')
   })
 
