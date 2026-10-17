@@ -1,3 +1,4 @@
+import { NATIVE_ATTACHMENT_IMAGE_CODECS } from '../shared/attachment-image-codecs'
 import { NATIVE_WINDOW_STATE_SCHEMAS } from '../shared/native-window-state'
 import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer } from '../shared/attachment-selection-callbacks'
 import { ARTIFACT_NATIVE_CALLBACK_SCHEMAS, isPrivateArtifactCopy, isPrivateArtifactCopyCheck } from '../shared/artifact-native-callbacks'
@@ -10,7 +11,8 @@ import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import type { ProductionService as ProductionServiceType, SealedProductionServiceHost, ProductionPrivateCallbacks } from './production-service'
 let ProductionService: typeof import('./production-service').ProductionService
@@ -173,6 +175,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     if (operation.endsWith('.finish')) return { verified: true }
     return { data: Buffer.alloc(Number(payload.length), 7).toString('base64') }
   } }
+  schemas['engine.attachment.image'] = { validatePayload: isPrivateAttachmentOpen, validateResult: NATIVE_ATTACHMENT_IMAGE_CODECS['attachments:readImage'].validateWireResult }
   schemas['engine.attachment.open'] = { validatePayload: isPrivateAttachmentOpen, validateResult: TASK_ATTACHMENT_CODECS['attachments:open'].validateWireResult }
   schemas['engine.attachment.download'] = { validatePayload: isPrivateAttachmentDownload, validateResult: TASK_ATTACHMENT_CODECS['attachments:download'].validateWireResult }
   schemas['engine.attachment.download.check'] = { validatePayload: isPrivateAttachmentDownloadCheck, validateResult: value => isRecord(value) && hasExactKeys(value,['authorized']) && value.authorized===true }
@@ -921,4 +924,38 @@ describe('private native window state under the actual profile owner', () => {
     await expect(f.host.request('engine.windowState.save', { state })).rejects.toMatchObject({ code: 'DISCONNECTED' })
     expect(f.service.getReadyServices()!.db.db.prepare("SELECT 1 FROM settings WHERE key='__native_window_state_v1'").get()).toBeUndefined()
   })
+})
+
+it('delivers bounded saved raster bytes only through native-stamped private ingress and repeated actual document receipts',async()=>{
+ const f=fixture(false,true,false,true);await f.initialize()
+ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII='
+ const {services,task,attachment,path}=savedAttachment(f,Buffer.from(png,'base64').length)
+ const record={...attachment,mime_type:'image/png'};services.db.updateTask(task.id,{attachments:[record]});writeFileSync(path,Buffer.from(png,'base64'));f.denyWrites()
+ await expect(f.host.request('attachments:readImage',{taskId:task.id,attachmentId:record.id})).rejects.toMatchObject({code:'UNKNOWN_OPERATION'})
+ const input={taskId:task.id,attachmentId:record.id,leaseId:'document_fixture_1'}
+ expect(await f.host.request('engine.attachment.image',input)).toEqual({defined:true,value:{mimeType:'image/png',data:png}})
+ expect(f.uiSnapshots()).toBeGreaterThanOrEqual(4);expect(f.attachmentReceipts).toEqual([])
+ const gate=deferred();release.push(gate.finish);f.holdUiSnapshot(gate.promise)
+ const before=f.uiSnapshots(),pending=f.host.request('engine.attachment.image',input),failure=expect(pending).rejects.toMatchObject({code:'STALE_EPOCH'})
+ await vi.waitFor(()=>expect(f.uiSnapshots()).toBeGreaterThan(before));f.changeUiLease('replacement_document');gate.finish();await failure
+ expect(services.db.getTask(task.id)!.attachments).toEqual([record]);expect(f.attachmentReceipts).toEqual([])
+})
+it('retains a raw image document callback across requester cancellation and prevents premature Source database release',async()=>{
+ const f=fixture(false,true,false,true);await f.initialize();const {services,task,attachment}=savedAttachment(f,12),gate=deferred();release.push(gate.finish);f.holdUiSnapshot(gate.promise)
+ const abort=new AbortController(),before=f.uiSnapshots(),pending=f.host.request('engine.attachment.image',{taskId:task.id,attachmentId:attachment.id,leaseId:'document_fixture_1'},{signal:abort.signal}),failure=expect(pending).rejects.toMatchObject({code:'CANCELLED'})
+ await vi.waitFor(()=>expect(f.uiSnapshots()).toBeGreaterThan(before));abort.abort();await failure
+ await expect(f.service.owner.close(5)).rejects.toThrow('OWNER_DRAIN_BLOCKED');expect(services.db.db.open).toBe(true)
+ gate.finish();await f.service.close();expect(services.db.db.open).toBe(false);expect(f.attachmentReceipts).toEqual([])
+})
+
+if (process.env.TAURI_PRODUCTION_SERVICE_ENTRY) it('uses the actual staged production engine for saved raster bytes and physical-document rejection',async()=>{
+ ;({ProductionService,sealProductionServiceHost}=await import(/* @vite-ignore */ pathToFileURL(join(dirname(process.env.TAURI_PRODUCTION_SERVICE_ENTRY!), 'production-engine.mjs')).href))
+ const f=fixture(false,true,false,true);await f.initialize()
+ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII='
+ const {services,task,attachment,path}=savedAttachment(f,Buffer.from(png,'base64').length);services.db.updateTask(task.id,{attachments:[{...attachment,mime_type:'image/png'}]});writeFileSync(path,Buffer.from(png,'base64'));f.denyWrites()
+ const input={taskId:task.id,attachmentId:attachment.id,leaseId:'document_fixture_1'}
+ expect(await f.host.request('engine.attachment.image',input)).toEqual({defined:true,value:{mimeType:'image/png',data:png}})
+ f.changeUiLease('new_staged_document');await expect(f.host.request('engine.attachment.image',input)).rejects.toMatchObject({code:'STALE_EPOCH'})
+ expect(f.attachmentReceipts).toEqual([]);expect(f.uiSnapshots()).toBeGreaterThanOrEqual(5)
+ await f.service.close();expect(services.db.db.open).toBe(false)
 })

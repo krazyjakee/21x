@@ -380,3 +380,61 @@ describe('native selection import under actual Source task ownership',()=>{
   await selectionOwner.close();expect(retire).toHaveBeenCalledTimes(2)
  })
 })
+
+describe('native-only saved raster reads', () => {
+  const identity = { ...caller, uiLeaseId: 'ui_image_document' }
+  const png = { name: 'preview.png', mimeType: 'image/png' as const, data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=' }
+  async function setup(document: NonNullable<TaskAttachmentBackendOptions['assertImageDocument']> = async () => {}) {
+    const value=task(), record=(await call('chatImages:saveToTask',[value.id,[png]]))[0]!
+    await backend.close(); options={...options,openAttachment:async()=>{throw new Error('Preview must not open external viewer')},assertImageDocument:document};backend=new TaskAttachmentBackend(options)
+    return {value,record,load:(signal=new AbortController().signal)=>backend.readImage(value.id,record.id,identity,signal)}
+  }
+  it('uses read-only metadata scope and exact held bytes without native viewer, mutation or metadata append', async()=>{
+    const {value,record,load}=await setup();write=false;fileReads=0;const before=events.length
+    const mutation=vi.spyOn(manager,'runTaskLifecycleMutation'),fullTask=vi.spyOn(db,'getTask').mockImplementation(()=>{throw new Error('No full getter')})
+    expect(await load()).toEqual({mimeType:'image/png',data:png.data});expect(fileReads).toBe(1);expect(files.inflightCount).toBe(0)
+    expect(metadata(value.id)).toEqual([record]);expect(events).toHaveLength(before);expect(mutation).not.toHaveBeenCalled();expect(fullTask).not.toHaveBeenCalled()
+    await expect(backend.registry.invoke('attachments:readImage',{taskId:value.id,attachmentId:record.id},identity,new AbortController().signal)).rejects.toMatchObject({code:'UNKNOWN_OPERATION'})
+  })
+  it.each(['document','task','metadata','agent'] as const)('fences changed %s after the actual native receipt wait before file bytes',async kind=>{
+    const gate=held();releases.push(gate.release);let calls=0
+    const {value,record,load}=await setup(async()=>{calls++;await gate.promise;if(kind==='document')throw new ServiceProtocolError('STALE_EPOCH')})
+    const pending=load(),failure=expect(pending).rejects.toMatchObject({code:kind==='document'?'STALE_EPOCH':'INVALID_REQUEST'})
+    await vi.waitFor(()=>expect(calls).toBe(1));fileReads=0
+    if(kind==='task')read=false
+    if(kind==='metadata')db.updateTask(value.id,{attachments:[{...record,filename:'replacement.png'}]})
+    if(kind==='agent'){const agent=db.createAgent({name:'changed scope'})!;db.updateTask(value.id,{agent_id:agent.id})}
+    gate.release();await failure;expect(fileReads).toBe(0);expect(files.inflightCount).toBe(0)
+  })
+  it('serializes bounded concurrent reads and joins a held document callback across cancelled queued requests and close retry',async()=>{
+    const gate=held();releases.push(gate.release);let calls=0
+    const {load}=await setup(async()=>{calls++;await gate.promise});fileReads=0
+    const first=load(),failure=expect(first).rejects.toMatchObject({code:'CANCELLED'})
+    await vi.waitFor(()=>expect(calls).toBe(1))
+    const abort=new AbortController(),second=load(abort.signal),cancelled=expect(second).rejects.toMatchObject({code:'CANCELLED'});abort.abort()
+    await expect(backend.close(5)).rejects.toMatchObject({code:'TIMEOUT'});expect(backend.inflightCount).toBe(2);expect(db.db.open).toBe(true)
+    gate.release();await failure;await cancelled;await backend.close();expect(fileReads).toBe(0);expect(calls).toBe(1)
+  })
+  it.each([2,3])('rechecks the exact physical document at read boundary %s and withholds late bytes',async boundary=>{
+    const gate=held();releases.push(gate.release);let calls=0,valid=true
+    const {load}=await setup(async()=>{if(++calls===boundary)await gate.promise;if(!valid)throw new ServiceProtocolError('STALE_EPOCH')})
+    fileReads=0;const pending=load(),failure=expect(pending).rejects.toMatchObject({code:'STALE_EPOCH'})
+    await vi.waitFor(()=>expect(calls).toBe(boundary));valid=false;gate.release();await failure
+    expect(fileReads).toBe(boundary===2?0:1);expect(files.inflightCount).toBe(0)
+  })
+  it('caps the serial image queue at sixteen owned requests and does not reopen cancelled admission',async()=>{
+    const gate=held();releases.push(gate.release);let calls=0
+    const {load}=await setup(async()=>{calls++;await gate.promise});fileReads=0
+    const pending=Array.from({length:16},()=>load().catch(error=>error));await vi.waitFor(()=>expect(calls).toBe(1))
+    expect(()=>load()).toThrowError(expect.objectContaining({code:'BACKPRESSURE'}));expect(backend.inflightCount).toBe(16)
+    backend.shutdown();gate.release();for(const error of await Promise.all(pending))expect(error).toMatchObject({code:'CANCELLED'})
+    expect(fileReads).toBe(0);expect(calls).toBe(1);await backend.close()
+  })
+  it('refuses missing, replaced or malformed native authority before a file read',async()=>{
+    const {value,record,load}=await setup();options.assertImageDocument=async()=>{};fileReads=0
+    expect(()=>load()).toThrowError(expect.objectContaining({code:'UNKNOWN_OPERATION'}))
+    await backend.close();backend=new TaskAttachmentBackend(options)
+    await expect(backend.readImage(value.id,record.id,{...identity,uiLeaseId:'../forged'},new AbortController().signal)).rejects.toMatchObject({code:'INVALID_REQUEST'})
+    expect(fileReads).toBe(0)
+  })
+})

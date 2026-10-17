@@ -418,7 +418,7 @@ it('hydrates the tray preference as a read but fences mutations and requires the
   f.results.set('app:getMinimizeToTray', { enabled: true, action: 'hide' })
   await expect(desktopApi.app.getMinimizeToTray()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })
-it('binds the 237 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 238 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -427,7 +427,7 @@ it('binds the 237 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(237)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(238)
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)
@@ -1176,4 +1176,25 @@ it('uses exact native chrome colors and the current physical document without ex
   const pending=f.host.api.app.setTitleBarOverlay(colors),failure=expect(pending).rejects.toMatchObject({code:'STALE_EPOCH'})
   f.changeUiLease();await f.host.reconnect();raw.resolve({engineEpoch:'engine-1',result:{defined:false}});await failure
   expect(f.invoke.mock.calls.filter(([command,args])=>command==='desktop_invoke'&&args?.operation==='app:setTitleBarOverlay')).toHaveLength(2)
+})
+
+it('reads exact bounded saved rasters through the actual optional facade and physical document transport',async()=>{
+ const f=fixture(true);f.host.setRehydrator(async()=>{});await f.host.reconnect()
+ const result={mimeType:'image/png' as const,data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII='};f.results.set('attachments:readImage',result)
+ expect(await f.host.api.attachments.readImage!('task_fixture',attachmentId)).toEqual(result)
+ expect(f.invoke).toHaveBeenLastCalledWith('desktop_invoke',{operation:'attachments:readImage',payload:{taskId:'task_fixture',attachmentId},engineEpoch:'engine-1',uiLease:'document-1'})
+ const before=f.invoke.mock.calls.length
+ await expect(f.host.api.attachments.readImage!('../foreign',attachmentId)).rejects.toMatchObject({code:'INVALID_ARGUMENTS'})
+ await expect(Reflect.apply(f.host.api.attachments.readImage!,null,['task_fixture',attachmentId,{path:'/etc/passwd'}])).rejects.toMatchObject({code:'INVALID_ARGUMENTS'})
+ expect(f.invoke.mock.calls).toHaveLength(before)
+ f.results.set('attachments:readImage',{...result,path:'/etc/passwd'});await expect(f.host.api.attachments.readImage!('task_fixture',attachmentId)).rejects.toMatchObject({code:'INVALID_RESULT'})
+})
+
+it('drops a late native raster after connection/document retirement without replay into the replacement',async()=>{
+ const f=fixture(true);f.host.setRehydrator(async()=>{});await f.host.reconnect()
+ const held=deferred<unknown>(),original=f.invoke.getMockImplementation()!
+ f.invoke.mockImplementation((command,args)=>args?.operation==='attachments:readImage'?held.promise:original(command,args))
+ const pending=f.host.api.attachments.readImage!('task_fixture',attachmentId),failure=expect(pending).rejects.toMatchObject({code:'STALE_EPOCH'})
+ f.changeUiLease();await f.host.reconnect();held.resolve({engineEpoch:'engine-1',result:{defined:true,value:{mimeType:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII='}}})
+ await failure;expect(f.invoke.mock.calls.filter(([,args])=>args?.operation==='attachments:readImage')).toHaveLength(1)
 })

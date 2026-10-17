@@ -6,6 +6,22 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+The #215/#214 saved-raster continuation adds optional native-only
+`attachments.readImage(taskId, attachmentId)`, with exact saved metadata/read
+scope and held no-follow FD authority. Native stamps and rechecks its current
+physical document; Source obtains the exact native snapshot before/after each
+bounded read and rechecks captured task/project/group/agent scope after awaits.
+Cancellation and queued reads remain owned through native callbacks and FD close.
+Full PNG/JPEG/GIF/WebP container checks bound compressed bytes, canvas/frame
+pixels and parser work before browser decoding; SVG/HTML, APNG, animated WebP,
+unknown/compressed PNG metadata and raw scheme fallback remain unavailable.
+The reviewed catalog adds one native-only optional operation without invented
+Electron IPC evidence or changed existing policies. Engineer A owns bounded
+Markdown/UI integration after publication. See [saved raster authority](native-saved-raster.md).
+Native drop, metadata-only orphan reconciliation, global shortcuts/login items,
+voice permission/raw-stream revocation and installed/platform acceptance remain
+open; identity/schemes and hosted Actions await user decisions.
+
 The #218 final-transcript continuation adds a Source-only production action
 owner: deterministic intent, exact turn/epoch confirmation and dismissal,
 bounded timeouts, offered choices, captured dictation/navigation and exact

@@ -199,3 +199,47 @@ describe('bounded selection-stream publication', () => {
     await rm(path); await owner.close()
   })
 })
+
+
+describe('bounded saved raster reads', () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64')
+  async function savedImage() {
+    const saved = await savedAttachment(png.length)
+    await writeFile(saved.path, png)
+    return { ...saved, attachment: { ...saved.attachment, mime_type: 'image/png' } }
+  }
+  it('reads exact canonical raster bytes through the saved namespace and captures mutable input before awaits', async () => {
+    const saved = await savedImage(), input = { ...saved.attachment }
+    const pending = owner.readImage(saved.taskId, input, controls())
+    input.size = Number.MAX_SAFE_INTEGER; input.mime_type = 'text/html'
+    expect(await pending).toEqual({ mimeType: 'image/png', data: png.toString('base64') })
+    expect(owner.inflightCount).toBe(0)
+    expect(await readFile(saved.path)).toEqual(png)
+  })
+  it('refuses oversized/unsupported metadata before opening and never returns spoofed or linked bytes', async () => {
+    const saved = await savedImage(), opened = vi.fn(actualHandle)
+    owner = create({ open: opened })
+    await expect(owner.readImage(saved.taskId, { ...saved.attachment, size: 512*1024+1 }, controls())).rejects.toMatchObject({ code: 'ATTACHMENT_CAPACITY' })
+    await expect(owner.readImage(saved.taskId, { ...saved.attachment, mime_type: 'image/svg+xml' }, controls())).rejects.toMatchObject({ code: 'ATTACHMENT_PATH_REFUSED' })
+    expect(opened).not.toHaveBeenCalled()
+    await writeFile(saved.path, Buffer.alloc(png.length, 65))
+    await expect(owner.readImage(saved.taskId, saved.attachment, controls())).rejects.toMatchObject({ code: 'ATTACHMENT_PATH_REFUSED' })
+    await writeFile(saved.path, png); await link(saved.path, join(root, 'foreign-image-link'))
+    await expect(owner.readImage(saved.taskId, saved.attachment, controls())).rejects.toMatchObject({ code: 'ATTACHMENT_PATH_REFUSED' })
+  })
+  it('holds a cancelled raw read and actual FD through scope loss and close, without returning late image bytes', async () => {
+    const saved = await savedImage(), entered = held(), gate = held(); releases.push(gate.release)
+    let closed = false, calls = 0, allowed = true
+    owner = create({ open: async (path, flags, mode) => {
+      const fd = await actualHandle(path, flags, mode)
+      return { ...fd, read: async (...args) => { calls++; const read = await fd.read(...args); entered.release(); await gate.promise; return read }, close: async () => { await fd.close(); closed = true } }
+    } })
+    const pending = owner.readImage(saved.taskId, saved.attachment, { signal: new AbortController().signal, beforeEffect: () => { if (!allowed) throw new ServiceProtocolError('INVALID_REQUEST') } })
+    const failed = pending.catch(error => error)
+    await entered.promise; allowed = false
+    await expect(owner.close(5)).rejects.toMatchObject({ code: 'ATTACHMENT_DRAIN_INCOMPLETE' })
+    expect(closed).toBe(false); gate.release()
+    expect((await failed).code).toBe('INVALID_REQUEST'); await owner.close()
+    expect(closed).toBe(true); expect(calls).toBe(1); expect(owner.inflightCount).toBe(0)
+  })
+})

@@ -19336,6 +19336,42 @@
         "convention": "preserve declared undefined/null/void semantics with explicit result codec",
         "validation": "required-before-binding"
       }
+    },
+    {
+      "caller": "trusted-desktop-main",
+      "deadline": "30000ms default; cancellation advisory; no automatic mutation replay",
+      "destination": "native-host",
+      "disposition": "retained",
+      "input": {
+        "convention": "native-only optional API arguments; exact task and attachment IDs; no paths or URLs",
+        "nativeApi": [
+          {
+            "apiPath": [
+              "attachments",
+              "readImage"
+            ],
+            "typeReference": "DesktopApi[\"attachments\"][\"readImage\"]"
+          }
+        ],
+        "preload": [],
+        "reviewedType": null,
+        "validation": "required-before-binding; source signatures are not runtime schemas"
+      },
+      "kind": "command",
+      "name": "attachments:readImage",
+      "nativeCallback": false,
+      "nativeExtension": {
+        "nativeDocumentReceipt": "required-native-stamped",
+        "review": "215/214 bounded saved raster; no Electron IPC binding",
+        "sourceReadAdmission": "required; exact saved metadata/task/project/group/agent scopes and retained FD"
+      },
+      "owner": "native-host",
+      "permission": "exact-operation; current physical document and Source read authority before bytes",
+      "references": [],
+      "result": {
+        "convention": "finite canonical raster data;512KiB bytes; bounded canvas/frame pixels; no implicit null/undefined",
+        "validation": "required-before-binding"
+      }
     }
   ],
   "removedFeatures": [

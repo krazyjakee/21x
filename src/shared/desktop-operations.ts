@@ -275,6 +275,7 @@ export interface DesktopCommandMap {
   "worktree:files": { apiArguments: Parameters<NonNullable<DesktopApi["worktree"]["files"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["worktree"]["files"]>>> }
   "worktree:readFile": { apiArguments: Parameters<NonNullable<DesktopApi["worktree"]["readFile"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["worktree"]["readFile"]>>> }
   "worktree:setup": { apiArguments: Parameters<NonNullable<DesktopApi["worktree"]["setup"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["worktree"]["setup"]>>> }
+  "attachments:readImage": { apiArguments: Parameters<NonNullable<DesktopApi["attachments"]["readImage"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["attachments"]["readImage"]>>> }
 }
 export interface DesktopEventMap {
   "agent-installer:progress": CallbackPayload<NonNullable<DesktopApi["agentInstaller"]["onProgress"]>>
@@ -661,4 +662,5 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "event/worktree:progress": {"name":"worktree:progress","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
   "command/worktree:readFile": {"name":"worktree:readFile","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/worktree:setup": {"name":"worktree:setup","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/attachments:readImage": {"name":"attachments:readImage","kind":"command","disposition":"retained","owner":"native-host","caller":"trusted-desktop-main","destination":"native-host"},
 } as const

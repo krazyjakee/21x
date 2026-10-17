@@ -465,6 +465,20 @@ async fn desktop_invoke(
         state.ui.assert_publish(&window, &engine_epoch, &lease)?;
         return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
     }
+    if operation == "attachments:readImage" {
+        if !twentyonex_engine::production_attachment_files::request(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        let result = engine
+            .read_attachment_image(&engine_epoch, payload, &lease)
+            .await?;
+        authorize(&window)?;
+        available_engine(window.app_handle(), Some(&engine_epoch))?;
+        state.ui.assert_publish(&window, &engine_epoch, &lease)?;
+        return Ok(json!({"engineEpoch":engine.epoch(),"result":result}));
+    }
     if matches!(operation.as_str(), "attachments:pick" | "attachments:save") {
         let lease = ui_lease.ok_or_else(|| EngineError::new("STALE_EPOCH"))?;
         state.ui.assert_publish(&window, &engine_epoch, &lease)?;

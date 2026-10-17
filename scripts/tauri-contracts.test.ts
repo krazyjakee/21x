@@ -75,3 +75,16 @@ describe('desktop contract generation', () => {
     expect(reviewEventForwarding(inventory, operations, { policies: [{ ...policy, source: { ...source, line: 3 } }] }).review.unreviewedReferences).toBe(1)
   })
 })
+
+it('adds one explicitly native-only optional raster contract without forging IPC evidence or changing retained policy',()=>{
+ const source="import { ipcMain } from 'electron'; ipcMain.handle('attachments:open', fn);"
+ const inventory=createInventory({sources:[{file:'src/main/fixture.ts',source}]})
+ const previous=buildOperationManifest(inventory,''),next=buildOperationManifest(inventory,'',undefined,true)
+ expect(next.operations.filter((row:{name:string})=>row.name!=='attachments:readImage')).toEqual(previous.operations)
+ const row=next.operations.find((row:{name:string})=>row.name==='attachments:readImage')
+ expect(row).toMatchObject({owner:'native-host',caller:'trusted-desktop-main',input:{preload:[],nativeApi:[{apiPath:['attachments','readImage']}]},references:[]})
+ expect(generateOperationTypes(next)).toContain('NonNullable<DesktopApi["attachments"]["readImage"]>')
+ expect(generateDesktopApi('interface ElectronAPI { attachments: { open: (id:string)=>Promise<void> } }')).toContain('readImage?:')
+ const collision=createInventory({sources:[{file:'src/main/fixture.ts',source:"import { ipcMain } from 'electron'; ipcMain.handle('attachments:readImage', fn)"}]})
+ expect(()=>buildOperationManifest(collision,'',undefined,true)).toThrow('collides')
+})

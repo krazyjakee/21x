@@ -11,6 +11,7 @@ import type { ArtifactCopyFileResult } from '../shared/artifacts'
 import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isAttachmentPathReceipt, isPrivateAttachmentOpen, isPrivateAttachmentDownload, isPrivateAttachmentDownloadCheck, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import { randomUUID } from 'node:crypto'
 import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
+import { NATIVE_ATTACHMENT_IMAGE_CODECS } from '../shared/attachment-image-codecs'
 import type { DesktopEventMap } from '../shared/desktop-operations'
 import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
@@ -291,6 +292,13 @@ export class ProductionService {
         return this.retain(this.bindings.invoke('agent-installer:install', { agentName: payload.agentName }, { ...this.caller, uiLeaseId: payload.leaseId }, signal))
       } }
     operations['attachments:open'].handle = () => { throw new ServiceProtocolError('INVALID_REQUEST') }
+    operations['engine.attachment.image'] = { validatePayload: isPrivateAttachmentOpen,
+      validateResult: NATIVE_ATTACHMENT_IMAGE_CODECS['attachments:readImage'].validateWireResult,
+      handle: (payload, signal) => {
+        if (!this.initialized || this.closing || !this.bindings || !isRecord(payload) || typeof payload.leaseId !== 'string') throw new ServiceProtocolError('DISCONNECTED')
+        return this.retain(this.bindings.readAttachmentImage(payload.taskId as string, payload.attachmentId as string, { ...this.caller, uiLeaseId: payload.leaseId }, signal)
+          .then(result => NATIVE_ATTACHMENT_IMAGE_CODECS['attachments:readImage'].encodeResult(result) as JsonValue))
+      } }
     operations['engine.attachment.open'] = { validatePayload: isPrivateAttachmentOpen,
       validateResult: TASK_ATTACHMENT_CODECS['attachments:open'].validateWireResult,
       handle: (payload, signal) => {
@@ -359,7 +367,11 @@ export class ProductionService {
       const initialization = (async () => {
         this.services = await this.owner.start()
         if (this.closing || signal.aborted) throw new ServiceProtocolError('CANCELLED')
-        this.bindings = await ProductionDesktopBindings.attach(this.owner, { attachmentSelections: this.attachmentSelections ?? undefined, authority: construction.authority,
+        this.bindings = await ProductionDesktopBindings.attach(this.owner, { attachmentSelections: this.attachmentSelections ?? undefined,
+          ...(descriptor.capabilities.attachmentFiles === 'host' && descriptor.capabilities.ui === 'host' ? { assertAttachmentImageDocument: async (caller: DesktopCallerContext) => {
+            const snapshot = await callbacks.ui.snapshot()
+            if (!snapshot.available || snapshot.leaseId !== caller.uiLeaseId) throw new ServiceProtocolError('STALE_EPOCH')
+          } } : {}), authority: construction.authority,
           emit: (operation, value, recipient) => {
             if (recipient !== undefined && (recipient.webviewId !== this.caller.webviewId || recipient.origin !== this.caller.origin || recipient.engineEpoch !== this.caller.engineEpoch)) return
             if (this.initialized && !this.closing) this.publishScoped(operation, value)

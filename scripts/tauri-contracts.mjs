@@ -76,9 +76,19 @@ export function preloadMappings(source, resolvedOperations) {
 
 function apiReference(path) { return 'DesktopApi' + path.map(part => `[${JSON.stringify(part)}]`).join('') }
 
+// A reviewed native-only extension is distinct from an observed Electron IPC
+// site. Keep the legacy AST inventory and all existing policies unchanged.
+function attachmentImageApiMember() {
+  return ts.factory.createPropertySignature(undefined, 'readImage', ts.factory.createToken(ts.SyntaxKind.QuestionToken),
+    ts.factory.createFunctionTypeNode(undefined,
+      ['taskId', 'attachmentId'].map(name => ts.factory.createParameterDeclaration(undefined, undefined, name, undefined, ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword), undefined)),
+      ts.factory.createTypeReferenceNode('Promise', [ts.factory.createTypeReferenceNode('AttachmentImage')])) )
+}
 export function generateDesktopApi(declarationSource) {
   const sf = ts.createSourceFile('electron.d.ts', declarationSource, ts.ScriptTarget.Latest, true)
-  const statements = []
+  const statements = [ts.factory.createImportDeclaration(undefined,
+    ts.factory.createImportClause(true, undefined, ts.factory.createNamedImports([ts.factory.createImportSpecifier(false, undefined, ts.factory.createIdentifier('AttachmentImage'))])),
+    ts.factory.createStringLiteral('./attachment-image'), undefined)]
   for (const statement of sf.statements) {
     if (ts.isModuleDeclaration(statement)) continue // No global Window/electronAPI declaration.
     if (ts.isImportDeclaration(statement)) {
@@ -91,7 +101,10 @@ export function generateDesktopApi(declarationSource) {
     } else if (ts.isInterfaceDeclaration(statement) && statement.name.text === 'ElectronAPI') {
       statements.push(ts.factory.updateInterfaceDeclaration(statement, [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)],
         ts.factory.createIdentifier('DesktopApi'), statement.typeParameters, statement.heritageClauses,
-        statement.members.filter(member => name(member.name) !== 'browser')))
+        statement.members.filter(member => name(member.name) !== 'browser').map(member =>
+          name(member.name) === 'attachments' && ts.isPropertySignature(member) && member.type && ts.isTypeLiteralNode(member.type)
+            ? ts.factory.updatePropertySignature(member, member.modifiers, member.name, member.questionToken,
+              ts.factory.createTypeLiteralNode([...member.type.members, attachmentImageApiMember()])) : member)))
     } else statements.push(statement)
   }
   const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed })
@@ -139,7 +152,7 @@ export function reviewEventForwarding(inventory, operations, review) {
     stalePolicies: policies.filter(policy => !seen.has(policy.id)).map(policy => policy.id), policies } }
 }
 
-export function buildOperationManifest(inventory, preloadSource, forwardingReview) {
+export function buildOperationManifest(inventory, preloadSource, forwardingReview, includeNativeExtensions = false) {
   const mappings = preloadMappings(preloadSource, inventory.operations)
   const channels = [...new Set(inventory.operations.map(item => item.channel).filter(Boolean))].sort()
   const operations = []
@@ -170,6 +183,18 @@ export function buildOperationManifest(inventory, preloadSource, forwardingRevie
         references: references.map(({ file, line, column, target, method, resolution }) => ({ file, line, column, target, method, resolution })) })
     }
   }
+  if (includeNativeExtensions) {
+    if (channels.includes('attachments:readImage')) throw new Error('Native-only attachment preview collides with an observed IPC operation')
+    operations.push({ name: 'attachments:readImage', kind: 'command', disposition: 'retained', owner: 'native-host',
+      caller: 'trusted-desktop-main', destination: 'native-host', nativeCallback: false,
+      nativeExtension: { review: '215/214 bounded saved raster; no Electron IPC binding', sourceReadAdmission: 'required; exact saved metadata/task/project/group/agent scopes and retained FD', nativeDocumentReceipt: 'required-native-stamped' },
+      permission: 'exact-operation; current physical document and Source read authority before bytes',
+      input: { convention: 'native-only optional API arguments; exact task and attachment IDs; no paths or URLs', preload: [],
+        nativeApi: [{ apiPath: ['attachments', 'readImage'], typeReference: apiReference(['attachments', 'readImage']) }],
+        reviewedType: null, validation: 'required-before-binding; source signatures are not runtime schemas' },
+      result: { convention: 'finite canonical raster data;512KiB bytes; bounded canvas/frame pixels; no implicit null/undefined', validation: 'required-before-binding' },
+      deadline: '30000ms default; cancellation advisory; no automatic mutation replay', references: [] })
+  }
   const forwarding = reviewEventForwarding(inventory, operations, forwardingReview)
   return { contractVersion: 1, status: 'contract-foundation; G1 not accepted',
     removedFeatures: ['embedded-browser', 'remote-webpage-panels', 'built-in-browser-tools', 'browser-recording-capture', 'browser-cookie-import'],
@@ -187,14 +212,14 @@ export function generateOperationTypes(manifest) {
     'export interface DesktopCommandMap {'
   ]
   for (const operation of manifest.operations.filter(item => item.kind === 'command' && item.disposition === 'retained')) {
-    const references = [...new Set(operation.input.preload.map(item => item.typeReference))]
+    const references = [...new Set([...operation.input.preload, ...(operation.input.nativeApi ?? [])].map(item => item.typeReference))]
     const args = references.length ? references.map(ref => `Parameters<NonNullable<${ref}>>`).join(' | ') : 'readonly unknown[]'
     const result = references.length ? references.map(ref => `Awaited<ReturnType<NonNullable<${ref}>>>`).join(' | ') : 'unknown'
     lines.push(`  ${JSON.stringify(operation.name)}: { apiArguments: ${args}; result: ${result} }`)
   }
   lines.push('}', 'export interface DesktopEventMap {')
   for (const operation of manifest.operations.filter(item => item.kind === 'event' && item.disposition === 'retained')) {
-    const references = [...new Set(operation.input.preload.map(item => item.typeReference))]
+    const references = [...new Set([...operation.input.preload, ...(operation.input.nativeApi ?? [])].map(item => item.typeReference))]
     lines.push(`  ${JSON.stringify(operation.name)}: ${references.length ? references.map(ref => `CallbackPayload<NonNullable<${ref}>>`).join(' | ') : operation.input.reviewedType ?? 'unknown'}`)
   }
   lines.push('}', 'export const DESKTOP_OPERATION_MANIFEST = {')
@@ -208,7 +233,7 @@ export function contractOutputs(root) {
   const inventory = scanRepository(root)
   const preloadSource = readFileSync(resolve(root, 'src/preload/index.ts'), 'utf8')
   const review = JSON.parse(readFileSync(resolve(root, 'docs/tauri-migration/event-forwarding-review.json'), 'utf8'))
-  const manifest = buildOperationManifest(inventory, preloadSource, review)
+  const manifest = buildOperationManifest(inventory, preloadSource, review, true)
   if (manifest.forwardingReview.unreviewedReferences || manifest.forwardingReview.stalePolicies.length) throw new Error('Event forwarding review must cover each current dynamic source site exactly')
   return {
     'docs/tauri-migration/inventory.json': serializeInventory(inventory),

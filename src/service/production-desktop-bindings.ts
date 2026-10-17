@@ -92,6 +92,7 @@ type Authority = Pick<AgentConfigurationBackendOptions, 'isTrustedDesktop' | 'ca
   }
 export interface ProductionDesktopBindingOptions {
   attachmentSelections?: AttachmentSelectionOwner
+  assertAttachmentImageDocument?(caller: DesktopCallerContext): Promise<void>
   authority: Authority
   emit(operation: string, payload: JsonValue, recipient?: DesktopCallerContext): void
   fatal(error: ServiceProtocolError): void
@@ -237,7 +238,7 @@ export class ProductionDesktopBindings {
         const current = (): void => { if (capture() !== binding) throw new ServiceProtocolError('INVALID_REQUEST') }
         return await services.agents.withTaskGroupRequestGuard(() => services.agents.runCliConfigurationMutation(targets, async () => { current(); const result = await effect(); current(); return result }), current, new AbortController().signal)
       } })
-    this.taskAttachments = new TaskAttachmentBackend({ selections: options.attachmentSelections, ...owner.getTaskAttachmentBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
+    this.taskAttachments = new TaskAttachmentBackend({ selections: options.attachmentSelections, assertImageDocument: options.assertAttachmentImageDocument, ...owner.getTaskAttachmentBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask,
       canAccessProject: dynamicAuthority.canAccessProject, canAccessAgent: dynamicAuthority.canAccessAgent })
     this.sources = new TaskSourceBackend({ database: services.db, manager: services.agents, sync: services.sync, plugins: services.registry,
@@ -331,6 +332,10 @@ export class ProductionDesktopBindings {
   readTrayPreference(): Promise<boolean> {
     if (this.closed) throw new ServiceProtocolError('DISCONNECTED')
     return this.owner.run(() => this.tray.getPreference())
+  }
+  readAttachmentImage(taskId: string, attachmentId: string, caller: DesktopCallerContext, signal: AbortSignal) {
+    if (this.closed) throw new ServiceProtocolError('DISCONNECTED')
+    return this.taskAttachments.readImage(taskId, attachmentId, caller, signal)
   }
   hasOwnerEvent(operation: string): boolean { return Object.hasOwn(PRODUCTION_EVENT_CODECS, operation) }
   /** Raw owner events never bypass exact codecs or durable transcript projection. */

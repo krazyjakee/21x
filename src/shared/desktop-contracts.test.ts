@@ -118,3 +118,10 @@ describe('validated native callback shapes', () => {
     }
   })
 })
+
+it('keeps native-only image admission outside the public Source registry',async()=>{
+ const service=registry()
+ expect(DESKTOP_OPERATION_MANIFEST['command/attachments:readImage']).toMatchObject({owner:'native-host',caller:'trusted-desktop-main'})
+ expect(()=>service.bindCommand('attachments:readImage',binding() as never)).toThrow('Unknown operation.')
+ await expect(service.invoke('attachments:readImage',{taskId:'task_fixture',attachmentId:'00000000-0000-4000-8000-000000000001'},caller,signal())).rejects.toMatchObject({code:'UNKNOWN_OPERATION'})
+})

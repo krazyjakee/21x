@@ -1,3 +1,5 @@
+import { isAttachmentImage, type AttachmentImage } from '../shared/attachment-image'
+import { taskAttachmentId } from '../shared/task-attachment-codecs'
 import { mimeTypeForPath } from '../main/mime'
 import { randomUUID } from 'node:crypto'
 import type { AttachmentSelectionOwner } from './attachment-selection-owner'
@@ -28,6 +30,7 @@ export interface TaskAttachmentBackendOptions extends TaskAttachmentOwners {
   runAttachmentMutation?<T>(taskIds: string[], effect: () => Promise<T>): Promise<T>
   onTaskUpdated(taskId: string, attachments: FileAttachmentRecord[]): void
   selections?: AttachmentSelectionOwner
+  assertImageDocument?(caller: DesktopCallerContext): Promise<void>
   openAttachment?(receipt: AttachmentPathReceipt, caller: DesktopCallerContext, signal: AbortSignal): Promise<void>
   downloadAttachment?(receipt: AttachmentPathReceipt, caller: DesktopCallerContext, signal: AbortSignal, beforeEffect: () => void): Promise<void>
 }
@@ -40,14 +43,17 @@ export class TaskAttachmentBackend {
   private readonly controllers = new Set<AbortController>()
   private closing = false
   private mutationBusy = false
+  private imageReadTail: Promise<void> = Promise.resolve()
   private readonly selections: AttachmentSelectionOwner | undefined
   private readonly openAttachment: TaskAttachmentBackendOptions['openAttachment']
   private readonly downloadAttachment: TaskAttachmentBackendOptions['downloadAttachment']
+  private readonly imageDocument: TaskAttachmentBackendOptions['assertImageDocument']
   constructor(private readonly options: TaskAttachmentBackendOptions) {
     this.owners = Object.freeze({ database: options.database, manager: options.manager, files: options.files, attachmentRoot: options.attachmentRoot })
     this.selections = options.selections
     this.openAttachment = options.openAttachment
     this.downloadAttachment = options.downloadAttachment
+    this.imageDocument = options.assertImageDocument
     if (!(options.manager instanceof AgentManager) || !(options.files instanceof TaskAttachmentFileOwner) || typeof options.onTaskUpdated !== 'function' || this.openAttachment !== undefined && typeof this.openAttachment !== 'function' || this.downloadAttachment !== undefined && typeof this.downloadAttachment !== 'function') throw new ServiceProtocolError('INVALID_ARGUMENTS')
     this.available(); this.registry = new DesktopOperationRegistry({ owner: 'service', engineEpoch: options.engineEpoch, isTrustedDesktop: options.isTrustedDesktop })
     for (const operation of this.operations()) this.bind(operation)
@@ -72,7 +78,23 @@ export class TaskAttachmentBackend {
     this.available(signal)
     if (caller.principal !== 'trusted-desktop-main' || caller.engineEpoch !== this.options.engineEpoch || !caller.webviewId || !caller.origin || !this.options.isTrustedDesktop(caller)) throw new ServiceProtocolError('INVALID_REQUEST')
   }
-  private async execute<K extends TaskAttachmentOperation>(operation: K, args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal): Promise<DesktopCommandMap[K]['result']> {
+  readImage(taskId: string, attachmentId: string, caller: DesktopCallerContext, signal: AbortSignal): Promise<AttachmentImage> {
+    this.authorize(caller, signal)
+    if (!isDatabaseId(taskId) || !taskAttachmentId(attachmentId)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    const captured = Object.freeze({ ...caller })
+    if (!this.imageDocument || this.options.assertImageDocument !== this.imageDocument) throw new ServiceProtocolError('UNKNOWN_OPERATION')
+    return this.start(false, signal, async owned => {
+      const previous = this.imageReadTail
+      let release!: () => void
+      this.imageReadTail = new Promise<void>(resolve => { release = resolve })
+      await previous
+      try { return await this.execute('attachments:open', [taskId, attachmentId], captured, owned, true) }
+      finally { release() }
+    })
+  }
+  private execute<K extends TaskAttachmentOperation>(operation: K, args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal, image: true): Promise<AttachmentImage>
+  private execute<K extends TaskAttachmentOperation>(operation: K, args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal, image?: false): Promise<DesktopCommandMap[K]['result']>
+  private async execute<K extends TaskAttachmentOperation>(operation: K, args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal, image = false): Promise<DesktopCommandMap[K]['result'] | AttachmentImage> {
     const { database, manager, files } = this.owners, db = database.db, taskId = args[0] as string
     const mutation = operation === 'chatImages:saveToTask' || operation === 'attachments:remove' || operation === 'attachments:save'
     const nativeCallback = operation === 'attachments:download' ? this.downloadAttachment : this.openAttachment
@@ -82,6 +104,7 @@ export class TaskAttachmentBackend {
       this.authorize(caller, signal)
       if (operation === 'attachments:save' && (!this.selections || this.options.selections !== this.selections || !isUiLeaseId(caller.uiLeaseId))) throw new ServiceProtocolError('INVALID_REQUEST')
       if (!mutation) {
+        if (image && (!this.imageDocument || this.options.assertImageDocument !== this.imageDocument)) throw new ServiceProtocolError('DISCONNECTED')
         if (!isUiLeaseId(caller.uiLeaseId)) throw new ServiceProtocolError('INVALID_REQUEST')
         const configured = operation === 'attachments:download' ? this.options.downloadAttachment : this.options.openAttachment
         if (!nativeCallback || configured !== nativeCallback) throw new ServiceProtocolError('DISCONNECTED')
@@ -145,6 +168,15 @@ export class TaskAttachmentBackend {
         if (!selected || !nativeCallback) throw new ServiceProtocolError('INVALID_REQUEST')
         if (Buffer.byteLength(scopeText) + Buffer.byteLength(initial.raw) + Buffer.byteLength(relevantText) >= TASK_ATTACHMENT_LIMITS.wireBytes) throw new ServiceProtocolError('FRAME_TOO_LARGE')
         beforeEffect()
+        if (image) {
+          const document = async (): Promise<void> => { beforeEffect(); await this.imageDocument!(caller); beforeEffect() }
+          await document()
+          const result = await files.readImage(taskId, selected, { beforeEffect, signal }, document)
+          await document()
+          beforeEffect()
+          if (!isAttachmentImage(result)) throw new ServiceProtocolError('INVALID_RESULT')
+          return result
+        }
         await files.open(taskId, selected, { beforeEffect, signal }, async receipt => {
           beforeEffect()
           if (!isAttachmentPathReceipt(receipt) || receipt.taskId !== taskId || receipt.attachmentId !== selected.id || receipt.filename !== selected.filename || receipt.target.size !== String(selected.size) || receipt.attachmentRoot !== this.owners.attachmentRoot) throw new ServiceProtocolError('INVALID_RESULT')
@@ -234,14 +266,19 @@ export class TaskAttachmentBackend {
       throw new ServiceProtocolError('INTERNAL_ERROR')
     } finally { active = false }
   }
+  private start<T>(mutation: boolean, signal: AbortSignal, effect: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (this.mutationBusy || this.flights.size >= TASK_ATTACHMENT_LIMITS.requests || mutation && this.flights.size > 0) throw new ServiceProtocolError('BACKPRESSURE')
+    if (mutation) this.mutationBusy = true
+    const controller = new AbortController(), abort = (): void => controller.abort()
+    this.controllers.add(controller); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
+    const raw = effect(controller.signal).finally(() => { if (mutation) this.mutationBusy = false; this.controllers.delete(controller); signal.removeEventListener('abort', abort) })
+    this.flights.add(raw); void raw.then(() => this.flights.delete(raw), () => this.flights.delete(raw)); return raw
+  }
   private bind<K extends TaskAttachmentOperation>(operation: K): void {
     const codec = TASK_ATTACHMENT_CODECS[operation] as TaskAttachmentCodec<K>
     this.registry.bindCommand(operation, { decodeRequest: value => codec.decodeArguments(structuredClone(value)), validateArguments: codec.validateArguments, authorize: (_args, caller) => { this.authorize(caller); return true }, invoke: (args, caller, signal) => {
       const mutation = operation === 'chatImages:saveToTask' || operation === 'attachments:remove' || operation === 'attachments:save'
-      if (this.mutationBusy || this.flights.size >= TASK_ATTACHMENT_LIMITS.requests || mutation && this.flights.size > 0) throw new ServiceProtocolError('BACKPRESSURE')
-      if (mutation) this.mutationBusy = true; const controller = new AbortController(), abort = (): void => controller.abort(); this.controllers.add(controller); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
-      const raw = this.execute(operation, args, Object.freeze({ ...caller }), controller.signal).finally(() => { if (mutation) this.mutationBusy = false; this.controllers.delete(controller); signal.removeEventListener('abort', abort) })
-      this.flights.add(raw); void raw.then(() => this.flights.delete(raw), () => this.flights.delete(raw)); return raw
+      return this.start(mutation, signal, owned => this.execute(operation, args, Object.freeze({ ...caller }), owned))
     }, validateResult: codec.validateResult, encodeResult: codec.encodeResult })
   }
 }

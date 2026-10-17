@@ -1,3 +1,5 @@
+import { isChatImageMimeType } from '../shared/chat-images'
+import { ATTACHMENT_IMAGE_BYTES, isAttachmentImage, type AttachmentImage } from '../shared/attachment-image'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { constants, lstatSync, realpathSync, type BigIntStats } from 'node:fs'
 import { lstat, realpath, mkdir, open, link, unlink } from 'node:fs/promises'
@@ -156,6 +158,31 @@ export class TaskAttachmentFileOwner {
   /** No contents are read. The actual no-follow FD remains retained across
    * the complete native acknowledgement, including ignored cancellation. */
   open(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls, invoke: (receipt: AttachmentPathReceipt) => Promise<void>): Promise<void> {
+    if (typeof invoke !== 'function') return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
+    return this.withOpenFile(taskId, attachment, controls, receipt => invoke(receipt))
+  }
+  readImage(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls, assertDocument?: () => Promise<void>): Promise<AttachmentImage> {
+    if (!taskAttachmentRecord(attachment)) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
+    if (attachment.size > ATTACHMENT_IMAGE_BYTES) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_CAPACITY'))
+    if (attachment.size < 3 || !isChatImageMimeType(attachment.mime_type)) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_PATH_REFUSED'))
+    const mimeType = attachment.mime_type, size = attachment.size
+    return this.withOpenFile(taskId, attachment, controls, async (_receipt, fd, guard) => {
+      const bytes = Buffer.alloc(size)
+      let offset = 0
+      while (offset < bytes.length) {
+        const length = Math.min(65536, bytes.length - offset)
+        if (assertDocument) await this.step(guard, assertDocument)
+        const read = await this.step(guard, () => fd.read(bytes, offset, length, offset))
+        if (assertDocument) await this.step(guard, assertDocument)
+        if (!Number.isSafeInteger(read.bytesRead) || read.bytesRead < 1 || read.bytesRead > length) fail('ATTACHMENT_PATH_CHANGED')
+        offset += read.bytesRead
+      }
+      const result = { mimeType, data: bytes.toString('base64') }
+      if (!isAttachmentImage(result)) fail('ATTACHMENT_PATH_REFUSED')
+      return result
+    })
+  }
+  private withOpenFile<T>(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls, invoke: (receipt: AttachmentPathReceipt, fd: TaskAttachmentFileHandle, guard: TaskAttachmentFileControls) => Promise<T>): Promise<T> {
     if (!taskAttachmentRecord(attachment) || typeof invoke !== 'function') return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
     if (attachment.size > TASK_ATTACHMENT_LIMITS.openBytes) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_CAPACITY'))
     const metadata = Object.freeze({ ...attachment })
@@ -187,11 +214,12 @@ export class TaskAttachmentFileOwner {
         if (!sameNode(rootInfo,this.roots[this.roots.length-1].info) || !sameNode(taskInfo,proof.info)) fail('ATTACHMENT_PATH_CHANGED')
         const receipt: AttachmentPathReceipt = { version:1,taskId,attachmentId:metadata.id,filename:metadata.filename,attachmentRoot:this.root,path,root:identity(this.root,rootInfo),ancestors:[identity(proof.path,taskInfo)],target:identity(path,opened) }
         if (!isAttachmentPathReceipt(receipt)) fail('ATTACHMENT_PATH_REFUSED')
-        this.current(guard); await invoke(structuredClone(receipt)); this.current(guard)
+        this.current(guard); const result = await invoke(structuredClone(receipt), handle.fd, guard); this.current(guard)
         await this.verifyOpeningDirectory(proof,guard)
         const afterFd = await this.step(guard, () => handle.fd.stat()), after = await this.step(guard, () => this.fs.lstat(path))
         this.openingFile(afterFd,metadata.size); this.openingFile(after,metadata.size)
         if (!sameBytes(before,afterFd) || !sameBytes(before,after)) fail('ATTACHMENT_PATH_CHANGED')
+        return result
       } finally { await this.closeHandle(handle) }
     })
   }

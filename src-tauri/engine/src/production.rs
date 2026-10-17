@@ -1,4 +1,6 @@
 //! Opt-in native production launcher. No renderer-supplied bootstrap or PID authority.
+#[path = "production_attachment_image.rs"]
+pub mod attachment_image;
 #[path = "production_cleanup_observation.rs"]
 pub mod cleanup_observation;
 #[path = "production_contracts.rs"]
@@ -1274,7 +1276,7 @@ impl ProductionEngine {
         payload: Value,
         lease_id: &str,
     ) -> Result<Value, EngineError> {
-        self.attachment_request(epoch, payload, lease_id, false)
+        self.attachment_request(epoch, payload, lease_id, "engine.attachment.open")
             .await
     }
     pub async fn download_attachment(
@@ -1283,7 +1285,16 @@ impl ProductionEngine {
         payload: Value,
         lease_id: &str,
     ) -> Result<Value, EngineError> {
-        self.attachment_request(epoch, payload, lease_id, true)
+        self.attachment_request(epoch, payload, lease_id, "engine.attachment.download")
+            .await
+    }
+    pub async fn read_attachment_image(
+        &self,
+        epoch: &str,
+        payload: Value,
+        lease_id: &str,
+    ) -> Result<Value, EngineError> {
+        self.attachment_request(epoch, payload, lease_id, "engine.attachment.image")
             .await
     }
     pub async fn load_window_state(
@@ -1550,7 +1561,7 @@ impl ProductionEngine {
         epoch: &str,
         payload: Value,
         lease_id: &str,
-        download: bool,
+        operation: &str,
     ) -> Result<Value, EngineError> {
         if !crate::production_attachment_files::request(&payload) {
             return Err(EngineError::new("INVALID_ARGUMENTS"));
@@ -1562,7 +1573,7 @@ impl ProductionEngine {
         if epoch != self.epoch() {
             return Err(EngineError::new("STALE_EPOCH"));
         }
-        let supported = if download {
+        let supported = if operation == "engine.attachment.download" {
             self.0.descriptor.capabilities.attachment_downloads == HostCapability::Host
                 && attachment_download_host_matches(&HostCapability::Host, &self.0.host)
         } else {
@@ -1578,16 +1589,7 @@ impl ProductionEngine {
         {
             return Err(EngineError::new("DISCONNECTED"));
         }
-        let result = self
-            .request(
-                if download {
-                    "engine.attachment.download"
-                } else {
-                    "engine.attachment.open"
-                },
-                payload,
-            )
-            .await?;
+        let result = self.request(operation, payload).await?;
         if epoch != self.epoch() {
             return Err(EngineError::new("STALE_EPOCH"));
         }
@@ -1821,6 +1823,7 @@ impl ProductionEngine {
                             crate::production_ui_contracts::void_result(result)
                         }
                         "engine.agent.install" => contracts::agent_installer::result(result),
+                        "engine.attachment.image" => attachment_image::result(result),
                         "engine.attachment.download.check" => result == &json!({"authorized":true}),
                         operation => contracts::valid_result(operation, result),
                     };
