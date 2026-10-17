@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "issue": "https://github.com/krazyjakee/21x/issues/212",
+  "implementationRevision": "e8fce3aef1407ee346e9a60c82e86d06292df3c2",
+  "integrationBaseRevision": "9d250893ed0777b32d9d3306a15e2ba249d1ebe3",
+  "scope": "Linux production-service periodic desktop activity freshness; whole G3 and installed acceptance remain pending",
+  "environment": {
+    "os": "Linux 6.8.0-139-generic #139-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 03:52:05 UTC 2026 x86_64 GNU/Linux",
+    "standaloneNode": "v22.23.2",
+    "sqlite": "13.0.3",
+    "legacyElectron": "44.0.0",
+    "vitest": "4.0.18",
+    "schema": 37,
+    "pnpm": "9.15.9",
+    "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+    "webview": "Not invoked; service-path and native validator tests only"
+  },
+  "fixtures": {
+    "profile": "Disposable synthetic profiles only; no live profile/data accessed",
+    "provider": "Actual Pi adapter with controlled JSONL child, isolated HOME, empty PATH, synthetic permission request and TERM refusal. No real provider session, account, API key or external model request.",
+    "native": "Actual Rust diagnostic/production finite event validators; native desktop delivery and private service peer controlled, no installed WebView claimed",
+    "credentials": "Synthetic protected-key store in production-service fixture. Copied physical native key helper is staged/hashed only; no real OS credential store access."
+  },
+  "controls": [
+    "Successful existing adapter coordinator polls emit rate-limited freshness without requiring an Electron window; no separate observation timer or persisted status loop",
+    "Activity-only dedicated listener bypasses general external/mobile/voice/status-transition fanout and is released by the captured production owner",
+    "Actual fragmented private service peer filters read authority on each observation; revoked delivery is suppressed and regrant sees a later sequence in the same epoch",
+    "Real controlled Pi prompt creates permission state; repeated real polls preserve raw task row, real project event bus, one prompt, real held concurrency queue and all six scheduler start counts",
+    "Known adapter disconnect invalidates activity without terminal outcome or prompt replay",
+    "Late output/status/poll receipts after retirement and shutdown cannot renew activity; detached throwing consumer does not interrupt polling",
+    "Finite TypeScript/native epoch/sequence/heartbeat/disconnect/terminal outcome metadata reject malformed combinations and extra fields",
+    "Existing #208 startup reconciliation is reused; copied interrupted claims do not authorize blind replay",
+    "Generated manifest authority fields for every retained operation are identical to the integration base; only reviewed dynamic source coordinates/references refresh. Inventory excludes Rust and remains895 before renderer rebase."
+  ],
+  "queuePolicy": "Existing priority ordering, FIFO within priority/project and project round robin is preserved. No global strict-FIFO claim.",
+  "gate": {
+    "lock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "expected": "All affected local checks pass; no lifecycle or external effect from periodic freshness; only owned work retired",
+    "actual": "All final affected controls pass; controlled process/private peer proof preserves task/project/admission/scheduler state. Installed acceptance is not inferred.",
+    "results": {
+      "app-gate-final": {
+        "passed": 225,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "src/service/production-agent-backend.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/production-service.test.ts",
+          "src/shared/agent-desktop-codecs.test.ts",
+          "src/main/agent-manager-activity-outcomes.test.ts",
+          "src/main/agent-manager-activity.test.ts",
+          "src/main/agent-manager-admission.test.ts",
+          "src/main/captain-waker-lifetime.test.ts",
+          "src/main/heartbeat-scheduler-lifetime.test.ts",
+          "src/main/recurrence-scheduler-lifetime.test.ts",
+          "src/main/scheduled-coordination-lifetime.test.ts",
+          "src/main/task-automation-lifetime.test.ts",
+          "src/main/workspace-cleanup-scheduler-lifetime.test.ts",
+          "src/main/agent-manager/activity-observations.test.ts"
+        ],
+        "skippedCases": [],
+        "reportSha256": "c20d7c1554859b319e65019b58dc6de826322958dfa77cf88f225468a60182b2"
+      },
+      "node-gate-final": {
+        "passed": 133,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "src/main/agent-manager-activity-outcomes.test.ts",
+          "src/main/captain-waker-lifetime.test.ts",
+          "src/main/heartbeat-scheduler-lifetime.test.ts",
+          "src/main/recurrence-scheduler-lifetime.test.ts",
+          "src/main/scheduled-coordination-lifetime.test.ts",
+          "src/main/task-automation-lifetime.test.ts",
+          "src/main/workspace-cleanup-scheduler-lifetime.test.ts",
+          "src/service/production-agent-backend.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/production-service.test.ts",
+          "src/shared/agent-desktop-codecs.test.ts"
+        ],
+        "skippedCases": [],
+        "reportSha256": "ef0910cb094f99b718f3f97f3d35c3204fc9cfe4dc4ff8da2019af5623919e20"
+      },
+      "app-peer-positive": {
+        "passed": 47,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "src/service/production-service.test.ts"
+        ],
+        "skippedCases": [],
+        "reportSha256": "b6e0f5f53dff73b421fb501e44edb608ee12bfd284174edbbff4f7504402a5a9"
+      },
+      "prior-activity": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "scripts/activity-process-proof.test.ts"
+        ],
+        "skippedCases": [],
+        "reportSha256": "3ab9ae2aa1855df6d69156375e112975c63d7b46a51a4b33d76361ca52d180a6"
+      },
+      "domain-app": {
+        "passed": 108,
+        "failed": 0,
+        "skipped": 1,
+        "files": [
+          "src/service/production-task-feedback-acceptance.test.ts",
+          "src/service/project-runtime-backend.test.ts",
+          "src/main/agent-manager-captain-managed.test.ts",
+          "src/main/agent-manager-captain-rollover.test.ts",
+          "src/main/agent-manager-project-captains.test.ts",
+          "src/main/captain-waker-managed.test.ts",
+          "src/main/session-feedback.test.ts",
+          "src/main/agent-manager/captain-context.test.ts",
+          "src/main/sessions/start-queue-store.test.ts"
+        ],
+        "skippedCases": [
+          "actual production task feedback acceptance delivers real scoped owner notices after acknowledged checkpoint/source effects"
+        ],
+        "reportSha256": "ca9d87c42ca3f89c77ae06aa084700c1daab6c16dcd41129ac8b268e2ed5bef9"
+      },
+      "domain-node": {
+        "passed": 43,
+        "failed": 0,
+        "skipped": 1,
+        "files": [
+          "src/main/agent-manager-captain-managed.test.ts",
+          "src/main/agent-manager-captain-rollover.test.ts",
+          "src/main/captain-waker-managed.test.ts",
+          "src/service/production-task-feedback-acceptance.test.ts",
+          "src/service/project-runtime-backend.test.ts"
+        ],
+        "skippedCases": [
+          "actual production task feedback acceptance delivers real scoped owner notices after acknowledged checkpoint/source effects"
+        ],
+        "reportSha256": "aa8c578e5e104eaffb72719f9237ce779f27ddcf41c9b1a06fb3407ad18d24d3"
+      },
+      "staged-final": {
+        "passed": 96,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "scripts/production-contracts-proof.test.ts",
+          "scripts/production-service-proof.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/production-service.test.ts",
+          "src/shared/agent-desktop-codecs.test.ts"
+        ],
+        "skippedCases": [],
+        "reportSha256": "dd2c35db9f620b7d60a169ce72022f61c63c486c99d65644c2eeac9c2667cb9d"
+      },
+      "rebase": {
+        "passed": 207,
+        "failed": 0,
+        "skipped": 0,
+        "files": [
+          "src/renderer/src/lib/native-desktop-host.test.ts",
+          "src/renderer/src/lib/tauri-desktop-transport.test.ts",
+          "scripts/production-contracts-proof.test.ts",
+          "scripts/production-service-proof.test.ts",
+          "src/service/production-agent-backend.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/production-service.test.ts",
+          "src/service/production-task-feedback-acceptance.test.ts",
+          "src/shared/agent-desktop-codecs.test.ts"
+        ],
+        "skippedCases": [],
+        "reportSha256": "a8679cb28447618a769cacea4ae749e0867e53e511006bb17744df65b45aa711"
+      }
+    },
+    "rawTypecheck": "passed: pnpm exec tsc --build --noEmit --force",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "native": {
+      "command": "CARGO_BUILD_JOBS=2 cargo test --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent",
+      "passed": 133,
+      "failed": 0,
+      "ignored": 6,
+      "ignoredReason": "Existing opt-in staged diagnostic/SQLite fixtures; no new ignored case",
+      "parityRegression": "diagnostic_and_production_activity_metadata_have_the_same_finite_authority passed",
+      "reportSha256": "e96146dfb0571581f4368b6620d711bbae1598363d846d2d929cbdf48a1e7f25"
+    },
+    "productionOnlyCheck": "passed: cargo check --no-default-features --features production-service",
+    "inventory": "passed after regeneration; Rust is outside the TypeScript source inventory",
+    "contracts": "passed;330 operation authority entries unchanged",
+    "staging": "Database and production graph staging passed, with Electron imports refused; actual staged entry ping/invalid-init/manifest mutation proofs passed",
+    "coverageNote": "The standalone runner excludes legacy Electron wrapper/activity and admission files; its actual report file lists define coverage. The current production peer and actual controlled Pi process run under both hosts. Domain feedback acceptance has one opt-in case; final rebase gate enables it with terminal proofs when present.",
+    "logsSha256": {
+      "rebase-typecheck": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rebase-lint": "2f59324c3e51976fa2f8ea7466f8dac9f919818544a67280c1951a656c90780f",
+      "rebase-inventory": "2b95fdc8f1868bcd75dbe480c6542a1b079bf1a6abd75964f6f6529c2269f8f2",
+      "rebase-contracts": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "source-commit": "95ac54af4f40b0ab9f3730b5b0845abce78b3933e994b3caeae0d158bd71aa3f",
+      "engine-production-check": "33c5c33785d0c68c39378178fee076135a7bcc6f3471fb71b95b46d46ef9b064"
+    }
+  },
+  "failureRepairs": [
+    {
+      "problem": "Initial new real-child fixture installed Date.now after owner construction and used the default 1s expect.poll for the real 2s coordinator",
+      "repair": "Install controlled clock before owner captures it; use a 4s poll expectation and explicit joined TERM-refusing child teardown, preserving production bounds"
+    },
+    {
+      "problem": "Initial quiet-period assertion included initial legitimate transcript batch",
+      "repair": "Await actual initial permission transcript before baseline; no assertion weakened"
+    },
+    {
+      "problem": "First broad app run passed224 and failed one new disconnect case because injected error hit startup readiness",
+      "repair": "Allow real readiness, inject failure on the subsequent poll"
+    },
+    {
+      "problem": "Raw typecheck rejected broad optional stamp flags against strict activity-only event type",
+      "repair": "Copy explicit epoch/seq and true heartbeat fields without casts"
+    },
+    {
+      "problem": "Native production-only compile refused diagnostic-only module reference",
+      "repair": "Share finite metadata in an independent local module included by both validators; no native entrypoint or feature grant broadened"
+    },
+    {
+      "problem": "Review found project bus spy imported before vi.resetModules could observe a different instance",
+      "repair": "Import current graph bus and assert its real initial transition as positive control before measuring no periodic events"
+    },
+    {
+      "problem": "Cross-validator native regression initially referenced contracts at crate root rather than production::contracts",
+      "repair": "Use existing production module namespace; rerun combined synthetic/production engine suite and production-only compile"
+    },
+    {
+      "problem": "Inventory/contracts checks detected expected moved AgentManager source sites and stale three dynamic forwarding review coordinates",
+      "repair": "Refresh only exact existing site coordinates and regenerate inventory/operation/forwarding reference artifacts; assert all operation authority fields unchanged, then rerun both checks"
+    }
+  ],
+  "hostedVerification": {
+    "status": "unavailable",
+    "reason": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runIds": [],
+    "authority": "Lead/user standing instruction; no settings endpoints or workflow dispatch"
+  },
+  "redistributionReviewComplete": false,
+  "remainingGaps": [
+    "Dependencies #208 and #210 remain open; this local Source slice does not accept their complete lifecycle/profile contracts.",
+    "Installed native window hiding/reload/recreation and interrupted startup/shutdown/forced-quit across supported packaged targets remain unproven; no installed WebView invoked here.",
+    "A owns the typed renderer reload/reconnect regression and will integrate this additive event contract after source publication.",
+    "Production voice capture/actions/shortcuts remain explicitly unavailable; legacy voice action admission routing and production management controls do not prove the retained production voice start/confirm path. Linked local-voice integration #218 remains open.",
+    "Real supported-provider sessions await user account/quota approval; only controlled provider processes run here.",
+    "Repository Actions disabled blocks hosted Verify/platform workflows pending user decision. Hosted voice remains deferred.",
+    "No live release/profile cutover/Electron retirement, master-to-main merge or final identity/scheme decision is performed."
+  ],
+  "acceptance": "Scoped Linux service freshness implemented. No whole checklist criterion is newly checked; issue remains open.",
+  "recordedAt": "2026-10-17T20:34:13.552004+00:00",
+  "sourceFilesSha256": {
+    "docs/tauri-migration/event-forwarding-review.json": "40771562a6fabe530bbbae9ad72afe3d6818f86ab38959c932532947e2f741f5",
+    "docs/tauri-migration/implementation-status.md": "2547b754da792ee8b0f06c666bc071b1bb9b6b5af12ea9cb802a08d53e4b2709",
+    "docs/tauri-migration/inventory.json": "8f66f912adb4cb8b7bf832ff6d280f3937c21093bfbc3f993f572af3c97e6c47",
+    "docs/tauri-migration/operations.json": "452457c11f7d0ca7672534c3c59da6bbd6a2c847a49aafb68c14de4c886b7c8a",
+    "docs/tauri-migration/production-background-activity.md": "84348742d23bcd66071c5fee130c25b306e01a02b1360f73c3b43d6afe0064b3",
+    "src-tauri/engine/src/agent_activity.rs": "eb01a34631944352f067b467a979cb1c49d8d5f2cf741c536e699c65375a2784",
+    "src-tauri/engine/src/agent_desktop.rs": "dd7cd5aad1a2ca861093afaf71283269403f6d9292dec0a24b7ccba15f1b0eb7",
+    "src-tauri/engine/src/production_contracts.rs": "9f38f7490d7bd66aca7ca19ecd079e1aa44637786837f9b350bd816646c84de7",
+    "src/main/agent-manager-activity.test.ts": "243d6c4bcfe656977d4b0377d777cfcb2ca1d3d82e3cc71e819653d370454842",
+    "src/main/agent-manager-core.ts": "7bebf9930af56858110a141a0be7fc8fcfd2014f6d645fb7c3b1a596d448ce8b",
+    "src/service/production-owner.ts": "87e2ee008d175074dd817e9449b8244383ad6ea1691748dc02ee4bcd956de12d",
+    "src/service/production-service.test.ts": "0b2c2c0f5be36d9d6c5e740d685a2cfa1f5f33d2433af49cc89444cf6d63c47d",
+    "src/shared/agent-desktop-codecs.test.ts": "ff4e32131b04a71781f3a305eb4b006b376ac10edf2d7d78f293b297d0cba343",
+    "src/shared/agent-desktop-codecs.ts": "08cc2d77893de6f929cc055469d65e13d9f0d3dec8e289e1fd2a6025788b7301",
+    "src/shared/desktop-event-forwarding.ts": "2515fde808b8745bb5f952e28b3d0d07c9635570db6044c6027a555b60f43d86"
+  },
+  "commands": [
+    "pnpm test:run --maxWorkers=2 src/service/production-agent-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/shared/agent-desktop-codecs.test.ts src/main/agent-manager-activity-outcomes.test.ts src/main/agent-manager-activity.test.ts src/main/agent-manager-admission.test.ts src/main/captain-waker-lifetime.test.ts src/main/heartbeat-scheduler-lifetime.test.ts src/main/recurrence-scheduler-lifetime.test.ts src/main/scheduled-coordination-lifetime.test.ts src/main/task-automation-lifetime.test.ts src/main/workspace-cleanup-scheduler-lifetime.test.ts src/main/agent-manager/activity-observations.test.ts --reporter=json --outputFile=/tmp/212-app-gate-final.json",
+    "pnpm test:tauri -- src/main/agent-manager-activity-outcomes.test.ts src/main/captain-waker-lifetime.test.ts src/main/heartbeat-scheduler-lifetime.test.ts src/main/recurrence-scheduler-lifetime.test.ts src/main/scheduled-coordination-lifetime.test.ts src/main/task-automation-lifetime.test.ts src/main/workspace-cleanup-scheduler-lifetime.test.ts src/service/production-agent-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/shared/agent-desktop-codecs.test.ts --reporter=json --outputFile=/tmp/212-node-gate-final.json",
+    "pnpm test:run src/service/production-service.test.ts --reporter=json --outputFile=/tmp/212-app-peer-positive.json",
+    "pnpm test:tauri -- scripts/activity-process-proof.test.ts --reporter=json --outputFile=/tmp/212-prior-activity.json",
+    "pnpm test:run --maxWorkers=2 src/service/production-task-feedback-acceptance.test.ts src/service/project-runtime-backend.test.ts src/main/agent-manager-captain-managed.test.ts src/main/agent-manager-captain-rollover.test.ts src/main/agent-manager-project-captains.test.ts src/main/captain-waker-managed.test.ts src/main/session-feedback.test.ts src/main/agent-manager/captain-context.test.ts src/main/sessions/start-queue-store.test.ts --reporter=json --outputFile=/tmp/212-domain-app.json",
+    "pnpm test:tauri -- src/main/agent-manager-captain-managed.test.ts src/main/agent-manager-captain-rollover.test.ts src/main/captain-waker-managed.test.ts src/service/production-task-feedback-acceptance.test.ts src/service/project-runtime-backend.test.ts --reporter=json --outputFile=/tmp/212-domain-node.json",
+    "pnpm test:tauri -- --production-proofs scripts/production-contracts-proof.test.ts scripts/production-service-proof.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/shared/agent-desktop-codecs.test.ts --reporter=json --outputFile=/tmp/212-staged-final.json",
+    "pnpm test:tauri -- --production-proofs --terminal-proofs src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts scripts/production-contracts-proof.test.ts scripts/production-service-proof.test.ts src/service/production-agent-backend.test.ts src/service/production-owner.test.ts src/service/production-service.test.ts src/service/production-task-feedback-acceptance.test.ts src/shared/agent-desktop-codecs.test.ts --reporter=json --outputFile=/tmp/212-rebase.json",
+    "CI=true pnpm install --frozen-lockfile",
+    "node scripts/tauri-prepare.mjs --native --node /mnt/Rusty/GitHub/21x/src-tauri/resources/node/node --npm-cli /home/krazy/.nvm/versions/node/v22.22.0/lib/node_modules/npm/bin/npm-cli.js",
+    "pnpm tauri:prepare:database",
+    "pnpm tauri:prepare:production",
+    "CARGO_BUILD_JOBS=2 cargo test --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent",
+    "CARGO_BUILD_JOBS=2 cargo check --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --no-default-features --features production-service",
+    "pnpm exec tsc --build --noEmit --force",
+    "pnpm lint",
+    "node scripts/tauri-inventory.mjs --check",
+    "node scripts/tauri-contracts.mjs --check",
+    "git diff --check"
+  ],
+  "artifacts": {
+    "node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "node/LICENSE": {
+      "sha256": "c738ae413cf561f174e34f6961f8ca458aae2369a73640dda6234c629b98bcc4",
+      "bytes": 145485
+    },
+    "native/twentyonex-credential-key": {
+      "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+      "bytes": 25759896
+    },
+    "service/production-engine.mjs": {
+      "sha256": "8bb35e1bf075f64ed90b5e41449fed81c10e8d4727271f1aef8c60fe16eb82a1",
+      "bytes": 6122157
+    },
+    "service/production-stdio.mjs": {
+      "sha256": "a3ae92b3a4e861a89b5e3cd96b6385ae1855a32d10c8e6282e61487b6f71a3cb",
+      "bytes": 18621
+    },
+    "service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "466a5afcb9fbd982e29e40ab7ae991d9fb1c0c62ffb46c93107bbdcb582105f0",
+      "bytes": 1261481
+    }
+  },
+  "localResourceProvenance": "Node copied by native preparation; companion LICENSE and native credential helper physically copied from existing shared staging. No node_modules symlink; helper not used for real credential access. Resources are local evidence artifacts, not committed redistribution approval.",
+  "rendererIntegrationSource": "c0c813641736de29e824f9d7fb9d206b5296e40a",
+  "documentationOnlyRebase": "9d250893ed0777b32d9d3306a15e2ba249d1ebe3",
+  "publication": {
+    "sourceRevision": "e8fce3aef1407ee346e9a60c82e86d06292df3c2",
+    "lsRemoteConfirmed": true,
+    "hostedRunQuery": "gh run list -R krazyjakee/21x --commit e8fce3aef1407ee346e9a60c82e86d06292df3c2 --json databaseId,name,status,conclusion,headSha",
+    "actualRuns": []
+  }
+}
