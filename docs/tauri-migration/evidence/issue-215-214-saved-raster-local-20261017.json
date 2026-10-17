@@ -1,0 +1,364 @@
+{
+  "schemaVersion": 1,
+  "issues": [
+    215,
+    214
+  ],
+  "sourceRevision": "4fd1780abd066587dc12fa59f9deff4186bbd602",
+  "recordedAt": "2026-10-17T22:16:49.918489+00:00",
+  "status": "scoped Linux source/native/facade proof; issues OPEN; no whole criterion tick",
+  "scope": "optional exact attachments.readImage task/UUID operation; native-stamped current physical document; sealed Source read grants and saved metadata; retained protected FD; bounded PNG/JPEG/GIF/WebP container and canonical binary envelope",
+  "catalog": {
+    "nativeOnlyAddition": "attachments:readImage",
+    "existingPoliciesChanged": false,
+    "electronIPCOrPreloadAdded": false,
+    "publicSourceRegistryAdded": false,
+    "rawAttachmentSchemeRegistered": false,
+    "inventoryRuntimeFiles": 909,
+    "legacyASTIPCOperations": 736
+  },
+  "authority": {
+    "native": "trusted main label/origin, original physical document, epoch/admission before/after Source RPC",
+    "source": "captured task/project/group/former/anchor/agent read scope and literal metadata after each await; native exact UI snapshot before open, before/after every 64KiB chunk and before result",
+    "filesystem": "existing no-follow held FD/ancestor/namespace/version/size/single-link checks; raw FD close before result; no viewer, metadata append or lifecycle mutation",
+    "retirement": "sixteen bounded owned requests, one serial read; cancellation/reload retain queued/raw snapshot/read/close until drain; failure retains database/profile for retry"
+  },
+  "limits": {
+    "decodedBytes": 524288,
+    "edgePixels": 4096,
+    "canvasTimesFramePixels": 8388608,
+    "gifFrames": 32,
+    "containerBlocks": 4096,
+    "jpegScans": 64,
+    "readChunkBytes": 65536,
+    "requests": 16
+  },
+  "formatPolicy": {
+    "admitted": [
+      "bounded PNG container with 1/2/4/8-bit supported sample types",
+      "8-bit baseline/progressive JPEG container",
+      "bounded GIF89a/GIF87a canvas+frames",
+      "static RIFF VP8/VP8L WebP"
+    ],
+    "unavailable": [
+      "SVG/HTML",
+      "APNG",
+      "animated WebP",
+      "compressed/unknown PNG metadata",
+      "extra JPEG frame/DNL/hierarchical redefinition",
+      "malformed/truncated/oversized/noncanonical envelopes"
+    ],
+    "limitation": "header/container admission only; no entropy/CRC correctness or platform decoder acceptance claimed; Rust separately validates finite envelope/byte ceiling/canonical padding, Source and facade independently validate full container dimensions before browser decode"
+  },
+  "checks": [
+    {
+      "command": "bash /tmp/e2-image-initial-gate.sh",
+      "exitCode": 1,
+      "actual": "275 app pass/3 own fixture failures, type test union error; engine147 pass/6 existing ignores; Linux host check pass",
+      "expected": "all affected checks pass",
+      "repaired": true
+    },
+    {
+      "command": "bash /tmp/e2-image-final-gate.sh",
+      "exitCode": 0,
+      "actual": "282 app +282 standalone tests, zero failures/skips;101 staged integration incl actual compiled image/current-document case,28 Source/staged voice controls,2 stdio entry proofs and17 contract corpus controls; forced typecheck/lint0errors165existingwarnings;production staging;85host/2 existing explicit GUI ignores;MSVC check;inventory909files736IPC9existingunresolved;contracts;both frontend builds;diffcheck pass",
+      "expected": "all affected checks pass"
+    },
+    {
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2",
+      "exitCode": 0,
+      "actual": "147 passed,6 existing opt-in ignored; executed in initial gate after source implementation",
+      "expected": "all native engine cases pass"
+    }
+  ],
+  "gate": {
+    "lock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "heavyCommandsUseRawExitCodes": true,
+    "scripts": {
+      "/tmp/e2-image-initial-gate.sh": "#!/bin/bash\nset -uo pipefail\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\nfail=0\ncheck() { name=\"$1\"; shift; rtk proxy \"$@\" > \"/tmp/e2-image-initial-${name}.log\" 2>&1; code=$?; printf \"%s:%s\\n\" \"$name\" \"$code\"; if [ \"$code\" -ne 0 ]; then fail=1; fi; }\ncheck app pnpm test:run src/shared/attachment-image.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts\ncheck type pnpm exec tsc --build --noEmit --force\ncheck engine cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2\ncheck host cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service\nexit \"$fail\"\n",
+      "/tmp/e2-image-final-gate.sh": "#!/bin/bash\nset -uo pipefail\ncd /mnt/Rusty/GitHub/21x-e2-215b\nexport CARGO_TARGET_DIR=/mnt/Rusty/cargo-target\nfail=0\ncheck() { name=\"$1\"; shift; rtk proxy \"$@\" > \"/tmp/e2-image-final-${name}.log\" 2>&1; code=$?; printf \"%s:%s\\n\" \"$name\" \"$code\"; if [ \"$code\" -ne 0 ]; then fail=1; fi; }\ncheck app pnpm test:run src/shared/attachment-image.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts\ncheck staged pnpm test:tauri src/shared/attachment-image.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts\ncheck type pnpm exec tsc --build --noEmit --force\ncheck lint pnpm lint\ncheck stage pnpm tauri:prepare:production\ncheck entry pnpm test:tauri --production-proofs scripts/production-service-proof.test.ts scripts/production-contracts-proof.test.ts src/service/production-voice-actions.test.ts src/service/production-service.test.ts\ncheck host cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2\ncheck msvc env PATH=\"/usr/lib/llvm-20/bin:$PATH\" cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc\ncheck contracts node scripts/tauri-contracts.mjs --check\ncheck inventory node scripts/tauri-inventory.mjs --check\ncheck frontend pnpm tauri:production:frontend:build\ncheck diagnostic-frontend pnpm tauri:frontend:build\ncheck diff git diff --check\nexit \"$fail\"\n"
+    },
+    "normalCommitHooks": "run under heavy.lock; see source commit report"
+  },
+  "repairs": [
+    "Initial file-owner positive PNG fixture had truncated IEND; replaced with generated valid1x1RGBA8PNG, no admission assertion weakened.",
+    "First combined gate found missing private image schema in controlled host and missing Electron import in AST collision fixture; repaired fixtures then282/282 passed.",
+    "Forced typecheck found heterogeneous negative-payload union with optional undefined; annotated test inputs as exact JsonValue[]; forced final typecheck passed.",
+    "Native host retains two pre-existing warnings in native_notifications.rs; no new warnings or waived check.",
+    "Evidence generator draft had a shell-quoting error; empty commit attempt exited1 without source changes. Repaired generator, validated JSON/source hashes, then committed the evidence normally. No source check was weakened."
+  ],
+  "versions": {
+    "os": "Linux x86_64",
+    "rootNode": "v22.22.0",
+    "bundledNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "cargo": "1.98.0 (797e8a9bc 2026-08-05)",
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "vitest": "4.0.18",
+    "Electron": "44.0.0",
+    "SQLite": "13.0.3",
+    "schema": 37,
+    "imageFixtureGenerator": "Pillow12.1.1 controlled3x2 RGB fixtures; not a runtime dependency",
+    "WebKitGTK": "2.52.6",
+    "GTK": "3.24.41",
+    "actualBrowserRasterDecode": "not exercised; facade/codec and native host compilation only"
+  },
+  "sourceFiles": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "1da1e2fde29aac4d3669b75e95c4a48a1f0bb542244d7b2b1db48bbb3fc13521",
+      "bytes": 69526
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "04f54dfe6aeeab2a38a5cf901a70e24f84b1ea02f14dd794afd606c88ebded97",
+      "bytes": 380042
+    },
+    "docs/tauri-migration/native-saved-raster.md": {
+      "sha256": "ede8ab8a33159e817c25633dd50cafcc52aca0d47830fee5f71bacab8aa8b29f",
+      "bytes": 4843
+    },
+    "docs/tauri-migration/operations.json": {
+      "sha256": "4565a9705fc5d04fca8c9ee1da8890a6ac5c0f13d5241df2465aa667701249b9",
+      "bytes": 623379
+    },
+    "scripts/tauri-contracts.mjs": {
+      "sha256": "7935772efbe061bbaee72db5bf39e996b416155ae6fa629a843eb01fe19da959",
+      "bytes": 19702
+    },
+    "scripts/tauri-contracts.test.ts": {
+      "sha256": "6de19f59b26d8db274f925e8dcba178c39df1c993a15b20594769d2f79cb7f7b",
+      "bytes": 7738
+    },
+    "src-tauri/engine/src/production.rs": {
+      "sha256": "8cf33e46c9aa38fbf4ca4e7e7cf9d917913125d0d3f3a025880bb9244551dec7",
+      "bytes": 197619
+    },
+    "src-tauri/engine/src/production_attachment_image.rs": {
+      "sha256": "5f11adbcd219445e2c213b41aca71f7150f263cbdbea4aee0922b63c077aa08f",
+      "bytes": 2565
+    },
+    "src-tauri/src/production_host.rs": {
+      "sha256": "6fc817a32aba171b6095632ab31b29645d3853ad28726f6b52328c8b7b282246",
+      "bytes": 56882
+    },
+    "src/main/task-attachment-file-owner.test.ts": {
+      "sha256": "fe43bb7f140b1c96e42fa672d5178258be2f86113dc935b7b84c88da514f3c59",
+      "bytes": 25357
+    },
+    "src/main/task-attachment-file-owner.ts": {
+      "sha256": "d3906c287f22190f240d9a1ba526084da8b563250c9ae00256e103a1dc15d422",
+      "bytes": 31041
+    },
+    "src/renderer/src/lib/native-desktop-host.test.ts": {
+      "sha256": "5260b96b358054fa643136a6c42fc85542532a140f8ed16038d4c265b0055808",
+      "bytes": 109995
+    },
+    "src/renderer/src/lib/native-desktop-host.ts": {
+      "sha256": "d74b5b6f5ac58df9ccc6fa98e5bdaba0dffab73eed482fe4823a473cf67edd12",
+      "bytes": 32988
+    },
+    "src/renderer/src/lib/tauri-desktop-transport.test.ts": {
+      "sha256": "7af7c640203d7a6db8b20d3535adb13fb6f298c70e2d485eda55b961441edfbf",
+      "bytes": 14552
+    },
+    "src/renderer/src/lib/tauri-desktop-transport.ts": {
+      "sha256": "2c2d09ad309230ebfda69271a0c29560d68220258faf9aab666888f8358e1b73",
+      "bytes": 11264
+    },
+    "src/service/production-desktop-bindings.ts": {
+      "sha256": "0f648166869b95f01114b96d3d2f30e2d261caa9dda438814eedc5ea38a2982d",
+      "bytes": 45387
+    },
+    "src/service/production-service.test.ts": {
+      "sha256": "413c0902ef0eb4712861d9efd2f13be14329bc917f22c380d06c938b33ab369b",
+      "bytes": 86584
+    },
+    "src/service/production-service.ts": {
+      "sha256": "7d931faf2be1d30f9bb74aeb7d8284251b85c81d7145e0f5b0ff26664dffff0d",
+      "bytes": 46348
+    },
+    "src/service/task-attachment-backend.test.ts": {
+      "sha256": "6630796382c7f7de7643060b1abba8523e173e927ac0e113cf2b7da0b0f1dc48",
+      "bytes": 47360
+    },
+    "src/service/task-attachment-backend.ts": {
+      "sha256": "e75665a0b51597f29826a88d5e6abf25f18b1de41d00bfe85ba77fd15022e9d0",
+      "bytes": 25513
+    },
+    "src/shared/attachment-image-codecs.ts": {
+      "sha256": "b285ab94fe0987e1786a0fbad567afdbf758d4630a7a171b3df8a24cf1417848",
+      "bytes": 1899
+    },
+    "src/shared/attachment-image.test.ts": {
+      "sha256": "ab5ba53004ebc2cbf7ca20d741f108ea6208f2f2f57dd3eb187f45b9eb595658",
+      "bytes": 7119
+    },
+    "src/shared/attachment-image.ts": {
+      "sha256": "80b65d774c3aac6672a6bd31d43ff1221b135635df11a97db75a5af592efd905",
+      "bytes": 1501
+    },
+    "src/shared/attachment-raster.ts": {
+      "sha256": "8a740b41bc3d7405f330c1849866729a4ec3220be2e13995ec7052bc98828071",
+      "bytes": 7587
+    },
+    "src/shared/desktop-api.ts": {
+      "sha256": "1011899ba9895d84d26634c6cecb33e827e8b0c4d8f89b0b2c49f7d1fe15530e",
+      "bytes": 41213
+    },
+    "src/shared/desktop-contracts.test.ts": {
+      "sha256": "65347f3fadf753f2fd1c12776e235e6d35853b19785c7df10b7a553d43e74932",
+      "bytes": 9281
+    },
+    "src/shared/desktop-operations.ts": {
+      "sha256": "94f92da0943c03c4d7661864d4a92eba54dbc0571e3177659c6ab8b99c30b73b",
+      "bytes": 115668
+    }
+  },
+  "artifacts": {
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "710a8bc0585f0a49226cc0c114a388e646afe9b701501c57dc7b95ae866c20f1",
+      "bytes": 6188374
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "da79a21193b7af199b8666e7fc96e7bdd75dc300fbe984a5984e5869fa58811f",
+      "bytes": 1261784
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "reports": {
+    "e2-image-initial-app.log": {
+      "sha256": "70a783c63b700b61ba7c8568bdc9ce2771db5a9e0b2ad30a45c3fe983105ffba",
+      "bytes": 205928,
+      "resultTail": "                                        ^\n    166|     try { if (!schema.validatePayload(payload)) return Promise.reject(\u2026\n    167|     catch { return Promise.reject(new ServiceProtocolError('INVALID_AR\u2026\n \u276f src/service/production-service.test.ts:933:22\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/3]\u23af\n\n FAIL  |main| src/service/production-service.test.ts > retains a raw image document callback across requester cancellation and prevents premature Source database release\nAssertionError: expected 0 to be greater than 0\n \u276f src/service/production-service.test.ts:943:47\n\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/3]\u23af\n\n\u23af\u23af\u23af\u23af\u23af\u23af Unhandled Errors \u23af\u23af\u23af\u23af\u23af\u23af\n\nVitest caught 1 unhandled error during the test run.\nThis might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.\n\n\u23af\u23af\u23af\u23af Unhandled Rejection \u23af\u23af\u23af\u23af\u23af\nAssertionError: expected ServiceProtocolError: Unknown operation. { code: '\u2026' } to match object { code: 'CANCELLED' }\n(1 matching property omitted from actual)\n \u276f Assertion.<anonymous> node_modules/.pnpm/@vitest+expect@4.0.18/node_modules/@vitest/expect/dist/index.js:1216:10\n \u276f Assertion.<anonymous> node_modules/.pnpm/@vitest+expect@4.0.18/node_modules/@vitest/expect/dist/index.js:1090:14\n \u276f Assertion.methodWrapper node_modules/.pnpm/chai@6.2.2/node_modules/chai/index.js:1700:25\n \u276f node_modules/.pnpm/@vitest+expect@4.0.18/node_modules/@vitest/expect/dist/index.js:1704:20\n \u276f processTicksAndRejections node:internal/process/task_queues:104:5\n\nThis error originated in \"src/service/production-service.test.ts\" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.\nThe latest test that might've caused the error is \"retains a raw image document callback across requester cancellation and prevents premature Source database release\". It might mean one of the following:\n- The error was thrown, while Vitest was running this test.\n- If the error occurred after the test had been completed, this was the last documented test before it was thrown.\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n\n Test Files  2 failed | 6 passed (8)\n      Tests  3 failed | 275 passed (278)\n     Errors  1 error\n   Start at  23:06:21\n   Duration  24.06s (transform 5.36s, setup 369ms, import 5.53s, tests 34.77s, environment 411ms)\n\n\u2009ELIFECYCLE\u2009 Command failed with exit code 1.\n",
+      "localPath": "/tmp/e2-image-initial-app.log"
+    },
+    "e2-image-initial-engine.log": {
+      "sha256": "2f4bfc100c401a7c3d3aad5bf2294c06f29b3504aad6dd9ad5550e39a1b386cb",
+      "bytes": 17546,
+      "resultTail": "_preferences_cross_the_exact_current_document_envelope ... ok\ntest production_ui_contracts::tests::finite_commands_cannot_grant_elements_paths_or_browser_control ... ok\ntest production_ui_contracts::tests::full_snapshot_is_passive_exact_and_bounded ... ok\ntest production_ui_contracts::tests::private_leases_and_results_do_not_expand_public_ingress ... ok\ntest production_window::tests::disconnected_display_restores_visible_normal_bounds_and_retains_display_modes ... ok\ntest production_window::tests::menu_zoom_is_finite_bounded_and_resets_only_on_explicit_action ... ok\ntest production_window::tests::negative_secondary_and_dpi_change_preserve_size_without_offscreen_titlebar ... ok\ntest production_window::tests::small_and_invalid_monitors_cannot_invent_unbounded_geometry ... ok\ntest tests::error_message_from_child_is_never_forwarded ... ok\ntest tests::ids_reject_wrong_direction_and_leading_zero ... ok\ntest tests::mixed_runtime_bootstrap_is_rejected ... ok\ntest tests::staged_cancel_while_waiting_for_writer_releases_capacity ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_concurrent_requests_preserve_monotonic_wire_order ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_initialize_ping_unknown_operation_and_shutdown ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_shutdown_settles_concurrent_calls_and_reaps_child ... ignored, requires an explicitly staged standalone Node 22.23.2 resource directory\ntest tests::staged_synthetic_configuration_roundtrip_preserves_real_content_effects ... ignored, requires explicitly staged content configuration service and standalone SQLite\ntest tests::staged_synthetic_database_roundtrip_emits_real_target_events ... ignored, requires explicitly staged database-stdio.mjs and standalone native SQLite\ntest production::cleanup_observation::linux::tests::actual_retained_cwd_process_is_busy_and_reaped_process_is_never_fabricated_idle ... ok\n\ntest result: ok. 147 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 3.02s\n\n   Doc-tests twentyonex_engine\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+      "localPath": "/tmp/e2-image-initial-engine.log"
+    },
+    "e2-image-initial-host.log": {
+      "sha256": "49dbef9b9282a434e31938051bee35e3dab8b0f65f941885926320e26e66b1d5",
+      "bytes": 1157,
+      "resultTail": "    Checking twentyonex-engine v0.1.0 (/mnt/Rusty/GitHub/21x-e2-215b/src-tauri/engine)\n    Checking twentyonex-tauri-feasibility v0.1.0 (/mnt/Rusty/GitHub/21x-e2-215b/src-tauri)\nwarning: variable does not need to be mutable\n   --> src/native_notifications.rs:686:13\n    |\n686 |         let mut batch = batch.borrow_mut();\n    |             ----^^^^^\n    |             |\n    |             help: remove this `mut`\n    |\n    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default\n\nwarning: field `0` is never read\n   --> src/native_notifications.rs:374:27\n    |\n374 |     struct SignalLifetime(std::sync::mpsc::Sender<()>);\n    |            -------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |            |\n    |            field in this struct\n    |\n    = help: consider removing this field\n    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: `twentyonex-tauri-feasibility` (bin \"twentyonex-tauri-feasibility\") generated 2 warnings (run `cargo fix --bin \"twentyonex-tauri-feasibility\" -p twentyonex-tauri-feasibility` to apply 1 suggestion)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.41s\n",
+      "localPath": "/tmp/e2-image-initial-host.log"
+    },
+    "e2-image-initial-type.log": {
+      "sha256": "c5aa49f584336472d17373fc64f8e62f9b3bf9bfecabf1b35ae9d40812524746",
+      "bytes": 1250,
+      "resultTail": "src/shared/attachment-image.test.ts(71,211): error TS2345: Argument of type '{ taskId: string; attachmentId: string; leaseId?: undefined; } | { taskId: string; attachmentId: string; leaseId: string; }' is not assignable to parameter of type 'JsonValue'.\n  Type '{ taskId: string; attachmentId: string; leaseId?: undefined; }' is not assignable to type 'JsonValue'.\n    Type '{ taskId: string; attachmentId: string; leaseId?: undefined; }' is not assignable to type '{ [key: string]: JsonValue; }'.\n      Property 'leaseId' is incompatible with index signature.\n        Type 'undefined' is not assignable to type 'JsonValue'.\nsrc/shared/attachment-image.test.ts(71,211): error TS2345: Argument of type '{ taskId: string; attachmentId: string; leaseId?: undefined; } | { taskId: string; attachmentId: string; leaseId: string; }' is not assignable to parameter of type 'JsonValue'.\n  Type '{ taskId: string; attachmentId: string; leaseId?: undefined; }' is not assignable to type 'JsonValue'.\n    Type '{ taskId: string; attachmentId: string; leaseId?: undefined; }' is not assignable to type '{ [key: string]: JsonValue; }'.\n      Property 'leaseId' is incompatible with index signature.\n        Type 'undefined' is not assignable to type 'JsonValue'.\n",
+      "localPath": "/tmp/e2-image-initial-type.log"
+    },
+    "e2-image-final-app.log": {
+      "sha256": "d877abec233266a7afee3398cd80f3fc525034b03cd10baeb7c145de832e9913",
+      "bytes": 197411,
+      "resultTail": "ce/production-service.test.ts > retains a raw image document callback across requester cancellation and prevents premature Source database release\n[AgentManager] Recovery inventory: { projects: 1, tasks: 0, agents: 1, sessions: 0, queued: 0 }\n\nstdout | src/service/production-service.test.ts > retains a raw image document callback across requester cancellation and prevents premature Source database release\n[RecurrenceScheduler] Starting scheduler...\n[HeartbeatScheduler] Starting scheduler...\n[TaskAutomation] Starting scheduler...\n[WorkspaceCleanup] Starting scheduler...\n\nstdout | src/service/production-service.test.ts > retains a raw image document callback across requester cancellation and prevents premature Source database release\n[AgentManager] Stopping all 0 sessions\n[HeartbeatScheduler] Scheduler stopped\n[RecurrenceScheduler] Scheduler stopped\n[TaskAutomation] Scheduler stopped\n[WorkspaceCleanup] Scheduler stopped\n\nstdout | src/service/production-service.test.ts > retains a raw image document callback across requester cancellation and prevents premature Source database release\n[AgentManager] Stopping all 0 sessions\n\n \u2713 |main| src/service/production-service.test.ts (53 tests) 20640ms\n     \u2713 delivers periodic real adapter freshness through the scoped peer while the desktop detaches without replay or transition effects  8576ms\n     \u2713 carries a known adapter disconnect as activity invalidation through the private peer without replaying its prompt  1127ms\n     \u2713 retains late native initialization and fences database creation after cancellation  3085ms\n   \u2713 installs a controlled real package through private native ingress and the actual singleton, preserving external files  763ms\n   \u2713 uses open for real saved attachment metadata through private document ingress while its task agent is active under read grants  316ms\n   \u2713 uses download for real saved attachment metadata through private document ingress while its task agent is active under read grants  308ms\n     \u2713 registers only the native offer, refuses public path save, and returns one exact imported file without metadata append  480ms\n\n Test Files  8 passed (8)\n      Tests  282 passed (282)\n   Start at  23:08:54\n   Duration  22.92s (transform 5.52s, setup 535ms, import 5.37s, tests 34.13s, environment 333ms)\n\n",
+      "localPath": "/tmp/e2-image-final-app.log"
+    },
+    "e2-image-final-contracts.log": {
+      "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "bytes": 43,
+      "resultTail": "Verified explicit desktop contract outputs\n",
+      "localPath": "/tmp/e2-image-final-contracts.log"
+    },
+    "e2-image-final-diagnostic-frontend.log": {
+      "sha256": "46df37f1c45f3ed514ca9f0a1b2b6085e73396ca195dbe82c5c8d74b8da4169e",
+      "bytes": 498,
+      "resultTail": "\n> 21x@0.0.161 tauri:frontend:build /mnt/Rusty/GitHub/21x-e2-215b\n> vite build --config vite.tauri.config.ts\n\nvite v6.4.1 building for production...\ntransforming...\n\u2713 21 modules transformed.\nrendering chunks...\ncomputing gzip size...\n../../out/tauri-renderer/index.html                   1.62 kB \u2502 gzip:  0.74 kB\n../../out/tauri-renderer/assets/index-DDaJ-I4V.css    0.94 kB \u2502 gzip:  0.48 kB\n../../out/tauri-renderer/assets/index-DGOg_TXb.js   108.99 kB \u2502 gzip: 20.49 kB\n\u2713 built in 279ms\n",
+      "localPath": "/tmp/e2-image-final-diagnostic-frontend.log"
+    },
+    "e2-image-final-diff.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "resultTail": "",
+      "localPath": "/tmp/e2-image-final-diff.log"
+    },
+    "e2-image-final-entry.log": {
+      "sha256": "8d3b2062db7055b9006c724e25798fe9dadae2fae94f25ce79fad5979b102e8d",
+      "bytes": 268759,
+      "resultTail": "synthetic-native-session-79905 (resetTaskStatus=true)\n[AgentManager] Unregistered session synthetic-native-session-79905 from polling (0 remaining)\n[AgentManager] Polling coordinator stopped (no active sessions)\n\nstdout | src/service/production-voice-actions.test.ts > actual staged production transcript action owner > keeps exact live HITL scope with acknowledged abort=true and refuses stale retargeting\n[AgentManager] Queued start of task qxbg0nmwldbzjb4aosqebufw cancelled\n[SessionTracker] DESTROYED session=synthetic-native-session-79905 task=qxbg0nmwldbzjb4aosqebufw resetStatus=true reason=stop_session\n\nstdout | src/service/production-voice-actions.test.ts > actual staged production transcript action owner > keeps exact live HITL scope with acknowledged abort=true and refuses stale retargeting\n[AgentManager] Stopping all 0 sessions\n[HeartbeatScheduler] Scheduler stopped\n[RecurrenceScheduler] Scheduler stopped\n[TaskAutomation] Scheduler stopped\n[WorkspaceCleanup] Scheduler stopped\n\nstdout | src/service/production-voice-actions.test.ts > actual staged production transcript action owner > keeps exact live HITL scope with acknowledged abort=true and refuses stale retargeting\n[AgentManager] Stopping all 0 sessions\n\n \u2713 |portable-main| src/service/production-voice-actions.test.ts (28 tests) 11430ms\n     \u2713 creates and assigns through canonical task owners and the actual private peer, with no public voice registration  519ms\n     \u2713 keeps exact live HITL scope with acknowledged abort=false and refuses stale retargeting  1393ms\n     \u2713 keeps exact live HITL scope with acknowledged abort=true and refuses stale retargeting  1365ms\n     \u2713 keeps exact live HITL scope with acknowledged abort=false and refuses stale retargeting  1363ms\n     \u2713 keeps exact live HITL scope with acknowledged abort=true and refuses stale retargeting  1397ms\n \u2713 |portable-main| scripts/production-service-proof.test.ts (2 tests) 3301ms\n     \u2713 verifies the staged closure, loads the real service graph and negotiates before granting domain access  3254ms\n \u2713 |portable-main| scripts/production-contracts-proof.test.ts (17 tests) 560ms\n\n Test Files  4 passed (4)\n      Tests  101 passed (101)\n   Start at  23:11:08\n   Duration  43.15s (transform 4.37s, setup 81ms, import 2.65s, tests 40.01s, environment 0ms)\n\n",
+      "localPath": "/tmp/e2-image-final-entry.log"
+    },
+    "e2-image-final-frontend.log": {
+      "sha256": "808ae1279452f3428e5113c3d3fd0f4025d7fd441ecd61a57297d723eb333184",
+      "bytes": 9621,
+      "resultTail": "/out/tauri-production-renderer/assets/chunk-GF5L2VYU-D3GG1K4f.js                   49.30 kB \u2502 gzip:  15.78 kB\n../../out/tauri-production-renderer/assets/flowDiagram-UKHOOZJN-BNKS_CFm.js             61.40 kB \u2502 gzip:  19.67 kB\n../../out/tauri-production-renderer/assets/settings-store-GSFTatbP.js                   65.97 kB \u2502 gzip:  20.89 kB\n../../out/tauri-production-renderer/assets/ganttDiagram-PKOTCBZU-DMG4NatS.js            69.73 kB \u2502 gzip:  23.57 kB\n../../out/tauri-production-renderer/assets/c4Diagram-5PPSVZJV-CyNxrKO5.js               70.01 kB \u2502 gzip:  19.67 kB\n../../out/tauri-production-renderer/assets/blockDiagram-VBNYF7ZC-BQh8Pyx8.js            75.16 kB \u2502 gzip:  21.61 kB\n../../out/tauri-production-renderer/assets/cose-bilkent-JH36ORCC-CyibCX2p.js            81.75 kB \u2502 gzip:  22.50 kB\n../../out/tauri-production-renderer/assets/sequenceDiagram-SI44F4Z6-CDj3S5CY.js        117.48 kB \u2502 gzip:  31.29 kB\n../../out/tauri-production-renderer/assets/swimlanes-SLNWSIFB-CoGQWnlH.js              120.32 kB \u2502 gzip:  44.01 kB\n../../out/tauri-production-renderer/assets/architectureDiagram-T3A2C74G-D_AuZW_g.js    152.06 kB \u2502 gzip:  43.25 kB\n../../out/tauri-production-renderer/assets/SettingsWorkspace-CZtzEPiC.js               205.92 kB \u2502 gzip:  53.70 kB\n../../out/tauri-production-renderer/assets/katex-C5jXJg4s.js                           261.33 kB \u2502 gzip:  77.57 kB\n../../out/tauri-production-renderer/assets/index-DkR8eaKz.js                           291.54 kB \u2502 gzip:  69.94 kB\n../../out/tauri-production-renderer/assets/cytoscape.esm-BjAbmLdb.js                   443.83 kB \u2502 gzip: 142.41 kB\n../../out/tauri-production-renderer/assets/mermaid.core-Y6eJ8rVe.js                    635.51 kB \u2502 gzip: 152.12 kB\n../../out/tauri-production-renderer/assets/cynefin-VYW2F7L2-BAYOQIH1.js                690.83 kB \u2502 gzip: 155.11 kB\n../../out/tauri-production-renderer/assets/main-D-a6tjpC.js                          1,510.75 kB \u2502 gzip: 437.41 kB\n\n(!) Some chunks are larger than 500 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.\n\u2713 built in 12.14s\n",
+      "localPath": "/tmp/e2-image-final-frontend.log"
+    },
+    "e2-image-final-host.log": {
+      "sha256": "99c0be5e8c6b4138ffd9d92e4ed7c8359527e026cb9a624239e7a750623f7922",
+      "bytes": 12614,
+      "resultTail": "de_waiter_fences_future_gui_effect_and_retains_raw_work ... ok\ntest production_host::native_tray::tests::scheduling_error_and_late_scope_loss_never_fake_callback_acknowledgement ... ok\ntest production_host::native_oauth::tests::warm_forwarding_uses_private_bus_and_nonce_authority ... ok\ntest production_host::native_window::tests::coalesces_observations_and_flushes_latest_during_native_close ... ok\ntest production_host::native_window::tests::cancelled_close_waiter_does_not_release_raw_profile_write_and_late_state_wins ... ok\ntest production_host::native_window::wry_proof::real_wry_window_restoration_chrome_editing_zoom_and_untrusted_window_denial ... ignored, requires an explicitly isolated Xvfb/Wry session; execute --ignored --test-threads=1\ntest production_host::production_ui::tests::attachment_raw_open_receipt_holds_descriptors_and_drain_after_public_abort_and_reload ... ok\ntest production_host::production_ui::tests::bootstrap_only_activation_is_stable_and_reload_revokes_old_document ... ok\ntest production_host::production_ui::tests::callback_rechecks_document_after_queued_raw_work_and_never_claims_applied ... ok\ntest production_host::production_ui::tests::hidden_untrusted_physical_replacement_and_new_epoch_never_inherit_authority ... ok\ntest production_host::production_ui::tests::installer_progress_cancelled_waiter_retains_raw_work_and_rechecks_reload_before_emit ... ok\ntest production_host::production_ui::tests::late_destroy_and_page_events_cannot_retire_or_activate_reused_main_label ... ok\ntest production_host::production_ui::tests::no_completion_without_start_and_generation_exhaustion_grants_nothing ... ok\ntest production_host::production_ui::tests::public_callback_abort_cannot_release_raw_emit_receipt_or_shutdown ... ok\ntest production_host::production_ui::tests::same_url_overlapping_completions_are_unavailable_until_an_unambiguous_load ... ok\ntest production_host::tests::only_exact_validated_notices_receive_a_native_document_envelope ... ok\ntest production_host::tests::production_origins_are_exact_and_remote_windows_gain_no_authority ... ok\ntest production_host::native_window::tests::failed_persistence_is_explicit_without_fabricating_a_saved_receipt ... ok\n\ntest result: ok. 85 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.27s\n\n",
+      "localPath": "/tmp/e2-image-final-host.log"
+    },
+    "e2-image-final-inventory.log": {
+      "sha256": "b6ad49723218d2eb2ee35bf514e10abfe82e7c9197b3602f4d3be3f1f5fb6974",
+      "bytes": 91,
+      "resultTail": "Verified docs/tauri-migration/inventory.json: 909 files, 736 IPC operations (9 unresolved)\n",
+      "localPath": "/tmp/e2-image-final-inventory.log"
+    },
+    "e2-image-final-lint.log": {
+      "sha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+      "bytes": 16728,
+      "resultTail": "  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  267:98  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  272:13  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  295:98  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  301:13  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  306:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  307:13  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/connectors/bridge/mapping.ts\n  277:1  warning  Unused eslint-disable directive (no problems were reported from 'no-control-regex')\n  279:1  warning  Unused eslint-disable directive (no problems were reported from 'no-control-regex')\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/oauth/oauth-manager-refresh.test.ts\n  109:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  121:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  137:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  154:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  169:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/task-api-server.test.ts\n  473:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/main/task-api/skill-routes.ts\n  106:28  warning  '_content' is assigned a value but never used  @typescript-eslint/no-unused-vars\n\n/mnt/Rusty/GitHub/21x-e2-215b/src/renderer/src/components/canvas/BrowserPanelContent.tsx\n  348:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  357:68  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n  518:30  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any\n\n\u2716 165 problems (0 errors, 165 warnings)\n  0 errors and 2 warnings potentially fixable with the `--fix` option.\n\n",
+      "localPath": "/tmp/e2-image-final-lint.log"
+    },
+    "e2-image-final-msvc.log": {
+      "sha256": "060d870dacd60d9e736711e7228dce8728ac0a54f1f551a32cc6b215a453e03b",
+      "bytes": 15158,
+      "resultTail": "d\n  --> src/native_clipboard.rs:23:7\n   |\n23 | const COPIED_TYPES: &[&str] = &[\n   |       ^^^^^^^^^^^^\n\nwarning: constant `OTHER_IMAGES` is never used\n  --> src/native_clipboard.rs:28:7\n   |\n28 | const OTHER_IMAGES: &[&str] = &[\n   |       ^^^^^^^^^^^^\n\nwarning: type alias `Scope` is never used\n  --> src/native_clipboard.rs:37:6\n   |\n37 | type Scope = Arc<dyn Fn() -> Result<(), EngineError> + Send + Sync>;\n   |      ^^^^^\n\nwarning: type alias `Reply` is never used\n  --> src/native_clipboard.rs:38:6\n   |\n38 | type Reply = std::sync::mpsc::Sender<Result<Value, EngineError>>;\n   |      ^^^^^\n\nwarning: function `empty` is never used\n  --> src/native_clipboard.rs:51:4\n   |\n51 | fn empty() -> Value {\n   |    ^^^^^\n\nwarning: function `encode` is never used\n  --> src/native_clipboard.rs:54:4\n   |\n54 | fn encode(bytes: &[u8]) -> String {\n   |    ^^^^^^\n\nwarning: function `image` is never used\n  --> src/native_clipboard.rs:75:4\n   |\n75 | fn image(bytes: &[u8]) -> Value {\n   |    ^^^^^\n\nwarning: enum `TargetChoice` is never used\n   --> src/native_clipboard.rs:160:6\n    |\n160 | enum TargetChoice {\n    |      ^^^^^^^^^^^^\n\nwarning: function `choose_targets` is never used\n   --> src/native_clipboard.rs:167:4\n    |\n167 | fn choose_targets<T: PartialEq>(\n    |    ^^^^^^^^^^^^^^\n\nwarning: struct `ActiveRequest` is never constructed\n   --> src/native_clipboard.rs:187:8\n    |\n187 | struct ActiveRequest(Arc<AtomicBool>);\n    |        ^^^^^^^^^^^^^\n\nwarning: struct `CallbackRequest` is never constructed\n   --> src/native_clipboard.rs:193:8\n    |\n193 | struct CallbackRequest {\n    |        ^^^^^^^^^^^^^^^\n\nwarning: method `finish` is never used\n   --> src/native_clipboard.rs:204:8\n    |\n203 | impl CallbackRequest {\n    | -------------------- method in this implementation\n204 |     fn finish(&self, value: Result<Value, EngineError>) {\n    |        ^^^^^^\n\nwarning: function `retained_read` is never used\n   --> src/native_clipboard.rs:209:10\n    |\n209 | async fn retained_read(\n    |          ^^^^^^^^^^^^^\n\nwarning: `twentyonex-tauri-feasibility` (bin \"twentyonex-tauri-feasibility\") generated 77 warnings (run `cargo fix --bin \"twentyonex-tauri-feasibility\" -p twentyonex-tauri-feasibility` to apply 11 suggestions)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.02s\n",
+      "localPath": "/tmp/e2-image-final-msvc.log"
+    },
+    "e2-image-final-stage.log": {
+      "sha256": "410b0e88825ca9535c646f8aac1220a5c945bda00b9c625d804d6e70ff956bef",
+      "bytes": 380,
+      "resultTail": "\n> 21x@0.0.161 tauri:prepare:production /mnt/Rusty/GitHub/21x-e2-215b\n> node scripts/tauri-stage-production.mjs\n\n{\n  \"staged\": true,\n  \"entry\": \"service/production-stdio.mjs\",\n  \"buildIdentity\": \"production-7d9c6f7a89ecfc382dbc798ac9a11bde\",\n  \"resourceManifestSha256\": \"da79a21193b7af199b8666e7fc96e7bdd75dc300fbe984a5984e5869fa58811f\",\n  \"redistributionReviewComplete\": false\n}\n",
+      "localPath": "/tmp/e2-image-final-stage.log"
+    },
+    "e2-image-final-staged.log": {
+      "sha256": "07bd6432f712ddf0c68a0b03b4094b9a05ade2d0d5af7174b68c620aa8804121",
+      "bytes": 197567,
+      "resultTail": "ion\n[Database Migration] Updating source_id foreign key to CASCADE delete\n[Database Migration] Successfully updated source_id foreign key to CASCADE\n\nstdout | src/service/task-attachment-backend.test.ts > native-only saved raster reads > caps the serial image queue at sixteen owned requests and does not reopen cancelled admission\n[AgentManager] Stopping all 0 sessions\n\nstdout | src/service/task-attachment-backend.test.ts > native-only saved raster reads > refuses missing, replaced or malformed native authority before a file read\n[Database Migration] Updating source_id foreign key to CASCADE delete\n[Database Migration] Successfully updated source_id foreign key to CASCADE\n\nstdout | src/service/task-attachment-backend.test.ts > native-only saved raster reads > refuses missing, replaced or malformed native authority before a file read\n[AgentManager] Stopping all 0 sessions\n\n \u2713 |portable-main| src/service/task-attachment-backend.test.ts (74 tests) 14840ms\n     \u2713 keeps literal Captain/member roots and requires former, anchor, project and group-agent read scope  424ms\n     \u2713 accepts saved files larger than the publication ceiling without Source byte transfer or metadata writes  1414ms\n     \u2713 keeps literal Captain/member roots and requires former, anchor, project and group-agent read scope  383ms\n     \u2713 accepts saved files larger than the publication ceiling without Source byte transfer or metadata writes  1317ms\n     \u2713 supports selection before task creation, returns metadata only, and cannot read an unselected path  2419ms\n     \u2713 refuses execution anchors and Captain file imports before claiming a selection or reading bytes  481ms\n \u2713 |portable-main| src/main/task-attachment-file-owner.test.ts (24 tests) 430ms\n \u2713 |portable-main| src/shared/desktop-contracts.test.ts (8 tests) 16ms\n \u2713 |portable-main| scripts/tauri-contracts.test.ts (7 tests) 33ms\n \u2713 |portable-main| src/shared/attachment-image.test.ts (9 tests) 62ms\n \u2713 |portable-renderer| src/renderer/src/lib/native-desktop-host.test.ts (97 tests) 112ms\n \u2713 |portable-renderer| src/renderer/src/lib/tauri-desktop-transport.test.ts (10 tests) 12ms\n\n Test Files  8 passed (8)\n      Tests  282 passed (282)\n   Start at  23:09:18\n   Duration  41.94s (transform 3.32s, setup 198ms, import 3.37s, tests 37.27s, environment 354ms)\n\n",
+      "localPath": "/tmp/e2-image-final-staged.log"
+    },
+    "e2-image-final-type.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "resultTail": "",
+      "localPath": "/tmp/e2-image-final-type.log"
+    },
+    "e2-image-source-commit.log": {
+      "sha256": "e9bd99f48736ad734482b989b3c0516da677493f388df7d96e99f269918a8333",
+      "bytes": 1182,
+      "resultTail": "[STARTED] Backing up original state...\n[COMPLETED] Backed up original state in git stash (7db7ec4d)\n[STARTED] Running tasks for staged files...\n[STARTED] package.json \u2014 27 files\n[STARTED] *.{ts,tsx} \u2014 19 files\n[STARTED] eslint --no-warn-ignored\n[COMPLETED] eslint --no-warn-ignored\n[COMPLETED] *.{ts,tsx} \u2014 19 files\n[COMPLETED] package.json \u2014 27 files\n[COMPLETED] Running tasks for staged files...\n[STARTED] Applying modifications from tasks...\n[COMPLETED] Applying modifications from tasks...\n[STARTED] Cleaning up temporary files...\n[COMPLETED] Cleaning up temporary files...\n\n> 21x@0.0.161 typecheck /mnt/Rusty/GitHub/21x-e2-215b\n> tsc --build --noEmit\n\n[batch35/215-214-native 4fd1780a] Authorize bounded saved raster previews through the current native document\n 27 files changed, 802 insertions(+), 37 deletions(-)\n create mode 100644 docs/tauri-migration/native-saved-raster.md\n create mode 100644 src-tauri/engine/src/production_attachment_image.rs\n create mode 100644 src/shared/attachment-image-codecs.ts\n create mode 100644 src/shared/attachment-image.test.ts\n create mode 100644 src/shared/attachment-image.ts\n create mode 100644 src/shared/attachment-raster.ts\n"
+    }
+  },
+  "publication": {
+    "source": "4fd1780abd066587dc12fa59f9deff4186bbd602 fast-forward pushed to origin/master; git ls-remote returned the same SHA; hosted source run lookup []",
+    "hosted": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "runLookup": [],
+    "settingsOrDispatch": false
+  },
+  "remaining": [
+    "Engineer A owns bounded resident/concurrent Markdown image integration, exact legacy ID parsing and UI lifecycle controls after source publication; backend/facade proof is not installed viewer parity.",
+    "Native drag/drop receipt authority; group/Captain file-import append; protected durable ownership/digest journal and unreferenced-copy reconciliation.",
+    "General global shortcuts, remaining Commander/terminal focus integration; native voice permission/persisted-grant bypass/raw capture+playback stream revocation. Voice remains unavailable.",
+    "Final installed app identity/current+legacy scheme authority and login-item semantics need the user decision. Schemes remain off.",
+    "#202/#208 prerequisites and installed macOS/Windows/Linux hide/reload/crash/shutdown and native service acceptance remain open; MSVC compile is not Windows runtime proof.",
+    "Hosted Actions disabled awaiting user decision; no settings endpoint or dispatch."
+  ],
+  "isolation": "synthetic temporary profiles/files/fixture images only; no microphone/live accounts/OS credentials/live profile/release/cutover/Electron retirement; hosted voice deferred",
+  "formatReferences": [
+    "https://www.w3.org/TR/png-3/",
+    "https://www.w3.org/Graphics/JPEG/itu-t81.pdf",
+    "https://www.w3.org/Graphics/GIF/spec-gif89a.txt",
+    "https://developers.google.com/speed/webp/docs/riff_container"
+  ]
+}
