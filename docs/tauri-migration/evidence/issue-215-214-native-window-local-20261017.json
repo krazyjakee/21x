@@ -1,0 +1,431 @@
+{
+  "schemaVersion": 1,
+  "issues": [
+    215,
+    214
+  ],
+  "recordedAt": "2026-10-17T21:35:53.761211+00:00",
+  "implementationRevision": "28343c43ca5d6371a0c5a4e8d40671db14bd06c0",
+  "sourceParent": "71a954df69a3e57286020f6007ade3ac8eeb8273",
+  "scope": "Native profile window state/chrome/local focused menus and nonordinary attachment-import denial; controlled Linux evidence only",
+  "sourceFiles": [
+    "docs/tauri-migration/implementation-status.md",
+    "docs/tauri-migration/inventory.json",
+    "docs/tauri-migration/native-window-services.md",
+    "src-tauri/Cargo.lock",
+    "src-tauri/Cargo.toml",
+    "src-tauri/engine/src/lib.rs",
+    "src-tauri/engine/src/production.rs",
+    "src-tauri/engine/src/production_window.rs",
+    "src-tauri/src/native_window.rs",
+    "src-tauri/src/production_host.rs",
+    "src-tauri/src/production_ui.rs",
+    "src/renderer/src/lib/native-desktop-host.test.ts",
+    "src/renderer/src/lib/native-desktop-host.ts",
+    "src/renderer/src/lib/tauri-desktop-transport.test.ts",
+    "src/renderer/src/lib/tauri-desktop-transport.ts",
+    "src/service/native-window-state-store.test.ts",
+    "src/service/native-window-state-store.ts",
+    "src/service/production-service.test.ts",
+    "src/service/production-service.ts",
+    "src/service/task-attachment-backend.test.ts",
+    "src/service/task-attachment-backend.ts",
+    "src/shared/native-window-codecs.ts",
+    "src/shared/native-window-state.ts",
+    "src/shared/production-bootstrap.ts"
+  ],
+  "versions": {
+    "os": "Linux 6.8.0-139-generic x86_64 GNU/Linux",
+    "node": "22.22.0",
+    "bundledNode": "22.23.2",
+    "electron": "44.0.0",
+    "electronNode": "24.18.1",
+    "pnpm": "9.15.9",
+    "rustc": "1.98.0 (88d9e12ae 2026-08-18)",
+    "cargo": "1.98.0 (797e8a9bc 2026-08-05)",
+    "tauri": "2.12.3",
+    "tauriRuntimeWry": "2.12.1",
+    "wry": "0.57.0",
+    "webkitgtk": "2.52.6",
+    "gtk": "3.24.41"
+  },
+  "authority": [
+    "Private engine.windowState load/save is sealed to the current engine/profile/database lease and owns only the non-public __native_window_state_v1 key; public settings cannot select it.",
+    "Normal finite geometry retains scale and flags; at most32 monitor areas, bounded DPI restore, no hidden/minimized/maximized/fullscreen rectangle replacing normal bounds.",
+    "Latest observations coalesce, raw writes survive waiter cancellation, cleanup flush precedes Source DB release. Deadline retains blocked work for retry; completed failure logs unavailable rather than fabricated persistence.",
+    "Finite native menu/keyboard actions capture the physical window. Editing WebKit callbacks use an in-memory generation ticket and never re-enter Tauri getters under its WebView lock. Reload fences old tickets first.",
+    "Exact six-digit overlay colors require the current physical-document lease. One replaceable provider holds at most64 weak widget references; no arbitrary CSS/window selectors cross the DTO.",
+    "Metadata-only file save refuses nonordinary task roles before consuming a selection/read. Atomic chat-image behavior and literal saved reads remain supported."
+  ],
+  "expectedActual": [
+    {
+      "expected": "Affected app and standalone controls pass without skips",
+      "actual": "253 app /253 staged,7 files each,0 skipped"
+    },
+    {
+      "expected": "Native policy/lifetime controls pass; explicit GUI fixtures separately invoked",
+      "actual": "146 engine passed/6 existing opt-in ignored;85 native host passed/2 explicit GUI ignores; both real GTK picker and real Wry window fixtures separately pass1 each"
+    },
+    {
+      "expected": "Production staging and real staged private entry remain usable",
+      "actual": "staging passed;2 staged-entry/corpus files passed19 tests/0skip"
+    },
+    {
+      "expected": "No new TypeScript/lint/build/contract failures",
+      "actual": "forced noEmit typecheck passed;lint0errors/165existingwarnings;Linux+MSVC host checks,three engine cross-target clippy checks,both frontends,inventory905/736IPC/9existingunresolved and contracts passed"
+    },
+    {
+      "expected": "Real GUI verifies actual controls rather than only policy declarations",
+      "actual": "Synthetic Wry document matched hidden Started/Finished;actual GTK menu SelectAll and ZoomIn;actual titlebar/internal symbol repaint;Openbox maximize/fullscreen preserves normal bounds;hidden move ignored;hide/reopen;reload old ticket refusal;foreign label denied and remote navigation blocked"
+    }
+  ],
+  "commands": [
+    {
+      "name": "final-app",
+      "command": "pnpm test:run src/service/native-window-state-store.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/shared/production-bootstrap.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/production-owner.test.ts",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-app.log",
+        "sha256": "fd91a2d93aaaea57802fe2bd9c24bd48c25b3000f758a5a691657e9c230c763c",
+        "bytes": 245797
+      }
+    },
+    {
+      "name": "final-staged",
+      "command": "pnpm test:tauri src/service/native-window-state-store.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/shared/production-bootstrap.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/production-owner.test.ts",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-staged.log",
+        "sha256": "1ed08e45aa5401034c52cfb52a849b8bc50d3bc9e6bc71e11e123c1a2af0d688",
+        "bytes": 246271
+      }
+    },
+    {
+      "name": "final-typecheck",
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-typecheck.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "name": "final-lint",
+      "command": "pnpm lint",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-lint.log",
+        "sha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+        "bytes": 16728
+      }
+    },
+    {
+      "name": "final-production-stage",
+      "command": "pnpm tauri:prepare:production",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-production-stage.log",
+        "sha256": "5a77c0eda0643e66851c3b0dc858555f0c4dcfd7673157e5c18e616632f1b413",
+        "bytes": 380
+      }
+    },
+    {
+      "name": "final-staged-entry",
+      "command": "pnpm test:tauri --production-proofs scripts/production-service-proof.test.ts scripts/production-contracts-proof.test.ts",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-staged-entry.log",
+        "sha256": "37d5e15842f33a03ae94485ed357495b116e82f302968ec1594f0069b4903822",
+        "bytes": 688
+      }
+    },
+    {
+      "name": "final-engine",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-engine.log",
+        "sha256": "91e63142807ce69528a088dc76df91400fd45c53041a930fa695b3770b5c3ef7",
+        "bytes": 17453
+      }
+    },
+    {
+      "name": "final-host",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-host.log",
+        "sha256": "495e5a2ed97ea645bc78658f8b7071f07c1d94d7c1f0fd626af007b3885285cb",
+        "bytes": 12615
+      }
+    },
+    {
+      "name": "final-host-linux-check",
+      "command": "cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-host-linux-check.log",
+        "sha256": "308813883e2f72ae7ce06e1f6c56e3f22f1296b94bdfc590e689a632930efab7",
+        "bytes": 1157
+      }
+    },
+    {
+      "name": "final-host-msvc-check",
+      "command": "env PATH=\"/usr/lib/llvm-20/bin:$PATH\" cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-host-msvc-check.log",
+        "sha256": "eec4763f601c1c41ee085ad7dc2997e599bbc6365762808dbf6e079e7ffd1184",
+        "bytes": 15746
+      }
+    },
+    {
+      "name": "final-contracts",
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-contracts.log",
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      }
+    },
+    {
+      "name": "final-inventory",
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-inventory.log",
+        "sha256": "56c9cd4b09dad0f8bc9cfc8dcd74afa4225db4590eacb39929b954d74a814ae0",
+        "bytes": 91
+      }
+    },
+    {
+      "name": "final-frontend",
+      "command": "pnpm tauri:production:frontend:build",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-frontend.log",
+        "sha256": "8bf431174c95d5e5e517bd603747006a8dd497e12cd7358312a718e503396521",
+        "bytes": 9621
+      }
+    },
+    {
+      "name": "final-diagnostic-frontend",
+      "command": "pnpm tauri:frontend:build",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-diagnostic-frontend.log",
+        "sha256": "8852b1277e390eb2242eb1014a11ec7b7cefa55392e52ab21850653a7b006eaa",
+        "bytes": 498
+      }
+    },
+    {
+      "name": "final-gtk-picker",
+      "command": "bash /tmp/e2-215b-gtk-proof.sh",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-gtk-picker.log",
+        "sha256": "f97fc0bce9cd198b4d69d5fe2660c0ca7fdabec27e69b30f63cc72285349e028",
+        "bytes": 12
+      }
+    },
+    {
+      "name": "final-wry-window",
+      "command": "timeout --signal=TERM --kill-after=5s 100s bash /tmp/e2-window-wry-proof.sh",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-wry-window.log",
+        "sha256": "1d18a79312292e9cc5baf927b13696fed956fe846c6c9f376e0aa7f0c974dbd4",
+        "bytes": 12
+      }
+    },
+    {
+      "name": "final-diff",
+      "command": "git diff --check",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-diff.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "name": "recheck-host",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-recheck-host.log",
+        "sha256": "8b73cdc4746ce9789e99b24746596b4985e36da3f312f606bc35e83ca56acdf4",
+        "bytes": 12528
+      }
+    },
+    {
+      "name": "recheck-host-linux",
+      "command": "cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-recheck-host-linux.log",
+        "sha256": "3a29e0fa03a103bca589b33f702ee3c103dd2437018522ac0fcf477f18ef1893",
+        "bytes": 1226
+      }
+    },
+    {
+      "name": "recheck-host-msvc",
+      "command": "env PATH=\"/usr/lib/llvm-20/bin:$PATH\" cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-recheck-host-msvc.log",
+        "sha256": "ff5462ce51e1e0c05f3397f463fae1bac1358f937c3cc6b8ef600564f126a664",
+        "bytes": 15071
+      }
+    },
+    {
+      "name": "recheck-wry",
+      "command": "timeout --signal=TERM --kill-after=5s 100s bash /tmp/e2-window-wry-proof.sh",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-recheck-wry.log",
+        "sha256": "1d18a79312292e9cc5baf927b13696fed956fe846c6c9f376e0aa7f0c974dbd4",
+        "bytes": 12
+      }
+    },
+    {
+      "name": "engine-clippy-x86_64-pc-windows-msvc",
+      "command": "cargo clippy --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --all-targets --target x86_64-pc-windows-msvc",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-engine-clippy-x86_64-pc-windows-msvc.log",
+        "sha256": "f5b45509f29be2af71ef0e086a8e9ca192af81bd2b640366f6cc5b9bf52ea245",
+        "bytes": 4586
+      }
+    },
+    {
+      "name": "engine-clippy-x86_64-apple-darwin",
+      "command": "cargo clippy --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --all-targets --target x86_64-apple-darwin",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-engine-clippy-x86_64-apple-darwin.log",
+        "sha256": "16025e53ec2bfd1a9cc2b95dff94c1548e1dcd80f0d6886f17596bd051397a25",
+        "bytes": 11444
+      }
+    },
+    {
+      "name": "engine-clippy-aarch64-apple-darwin",
+      "command": "cargo clippy --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service --all-targets --target aarch64-apple-darwin",
+      "rawExitCode": 0,
+      "report": {
+        "path": "/tmp/e2-window-final-engine-clippy-aarch64-apple-darwin.log",
+        "sha256": "c642224a154bab6c1ae29230da811b9a214baa164c9e13e92605fb5359e095bd",
+        "bytes": 11444
+      }
+    }
+  ],
+  "lane": {
+    "lock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "outerCommands": [
+      "rtk proxy flock <lock> bash /tmp/e2-window-final-gate.sh",
+      "rtk proxy flock <lock> bash /tmp/e2-window-native-recheck.sh"
+    ],
+    "scripts": [
+      {
+        "path": "/tmp/e2-window-final-gate.sh",
+        "sha256": "38139cee89feb42e2529bf0d7953e78fce6e235324bdd25c21addaf8146ddc23",
+        "bytes": 2453
+      },
+      {
+        "path": "/tmp/e2-window-native-recheck.sh",
+        "sha256": "7f3b6c4ab093c9a4998d737beb01d3018bbabb007ad9dd5a404b857b610bc6b2",
+        "bytes": 785
+      }
+    ]
+  },
+  "gui": {
+    "command": "cargo test --manifest-path src-tauri/Cargo.toml --features production-service production_host::native_window::wry_proof::real_wry_window_restoration_chrome_editing_zoom_and_untrusted_window_denial -- --ignored --test-threads=1 --nocapture",
+    "isolation": "Fresh XDG_CONFIG_HOME/DATA_HOME/CACHE_HOME/RUNTIME_DIR,private dbus-run-session,Xvfb1920x1080x24,owned Openbox,same production CSP,synthetic invalid.synthetic.window-proof identity/assets;temporary roots removed afterward. No Source engine/live profile/provider/microphone is exercised.",
+    "report": {
+      "path": "/tmp/e2-window-wry-proof.log",
+      "sha256": "930766fca09524018c429ad4a23d5f3f4864bd74e60749b60806411202c0713e",
+      "bytes": 5264
+    },
+    "osServices": "WebKit auto-activated portal/keyring/accessibility services inside the isolated bus/XDG roots. No Source credential helper or credential request was made.",
+    "limits": "Real GUI exercises the shared native handlers with controlled save sink; it is not installed production Source-to-host overlay RPC, full app restart or hardware multimonitor acceptance."
+  },
+  "artifacts": [
+    {
+      "path": "/mnt/Rusty/GitHub/21x-e2-215b/src-tauri/resources/node/node",
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    {
+      "path": "/mnt/Rusty/GitHub/21x-e2-215b/src-tauri/resources/service/production-engine.mjs",
+      "sha256": "9f7926a97e0ce05c43b872e642c6d0f1db67572db150b142b00aa15e406d0e49",
+      "bytes": 6142692
+    },
+    {
+      "path": "/mnt/Rusty/GitHub/21x-e2-215b/src-tauri/resources/service/production-stdio.mjs",
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    {
+      "path": "/mnt/Rusty/GitHub/21x-e2-215b/src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json",
+      "sha256": "a9bd8e765a88dcef8c864665ac7507f43fd1caed6a60b13464b50ec87fe0d9ec",
+      "bytes": 1261784
+    },
+    {
+      "path": "/mnt/Rusty/GitHub/21x-e2-215b/src-tauri/Cargo.lock",
+      "sha256": "4b474eed2e3c5401c2fa5536a97413b6492f6d08d5a69bafb69f31a719e1ae20",
+      "bytes": 135619
+    }
+  ],
+  "failureRepairs": [
+    "Initial Rust WebKit trait import and GUI borrowed-window callback compile errors repaired; native checks pass.",
+    "Nonordinary attachment fixture initially lacked a real agent/coordinator task; corrected fixture and64 actual attachment backend controls pass.",
+    "Actual Muda menu label uses nested GTK label widgets, not MenuItem.label; corrected real menu lookup without dropping the menu activation assertion.",
+    "Strengthened menu proof exposed a real re-entrant Tauri getter deadlock inside with_webview. Owned stalled process stopped, logs retained; replaced callback getter with captured in-memory physical/document fence. Same actual menu proof passes.",
+    "Hidden page-start recording, lost-wakeup registration, bounded titlebar provider replacement/internal symbol styling, hidden geometry refusal and app-owned Quit retry were repaired/reviewed; final native recheck executes current source.",
+    "Two new non-Linux dead-code warnings removed by cfg-gating Linux-only callback fences; remaining native platform warnings pre-exist. No assertion/check was weakened."
+  ],
+  "failureReports": [
+    {
+      "path": "/tmp/e2-window-wry-menu-label-failure.log",
+      "sha256": "cf3c50045075b5239fb4dd2c452b6448cbfe66636de97b6859b4b9fac17c9f07",
+      "bytes": 5682
+    },
+    {
+      "path": "/tmp/e2-window-wry-menu-hang.log",
+      "sha256": "390c342617deaffcdedc39af73452d25a425f47e17e01c18f637c300b9a936b9",
+      "bytes": 5310
+    },
+    {
+      "path": "/tmp/e2-window-wry-page-borrow-failure.log",
+      "sha256": "b78e4ffa8977f6411be609009d742c32dc4fffece7da768c678221dd08e63736",
+      "bytes": 3241
+    },
+    {
+      "path": "/tmp/e2-window-wry-webview-reentry-failure.log",
+      "sha256": "43118757dba4c28c984a04bdea058b64de5f60e850e6a1aaffc84579863fa843",
+      "bytes": 5729
+    }
+  ],
+  "ci": {
+    "status": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "runs": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "acceptance": {
+    "wholeChecklistItemsNewlyChecked": [],
+    "issue215": "OPEN",
+    "issue214": "OPEN",
+    "reason": "Compound criteria and stated dependencies still require remaining source services, approved identities and installed supported-platform evidence."
+  },
+  "remaining": [
+    "Native attachment viewer URLs and physical drop receipts; protected durable ownership/digest journal for unreferenced metadata-only copies. No DOM/raw-path fallback or filename-pattern unlink authority.",
+    "General global shortcut lifecycle, login items under approved installed identity, remaining Commander/terminal native focus integration and cross-platform editing/chrome/service parity.",
+    "Native voice permission/raw-stream revocation including cached WebView grants and capture/playback/shortcut authority. Optional218 SDK/actions stay unregistered/unavailable.",
+    "Approved current/legacy identity/scheme registration and installed warm/cold OAuth callbacks; no final identity selected.",
+    "#208/#202 prerequisites and installed production Source/window crash/reconnect/shutdown, actual multimonitor/DPI hardware and supported macOS/Windows/Linux packaged service evidence.",
+    "Hosted Actions decision,final identity/schemes,live provider approval and master-to-main decision remain with user. No release/live profile cutover/Electron retirement;hosted voice deferred."
+  ]
+}
