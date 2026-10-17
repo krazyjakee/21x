@@ -1,0 +1,375 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-17T21:39:05.783249+00:00",
+  "baseRevision": "8c9c2038",
+  "implementationRevision": "82902259e3712b47b1ea82962ef5e9167916f939",
+  "scope": "Commander renderer authoritative list/search snapshot consistency, strict read-only recovery, selection/history lifetime, refcounted event retirement and exact turn terminal handling. Existing typed native operations only.",
+  "fixture": {
+    "profiles": "Synthetic actual typed NativeDesktopHost/client/codecs/transport and Zustand, with controlled native invoke/events, no preload. All20 Commander controls use the native boundary; no provider/OS WebView/Source SQLite accessed by these renderer tests. E2 window source28343c43 and evidence8c9c2038 are independent native proofs.",
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "architecture": "x86_64",
+    "hostNode": "v22.22.0",
+    "stagedNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "expectedActual": [
+    {
+      "expected": "Search/filter changes, accepted create/rename/archive and session events cannot be overwritten by a held list.",
+      "actual": "Coalesced snapshot reader invalidates on those inputs and retries at most8 reads. Query membership comes from Source title/body search, with an independent all-sessions inbox read during search. Accepted mutations are invoked exactly once; current sessions/unread metadata survive delayed reads."
+    },
+    {
+      "expected": "Retired selection/document/connection history cannot mark reports read or overwrite current history.",
+      "actual": "Captured selection plus document and native connection generations fence list/history publication and follow-up report reads. Same-thread reselection, same-epoch reconnect, last subscriber release and pagehide controls pass. Drafts persist; recovery does not setActive/markRead/send."
+    },
+    {
+      "expected": "Recovery merges live messages/turns without restarting a completed or overwriting a newer turn.",
+      "actual": "Finished-turn cache prevents delayed history revival. Newer live turns survive history; an older done terminal only clears its matching turn. Current done still clears current streaming state."
+    },
+    {
+      "expected": "One event cohort survives multiple views and retires exactly once.",
+      "actual": "Reference-counted native event subscription shares one callback, removes it on final release/pagehide/HMR, fences direct queued callback invocation, and an old unsubscriber cannot retire a replacement cohort."
+    },
+    {
+      "expected": "Failed/busy recovery remains fenced and retry is explicit.",
+      "actual": "Strict list recovery failure holds actual native mutation fence; successful explicit reconnect restores it. Eight deliberate rename invalidations produce BACKPRESSURE with exactly8 writes and no automatic replay."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "fullRendererBaseline": {
+      "passed": 1740,
+      "files": 150,
+      "skipped": 0,
+      "nativeControlsAtBaseline": 18
+    },
+    "stagedBaseline": {
+      "passed": 408,
+      "files": 21,
+      "skipped": 0,
+      "nativeControlsAtBaseline": 19
+    },
+    "finalAffectedApp": {
+      "passed": 51,
+      "files": 4,
+      "skipped": 0
+    },
+    "finalAffectedStaged": {
+      "passed": 20,
+      "files": 1,
+      "skipped": 0
+    },
+    "nativeWindowRebaseApp": {
+      "passed": 142,
+      "files": 4,
+      "skipped": 0
+    },
+    "nativeWindowRebaseStaged": {
+      "passed": 142,
+      "files": 4,
+      "skipped": 0
+    },
+    "finalNativeCommanderControls": 20,
+    "contractUnitTests": 20,
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "inventory": {
+      "files": 905,
+      "ipcOperations": 736,
+      "existingUnresolved": 9,
+      "status": "Freshness passes after inheriting28343c43; regenerated inventory has no diff. This also resolves earlier209 agent slice deferred freshness."
+    },
+    "commands": [
+      {
+        "phase": "baseline",
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b020983b1f48f9e44503d2b03eaf023b776189582957ef17215e25fb86499644",
+          "bytes": 1123283
+        }
+      },
+      {
+        "phase": "baseline",
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "phase": "baseline",
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "phase": "baseline",
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "3e1926ac5f6239717f876520f74ec43f26b5fefa4bae8918d37c3dc3c92f64da",
+          "bytes": 116585
+        }
+      },
+      {
+        "phase": "baseline",
+        "command": "rtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b119e89e57e51971186076d8e17e09118830ab8da5117a6e3951b79f12bd2100",
+          "bytes": 533
+        }
+      },
+      {
+        "phase": "baseline",
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "02deab0429e36f5cf4c82aefb069f36f444931a14b94dfcdb4780787871f968d",
+          "bytes": 29344
+        }
+      },
+      {
+        "phase": "baseline",
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "3dc1d855022d83a82e024d9edb27e28d7b2c21934d84a8671c5888fba47594ff",
+          "bytes": 9620
+        }
+      },
+      {
+        "phase": "finalDelta",
+        "command": "rtk proxy pnpm test:run src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/components/commander/CommanderWorkspace.test.tsx src/renderer/src/components/commander/CommanderChatPane.images.test.tsx src/renderer/src/lib/commander-images.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "03224edafd0a191354785bc82a5523c50de6426d73bbbbf68d42525a8936b2a3",
+          "bytes": 20186
+        }
+      },
+      {
+        "phase": "finalDelta",
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/stores/commander-desktop-recovery.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "6bfd3fe9d6d5aec2e176287e417be615e738a102f74f5304c3291c37365d2697",
+          "bytes": 590
+        }
+      },
+      {
+        "phase": "finalDelta",
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "phase": "finalDelta",
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "phase": "finalDelta",
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b93b5ddcbfb16fcdf925ef501881fe7154bcb82cdaf9af06d68f90dfc2b3fda3",
+          "bytes": 29344
+        }
+      },
+      {
+        "phase": "finalDelta",
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "7c7e688ced119ea4958c94104137d9dd677ac071383fb25e02dc102f070d9eb5",
+          "bytes": 9620
+        }
+      },
+      {
+        "phase": "nativeWindowRebase",
+        "command": "rtk proxy pnpm test:run src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/stores/native-agent-activity.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "2f09449dd239a847ccca5fcd318f9d5893179716ccf4d6ba0154d8aaa923376f",
+          "bytes": 1150
+        }
+      },
+      {
+        "phase": "nativeWindowRebase",
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/stores/native-agent-activity.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "9b1422e5da6c4768dcb22380294e611351af0fd7cacb714e7d64877597a10629",
+          "bytes": 1030
+        }
+      },
+      {
+        "phase": "nativeWindowRebase",
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "phase": "nativeWindowRebase",
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "phase": "nativeWindowRebase",
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e741ed40d05d28733e320f25184f6b850427fc64286e46cf06d901473d25c291",
+          "bytes": 29344
+        }
+      },
+      {
+        "phase": "nativeWindowRebase",
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "0d969050005bf2d772c798b4fde85025130ba0f33c3442e73c5fe476b3181dd2",
+          "bytes": 9620
+        }
+      },
+      {
+        "phase": "nativeWindowRebase",
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "56c9cd4b09dad0f8bc9cfc8dcd74afa4225db4590eacb39929b954d74a814ae0",
+          "bytes": 91
+        }
+      },
+      {
+        "phase": "nativeWindowRebase",
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      }
+    ],
+    "gateScripts": {
+      "baseline": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run --project renderer --maxWorkers=4 > /tmp/ea209-commander-renderer.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-commander-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-commander-lint.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/components/canvas/native-browser-retirement.test.tsx src/renderer/src/components/canvas/browser-retirement.test.tsx src/renderer/src/components/settings/native-general-settings.test.tsx src/renderer/src/components/update/UpdateDialog.test.tsx src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/stores/agent-store.test.ts src/renderer/src/stores/production-list-recovery.test.ts src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/project-store.test.ts src/renderer/src/stores/settings-store.test.ts src/renderer/src/stores/canvas-store.test.ts src/renderer/src/stores/drawing-store.test.ts src/renderer/src/lib/desktop-api.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/lib/desktop-client.test.ts src/renderer/src/lib/shared-ipc-listeners.test.ts > /tmp/ea209-commander-staged.log 2>&1\nrtk proxy pnpm test:run scripts/tauri-inventory.test.ts scripts/tauri-contracts.test.ts > /tmp/ea209-commander-contract-tests.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-commander-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-commander-production-build.log 2>&1\nrtk proxy git diff --check\n",
+      "finalDelta": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/components/commander/CommanderWorkspace.test.tsx src/renderer/src/components/commander/CommanderChatPane.images.test.tsx src/renderer/src/lib/commander-images.test.ts > /tmp/ea209-commander-final-app.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/stores/commander-desktop-recovery.test.ts > /tmp/ea209-commander-final-staged.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-commander-final-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-commander-final-lint.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-commander-final-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-commander-final-production-build.log 2>&1\nrtk proxy git diff --check\n",
+      "nativeWindowRebase": "#!/bin/bash\nset -euo pipefail\ncd /mnt/Rusty/GitHub/21x-ea-209\nrtk proxy pnpm test:run src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/stores/native-agent-activity.test.ts > /tmp/ea209-commander-rebase-app.log 2>&1\nrtk proxy pnpm test:tauri -- src/renderer/src/stores/commander-desktop-recovery.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/stores/native-agent-activity.test.ts > /tmp/ea209-commander-rebase-staged.log 2>&1\nrtk proxy pnpm exec tsc --build --noEmit --force > /tmp/ea209-commander-rebase-typecheck.log 2>&1\nrtk proxy pnpm lint > /tmp/ea209-commander-rebase-lint.log 2>&1\nrtk proxy pnpm build > /tmp/ea209-commander-rebase-build.log 2>&1\nrtk proxy pnpm tauri:production:frontend:build > /tmp/ea209-commander-rebase-production-build.log 2>&1\nrtk proxy node scripts/tauri-inventory.mjs --check > /tmp/ea209-commander-rebase-inventory.log 2>&1\nrtk proxy node scripts/tauri-contracts.mjs --check > /tmp/ea209-commander-rebase-contracts.log 2>&1\nrtk proxy git diff --check\n"
+    },
+    "diffCheck": {
+      "command": "rtk proxy git diff --check",
+      "exitCode": 0
+    },
+    "commitHooks": "Normal staged eslint and typecheck passed. Source rebased onto28343c43 then relevant typed facade/transport/activity/Commander controls, force type/lint/builds/freshness rerun passed. Final rebase8c9c2038 changed evidence JSON only; no source inputs changed."
+  },
+  "failureRepair": [
+    "Initial native fixture filter race changed state before the bounded reader started; held the old list explicitly and asserted actual invoked query before replacement. No production assertion removed.",
+    "Initial strict recovery fixture incorrectly treated native reconnect failure as resolved; asserted its exact DISCONNECTED rejection and retained mutation-fence denial plus successful explicit retry.",
+    "Review added selection-generation guard for same-thread reselection after recovery, then exact-turn done guard. Final app/staged regressions and raw type/lint/build checks all pass."
+  ],
+  "sourceFiles": {
+    "src/renderer/src/stores/commander-store.ts": {
+      "sha256": "d6aa8867232d103191903319ff35df5ad0d921d199fb0c412ebe627ebde60dc1",
+      "bytes": 19494
+    },
+    "src/renderer/src/stores/commander-desktop-recovery.test.ts": {
+      "sha256": "ba7036907b257d132c49bae7cf7fbd1b29e15999fd7535ef77b4db8e11c0cb49",
+      "bytes": 19589
+    },
+    "src/renderer/src/lib/desktop-api.ts": {
+      "sha256": "33701eb869e1d8d2a0d732b58aa17fba11127fa419c5a07c8d2b9c12fadf1b85",
+      "bytes": 3575
+    },
+    "src/renderer/src/lib/desktop-snapshot.ts": {
+      "sha256": "a5984bbeb9e5066fcb9ac563eb5017d0e1126308d60a55076b981ae7b99f223f",
+      "bytes": 1682
+    },
+    "src/renderer/src/lib/native-desktop-host.ts": {
+      "sha256": "91a6b5ba8560d9f3a40a37891f4d8fb4f7c6e3c73856436463b6c7b8150ff5d7",
+      "bytes": 32822
+    },
+    "src/renderer/src/lib/tauri-desktop-transport.ts": {
+      "sha256": "0495c21c4b9da2f5d29a7b5f81573be23d57037f1f4e1db47c43edefa0cc492f",
+      "bytes": 11223
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "a4353709be2babc366b64d0c522f35e350cbbde216593ed466c37844df7a3710",
+      "bytes": 12007
+    },
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "21d454335da985a491861827364186e641c8fc32fdd145a9d19a1a3031950650",
+      "bytes": 66160
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "26aaf06055679817d3cb47f50aaa33d4998aa717f898c17c85d6ca012316df15",
+      "bytes": 380175
+    }
+  },
+  "buildArtifacts": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "afe7e78803b24f95a91c1bfa14b76e48276c976ddc639f3bb3415f59afedc5a7",
+      "bytes": 856
+    },
+    "out/tauri-production-renderer/assets/main-B4BgNMsS.js": {
+      "sha256": "19fa252ba5af3da64ae5ad4c3a4bd59d4893cbe19795ef9a45f26f685fef03d6",
+      "bytes": 1510288
+    },
+    "out/renderer/index.html": {
+      "sha256": "2be38e572c4fd4dbe6edb3174e16acc834916071b1d493ba9cf23a6ba8956dce",
+      "bytes": 3101
+    }
+  },
+  "acceptance": {
+    "newWholeCriteriaChecked": [],
+    "issueRemainsOpen": true,
+    "installedLifecycleProof": false
+  },
+  "remainingDefects": [
+    "Installed WebView reload/recreation/hide/crash/cleanup and non-Linux runtime proof unavailable.",
+    "Remaining retained native operations and UI window/theme/zoom/keyboard consumers pending owner contracts.",
+    "Unsupported group/Captain attachment mutations, native DOM-drop receipts and protected unreferenced import reconciliation remain domain gaps.",
+    "Migration umbrella #202 and other production prerequisites remain open."
+  ],
+  "hostedVerification": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runList": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "limits": [
+    "Controlled renderer boundary tests do not establish installed native UI, physical window lifetime or real provider behavior.",
+    "No voice authority enabled, no account/live data accessed, no release/cutover/Electron retirement; hosted voice deferred."
+  ],
+  "verificationRevision": "0bf9d14f714dee699f1fc145abf8592d9c2f6f5d"
+}
