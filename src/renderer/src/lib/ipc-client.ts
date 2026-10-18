@@ -1,3 +1,4 @@
+import type { DesktopApi } from '@shared/desktop-api'
 import { desktopApi, desktopSupports, electronBrowserApi } from '@/lib/desktop-api'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
 import type { AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent, AgentSessionStartResult, AgentTaskStartResult, AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
@@ -64,6 +65,8 @@ export const taskGroupsApi = {
   review: (data: TaskGroupReviewData) => desktopApi.taskGroups.review(data)
 }
 
+export type TaskUpdatePrecondition = Parameters<DesktopApi['db']['updateTask']>[2]
+
 export const taskApi = {
   /** Every project's tasks, or one project's when `projectId` is given. */
   getAll: (projectId?: string): Promise<Task[]> => {
@@ -78,8 +81,8 @@ export const taskApi = {
     return desktopApi.db.createTask(data)
   },
 
-  update: (id: string, data: UpdateTaskDTO): Promise<Task | undefined> => {
-    return desktopApi.db.updateTask(id, data)
+  update: (id: string, data: UpdateTaskDTO, precondition?: TaskUpdatePrecondition): Promise<Task | undefined> => {
+    return precondition === undefined ? desktopApi.db.updateTask(id, data) : desktopApi.db.updateTask(id, data, precondition)
   },
 
   delete: (id: string): Promise<boolean> => {

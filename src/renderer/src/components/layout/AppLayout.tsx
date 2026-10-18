@@ -1,5 +1,5 @@
 import { desktopApi, desktopSupports } from '@/lib/desktop-api'
-import { ATTACHMENT_IMPORT_FAILURE } from '@/lib/task-attachment-import'
+import { ATTACHMENT_IMPORT_FAILURE, attachmentPrecondition } from '@/lib/task-attachment-import'
 import { DesktopHostStatus } from './DesktopHostStatus'
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { Sidebar } from './Sidebar'
@@ -118,8 +118,8 @@ export function AppLayout() {
     if (selectedTaskId) openDeleteModal(selectedTaskId)
   }, [openDeleteModal, selectedTaskId])
   const handleUpdateSelectedAttachments = useCallback(
-    async (attachments: FileAttachment[]) => {
-      if (selectedTaskId && !await updateTask(selectedTaskId, { attachments })) throw new Error(ATTACHMENT_IMPORT_FAILURE)
+    async (attachments: FileAttachment[], baseline?: FileAttachment[]) => {
+      if (selectedTaskId && !await updateTask(selectedTaskId, { attachments }, attachmentPrecondition(baseline))) throw new Error(ATTACHMENT_IMPORT_FAILURE)
     },
     [selectedTaskId, updateTask]
   )

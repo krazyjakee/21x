@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { ATTACHMENT_IMPORT_FAILURE } from '@/lib/task-attachment-import'
+import { ATTACHMENT_IMPORT_FAILURE, attachmentPrecondition } from '@/lib/task-attachment-import'
 import { TaskWorkspace, type TaskWorkspaceLayout } from '@/components/tasks/TaskWorkspace'
 import { useCanvasStore, DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT } from '@/stores/canvas-store'
 import { useTaskStore } from '@/stores/task-store'
@@ -44,8 +44,8 @@ export function TaskPanelContent({ panelId, taskId, panelLayout = 'both' }: Task
   }, [task, openDeleteModal])
 
   const handleUpdateAttachments = useCallback(
-    async (attachments: FileAttachment[]) => {
-      if (task && !await updateTask(task.id, { attachments })) throw new Error(ATTACHMENT_IMPORT_FAILURE)
+    async (attachments: FileAttachment[], baseline?: FileAttachment[]) => {
+      if (task && !await updateTask(task.id, { attachments }, attachmentPrecondition(baseline))) throw new Error(ATTACHMENT_IMPORT_FAILURE)
     },
     [task, updateTask]
   )

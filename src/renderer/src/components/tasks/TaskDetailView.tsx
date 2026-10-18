@@ -29,7 +29,7 @@ interface TaskDetailViewProps {
   agents: Agent[]
   onEdit: () => void
   onDelete: () => void
-  onUpdateAttachments: (attachments: FileAttachment[]) => void | Promise<void>
+  onUpdateAttachments: (attachments: FileAttachment[], baseline?: FileAttachment[]) => void | Promise<void>
   onUpdateOutputFields: (fields: OutputField[]) => void
   onCompleteTask: () => void
   onAssignAgent: (agentId: string | null) => void

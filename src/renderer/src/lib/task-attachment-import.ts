@@ -1,5 +1,5 @@
 import { captureDesktopRead, getDesktopHost } from './desktop-api'
-import { attachmentApi } from './ipc-client'
+import { attachmentApi, type TaskUpdatePrecondition } from './ipc-client'
 import type { FileAttachment } from '@/types'
 
 export const ATTACHMENT_IMPORT_FAILURE = 'Some files could not be attached. Check the current attachments before choosing files again.'
@@ -32,4 +32,15 @@ export function mergeTaskAttachments(current: FileAttachment[], saved: FileAttac
     seen.add(item.id); merged.push(item)
   }
   return merged
+}
+
+
+/** The baseline is the exact observed array used to construct a replacement. */
+export function copyAttachmentBaseline(records: readonly FileAttachment[]): FileAttachment[] {
+  return records.map(({ id, filename, size, mime_type, added_at }) => ({ id, filename, size, mime_type, added_at }))
+}
+export function attachmentPrecondition(baseline?: readonly FileAttachment[]): TaskUpdatePrecondition {
+  if (getDesktopHost().kind !== 'tauri') return undefined
+  if (!baseline) throw new Error(ATTACHMENT_IMPORT_FAILURE)
+  return { attachmentsBaseline: copyAttachmentBaseline(baseline) }
 }

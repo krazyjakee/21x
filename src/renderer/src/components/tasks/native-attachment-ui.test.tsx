@@ -24,18 +24,27 @@ const makeTask = (extra: Partial<Task> = {}): Task => ({
 async function fixture() {
   const { installDesktopHost } = await import('@/lib/desktop-api')
   const { createNativeDesktopHost } = await import('@/lib/native-desktop-host')
+  let dropSupported = false
+  const listeners = new Map<string, Set<(event: { payload: unknown }) => void>>()
   const values = new Map<string, unknown>()
   const handlers = new Map<string, (payload: Record<string, unknown>) => Promise<unknown>>()
   const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
-    if (command === 'engine_status') return { available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document-1' }
+    if (command === 'engine_status') return { available: true, protocolVersion: 1, engineEpoch: 'engine-1', uiLeaseId: 'document-1', nativeDropSupported: dropSupported }
     const op = String(args?.operation), payload = args?.payload as Record<string, unknown>
     const value = handlers.has(op) ? await handlers.get(op)!(payload) : values.get(op)
     return { engineEpoch: 'engine-1', result: value === undefined ? { defined: false } : { defined: true, value } }
   })
-  const native = { core: { invoke }, event: { listen: vi.fn(async () => vi.fn()) } } as unknown as TauriDesktopApi
+  const native = { core: { invoke }, event: { listen: vi.fn(async (event: string, listener: (event: { payload: unknown }) => void) => {
+    const callbacks = listeners.get(event) ?? new Set(); listeners.set(event, callbacks); callbacks.add(listener)
+    return () => callbacks.delete(listener)
+  }) } } as unknown as TauriDesktopApi
   const host = createNativeDesktopHost(native), release = installDesktopHost(host)
   host.setRehydrator(async () => {}); await host.reconnect()
-  return { host, values, handlers, invoke, release, calls: (op: string) => invoke.mock.calls.filter(([, args]) => args?.operation === op) }
+  return { host, values, handlers, invoke, release, setDropSupported: (value: boolean) => { dropSupported = value },
+    emitDrop: (contextId: string, paths = ['/synthetic/1.txt', '/synthetic/2.txt'], dropId = crypto.randomUUID()) => {
+      for (const listener of listeners.get('desktop:attachment-drop') ?? []) listener({ payload: { engineEpoch: 'engine-1', leaseId: 'document-1', drop: { contextId, paths, dropId } } })
+      return dropId
+    }, calls: (op: string) => invoke.mock.calls.filter(([, args]) => args?.operation === op) }
 }
 let f: Awaited<ReturnType<typeof fixture>>
 let TaskAttachments: typeof import('./TaskAttachments').TaskAttachments
@@ -46,8 +55,13 @@ let TranscriptComposer: typeof import('../agents/transcript/TranscriptComposer')
 let stores: { ui: typeof import('@/stores/ui-store').useUIStore; tasks: typeof import('@/stores/task-store').useTaskStore }
 const feedback = vi.fn<(detail: { message: string; isError: boolean }) => void>()
 let retireFeedback: () => void
+let restoreLayout: () => void
 const legacy = window.electronAPI
 beforeAll(async () => {
+  // happy-dom has no layout engine. Give visible roots a controlled viewport
+  // rectangle; hidden/inert/style/modal admission is still checked by the owner.
+  const layout = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 400, 400)] as unknown as DOMRectList)
+  restoreLayout = () => layout.mockRestore()
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: undefined })
   f = await fixture()
   ;({ TaskAttachments } = await import('./TaskAttachments'))
@@ -59,6 +73,7 @@ beforeAll(async () => {
   retireFeedback = (await import('@/lib/keyboard-shortcuts')).onShortcutFeedback(feedback)
 })
 beforeEach(async () => {
+  f.setDropSupported(false)
   f.values.clear(); f.handlers.clear(); f.invoke.mockClear(); feedback.mockClear(); panel.pick = undefined
   f.values.set('attachments:pick', ['/synthetic/1.txt', '/synthetic/2.txt'])
   f.values.set('settings:get', null); f.values.set('tasks:getWorkspaceDir', '/synthetic')
@@ -76,13 +91,13 @@ beforeEach(async () => {
 })
 afterEach(() => { cleanup() })
 afterAll(() => {
-  retireFeedback(); f.release()
+  retireFeedback(); restoreLayout(); f.release()
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: legacy })
 })
 function Existing() {
   const [items, setItems] = useState<FileAttachment[]>([attachment(9)])
-  return <TaskAttachments items={items} taskId="task-1" onChange={async next => {
-    await f.host.api.db.updateTask('task-1', { attachments: next }); setItems(next)
+  return <TaskAttachments items={items} taskId="task-1" onChange={async (next, baseline) => {
+    await f.host.api.db.updateTask('task-1', { attachments: next }, { attachmentsBaseline: baseline! }); setItems(next)
   }} />
 }
 it('imports native selections sequentially, waits for each receipt and appends metadata exactly once', async () => {
@@ -100,7 +115,7 @@ it('imports native selections sequentially, waits for each receipt and appends m
     { payload: { taskId: 'task-1', filePath: '/synthetic/2.txt' }, uiLease: 'document-1' }
   ])
   expect(f.calls('db:updateTask')).toHaveLength(1)
-  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'task-1', data: { attachments: [attachment(9), attachment(1), attachment(2)] } })
+  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'task-1', data: { attachments: [attachment(9), attachment(1), attachment(2)] }, precondition: { attachmentsBaseline: [attachment(9)] } })
 })
 it('keeps accepted partial imports and stops on refusal without leaking errors or replaying on reconnect', async () => {
   f.values.set('attachments:pick', ['/synthetic/1.txt', '/synthetic/2.txt', '/synthetic/3.txt'])
@@ -112,7 +127,7 @@ it('keeps accepted partial imports and stops on refusal without leaking errors o
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Check the current attachments'))
   expect(document.body.textContent).not.toContain('private-file-canary')
   expect(f.calls('attachments:save')).toHaveLength(2)
-  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'task-1', data: { attachments: [attachment(9), attachment(1)] } })
+  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'task-1', data: { attachments: [attachment(9), attachment(1)] }, precondition: { attachmentsBaseline: [attachment(9)] } })
   await f.host.reconnect()
   expect(f.calls('attachments:save')).toHaveLength(2)
 })
@@ -168,7 +183,7 @@ it('uses the actual create form then attaches to only the accepted new task, pre
   await waitFor(() => expect(stores.ui.getState().activeModal).toBeNull())
   expect(f.calls('db:createTask')).toHaveLength(1)
   expect(f.calls('attachments:save').every(([, args]) => (args?.payload as { taskId: string }).taskId === 'created-task')).toBe(true)
-  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'created-task', data: { attachments: [attachment(1)] } })
+  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'created-task', data: { attachments: [attachment(1)] }, precondition: { attachmentsBaseline: [] } })
   expect(toast).toHaveBeenCalledWith(expect.stringContaining('Check the current attachments'), true)
 })
 it('serializes the actual workspace composer import callback before its explicit metadata append', async () => {
@@ -180,7 +195,7 @@ it('serializes the actual workspace composer import callback before its explicit
   await waitFor(() => expect(f.calls('attachments:save')).toHaveLength(1))
   expect(changed).not.toHaveBeenCalled()
   await act(async () => { first.resolve(attachment(1)); await importing })
-  expect(changed).toHaveBeenCalledExactlyOnceWith([attachment(1), attachment(2)])
+  expect(changed).toHaveBeenCalledExactlyOnceWith([attachment(1), attachment(2)], [])
   expect(f.calls('attachments:save')).toHaveLength(2)
 })
 it('keeps native DOM drops non-authoritative in task attachments and the actual transcript composer', () => {
@@ -324,4 +339,327 @@ it('ignores a retired composer picker error after same-epoch reconnect', async (
   await f.host.reconnect()
   await act(async () => { picked.reject(new Error('retired-picker-canary')) })
   expect(feedback).not.toHaveBeenCalled()
+})
+
+
+async function enableDrops() { f.setDropSupported(true); await act(async () => { await f.host.reconnect() }) }
+async function acknowledgedDropContext() {
+  let contextId: string | undefined
+  await waitFor(() => {
+    const calls = f.calls('attachments:setNativeDropContext')
+    const payload = calls.at(-1)?.[1]?.payload as { contextId?: string | null } | undefined
+    expect(typeof payload?.contextId).toBe('string'); contextId = payload?.contextId ?? undefined
+  })
+  await act(async () => { await Promise.resolve() })
+  return contextId!
+}
+
+it('accepts the exact native task drop before sequential copies and closes after explicit metadata receipt', async () => {
+  await enableDrops()
+  const first = held<unknown>(); f.handlers.set('attachments:save', payload => String(payload.filePath).endsWith('1.txt') ? first.promise : Promise.resolve(attachment(2)))
+  render(<Existing />); const context = await acknowledgedDropContext()
+  let dropId = ''
+  act(() => { dropId = f.emitDrop(context) })
+  await waitFor(() => expect(f.calls('attachments:save')).toHaveLength(1))
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(1)
+  expect(f.calls('db:updateTask')).toHaveLength(0); expect(f.calls('native.attachment.drop.close')).toHaveLength(0)
+  await act(async () => { first.resolve(attachment(1)) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:save')).toHaveLength(2); expect(f.calls('db:updateTask')).toHaveLength(1)
+  expect(f.calls('native.attachment.drop.close')[0][1]?.payload).toEqual({ dropId, contextId: context })
+  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'task-1', data: { attachments: [attachment(9), attachment(1), attachment(2)] }, precondition: { attachmentsBaseline: [attachment(9)] } })
+})
+
+it('retains an accepted native draft drop until actual task creation and sequential import finish', async () => {
+  await enableDrops(); stores.ui.setState({ activeModal: 'create' })
+  const first = held<unknown>(); f.handlers.set('attachments:save', payload => String(payload.filePath).endsWith('1.txt') ? first.promise : Promise.resolve(attachment(2)))
+  const noop = vi.fn(async () => {})
+  render(<TaskDialogs agents={[]} showToast={vi.fn()} completeTask={noop} onGoToFullView={noop} onNavigateFromPreview={noop} onAssignAgent={noop} onUpdateTask={noop} />)
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Dropped draft' } })
+  const context = await acknowledgedDropContext(); act(() => { f.emitDrop(context) })
+  await screen.findByText('1.txt')
+  expect(f.calls('attachments:save')).toHaveLength(0); expect(f.calls('native.attachment.drop.close')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Create Task' }))
+  await waitFor(() => expect(f.calls('attachments:save')).toHaveLength(1))
+  expect(f.calls('attachments:setNativeDropContext').filter(([, args]) => (args?.payload as { contextId: string | null }).contextId !== null)).toHaveLength(1)
+  expect(f.calls('native.attachment.drop.close')).toHaveLength(0)
+  await act(async () => { first.resolve(attachment(1)) })
+  await waitFor(() => expect(stores.ui.getState().activeModal).toBeNull())
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('db:createTask')).toHaveLength(1); expect(f.calls('attachments:save')).toHaveLength(2)
+  expect(f.calls('attachments:save').every(([, args]) => (args?.payload as { taskId: string }).taskId === 'created-task')).toBe(true)
+})
+
+it('closes ignored native drops when two unrelated visible task targets are ambiguous', async () => {
+  await enableDrops()
+  render(<><TaskAttachments items={[]} taskId="task-1" onChange={vi.fn()} /><TaskAttachments items={[]} taskId="task-2" onChange={vi.fn()} /></>)
+  await waitFor(() => expect((f.calls('attachments:setNativeDropContext').at(-1)?.[1]?.payload as { contextId: unknown })?.contextId).toBeNull())
+  act(() => { f.emitDrop(crypto.randomUUID()) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(0); expect(f.calls('attachments:save')).toHaveLength(0)
+})
+
+
+it('joins a held raw drop acceptance on task replacement before closing and never imports into the replacement', async () => {
+  await enableDrops()
+  const accepting = held<unknown>(); f.handlers.set('native.attachment.drop.accept', () => accepting.promise)
+  const changed = vi.fn(), view = render(<TaskAttachments taskId="task-1" items={[]} onChange={changed} />)
+  const original = await acknowledgedDropContext(); act(() => { f.emitDrop(original) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.accept')).toHaveLength(1))
+  view.rerender(<TaskAttachments taskId="task-2" items={[]} onChange={changed} />)
+  expect(f.calls('native.attachment.drop.close')).toHaveLength(0); expect(f.calls('attachments:save')).toHaveLength(0)
+  await act(async () => { accepting.resolve(undefined) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:save')).toHaveLength(0); expect(changed).not.toHaveBeenCalled()
+})
+
+it('rejects an old literal context after replacement and never targets the newly visible task at delivery', async () => {
+  await enableDrops()
+  const changed = vi.fn(), view = render(<TaskAttachments taskId="task-1" items={[]} onChange={changed} />)
+  const original = await acknowledgedDropContext()
+  view.rerender(<TaskAttachments taskId="task-2" items={[]} onChange={changed} />)
+  const replacement = await acknowledgedDropContext(); expect(replacement).not.toBe(original)
+  act(() => { f.emitDrop(original) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(0); expect(f.calls('attachments:save')).toHaveLength(0)
+})
+
+it('keeps draft receipts during ordinary field edits and closes the group only after all pending files are removed', async () => {
+  await enableDrops(); render(<TaskForm onSubmit={vi.fn()} onCancel={vi.fn()} />)
+  const context = await acknowledgedDropContext(); act(() => { f.emitDrop(context, ['/synthetic/1.txt']) })
+  await screen.findByText('1.txt')
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Still same draft' } })
+  expect(f.calls('attachments:setNativeDropContext').filter(([, args]) => (args?.payload as { contextId: string | null }).contextId !== null)).toHaveLength(1)
+  expect(f.calls('native.attachment.drop.close')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Remove 1.txt' }))
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:save')).toHaveLength(0)
+})
+
+it('uses one workspace owner for nested details and composer instead of ambiguous duplicate targets', async () => {
+  await enableDrops()
+  const changed = vi.fn(async () => {})
+  render(<TaskWorkspace task={makeTask()} agents={[]} panelLayout="task-only" onEdit={vi.fn()} onDelete={vi.fn()} onUpdateAttachments={changed} onUpdateOutputFields={vi.fn()} onCompleteTask={vi.fn()} onAssignAgent={vi.fn()} />)
+  const context = await acknowledgedDropContext()
+  expect(f.calls('attachments:setNativeDropContext').filter(([, args]) => (args?.payload as { contextId: string | null }).contextId !== null)).toHaveLength(1)
+  act(() => { f.emitDrop(context) })
+  await waitFor(() => expect(changed).toHaveBeenCalledExactlyOnceWith([attachment(1), attachment(2)], []))
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(1)
+})
+
+it('rejects another drop while a task import is busy without repeating accepted copies', async () => {
+  await enableDrops()
+  const first = held<unknown>(); f.handlers.set('attachments:save', payload => String(payload.filePath).endsWith('1.txt') ? first.promise : Promise.resolve(attachment(2)))
+  render(<Existing />); const context = await acknowledgedDropContext()
+  act(() => { f.emitDrop(context) }); await waitFor(() => expect(f.calls('attachments:save')).toHaveLength(1))
+  act(() => { f.emitDrop(context, ['/synthetic/3.txt']) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(1)
+  await act(async () => { first.resolve(attachment(1)) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(2))
+  expect(f.calls('attachments:save')).toHaveLength(2)
+})
+
+it('targets only the modal draft while a background task is still mounted', async () => {
+  await enableDrops()
+  const changed = vi.fn()
+  render(<><TaskAttachments taskId="task-1" items={[]} onChange={changed} /><div role="dialog"><TaskForm onSubmit={vi.fn()} onCancel={vi.fn()} /></div></>)
+  const context = await acknowledgedDropContext(); act(() => { f.emitDrop(context, ['/synthetic/1.txt']) })
+  await screen.findByText('1.txt')
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(1); expect(f.calls('attachments:save')).toHaveLength(0)
+  expect(changed).not.toHaveBeenCalled(); expect(f.calls('native.attachment.drop.close')).toHaveLength(0)
+})
+
+it('retires an accepted pending draft on reconnect and never replays its file import', async () => {
+  await enableDrops(); render(<TaskForm onSubmit={vi.fn()} onCancel={vi.fn()} />)
+  const original = await acknowledgedDropContext(); act(() => { f.emitDrop(original, ['/synthetic/1.txt']) })
+  await screen.findByText('1.txt')
+  await act(async () => { await f.host.reconnect() })
+  await waitFor(() => expect(screen.queryByText('1.txt')).toBeNull())
+  const replacement = await acknowledgedDropContext(); expect(replacement).not.toBe(original)
+  expect(f.calls('native.attachment.drop.close')).toHaveLength(1); expect(f.calls('attachments:save')).toHaveLength(0)
+})
+
+it('keeps refusal wording fixed and closes a drop after partial-copy failure without rollback or retry', async () => {
+  await enableDrops()
+  f.handlers.set('attachments:save', async payload => {
+    if (String(payload.filePath).endsWith('1.txt')) return attachment(1)
+    throw new Error('private-native-drop-path')
+  })
+  render(<Existing />); const context = await acknowledgedDropContext(); act(() => { f.emitDrop(context) })
+  await screen.findByRole('alert')
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:save')).toHaveLength(2); expect(f.calls('db:updateTask')).toHaveLength(1)
+  expect(document.body.textContent).not.toContain('private-native-drop-path')
+  expect(f.calls('attachments:delete')).toHaveLength(0)
+  await act(async () => { await f.host.reconnect() }); expect(f.calls('attachments:save')).toHaveLength(2)
+})
+
+it('retries refused drop cleanup on explicit retirement without another accept or import', async () => {
+  await enableDrops()
+  let closes = 0
+  f.handlers.set('native.attachment.drop.close', async () => { if (++closes === 1) throw new Error('private-retirement-refusal') })
+  const view = render(<Existing />); const context = await acknowledgedDropContext(); act(() => { f.emitDrop(context) })
+  await screen.findByRole('alert')
+  expect(f.calls('native.attachment.drop.close')).toHaveLength(1)
+  view.unmount()
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(2))
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(1); expect(f.calls('attachments:save')).toHaveLength(2)
+})
+
+it('fences a project change and return before a held raw acceptance without adopting the replacement intent', async () => {
+  await enableDrops()
+  const projects = (await import('@/stores/project-store')).useProjectStore
+  const originalProject = projects.getState().currentProjectId
+  const accepting = held<unknown>(); f.handlers.set('native.attachment.drop.accept', () => accepting.promise)
+  render(<Existing />); const original = await acknowledgedDropContext(); act(() => { f.emitDrop(original) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.accept')).toHaveLength(1))
+  act(() => { projects.setState({ currentProjectId: 'temporary-project' }); projects.setState({ currentProjectId: originalProject }) })
+  await act(async () => { accepting.resolve(undefined) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:save')).toHaveLength(0)
+  const replacement = await acknowledgedDropContext(); expect(replacement).not.toBe(original)
+})
+
+
+it.each(['captain', 'task_group'] as const)('keeps native %s file-drop mutation unavailable before acceptance', async role => {
+  await enableDrops()
+  render(<TaskWorkspace task={makeTask({ role })} agents={[]} panelLayout="task-only" onEdit={vi.fn()} onDelete={vi.fn()} onUpdateAttachments={vi.fn()} onUpdateOutputFields={vi.fn()} onCompleteTask={vi.fn()} onAssignAgent={vi.fn()} />)
+  act(() => { f.emitDrop(crypto.randomUUID()) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:setNativeDropContext').filter(([, args]) => (args?.payload as { contextId: string | null }).contextId !== null)).toHaveLength(0)
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(0); expect(f.calls('attachments:save')).toHaveLength(0)
+})
+
+it('retires a draft drop on pagehide and ignores its old context after listener cleanup', async () => {
+  await enableDrops(); render(<TaskForm onSubmit={vi.fn()} onCancel={vi.fn()} />)
+  const original = await acknowledgedDropContext(); act(() => { f.emitDrop(original, ['/synthetic/1.txt']) })
+  await screen.findByText('1.txt')
+  act(() => { window.dispatchEvent(new Event('pagehide')) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  act(() => { f.emitDrop(original, ['/synthetic/2.txt']) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(2))
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(1); expect(f.calls('attachments:save')).toHaveLength(0)
+})
+
+it('never registers a drop owner for hidden content and fences it again before a held acceptance settles', async () => {
+  await enableDrops()
+  const accepting = held<unknown>(); f.handlers.set('native.attachment.drop.accept', () => accepting.promise)
+  const changed = vi.fn(), view = render(<div data-testid="hidden-owner" style={{ display: 'none' }}><TaskAttachments taskId="task-1" items={[]} onChange={changed} /></div>)
+  await act(async () => { await Promise.resolve() })
+  expect(f.calls('attachments:setNativeDropContext').filter(([, args]) => (args?.payload as { contextId: string | null }).contextId !== null)).toHaveLength(0)
+  act(() => { screen.getByTestId('hidden-owner').style.display = 'block' })
+  const context = await acknowledgedDropContext(); act(() => { f.emitDrop(context) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.accept')).toHaveLength(1))
+  act(() => { screen.getByTestId('hidden-owner').style.display = 'none' })
+  await act(async () => { accepting.resolve(undefined) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:save')).toHaveLength(0); expect(changed).not.toHaveBeenCalled()
+  view.unmount()
+})
+
+it('fences a modal intent change and return before raw acceptance even without a replacement DOM target', async () => {
+  await enableDrops()
+  const accepting = held<unknown>(); f.handlers.set('native.attachment.drop.accept', () => accepting.promise)
+  render(<Existing />); const context = await acknowledgedDropContext(); act(() => { f.emitDrop(context) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.accept')).toHaveLength(1))
+  act(() => { stores.ui.setState({ activeModal: 'create' }); stores.ui.setState({ activeModal: null }) })
+  await act(async () => { accepting.resolve(undefined) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:save')).toHaveLength(0)
+  expect(await acknowledgedDropContext()).not.toBe(context)
+})
+
+it('refuses over-capacity draft offers before acceptance or any file read', async () => {
+  await enableDrops()
+  const pendingFiles = Array.from({ length: 128 }, (_, index) => ({ id: 'pending-' + index, filename: 'pending-' + index, sourcePath: '/synthetic/pending-' + index, size: 0 }))
+  render(<TaskAttachments taskId={null} items={[]} pendingFiles={pendingFiles} onChange={vi.fn()} onPendingChange={vi.fn()} />)
+  const context = await acknowledgedDropContext(); act(() => { f.emitDrop(context, ['/synthetic/1.txt']) })
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('native.attachment.drop.accept')).toHaveLength(0); expect(f.calls('attachments:save')).toHaveLength(0)
+  expect(screen.getByRole('alert')).toHaveTextContent('Some files could not be attached')
+})
+
+
+it('captures the complete ordered baseline before raw file save and never refreshes or retries a conflict', async () => {
+  const saving = held<unknown>(), original = [attachment(9), attachment(8)]
+  f.values.set('attachments:pick', ['/synthetic/1.txt'])
+  f.handlers.set('attachments:save', () => saving.promise)
+  f.handlers.set('db:updateTask', async () => { throw { code: 'INVALID_REQUEST', detail: 'private-conflict' } })
+  const changed = vi.fn(async (next: FileAttachment[], baseline?: FileAttachment[]) => {
+    await f.host.api.db.updateTask('task-1', { attachments: next }, { attachmentsBaseline: baseline! })
+  })
+  const view = render(<TaskAttachments taskId="task-1" items={original} onChange={changed} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Add files' }))
+  await waitFor(() => expect(f.calls('attachments:save')).toHaveLength(1))
+  // A canonical event arrives while the independently admitted copy is pending.
+  view.rerender(<TaskAttachments taskId="task-1" items={[...original, attachment(7)]} onChange={changed} />)
+  original[0].filename = 'mutated-after-intent.txt'
+  await act(async () => { saving.resolve(attachment(1)) })
+  await screen.findByRole('alert')
+  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'task-1', data: { attachments: [attachment(9), attachment(8), attachment(1)] }, precondition: { attachmentsBaseline: [attachment(9), attachment(8)] } })
+  expect(f.calls('db:updateTask')).toHaveLength(1); expect(f.calls('db:getTask')).toHaveLength(0)
+  expect(f.calls('attachments:remove')).toHaveLength(0); expect(document.body.textContent).not.toContain('private-conflict')
+  await f.host.reconnect(); expect(f.calls('db:updateTask')).toHaveLength(1)
+})
+
+it('keeps a workspace import baseline when canonical props change during its raw copy', async () => {
+  const saving = held<unknown>(), changed = vi.fn(async () => {})
+  f.values.set('attachments:pick', ['/synthetic/1.txt']); f.handlers.set('attachments:save', () => saving.promise)
+  const props = { agents: [], panelLayout: 'transcript-only' as const, onEdit: vi.fn(), onDelete: vi.fn(), onUpdateAttachments: changed, onUpdateOutputFields: vi.fn(), onCompleteTask: vi.fn(), onAssignAgent: vi.fn() }
+  const view = render(<TaskWorkspace {...props} task={makeTask({ attachments: [attachment(9)] })} />)
+  let importing!: Promise<unknown>
+  await act(async () => { importing = panel.pick!() })
+  await waitFor(() => expect(f.calls('attachments:save')).toHaveLength(1))
+  view.rerender(<TaskWorkspace {...props} task={makeTask({ attachments: [attachment(9), attachment(8)] })} />)
+  await act(async () => { saving.resolve(attachment(1)); await importing })
+  expect(changed).toHaveBeenCalledExactlyOnceWith([attachment(9), attachment(1)], [attachment(9)])
+})
+
+it('retains an edit intent baseline across canonical refresh and locks an uncertain save without replay', async () => {
+  const original = makeTask({ attachments: [attachment(9), attachment(8)] })
+  stores.tasks.setState({ tasks: [original] }); stores.ui.setState({ activeModal: 'edit', editingTaskId: original.id })
+  f.handlers.set('db:updateTask', async () => { throw { code: 'INVALID_REQUEST', detail: 'private-conflict' } })
+  const noop = vi.fn(async () => {})
+  render(<TaskDialogs agents={[]} showToast={vi.fn()} completeTask={noop} onGoToFullView={noop} onNavigateFromPreview={noop} onAssignAgent={noop} onUpdateTask={noop} />)
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Unsaved edit' } })
+  act(() => stores.tasks.setState({ tasks: [{ ...original, title: 'Concurrent canonical', attachments: [...original.attachments, attachment(7)] }] }))
+  expect(screen.getByLabelText('Title')).toHaveValue('Unsaved edit')
+  fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await screen.findByText('Task save could not be confirmed. Close this draft and review the task list before saving again.')
+  expect(f.calls('db:updateTask')[0][1]?.payload).toMatchObject({ id: original.id, data: { title: 'Unsaved edit', attachments: original.attachments }, precondition: { attachmentsBaseline: original.attachments } })
+  const data = (f.calls('db:updateTask')[0][1]?.payload as { data: Record<string, unknown> }).data
+  expect(data).not.toHaveProperty('_attachmentsBaseline'); expect(data).not.toHaveProperty('_pendingFiles')
+  expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
+  await f.host.reconnect(); expect(f.calls('db:updateTask')).toHaveLength(1)
+})
+
+it('uses the accepted new task attachment receipt as draft import baseline', async () => {
+  f.handlers.set('db:createTask', async payload => makeTask({ ...(payload.data as Partial<Task>), id: 'created-task', attachments: [attachment(9)] }))
+  f.values.set('attachments:pick', ['/synthetic/1.txt']); stores.ui.setState({ activeModal: 'create' })
+  const noop = vi.fn(async () => {})
+  render(<TaskDialogs agents={[]} showToast={vi.fn()} completeTask={noop} onGoToFullView={noop} onNavigateFromPreview={noop} onAssignAgent={noop} onUpdateTask={noop} />)
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'New task receipt' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add files' })); await screen.findByText('1.txt')
+  fireEvent.click(screen.getByRole('button', { name: 'Create Task' }))
+  await waitFor(() => expect(f.calls('db:updateTask')).toHaveLength(1))
+  expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'created-task', data: { attachments: [attachment(9), attachment(1)] }, precondition: { attachmentsBaseline: [attachment(9)] } })
+  expect(f.calls('db:getTask')).toHaveLength(0)
+})
+
+it('does not close or overwrite a replacement edit dialog after a raw save settles', async () => {
+  const saving = held<unknown>(), original = makeTask({ attachments: [attachment(9)] })
+  f.handlers.set('db:updateTask', () => saving.promise)
+  stores.tasks.setState({ tasks: [original] }); stores.ui.setState({ activeModal: 'edit', editingTaskId: original.id })
+  const noop = vi.fn(async () => {})
+  render(<TaskDialogs agents={[]} showToast={vi.fn()} completeTask={noop} onGoToFullView={noop} onNavigateFromPreview={noop} onAssignAgent={noop} onUpdateTask={noop} />)
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Old save' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() => expect(f.calls('db:updateTask')).toHaveLength(1))
+  act(() => { stores.ui.setState({ activeModal: null }); stores.ui.setState({ activeModal: 'edit', editingTaskId: original.id }) })
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Replacement draft' } })
+  await act(async () => { saving.resolve(makeTask({ title: 'Old save', attachments: [attachment(9)] })) })
+  expect(stores.ui.getState().activeModal).toBe('edit'); expect(screen.getByLabelText('Title')).toHaveValue('Replacement draft')
+  expect(f.calls('db:updateTask')).toHaveLength(1)
 })

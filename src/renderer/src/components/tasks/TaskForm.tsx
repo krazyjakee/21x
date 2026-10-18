@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { copyAttachmentBaseline } from '@/lib/task-attachment-import'
+import { useState, useEffect, useRef } from 'react'
 import { getDesktopHost } from '@/lib/desktop-api'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -23,6 +24,7 @@ import type {
 
 export interface TaskFormSubmitData extends CreateTaskDTO {
   _pendingFiles?: PendingFile[]
+  _attachmentsBaseline?: FileAttachment[]
 }
 
 interface TaskFormProps {
@@ -41,12 +43,17 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
   const [assignee, setAssignee] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [labels, setLabels] = useState('')
+  const attachmentsBaseline = useRef(copyAttachmentBaseline(task?.attachments ?? []))
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
   const [outputFields, setOutputFields] = useState<OutputField[]>([])
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
   const [recurrencePattern, setRecurrencePattern] = useState<RecurrencePattern | null>(null)
   const [autoStartAgent, setAutoStartAgent] = useState(false)
   const [autoCompleteWithoutReview, setAutoCompleteWithoutReview] = useState(false)
+  const active = useRef(true)
+  const generation = useRef(0)
+  const [reviewRequired, setReviewRequired] = useState(false)
+  const submitting = useRef(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
@@ -54,6 +61,14 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
   const [showMore, setShowMore] = useState(false)
 
   useEffect(() => {
+    active.current = true
+    const retire = () => { active.current = false; ++generation.current; window.removeEventListener('pagehide', retire) }
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
+  }, [])
+
+  useEffect(() => {
+    ++generation.current
     if (task) {
       setTitle(task.title)
       setDescription(task.description)
@@ -63,7 +78,8 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
       setAssignee(task.assignee)
       setDueDate(task.due_date ? task.due_date.slice(0, 10) : '')
       setLabels(task.labels.join(', '))
-      setAttachments(task.attachments)
+      attachmentsBaseline.current = copyAttachmentBaseline(task.attachments)
+      setAttachments(copyAttachmentBaseline(task.attachments))
       setOutputFields(task.output_fields)
       setRecurrencePattern(task.recurrence_pattern)
       setAutoStartAgent(task.auto_start_agent)
@@ -81,14 +97,17 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
         setShowMore(true)
       }
     }
-  }, [task])
+  }, [task?.id])
 
   const hasOptionalValues = type !== 'general' || priority !== 'medium' || dueDate || labels || outputFields.length > 0 || !!recurrencePattern
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!title.trim()) return
+    if (!title.trim() || submitting.current || reviewRequired || !active.current) return
+    const intent = generation.current
+    const current = () => active.current && generation.current === intent
 
+    submitting.current = true
     setIsSubmitting(true)
     setSubmitError(null)
     try {
@@ -114,21 +133,28 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
         auto_complete_without_review: !!recurrencePattern && autoCompleteWithoutReview
       }
 
+      if (task && getDesktopHost().kind === 'tauri') formData._attachmentsBaseline = copyAttachmentBaseline(attachmentsBaseline.current)
+
       if (!task && pendingFiles.length > 0) {
         formData._pendingFiles = pendingFiles
       }
 
       await onSubmit(formData)
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err)
-      setSubmitError(reason)
+      if (!current()) return
+      if (getDesktopHost().kind === 'tauri') {
+        setReviewRequired(true)
+        setSubmitError('Task save could not be confirmed. Close this draft and review the task list before saving again.')
+      } else setSubmitError(err instanceof Error ? err.message : String(err))
     } finally {
-      setIsSubmitting(false)
+      submitting.current = false
+      if (current()) setIsSubmitting(false)
     }
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      <fieldset disabled={isSubmitting || reviewRequired} className="space-y-5 border-0 p-0 m-0 min-w-0">
       <div className="space-y-2">
         <Label htmlFor="title">Title</Label>
         <Input
@@ -155,8 +181,9 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
       <div className="rounded-md border p-4">
         <TaskAttachments
           items={attachments}
-          onChange={setAttachments}
+          onChange={next => setAttachments(next)}
           taskId={task?.id ?? null}
+          disabled={isSubmitting || reviewRequired}
           readOnly={getDesktopHost().kind === 'tauri' && !!task && task.role !== 'task'}
           pendingFiles={pendingFiles}
           onPendingChange={setPendingFiles}
@@ -243,13 +270,14 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
         </div>
       )}
 
+      </fieldset>
       {submitError && (
         <p className="text-sm text-destructive">{submitError}</p>
       )}
 
       <div className="flex justify-end gap-3 pt-4 border-t">
         <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" disabled={!title.trim() || isSubmitting}>
+        <Button type="submit" disabled={!title.trim() || isSubmitting || reviewRequired}>
           {isSubmitting ? 'Saving...' : task ? 'Save Changes' : 'Create Task'}
         </Button>
       </div>

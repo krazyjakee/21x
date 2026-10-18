@@ -376,3 +376,46 @@ Plugin list/documentation reads capture document, selected plugin and connection
 Published Source has no public handlers for general `oauth:startFlow`, `oauth:startLocalhostFlow`, `oauth:exchangeCode`, `oauth:getValidToken` or `oauth:revokeToken`. Native HubSpot and Linear general integration sign-in therefore stays unavailable, including direct rendering of the general OAuth dialog. Mount/recovery does not ask for a bearer token or refresh it, does not install a public callback listener and does not manufacture connected/disconnected status. Native Linear redirect registration instructions are withheld until identity/OS authority exists. Existing explicit source synchronization remains Source-owned and may independently accept or refuse its configured credentials.
 
 The separately proven `connectors:oauthConnect` instance/source/storage loopback path depends on enabled connector runtime and a sealed captured private OAuth owner. It grants no HubSpot/Linear general integration authority, global browser capability, custom-scheme registration or installed/provider acceptance. Shipping Electron retains its existing general OAuth path. Portable actual-component controls cover save/refusal/update/refresh/project replacement/reconnect, metadata selection races/pagehide, exact sync readback, both provider forms and direct unavailable OAuth dialogs. A seven-control old-source negative fails before the repair. Remaining installed native UI, durable mutation reconciliation, drop UI and attachment CAS/orphan acceptance stay open.
+
+
+## Native file-drop receipt and attachment replacement intent
+
+The renderer activates the optional two-phase native Drop protocol only when the
+captured physical document is connected and hydrated. One document observer
+selects exactly one visible, ordinary-task or new-task draft owner in the current
+project. Hidden/background/modal-obscured, ambiguous, busy, over-capacity and
+nonordinary views refuse the offer before acceptance. Browser DOM paths remain
+inert. The native physical Drop owner and private Source selection receipts are
+unchanged; a displayed pathname supplies no authority.
+
+The UI claims the original receipt synchronously, waits for acceptance before any
+file save, copies files sequentially and joins metadata acknowledgement before
+closing the group. A new-task draft holds its accepted group through task creation
+and import; removing its pending files or retiring its project/view/document
+joins close instead. There are at most16 retained groups and128 attachment/pending
+records per view. A stable acknowledged context survives title edits and a busy
+create; connection, project change-and-return, modal replacement, navigation,
+pagehide and unmount retire it. Refused cleanup is surfaced and remains retryable
+through the facade; there is no automatic import or mutation replay.
+
+Every explicit production full-array attachment update now passes the separate
+published CAS precondition. Task/detail/composer imports clone all five canonical
+fields in exact order before the first asynchronous save. A draft import uses the
+accepted new task's original attachment receipt. Edit forms preserve their original
+baseline and unsaved fields across canonical refresh; it is never replaced with a
+fresh database read to authorize stale intent. Private draft fields are stripped
+before public DTO submission. A refused or uncertain form save requires close and
+canonical review; a late receipt cannot close a replacement dialog. Field-only
+calls still use two arguments, and shipping Electron retains its existing path.
+
+Portable actual-component controls use the real typed native facade with held
+synthetic receipts, plus controlled viewport rectangles because happy-dom has no
+layout engine. They do not establish installed physical drag delivery or a full
+Wry-to-production-Source graph. Native/backend ownership and actual OS Drop proofs
+remain separately revision-bound under #214/#215. The published Source CAS proof
+covers accepted metadata replacement, not a durable copy/orphan journal. The old
+native remove-then-replacement callsite remains a known gap in this slice; E2's
+separate metadata-first exact-ID removal contract is agreed but unpublished here.
+Its next renderer integration must eliminate the second full-array write and
+reconcile canonical state even when post-unlink cleanup reports partial failure.
+No filesystem/SQLite rollback or atomic-removal guarantee is made.

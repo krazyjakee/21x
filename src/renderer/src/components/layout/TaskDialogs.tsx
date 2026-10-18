@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TaskWorkspace } from '@/components/tasks/TaskWorkspace'
 import { TaskForm, type TaskFormSubmitData } from '@/components/tasks/TaskForm'
 import { DeleteConfirmDialog } from '@/components/tasks/DeleteConfirmDialog'
@@ -8,7 +8,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { worktreeApi, settingsApi } from '@/lib/ipc-client'
-import { ATTACHMENT_IMPORT_FAILURE, importTaskAttachments, mergeTaskAttachments } from '@/lib/task-attachment-import'
+import { ATTACHMENT_IMPORT_FAILURE, attachmentPrecondition, copyAttachmentBaseline, importTaskAttachments, mergeTaskAttachments } from '@/lib/task-attachment-import'
 import { captureDesktopRead } from '@/lib/desktop-api'
 import { useProjectStore } from '@/stores/project-store'
 import type { Agent, FileAttachment, OutputField } from '@/types'
@@ -40,9 +40,19 @@ export function TaskDialogs({
   const selectTask = useTaskStore((s) => s.selectTask)
   const stopAndRemoveSessionForTask = useAgentStore((s) => s.stopAndRemoveSessionForTask)
   const currentProject = useCurrentProject()
+  const formIntentRef = useRef(0)
+  const [formIntent, setFormIntent] = useState(0)
   const creating = useRef(false)
   const mounted = useRef(true)
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  useEffect(() => {
+    mounted.current = true
+    const off = useUIStore.subscribe((state, previous) => {
+      if (state.activeModal !== previous.activeModal || state.editingTaskId !== previous.editingTaskId) setFormIntent(++formIntentRef.current)
+    })
+    const retire = () => { mounted.current = false; ++formIntentRef.current; off(); window.removeEventListener('pagehide', retire) }
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
+  }, [])
 
   const activeModal = useUIStore((s) => s.activeModal)
   const closeModal = useUIStore((s) => s.closeModal)
@@ -79,8 +89,8 @@ export function TaskDialogs({
     if (dashboardPreviewTaskId) openDeleteModal(dashboardPreviewTaskId)
   }, [dashboardPreviewTaskId, openDeleteModal])
   const handleUpdatePreviewAttachments = useCallback(
-    async (attachments: FileAttachment[]) => {
-      if (dashboardPreviewTaskId && !await updateTask(dashboardPreviewTaskId, { attachments })) throw new Error(ATTACHMENT_IMPORT_FAILURE)
+    async (attachments: FileAttachment[], baseline?: FileAttachment[]) => {
+      if (dashboardPreviewTaskId && !await updateTask(dashboardPreviewTaskId, { attachments }, attachmentPrecondition(baseline))) throw new Error(ATTACHMENT_IMPORT_FAILURE)
     },
     [dashboardPreviewTaskId, updateTask]
   )
@@ -97,7 +107,7 @@ export function TaskDialogs({
   const closeCreate = () => { closeModal(); clearCreateTaskPrefill() }
 
   const handleCreate = async (data: unknown) => {
-    if (creating.current) return
+    if (creating.current) throw new Error('A previous task creation is still settling. Review the task list before trying again.')
     creating.current = true
     const scope = captureDesktopRead()
     let retained = true
@@ -105,16 +115,20 @@ export function TaskDialogs({
     const releaseProject = useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) retained = false })
     const isCurrent = () => mounted.current && retained && scope.isCurrent()
     try {
-      const { _pendingFiles: pendingFiles, ...formData } = data as TaskFormSubmitData
+      const formData = { ...data as TaskFormSubmitData }
+      const pendingFiles = formData._pendingFiles
+      delete formData._pendingFiles
+      delete formData._attachmentsBaseline
       const newTask = await createTask(formData)
       if (!newTask) throw new Error('The task could not be created. Check the task list before trying again.')
       // Creation was accepted. Attachment failure must not leave the form able
       // to repeat that create; preserve known receipts and open the real task.
       if (pendingFiles?.length) {
+        const baseline = copyAttachmentBaseline(newTask.attachments)
         try {
           const { saved, incomplete } = await importTaskAttachments(newTask.id, pendingFiles.map(file => file.sourcePath), isCurrent)
           if (!isCurrent()) return
-          if (saved.length && !await updateTask(newTask.id, { attachments: mergeTaskAttachments(newTask.attachments, saved) })) {
+          if (saved.length && !await updateTask(newTask.id, { attachments: mergeTaskAttachments(baseline, saved) }, attachmentPrecondition(baseline))) {
             throw new Error(ATTACHMENT_IMPORT_FAILURE)
           }
           if (incomplete && isCurrent()) showToast(ATTACHMENT_IMPORT_FAILURE, true)
@@ -174,7 +188,7 @@ export function TaskDialogs({
             <DialogDescription>In {currentProject?.name ?? 'Default'}</DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <TaskForm prefill={createTaskPrefill} onSubmit={handleCreate} onCancel={closeCreate} />
+            <TaskForm key={formIntent} prefill={createTaskPrefill} onSubmit={handleCreate} onCancel={closeCreate} />
           </DialogBody>
         </DialogContent>
       </Dialog>
@@ -187,10 +201,17 @@ export function TaskDialogs({
           <DialogBody>
             {editingTask && (
               <TaskForm
+                key={formIntent}
                 task={editingTask}
                 onSubmit={async (data) => {
-                  await updateTask(editingTask.id, data)
-                  closeModal()
+                  const scope = captureDesktopRead(), intent = formIntentRef.current, id = editingTask.id
+                  const update = { ...data as TaskFormSubmitData }, baseline = update._attachmentsBaseline
+                  delete update._attachmentsBaseline
+                  delete update._pendingFiles
+                  const saved = await updateTask(id, update, attachmentPrecondition(baseline))
+                  if (!saved) throw new Error('Task save could not be confirmed. Review the task before saving again.')
+                  const ui = useUIStore.getState()
+                  if (mounted.current && intent === formIntentRef.current && scope.isCurrent() && ui.activeModal === 'edit' && ui.editingTaskId === id) closeModal()
                 }}
                 onCancel={closeModal}
               />

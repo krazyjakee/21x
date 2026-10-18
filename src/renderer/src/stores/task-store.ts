@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, OutputField, OutputFieldType } from '@/types'
-import { taskApi, taskSourceApi, projectApi, onTaskUpdated, onTaskCreated, onTaskDeleted, onTasksRefresh } from '@/lib/ipc-client'
+import { taskApi, taskSourceApi, projectApi, onTaskUpdated, onTaskCreated, onTaskDeleted, onTasksRefresh, type TaskUpdatePrecondition } from '@/lib/ipc-client'
 import { useProjectStore, getCurrentProjectId, isInProject, projectIdOf } from './project-store'
 import { createDesktopSnapshotReader } from '@/lib/desktop-snapshot'
 
@@ -66,7 +66,7 @@ interface TaskState {
 
   fetchTasks: () => Promise<void>
   createTask: (data: CreateTaskDTO) => Promise<Task | null>
-  updateTask: (id: string, data: UpdateTaskDTO) => Promise<Task | null>
+  updateTask: (id: string, data: UpdateTaskDTO, precondition?: TaskUpdatePrecondition) => Promise<Task | null>
   deleteTask: (id: string) => Promise<boolean>
   /** Selecting a task from another project switches to that project. */
   selectTask: (id: string | null) => void
@@ -99,9 +99,9 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
   },
 
-  updateTask: async (id, data) => {
+  updateTask: async (id, data, precondition) => {
     try {
-      const raw = await taskApi.update(id, data)
+      const raw = await taskApi.update(id, data, precondition)
       const updated = raw ? normalizeTask(raw) : null
       if (updated) {
         taskSnapshot.invalidate()

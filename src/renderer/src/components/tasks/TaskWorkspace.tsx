@@ -1,3 +1,4 @@
+import { NativeAttachmentDropManaged, useNativeAttachmentDrop } from '@/hooks/use-native-attachment-drop'
 import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import { LayoutList, Send, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -13,7 +14,7 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { useTaskStore } from '@/stores/task-store'
 import { taskApi, worktreeApi, taskSourceApi, attachmentApi, artifactApi, agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
-import { ATTACHMENT_IMPORT_FAILURE, importTaskAttachments, mergeTaskAttachments } from '@/lib/task-attachment-import'
+import { ATTACHMENT_IMPORT_FAILURE, copyAttachmentBaseline, importTaskAttachments, mergeTaskAttachments } from '@/lib/task-attachment-import'
 import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import { memo, useEffect, useCallback, useRef, useState, useMemo } from 'react'
 import { TaskStatus } from '@/types'
@@ -47,7 +48,7 @@ interface TaskWorkspaceProps {
   agents: Agent[]
   onEdit: () => void
   onDelete: () => void
-  onUpdateAttachments: (attachments: FileAttachment[]) => void | Promise<void>
+  onUpdateAttachments: (attachments: FileAttachment[], baseline?: FileAttachment[]) => void | Promise<void>
   onUpdateOutputFields: (fields: OutputField[]) => void
   onCompleteTask: (completeAtSource?: boolean) => void
   onAssignAgent: (taskId: string, agentId: string | null) => void
@@ -108,6 +109,8 @@ function TaskWorkspaceComponent({
   const [parentTask, setParentTask] = useState<Task | null>(null)
   const [recoveryState, setRecoveryState] = useState<QueuedAgentStart | null>(null)
   const startingRef = useRef(false)
+  const dropRoot = useRef<HTMLDivElement | null>(null)
+  const attachmentPicking = useRef(false)
   const attachmentBusy = useRef(false)
   const attachmentMounted = useRef(true)
   const attachmentOwner = useRef(task)
@@ -443,21 +446,25 @@ function TaskWorkspaceComponent({
     [approve, ensureChatSession, sendMessage, task?.agent_id, task?.id]
   )
 
-  const handleAddAttachmentPaths = useCallback(async (filePaths: string[]) => {
+  const handleAddAttachmentPaths = useCallback(async (filePaths: string[], receiptCurrent: () => boolean = () => true) => {
     if (!task?.id || filePaths.length === 0) return []
     if (getDesktopHost().kind === 'tauri' && task.role !== 'task') throw new Error('File import is unavailable for this conversation.')
     if (attachmentBusy.current) return []
     attachmentBusy.current = true
     const scope = captureDesktopRead()
+    const baseline = copyAttachmentBaseline(attachmentOwner.current?.attachments ?? [])
+    const retained = () => receiptCurrent() && attachmentMounted.current && attachmentOwner.current?.id === task.id
     try {
-      const { saved, incomplete } = await importTaskAttachments(task.id, filePaths, () => attachmentMounted.current && attachmentOwner.current?.id === task.id)
+      const { saved, incomplete } = await importTaskAttachments(task.id, filePaths, retained)
       scope.assertCurrent()
-      if (!attachmentMounted.current || attachmentOwner.current?.id !== task.id) return []
+      const currentTask = attachmentOwner.current
+      if (!retained() || !currentTask) return []
       if (saved.length) {
-        const merged = mergeTaskAttachments(attachmentOwner.current.attachments, saved)
-        await onUpdateAttachments(merged)
+        const merged = mergeTaskAttachments(baseline, saved)
+        if (getDesktopHost().kind === 'tauri') await onUpdateAttachments(merged, baseline)
+        else await onUpdateAttachments(merged)
       }
-      if (!scope.isCurrent() || !attachmentMounted.current || attachmentOwner.current?.id !== task.id) return []
+      if (!scope.isCurrent() || !retained()) return []
       if (incomplete) dispatchShortcutFeedback(ATTACHMENT_IMPORT_FAILURE, true)
       return saved
     } finally {
@@ -469,13 +476,24 @@ function TaskWorkspaceComponent({
   const handleSaveImages = useMemo(() => (task?.id ? taskImageSaver(task.id) : undefined), [task?.id])
 
   const handlePickAttachments = useCallback(async () => {
-    if (!task?.id) return []
+    if (!task?.id || attachmentPicking.current || attachmentBusy.current) return []
     if (getDesktopHost().kind === 'tauri' && task.role !== 'task') throw new Error('File import is unavailable for this conversation.')
     const scope = captureDesktopRead(), owner = task.id
-    const filePaths = await attachmentApi.pick()
-    if (!filePaths.length || !scope.isCurrent() || !attachmentMounted.current || attachmentOwner.current?.id !== owner) return []
-    return handleAddAttachmentPaths(filePaths)
+    attachmentPicking.current = true
+    try {
+      const filePaths = await attachmentApi.pick()
+      if (!filePaths.length || !scope.isCurrent() || !attachmentMounted.current || attachmentOwner.current?.id !== owner) return []
+      return await handleAddAttachmentPaths(filePaths)
+    } finally { attachmentPicking.current = false }
   }, [handleAddAttachmentPaths, task?.id, task?.role])
+
+  useNativeAttachmentDrop({
+    root: dropRoot, identity: task?.id ?? 'no-task', enabled: task?.role === 'task' && !task.group_id && !isGroupExecution,
+    busy: () => attachmentBusy.current || attachmentPicking.current,
+    capacity: () => 128 - (attachmentOwner.current?.attachments.length ?? 0),
+    consume: async (paths, current) => { await handleAddAttachmentPaths(paths, current) },
+    error: () => dispatchShortcutFeedback(ATTACHMENT_IMPORT_FAILURE, true)
+  })
 
   const feedback = useTaskFeedbackFlow({
     task,
@@ -773,8 +791,9 @@ function TaskWorkspaceComponent({
   }
 
   return (
+    <NativeAttachmentDropManaged.Provider value={true}>
     <>
-      <div className="ui-scale relative flex h-full min-h-0 flex-col bg-background">
+      <div ref={dropRoot} className="ui-scale relative flex h-full min-h-0 flex-col bg-background">
         {!isGroupExecution && <TaskGroupHistoryNotice taskId={task.id} />}
         {groupProblem && <p role="alert" className="shrink-0 px-4 py-2 text-sm text-destructive">{groupProblem}</p>}
         {isGroupExecution ? <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-border p-3"><p className="min-w-0 flex-1 text-sm font-medium">{groupHistory ? 'Retained shared conversation' : 'Shared agent session'}</p><TaskStatusBadge status={task.status} />{primaryAction && handlePrimaryAction && <Button size="sm" onClick={handlePrimaryAction}>{primaryAction === TaskPrimaryAction.START ? 'Start group' : primaryAction === TaskPrimaryAction.RESUME ? 'Resume group' : 'Restart group'}</Button>}{!groupHistory && sessionStatus !== SessionStatus.IDLE && <Button size="sm" variant="outline" onClick={() => { void handleAbort() }}>Stop group</Button>}</header> : <TaskHeaderBar
@@ -897,6 +916,7 @@ function TaskWorkspaceComponent({
         onStartFreshSession={handleStartFreshSession}
       />
     </>
+    </NativeAttachmentDropManaged.Provider>
   )
 }
 
