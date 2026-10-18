@@ -2,6 +2,7 @@ import { CompleteAtSourceDialog } from '@/components/tasks/CompleteAtSourceDialo
 import { getTaskCompletionAction, getTaskSourceName } from '@shared/task-completion'
 import { useCallback, useRef, useState } from 'react'
 import { getDesktopHost } from '@/lib/desktop-api'
+import { taskApi } from '@/lib/ipc-client'
 import { useProjectStore } from '@/stores/project-store'
 import { useTaskEditReceipt } from './use-task-edit-receipt'
 import { useTaskSourceStore } from '@/stores/task-source-store'
@@ -126,14 +127,17 @@ function useNativeTaskCompletion({ onToast, viewKey }: UseTaskCompletionOptions)
         if (intent.task.project_id !== useProjectStore.getState().currentProjectId || intent.task.role && intent.task.role !== 'task') throw new Error('Ordinary task completion is unavailable here.')
         await intent.options?.beforeComplete?.()
         assertIntent(intent)
+        // Completion markers are local lifecycle state. The general content
+        // store also exports updates; that would create a second, unowned
+        // Source effect after this view retires or chooses local-only.
         if (intent.task.status === TaskStatus.AgentLearning) {
-          acceptTask(intent, await useTaskStore.getState().updateTask(intent.task.id, { status: TaskStatus.ReadyForReview }), TaskStatus.ReadyForReview)
+          acceptTask(intent, await taskApi.update(intent.task.id, { status: TaskStatus.ReadyForReview }), TaskStatus.ReadyForReview)
         }
         let completed: Task
         if (!intent.task.source_id || !completeAtSource) {
-          completed = acceptTask(intent, await useTaskStore.getState().updateTask(intent.task.id, { status: TaskStatus.Completed, ...(intent.task.source_id ? { complete_at_source: false } : {}) }), TaskStatus.Completed)
+          completed = acceptTask(intent, await taskApi.update(intent.task.id, { status: TaskStatus.Completed, ...(intent.task.source_id ? { complete_at_source: false } : {}) }), TaskStatus.Completed)
         } else {
-          acceptTask(intent, await useTaskStore.getState().updateTask(intent.task.id, { complete_at_source: true }))
+          acceptTask(intent, await taskApi.update(intent.task.id, { complete_at_source: true }))
           assertIntent(intent)
           const action = getTaskCompletionAction(intent.task.output_fields)
           const result = await useTaskSourceStore.getState().executeAction(action, intent.task.id, intent.task.source_id)

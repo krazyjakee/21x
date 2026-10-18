@@ -164,3 +164,27 @@ it('refuses a native board status acknowledgement without its canonical destinat
   await expect(transitionTaskFromBoard(canonical[0], TaskStatus.ReadyForReview, deps)).rejects.toThrow('Task transition was not confirmed')
   expect(deps.stopByTaskId).not.toHaveBeenCalled(); expect(deps.getStartRecoveryState).not.toHaveBeenCalled()
 })
+
+
+it.each(['project-return','unmount','view-replacement'] as const)('never starts a background Source export after %s retires an owned completion marker', async mode => {
+  useSourceTask(); const raw = held<unknown>(); handlers.set('db:updateTask', () => raw.promise)
+  const api = await import('@/lib/ipc-client'), exported = vi.spyOn(api.taskSourceApi, 'exportUpdate')
+  const view = render(<Harness viewKey="original" />); click(); fireEvent.click(await screen.findByTestId('complete-at-source'))
+  await waitFor(() => expect(calls('db:updateTask')).toHaveLength(1))
+  if (mode === 'project-return') act(() => { projects.setState({ currentProjectId: 'other' }); projects.setState({ currentProjectId: 'default' }) })
+  if (mode === 'unmount') view.unmount()
+  if (mode === 'view-replacement') view.rerender(<Harness viewKey="replacement" />)
+  await act(async () => { const accepted = { ...canonical[0], complete_at_source: true }; canonical = [accepted]; raw.resolve(accepted) })
+  expect(exported).not.toHaveBeenCalled(); expect(calls('taskSource:exportUpdate')).toHaveLength(0); expect(calls('plugin:executeAction')).toHaveLength(0); expect(completed).not.toHaveBeenCalled()
+})
+it('keeps the local native completion choice free of background Source export', async () => {
+  useSourceTask(); const api = await import('@/lib/ipc-client'), exported = vi.spyOn(api.taskSourceApi, 'exportUpdate')
+  render(<Harness />); click(); fireEvent.click(await screen.findByTestId('complete-manually'))
+  await waitFor(() => expect(completed).toHaveBeenCalledOnce()); expect(canonical[0]).toMatchObject({ status: TaskStatus.Completed, complete_at_source: false }); expect(exported).not.toHaveBeenCalled(); expect(calls('plugin:executeAction')).toHaveLength(0)
+})
+it('keeps native completion markers on the local lifecycle path before its one explicit Source action', async () => {
+  useSourceTask(); const api = await import('@/lib/ipc-client'), exported = vi.spyOn(api.taskSourceApi, 'exportUpdate')
+  handlers.set('plugin:executeAction', async () => { canonical = [{ ...canonical[0], status: TaskStatus.Completed }]; return { success: true } })
+  render(<Harness />); click(); fireEvent.click(await screen.findByTestId('complete-at-source'))
+  await waitFor(() => expect(completed).toHaveBeenCalledOnce()); expect(calls('plugin:executeAction')).toHaveLength(1); expect(exported).not.toHaveBeenCalled()
+})

@@ -743,3 +743,28 @@ prove the automatic-start contract. Forced no-emit typecheck, lint0errors/
 165baselinewarnings, production staging, both frontends and923inventory/contracts
 pass. Initial type/lint/fixture failures are retained in revision-bound evidence:
 `issue-209-native-autorun-local-20261018.json`.
+
+
+### Completion markers and content export
+
+Five follow-up typed-native controls reproduce an additional completion-owner
+boundary: the generic task store starts a background `taskSource:exportUpdate`
+after its local task write. That occurred even after the completion view had
+retired, and for the explicit local-only completion choice. Earlier tests fenced
+the controller's explicit action but did not inspect this nested content export.
+The controls prove the retained operation attempt, not a real provider mutation.
+
+Native completion now uses the original local task lifecycle operation directly
+for learning-stop, local completion and completion-choice markers. It requires
+the same canonical receipts. The chosen explicit Source action still runs once
+under its captured owner, followed by strict canonical completed readback. A
+local-only choice invokes no Source export/action. Electron and general task
+content exports keep their existing behavior; this does not establish owned
+followups for every content editor or the full board drag/view lifetime.
+
+Verification: 31 focused controls; 2,157 full renderer, 678 affected integration
+and 153 directory-owner tests, all without skips. Forced typecheck, lint
+(zero errors/165 baseline warnings), staging, both frontend builds and
+923-source freshness/contracts pass. Revision-bound receipts and the five
+published-code failures are in
+`evidence/issue-209-completion-source-export-local-20261018.json`.
