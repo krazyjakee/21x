@@ -54,6 +54,33 @@ cause unlink. A stale CAS fails before this observer. File-owner rollback also
 preserves bytes if canonical metadata acquired the path while the original
 request was retiring.
 
+## Whole-task deletion retains protected directories
+
+An actual retained `db:deleteTask` regression saved a protected copy, renamed
+its root and installed a symlink to a separate synthetic directory. The former
+`DatabaseManager.deleteTaskAttachments` recursive pathname cleanup deleted the
+outside task-directory canary. This was reproduced through the real Source
+binding; it is no longer only a code audit.
+
+Production now captures the private database construction policy
+`attachmentDeletion: 'retain'`. Both direct `deleteTaskAttachments` and all
+`deleteTask` callers return from byte cleanup before constructing or traversing
+a path. Existing logical deletion still uses its task/graph grants, exclusion,
+Stop and canonical event owner. Accepted ordinary task/subtree and task-source
+deletion removes logical rows while retaining protected directories and any
+existing journal facts. The policy is captured as a primitive at construction;
+mutating the options object later cannot restore recursive authority. Invalid
+policy values refuse construction. The Electron host default is unchanged.
+
+This is deliberate byte retention, not a new garbage collector. No current
+root check, task ID or persisted ledger entry authorizes recursive unlink.
+Existing publication facts can subsequently classify as `task_absent`; they
+still cannot resurrect read/delete authority. Legacy files with no journal
+fact remain retained without inventing one, and no new proof claims a complete
+legacy orphan inventory. Canonical logical success does not promise reclaimed
+disk space or a filesystem/SQLite transaction. Separately authorized bounded
+cleanup and user-facing reconciliation remain open work.
+
 ## Bounds and recovery meaning
 
 SQLite bounds the ledger's key lengths, record count, largest value and total
@@ -92,9 +119,8 @@ production-owner test establishes clean protected-profile restart integration.
 Filesystem publication and SQLite are not one atomic transaction. These tests
 do not establish power-loss durability, safe automatic orphan deletion,
 cross-platform destination authority, or an installed physical UI/device
-rehearsal. Whole-task/subtree deletion still needs a separate bridge/audit for
-the legacy `DatabaseManager.deleteTaskAttachments` recursive cleanup path;
-this slice does not establish ownership of every task-deletion file effect.
+rehearsal. Whole-task/subtree byte cleanup remains unavailable; the production
+retention boundary described above replaces its former recursive path cleanup.
 macOS/Windows saved-file execution remains refused. The scoped Linux
 mobile execution handoff published in `bd898f99` uses the same captured Source
 manager/file owner; incoming nonempty mobile payloads and full-array writes

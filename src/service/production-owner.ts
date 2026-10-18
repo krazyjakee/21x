@@ -771,7 +771,7 @@ export class ProductionOwner {
     preflightProfile(join(profileRoot, '21x.db'), this.storage)
     this.checkpoint('database')
     for (const path of [this.bootstrap.paths.workspaceRoot, this.bootstrap.paths.attachmentRoot, this.bootstrap.paths.reposRoot, this.bootstrap.paths.tempRoot]) mkdirSync(path, { recursive: true })
-    this.databaseRuntime = { paths: { profileRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, attachmentRoot: this.bootstrap.paths.attachmentRoot }, managedTaskMcp: runtime }
+    this.databaseRuntime = { paths: { profileRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, attachmentRoot: this.bootstrap.paths.attachmentRoot }, managedTaskMcp: runtime, attachmentDeletion: 'retain' }
     this.db = new DatabaseManager(this.databaseRuntime)
     this.db.initialize()
     const db = this.db

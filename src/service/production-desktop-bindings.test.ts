@@ -9,7 +9,7 @@ import { MOBILE_CODECS } from '../shared/mobile-codecs'
 import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, renameSync, symlinkSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -115,6 +115,61 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('never recursively deletes outside bytes through a replaced attachment root during task deletion', async () => {
+    const f = await fixture(), task = f.services.db.createTask({ title: 'Actual task deletion boundary' })!
+    const bytes = Buffer.from('owned attachment'), record = { id: randomUUID(), filename: 'owned.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+    const receipt = await f.services.taskAttachmentFiles.write(task.id, record, bytes, { beforeEffect() {}, signal: f.signal })
+    f.services.taskAttachmentFiles.commit(receipt)
+    await f.backend.invoke('db:updateTask', { id: task.id, data: { attachments: [record] }, precondition: { attachmentsBaseline: [] } }, f.caller, f.signal)
+    const outside = join(f.root, 'outside-canary'), outsideTask = join(outside, task.id), canary = join(outsideTask, 'never-delete.txt')
+    mkdirSync(outsideTask, { recursive: true }); writeFileSync(canary, 'outside authority')
+    const root = f.bootstrap.paths.attachmentRoot, original = `${root}-original`
+    renameSync(root, original); symlinkSync(outside, root, 'dir')
+    try {
+      // The real retained binding and DB/manager deletion path must never
+      // derive recursive filesystem authority from this replaced pathname.
+      expect(await f.backend.invoke('db:deleteTask', { id: task.id }, f.caller, f.signal)).toEqual({ defined: true, value: true })
+      expect(f.services.db.getTask(task.id)).toBeUndefined()
+      expect(existsSync(canary)).toBe(true)
+      expect(readFileSync(canary, 'utf8')).toBe('outside authority')
+      expect(readFileSync(join(original, task.id, `${record.id}-${record.filename}`))).toEqual(bytes)
+    } finally { unlinkSync(root); renameSync(original, root) }
+  })
+  it('retains protected subtree copies and durable facts after accepted logical task deletion', async () => {
+    const f = await fixture(), parent = f.services.db.createTask({ title: 'Retained deleted parent' })!, child = f.services.db.createTask({ title: 'Retained deleted child', parent_task_id: parent.id })!
+    const bytes = Buffer.from('retained after logical deletion'), copies: string[] = []
+    for (const task of [parent, child]) {
+      const record = { id: randomUUID(), filename: 'retained.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+      const receipt = await f.services.taskAttachmentFiles.write(task.id, record, bytes, { beforeEffect() {}, signal: f.signal })
+      f.services.taskAttachmentFiles.commit(receipt)
+      await f.backend.invoke('db:updateTask', { id: task.id, data: { attachments: [record] }, precondition: { attachmentsBaseline: [] } }, f.caller, f.signal)
+      copies.push(join(f.bootstrap.paths.attachmentRoot, task.id, `${record.id}-${record.filename}`))
+    }
+    expect(await f.backend.invoke('db:deleteTask', { id: parent.id }, f.caller, f.signal)).toEqual({ defined: true, value: true })
+    expect(f.services.db.getTask(parent.id)).toBeUndefined(); expect(f.services.db.getTask(child.id)).toBeUndefined()
+    for (const path of copies) expect(readFileSync(path)).toEqual(bytes)
+    const facts = f.services.db.db.prepare('SELECT value FROM settings WHERE key GLOB ?').all('__attachment_journal_v1:*') as Array<{ value: string }>
+    expect(facts.map(row => JSON.parse(row.value).taskId).sort()).toEqual([parent.id, child.id].sort())
+    // Each exact ID is published once; the existing Source contract does
+    // not impose parent-first order on its captured database row sequence.
+    expect(f.events.filter(event => event.operation === 'task:deleted').map(event => event.payload).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))).toEqual([{ taskId: parent.id }, { taskId: child.id }].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))))
+    expect(await f.backend.invoke('db:deleteTask', { id: parent.id }, f.caller, f.signal)).toEqual({ defined: true, value: false })
+    for (const path of copies) expect(readFileSync(path)).toEqual(bytes)
+  })
+  it('retains protected source-task copies when the actual source deletion owner cascades logical rows', async () => {
+    const f = await fixture(), source = f.services.db.createTaskSource({ name: 'Retired local source', plugin_id: 'notion', mcp_server_id: null, config: {} })!
+    const task = f.services.db.createTask({ title: 'Source-owned retained copy', source_id: source.id, project_id: source.project_id })!
+    const bytes = Buffer.from('retained source bytes'), record = { id: randomUUID(), filename: 'source.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+    const receipt = await f.services.taskAttachmentFiles.write(task.id, record, bytes, { beforeEffect() {}, signal: f.signal })
+    f.services.taskAttachmentFiles.commit(receipt); f.services.db.updateTask(task.id, { attachments: [record] })
+    const saved = join(f.bootstrap.paths.attachmentRoot, task.id, `${record.id}-${record.filename}`)
+    const result = await f.backend.invoke('taskSource:delete', TASK_SOURCE_CODECS['taskSource:delete'].encodeArguments([source.id]), f.caller, f.signal)
+    expect(result).toEqual({ defined: true, value: true })
+    expect(f.services.db.getTaskSource(source.id)).toBeUndefined(); expect(f.services.db.getTask(task.id)).toBeUndefined()
+    expect(readFileSync(saved)).toEqual(bytes)
+    const facts = f.services.db.db.prepare('SELECT value FROM settings WHERE key GLOB ?').all('__attachment_journal_v1:*') as Array<{ value: string }>
+    expect(facts.map(row => JSON.parse(row.value))).toContainEqual(expect.objectContaining({ taskId: task.id, kind: 'publication', phase: 'published' }))
+  })
   it('joins canonical attachment detachment and private journal facts through the actual task binding', async () => {
     const f = await fixture(), task = f.services.db.createTask({ title: 'Actual binding journal' })!
     const bytes = Buffer.from('actual protected bytes'), record = { id: randomUUID(), filename: 'journal.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }

@@ -246,6 +246,8 @@ export interface DatabaseRuntimeOptions {
   paths: DatabasePaths
   /** The server's actual tool metadata and executable/entry-point configuration. */
   managedTaskMcp: ManagedTaskMcpRuntime | { disabled: true }
+  /** Private host policy: protected task directories require their own cleanup authority. */
+  attachmentDeletion?: 'retain'
   /** Service callers route diagnostics to stderr, leaving protocol stdout private. */
   logger?: Pick<Console, 'log' | 'error'>
 }
@@ -253,6 +255,7 @@ export interface DatabaseRuntimeOptions {
 /** The sole implementation of database/schema/domain behavior for both hosts. */
 export class DatabaseManager {
   private readonly paths: DatabasePaths
+  private readonly retainTaskAttachments: boolean
   private readonly managedTaskMcp: ManagedTaskMcpRuntime | { disabled: true }
   private readonly logger: Pick<Console, 'log' | 'error'>
 
@@ -265,6 +268,8 @@ export class DatabaseManager {
     if (options.managedTaskMcp && 'disabled' in options.managedTaskMcp) {
       if (options.managedTaskMcp.disabled !== true || Object.keys(options.managedTaskMcp).length !== 1) throw new Error('Invalid managed task MCP policy')
     } else validateManagedTaskMcpRuntime(options.managedTaskMcp as ManagedTaskMcpRuntime)
+    if (options.attachmentDeletion !== undefined && options.attachmentDeletion !== 'retain') throw new Error('Invalid attachment deletion policy')
+    this.retainTaskAttachments = options.attachmentDeletion === 'retain'
     this.paths = { ...options.paths }
     const runtime = options.managedTaskMcp as ManagedTaskMcpRuntime
     this.managedTaskMcp = disabled ? { disabled: true } : {
@@ -371,6 +376,9 @@ export class DatabaseManager {
   }
 
   deleteTaskAttachments(taskId: string): void {
+    // Logical deletion grants no recursive path authority over a protected
+    // root. Retained bytes/journal facts require separately authorized cleanup.
+    if (this.retainTaskAttachments) return
     rmSync(join(this.paths.attachmentRoot, taskId), { recursive: true, force: true })
   }
 

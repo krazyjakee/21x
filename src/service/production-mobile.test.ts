@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync, unlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync, unlinkSync, renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -349,6 +349,21 @@ async function socket(base: string, token: string) {
 for (const kind of cases) describe(`actual ${kind} production mobile HTTP/WS`, () => {
   beforeAll(async () => {
     if (kind === 'staged') stagedModule = await import(pathToFileURL(join(dirname(process.env.TAURI_PRODUCTION_SERVICE_ENTRY!), 'production-engine.mjs')).href) as typeof sourceModule
+  })
+  it('retains protected bytes and outside canaries through private-peer logical deletion in the compiled root', async () => {
+    const f = await fixture(kind), task = f.task('Protected logical deletion', false), saved = await savedFile(f, task.id)
+    const root = join(f.root, 'attachments'), original = `${root}-original`, outside = join(f.root, 'outside-canary'), canary = join(outside, task.id, 'never-delete.txt')
+    mkdirSync(join(outside, task.id), { recursive: true }); writeFileSync(canary, 'outside authority')
+    renameSync(root, original); symlinkSync(outside, root, 'dir')
+    try {
+      expect(await f.command('db:deleteTask', [task.id])).toBe(true)
+      expect(f.db.getTask(task.id)).toBeUndefined()
+      expect(existsSync(canary)).toBe(true); expect(readFileSync(canary, 'utf8')).toBe('outside authority')
+      expect(readFileSync(join(original, task.id, `${saved.file.id}-${saved.file.filename}`))).toEqual(saved.bytes)
+      const rows = f.db.db.prepare('SELECT value FROM settings WHERE key GLOB ?').all('__attachment_journal_v1:*') as Array<{ value: string }>
+      expect(rows.map(row => JSON.parse(row.value))).toContainEqual(expect.objectContaining({ taskId: task.id, kind: 'publication', phase: 'published' }))
+      expect(f.ownerEventFailures).toEqual([])
+    } finally { unlinkSync(root); renameSync(original, root) }
   })
   it('keeps access disabled, serves an independent SPA on loopback, pairs hashed credentials and revokes HTTP/WS access', async () => {
     const f = await fixture(kind)
