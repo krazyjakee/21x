@@ -1,0 +1,281 @@
+{
+  "version": 1,
+  "issue": 209,
+  "scope": "Actual native Drop ordinary task/draft renderer ownership and exact captured attachment CAS baseline integration; no Source/native contract changes.",
+  "fixture": {
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1,
+    "description": "Actual typed NativeDesktopHost/client/codecs/transport and real TaskAttachments/TaskWorkspace/TaskForm/TaskDialogs/store with held finite synthetic native receipts; Electron preload absent. happy-dom viewport rectangles are controlled because it has no layout engine. The composed UI does not instantiate Source SQLite. Separate standalone controls exercise the real protected-profile SQLite/AgentManager/SelectionOwner/FileOwner published CAS backend; no installed Wry-to-Source/UI graph is claimed."
+  },
+  "expectedActual": [
+    {
+      "expected": "Drop belongs to exactly one original visible ordinary task/draft and cannot retarget after an await.",
+      "actual": "One document observer/context; acceptance precedes copy; ambiguity, hidden/modal-obscured/role/capacity/busy/context/connection/project-change-and-return/pagehide controls pass. Draft receipts remain owned through create/import or explicit retirement."
+    },
+    {
+      "expected": "Attachment replacement uses the exact original canonical baseline and never silently refreshes stale intent.",
+      "actual": "Cloned ordered full records are captured before raw saves; canonical prop changes and mutation of original record objects cannot change baseline. Actual native request carries separate precondition; conflicts produce one request, no fresh getTask, rollback or replay. Accepted create receipt supplies draft baseline."
+    },
+    {
+      "expected": "Late or uncertain task saves cannot close/rewrite replacement drafts.",
+      "actual": "Edit baseline/unsaved fields survive canonical refresh; missing/refused save locks repeat submission for close/review. Monotonic keyed dialog intent fences late acknowledgement even after close-and-return to same task. Private draft fields never enter public persisted DTO."
+    }
+  ],
+  "remainingDefects": [
+    "Published legacy native removal still deletes file then replaces full array. Separate Source exact-ID metadata-first delta is agreed and under E2 implementation; no atomic-removal claim or fix in this slice.",
+    "Protected orphan/copy/removal journal and hard-crash/durable mutation receipt reconciliation remain open; successful CAS does not make filesystem and SQLite atomic.",
+    "Installed supported-platform Drop/reload/reconnect/visibility/keyboard/focus acceptance and unavailable native voice/login/global-shortcut authority remain open, as does #202 prerequisite.",
+    "General HubSpot/Linear OAuth stays unavailable; no browser/identity/provider authority enabled."
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "settingsOrDispatchUsed": false,
+    "sourceRunLookup": []
+  },
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  },
+  "constraints": {
+    "syntheticOnly": true,
+    "liveProfiles": false,
+    "liveProviders": false,
+    "microphone": false,
+    "liveRelease": false,
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred",
+    "identityDecision": false,
+    "masterToMainMerge": false
+  },
+  "failureRepair": [
+    {
+      "failure": "Initial new Drop UI tests exposed optional attempted-owner dereference and an overbroad modal attribute retirement; controlled DOM has zero layout rectangles.",
+      "repair": "Require attempted entry before dereference, retire on actual modal lifecycle/visibility and supply explicit synthetic viewport fixture while retaining fail-closed real layout eligibility; all45 actual controls pass."
+    },
+    {
+      "failure": "Preflight164app166Node passed; forced typecheck reported nullable current task in new Workspace path.",
+      "repair": "Capture guarded currentTask before using it; final forced typecheck passes."
+    },
+    {
+      "failure": "Full1942 renderer passed; production staging exit1 because this worktree lacked packaged credential helper.",
+      "repair": "Build actual pinned credential helper under heavy.lock; first cp used default local target path and failed; query cargo metadata (/mnt/Rusty/cargo-target), explicitly stage built helper, rerun stage and remaining gate. No credential/store execution."
+    },
+    {
+      "failure": "Initial preflight164app166Node passed before final CAS/lifecycle followup; no final-source proof claimed for that baseline.",
+      "repair": "Final45UI controls and combined1942renderer281standalone passed after all source changes and inherited9439571c."
+    }
+  ],
+  "createdAt": "2026-10-18T00:36:57.136777+00:00",
+  "implementationRevision": "6f29f692a46257fb9c42db450f34fa4e0f276331",
+  "verificationRevision": "6f29f692a46257fb9c42db450f34fa4e0f276331",
+  "baseRevision": "9439571c752a7078cb38abef53d59d55d8d5f29d",
+  "publication": {
+    "branch": "master",
+    "fastForward": true,
+    "remoteConfirmed": "6f29f692a46257fb9c42db450f34fa4e0f276331"
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "rendererPassed": 1942,
+    "rendererFiles": 157,
+    "stagedPassed": 281,
+    "stagedFiles": 10,
+    "skipped": 0,
+    "actualTypedNativeUiControls": 45,
+    "newTypedNativeUiControls": 24,
+    "actualProtectedProfileSourceCasControls": 9,
+    "normalSourceHooks": "pass lint-staged plus pnpm typecheck",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "inventory": {
+      "files": 918,
+      "ipcOperations": 736,
+      "existingUnresolved": 9
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer",
+        "exitCode": 0,
+        "log": {
+          "sha256": "2ef3126884c3205b5690a0efb1971972ea254753dcb05a31a62700aef7f6103e",
+          "bytes": 1125057
+        }
+      },
+      {
+        "command": "rtk proxy cargo build --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-credentials --bin twentyonex-credential-key",
+        "exitCode": 0,
+        "log": {
+          "sha256": "95c426447b7c967db0cb41737d63f9c61f19c26ac93accc92328235bb12e04ba",
+          "bytes": 168
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-stage-production.mjs",
+        "exitCode": 0,
+        "log": {
+          "sha256": "83508159e83619fb901bfb64c7f7ddf3ebd292e0505b2fd0d819a4a48bf0cd47",
+          "bytes": 267
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri --production-proofs src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/lib/native-attachment-drop-owner.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/components/tasks/TaskForm.test.tsx src/renderer/src/stores/task-store.test.ts src/service/task-attachment-metadata-conflict.test.ts src/service/task-attachment-backend.test.ts src/shared/native-attachment-drop.test.ts src/shared/task-lifecycle-codecs.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "a2ee8cb60c10b049784a529807a5b61b68c12f54be85656c9666d1202d75dacf",
+          "bytes": 54627
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "88ba9b0471d3fa09c983d193858fed6e39560df61d7736ce87dca6ed76fb3d1b",
+          "bytes": 9737
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "93efd95a28b7ef09869bfe99d049102f840c5ea8ca51835b6104827c64b3af01",
+          "bytes": 29253
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "181f938067247040999ede2b1735c148784d5814c67265755c68fb6b849f56e1",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy git diff --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    ]
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "937830fd2d99d6096981efc53ae0a570fa7cee3c0455df9f09866e01a9825dd3",
+      "bytes": 91522
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "3dc9ab0f7b3b091532b67d9eee632c5a1835c35336e9a21e35d31ad31e19b182",
+      "bytes": 380526
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "8e9f33722aa77e6e76f0bab7c4e583e1d57d9201eef85cd36ffc1c7d6b43b68a",
+      "bytes": 30392
+    },
+    "src/renderer/src/components/canvas/TaskPanelContent.tsx": {
+      "sha256": "8a70c244a952ed0e2e4f345ce3ca27ce38d8f603a12e754bd6b9517babbd3cba",
+      "bytes": 5680
+    },
+    "src/renderer/src/components/layout/AppLayout.tsx": {
+      "sha256": "eb1218a46c677ab2b63bff12ce5a0685063ac69edc3a90aa0807c7e7e105b2f2",
+      "bytes": 15434
+    },
+    "src/renderer/src/components/layout/TaskDialogs.tsx": {
+      "sha256": "2e0e9ccc2aa60b22d69a974ea2934bdcbfcbf2a82a15698cbdfa75662857ea18",
+      "bytes": 11960
+    },
+    "src/renderer/src/components/tasks/TaskAttachments.tsx": {
+      "sha256": "153832127d96bdf3e055eb43798e882ef2b1031ad14809490a67e2cd532e1569",
+      "bytes": 10457
+    },
+    "src/renderer/src/components/tasks/TaskDetailView.tsx": {
+      "sha256": "e51564e00e5291563c4f2e38ff5a06c04e75b8bbe0ae5a979ca2a1bb934bbdcb",
+      "bytes": 29408
+    },
+    "src/renderer/src/components/tasks/TaskForm.tsx": {
+      "sha256": "fe74f1cd70f68970aa492c1942c780441aa4c87f3388336600e3b94d836c0290",
+      "bytes": 11571
+    },
+    "src/renderer/src/components/tasks/TaskWorkspace.tsx": {
+      "sha256": "3cc0575b0f989a838b5a95f38c0b0e912fa211b37a66869ece83fb3ff22103bf",
+      "bytes": 43331
+    },
+    "src/renderer/src/components/tasks/native-attachment-ui.test.tsx": {
+      "sha256": "ae201dd1a2e103ed0e1b045d909321197afca8770877384d6971f6c8da9dd666",
+      "bytes": 49346
+    },
+    "src/renderer/src/hooks/use-native-attachment-drop.ts": {
+      "sha256": "92f37c060b57c1e56efdda1393ae471dd6376cee1923d0c8e5cb16d7263c56e0",
+      "bytes": 11451
+    },
+    "src/renderer/src/lib/ipc-client.ts": {
+      "sha256": "175ce8cb94e656e32e32bb05db6cafc04b7000d1d1ba05cd7f1f439370742b33",
+      "bytes": 47554
+    },
+    "src/renderer/src/lib/task-attachment-import.ts": {
+      "sha256": "207d551f739cbc0636767444514b352cb5716c2fb5d0fe0c5f930e3262df3ac6",
+      "bytes": 2254
+    },
+    "src/renderer/src/stores/task-store.ts": {
+      "sha256": "bee74ca8eed060b631e8be34091c53a2e4dd14296934bb661aba3d1c807ece37",
+      "bytes": 9405
+    }
+  },
+  "artifacts": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "543e3e00639839cc7bcc8ceee7f3d999af02843cab0d67cd47cef2273e447a60",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "d5307e5eea5f6fb3905de37403d195389b98fcb44c2f1138fc2f32e080352613",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    "src-tauri/resources/native/twentyonex-credential-key": {
+      "sha256": "9c1f27ade9a0ad05f7b7044edb8bd9f2bf3e70e3bd156daffc0970083a4e7009",
+      "bytes": 25759904
+    }
+  }
+}
