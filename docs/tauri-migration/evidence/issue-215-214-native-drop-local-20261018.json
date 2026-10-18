@@ -1,0 +1,477 @@
+{
+  "formatVersion": 1,
+  "issues": [
+    215,
+    214
+  ],
+  "createdAt": "2026-10-17T23:58:45.330473+00:00",
+  "sourceRevision": "4427028958d897a8939eea364eca4186e3b3281b",
+  "sourceBaseRevision": "6b7444666060f3b6ef2690f5570d97c675f8e298",
+  "status": "scoped Linux native Drop source/protocol delivery; both whole issues OPEN; no acceptance checkbox newly ticked",
+  "scope": {
+    "implemented": [
+      "Original acknowledged opaque UI context + actual physical document captured in native OS Drop before awaits",
+      "Private monotonic context revision rejects reordered request arrival and response completion",
+      "Native no-follow held FD batch + existing private Source one-shot offer and group revocation",
+      "Separate stamped physical-document event and facade-local accept/close functions; explicit bootstrap availability",
+      "Read refusal before native accept; synchronous local accept ownership before promise return",
+      "Synchronous context/close fences, raw capture/accept/import/timer/FD joining, retryable failed cleanup, unrelated flow survival",
+      "Ignored/absent/ambiguous/throwing/async-failed observer cleanup and actual15-second unaccepted deadline",
+      "Current document/connection/hydration/reconnect and old-listener fencing, bounded replay tombstones",
+      "Optional generated DesktopApi members and separate nativeFacadeProtocols audit without new retained Source rows/grants"
+    ],
+    "notClaimed": [
+      "A-owned ordinary-task/draft Drop UI integration and installed full Wry-to-production-Source/UI path",
+      "Installed Linux/macOS/Windows supported-target parity or Windows/macOS native Drop runtime",
+      "Atomic cross-writer attachment metadata append; A audit/E2 actual Source reproducer pending",
+      "Protected unreferenced-copy journal/reconciliation",
+      "Whole native permission/voice stream/playback/global shortcut authority, final identity/scheme/login decision",
+      "Live providers/accounts, real microphone/device/OS credentials, release/profile cutover or Electron retirement"
+    ]
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "hostNode": "22.22.0",
+    "appElectron": "44.0.0",
+    "appElectronNode": "24.18.1",
+    "bundledNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "vitest": "4.0.18",
+    "betterSqlite3": "13.0.3",
+    "cargo": "1.98.0",
+    "tauri": "2.12.3",
+    "profiles": "synthetic temporary profiles only",
+    "gui": "isolated Xvfb/Openbox/DBus with synthetic XDG configuration/data/cache/runtime; controlled GTK URI-list source, synthetic files and Source epoch/retirement bridge"
+  },
+  "execution": {
+    "lane": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock bash /tmp/e2-drop-final-gate.sh",
+    "uptimeBeforeFinalGate": "load10.37/10.73/9.48, below18",
+    "gateScriptSha256": "1036e09ed9145dc9746184e44afbd969142c35504d8c01239f0e8b026fdfa66e",
+    "checks": [
+      {
+        "name": "app",
+        "command": "pnpm test:run src/shared/native-attachment-drop.test.ts src/renderer/src/lib/native-attachment-drop-owner.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/attachment-selection-owner.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-app.log",
+        "reportSha256": "b98068d2c9e3791787e4569eba3068cf2b503ba7664554bc0eb056cb87114cb8"
+      },
+      {
+        "name": "type",
+        "command": "pnpm exec tsc --build --noEmit --force",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-type.log",
+        "reportSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "lint",
+        "command": "pnpm lint",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-lint.log",
+        "reportSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+      },
+      {
+        "name": "stage",
+        "command": "pnpm tauri:prepare:production",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-stage.log",
+        "reportSha256": "a0b4d3db490478ffd5c23dea98d858a15892a8348d10c0d09f0fe97f44b46fbb"
+      },
+      {
+        "name": "staged",
+        "command": "pnpm test:tauri --production-proofs src/shared/native-attachment-drop.test.ts src/renderer/src/lib/native-attachment-drop-owner.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/attachment-selection-owner.test.ts src/main/task-attachment-file-owner.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts scripts/tauri-contracts.test.ts src/shared/desktop-contracts.test.ts scripts/production-service-proof.test.ts scripts/production-contracts-proof.test.ts",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-staged.log",
+        "reportSha256": "bedbd6d1d609b4e1314ee7708f01e660e3f64f6ef1797f778bb956f3f51b3a3c"
+      },
+      {
+        "name": "engine",
+        "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-engine.log",
+        "reportSha256": "8451633f1c890caefa8732e624900b2cbb6b50abdd58670d01d3e6ffc9ed9ccb"
+      },
+      {
+        "name": "host",
+        "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml --features production-service -- --test-threads=2",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-host.log",
+        "reportSha256": "f14f2cd1e5afe162cee72b08a7fe646b220c7441928dcef5d04c9c766ee9ab0b"
+      },
+      {
+        "name": "wry-drop",
+        "command": "timeout --signal=TERM --kill-after=5s 100s bash /tmp/e2-drop-wry-proof.sh",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-wry-drop.log",
+        "reportSha256": "1f957a8e865919fc95c6d31c406fbc4057876b3fdddd02498d9634f5a827056f"
+      },
+      {
+        "name": "wry-window",
+        "command": "timeout --signal=TERM --kill-after=5s 100s bash /tmp/e2-window-wry-proof.sh",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-wry-window.log",
+        "reportSha256": "1d18a79312292e9cc5baf927b13696fed956fe846c6c9f376e0aa7f0c974dbd4"
+      },
+      {
+        "name": "linux",
+        "command": "cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-linux.log",
+        "reportSha256": "9c701047e0c9eea988048d0b66b44df7a20f2b23658ed4eac22cf36e94c79b95"
+      },
+      {
+        "name": "msvc",
+        "command": "env 'PATH=/usr/lib/llvm-20/bin:$PATH' cargo check --locked --manifest-path src-tauri/Cargo.toml --features production-service --target x86_64-pc-windows-msvc",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-msvc.log",
+        "reportSha256": "6b35b028456b62ae380e0d52d14c66be55877863473e27372e79f6c2c72b9961"
+      },
+      {
+        "name": "contracts",
+        "command": "node scripts/tauri-contracts.mjs --check",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-contracts.log",
+        "reportSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+      },
+      {
+        "name": "inventory",
+        "command": "node scripts/tauri-inventory.mjs --check",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-inventory.log",
+        "reportSha256": "e456209d7f5b6d3b4118d87f0927372e9df96c2fa432dcb7794cdb35efd0fb06"
+      },
+      {
+        "name": "frontend",
+        "command": "pnpm tauri:production:frontend:build",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-frontend.log",
+        "reportSha256": "1da0b3420aed7c8d00b39a597fbf1c5da865af57cb5c057ccc6368e07e0d1e4c"
+      },
+      {
+        "name": "diagnostic-frontend",
+        "command": "pnpm tauri:frontend:build",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-diagnostic-frontend.log",
+        "reportSha256": "9a9787daf2d8051a757308473ec375897062d1f239dc6f3efc4efe2110eb1bc4"
+      },
+      {
+        "name": "diff",
+        "command": "git diff --check",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-final-diff.log",
+        "reportSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "results": {
+      "app": {
+        "passed": 305,
+        "failed": 0,
+        "skipped": 0,
+        "files": 10
+      },
+      "staged": {
+        "reportedPassed": 328,
+        "failed": 0,
+        "skipped": 0,
+        "projectsFiles": 13,
+        "actualProductionEntryTests": 2,
+        "productionContractCorpusTests": 18,
+        "countNote": "The2new shared DTO cases run in both portable-main and portable-renderer;328 is the reported cross-project execution count, not328 distinct cases. The standalone private-peer file has56 cases vs55 app cases."
+      },
+      "engine": {
+        "passed": 151,
+        "ignored": 6,
+        "ignoredScope": "existing explicit opt-in synthetic/installed diagnostics; not newly executed here"
+      },
+      "nativeHost": {
+        "passed": 94,
+        "ignored": 4,
+        "ignoredScope": "four explicit GUI proofs; Drop and window are separately executed here; chooser/media are not newly rerun/claimed"
+      },
+      "realWryDrop": {
+        "passed": 1,
+        "ignored": 0,
+        "rawExitCode": 0,
+        "proof": "Controlled actual GTK URI-list OS Drop into real Wry under production CSP; original registered synthetic document/context captured; held real file unreadable beforeaccept, exact bytes afteraccept, raw asset fetch denied, navigation refuses old group and cleanup joins. Native physical event/pool proof uses synthetic Source epoch and controlled retirement; no installed Source/UI claim."
+      },
+      "realWryWindow": {
+        "passed": 1,
+        "ignored": 0,
+        "rawExitCode": 0
+      },
+      "typecheck": "forced raw build --noEmit --force pass",
+      "lint": {
+        "errors": 0,
+        "warnings": 165,
+        "warningScope": "existing baseline"
+      },
+      "nativeWarnings": {
+        "linuxHost": 2,
+        "msvcHost": 77,
+        "msvcEngine": 3,
+        "scope": "existing baselines;8new unused Linux-only items found during first MSVCcheck were corrected with target-specific compilation, no check suppressed"
+      },
+      "inventory": {
+        "sourceFiles": 916,
+        "ipcOperations": 736,
+        "unresolved": 9,
+        "unresolvedScope": "existing reviewed finite dynamic forwarding sites"
+      },
+      "frontends": "production and diagnostic builds pass; existing bundle-size warnings retained"
+    }
+  },
+  "contractEvidence": {
+    "allOperationRows": 331,
+    "retainedRows": 325,
+    "allRowsReferencesPoliciesExactlyEqualToParent": true,
+    "nativeProtocol": {
+      "api": [
+        [
+          "attachments",
+          "setNativeDropContext"
+        ],
+        [
+          "attachments",
+          "onNativeDrop"
+        ]
+      ],
+      "availability": "explicit native bootstrap; acknowledged current physical document and UI context",
+      "id": "native-attachment-drop-v1",
+      "limits": {
+        "activeDrops": 16,
+        "displayPaths": 16,
+        "dropIdsPerEpoch": 4096,
+        "unacceptedTtlMs": 15000
+      },
+      "nativeEvent": {
+        "name": "desktop:attachment-drop",
+        "payload": [
+          "dropId",
+          "contextId",
+          "paths"
+        ],
+        "routing": "captured main physical document only; separate from desktop:event",
+        "stamp": [
+          "engineEpoch",
+          "leaseId"
+        ]
+      },
+      "nativeInvokes": [
+        {
+          "authority": "current native document; monotonic facade revision; join old retirement before acknowledgement",
+          "operation": "attachments:setNativeDropContext",
+          "payload": [
+            "contextId",
+            "contextRevision"
+          ]
+        },
+        {
+          "authority": "exact current physical-document/context drop; no paths or task selector",
+          "operation": "native.attachment.drop.accept",
+          "payload": [
+            "dropId",
+            "contextId"
+          ]
+        },
+        {
+          "authority": "captured exact receipt-only cleanup; usable for retired document; joins raw accept/import/FD retirement",
+          "operation": "native.attachment.drop.close",
+          "payload": [
+            "dropId",
+            "contextId"
+          ]
+        }
+      ],
+      "result": "exact undefined receipt; functions exist only in facade; accepted destination copies survive close",
+      "review": "215/214 original physical-document/context and held FD; two-phase receipt",
+      "scope": "native-only extension; no Electron AST site; no change to retained operation policy",
+      "sourceEvents": [],
+      "sourceGrants": [],
+      "sourceOperations": []
+    },
+    "privateSourceGroupCleanup": "engine.attachment.selection.revoke fromf33f3a09; actual private-peer/SQLite regressions rerun in Source app/staged gate; no public Source Drop name can bind/invoke/subscribe"
+  },
+  "failuresAndRepairs": [
+    {
+      "stage": "initial finite DTO unit test",
+      "observed": "Generic attachment ID helper accepted uppercase UUID aliases; fixture also assumed a stricter lexical UI-lease format than the existing opaque-lease contract",
+      "repair": "Dedicated lowercase UUIDv4 Drop nonce validation; invalid lease fixture uses empty lease and real equality fences prove foreign documents",
+      "verified": "DTO2tests and actual helper/facade/transport controls in final gates"
+    },
+    {
+      "stage": "first actual OS Drop proof",
+      "rawExitCode": 101,
+      "observed": "Tauri received the real OS Drop but new owner rejected it because keyboard focus stayed with the drag-source window",
+      "repair": "Bind to actual native physical Drop target/current acknowledged document/context; retain visible/trusted post-await checks and native accept before reads",
+      "verified": "Final actual GTK/Wry proof explicitly starts with active source/background target and passes; no keyboard-focus authority granted to renderer",
+      "initialReportSha256": "ea6bf589aa3ace82e9b29c6260673ca9a744a2ef851b811489ca90349cb49146"
+    },
+    {
+      "stage": "first MSVCcheck",
+      "rawExitCode": 0,
+      "observed": "85host warnings vs77baseline due8new unused Linux-only backend items",
+      "repair": "Compile Linux-specific event/FD/capture helpers and fields only for Linux (or test where relevant), preserving unsupported-target availability false",
+      "verified": "Final MSVCcheck77baseline host warnings; no warning suppression/check weakening"
+    }
+  ],
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": "75ebedb790cc33b563d1b00cc9d05d3a04fb37db882b0fbe0e29a93a7b3aef1d",
+    "docs/tauri-migration/inventory.json": "ea3418dd6326a2fe3911420d5d1d3e0a06e4476cd9d942a61bfe108efd7f604d",
+    "docs/tauri-migration/native-attachment-drop.md": "dc1deefed18eb5110dd48447a66c734b853bb90d1b3d48471ad92c4004187133",
+    "docs/tauri-migration/native-attachment-selection.md": "483ef85af09f471bab8465d25d644ff9e1ddaba29b840faec078425a0aff4ec4",
+    "docs/tauri-migration/operations.json": "4ae7a8e5d0cfbd636b826b84fe7de12d0e18ac6f3368cabc8da74d3785f5d036",
+    "scripts/tauri-contracts.mjs": "f39d588eae0cd6fdc08bdce4d121ddbce5d4301e1c40517a45aa9fb54c7b1ba4",
+    "scripts/tauri-contracts.test.ts": "da43ca51fd1ad416193d9bc0152f2d04a71bab83f6faeb4eb1675df6ca420c1d",
+    "src-tauri/src/native_attachment_drop.rs": "a513bc1acedab7bc1c78c4e867d17abd17108553750a0b091489d82bbfa0ced3",
+    "src-tauri/src/native_attachment_selection.rs": "f423ac87c55bb00784f7b39e6c350c31dabbf58652dc31db5205b965ca24f115",
+    "src-tauri/src/production_host.rs": "3d4c1d89fd793cd43037670efe2191bed16ff029828542c62f015d0381608b00",
+    "src-tauri/src/production_ui.rs": "184d202551ae95b43110bb0926d9c777bb67f7eb637ae5bc981f7c07889c4db8",
+    "src/renderer/src/lib/native-attachment-drop-owner.test.ts": "53a84ad276ed94bf7a5c2fadafebbd2c2de7e372439c560a6c13a4015c1801cd",
+    "src/renderer/src/lib/native-attachment-drop-owner.ts": "50f5b417bc342b74d684b00f87849491ef95fab7abe84a7eae6ca011674f7dc3",
+    "src/renderer/src/lib/native-desktop-host.test.ts": "c4b65df229e7658a2c4c98c12e0ee726f65c0ba69ff2689fdd5ab5bec296383b",
+    "src/renderer/src/lib/native-desktop-host.ts": "47d995e5a4fb971e331f03db41c5cd4df0c99e316e4142112b003834836f4acf",
+    "src/renderer/src/lib/tauri-desktop-transport.test.ts": "899e8ad7dd27148dad1f7de451e91ead5854fbd1fe558ab6fc917090f2202ee8",
+    "src/renderer/src/lib/tauri-desktop-transport.ts": "c8f678915d492b4851d8928bce5aafae4b183e1b499c05e922fe421a244fb32d",
+    "src/shared/desktop-api.ts": "811a38c9c7966f6260b8fc86ef5956aed259c6a5bf2ba881a6c8e25d5415bd22",
+    "src/shared/desktop-contracts.test.ts": "c2743d66268ce9e887b3cf6d0e759fead75ae93f1f0ebaf79bb65dc402e32f2a",
+    "src/shared/native-attachment-drop.test.ts": "f42105855dfc691723aaea0dd0cbee2bb26eb9b13a063200a13cc720800c4ad4",
+    "src/shared/native-attachment-drop.ts": "b10d84feca44c82333d3ab0a593afe1e323103765228539a663ec15cc642604d"
+  },
+  "artifactHashes": {
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": {
+      "sha256": "85295b3e7b09a2575882f4a7c66cf55b8fd405535b6851e20a142f9eabd7772d",
+      "bytes": 1261784
+    },
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "fd94ef77faecba2e8e803ddafc96d71629f7f605d1f8b7e73bc4a2ac735937d4",
+      "bytes": 856,
+      "builtFromRevision": "26767e231bf3c11a515beae480cf81ccd058ccb9",
+      "scope": "followup combined renderer build; source-native proof stays bound to44270289"
+    },
+    "out/tauri-renderer/index.html": {
+      "sha256": "7b9b8905836dcf88a1f618354b8b85c3d70eddc15ccf54cd3919e447ae9b70b4",
+      "bytes": 1618,
+      "builtFromRevision": "26767e231bf3c11a515beae480cf81ccd058ccb9",
+      "scope": "followup combined renderer build; source-native proof stays bound to44270289"
+    },
+    "executedNativeTestElf": {
+      "path": "/mnt/Rusty/cargo-target/debug/deps/twentyonex_tauri_feasibility-cb90ce0c4532bca0",
+      "sha256": "7158dfa66f0a85b6c5dfb61830681dfac1084adae7c53514e32cbd7daf553d20",
+      "bytes": 435453408
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033,
+      "builtFromSourceTree": "44270289 final local gate"
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "14f27944e29a3d75f8da8f6a4386f42ee2d373729277a70addcc80e026691041",
+      "bytes": 6214047,
+      "builtFromSourceTree": "44270289 final local gate"
+    }
+  },
+  "remainingDefectsAndPrerequisites": [
+    "A renderer Drop context/receipt ownership integration still pending at source publication",
+    "Actual cross-writer metadata lost-update reproducer and agreed Source CAS/atomic append contract with TaskLifecycle owner; save remains metadata-only",
+    "Protected unreferenced accepted-copy journal/reconciliation",
+    "Installed native end-to-end and all supported-target acceptance; prerequisites208/202 and remaining214/215checklists open",
+    "Final app identity/current+legacy scheme handler authority and login-item policy await user decision; no scheme/identifier selected",
+    "Native voice remains unavailable pending physical-document permission/cached grant/raw stream revocation/capture/playback/shortcut authority; no optional SDK production registration",
+    "Hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision"
+  ],
+  "hostedCI": {
+    "command": "gh run list -R krazyjakee/21x --commit 4427028958d897a8939eea364eca4186e3b3281b --json databaseId,name,status,conclusion,url",
+    "actual": [],
+    "status": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "publication": {
+    "source": "fast-forward origin/master confirmed by git ls-remote",
+    "normalCommitHooks": "eslint staged11TS files and tsc --build --noEmit passed under heavy.lock",
+    "inherited": [
+      "be3dbef0 Source domain scope repairs",
+      "6b744466 B evidence",
+      "926552c5 A catalog source and portable includes",
+      "6f61162e A catalog evidence"
+    ],
+    "sharedClaims": "all released immediately after source publication",
+    "issueClosure": "both issues stay open; no whole criterion newly checked",
+    "postSourcePeerInheritance": "A a0153cce/26767e23 inherited and own affected app/portable/type/bothfrontends/freshness checks pass before evidence publication."
+  },
+  "safetyAndData": {
+    "liveProfilesTouched": false,
+    "realProviderRuns": false,
+    "realMicrophoneUsed": false,
+    "realCredentialsAccessed": false,
+    "identifiersOrSchemesChanged": false,
+    "releaseOrCutover": false,
+    "hostedVoice": "deferred",
+    "failedProofCleanup": "one verified owned controlled.txt fixture from failed OS proof removed; no live data touched"
+  },
+  "followupInheritance": {
+    "revision": "26767e231bf3c11a515beae480cf81ccd058ccb9",
+    "inherited": "A a0153cce MCP form source +26767e23 evidence/status; E2 native/facade/protocol code unchanged",
+    "gateLane": "heavy.lock",
+    "checks": [
+      {
+        "command": "pnpm test:run src/shared/native-attachment-drop.test.ts src/renderer/src/lib/native-attachment-drop-owner.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-inherit-app.log",
+        "reportSha256": "c836b06cb4da61a10b4fe7e7b296048965754e6c7e019051656eb4683689479c"
+      },
+      {
+        "command": "pnpm test:tauri src/shared/native-attachment-drop.test.ts src/renderer/src/lib/native-attachment-drop-owner.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-inherit-staged.log",
+        "reportSha256": "e9b1e788777c9167462b69b4d4c68b7aa76576a98d98db93006966e8bc219b6b"
+      },
+      {
+        "command": "pnpm exec tsc --build --noEmit --force",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-inherit-type.log",
+        "reportSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "command": "pnpm tauri:production:frontend:build",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-inherit-frontend.log",
+        "reportSha256": "c6c4bae6a3d84d2071bf47ffe30fa8238fe4e8117573b28c6fd15f32b007e84a"
+      },
+      {
+        "command": "pnpm tauri:frontend:build",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-inherit-diagnostic-frontend.log",
+        "reportSha256": "b82a4104bd2cb88215463617c5c23e6160fab7580a2682207a3744d422c638b6"
+      },
+      {
+        "command": "node scripts/tauri-inventory.mjs --check",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-inherit-inventory.log",
+        "reportSha256": "e456209d7f5b6d3b4118d87f0927372e9df96c2fa432dcb7794cdb35efd0fb06"
+      },
+      {
+        "command": "node scripts/tauri-contracts.mjs --check",
+        "rawExitCode": 0,
+        "report": "/tmp/e2-drop-inherit-contracts.log",
+        "reportSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+      }
+    ],
+    "app": {
+      "passed": 126,
+      "skipped": 0
+    },
+    "staged": {
+      "reportedPassed": 128,
+      "skipped": 0,
+      "duplicateEnvironmentNote": "same2sharedDTOcases run under both portable-main andportable-renderer"
+    },
+    "typeAndBothFrontends": "pass",
+    "freshness": "916files736IPC9existingunresolved;contracts pass",
+    "nativeRerun": "not repeated for A renderer-only changes; all own Rust/FD/protocol inputs remain byte-identical to44270289"
+  }
+}
