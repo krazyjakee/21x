@@ -1,0 +1,371 @@
+{
+  "formatVersion": 1,
+  "issues": [
+    214,
+    210
+  ],
+  "createdAt": "2026-10-18T00:14:38.076122+00:00",
+  "sourceRevision": "8679abc59841d6a4e2abe31dd554787afc5911d9",
+  "sourceBaseRevision": "1cb02aa86f1e14295af6f4e6dc8d5ad651b9a146",
+  "status": "scoped Source attachment metadata conflict fix; whole issues remain OPEN; renderer captured-baseline integration and protected orphan reconciliation not claimed",
+  "scope": {
+    "implemented": [
+      "Existing db:updateTask separate optional third precondition argument, mandatory in production for attachment-array replacement",
+      "At most128 full canonical records; exact array/field equality; existing900000-byte wire bound includes baseline",
+      "Compare under existing actual task exclusion before Stop/prepare and inside SQLite write transaction",
+      "No stale accepted task/scheduler effects, automatic retry/merge, baseline persistence or accepted-copy rollback",
+      "Native finite request validation and generated DesktopApi signature; no new retained operation/event/grant"
+    ],
+    "notClaimed": [
+      "A-owned captured-baseline UI task/draft/Drop integration",
+      "Protected orphan-copy journal/reconciliation",
+      "Atomic merge or task-wide multi-field optimistic concurrency",
+      "Installed supported-platform physical UI/native runtime acceptance",
+      "Whole214/210 or215 closure, real provider/microphone/credential access, release/profile cutover/Electron retirement"
+    ]
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "hostNode": "22.22.0",
+    "appElectron": "44.0.0",
+    "appElectronNode": "24.18.1",
+    "bundledNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "vitest": "4.0.18",
+    "betterSqlite3": "13.0.3",
+    "cargo": "1.98.0",
+    "tauri": "2.12.3",
+    "profiles": "synthetic temporary SQLite profiles and controlled selected bytes only",
+    "versionsVerifiedBy": [
+      "node -p process.versions.node",
+      "pnpm --version",
+      "ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron -p JSON.stringify(runtime/package versions)",
+      "src-tauri/resources/node/node -p process.versions.node",
+      "cargo --version"
+    ]
+  },
+  "contract": {
+    "public": "db.updateTask(id,data,precondition?:{attachmentsBaseline:FileAttachment[]})",
+    "wire": "{id,data,precondition:{attachmentsBaseline:[...]}}",
+    "canonicalFields": [
+      "id",
+      "filename",
+      "size",
+      "mime_type",
+      "added_at"
+    ],
+    "maxRecords": 128,
+    "maxLifecycleBytes": 900000,
+    "missingMalformedOrMisplacedError": "INVALID_ARGUMENTS",
+    "staleError": "INVALID_REQUEST",
+    "propertyOrder": "irrelevant",
+    "arrayOrder": "exact",
+    "electron": "existing preload implementation unchanged; optional third argument ignored there",
+    "scope": "same operation and grants; separate precondition never persisted"
+  },
+  "negativeProof": {
+    "baseRevision": "7d9b03b3b8d2f3c53af2b5daec4c4ca71b65cca8",
+    "command": "pnpm test:run src/service/task-attachment-metadata-conflict.test.ts",
+    "log": "/tmp/e2-attachment-metadata-old-source.log",
+    "sha256": "e17c452096ab3b15846439c3c86e07d7aabee950a136d5596b5ec5cca88e01e1",
+    "expected": "after independent empty snapshots and actual metadata-only protected file imports, a stale append must preserve first accepted metadata or reject",
+    "actual": "both writes accepted; second returned only second.txt and lost first.txt metadata; both protected copies remained",
+    "reportedChildExitCode": 1,
+    "wrapperNote": "incoming message interrupted tool wrapper; child independently completed and raw log records one failed assertion and ELIFECYCLE exit1"
+  },
+  "failuresAndRepairs": [
+    "Initial new fixture omitted required onTaskUpdated callback; repaired before genuine lost-update reproduction.",
+    "Three new lock tests initially assumed a waiting queue, but actual manager refuses overlapping mutations immediately. Repaired fixtures to hold actual raw Stop, verify existing overlapping refusal, and separately verify stale post-owner baseline; no manager behavior/check weakened.",
+    "First combined raw type gate failed on three new test-only type inference issues (readonly nested tuple, intentional malformed JSON union, widened text literal). Explicit fixture types repaired; final raw gate must pass before publication."
+  ],
+  "rawStopLimit": "A baseline valid before admitted raw Stop can become stale during that Stop. Source joins that already admitted ownership, refuses subsequent metadata write/accepted follow-up effects, and does not claim to undo Stop.",
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "sourceRuns": [],
+    "evidenceRuns": "Exact lookup after evidence publication is recorded in the issue comments; repository Actions remains disabled.",
+    "settingsCalls": false,
+    "dispatch": false
+  },
+  "gates": [
+    {
+      "phase": "initial",
+      "name": "app",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-app.log",
+      "logSha256": "840407088ecb0bfb50b79f64f2c0266c7c1562a83d8b2dbcd411f9f203bfb17a",
+      "result": "pass",
+      "command": "pnpm test:run src/service/task-attachment-metadata-conflict.test.ts src/service/task-lifecycle-backend.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/service/production-desktop-bindings.test.ts src/shared/task-lifecycle-codecs.test.ts src/shared/desktop-contracts.test.ts scripts/tauri-contracts.test.ts src/renderer/src/lib/native-desktop-host.test.ts"
+    },
+    {
+      "phase": "initial",
+      "name": "type",
+      "rawExitCode": 1,
+      "log": "/tmp/e2-cas-type.log",
+      "logSha256": "2a2325ae12ea16de2150647228dfbe3cbca66141ac88dfedba03cf8ec12de397",
+      "result": "repaired in final type gate",
+      "command": "pnpm exec tsc --build --noEmit --force"
+    },
+    {
+      "phase": "initial",
+      "name": "lint",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-lint.log",
+      "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+      "result": "pass",
+      "command": "pnpm lint"
+    },
+    {
+      "phase": "initial",
+      "name": "stage",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-stage.log",
+      "logSha256": "7df4cc7155672ec52c7f9572f48ed2a54bc56e1005423be5ab8919e41e98cfea",
+      "result": "pass",
+      "command": "pnpm tauri:prepare:production"
+    },
+    {
+      "phase": "initial",
+      "name": "node",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-node.log",
+      "logSha256": "e62dc271342c49f2fc9b8686a757c0490a182a840a1ed7be9f5e62ff057ff9f8",
+      "result": "pass",
+      "command": "node scripts/tauri-test.mjs --production-proofs src/service/task-attachment-metadata-conflict.test.ts src/service/task-lifecycle-backend.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/service/production-desktop-bindings.test.ts src/shared/task-lifecycle-codecs.test.ts src/shared/desktop-contracts.test.ts scripts/tauri-contracts.test.ts src/renderer/src/lib/native-desktop-host.test.ts scripts/production-service-proof.test.ts"
+    },
+    {
+      "phase": "initial",
+      "name": "engine",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-engine.log",
+      "logSha256": "ef3edbcc54068a2193b3a36a854ec9e2b50130c94ec89b00cf38f3a5c6b2135b",
+      "result": "pass",
+      "command": "cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service,synthetic-agent -- --test-threads=2"
+    },
+    {
+      "phase": "initial",
+      "name": "production",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-production.log",
+      "logSha256": "654626b14f71e1906f5ece8c98154d4f147bdcb53faa06c78b989e4c06681f44",
+      "result": "pass",
+      "command": "cargo check --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features production-service"
+    },
+    {
+      "phase": "initial",
+      "name": "contracts",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-contracts.log",
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "result": "pass",
+      "command": "node scripts/tauri-contracts.mjs --check"
+    },
+    {
+      "phase": "initial",
+      "name": "inventory",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-inventory.log",
+      "logSha256": "e456209d7f5b6d3b4118d87f0927372e9df96c2fa432dcb7794cdb35efd0fb06",
+      "result": "pass",
+      "command": "node scripts/tauri-inventory.mjs --check"
+    },
+    {
+      "phase": "initial",
+      "name": "diff",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-diff.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "result": "pass",
+      "command": "git diff --check"
+    },
+    {
+      "phase": "final",
+      "name": "app",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-app.log",
+      "logSha256": "40cf2a0e8f647054eced6e652f798547c8c9429e78e5a3b297f98d4a2a5dbec7",
+      "result": "pass",
+      "command": "pnpm test:run src/service/task-attachment-metadata-conflict.test.ts src/service/task-lifecycle-backend.test.ts src/service/task-attachment-backend.test.ts src/service/production-service.test.ts src/service/production-desktop-bindings.test.ts src/shared/task-lifecycle-codecs.test.ts src/shared/desktop-contracts.test.ts scripts/tauri-contracts.test.ts src/renderer/src/lib/native-desktop-host.test.ts"
+    },
+    {
+      "phase": "final",
+      "name": "type",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-type.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "result": "pass",
+      "command": "pnpm exec tsc --build --noEmit --force"
+    },
+    {
+      "phase": "final",
+      "name": "lint",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-lint.log",
+      "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+      "result": "pass",
+      "command": "pnpm lint"
+    },
+    {
+      "phase": "final",
+      "name": "node",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-node.log",
+      "logSha256": "edd0098bde394b8e2840f8ce05587aef1780cbe5d832be530d5a8eb08f078389",
+      "result": "pass",
+      "command": "node scripts/tauri-test.mjs --production-proofs src/service/task-attachment-metadata-conflict.test.ts src/service/production-service.test.ts src/shared/task-lifecycle-codecs.test.ts"
+    },
+    {
+      "phase": "final",
+      "name": "frontend",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-frontend.log",
+      "logSha256": "cb387c1a32c5b7b405c9acaf460ee232e55c4a8869a25e3ccf2da8bfaef44071",
+      "result": "pass",
+      "command": "pnpm tauri:production:frontend:build"
+    },
+    {
+      "phase": "final",
+      "name": "diagnostic-frontend",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-diagnostic-frontend.log",
+      "logSha256": "7bb5a195e1e17160f7d3383eeaa11c7b3ce7a01e757f3577be593fb92877adbf",
+      "result": "pass",
+      "command": "pnpm tauri:frontend:build"
+    },
+    {
+      "phase": "final",
+      "name": "contracts",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-contracts.log",
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "result": "pass",
+      "command": "node scripts/tauri-contracts.mjs --check"
+    },
+    {
+      "phase": "final",
+      "name": "inventory",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-inventory.log",
+      "logSha256": "e456209d7f5b6d3b4118d87f0927372e9df96c2fa432dcb7794cdb35efd0fb06",
+      "result": "pass",
+      "command": "node scripts/tauri-inventory.mjs --check"
+    },
+    {
+      "phase": "final",
+      "name": "diff",
+      "rawExitCode": 0,
+      "log": "/tmp/e2-cas-final-diff.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "result": "pass",
+      "command": "git diff --check"
+    }
+  ],
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": "ab5c1385e26efe04ca78ecc05d191fa6f1098ca10b119e9591951c68940267bd",
+    "docs/tauri-migration/native-attachment-selection.md": "e7ef8fa2613ba536510f2ee297d167ae4bdf65b980c25fad7482d14807f15e92",
+    "scripts/tauri-contracts.test.ts": "6f2d9707ae082fec70c1b450b8e3082ce8704b6697fa44178a451b3305581be6",
+    "src-tauri/engine/src/production_contracts.rs": "b076d8624e00fe2a2d448822b7fd0d12480ac7e3c200a1fc47a7827d3477616e",
+    "src/renderer/src/types/electron.d.ts": "4b16a3e6341cb5644905829775d7a3d8d8f03675ede4c5083d630e79d75ef681",
+    "src/service/production-service.test.ts": "eadd2727f970b548d9b904a17fa63c01f97496e1a12b09a7c7442511c9d55428",
+    "src/service/task-attachment-metadata-conflict.test.ts": "6f7193b8fe66e17883cab2f8819c13106b10212fb7d6d669d0b51bfc4aff5d36",
+    "src/service/task-lifecycle-backend.ts": "9795dd846afbe1a66e8e7c3396710a7849625a449bb716058621d446be3d548e",
+    "src/shared/desktop-api.ts": "aa2bc060dd47ad7c3cdb244a5d9637cd85eee323bd55ed1fbed5825287381e8f",
+    "src/shared/task-lifecycle-codecs.test.ts": "ac6666eff874110ae0c51fd1e9d40d1ce410ed751ce8d4f6909b4f289e10a8fb",
+    "src/shared/task-lifecycle-codecs.ts": "d9fb5ab4e5f4139f1b39c4f8312de6dd7633825b75e11cd24060fbd3d5e543dd",
+    "src/main/task-attachment-file-owner.ts": "865245490d35b3f29c4f6afab806c62441ab48f82611520e0710e784c01ffca0",
+    "src/service/task-attachment-backend.ts": "e75665a0b51597f29826a88d5e6abf25f18b1de41d00bfe85ba77fd15022e9d0",
+    "src/service/attachment-selection-owner.ts": "c60bb8440f9b11308df394f9f0ff39bd9b7bc185f2986f440da27d52c2fb8a79",
+    "scripts/production-service-proof.test.ts": "68d4e586b1946a145240c813948abcca88d0bdcae902fc513c8c8bc529f61614"
+  },
+  "artifactHashes": {
+    "src-tauri/resources/service/production-stdio.mjs": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+    "src-tauri/resources/service/production-engine.mjs": "26f7958958e8e3b4e7d72d6a896e333cda7ab14949d7d263e4b0e7473114ea2d",
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": "13b30ce5a3c714a0898ef47694d817a24f8accded8c7e06653e8b3526389e0d4",
+    "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+    "out/tauri-production-renderer/index.html": "1750f224f4c05b5fbedaaf679ea7f7540d39e8d8f69d3de01f1930cca46afe27",
+    "out/tauri-renderer/index.html": "7b9b8905836dcf88a1f618354b8b85c3d70eddc15ccf54cd3919e447ae9b70b4"
+  },
+  "remaining": [
+    "Renderer baseline callsite integration owned by A",
+    "Protected orphan/unreferenced accepted-copy reconciliation",
+    "Installed Linux/macOS/Windows lifecycle/native ownership acceptance and remaining202/prerequisites",
+    "User decisions: Actions, final identity/schemes, master-to-main merge, live provider runs; hosted voice deferred"
+  ],
+  "execution": {
+    "lane": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "initialScript": "/tmp/e2-cas-gate.sh",
+    "initialScriptSha256": "075159189063a5135a16e6cf6fb37d3fe726a73926be1978111cb505bb8142ae",
+    "finalScript": "/tmp/e2-cas-final-gate.sh",
+    "finalScriptSha256": "db06e032c6ff21f2dc1f6d6360a757d641b63f587e158c2d4262183d828ab9c1",
+    "initialUptime": "6.96/8.07/8.36",
+    "finalUptime": "5.97/7.12/7.91",
+    "normalCommitHooks": "normal lint-staged/typecheck source hooks passed under heavy.lock; queued behind current owner gate, no bypass"
+  },
+  "observedCounts": {
+    "initialApp": {
+      "files": 9,
+      "passed": 308,
+      "skipped": 0
+    },
+    "initialPortable": {
+      "files": 10,
+      "passed": 311,
+      "skipped": 0,
+      "existingActualStagedEntryControls": 2
+    },
+    "engine": {
+      "passed": 152,
+      "failed": 0,
+      "existingOptInIgnored": 6
+    },
+    "finalApp": {
+      "files": 9,
+      "passed": 308,
+      "skipped": 0
+    },
+    "finalPortable": {
+      "files": 3,
+      "passed": 73,
+      "skipped": 0
+    },
+    "newActualSourceControls": 9,
+    "newPrivateProductionPeerControls": 1,
+    "newSharedCodecControls": 2,
+    "newGeneratorControls": 1,
+    "newNativeContractControls": 1,
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "inventory": {
+      "sources": 916,
+      "ipcSites": 736,
+      "existingReviewedUnresolved": 9
+    }
+  },
+  "retainedAuthority": {
+    "manifestEqualToSourceBase": true,
+    "totalOperationRows": 331,
+    "retainedRows": 325,
+    "newOperations": 0,
+    "newEvents": 0,
+    "newGrants": 0,
+    "desktopOperationsGeneratedFileDiff": false,
+    "eventForwardingGeneratedFileDiff": false
+  },
+  "publication": {
+    "sourceCommit": "8679abc59841d6a4e2abe31dd554787afc5911d9",
+    "sourcePush": "fast-forward1cb02aa8..8679abc5 HEAD->master; raw exit0",
+    "lsRemote": "8679abc59841d6a4e2abe31dd554787afc5911d9 refs/heads/master",
+    "fetchRebase": "source base unchanged; Current branch up to date",
+    "normalSourceCommitHooks": {
+      "rawExitCode": 0,
+      "checks": [
+        "lint-staged eslint --no-warn-ignored8TSfiles",
+        "pnpm typecheck:tsc --build --noEmit"
+      ],
+      "bypassed": false
+    }
+  },
+  "stagedBaselineMarkerPresent": true
+}
