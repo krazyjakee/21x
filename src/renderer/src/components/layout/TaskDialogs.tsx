@@ -9,7 +9,8 @@ import { useTaskStore } from '@/stores/task-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { worktreeApi, settingsApi } from '@/lib/ipc-client'
 import { ATTACHMENT_IMPORT_FAILURE, attachmentPrecondition, copyAttachmentBaseline, importTaskAttachments, mergeTaskAttachments } from '@/lib/task-attachment-import'
-import { captureDesktopRead } from '@/lib/desktop-api'
+import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
+import { useTaskEditReceipt } from '@/hooks/use-task-edit-receipt'
 import { useProjectStore } from '@/stores/project-store'
 import type { Agent, FileAttachment, OutputField } from '@/types'
 
@@ -47,7 +48,7 @@ export function TaskDialogs({
   useEffect(() => {
     mounted.current = true
     const off = useUIStore.subscribe((state, previous) => {
-      if (state.activeModal !== previous.activeModal || state.editingTaskId !== previous.editingTaskId) setFormIntent(++formIntentRef.current)
+      if (state.activeModal !== previous.activeModal || state.editingTaskId !== previous.editingTaskId || state.deletingTaskId !== previous.deletingTaskId) setFormIntent(++formIntentRef.current)
     })
     const retire = () => { mounted.current = false; ++formIntentRef.current; off(); window.removeEventListener('pagehide', retire) }
     window.addEventListener('pagehide', retire, { once: true })
@@ -58,6 +59,7 @@ export function TaskDialogs({
   const closeModal = useUIStore((s) => s.closeModal)
   const editingTaskId = useUIStore((s) => s.editingTaskId)
   const deletingTaskId = useUIStore((s) => s.deletingTaskId)
+  const native = getDesktopHost().kind === 'tauri', deleteReceipt = useTaskEditReceipt(`delete:${deletingTaskId}:${formIntent}`)
   const openEditModal = useUIStore((s) => s.openEditModal)
   const openDeleteModal = useUIStore((s) => s.openDeleteModal)
   const createTaskPrefill = useUIStore((s) => s.createTaskPrefill)
@@ -147,6 +149,20 @@ export function TaskDialogs({
 
   const handleConfirmDelete = async () => {
     if (!deletingTaskId) return
+    if (native) {
+      const id = deletingTaskId, intent = formIntent
+      if (intent !== formIntentRef.current || useUIStore.getState().activeModal !== 'delete' || useUIStore.getState().deletingTaskId !== id) return
+      await deleteReceipt.run(async () => {
+        if (deletingTask?.role !== 'task' || !await deleteTask(id)) throw new Error('The deletion could not be confirmed.')
+      }, () => {
+        const current = useUIStore.getState()
+        if (intent !== formIntentRef.current || current.activeModal !== 'delete' || current.deletingTaskId !== id) return
+        if (current.canvasPendingTaskId === id) clearCanvasPendingTask()
+        if (current.dashboardPreviewTaskId === id) closeDashboardPreview()
+        closeModal()
+      })
+      return
+    }
     await stopAndRemoveSessionForTask(deletingTaskId)
     if (deletingTask && deletingTask.repos?.length > 0) {
       try {
@@ -224,6 +240,11 @@ export function TaskDialogs({
         isOpen={activeModal === 'delete'}
         taskTitle={deletingTask?.title || ''}
         onConfirm={handleConfirmDelete}
+        retainUntilReceipt={native}
+        blocked={native && (deleteReceipt.blocked || deletingTask?.role !== 'task')}
+        failed={native && (deleteReceipt.failed || deleteReceipt.review)}
+        retainsWorkspace={native}
+        unavailable={native && deletingTask?.role !== 'task'}
         onCancel={closeModal}
       />
 

@@ -5,6 +5,8 @@ import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
 import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import type { Task } from '@/types'
+import { getDesktopHost } from '@/lib/desktop-api'
+import { useTaskEditReceipt } from '@/hooks/use-task-edit-receipt'
 
 /**
  * The task's project, with a picker that moves it elsewhere. Subtasks move
@@ -15,6 +17,7 @@ export function TaskProjectField({ task }: { task: Task }) {
   const projects = useProjectStore((s) => s.projects)
   const moveTaskToProject = useTaskStore((s) => s.moveTaskToProject)
   const [moving, setMoving] = useState(false)
+  const native = getDesktopHost().kind === 'tauri', receipt = useTaskEditReceipt(task.id)
   const projectId = projectIdOf(task)
   const name = projectName(projects, projectId)
 
@@ -25,11 +28,22 @@ export function TaskProjectField({ task }: { task: Task }) {
   }, [projects, projectId])
 
   const handleMove = async (targetId: string) => {
-    if (targetId === projectId) return
+    if (targetId === projectId || native && !receipt.admit()) return
     const target = projectName(projects, targetId)
     const subtaskCount = useTaskStore.getState().tasks.filter((t) => t.parent_task_id === task.id).length
     const what = subtaskCount > 0 ? `"${task.title}" and its ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}` : `"${task.title}"`
     if (!confirm(`Move ${what} to ${target}?`)) return
+    if (native) {
+      await receipt.run(async () => {
+        if (!useProjectStore.getState().projects.some(project => project.id === targetId && !project.archived)) throw new Error('Review the target project before moving this task.')
+        if (!await moveTaskToProject(task.id, targetId)) throw new Error('The move could not be confirmed.')
+      }, () => {
+        if (useTaskStore.getState().selectedTaskId === task.id) useTaskStore.getState().selectTask(null)
+        if (useUIStore.getState().dashboardPreviewTaskId === task.id) useUIStore.getState().closeDashboardPreview()
+        dispatchShortcutFeedback(`Moved ${what} to ${target}.`)
+      })
+      return
+    }
     setMoving(true)
     const moved = await moveTaskToProject(task.id, targetId)
     setMoving(false)
@@ -43,7 +57,7 @@ export function TaskProjectField({ task }: { task: Task }) {
     dispatchShortcutFeedback(`Moved ${what} to ${target}.`)
   }
 
-  if (task.parent_task_id || options.length < 2) {
+  if (task.parent_task_id || options.length < 2 || native && task.role !== 'task') {
     return (
       <span className="inline-flex items-center gap-1" title={task.parent_task_id ? 'A subtask moves with its parent' : undefined}>
         <FolderKanban className="size-icon-xs" />
@@ -54,10 +68,10 @@ export function TaskProjectField({ task }: { task: Task }) {
 
   return (
     <span className="inline-flex items-center gap-1">
-      {moving ? <Loader2 className="size-icon-xs animate-spin" /> : <FolderKanban className="size-icon-xs" />}
+      {(moving || native && receipt.busy) ? <Loader2 className="size-icon-xs animate-spin" /> : <FolderKanban className="size-icon-xs" />}
       <select
         value={projectId}
-        disabled={moving}
+        disabled={moving || native && receipt.blocked}
         onChange={(e) => void handleMove(e.target.value)}
         aria-label="Project (choose another to move the task)"
         title="Move to another project"
@@ -67,6 +81,7 @@ export function TaskProjectField({ task }: { task: Task }) {
           <option key={p.id} value={p.id}>{p.name}</option>
         ))}
       </select>
+      {native && (receipt.failed || receipt.review) && <span role="alert">The move could not be confirmed. Reopen and review the task before trying again.</span>}
     </span>
   )
 }

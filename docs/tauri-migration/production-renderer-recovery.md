@@ -571,3 +571,35 @@ voice remains unavailable; text sends do not invoke its unsupported operation.
 Electron retains its existing send/start orchestration. Controlled renderer
 results establish UI ownership; installed WebView/provider/platform acceptance
 and the separate completion/CRUD lifetimes remain open.
+
+### Native create, delete and project-move receipts
+
+Task cache mutations capture their document cohort and connection before raw
+work. A retired cohort cannot publish an old success/error or invalidate the
+replacement snapshot. Native create checks the accepted parent/project identity;
+move checks the exact root, destination and unique canonical rows before cache
+publication. Existing typed Source events remain the canonical global updates;
+a retired local view cannot undo accepted Source work.
+
+Project moves use a synchronous view lane and await the retained manager-owned
+subtree move. False/missing/foreign results require explicit reopen/review,
+without optimistic order, retry or an extra Stop. Task/project replacement,
+pagehide and reconnect fence selection/preview/toast followups. Native Captain
+and shared-group rows expose no ordinary project-move picker.
+
+Native task deletion uses one retained Source deletion operation. The renderer
+does not first stop/remove a local session or start worktree cleanup. Its real
+confirmation stays open through the raw receipt; duplicate clicks are fenced,
+and a false/unknown result keeps fixed review wording. Same-kind replacement
+dialogs have a distinct intent, so late acknowledgements cannot close them or
+clear their canvas/preview state. Cancel retires UI followups and does not claim
+to cancel admitted Source deletion. Workspace directories remain for separately
+owned cleanup. Electron retains its established delete/cleanup orchestration.
+
+These controls establish renderer receipt ownership, not atomic Source deletion
+or filesystem authority. E2 separately reproduced DatabaseManager whole-task recursive attachment cleanup
+deleting an outside synthetic canary after an attachment-root rename/symlink
+(on3b215ebd/43016075). Current journal/CAS/exact-ID removal work does not certify
+that path. A private Source retention-policy repair is owned separately by E2;
+this renderer slice establishes no recursive cleanup authority. Installed native
+input and platform acceptance remain open.

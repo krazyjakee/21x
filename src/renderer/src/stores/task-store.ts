@@ -76,6 +76,13 @@ interface TaskState {
   moveTaskToProject: (taskId: string, projectId: string) => Promise<boolean>
 }
 
+let taskDocumentGeneration = 0
+function captureTaskMutation() {
+  const scope = captureDesktopRead(), document = taskDocumentGeneration
+  const isCurrent = () => document === taskDocumentGeneration && scope.isCurrent()
+  return { isCurrent, assertCurrent() { scope.assertCurrent(); if (document !== taskDocumentGeneration) throw new ServiceProtocolError('DISCONNECTED') } }
+}
+
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   selectedTaskId: null,
@@ -87,22 +94,28 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   createTask: async (data) => {
+    const scope = captureTaskMutation(), native = getDesktopHost().kind === 'tauri'
     try {
       // New tasks land in the current project. A subtask's project is its
       // parent's, which the main process enforces.
       const payload = data.project_id || data.parent_task_id ? data : { ...data, project_id: getCurrentProjectId() }
-      const task = normalizeTask(await taskApi.create(payload))
+      const raw = await taskApi.create(payload)
+      if (native) {
+        scope.assertCurrent()
+        if (!raw || payload.project_id && raw.project_id !== payload.project_id || payload.parent_task_id && raw.parent_task_id !== payload.parent_task_id) throw new ServiceProtocolError('INVALID_RESULT')
+      }
+      const task = normalizeTask(raw)
       taskSnapshot.invalidate()
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      set({ error: message })
+      if (!native || scope.isCurrent()) set({ error: message })
       throw err
     }
   },
 
   updateTask: async (id, data, precondition) => {
-    const scope = captureDesktopRead(), native = getDesktopHost().kind === 'tauri'
+    const scope = captureTaskMutation(), native = getDesktopHost().kind === 'tauri'
     try {
       const raw = await taskApi.update(id, data, precondition)
       if (native) {
@@ -130,8 +143,10 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   deleteTask: async (id) => {
+    const scope = captureTaskMutation(), native = getDesktopHost().kind === 'tauri'
     try {
       const success = await taskApi.delete(id)
+      if (native) scope.assertCurrent()
       if (success) {
         taskSnapshot.invalidate()
         set((state) => ({
@@ -143,7 +158,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       return success
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      set({ error: message })
+      if (!native || scope.isCurrent()) set({ error: message })
       throw err
     }
   },
@@ -157,8 +172,13 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   moveTaskToProject: async (taskId, projectId) => {
+    const scope = captureTaskMutation(), native = getDesktopHost().kind === 'tauri'
     try {
       const moved = await projectApi.moveTask(taskId, projectId)
+      if (native) {
+        scope.assertCurrent()
+        if (moved && (!moved.some(task => task.id === taskId) || moved.some(task => task.project_id !== projectId) || new Set(moved.map(task => task.id)).size !== moved.length)) throw new ServiceProtocolError('INVALID_RESULT')
+      }
       if (!moved) return false
       taskSnapshot.invalidate()
       const byId = new Map(moved.map((t) => [t.id, normalizeTask(t)]))
@@ -168,7 +188,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       }))
       return true
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) })
+      if (!native || scope.isCurrent()) set({ error: err instanceof Error ? err.message : String(err) })
       return false
     }
   }
@@ -254,6 +274,7 @@ export function initializeTaskDesktopState(): () => void {
     if (releaseListeners !== release) return
     active = false
     releaseListeners = undefined
+    taskDocumentGeneration++
     taskSnapshot.dispose()
     for (const cleanup of cleanups) cleanup?.()
     window.removeEventListener('pagehide', release)
