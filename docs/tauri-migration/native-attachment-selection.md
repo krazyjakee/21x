@@ -115,3 +115,44 @@ activation after publication. No raw path fallback or Source public operation
 is granted; installed all-platform acceptance remains open. Explicit full-array
 metadata update also still needs a Source cross-writer append/CAS decision and
 regression; metadata-only save semantics are unchanged.
+
+## Explicit attachment metadata compare-and-swap
+
+Production `db.updateTask(id, data, precondition?)` now requires the separate
+third argument `{ attachmentsBaseline: FileAttachment[] }` whenever
+`data.attachments` is supplied. The baseline is the complete canonical metadata
+array captured with the caller's replacement intent, with at most 128 records
+and the existing 900,000-byte lifecycle request bound including both arrays.
+It is not a database field, native file receipt, path grant or stored task field.
+Field-only updates keep the existing two-argument API. Electron behavior remains
+unchanged; the extra argument is a production contract precondition.
+
+Source compares array order and every `id`, `filename`, `size`, `mime_type` and
+`added_at` field under the existing AgentManager task mutation exclusion before
+Stop/prepare and again immediately inside the write transaction. Object property
+insertion order is irrelevant. Missing, malformed or misplaced preconditions
+fail with `INVALID_ARGUMENTS`; a valid stale baseline fails with the existing
+finite `INVALID_REQUEST`. A refusal emits no task update or accepted scheduler
+effects and does not remove any accepted destination copy. If a raw Stop was
+already legitimately admitted while the baseline was current, its ownership is
+still joined; a later metadata conflict prevents persistence and follow-up
+accepted effects without claiming to undo that Stop.
+
+This preserves explicit removal and ordering. Source does not union arrays,
+fabricate a baseline from current database state, retry an uncertain write or
+turn metadata-only `attachments.save` into an implicit append. A caller must
+review a fresh canonical task after conflict and make a new explicit decision.
+Mobile attachment-array writes remain refused until that caller transport has
+an explicit captured baseline; ordinary mobile field-only updates are separate.
+
+The real Source regression imports two native selections through actual
+selection/file owners and verifies protected bytes. Two independent empty task
+snapshots then produce separate metadata appends: old Source accepted both and
+lost the first record; the repaired Source accepts the first and refuses the
+stale second while keeping both acknowledged copies. Other controls cover all
+metadata fields, removal/order, existing overlapping-mutation refusal, actual
+raw Stop, cancellation, scope withdrawal, old epochs and private-peer delivery.
+Renderer owner A threads the exact captured baseline through task/draft/Drop
+metadata writes after this source publication; this backend evidence does not
+claim that UI integration or installed physical app acceptance. Protected
+unreferenced-copy journaling/reconciliation remains open.

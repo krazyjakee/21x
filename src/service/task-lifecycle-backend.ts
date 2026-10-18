@@ -14,7 +14,7 @@ import { validateProjectRepos } from '../main/agent-manager/project-repos'
 import { TaskStatus, PluginActionId } from '../shared/constants'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { getTaskCompletionAction } from '../shared/task-completion'
-import { TASK_LIFECYCLE_CODECS, TASK_LIFECYCLE_OPERATIONS, TASK_LIFECYCLE_EVENTS, TASK_LIFECYCLE_EVENT_CODECS, projectTaskLifecycleTask,
+import { TASK_LIFECYCLE_CODECS, TASK_LIFECYCLE_OPERATIONS, TASK_LIFECYCLE_EVENTS, TASK_LIFECYCLE_EVENT_CODECS, projectTaskLifecycleTask, taskAttachmentMetadataEqual,
   type TaskLifecycleCodec, type TaskLifecycleOperation, type TaskLifecycleEvent } from '../shared/task-lifecycle-codecs'
 import type { DesktopCommandMap } from '../shared/desktop-operations'
 import { isJsonValue, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
@@ -270,23 +270,31 @@ export class TaskLifecycleBackend {
         return db.getTask(task.id)
       } finally { this.publish('task:created', { task: projectTaskLifecycleTask(db.getTask(task.id)) }) }
     })
-    this.bind('db:updateTask', ([id, data], caller) => this.updateAllowed(id, data, caller), async ([id, data], caller, signal) => {
+    this.bind('db:updateTask', ([id, data], caller) => this.updateAllowed(id, data, caller), async ([id, data, precondition], caller, signal) => {
       this.ownersReady()
       if (!db.getTask(id)) return undefined
       const rows = this.updateRows(id, data), ids = rows.map(task => task.id)
+      const attachmentsBaseline = precondition?.attachmentsBaseline.map(record => ({ ...record }))
+      const assertAttachmentBaseline = (): void => {
+        if (data.attachments !== undefined && (!attachmentsBaseline || !taskAttachmentMetadataEqual(db.getTask(id)?.attachments, attachmentsBaseline)))
+          throw new ServiceProtocolError('INVALID_REQUEST')
+      }
       let accepted = false, start = false
       try {
         const effects = await manager.runTaskLifecycleMutation(ids, async () => {
           this.available(signal)
           if (!this.updateAllowed(id, data, caller) || !this.sameRows(this.updateRows(id, data), ids)) throw new ServiceProtocolError('INVALID_REQUEST')
+          assertAttachmentBaseline()
           const previous = db.getTask(id)!
           if (data.agent_id !== undefined && data.agent_id !== previous.agent_id || data.parent_task_id !== undefined && data.parent_task_id !== previous.parent_task_id)
             await manager.stopByTaskId(id)
           this.available(signal)
+          assertAttachmentBaseline()
           const prepared = await prepareUserTaskUpdate(manager, previous, data)
           this.available(signal)
           if (!this.updateAllowed(id, data, caller) || !this.sameRows(this.updateRows(id, data), ids)) throw new ServiceProtocolError('INVALID_REQUEST')
           const updated = db.db.transaction(() => {
+            assertAttachmentBaseline()
             const updated = updateTaskFromUser(db, id, prepared.data)
             if (updated) projectTaskLifecycleTask(updated)
             return updated

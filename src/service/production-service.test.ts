@@ -13,7 +13,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { ProductionService as ProductionServiceType, SealedProductionServiceHost, ProductionPrivateCallbacks } from './production-service'
 let ProductionService: typeof import('./production-service').ProductionService
 let sealProductionServiceHost: typeof import('./production-service').sealProductionServiceHost
@@ -258,6 +258,24 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
 }
 
 describe('actual private production peer', () => {
+  it('carries an exact separate attachment CAS baseline through the actual private peer without stale overwrite', async () => {
+    const f = fixture(); await f.initialize()
+    const services = f.service.getReadyServices()!, task = services.db.createTask(makeTask())!
+    const first = { id: randomUUID(), filename: 'first.txt', size: 3, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+    const second = { ...first, id: randomUUID(), filename: 'second.txt' }
+    const request = (attachments: JsonValue[], attachmentsBaseline: JsonValue[]) => f.host.request('db:updateTask', { id: task.id, data: { attachments }, precondition: { attachmentsBaseline } })
+    expect(await request([first], [])).toMatchObject({ defined: true, value: { attachments: [first] } })
+    const before = f.wireEvents.filter(event => event.operation === 'task:updated').length
+    await expect(request([second], [])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(f.host.request('db:updateTask', { id: task.id, data: { attachments: [] } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+    expect(services.db.getTask(task.id)?.attachments).toEqual([first])
+    expect(f.wireEvents.filter(event => event.operation === 'task:updated')).toHaveLength(before)
+    expect(await request([], [first])).toMatchObject({ value: { attachments: [] } })
+    expect(await f.host.request('db:updateTask', { id: task.id, data: { description: 'Field-only request preserved' } })).toMatchObject({ value: { description: 'Field-only request preserved' } })
+    expect(JSON.stringify(f.wireEvents)).not.toMatch(/attachmentsBaseline|precondition/)
+    await f.service.close()
+  })
+
   it('delivers periodic real adapter freshness through the scoped peer while the desktop detaches without replay or transition effects', async () => {
     const f = fixture(), cli = join(f.root, 'controlled-pi.cjs'), receiptFile = join(f.root, 'child-receipt.json')
     const emptyPath = join(f.root, 'empty-path'); mkdirSync(emptyPath)

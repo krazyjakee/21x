@@ -29,6 +29,13 @@ const object = (value: unknown, shape: Shape, required: string[] = []): value is
   Object.entries(value).every(([key, item]) => item === undefined && !required.includes(key) || shape[key](item))
 const attachmentShape: Shape = { id: isDatabaseId, filename: value => named(value) && !/[\\/]/.test(value as string) && !['.', '..'].includes(value as string), size: integer, mime_type: text(128), added_at: date }
 const attachments = list(value => object(value, attachmentShape, Object.keys(attachmentShape)))
+/** Full metadata baseline, separate from data persisted by updateTask. Array order
+ * and every canonical record field matter; object property insertion order does not. */
+export function taskAttachmentMetadataEqual(left: unknown, right: unknown): boolean {
+  return attachments(left) && attachments(right) && (left as Record<string, unknown>[]).length === (right as Record<string, unknown>[]).length &&
+    (left as Record<string, unknown>[]).every((record, index) => Object.keys(attachmentShape).every(key => record[key] === (right as Record<string, unknown>[])[index][key]))
+}
+const attachmentPrecondition: Check = value => object(value, { attachmentsBaseline: attachments }, ['attachmentsBaseline'])
 const outputShape: Shape = { id: named, name: text(512), type: text(128), multiple: bool, options: list(text(512)), required: bool, value: bounded }
 const outputs = list(value => object(value, outputShape, ['id', 'name', 'type']))
 const recurrenceObject: Shape = {
@@ -85,7 +92,7 @@ const descriptors: Record<TaskLifecycleOperation, Descriptor> = {
   'db:getTasks': { keys: [], optional: ['projectId'], checks: [isDatabaseId], result: taskList, project: value => (value as unknown[]).map(projectTaskLifecycleTask) },
   'db:getTask': { keys: ['id'], checks: [isDatabaseId], result: value => value === undefined || isTaskLifecycleTask(value), project: projectTaskLifecycleTask },
   'db:createTask': { keys: ['data'], checks: [isTaskLifecycleCreate], result: isTaskLifecycleTask, project: projectTaskLifecycleTask },
-  'db:updateTask': { keys: ['id', 'data'], checks: [isDatabaseId, isTaskLifecycleUpdate], result: value => value === undefined || isTaskLifecycleTask(value), project: projectTaskLifecycleTask },
+  'db:updateTask': { keys: ['id', 'data'], optional: ['precondition'], checks: [isDatabaseId, isTaskLifecycleUpdate, attachmentPrecondition], result: value => value === undefined || isTaskLifecycleTask(value), project: projectTaskLifecycleTask },
   'db:deleteTask': { keys: ['id'], checks: [isDatabaseId], result: bool },
   'db:getSubtasks': { keys: ['parentId'], checks: [isDatabaseId], result: taskList, project: value => (value as unknown[]).map(projectTaskLifecycleTask) },
   'db:reorderSubtasks': { keys: ['parentId', 'orderedIds'], checks: [isDatabaseId, ids], result: bool },
@@ -116,7 +123,8 @@ export interface TaskLifecycleCodec<K extends TaskLifecycleOperation> {
 function codec<K extends TaskLifecycleOperation>(operation: K): TaskLifecycleCodec<K> {
   const descriptor = descriptors[operation], keys = [...descriptor.keys, ...(descriptor.optional ?? [])]
   const validateArguments = (value: unknown): boolean => Array.isArray(value) && value.length >= descriptor.keys.length && value.length <= keys.length &&
-    keys.every((_, index) => value[index] === undefined && index >= descriptor.keys.length || descriptor.checks[index](value[index]))
+    keys.every((_, index) => value[index] === undefined && index >= descriptor.keys.length || descriptor.checks[index](value[index])) &&
+    (operation !== 'db:updateTask' || (isRecord(value[1]) && value[1].attachments !== undefined) === (value[2] !== undefined))
   const validateResult = descriptor.result
   return {
     validateArguments,
@@ -132,6 +140,7 @@ function codec<K extends TaskLifecycleOperation>(operation: K): TaskLifecycleCod
     decodeArguments(value) {
       if (!isRecord(value) || !hasExactKeys(value, descriptor.keys, descriptor.optional) || !bounded(value)) return fail('INVALID_ARGUMENTS')
       const args = keys.map(key => value[key])
+      if (operation === 'db:updateTask' && args[2] === undefined) args.pop()
       if (!validateArguments(args)) return fail('INVALID_ARGUMENTS')
       return args as DesktopCommandMap[K]['apiArguments']
     },

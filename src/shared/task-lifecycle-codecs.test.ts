@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { TASK_LIFECYCLE_CODECS as codecs, TASK_LIFECYCLE_EVENT_CODECS as events, projectTaskLifecycleTask, OVERDUE_EVENT_CODEC } from './task-lifecycle-codecs'
+import { TASK_LIFECYCLE_CODECS as codecs, TASK_LIFECYCLE_EVENT_CODECS as events, projectTaskLifecycleTask, OVERDUE_EVENT_CODEC, taskAttachmentMetadataEqual } from './task-lifecycle-codecs'
 import { TaskStatus } from './constants'
 import type { JsonValue } from './service-protocol'
+import type { DesktopCommandMap } from './desktop-operations'
 
 const task = {
   id: 'task-one', title: 'Task', description: '', type: 'coding', priority: 'high', status: 'ready_for_review', assignee: '', due_date: null,
@@ -50,6 +51,37 @@ describe('full task lifecycle codecs', () => {
     expect(codecs['db:getTasks'].validateWireResult({ defined: true, value: big })).toBe(false)
     expect(() => codecs['db:getTasks'].decodeResult(big)).toThrow('result')
     expect(() => projectTaskLifecycleTask({ ...task, role: 'arbitrary' })).toThrow('result')
+  })
+
+  it('encodes a separate finite attachment baseline and leaves field-only signatures unchanged', () => {
+    const record = { id: 'attachment-one', filename: 'kept.txt', size: 3, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+    const args: DesktopCommandMap['db:updateTask']['apiArguments'] = ['task-one', { attachments: [record] }, { attachmentsBaseline: [] }]
+    const wire = codecs['db:updateTask'].encodeArguments(args)
+    expect(wire).toEqual({ id: 'task-one', data: { attachments: [record] }, precondition: { attachmentsBaseline: [] } })
+    expect(codecs['db:updateTask'].decodeArguments(wire)).toEqual(args)
+    const plain = ['task-one', { description: 'Still a normal two-argument edit' }] as const
+    expect(codecs['db:updateTask'].decodeArguments(codecs['db:updateTask'].encodeArguments([...plain]))).toEqual(plain)
+    expect(taskAttachmentMetadataEqual([record], [Object.fromEntries(Object.entries(record).reverse())])).toBe(true)
+    expect(taskAttachmentMetadataEqual([record], [{ ...record, size: 4 }])).toBe(false)
+  })
+
+  it('refuses missing, misplaced, oversized and authority-bearing attachment preconditions', () => {
+    const record = { id: 'attachment-one', filename: 'kept.txt', size: 3, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+    const preconditions: JsonValue[] = [null, [], { attachmentsBaseline: null }, { attachmentsBaseline: [], taskId: 'foreign' },
+      { attachmentsBaseline: Array.from({ length: 129 }, () => record) },
+      { attachmentsBaseline: [{ ...record, filename: '../outside' }] },
+      { attachmentsBaseline: [{ ...record, added_at: 'invalid-date' }] },
+      { attachmentsBaseline: [{ ...record, size: Number.MAX_SAFE_INTEGER + 1 }] },
+      { attachmentsBaseline: [{ ...record, path: '/etc/passwd' }] }]
+    const invalid: JsonValue[] = [
+      { id: 'task-one', data: { attachments: [] } },
+      { id: 'task-one', data: { description: 'No metadata replacement' }, precondition: { attachmentsBaseline: [] } },
+      { id: 'task-one', data: { attachments: [], attachmentsBaseline: [] } },
+      ...preconditions.map(precondition => ({ id: 'task-one', data: { attachments: [] }, precondition }))
+    ]
+    for (const wire of invalid) expect(() => codecs['db:updateTask'].decodeArguments(wire)).toThrow('arguments')
+    const data = { attachments: [], output_fields: [{ id: 'out', name: 'Out', type: 'text' as const, value: 'a'.repeat(899_700) }] }
+    expect(() => codecs['db:updateTask'].encodeArguments(['task-one', data, { attachmentsBaseline: Array.from({ length: 128 }, () => record) }])).toThrow('arguments')
   })
 
   it('keeps exact event correlation and safe public action results', () => {

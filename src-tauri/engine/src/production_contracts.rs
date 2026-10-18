@@ -1906,8 +1906,8 @@ fn fields(operation: &str) -> Option<(&'static [&'static str], &'static [&'stati
         | "projectResource:remove"
         | "commander:getImage" => (&["id"], &[]),
         "db:createTask" | "project:create" | "skills:create" | "agent:create" => (&["data"], &[]),
-        "db:updateTask"
-        | "project:update"
+        "db:updateTask" => (&["id", "data"], &["precondition"]),
+        "project:update"
         | "skills:update"
         | "agent:update"
         | "projectRepo:update"
@@ -3388,6 +3388,29 @@ fn workspace_file_path(v: &Value) -> bool {
             })
     })
 }
+// Matches the existing public FileAttachment record shape. Date semantics are
+// additionally checked by Source; no field here grants a native file path.
+fn task_attachment_metadata(value: &Value) -> bool {
+    value.as_array().is_some_and(|items| {
+        items.len() <= 128
+            && items.iter().all(|item| {
+                object(
+                    item,
+                    &["id", "filename", "size", "mime_type", "added_at"],
+                    &[],
+                ) && id(&item["id"])
+                    && integer(&item["size"])
+                    && text(&item["filename"], 512)
+                    && item["filename"].as_str().is_some_and(|name| {
+                        !js_trim(name).is_empty()
+                            && !name.contains(['/', '\\'])
+                            && !matches!(name, "." | "..")
+                    })
+                    && text(&item["mime_type"], 128)
+                    && text(&item["added_at"], 128)
+            })
+    })
+}
 pub fn valid_request(operation: &str, value: &Value) -> bool {
     if operation == "attachments:save" {
         return crate::production_attachment_selection::save_request(value);
@@ -3472,6 +3495,19 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
     if !object(value, required, optional) || !bounded_bytes(value, 1024 * 1024) {
         return false;
     }
+    if operation == "db:updateTask" {
+        let replacing = value["data"].get("attachments").is_some();
+        if replacing != value.get("precondition").is_some() || !bounded_bytes(value, 900_000) {
+            return false;
+        }
+        if replacing
+            && (!task_attachment_metadata(&value["data"]["attachments"])
+                || !object(&value["precondition"], &["attachmentsBaseline"], &[])
+                || !task_attachment_metadata(&value["precondition"]["attachmentsBaseline"]))
+        {
+            return false;
+        }
+    }
     if operation.starts_with("terminal:") {
         return terminal_request(operation, value);
     }
@@ -3492,6 +3528,7 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
             "orderedIds" => ids(item),
             "images" => images(item),
             "data" => data_fields(operation, item),
+            "precondition" if operation == "db:updateTask" => true,
             "page" => transcript_page_request(item),
             "responseType" => matches!(item.as_str(), Some("permission" | "question")),
             "backendType" => matches!(
@@ -5364,6 +5401,36 @@ mod tests {
             "taskSource:reassign",
             &json!({"defined":true,"value":{"success":true,"token":"private"}})
         ));
+    }
+    #[test]
+    fn attachment_metadata_cas_is_exact_separate_and_required_only_for_replacement() {
+        let record = json!({"id":"attachment_one","filename":"kept.txt","size":3,"mime_type":"text/plain","added_at":"2026-10-18T00:00:00Z"});
+        let request = json!({"id":"task_one","data":{"attachments":[record.clone()]},"precondition":{"attachmentsBaseline":[]}});
+        assert!(valid_request("db:updateTask", &request));
+        assert!(valid_request(
+            "db:updateTask",
+            &json!({"id":"task_one","data":{"description":"field-only"}})
+        ));
+        for rejected in [
+            json!({"id":"task_one","data":{"attachments":[]}}),
+            json!({"id":"task_one","data":{"description":"field-only"},"precondition":{"attachmentsBaseline":[]}}),
+            json!({"id":"task_one","data":{"attachments":[],"attachmentsBaseline":[]}}),
+            json!({"id":"task_one","data":{"attachments":[]},"precondition":null}),
+            json!({"id":"task_one","data":{"attachments":[]},"precondition":{"attachmentsBaseline":[],"authority":"foreign"}}),
+            json!({"id":"task_one","data":{"attachments":[]},"precondition":{"attachmentsBaseline":vec![record.clone();129]}}),
+        ] {
+            assert!(!valid_request("db:updateTask", &rejected));
+        }
+        for invalid_record in [
+            json!({"id":"attachment_one","filename":"../secret","size":3,"mime_type":"text/plain","added_at":"date"}),
+            json!({"id":"attachment_one","filename":"kept.txt","size":9007199254740992u64,"mime_type":"text/plain","added_at":"date"}),
+            json!({"id":"attachment_one","filename":"kept.txt","size":3,"mime_type":"text/plain","added_at":"date","path":"/private"}),
+        ] {
+            let mut bad = request.clone();
+            bad["precondition"]["attachmentsBaseline"] = json!([invalid_record]);
+            assert!(!valid_request("db:updateTask", &bad));
+        }
+        assert_eq!(request["data"].as_object().unwrap().len(), 1);
     }
     #[test]
     fn production_names_and_scopes_are_finite() {

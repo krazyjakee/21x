@@ -274,7 +274,7 @@ interface ElectronAPI {
     getTasks: (projectId?: string) => Promise<Task[]>
     getTask: (id: string) => Promise<Task | undefined>
     createTask: (data: CreateTaskDTO) => Promise<Task>
-    updateTask: (id: string, data: UpdateTaskDTO) => Promise<Task | undefined>
+    updateTask: (id: string, data: UpdateTaskDTO, precondition?: { attachmentsBaseline: FileAttachment[] }) => Promise<Task | undefined>
     deleteTask: (id: string) => Promise<boolean>
     getSubtasks: (parentId: string) => Promise<Task[]>
     reorderSubtasks: (parentId: string, orderedIds: string[]) => Promise<boolean>

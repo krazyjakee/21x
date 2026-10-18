@@ -21,6 +21,15 @@ describe('desktop contract generation', () => {
     expect(output).not.toMatch(/browser:|BrowserRecordingManifest|declare global|electronAPI:/)
   })
 
+  it('keeps attachment CAS preconditions separate from the persisted task DTO', () => {
+    const output = generateDesktopApi(`import type { Task, UpdateTaskDTO, FileAttachment } from './index';
+      interface ElectronAPI { db: { updateTask: (id: string, data: UpdateTaskDTO, precondition?: { attachmentsBaseline: FileAttachment[] }) => Promise<Task | undefined> } }
+    `)
+    expect(output).toContain('data: UpdateTaskDTO, precondition?:')
+    expect(output).toContain('attachmentsBaseline: FileAttachment[]')
+    expect(output).not.toContain('data: UpdateTaskDTO &')
+  })
+
   it('captures the public API path and actual preload transformation rather than inventing wire arguments', () => {
     const preload = `import { ipcRenderer, contextBridge } from 'electron';
       contextBridge.exposeInMainWorld('electronAPI', {
