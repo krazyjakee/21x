@@ -61,8 +61,8 @@ interface TaskDetailViewProps {
   onNavigateToTask?: (taskId: string) => void
   /** When provided, each subtask shows an action to open it as a separate window/panel. */
   onOpenSubtaskInWindow?: (taskId: string) => void
-  onAddSubtask?: (title: string) => void
-  onReorderSubtasks?: (orderedIds: string[]) => void
+  onAddSubtask?: (title: string) => void | Promise<void>
+  onReorderSubtasks?: (orderedIds: string[]) => void | Promise<void>
   /** Presentation-only mode used by the task workspace redesign. */
   displayMode?: 'full' | 'prestart' | 'panel'
   /** Output fields live in their own pinned artifact tab in panel mode. */
@@ -456,6 +456,7 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
 
           {!task.parent_task_id && (
             <SubtasksSection
+              key={task.id}
               subtasks={subtasks || []}
               onNavigateToTask={onNavigateToTask}
               onOpenSubtaskInWindow={onOpenSubtaskInWindow}

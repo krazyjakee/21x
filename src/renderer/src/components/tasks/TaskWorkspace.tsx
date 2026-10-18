@@ -11,7 +11,8 @@ import { WorktreeProgressOverlay } from '@/components/github/WorktreeProgressOve
 import { useAgentSessionActions } from '@/hooks/use-agent-session'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useSettingsStore } from '@/stores/settings-store'
-import { useTaskStore } from '@/stores/task-store'
+import { rehydrateTaskDesktopState, useTaskStore } from '@/stores/task-store'
+import { useProjectStore } from '@/stores/project-store'
 import { taskApi, worktreeApi, taskSourceApi, attachmentApi, artifactApi, agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
 import { ATTACHMENT_IMPORT_FAILURE, copyAttachmentBaseline, importTaskAttachments, mergeTaskAttachments } from '@/lib/task-attachment-import'
@@ -36,6 +37,15 @@ import type { QueuedAgentStart } from '@/types/electron'
 import { TaskGroupHistoryNotice } from '@/components/task-groups/TaskGroupHistoryNotice'
 import { TaskStatusBadge } from './TaskStatusBadge'
 import { Markdown } from '@/components/ui/Markdown'
+
+function captureHierarchyScope(current: () => boolean) {
+  const scope = captureDesktopRead()
+  let live = true
+  const withdraw = () => { live = false }
+  const offProject = useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) withdraw() })
+  window.addEventListener('pagehide', withdraw, { once: true })
+  return { current: () => live && scope.isCurrent() && current(), release: () => { live = false; offProject(); window.removeEventListener('pagehide', withdraw) } }
+}
 
 const EMPTY_ARTIFACTS: Artifact[] = []
 const DEFAULT_ARTIFACT_UI: ArtifactUIState = { open: false, activeTabId: null, railExpanded: false }
@@ -181,46 +191,61 @@ function TaskWorkspaceComponent({
     }
   }, [task?.id])
 
+  const hierarchyProject = useProjectStore(state => state.currentProjectId)
   useEffect(() => {
-    if (!task) {
+    let active = true, revision = 0, readReady = false
+    let readGeneration: number | undefined
+    const host = getDesktopHost()
+    const refresh = (force = false) => {
+      if (!active) return
+      const scope = captureDesktopRead(), ready = scope.isCurrent()
+      if (!force && ready && readReady && readGeneration === host.connectionGeneration) return
+      readReady = ready; readGeneration = host.connectionGeneration
+      const request = ++revision
       setParentTask(null)
-      return
+      if (!active || !task?.parent_task_id || !scope.isCurrent()) return
+      void taskApi.getById(task.parent_task_id).then(parent => {
+        if (active && request === revision && scope.isCurrent() && attachmentOwner.current?.id === task.id) {
+          setParentTask(parent?.id === task.parent_task_id && (parent.project_id ?? 'default') === (task.project_id ?? 'default') ? parent : null)
+        }
+      }).catch(() => { if (active && request === revision && scope.isCurrent()) setParentTask(null) })
     }
-    if (task.parent_task_id) {
-      taskApi.getById(task.parent_task_id).then(p => setParentTask(p ?? null)).catch(() => setParentTask(null))
-    } else {
-      setParentTask(null)
-    }
-  }, [task?.id, task?.parent_task_id])
+    refresh()
+    const off = host.kind === 'tauri' ? host.subscribeConnection(() => refresh()) : () => {}
+    const offProject = useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) refresh(true) })
+    const retire = () => { active = false; ++revision; off(); offProject(); window.removeEventListener('pagehide', retire) }
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
+  }, [task?.id, task?.parent_task_id, task?.project_id, hierarchyProject])
 
   const handleAddSubtask = useCallback(async (title: string) => {
-    if (!task) return
+    if (!task) throw new Error('Subtask parent is unavailable.')
+    const captured = captureHierarchyScope(() => attachmentMounted.current && attachmentOwner.current?.id === task.id)
     try {
+      if (!captured.current()) throw new Error('Subtask view was replaced.')
       const newSubtask = await taskApi.create({
-        title,
-        parent_task_id: task.id,
-        type: task.type as 'general' | 'coding' | 'manual' | 'review' | 'approval',
-        priority: task.priority as 'critical' | 'high' | 'medium' | 'low',
+        title, parent_task_id: task.id, type: task.type, priority: task.priority,
         repos: task.repos,
       })
-      if (newSubtask) {
-        fetchTasks() // Subtasks are derived reactively from the store
-      }
-    } catch (err) {
-      console.error('[TaskWorkspace] Failed to create subtask:', err)
-    }
-  }, [task, fetchTasks])
+      if (!captured.current()) throw new Error('Subtask view was replaced.')
+      if (!newSubtask || newSubtask.parent_task_id !== task.id || (newSubtask.project_id ?? 'default') !== (task.project_id ?? 'default')) throw new Error('Subtask create receipt is unavailable.')
+      await rehydrateTaskDesktopState()
+      if (!captured.current()) throw new Error('Subtask view was replaced.')
+    } finally { captured.release() }
+  }, [task])
 
   const handleReorderSubtasks = useCallback(async (orderedIds: string[]) => {
-    if (!task) return
+    if (!task) throw new Error('Subtask parent is unavailable.')
+    const captured = captureHierarchyScope(() => attachmentMounted.current && attachmentOwner.current?.id === task.id)
     try {
-      await taskApi.reorderSubtasks(task.id, orderedIds)
-      fetchTasks()
-    } catch (err) {
-      console.error('[TaskWorkspace] Failed to reorder subtasks:', err)
-      fetchTasks() // Re-fetch to restore actual order
-    }
-  }, [task, fetchTasks])
+      if (!captured.current()) throw new Error('Subtask view was replaced.')
+      const accepted = await taskApi.reorderSubtasks(task.id, orderedIds)
+      if (!captured.current()) throw new Error('Subtask view was replaced.')
+      if (!accepted) throw new Error('Subtask order was refused.')
+      await rehydrateTaskDesktopState()
+      if (!captured.current()) throw new Error('Subtask view was replaced.')
+    } finally { captured.release() }
+  }, [task])
 
   // Re-fetch tasks when agent status changes (status is updated in DB by agent-manager).
   // Debounced to 500ms to prevent cascading re-fetches when multiple canvas panels
@@ -764,8 +789,8 @@ function TaskWorkspaceComponent({
       onUpdateNextSubtaskIds={handleUpdateNextSubtaskIds}
       onNavigateToTask={onNavigateToTask}
       onOpenSubtaskInWindow={onOpenSubtaskInWindow}
-      onAddSubtask={handleAddSubtask}
-      onReorderSubtasks={handleReorderSubtasks}
+      onAddSubtask={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handleAddSubtask}
+      onReorderSubtasks={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handleReorderSubtasks}
       displayMode={hasSession ? 'panel' : 'prestart'}
       showOutputFields={!hasSession || panelLayout === 'task-only'}
       showPrimaryActions={!hasSession || panelLayout === 'task-only'}

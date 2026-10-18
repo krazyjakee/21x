@@ -1,4 +1,5 @@
 import React from 'react'
+import { getDesktopHost } from '@/lib/desktop-api'
 import { Plus, X, ListTree, ChevronRight, GripVertical, SquareArrowOutUpRight } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -15,7 +16,7 @@ const subtaskStatusDotColor: Record<TaskStatus, string> = {
   [TaskStatus.Completed]: 'bg-emerald-400'
 }
 
-function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow }: { subtask: Task; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void }) {
+function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow, disabled }: { disabled?: boolean; subtask: Task; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void }) {
   const {
     attributes,
     listeners,
@@ -23,7 +24,7 @@ function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow 
     transform,
     transition,
     isDragging
-  } = useSortable({ id: subtask.id })
+  } = useSortable({ id: subtask.id, disabled })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -39,6 +40,7 @@ function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow 
       className="flex items-center gap-1 px-1 py-2.5 hover:bg-accent/50 transition-colors"
     >
       <button
+        disabled={disabled}
         className="shrink-0 cursor-grab active:cursor-grabbing p-1 text-muted-foreground/50 hover:text-muted-foreground touch-none"
         {...attributes}
         {...listeners}
@@ -69,10 +71,35 @@ function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow 
   )
 }
 
-export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks }: { subtasks: Task[]; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void; onAddSubtask?: (title: string) => void; onReorderSubtasks?: (orderedIds: string[]) => void }) {
+export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks }: { subtasks: Task[]; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void; onAddSubtask?: (title: string) => void | Promise<void>; onReorderSubtasks?: (orderedIds: string[]) => void | Promise<void> }) {
   const [isAdding, setIsAdding] = React.useState(false)
   const [newTitle, setNewTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const pending = React.useRef(false), active = React.useRef(true), intent = React.useRef(0), refused = React.useRef(false)
+  const [busy, setBusy] = React.useState(false)
+  const [reviewRequired, setReviewRequired] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    active.current = true
+    const retire = () => { active.current = false; ++intent.current; window.removeEventListener('pagehide', retire) }
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
+  }, [])
+  const run = async (action: () => void | Promise<void>, accepted?: () => void) => {
+    if (!active.current || pending.current || refused.current) return
+    const captured = intent.current
+    pending.current = true; setBusy(true); setError(null)
+    try { await action(); if (active.current && intent.current === captured) accepted?.() }
+    catch {
+      if (active.current && (intent.current === captured || getDesktopHost().kind === 'tauri')) {
+        setError('Subtask change could not be confirmed. Reopen this task and review its subtasks before trying again.')
+        refused.current = getDesktopHost().kind === 'tauri'
+        setReviewRequired(refused.current)
+      }
+    } finally { pending.current = false; if (active.current) setBusy(false) }
+  }
+  const cancel = () => { ++intent.current; setIsAdding(false); setNewTitle('') }
+
   const completedCount = subtasks.filter(s => s.status === TaskStatus.Completed).length
 
   const sensors = useSensors(
@@ -86,11 +113,7 @@ export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWin
 
   const handleSubmit = () => {
     const title = newTitle.trim()
-    if (title && onAddSubtask) {
-      onAddSubtask(title)
-      setNewTitle('')
-      setIsAdding(false)
-    }
+    if (title && onAddSubtask) void run(() => onAddSubtask(title), () => { setNewTitle(''); setIsAdding(false) })
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -102,7 +125,7 @@ export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWin
     if (oldIndex === -1 || newIndex === -1) return
 
     const reordered = arrayMove(subtasks, oldIndex, newIndex)
-    onReorderSubtasks?.(reordered.map(s => s.id))
+    if (onReorderSubtasks) void run(() => onReorderSubtasks(reordered.map(s => s.id)))
   }
 
   const subtaskIds = subtasks.map(s => s.id)
@@ -118,13 +141,15 @@ export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWin
         </div>
         {onAddSubtask && !isAdding && (
           <button
-            onClick={() => setIsAdding(true)}
+            onClick={() => { ++intent.current; setIsAdding(true) }}
+            disabled={busy || reviewRequired}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
             <Plus className="h-3 w-3" /> Add
           </button>
         )}
       </div>
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <div className="rounded-md border divide-y">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={subtaskIds} strategy={verticalListSortingStrategy}>
@@ -132,6 +157,7 @@ export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWin
               <SortableSubtaskItem
                 key={subtask.id}
                 subtask={subtask}
+                disabled={busy || reviewRequired}
                 onNavigateToTask={onNavigateToTask}
                 onOpenSubtaskInWindow={onOpenSubtaskInWindow}
               />
@@ -145,17 +171,18 @@ export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWin
               ref={inputRef}
               type="text"
               value={newTitle}
+              disabled={busy || reviewRequired}
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSubmit()
-                if (e.key === 'Escape') { setIsAdding(false); setNewTitle('') }
+                if (e.key === 'Enter') { e.preventDefault(); handleSubmit() }
+                if (e.key === 'Escape') cancel()
               }}
               onBlur={() => { if (!newTitle.trim()) { setIsAdding(false); setNewTitle('') } }}
               placeholder="Subtask title..."
               className="flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground/50"
             />
-            <button onClick={handleSubmit} className="text-xs text-primary hover:text-primary/80 cursor-pointer">Add</button>
-            <button onClick={() => { setIsAdding(false); setNewTitle('') }} className="text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+            <button disabled={busy || reviewRequired} onClick={handleSubmit} className="text-xs text-primary hover:text-primary/80 cursor-pointer">Add</button>
+            <button aria-label="Cancel subtask draft" onClick={cancel} className="text-xs text-muted-foreground hover:text-foreground cursor-pointer">
               <X className="h-3 w-3" />
             </button>
           </div>

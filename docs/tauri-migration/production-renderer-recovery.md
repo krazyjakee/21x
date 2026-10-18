@@ -419,3 +419,35 @@ separate metadata-first exact-ID removal contract is agreed but unpublished here
 Its next renderer integration must eliminate the second full-array write and
 reconcile canonical state even when post-unlink cleanup reports partial failure.
 No filesystem/SQLite rollback or atomic-removal guarantee is made.
+
+
+## Task hierarchy observation and mutation receipts
+
+The real task workspace reads only the captured literal parent and validates its
+returned identity/project before displaying navigation. View replacement, project
+change-and-return, pagehide and connection retirement fence old replies. Parent
+reads clear old navigation and rehydrate once per ready connection generation;
+repeated notifications for the same generation issue no additional reads. Each
+view releases its connection/project/DOM lifetime listeners.
+
+Subtask creation keeps the entered title visible and frozen until the exact
+accepted child receipt and canonical task snapshot settle. Reorder waits for a
+true acknowledgement and canonical readback; it does not optimistically replace
+order or treat a false receipt as success. One synchronous UI lane covers create
+and reorder, and Source retains the actual task exclusion/scheduler authority.
+The child receipt must retain the original parent/project. Retired views issue
+no follow-up readback and cannot clear a replacement task's draft.
+
+Missing/refused/uncertain replies retain the subtask draft and require reopening
+the saved task for review before a new native mutation. There is no automatic
+retry, rollback or assumption that a lost reply means no write occurred. Cancel
+only retires the local draft; it does not claim to cancel admitted Source work.
+Native Captain/shared-group rows expose no ordinary subtask mutation control.
+Shipping Electron uses the same awaited UI callbacks with its existing contract.
+
+The portable controls use the actual typed native facade, stores and workspace
+components with controlled private results. Reorder tests invoke the real finite
+UI handler through a controlled DndContext; physical keyboard/pointer dragging
+and installed platform acceptance are not claimed. Two corrected old-source
+controls reproduce parent-reply replacement and discarded pending-title defects.
+No Source/native/public operation, policy, grant or voice availability changes.

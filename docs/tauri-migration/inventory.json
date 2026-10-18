@@ -542,7 +542,7 @@
       "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 618,
+      "line": 643,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -554,7 +554,7 @@
       "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 619,
+      "line": 644,
       "path": [
         "shell",
         "openPath"
