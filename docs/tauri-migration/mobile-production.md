@@ -51,7 +51,13 @@ to its actual local update or scoped source action; source refusal/withdrawal
 cannot manufacture completion. Attachment replacement is explicitly refused
 without a caller-supplied baseline; the adapter never reads the latest database
 array to pretend it was the caller's original intent. Nonempty attachment create
-and send remain unavailable. `attachments:save` stays metadata-only, and the
+and send remain unavailable. Saved task attachment records also fence mobile
+start/resume/send, even when the request omits attachments: the manager otherwise
+automatically enters its ambient workspace-copy/preview pipeline. The request
+captures and rechecks the target, routed children and current group members across
+raw awaits; changed graphs and saved files reject before later effects. A matched
+metadata row or display receipt is not a protected execution/read lease. That
+held-file/destination bridge remains a #214 prerequisite. `attachments:save` stays metadata-only, and the
 separate #214/#210 CAS contract is not bypassed.
 
 Session/HITL routes use the same manager. Approval responses capture current
@@ -62,13 +68,24 @@ declared fields; private MCP nonces/checklist storage never cross this boundary.
 The broadcaster rejects speech/TTS names even when called directly, in addition
 to the root's finite mobile event list.
 
-Source name/enabled changes enter the real SyncManager mutation lease and recheck source/task bindings
-and paired access after raw work drains. Source creation, credential/config/binding
-changes, integration option resolution, grouped review and parent reassignment
-remain explicit desktop-only effects on this mobile route. These are not
-automatically enabled by the full-profile pairing contract. Nonempty attachment
-sends also remain unavailable on this path. These refusals preserve existing stored data.
-Legacy Electron routes retain their existing behavior.
+Source create/configuration updates and explicit integration option resolution use
+the same `TaskSourceBackend` / `TaskSourcePluginBackend`, SyncManager mutation
+leases, registry, protected credential storage and OAuth owner as desktop. These
+are private adapters for the existing authenticated HTTP routes; public desktop
+commands, native authority and grants do not change. Returned source rows omit
+configuration. Masked configuration round-trips preserve stored secrets, stored
+credentials remain encrypted, and option labels redact borrowed/unsaved secrets.
+No OAuth browser, refresh or option resolver runs on mobile mount/reconnect.
+
+Explicit sync-all runs one source at a time through the same source service,
+rechecking paired access before each start and after failures. Revocation stops
+later starts and retains already admitted raw plugin work until it joins; accepted
+external effects cannot be undone. Parent/subtask-reference edits use the task
+service's existing exclusion and cycle/reference checks. Grouped review and
+nonempty attachment create/send remain unavailable on this portable route.
+Attachment-array updates require explicit caller baseline support before they can
+be admitted; a fresh database read cannot supply that intent. Legacy Electron
+routes retain their existing behavior.
 
 Control results are finite schemas: up to 128 session rows, 64 KiB total output,
 bounded HTTP(S) URLs without userinfo or secret query/fragment data, six-digit

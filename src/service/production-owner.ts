@@ -1102,7 +1102,7 @@ export class ProductionOwner {
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)
       if (!isAbsolute(distRoot) || actual !== distRoot || !location || location.startsWith('..') || isAbsolute(location) || lstatSync(distRoot).isSymbolicLink() || !lstatSync(join(distRoot, 'index.html')).isFile() || lstatSync(join(distRoot, 'index.html')).isSymbolicLink() ||
         port !== undefined && (!Number.isSafeInteger(port) || port < 0 || port > 65535)) throw new ProductionOwnerError('MOBILE_RESOURCES_UNAVAILABLE')
-      const taskActions = new ProductionMobileActions({ database: db, manager: agents, sync, registry, recurrence, heartbeat, automation, engineEpoch: this.epoch,
+      const taskActions = new ProductionMobileActions({ database: db, manager: agents, sync, registry, oauth, secretStorage: this.storage!, recurrence, heartbeat, automation, engineEpoch: this.epoch,
         assertAvailable: () => {
           if (this.abort.signal.aborted || !['starting', 'ready'].includes(this.phase) || processRegistry[registryKey] !== this.identity || this.services?.db !== db) throw new ProductionOwnerError('OWNER_CLOSING')
           this.lock!.assertHeld()

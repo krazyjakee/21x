@@ -10,7 +10,7 @@ import { join, sep, resolve, isAbsolute } from 'path'
 import { existsSync, readFileSync, statSync, lstatSync, realpathSync } from 'fs'
 import { WebSocketServer, WebSocket } from 'ws'
 import { randomUUID, createHash, randomInt } from 'crypto'
-import type { CreateTaskData, DatabaseManager, UpdateTaskData } from './database'
+import type { CreateTaskData, DatabaseManager, UpdateTaskData, CreateTaskSourceData, UpdateTaskSourceData } from './database'
 import type { AgentManager } from './agent-manager-core'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
@@ -32,7 +32,7 @@ import type { RecurrenceSchedulerCore } from './recurrence-scheduler-core'
 import type { HeartbeatSchedulerCore } from './heartbeat-scheduler-core'
 import type { TaskAutomationScheduler } from './task-automation-scheduler'
 import { mimeTypeForPath } from './mime'
-import { hasExactKeys, isRecord } from '../shared/service-protocol'
+import { hasExactKeys, isRecord, ServiceProtocolError } from '../shared/service-protocol'
 import { TASK_LIFECYCLE_CODECS, projectTaskLifecycleTask, isTaskLifecycleCreate, isTaskLifecycleUpdate } from '../shared/task-lifecycle-codecs'
 import { isDatabaseId } from '../shared/database-desktop-codecs'
 
@@ -287,6 +287,10 @@ export function startMobileApiServer(
 }
 
 export interface MobileTaskActions {
+  syncSource(id: string, guard: () => void): Promise<unknown>
+  createSource(data: CreateTaskSourceData, guard: () => void): Promise<unknown>
+  updateSource(id: string, data: UpdateTaskSourceData, guard: () => void): Promise<unknown>
+  resolveOptions(id: string, resolver: string, config: Record<string, unknown>, guard: () => void): Promise<unknown>
   create(data: CreateTaskData, guard: () => void): Promise<unknown>
   update(id: string, data: UpdateTaskData, guard: () => void): Promise<unknown>
   reorder(id: string, ids: string[], guard: () => void): Promise<unknown>
@@ -525,9 +529,11 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
     if (mobileDistRoot) { assertMobileApiDeps(currentOwner!.deps); preflightMobileData(pathname) }
     const owner = currentOwner!
     const token = bearerToken(req)
+    const executionGuard = body && mobileDistRoot ? captureMobileExecutionGuard(pathname, body, owner.deps.db, owner.deps.agentManager) : undefined
     const guard = (): void => {
       if (owner.closing || currentOwner !== owner || !validateSession(token, false))
         throw Object.assign(new Error('Mobile access ended.'), { status: 401 })
+      executionGuard?.()
     }
     const result = body && mobileDistRoot && !pathname.startsWith('/api/auth/pair/')
       ? await owner.deps.agentManager.withTaskGroupRequestGuard(() => routePost(pathname, body, req, guard), guard, new AbortController().signal)
@@ -540,11 +546,41 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
     res.end(encoded)
   } catch (err: unknown) {
     if (res.destroyed) return
-    const status = (err as { status?: number }).status || 500
+    const protocolStatus: Record<string, number> = { INVALID_ARGUMENTS: 400, INVALID_REQUEST: 409, BACKPRESSURE: 429, FRAME_TOO_LARGE: 413, CANCELLED: 409, DISCONNECTED: 503 }
+    const status = (err as { status?: number }).status || (err instanceof ServiceProtocolError ? protocolStatus[err.code] : undefined) || 500
     const message = mobileDistRoot && status >= 500 ? 'Mobile request failed.' : err instanceof Error ? err.message : String(err)
     res.writeHead(status)
     res.end(JSON.stringify({ error: message }))
   }
+}
+
+/** A matching metadata record is not authority to read/copy its bytes. Until
+ * #214 supplies an execution FileOwner bridge, mobile starts/resumes/sends must
+ * not enter the manager's ambient attachment pipeline, including routed children
+ * and group members. The captured graph fence follows the real manager request
+ * scope across raw awaits; it neither grants file access nor changes that owner. */
+function captureMobileExecutionGuard(pathname: string, params: Record<string, unknown>, db: DatabaseManager, agent: AgentManager): (() => void) | undefined {
+  const session = pathname.match(/^\/api\/sessions\/([^/]+)\/(resume|send)$/)
+  const taskId = pathname === '/api/sessions/start' || session?.[2] === 'resume' ? params.taskId : session?.[2] === 'send' ? agent.getSession(session[1])?.taskId : undefined
+  if (typeof taskId !== 'string' || !isDatabaseId(taskId)) return undefined
+  const read = (): string => {
+    const pending = [taskId], rows = new Map<string, unknown>()
+    while (pending.length) {
+      const id = pending.pop()!
+      if (rows.has(id)) continue
+      if (rows.size >= 128) throw Object.assign(new Error('Mobile execution scope exceeds the supported size.'), { status: 413 })
+      const row = db.db.prepare('SELECT id,project_id,parent_task_id,group_id,role,attachments FROM tasks WHERE id=?').get(id) as { id: string; project_id: string; parent_task_id: string | null; group_id: string | null; role: string; attachments: string | null } | undefined
+      if (!row) throw Object.assign(new Error('Mobile execution target changed.'), { status: 409 })
+      if (row.attachments !== null && row.attachments !== '[]') throw Object.assign(new Error('Saved attachments require the protected execution bridge on the desktop.'), { status: 409 })
+      const group = db.getTaskGroupByTask(id)
+      rows.set(id, { id: row.id, project: row.project_id, parent: row.parent_task_id, group: row.group_id, role: row.role, execution: group?.execution_task_id ?? null })
+      if (group) pending.push(group.execution_task_id, ...db.getTaskGroupMembers(group.id).map(member => member.id))
+      pending.push(...db.getSubtasks(id).map(child => child.id))
+    }
+    return JSON.stringify([...rows].sort(([a], [b]) => a.localeCompare(b)))
+  }
+  const captured = read()
+  return () => { if (read() !== captured) throw Object.assign(new Error('Mobile execution scope changed.'), { status: 409 }) }
 }
 
 /** Reject oversized legacy rows before their JSON deserializers are entered.
@@ -956,6 +992,10 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   // POST /api/plugins/:id/resolve-options — resolve dynamic options for a plugin config field
   const pluginResolveMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/resolve-options$/)
   if (pluginResolveMatch) {
+    if (actions && guard) {
+      if (!hasExactKeys(params, ['resolverKey'], ['config']) || typeof params.resolverKey !== 'string' || params.config !== undefined && !isRecord(params.config)) throw Object.assign(new Error('Invalid integration options request.'), { status: 400 })
+      return actions.resolveOptions(pluginResolveMatch[1], params.resolverKey, params.config as Record<string, unknown> ?? {}, guard)
+    }
     if (mobileDistRoot) throw Object.assign(new Error('Configure integration options on the desktop.'), { status: 503 })
     if (!pluginRegistryRef) throw Object.assign(new Error('Plugin registry not available'), { status: 503 })
     const pluginId = pluginResolveMatch[1]
@@ -970,6 +1010,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 
   // POST /api/task-sources — create a new task source
   if (pathname === '/api/task-sources') {
+    if (actions && guard) return withoutSourceConfig(await actions.createSource(params as unknown as CreateTaskSourceData, guard) as Record<string, unknown>)
     if (mobileDistRoot) throw Object.assign(new Error('Create task sources on the desktop.'), { status: 503 })
     const { name, plugin_id, config, mcp_server_id } = params as {
       name?: string; plugin_id?: string; config?: Record<string, unknown>; mcp_server_id?: string | null
@@ -984,6 +1025,15 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     if (mobileDistRoot && !hasExactKeys(params, [])) throw Object.assign(new Error('Invalid sync request.'), { status: 400 })
     if (!syncManagerRef) throw Object.assign(new Error('Sync manager not available'), { status: 503 })
     const sources = db.getTaskSources().filter((s: { enabled: boolean }) => s.enabled)
+    if (actions && guard) {
+      const results: unknown[] = []
+      for (const source of sources) {
+        guard()
+        try { results.push(await actions.syncSource(source.id, guard)) }
+        catch { guard(); results.push({ error: 'Task source sync failed.' }) }
+      }
+      return results
+    }
     const results = await Promise.allSettled(
       sources.map((s: { id: string }) => syncManagerRef!.importTasks(s.id, guard))
     )
@@ -997,6 +1047,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   if (sourceSyncMatch) {
     if (mobileDistRoot && (!isDatabaseId(sourceSyncMatch[1]) || !hasExactKeys(params, []))) throw Object.assign(new Error('Invalid sync request.'), { status: 400 })
     if (!syncManagerRef) throw Object.assign(new Error('Sync manager not available'), { status: 503 })
+    if (actions && guard) return actions.syncSource(sourceSyncMatch[1], guard)
     const result = await syncManagerRef.importTasks(sourceSyncMatch[1], guard)
     return mobileDistRoot ? fixedMobileSyncResult(result) : result
   }
@@ -1007,6 +1058,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const sourceId = sourceUpdateMatch[1]
     const source = db.getTaskSource(sourceId)
     if (!source) throw Object.assign(new Error('Task source not found'), { status: 404 })
+    if (actions && guard) return withoutSourceConfig(await actions.updateSource(sourceId, params as UpdateTaskSourceData, guard) as Record<string, unknown>)
     if (mobileDistRoot) {
       if (!isDatabaseId(sourceId) || !hasExactKeys(params, [], ['name', 'enabled']) || Object.keys(params).length === 0 || params.name !== undefined && (typeof params.name !== 'string' || !params.name.trim() || Buffer.byteLength(params.name) > 512 || /[\u0000-\u001f\u007f]/.test(params.name)) || params.enabled !== undefined && typeof params.enabled !== 'boolean') throw Object.assign(new Error('Change task source credentials and bindings on the desktop.'), { status: 400 })
       if (!syncManagerRef) throw Object.assign(new Error('Task source owner unavailable.'), { status: 503 })
@@ -1138,7 +1190,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     if (mobileDistRoot) {
       assertProductionOrdinaryTask(db, taskId)
       if (actions && Object.hasOwn(params, 'attachments')) throw Object.assign(new Error('Attachment replacement requires an explicit baseline on the desktop.'), { status: 409 })
-      if (!isTaskLifecycleUpdate(params) || ['parent_task_id', 'next_subtask_ids', 'last_occurrence_at', 'next_occurrence_at', 'heartbeat_last_check_at', 'heartbeat_next_check_at'].some(key => Object.hasOwn(params, key))) throw Object.assign(new Error('Invalid task fields.'), { status: 400 })
+      if (!isTaskLifecycleUpdate(params) || [...(actions ? [] : ['parent_task_id', 'next_subtask_ids']), 'last_occurrence_at', 'next_occurrence_at', 'heartbeat_last_check_at', 'heartbeat_next_check_at'].some(key => Object.hasOwn(params, key))) throw Object.assign(new Error('Invalid task fields.'), { status: 400 })
       if (params.status === TaskStatus.Completed && (existing.source_id || agent.findSessionByTaskId(taskId))) throw Object.assign(new Error('Use the task completion controls after stopping this task.'), { status: 409 })
     }
     if (actions && guard) return actions.update(taskId, params as UpdateTaskData, guard)

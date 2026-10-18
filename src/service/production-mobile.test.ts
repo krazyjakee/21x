@@ -478,6 +478,117 @@ for (const kind of cases) describe(`actual ${kind} production mobile HTTP/WS`, (
     await expect(fetch(base + '/api/tasks')).rejects.toThrow()
   })
 
+  it('routes legacy source create/configuration and explicit options through encrypted production owners', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base)
+    const secret = 'synthetic-mobile-source-key', resolve = vi.fn(async () => [{ value: 'fixture-database', label: `Database ${secret}` }])
+    f.services.registry.register({ id: 'notion', displayName: 'Controlled Notion', description: '', icon: 'test',
+      getConfigSchema: () => [{ key: 'data_source_id', label: 'Database', type: 'dynamic-select', optionsResolver: 'data_sources' }], getActions: () => [],
+      resolveOptions: resolve, importTasks: async () => ({ imported: 0, updated: 0, errors: [] }), exportUpdate: async () => {}, executeAction: async () => ({ success: false }) })
+    const create = await post(base, '/api/task-sources', { name: 'Phone source', plugin_id: 'notion', mcp_server_id: null, config: { data_source_id: 'fixture-database', api_token: secret }, project_id: f.project.id }, device.sessionToken)
+    expect(create.status).toBe(200)
+    const source = await create.json() as { id: string }
+    expect(source).not.toHaveProperty('config'); expect(resolve).not.toHaveBeenCalled()
+    const raw = () => (f.db.db.prepare('SELECT config FROM task_sources WHERE id=?').get(source.id) as { config: string }).config
+    expect(raw()).not.toContain(secret); expect(f.db.getTaskSource(source.id)?.config.api_token).toBe(secret)
+    const update = await post(base, `/api/task-sources/${source.id}`, { name: 'Renamed source', enabled: false, config: { api_token: '__21x_api_key_set__' } }, device.sessionToken)
+    expect(update.status).toBe(200); expect(await update.json()).not.toHaveProperty('config')
+    expect(f.db.getTaskSource(source.id)).toMatchObject({ name: 'Renamed source', enabled: false, config: { api_token: secret, data_source_id: 'fixture-database' } })
+    const options = await post(base, '/api/plugins/notion/resolve-options', { resolverKey: 'data_sources', config: { api_token: secret } }, device.sessionToken)
+    expect(options.status).toBe(200); expect(await options.json()).toEqual([{ value: 'fixture-database', label: 'Database [REDACTED]' }])
+    expect(resolve).toHaveBeenCalledOnce()
+    expect((await post(base, '/api/plugins/notion/resolve-options', { resolverKey: 'not-a-declared-resolver', config: {} }, device.sessionToken)).status).toBe(400)
+    expect((await post(base, `/api/task-sources/${source.id}`, { config: { unexpected_private_key: secret } }, device.sessionToken)).status).toBe(400)
+    expect(resolve).toHaveBeenCalledOnce(); expect(raw()).not.toContain(secret)
+  })
+  it('holds raw source/configuration and resolver work until exact paired access is rechecked', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), held = deferred(), entered = deferred()
+    const resolver = vi.fn(async () => { entered.resolve(); await held.promise; return [{ value: 'unchanged', label: 'Controlled option' }] })
+    f.services.registry.register({ id: 'notion', displayName: 'Controlled', description: '', icon: 'test',
+      getConfigSchema: () => [{ key: 'data_source_id', label: 'Database', type: 'dynamic-select', optionsResolver: 'data_sources' }], getActions: () => [], resolveOptions: resolver,
+      importTasks: async () => ({ imported: 0, updated: 0, errors: [] }), exportUpdate: async () => {}, executeAction: async () => ({ success: false }) })
+    const created = await post(base, '/api/task-sources', { name: 'Original', plugin_id: 'notion', mcp_server_id: null, config: { data_source_id: 'before', api_token: 'synthetic-original' } }, device.sessionToken)
+    expect(created.status).toBe(200); const source = await created.json() as { id: string }
+    const workGate = deferred(), workEntered = deferred()
+    const work = f.services.sync.runSourceWork(source.id, async () => { workEntered.resolve(); await workGate.promise }); await workEntered.promise
+    const mutation = vi.spyOn(f.services.sync, 'runSourceMutation')
+    const update = post(base, `/api/task-sources/${source.id}`, { config: { data_source_id: 'must-not-commit' } }, device.sessionToken)
+    await vi.waitFor(() => expect(mutation).toHaveBeenCalled())
+    await f.command('mobile:revokeSession', [device.sessionId]); workGate.resolve(); await work
+    expect((await update).status).toBeGreaterThanOrEqual(400); expect(f.db.getTaskSource(source.id)?.config.data_source_id).toBe('before')
+    const current = await pair(f, base)
+    const options = post(base, '/api/plugins/notion/resolve-options', { resolverKey: 'data_sources', config: {} }, current.sessionToken)
+    await entered.promise; await f.command('mobile:revokeSession', [current.sessionId]); held.resolve()
+    expect((await options).status).toBeGreaterThanOrEqual(400); expect(resolver).toHaveBeenCalledOnce()
+    expect(f.db.db.open).toBe(true); expect(f.service.owner.snapshot().phase).toBe('ready')
+  })
+
+  it('keeps explicit sync-all sequential and routes parent edits through the real exclusion/reference owner', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), hold = deferred(), entered = deferred()
+    const imports = vi.fn(async () => { entered.resolve(); await hold.promise; return { imported: 0, updated: 0, errors: [] } })
+    f.services.registry.register({ id: 'notion', displayName: 'Controlled Notion', description: '', icon: 'test', getConfigSchema: () => [], getActions: () => [], resolveOptions: async () => [],
+      importTasks: imports, exportUpdate: async () => {}, executeAction: async () => ({ success: false }) })
+    for (const name of ['First phone source', 'Second phone source']) {
+      const create = await post(base, '/api/task-sources', { name, plugin_id: 'notion', mcp_server_id: null, config: { data_source_id: 'fixture' } }, device.sessionToken)
+      expect(create.status).toBe(200)
+    }
+    const work = post(base, '/api/task-sources/sync-all', {}, device.sessionToken)
+    await entered.promise; expect(imports).toHaveBeenCalledOnce()
+    await f.command('mobile:revokeSession', [device.sessionId]); hold.resolve()
+    expect((await work).status).toBeGreaterThanOrEqual(400)
+    expect(imports).toHaveBeenCalledOnce()
+    const current = await pair(f, base), parent = f.task('Parent', false), child = f.task('Child', false)
+    const accepted = await post(base, `/api/tasks/${child.id}`, { parent_task_id: parent.id }, current.sessionToken)
+    expect(accepted.status).toBe(200); expect(f.db.getTask(child.id)?.parent_task_id).toBe(parent.id)
+    const cycle = await post(base, `/api/tasks/${parent.id}`, { parent_task_id: child.id }, current.sessionToken)
+    expect(cycle.status).toBe(409); expect(f.db.getTask(parent.id)?.parent_task_id).toBeNull()
+  })
+
+  it('refuses saved attachment execution on start, resume, empty send, routed children and group members', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base)
+    const file = { id: 'saved_file', filename: 'saved.txt', size: 3, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00Z' }
+    const blocked = f.task('Saved attachments'); f.db.updateTask(blocked.id, { attachments: [file], session_id: 'stored_session' })
+    expect((await post(base, '/api/sessions/start', { taskId: blocked.id, skipInitialPrompt: true }, device.sessionToken)).status).toBe(409)
+    expect((await post(base, `/api/sessions/stored_session/resume`, { taskId: blocked.id, agentId: blocked.agent_id }, device.sessionToken)).status).toBe(409)
+    const parent = f.task('Parent without files'), child = f.task('Child with files')
+    f.db.updateTask(child.id, { parent_task_id: parent.id, attachments: [file] })
+    expect((await post(base, '/api/sessions/start', { taskId: parent.id }, device.sessionToken)).status).toBe(409)
+    const a=f.task('Group A'), b=f.task('Group B'), group=f.db.createTaskGroup({ title: 'Group', task_ids: [a.id,b.id] })
+    f.db.db.prepare('UPDATE tasks SET attachments=? WHERE id=?').run(JSON.stringify([file]), b.id)
+    expect((await post(base, '/api/sessions/start', { taskId: a.id }, device.sessionToken)).status).toBe(409)
+    expect((await post(base, '/api/sessions/start', { taskId: group.execution_task_id }, device.sessionToken)).status).toBe(409)
+    expect(f.adapter.createSession).not.toHaveBeenCalled(); expect(f.adapter.resumeSession).not.toHaveBeenCalled()
+    const safe=f.task('No attachments'), started=await post(base, '/api/sessions/start', { taskId: safe.id, agentId: safe.agent_id, skipInitialPrompt: true }, device.sessionToken)
+    expect(started.status).toBe(200); const { sessionId }=await started.json() as { sessionId: string }
+    f.db.updateTask(safe.id, { attachments: [file] })
+    expect((await post(base, `/api/sessions/${sessionId}/send`, { message: 'No explicit files', attachments: [] }, device.sessionToken)).status).toBe(409)
+    expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
+  })
+  it.each(['attachments', 'graph'])('rechecks %s after held raw initialization before attachment or provider effects', async change => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task=f.task('Held initialize')
+    const held=deferred(); f.adapter.initialize.mockImplementationOnce(async () => { await held.promise })
+    const response=post(base, '/api/sessions/start', { taskId: task.id }, device.sessionToken)
+    await vi.waitFor(() => expect(f.adapter.initialize).toHaveBeenCalledOnce())
+    if (change === 'attachments') f.db.updateTask(task.id, { attachments: [{ id: 'late_file', filename: 'late.txt', size: 1, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00Z' }] })
+    else { const child=f.task('New routed child'); f.db.updateTask(child.id, { parent_task_id: task.id }) }
+    held.resolve(); expect((await response).status).toBeGreaterThanOrEqual(400)
+    expect(f.adapter.createSession).not.toHaveBeenCalled(); expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
+    expect(f.manager.findSessionByTaskId(task.id)).toBeUndefined()
+  })
+  it('keeps queued sends fenced when saved attachments change', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task=f.task('Held send')
+    const started=await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id, skipInitialPrompt: true }, device.sessionToken)
+    expect(started.status).toBe(200); const { sessionId }=await started.json() as { sessionId: string }
+    const held=deferred(); f.adapter.sendPrompt.mockImplementationOnce(async () => { await held.promise })
+    const first=post(base, `/api/sessions/${sessionId}/send`, { message: 'Accepted raw send' }, device.sessionToken)
+    await vi.waitFor(() => expect(f.adapter.sendPrompt).toHaveBeenCalledOnce())
+    const second=post(base, `/api/sessions/${sessionId}/send`, { message: 'Queued send' }, device.sessionToken)
+    await new Promise(resolve => setTimeout(resolve, 30))
+    f.db.updateTask(task.id, { attachments: [{ id: 'late_file', filename: 'late.txt', size: 1, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00Z' }] })
+    held.resolve(); expect((await first).status).toBeGreaterThanOrEqual(400); expect((await second).status).toBeGreaterThanOrEqual(400)
+    expect(f.adapter.sendPrompt).toHaveBeenCalledOnce()
+    expect(f.service.owner.snapshot().phase).toBe('ready')
+  })
+
 })
 
 
