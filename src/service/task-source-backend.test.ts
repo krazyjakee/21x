@@ -172,6 +172,32 @@ describe('actual production task source owner boundary', () => {
     expect(events.some(event => event.operation === 'task:updated' && (event.payload as { taskId: string }).taskId === imported.id)).toBe(true)
   })
 
+  it.each(['critical', 'high', 'medium', 'low'] as const)('exports canonical priority %s unchanged through typed codec and real Source plugin owner', async priority => {
+    const saved = source(), item = task(saved.id)
+    const fields = Object.freeze({ priority })
+    await call('taskSource:exportUpdate', [item.id, fields])
+    expect(plugin.exportUpdate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: item.id }), { priority }, expect.any(Object), expect.any(Object))
+    expect(fields).toEqual({ priority })
+    expect(db.getTask(item.id)?.priority).toBe(item.priority)
+  })
+
+  it('normalizes only explicit urgent export input on a cloned field map before plugin effects without persisting the alias', async () => {
+    const saved = source(), item = task(saved.id)
+    db.updateTask(item.id, { priority: 'critical' })
+    const fields = Object.freeze({ priority: 'urgent', description: 'Original bounded export intent' })
+    await call('taskSource:exportUpdate', [item.id, fields])
+    expect(plugin.exportUpdate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: item.id, priority: 'critical' }), { ...fields, priority: 'critical' }, expect.any(Object), expect.any(Object))
+    expect(fields.priority).toBe('urgent')
+    expect(db.getTask(item.id)?.priority).toBe('critical')
+  })
+
+  it.each(['emergency', 'Critical', '', 1, null])('refuses invalid export priority %j before plugin effect', async priority => {
+    const saved = source(), item = task(saved.id)
+    await expect(call('taskSource:exportUpdate', [item.id, { priority }])).rejects.toThrow()
+    expect(plugin.exportUpdate).not.toHaveBeenCalled()
+    expect(db.getTask(item.id)?.priority).toBe(item.priority)
+  })
+
   it('preflights source and every before/after task project scope before network or cascade Stop', async () => {
     const saved = source(), foreign = db.createProject({ name: 'Foreign moved task' })!, item = task(saved.id)
     db.db.prepare('UPDATE tasks SET project_id=? WHERE id=?').run(foreign.id, item.id)

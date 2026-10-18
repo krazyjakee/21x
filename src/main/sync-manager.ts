@@ -151,6 +151,9 @@ export class SyncManager {
     if (!plugin) return
 
     const fields = { ...changedFields }
+    // Retained export-only compatibility input. Tasks and provider exports use
+    // canonical critical; never mutate the caller's intent or persist urgent.
+    if (fields.priority === 'urgent') fields.priority = 'critical'
     // Internal completion control — never a source field.
     delete fields.complete_at_source
     if (task.complete_at_source === false) delete fields.status

@@ -593,6 +593,22 @@ it('binds project source metadata, sync, export and users while fencing mutation
   expect(f.invoke.mock.calls.length).toBe(before)
 })
 
+it.each(['critical', 'high', 'medium', 'low', 'urgent'] as const)('exports priority %s unchanged through the typed native facade', async priority => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const fields = Object.freeze({ priority })
+  await expect(f.host.api.taskSources.exportUpdate('task_fixture', fields)).resolves.toBeUndefined()
+  const exports = f.invoke.mock.calls.filter(([command, args]) => command === 'desktop_invoke' && args?.operation === 'taskSource:exportUpdate')
+  expect(exports).toEqual([['desktop_invoke', { operation: 'taskSource:exportUpdate', payload: { taskId: 'task_fixture', fields: { priority } }, engineEpoch: 'engine-1' }]])
+  expect(fields).toEqual({ priority })
+})
+
+it.each(['Critical', 'normal', 'urgent ', '', null, 3, {}])('refuses invalid export priority %j before native invocation', async priority => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const before = f.invoke.mock.calls.length
+  await expect(f.host.api.taskSources.exportUpdate('task_fixture', { priority })).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
+  expect(f.invoke.mock.calls.length).toBe(before)
+})
+
 it('does not repeat an accepted source sync when its result is lost across native epochs', async () => {
   const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
   const pending = deferred<unknown>(), original = f.invoke.getMockImplementation()!

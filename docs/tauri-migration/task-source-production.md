@@ -26,3 +26,21 @@ Cancellation before an effect prevents it. An accepted provider/Stop operation r
 Authored tests exercise real portable SQLite, authenticated storage, SyncManager, PluginRegistry, AgentManager and schedulers with an explicitly controlled local provider. A connector scenario uses the actual bridge engine/scheduler/credential store and durable SQLite cursor with a controlled allowlisted piece call; it proves owner reconstruction, not a packaged process or remote connector. Coverage includes ciphertext/marker reuse, independent read grants, inactive metadata, source/task scopes, cascade Stop/group guards, source mutation races, task lifecycle collisions, raw cancellation/drain, exact replacement binding, row-size preflight and redacted failure/no replay.
 
 No worker validation has been executed. Root validation must record revision, command, fixture/schema, runtime/platform versions, artifact hashes and actual outcomes. Full #216 remains open for final production worker packaging/allowlist/pin/license evidence, call-scoped KV timeout/crash restart, final-identity warm/cold OAuth callbacks/refresh/revoke and representative retained connector behavior on packaged targets. Existing source bindings and controlled fixtures do not establish installed platform parity or authorize a release/data cutover.
+
+## Export priority contract continuation
+
+The retained `taskSource:exportUpdate` command accepts canonical `critical`,
+`high`, `medium`, and `low` unchanged through the typed/native finite validators.
+For compatibility it also accepts the explicit export **input** alias `urgent`.
+The Source sync owner clones the incoming fields, normalizes only that alias to
+`critical`, and then invokes the existing plugin export owner. Caller objects
+and persisted task priority remain unchanged; `urgent` is never forwarded to
+the plugin or written as task state. Invalid/case/whitespace aliases still fail
+before plugin effects. Provider-specific import/action aliases are unchanged.
+
+Actual typed-facade tests reproduce the former critical rejection before native
+invoke. Real SQLite/SyncManager/local-plugin tests separately reproduce urgent
+being forwarded unchanged. Canonical/alias/invalid controls cover both repaired
+boundaries without a remote provider. Wire acceptance alone does not establish
+connector semantics or installed/provider acceptance. No public operation,
+grant, OAuth or availability flag changes.

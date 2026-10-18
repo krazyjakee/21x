@@ -25,6 +25,17 @@ describe('task source finite production codecs', () => {
     expect(codecs['taskSource:update'].decodeArguments(codecs['taskSource:update'].encodeArguments(['source-one', { enabled: false, name: undefined }]))).toEqual(['source-one', { enabled: false }])
   })
 
+  it.each(['critical', 'high', 'medium', 'low', 'urgent'])('accepts canonical export priority or explicit input alias %s without wire rewriting', priority => {
+    const payload = { taskId: 'task-one', fields: { priority } }
+    expect(codecs['taskSource:exportUpdate'].encodeArguments(['task-one', { priority }])).toEqual(payload)
+    expect(codecs['taskSource:exportUpdate'].decodeArguments(payload)).toEqual(['task-one', { priority }])
+  })
+
+  it.each(['emergency', 'Critical', '', 1, null])('rejects invalid export priority %j', priority => {
+    expect(codecs['taskSource:exportUpdate'].validateArguments(['task-one', { priority }])).toBe(false)
+    expect(() => codecs['taskSource:exportUpdate'].decodeArguments({ taskId: 'task-one', fields: { priority } })).toThrow('arguments')
+  })
+
   it('bounds write-only raw credentials separately from the marker-only DTO and finite plugin configuration', () => {
     const value = '\uFEFFcredential-雪\nsecond-line'
     expect(isTaskSourceConfigInput('notion', { api_token: value })).toBe(true)

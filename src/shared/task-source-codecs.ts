@@ -108,7 +108,7 @@ export function isTaskSourceInput(value: unknown, create: boolean): boolean {
 export function isTaskSourceExportFields(value: unknown): boolean {
   return isRecord(value) && hasExactKeys(value, [], ['title', 'description', 'status', 'priority', 'assignee', 'due_date', 'labels', 'complete_at_source']) && Object.keys(value).length > 0 && bounded(value) && Object.entries(value).every(([key, item]) => {
     if (key === 'status') return (Object.values(TaskStatus) as unknown[]).includes(item)
-    if (key === 'priority') return ['low', 'medium', 'high', 'urgent'].includes(item as string)
+    if (key === 'priority') return ['critical', 'high', 'medium', 'low', 'urgent'].includes(item as string)
     if (key === 'labels') return strings(item)
     if (key === 'complete_at_source') return item === null || typeof item === 'boolean'
     if (key === 'due_date') return item === null || text(item, 128)

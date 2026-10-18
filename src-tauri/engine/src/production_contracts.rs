@@ -1808,9 +1808,9 @@ fn source_export(value: &Value) -> bool {
                         ]
                         .contains(&s)
                     }),
-                    "priority" => entry
-                        .as_str()
-                        .is_some_and(|s| ["low", "medium", "high", "urgent"].contains(&s)),
+                    "priority" => entry.as_str().is_some_and(|s| {
+                        ["critical", "high", "medium", "low", "urgent"].contains(&s)
+                    }),
                     "labels" => source_strings(entry, 128),
                     "complete_at_source" => entry.is_null() || entry.is_boolean(),
                     "due_date" => entry.is_null() || clean_text(entry, 128),
@@ -5275,6 +5275,34 @@ mod tests {
             "mcp:startOAuthFlow",
             &json!({"defined":true,"value":{"pid":1234}})
         ));
+    }
+
+    #[test]
+    fn task_source_export_accepts_canonical_priorities_and_only_explicit_urgent_input_alias() {
+        for priority in ["critical", "high", "medium", "low", "urgent"] {
+            assert!(
+                valid_request(
+                    "taskSource:exportUpdate",
+                    &json!({"taskId":"task_fixture","fields":{"priority":priority}})
+                ),
+                "{priority}"
+            );
+        }
+        for priority in [
+            json!("emergency"),
+            json!("Critical"),
+            json!(""),
+            json!(1),
+            Value::Null,
+        ] {
+            assert!(
+                !valid_request(
+                    "taskSource:exportUpdate",
+                    &json!({"taskId":"task_fixture","fields":{"priority":priority}})
+                ),
+                "{priority}"
+            );
+        }
     }
 
     #[test]
