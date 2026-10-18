@@ -1,13 +1,15 @@
 import { isAgentStatusHeartbeat } from '@shared/activity'
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useReducer } from 'react'
 import { useAgentSchedulerStore } from '@/stores/agent-scheduler-store'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSessionActions } from './use-agent-session'
-import { onAgentStatus, onAgentStartQueueChanged, onTaskUpdated, onTaskCreated, taskApi } from '@/lib/ipc-client'
+import { onAgentStatus, onAgentStartQueueChanged, onTaskUpdated, onTaskCreated, taskApi, agentSessionApi } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
 import { findBlockingSibling, isSuccessorGraphInProgress } from '@shared/subtask-graph'
 import type { Task, Agent, TaskPriority } from '@/types'
 import type { AgentStatusEvent } from '@/types/electron.d'
+import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
+import { useProjectStore } from '@/stores/project-store'
 import type { TaskSession } from '@/stores/agent-store'
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = {
@@ -70,11 +72,16 @@ interface UseAgentAutoStartProps {
  * runs it when a slot frees, window open or not. This hook keeps no running
  * counts or queue of its own.
  */
-export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStartProps) {
+export function useAgentAutoStart(props: UseAgentAutoStartProps) {
+  useNativeAgentAutoStart(props)
+  useLegacyAgentAutoStart(props)
+}
+
+function useLegacyAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStartProps) {
   // Sessions are read non-reactively: subscribing would re-render the whole
   // AppLayout on every agent message.
   const getSessionsSnapshot = useCallback(() => useAgentStore.getState().sessions, [])
-  const isEnabled = useAgentSchedulerStore((s) => s.isEnabled)
+  const isEnabled = useAgentSchedulerStore((s) => s.isEnabled) && getDesktopHost().kind === 'electron'
 
   // tasks/agents/showToast live in refs so callbacks and IPC listeners stay
   // stable. Recreating them on every task:updated event re-subscribed every
@@ -501,4 +508,165 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
     return () => clearInterval(intervalId)
   }, [isEnabled, getSessionsSnapshot, selectEligibleTasks, selectTriageCandidates, startTasksForAgent, startTriage])
+}
+
+
+function nativeAutoTaskBinding(task: Task): string {
+  return JSON.stringify([task.id, task.project_id, task.role ?? 'task', task.status,
+    task.agent_id, task.group_id, task.parent_task_id, task.source_id, task.external_id,
+    task.source, task.snoozed_until, task.heartbeat_enabled, task.is_recurring, task.recurrence_parent_id,
+    task.next_subtask_ids, task.sort_order, task.attachments, task.repos, task.skill_ids])
+}
+function nativeAutoAgentBinding(agent: Agent): string {
+  return JSON.stringify([agent.id, agent.server_url, agent.config])
+}
+function nativeAutoFamilyBinding(task: Task, all: Task[]): string {
+  return !task.parent_task_id ? '' : JSON.stringify(all.filter(t => t.id === task.parent_task_id || t.parent_task_id === task.parent_task_id).map(nativeAutoTaskBinding).sort())
+}
+interface NativeAutoIntent { task: Pick<Task, 'id' | 'title' | 'parent_task_id'>; agent: Pick<Agent, 'id' | 'name'>; binding: string; agentBinding: string; familyBinding: string; cancelled: boolean; bytes: number }
+
+/** Window AutoRun owns only captured selection and future requests. Source owns
+ * admission, triage classification, recovery policy and acknowledged queues. */
+function useNativeAgentAutoStart(props: UseAgentAutoStartProps) {
+  const native = getDesktopHost().kind === 'tauri'
+  const enabled = useAgentSchedulerStore(s => s.isEnabled)
+  const projectId = useProjectStore(s => s.currentProjectId)
+  const latest = useRef(props); latest.current = props
+  const cohort = useRef<{ reconcile: () => void } | null>(null)
+  const outstanding = useRef<Promise<unknown> | null>(null)
+  const [activation, activate] = useReducer(value => value + 1, 0)
+  // Observe even disable/enable in one React batch. The old generation must
+  // retire synchronously; an explicit new enable creates a separate intent.
+  useEffect(() => native ? useAgentSchedulerStore.subscribe((state, previous) => {
+    if (state.isEnabled !== previous.isEnabled) activate()
+  }) : undefined, [native])
+  useEffect(() => {
+    if (!native || !enabled || !useAgentSchedulerStore.getState().isEnabled) return
+    const host = getDesktopHost(), scope = captureDesktopRead()
+    if (!scope.isCurrent()) { useAgentSchedulerStore.getState().disable(); return }
+    const initialDefault = latest.current.agents.find(a => a.is_default) ?? latest.current.agents[0]
+    const defaultAgent = initialDefault && structuredClone(initialDefault)
+    const seen = new Set<string>(), refused = new Set<string>(), queue: NativeAutoIntent[] = []
+    let live = true, draining = false, queuedBytes = 0, currentIntent: NativeAutoIntent | undefined, timer: ReturnType<typeof setTimeout> | undefined
+    const releases: Array<() => void> = []
+    const remember = (release: (() => void) | undefined) => { if (release) releases.push(release) }
+    const active = () => live && scope.isCurrent() && useAgentSchedulerStore.getState().isEnabled
+      && useProjectStore.getState().currentProjectId === projectId
+    const retire = () => {
+      if (!live) return
+      live = false; queue.length = 0
+      clearTimeout(timer); clearInterval(interval)
+      for (const release of releases.splice(0)) release()
+      window.removeEventListener('pagehide', retire)
+      useAgentSchedulerStore.getState().disable()
+    }
+    const matches = (intent: NativeAutoIntent) => {
+      if (!active() || intent.cancelled) return false
+      const task = latest.current.tasks.find(t => t.id === intent.task.id)
+      const agent = latest.current.agents.find(a => a.id === intent.agent.id)
+      const currentDefault = latest.current.agents.find(a => a.is_default) ?? latest.current.agents[0]
+      return !!task && !!agent && nativeAutoTaskBinding(task) === intent.binding
+        && nativeAutoAgentBinding(agent) === intent.agentBinding
+        && nativeAutoFamilyBinding(task, latest.current.tasks) === intent.familyBinding
+        && (!!task.agent_id || currentDefault?.id === intent.agent.id)
+    }
+    const eligible = (task: Task) => (!task.role || task.role === 'task')
+      && task.status === TaskStatus.NotStarted && !task.heartbeat_enabled && !isRecurringTemplate(task) && !isSnoozed(task.snoozed_until)
+    const family = (task: Task, all: Task[]) => !task.parent_task_id || subtaskMayStart(task,
+      familyGate(all.find(t => t.id === task.parent_task_id), all.filter(t => t.parent_task_id === task.parent_task_id)))
+    const drain = async () => {
+      if (draining) return
+      draining = true
+      try {
+        while (active() && queue.length) {
+          const intent = queue.shift()!; queuedBytes -= intent.bytes; currentIntent = intent
+          if (!matches(intent) || refused.has(intent.task.id)) continue
+          try {
+            if (outstanding.current) { try { await outstanding.current } catch { /* Original cohort owns its receipt. */ } }
+            if (!matches(intent)) continue
+            const fresh = await taskApi.getById(intent.task.id)
+            if (!matches(intent) || !fresh || nativeAutoTaskBinding(fresh) !== intent.binding || !eligible(fresh)) continue
+            const children = await taskApi.getSubtasks(fresh.id)
+            if (!matches(intent) || children.length) continue
+            if (fresh.parent_task_id) {
+              const capturedParent = latest.current.tasks.find(t => t.id === fresh.parent_task_id)
+              const capturedSiblings = latest.current.tasks.filter(t => t.parent_task_id === fresh.parent_task_id)
+              if (!capturedParent || !family(fresh, latest.current.tasks)) continue
+              const parentBinding = nativeAutoTaskBinding(capturedParent)
+              if (nativeAutoFamilyBinding(fresh, [capturedParent, ...capturedSiblings]) !== intent.familyBinding) continue
+              const parent = await taskApi.getById(fresh.parent_task_id)
+              if (!matches(intent) || !parent || nativeAutoTaskBinding(parent) !== parentBinding) continue
+              const siblings = await taskApi.getSubtasks(fresh.parent_task_id)
+              if (!matches(intent) || nativeAutoFamilyBinding(fresh, [parent, ...siblings]) !== intent.familyBinding
+                || !subtaskMayStart(fresh, familyGate(parent, siblings))) continue
+            }
+            if (!matches(intent) || !family(fresh, latest.current.tasks)) continue
+            // Exact selected target: unlike startTask this does not lift a
+            // manual Stop or choose another child. No status/session prewrite,
+            // workspace override, skipInitialPrompt or local session creation.
+            const raw = agentSessionApi.start(intent.agent.id, fresh.id)
+            outstanding.current = raw
+            let result: Awaited<typeof raw>
+            try { result = await raw } finally { if (outstanding.current === raw) outstanding.current = null }
+            if (!matches(intent)) continue
+            latest.current.showToast(result.queued
+              ? `Queued "${intent.task.title}" — Source owns its admission queue`
+              : `Started "${intent.task.title}" with ${intent.agent.name}`)
+          } catch {
+            refused.add(intent.task.id)
+            if (matches(intent)) latest.current.showToast('AutoRun could not confirm this request. Review the task and queue before trying again.', true)
+          }
+        }
+      } finally { currentIntent = undefined; draining = false; if (active()) reconcile() }
+    }
+    const reconcile = () => {
+      if (!active()) return
+      const snapshot = latest.current
+      for (const task of [...snapshot.tasks].sort((a,b) => PRIORITY_ORDER[b.priority] - PRIORITY_ORDER[a.priority] || bySortOrder(a,b))) {
+        if (!eligible(task) || !family(task, snapshot.tasks) || snapshot.tasks.some(t => t.parent_task_id === task.id)
+          || !task.agent_id && task.parent_task_id || refused.has(task.id)) continue
+        const agent = task.agent_id ? snapshot.agents.find(a => a.id === task.agent_id) : defaultAgent
+        if (!agent) continue
+        const key = JSON.stringify([task.id, task.agent_id])
+        if (seen.has(key)) continue
+        if (seen.size >= 4096 || refused.size >= 4096) { retire(); return }
+        const binding = nativeAutoTaskBinding(task), agentBinding = nativeAutoAgentBinding(agent), familyBinding = nativeAutoFamilyBinding(task, snapshot.tasks)
+        const bytes = new TextEncoder().encode(binding + agentBinding + familyBinding).byteLength
+        if (bytes > 262_144) { refused.add(task.id); continue }
+        if (queue.length >= 64 || queuedBytes + bytes > 2_097_152) break
+        seen.add(key); queuedBytes += bytes
+        queue.push({ task: { id: task.id, title: task.title, parent_task_id: task.parent_task_id }, agent: { id: agent.id, name: agent.name }, binding, agentBinding, familyBinding, cancelled: false, bytes })
+      }
+      if (!draining && queue.length && timer === undefined) timer = setTimeout(() => {
+        timer = undefined; void drain().catch(retire)
+      }, 300)
+    }
+    const interval = setInterval(reconcile, 60_000)
+    const current = { reconcile }; cohort.current = current
+    remember(host.subscribeConnection(() => { if (!scope.isCurrent()) retire() }))
+    remember(useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) retire() }))
+    remember(useAgentSchedulerStore.subscribe(state => { if (!state.isEnabled) retire() }))
+    remember(onTaskCreated(reconcile))
+    remember(onTaskUpdated(event => {
+      // Authority withdrawals are observed synchronously even if React batches
+      // a move/assignment away and back before the next render.
+      const projected = latest.current.tasks.map(task => task.id === event.taskId ? { ...task, ...event.updates } : task)
+      for (const intent of [...queue, ...(currentIntent ? [currentIntent] : [])]) {
+        const task = projected.find(t => t.id === intent.task.id)
+        if (!task || nativeAutoTaskBinding(task) !== intent.binding || nativeAutoFamilyBinding(task, projected) !== intent.familyBinding) intent.cancelled = true
+      }
+      reconcile()
+    }))
+    remember(onAgentStatus(event => { if (!isAgentStatusHeartbeat(event) && event.status === SessionStatus.IDLE) reconcile() }))
+    remember(onAgentStartQueueChanged(event => {
+      if (event.failed && active() && [...seen].some(key => JSON.parse(key)[0] === event.failed!.taskId)) {
+        refused.add(event.failed.taskId)
+        latest.current.showToast('A queued AutoRun request failed. Review the task and queue before trying again.', true)
+      }
+    }))
+    window.addEventListener('pagehide', retire)
+    reconcile()
+    return () => { if (cohort.current === current) cohort.current = null; retire() }
+  }, [native, enabled, activation, projectId])
+  useEffect(() => { cohort.current?.reconcile() }, [props.tasks, props.agents])
 }

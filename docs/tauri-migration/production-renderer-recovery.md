@@ -691,3 +691,55 @@ stdio entries remain separate from the controlled UI harness. Forced no-emit
 typecheck, lint0errors165baselinewarnings, staging, both frontends and923-source
 inventory/contracts pass. Revision-bound evidence:
 `issue-209-native-task-feedback-local-20261018.json`.
+
+
+### Native window AutoRun
+
+The native sidebar toggle owns a window generation, not a new Source setting.
+It continues to select ordinary tasks across the loaded projects, but captures
+both the active view/project and each original task/project/agent/family before
+its delay or reads. Disable, pagehide, unmount, project withdrawal and reconnect
+synchronously retire timers/listeners and fence future requests. An explicit
+new enable creates a separate cohort and joins the preceding client receipt;
+it cannot undo an admitted Source prompt or durable admission queue.
+
+One serialized retained `agentSession.start(agentId, taskId)` asks for that exact
+selected target. It passes neither workspace nor skip-prompt controls. Source
+owns the unassigned-task triage classification, manual-Stop recovery refusal,
+provider startup, limits/FIFO and detached queue lifetime. The renderer writes
+no runtime status, assignment, session ID or synthesized parent completion,
+and creates no local session for queued or nonqueued acknowledgements. Native
+AutoRun does not substitute explicit-user `startTask` or an exact-root Fresh.
+Source canonical task/session/queue events remain authoritative.
+
+Fresh task and exact family checks never fall back from a failed read to a
+start. Source updates withdraw pending old bindings synchronously, including
+move/assignment away and back before React renders. Metadata churn and minute
+rescans cannot replay one captured cause; uncertain or failed queue results
+require review. Idle heartbeat observations stay out of transition handling.
+One cohort bounds4096 task/agent causes and4096 refused task IDs,64 queued selections,262144 bytes per
+selection and2097152 total queued binding bytes. It captures only finite binding
+fingerprints and display identity, not copies of task descriptions/transcripts.
+Source remains the final authorization and admission owner, including any
+current task-group execution mapping for the selected original member.
+
+Four separate actual SQLite/ProductionAgentBackend/AgentManager controls prove
+unassigned triage, queued admission and failed/cancelled recovery guards. The
+failed control exhausts the actual Source retry budget with a controlled clock
+and FakeAdapter; it does not transfer that retry loop to the renderer. Typed
+renderer controls and these Source controls are separate, not an installed
+WebView-to-provider graph.
+
+Electron keeps its established sidebar behavior. Source `auto_start_agent` and
+`auto_complete_without_review`, schedulers and accepted queues retain their
+independent background ownership. This renderer proof does not establish
+installed hide/reload/crash behavior, real-provider post-Stop recovery, live
+provider triage or supported-platform input acceptance.
+
+The final gate passes2152renderer tests/161files,655affected tests/25files and
+153directory-owner tests/4files, all with zero skips. Twenty-five typed-native
+controls repair8 published-hook failures; four separate real Source controls
+prove the automatic-start contract. Forced no-emit typecheck, lint0errors/
+165baselinewarnings, production staging, both frontends and923inventory/contracts
+pass. Initial type/lint/fixture failures are retained in revision-bound evidence:
+`issue-209-native-autorun-local-20261018.json`.

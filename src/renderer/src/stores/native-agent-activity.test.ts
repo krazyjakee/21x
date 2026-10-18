@@ -372,8 +372,8 @@ const autoTask = (extra: Partial<Task> = {}): Task => ({
 it('keeps an enabled native auto-run observation inert for a poll/disconnect heartbeat', async () => {
   vi.useFakeTimers()
   const task = autoTask(), selected = { ...agent(), config: { coding_agent: 'pi', model: 'synthetic/model' } } as Agent
-  f.handlers.set('db:updateTask', async () => autoTask({ status: 'triaging' } as Partial<Task>))
   f.handlers.set('db:getTask', async () => task)
+  f.handlers.set('db:getSubtasks', async () => [])
   f.handlers.set('agentSession:start', async () => ({ sessionId: 'session-1' }))
   const scheduler = (await import('./agent-scheduler-store')).useAgentSchedulerStore
   const { useAgentAutoStart } = await import('@/hooks/use-agent-auto-start')
@@ -383,17 +383,23 @@ it('keeps an enabled native auto-run observation inert for a poll/disconnect hea
   let observed: unknown, afterHeartbeat: unknown
   try {
     await act(async () => { await vi.advanceTimersByTimeAsync(300) })
-    expect(f.calls('db:updateTask')).toBe(1); expect(f.calls('agentSession:start')).toBe(1)
+    expect(f.calls('db:updateTask')).toBe(0); expect(f.calls('agentSession:start')).toBe(1)
+    expect(f.useAgentStore.getState().sessions.has('task-1')).toBe(false)
+    // A start acknowledgement does not manufacture a renderer session. The
+    // real typed Source status event supplies the positive identity control.
+    act(() => f.emit(f.status(1)))
     observed = f.useAgentStore.getState().sessions.get('task-1')
     expect(observed).toMatchObject({ sessionId: 'session-1', status: 'working' })
+    const reads = f.calls('db:getTask'), children = f.calls('db:getSubtasks')
+    expect(reads).toBe(1); expect(children).toBe(1)
     await act(async () => {
-      f.emit(f.status(1, { status: 'idle', heartbeat: true, disconnected: true }))
+      f.emit(f.status(2, { status: 'idle', heartbeat: true, disconnected: true }))
       afterHeartbeat = f.useAgentStore.getState().sessions.get('task-1')
       await vi.advanceTimersByTimeAsync(600)
     })
     expect(afterHeartbeat).toBe(observed)
-    expect(f.calls('db:getTask')).toBe(0)
-    expect(f.calls('db:updateTask')).toBe(1); expect(f.calls('agentSession:start')).toBe(1)
+    expect(f.calls('db:getTask')).toBe(reads); expect(f.calls('db:getSubtasks')).toBe(children)
+    expect(f.calls('db:updateTask')).toBe(0); expect(f.calls('agentSession:start')).toBe(1)
   } finally { view.unmount(); scheduler.getState().disable(); vi.useRealTimers() }
 })
 
