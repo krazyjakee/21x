@@ -1,4 +1,4 @@
-import { open } from 'node:fs/promises'
+import { open, unlink as unlinkFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { CLI_MCP_CODECS } from '../shared/cli-mcp-codecs'
 import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
@@ -115,6 +115,29 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('keeps an outside canary untouched when the root swaps during the exact-ID raw unlink syscall', async () => {
+    const { TaskAttachmentFileOwner } = await import('../main/task-attachment-file-owner')
+    let armed = false
+    const f = await fixture(undefined, false, false, false, undefined, undefined, undefined, false, options => new TaskAttachmentFileOwner({ ...options, fs: { unlink: async path => {
+      if (!armed || !path.endsWith(`/${swap.filename}`)) return unlinkFile(path)
+      armed = false
+      renameSync(swap.root, swap.original); symlinkSync(swap.outside, swap.root, 'dir')
+      try { await unlinkFile(path) } finally { unlinkSync(swap.root); renameSync(swap.original, swap.root) }
+    } } }))
+    const task = f.services.db.createTask({ title: 'Exact-ID unlink syscall authority' })!, bytes = Buffer.from('owned exact-ID bytes')
+    const record = { id: randomUUID(), filename: 'owned.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+    const receipt = await f.services.taskAttachmentFiles.write(task.id, record, bytes, { beforeEffect() {}, signal: f.signal })
+    f.services.taskAttachmentFiles.commit(receipt); f.services.db.updateTask(task.id, { attachments: [record] })
+    const filename = `${record.id}-${record.filename}`, outside = join(f.root, 'outside-unlink-canary'), canary = join(outside, task.id, filename)
+    mkdirSync(join(outside, task.id), { recursive: true }); writeFileSync(canary, 'outside final syscall authority')
+    const swap = { root: f.bootstrap.paths.attachmentRoot, original: `${f.bootstrap.paths.attachmentRoot}-original`, outside, filename }; armed = true
+    const result = await f.backend.invoke('attachments:remove', { taskId: task.id, attachmentId: record.id }, f.caller, f.signal).then(() => 'accepted', () => 'refused')
+    expect(existsSync(canary)).toBe(true)
+    expect(readFileSync(canary, 'utf8')).toBe('outside final syscall authority')
+    expect(result).toBe('accepted')
+    expect(f.services.db.getTask(task.id)?.attachments).toEqual([])
+    expect(existsSync(join(f.bootstrap.paths.attachmentRoot, task.id, filename))).toBe(false)
+  })
   it('never recursively deletes outside bytes through a replaced attachment root during task deletion', async () => {
     const f = await fixture(), task = f.services.db.createTask({ title: 'Actual task deletion boundary' })!
     const bytes = Buffer.from('owned attachment'), record = { id: randomUUID(), filename: 'owned.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }

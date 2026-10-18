@@ -103,3 +103,7 @@ provider, OS credential account, microphone, release or profile cutover.
 Hosted Verify unavailable: repository Actions disabled
 (actions/permissions enabled:false), awaiting user decision. No settings endpoint
 or workflow dispatch; hosted voice stays deferred.
+
+## Protected Source directory effects
+
+The shared attachment file owner now uses [verified held directory descriptors](native-attachment-directory-authority.md) for Linux protected opens/publication/cleanup as well as the existing held source file reader. A final-unlink root-swap canary reproduced ambient pathname redirection before this change. Canonical receipts and scope fences remain; FDs/proc paths never cross to a renderer. Equivalent protected directory authority remains unavailable on macOS/Windows; no ambient pathname fallback is enabled. Whole-task deletion continues to retain protected directories and journal facts rather than recursively reclaiming them.

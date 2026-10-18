@@ -1,6 +1,6 @@
 import { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, symlinkSync, linkSync, renameSync } from 'node:fs'
+import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, symlinkSync, linkSync, renameSync } from 'node:fs'
 import { link, open, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
@@ -345,7 +345,7 @@ describe('Source-owned exact-ID logical removal before physical cleanup', () => 
   it('publishes canonical metadata before holding raw unlink and excludes a second Source mutation', async () => {
     const { value, records, selected, path } = await ready(), gate = held()
     let entered = false
-    beforeUnlink = async target => { expect(target).toBe(path); entered = true; await gate.promise }
+    beforeUnlink = async target => { expect(dirname(target)).toMatch(/^\/proc\/self\/fd\/\d+$/); expect(realpathSync(target)).toBe(path); entered = true; await gate.promise }
     const work = call('attachments:remove', [value.id, selected.id]); releases.push(gate.release)
     await vi.waitFor(() => expect(entered).toBe(true))
     expect(metadata(value.id)).toEqual([records[1]])

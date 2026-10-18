@@ -1,7 +1,7 @@
 import { open } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SQLite from 'better-sqlite3'
-import { linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync } from 'node:fs'
+import { constants, linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProductionOwner, ProductionOwnerBootstrap, ProductionServices } from './production-owner'
@@ -179,6 +179,30 @@ describe('actual production application owner', () => {
     const retry = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, f.boundaries)
     owners.push(retry)
     expect((await retry.start()).db.getTask(task.id)?.title).toBe('Preserve busy profile')
+  })
+  it.each(['root', 'task'] as const)('retains the actual profile until a refused %s directory close is acknowledged', async kind => {
+    const f = await fixture(); await f.owner.close()
+    const { TaskAttachmentFileOwner } = await import('../main/task-attachment-file-owner')
+    const { acquireProfileLock } = await import('../main/platform/profile-lock')
+    let refuse = true
+    finishers.push(() => { refuse = false })
+    const owner = new f.ProductionOwner(f.bootstrap, { ...f.boundaries, taskAttachmentFiles: options => new TaskAttachmentFileOwner({ ...options, fs: { openDirectory: async path => {
+      const fd = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+      return { descriptor: fd.fd, stat: () => fd.stat({ bigint: true }), close: async () => {
+        if (refuse && (kind === 'root' ? path === options.attachmentRoot : path !== options.attachmentRoot)) throw new Error('Controlled directory close refusal')
+        await fd.close()
+      } }
+    } } }) }); owners.push(owner)
+    const services = await owner.start(), task = services.db.createTask({ title: 'Retain directory descriptor profile' })!
+    const bytes = Buffer.from('owned directory bytes'), record = { id: '00000000-0000-4000-8000-000000000002', filename: 'directory.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+    await expect(services.taskAttachmentFiles.write(task.id, record, bytes, { beforeEffect() {}, signal: new AbortController().signal })).rejects.toMatchObject({ code: 'ATTACHMENT_CLOSE_FAILED' })
+    expect(services.taskAttachmentFiles.inflightCount).toBeGreaterThan(0)
+    await expect(owner.close()).rejects.toThrow('OWNER_DRAIN_BLOCKED')
+    expect(owner.snapshot()).toMatchObject({ phase: 'blocked', owned: true })
+    expect(() => acquireProfileLock(f.bootstrap.paths.profileRoot)).toThrow('PROFILE_DUPLICATE_OWNER')
+    refuse = false; await owner.close()
+    expect(owner.snapshot()).toMatchObject({ phase: 'stopped', owned: false })
+    const lock = acquireProfileLock(f.bootstrap.paths.profileRoot); lock.release()
   })
   it('retains the actual profile while a task attachment descriptor refuses close, then retries cleanup', async () => {
     const f = await fixture(); await f.owner.close()

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { link, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { unlink, link, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { constants } from 'node:fs'
 import { TaskAttachmentFileOwner, type TaskAttachmentFileHandle, type TaskAttachmentFilePrimitives } from './task-attachment-file-owner'
 import { isAttachmentPathReceipt, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import { ServiceProtocolError } from '../shared/service-protocol'
@@ -16,6 +17,87 @@ async function actualHandle(path: string, flags: number, mode?: number): Promise
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), '21x-attachment-owner-')); attachmentRoot = join(root, 'attachments'); await mkdir(attachmentRoot); valid = true; releases = []; owner = create() })
 afterEach(async () => { for (const release of releases) release(); valid = true; await owner.close(); await rm(root, { recursive: true, force: true }) })
 describe('actual attachment-root publication and raw lifetime', () => {
+  it('anchors task directory creation across a root swap inside the actual mkdir syscall', async () => {
+    const outside = join(root, 'mkdir-outside'), original = `${attachmentRoot}-original`; await mkdir(outside)
+    owner = create({ mkdir: async path => {
+      await rename(attachmentRoot, original); await symlink(outside, attachmentRoot, 'dir')
+      try { await mkdir(path) } finally { await unlink(attachmentRoot); await rename(original, attachmentRoot) }
+    } })
+    const receipt = await owner.write('task-1', metadata, bytes, controls()); owner.commit(receipt)
+    expect(await readdir(outside)).toEqual([])
+    expect(await readFile(join(attachmentRoot, 'task-1', `${metadata.id}-${metadata.filename}`))).toEqual(bytes)
+  })
+  it.each(['open', 'link'] as const)('anchors publication across root replacement at the actual %s syscall', async boundary => {
+    const outside = join(root, 'publication-outside'), outsideTask = join(outside, 'task-1'), original = `${attachmentRoot}-original`
+    await mkdir(outsideTask, { recursive: true }); let armed = true
+    const swapping = async <T,>(effect: () => Promise<T>): Promise<T> => {
+      await rename(attachmentRoot, original); await symlink(outside, attachmentRoot, 'dir')
+      try { return await effect() } finally { await unlink(attachmentRoot); await rename(original, attachmentRoot) }
+    }
+    owner = create(boundary === 'open' ? { open: async (path, flags, mode) => {
+      if (!armed || !path.endsWith('.tmp')) return actualHandle(path, flags, mode)
+      armed = false; return swapping(() => actualHandle(path, flags, mode))
+    } } : { link: async (from, to) => {
+      if (!armed) return link(from, to)
+      armed = false
+      await writeFile(join(outsideTask, basename(from)), 'outside stage bytes')
+      await swapping(() => link(from, to))
+    } })
+    const receipt = await owner.write('task-1', metadata, bytes, controls()); owner.commit(receipt)
+    expect(await readFile(join(attachmentRoot, 'task-1', `${metadata.id}-${metadata.filename}`))).toEqual(bytes)
+    const names = await readdir(outsideTask)
+    expect(names.some(name => name === `${metadata.id}-${metadata.filename}`)).toBe(false)
+    if (boundary === 'open') expect(names).toEqual([])
+    else { expect(names).toHaveLength(1); expect(await readFile(join(outsideTask, names[0]), 'utf8')).toBe('outside stage bytes') }
+  })
+  it('anchors rollback unlink and never erases the outside same-name canary', async () => {
+    const outside = join(root, 'rollback-outside'), outsideTask = join(outside, 'task-1'), original = `${attachmentRoot}-original`, filename = `${metadata.id}-${metadata.filename}`
+    await mkdir(outsideTask, { recursive: true }); await writeFile(join(outsideTask, filename), 'outside rollback bytes'); let armed = false
+    owner = create({ unlink: async path => {
+      if (!armed || !path.endsWith(`/${filename}`)) return unlink(path)
+      armed = false; await rename(attachmentRoot, original); await symlink(outside, attachmentRoot, 'dir')
+      try { await unlink(path) } finally { await unlink(attachmentRoot); await rename(original, attachmentRoot) }
+    } })
+    const receipt = await owner.write('task-1', metadata, bytes, controls()); armed = true
+    await owner.rollback(receipt)
+    expect(await readFile(join(outsideTask, filename), 'utf8')).toBe('outside rollback bytes')
+    expect(await readdir(join(attachmentRoot, 'task-1'))).toEqual([])
+  })
+  it('retains a late directory close acknowledgement through cancellation and shutdown', async () => {
+    const entered = held(), gate = held(), cancelled = new AbortController(); releases.push(gate.release)
+    owner = create({ openDirectory: async path => {
+      const fd = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+      return { descriptor: fd.fd, stat: () => fd.stat({ bigint: true }), close: async () => {
+        if (path === join(attachmentRoot, 'task-1')) { entered.release(); await gate.promise }
+        await fd.close()
+      } }
+    } })
+    const writing = owner.write('task-1', metadata, bytes, controls(cancelled.signal)); void writing.catch(() => {})
+    await entered.promise; cancelled.abort()
+    await expect(owner.close(10)).rejects.toMatchObject({ code: 'ATTACHMENT_DRAIN_INCOMPLETE' })
+    expect(owner.inflightCount).toBeGreaterThan(0)
+    gate.release(); await expect(writing).rejects.toMatchObject({ code: 'ATTACHMENT_CLOSED' })
+    await owner.close(); expect(owner.inflightCount).toBe(0)
+    expect(await readdir(join(attachmentRoot, 'task-1'))).toEqual([])
+  })
+  it('keeps refused directory closes owned for an explicit successful retry', async () => {
+    let refuse = true
+    owner = create({ openDirectory: async path => {
+      const fd = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+      return { descriptor: fd.fd, stat: () => fd.stat({ bigint: true }), close: async () => { if (refuse) throw new Error('Controlled directory close refusal'); await fd.close() } }
+    } })
+    await expect(owner.write('task-1', metadata, bytes, controls())).rejects.toMatchObject({ code: 'ATTACHMENT_CLOSE_FAILED' })
+    expect(owner.inflightCount).toBeGreaterThan(0)
+    await expect(owner.close()).rejects.toMatchObject({ code: 'ATTACHMENT_CLOSE_FAILED' })
+    refuse = false; await owner.close(); expect(owner.inflightCount).toBe(0)
+  })
+  it('refuses missing directory authority before creating, opening or reading copy bytes', async () => {
+    const opened = vi.fn(), created = vi.fn(), read = vi.fn()
+    owner = create({ openDirectory: async () => { throw new ServiceProtocolError('DISCONNECTED') }, open: opened, mkdir: created })
+    await expect(owner.writeStream('task-1', metadata, read, controls())).rejects.toThrow()
+    expect(opened).not.toHaveBeenCalled(); expect(created).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled()
+    expect(await readdir(attachmentRoot)).toEqual([]); expect(owner.inflightCount).toBe(0)
+  })
   it('publishes verified real bytes only after fsync/close and keeps committed data through owner close', async () => {
     let closed = false, synced = false
     owner = create({ open: async (path, flags, mode) => { const fd = await actualHandle(path, flags, mode); return { ...fd, sync: async () => { await fd.sync(); synced = true }, close: async () => { await fd.close(); closed = true } } }, link: async (from, to) => { expect(synced).toBe(true); expect(closed).toBe(true); await link(from, to) } })

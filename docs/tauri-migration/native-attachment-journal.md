@@ -54,6 +54,8 @@ cause unlink. A stale CAS fails before this observer. File-owner rollback also
 preserves bytes if canonical metadata acquired the path while the original
 request was retiring.
 
+Protected file syscalls additionally use [held directory authority](native-attachment-directory-authority.md) on Linux; canonical journal facts remain data, not stored FD capabilities. Unsupported directory authority refuses file effects.
+
 ## Whole-task deletion retains protected directories
 
 An actual retained `db:deleteTask` regression saved a protected copy, renamed
