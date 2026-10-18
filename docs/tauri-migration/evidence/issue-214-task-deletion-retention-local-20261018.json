@@ -1,0 +1,586 @@
+{
+  "version": 1,
+  "kind": "issue-214-production-task-deletion-protected-directory-retention-local",
+  "issues": [
+    214,
+    215,
+    210
+  ],
+  "sourceRevision": "956c5d0739a579f1487fff1e053373d6ad36433b",
+  "sourceBaseRevision": "2d5810e62e80c190d060d91cad83b0ac1c9b7c1a",
+  "createdAt": "2026-10-18T03:33:07.686458+00:00",
+  "environment": {
+    "os": "Linux 6.8.0-139-generic x86_64 GNU/Linux",
+    "testRuntime": {
+      "node": "v22.23.2",
+      "modules": "127",
+      "platform": "linux",
+      "arch": "x64"
+    },
+    "schemaVersion": 37,
+    "hostNode": "v22.22.0",
+    "pnpmActual": "9.15.9",
+    "packageManagerDeclared": "pnpm@9.15.2",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18",
+    "eslint": "10.0.1",
+    "stagedPackages": {
+      "better-sqlite3": "13.0.3",
+      "node-pty": "1.1.0",
+      "@paralleldrive/cuid2": "2.3.1",
+      "@anthropic-ai/claude-agent-sdk": "0.3.260",
+      "@anthropic-ai/sdk": "0.123.0",
+      "@opencode-ai/sdk": "1.18.28"
+    },
+    "nativeRust": "No native source/manifests changed; no Cargo/installed proof claimed"
+  },
+  "fixture": {
+    "data": "Synthetic temporary protected profiles, in-memory actual schema and owned filesystem canaries only",
+    "credentials": "Synthetic in-memory keystore closures; no live OS credential account/profile",
+    "providers": "Existing controlled FakeAdapter/Pi processes only; no live account/model/provider run",
+    "network": "Existing loopback HTTP/WS/private-peer controls only; no LAN/public tunnel",
+    "compiledRoot": "production-engine.mjs imported under pinned physical Node in the same isolated test process; no installed native app claim",
+    "entryProof": "Two separate actual staged stdio child tests negotiate/reject bootstrap and close; these do not perform the deletion transaction"
+  },
+  "implemented": [
+    "ProductionOwner always passes private attachmentDeletion:retain when constructing its sole real DatabaseManager.",
+    "DatabaseManager captures the policy as a primitive and rejects malformed values; later option mutation cannot restore recursive cleanup.",
+    "Protected direct deleteTaskAttachments and every deleteTask caller return from byte cleanup before constructing/traversing a path. Existing logical row, task/subtree/source scopes, exclusion, Stop, transcript cleanup and canonical events remain with their original owners.",
+    "Accepted logical deletion retains protected directories and existing private journal facts. No recursive cleanup authority is synthesized from task ID, current-root check or persisted journal entry.",
+    "Legacy Electron host construction omits the new private option and retains its existing default behavior; no public API, DTO, retained row/grant or file import semantics change."
+  ],
+  "expectedActual": [
+    {
+      "scenario": "Actual retained db:deleteTask after root rename plus symlink to outside synthetic task directory",
+      "expected": "Logical true/row absent; outside canary and original protected copy unchanged",
+      "oldActual": "Outside canary deleted; actual negative raw1 before policy fix",
+      "fixedActual": "Pass in Source binding and both Source/compiledRoot private-peer variants"
+    },
+    {
+      "scenario": "Accepted normal subtree deletion",
+      "expected": "Parent and child rows absent, exact two task:deleted payloads once, protected copies and publication facts retained",
+      "actual": "Pass; event order intentionally follows captured DB rows rather than an invented parent-first contract"
+    },
+    {
+      "scenario": "Actual source-owner logical task cascade",
+      "expected": "Source/task rows absent; protected copy and published journal fact retained",
+      "actual": "Pass through real taskSource:delete owner"
+    },
+    {
+      "scenario": "Private policy capture/invalid values/default host",
+      "expected": "Captured retain survives option mutation/direct cleanup; malformed policies refuse construction; omitted default retains legacy cleanup",
+      "actual": "Three actual-schema/filesystem controls pass"
+    }
+  ],
+  "initialPassingGate": {
+    "coverage": {
+      "passed": 349,
+      "failed": 0,
+      "skipped": 0,
+      "files": 12,
+      "reportSha256": "c1c5eca0c1ef78d4f25689f9a693b214b34d2f71bb488b6be10d7fdd780e4b3e"
+    },
+    "checks": [
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-gate-type.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "stage",
+        "argv": [
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-gate-stage.log",
+        "logSha256": "323fbd04e7f4147de25fbf21f9d418085be2201b109ac23080ab42731f30114d"
+      },
+      {
+        "name": "neutral",
+        "argv": [
+          "pnpm",
+          "test:host-neutral",
+          "--",
+          "--service-proofs",
+          "--production-proofs",
+          "--terminal-proofs",
+          "src/main/database-attachment-retention.test.ts",
+          "src/main/task-attachment-journal.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/task-lifecycle-backend.test.ts",
+          "src/service/task-source-backend.test.ts",
+          "src/service/task-attachment-backend.test.ts",
+          "src/service/task-attachment-metadata-conflict.test.ts",
+          "src/service/production-attachment-execution.test.ts",
+          "src/service/production-mobile.test.ts",
+          "src/service/production-service.test.ts",
+          "scripts/production-service-proof.test.ts",
+          "--maxWorkers=1",
+          "--run-receipt=/tmp/e2-task-delete-gate-receipt.json",
+          "--reporter=json",
+          "--outputFile=/tmp/e2-task-delete-gate-vitest.json"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-gate-neutral.log",
+        "logSha256": "ad73c6511dc6f0ed7b4d268794a9edf175ca3d0547d0de253ae076b51a67db2c"
+      },
+      {
+        "name": "lint",
+        "argv": [
+          "pnpm",
+          "lint"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-gate-lint.log",
+        "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+      },
+      {
+        "name": "frontend",
+        "argv": [
+          "pnpm",
+          "tauri:production:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-gate-frontend.log",
+        "logSha256": "2d5da5379d560d3133682f7fb100cf320923b08762422c5f0d4161ea24198ed2"
+      },
+      {
+        "name": "diagnostic",
+        "argv": [
+          "pnpm",
+          "tauri:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-gate-diagnostic.log",
+        "logSha256": "fa285e7321e76253344804b419061549a1018039802f3dee29e81669b90658c0"
+      },
+      {
+        "name": "diff",
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-gate-diff.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "testVersion": "Before own event-order expectation normalization; runtime implementation identical to final Source"
+  },
+  "finalPassingGate": {
+    "coverage": {
+      "passed": 171,
+      "failed": 0,
+      "skipped": 0,
+      "files": 6,
+      "reportSha256": "f7ef115caa87d36e81f70f62f4296d941531dc393c694231679f149b408511a2"
+    },
+    "checks": [
+      {
+        "name": "stage",
+        "argv": [
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-stage.log",
+        "logSha256": "323fbd04e7f4147de25fbf21f9d418085be2201b109ac23080ab42731f30114d"
+      },
+      {
+        "name": "neutral",
+        "argv": [
+          "pnpm",
+          "test:host-neutral",
+          "--",
+          "--service-proofs",
+          "--production-proofs",
+          "--terminal-proofs",
+          "src/main/database-attachment-retention.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/production-mobile.test.ts",
+          "src/renderer/src/components/tasks/native-task-crud.test.tsx",
+          "scripts/production-service-proof.test.ts",
+          "--maxWorkers=1",
+          "--run-receipt=/tmp/e2-task-delete-rebase-gate-receipt.json",
+          "--reporter=json",
+          "--outputFile=/tmp/e2-task-delete-rebase-gate-vitest.json"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-neutral.log",
+        "logSha256": "69e38f0492812994ba9b8a1a8baa415a0560ec1359cde8b658c40f809737f95a"
+      },
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-type.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "lint",
+        "argv": [
+          "pnpm",
+          "lint"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-lint.log",
+        "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+      },
+      {
+        "name": "frontend",
+        "argv": [
+          "pnpm",
+          "tauri:production:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-frontend.log",
+        "logSha256": "b522f32ba5e4414aa94f8117f4df6177cf4a9ff957f2e4d13bf6395c9f6fbbd5"
+      },
+      {
+        "name": "diagnostic",
+        "argv": [
+          "pnpm",
+          "tauri:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-diagnostic.log",
+        "logSha256": "3d5d26c5b6100a99474ec19c9390040cb57b10dafe08cc1c2970c792afcbdf36"
+      },
+      {
+        "name": "inventory",
+        "argv": [
+          "node",
+          "scripts/tauri-inventory.mjs",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-inventory.log",
+        "logSha256": "d2f3d0b21cb77c8fd81226acb00793d3a744c427ee7b5e80c3fd1542028649dc"
+      },
+      {
+        "name": "contracts",
+        "argv": [
+          "node",
+          "scripts/tauri-contracts.mjs",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-contracts.log",
+        "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+      },
+      {
+        "name": "diff",
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-task-delete-rebase-gate-diff.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "callerFiltered": true,
+    "revisionUnderTest": "2d5810e62e80c190d060d91cad83b0ac1c9b7c1a",
+    "workingTreeModified": true,
+    "notFullEligibleCohortProof": true,
+    "includes": "34 actual typed-native CRUD controls, Source plus compiledRoot/private-peer canaries and two separate actual stdio entry controls"
+  },
+  "priorFailuresAndRepairs": {
+    "baseRevision": "43016075da5869da41fa2fea4a561391f5f93071",
+    "negative": {
+      "command": [
+        "pnpm",
+        "test:host-neutral",
+        "--",
+        "--service-proofs",
+        "--production-proofs",
+        "src/service/production-desktop-bindings.test.ts",
+        "-t",
+        "never recursively deletes outside bytes",
+        "--maxWorkers=1",
+        "--run-receipt=/tmp/e2-task-delete-negative-receipt.json",
+        "--reporter=json",
+        "--outputFile=/tmp/e2-task-delete-negative-vitest.json"
+      ],
+      "rawExitCode": 1,
+      "actual": "outside synthetic canary removed through real retained db:deleteTask after root rename and symlink replacement; expected exists true, actual false",
+      "fixtureFailure": false
+    },
+    "focused": {
+      "bindingCases": 3,
+      "policyCases": 3,
+      "passed": 6,
+      "filteredOutBindingCases": 29
+    },
+    "firstCombinedFailure": {
+      "rawExitCode": 2,
+      "stage": "forced typecheck",
+      "actual": "New source deletion fixture omitted required mcp_server_id:null",
+      "repair": "Added required null field; runtime policy/assertions unchanged; full rerun queued after first job finished. All jobs serialized by heavy.lock."
+    },
+    "noNativeChanges": true,
+    "retainedPolicy": "production-only attachmentDeletion:retain captured by DatabaseManager constructor; direct and logical task deletion do not construct/traverse/unlink protected paths; existing facts and bytes survive; legacy files not retroactively inventoried",
+    "limits": [
+      "No automatic garbage collection, durable complete legacy orphan inventory, new cleanup grant or filesystem/SQLite atomicity",
+      "Existing Electron default recursive cleanup unchanged; production Root always captures retain",
+      "Source/staged private-peer proof is separate from installed native lifecycle/platform evidence",
+      "No change to public commands, DTOs, grants, voice/identity/schemes or incoming mobile attachment policy"
+    ],
+    "firstRebaseFailure": {
+      "passed": 170,
+      "failed": 1,
+      "skipped": 0,
+      "actual": "Own subtree-positive assertion imposed parent-first delete event order, while actual TaskLifecycleBackend publishes captured DB row order. Same-timestamp rows expose either order. All retention/canary effects passed.",
+      "repair": "Normalize only event payload comparison order and still require exactly each of the two complete task:deleted payloads once; no runtime change or removed event assertion/deadline."
+    },
+    "proofInputVersions": {
+      "initial349AndFirstMerged170FailureBindingTestSha256": "bd1d4022930b9ee4dd2293658f754eee25666c11daea5ed738d6f8d885cfb9ff",
+      "final171BindingTestSha256": "3f69e633d701703f0722accf2fbeade03b896772f88f4926e540bf05bb4628f6",
+      "difference": "Only normalization of exact task:deleted comparison order; runtime Source inputs unchanged"
+    },
+    "firstCombined": [
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 2,
+        "log": "/tmp/e2-task-delete-first-gate-type.log",
+        "originalLogPath": "/tmp/e2-task-delete-gate-type.log",
+        "logSha256": "357a762f1712fe6e0fba6529bdbe44aa74dff187f1609548cdcf5bde2213d0c9"
+      }
+    ],
+    "firstMerged": {
+      "checks": [
+        {
+          "name": "stage",
+          "argv": [
+            "pnpm",
+            "tauri:prepare:production"
+          ],
+          "rawExitCode": 0,
+          "originalLogPath": "/tmp/e2-task-delete-rebase-gate-stage.log",
+          "retainedLog": null,
+          "logNote": "Original stage log not separately retained; first failure neutral log/report preserved before overwrite."
+        },
+        {
+          "name": "neutral",
+          "argv": [
+            "pnpm",
+            "test:host-neutral",
+            "--",
+            "--service-proofs",
+            "--production-proofs",
+            "--terminal-proofs",
+            "src/main/database-attachment-retention.test.ts",
+            "src/service/production-desktop-bindings.test.ts",
+            "src/service/production-owner.test.ts",
+            "src/service/production-mobile.test.ts",
+            "src/renderer/src/components/tasks/native-task-crud.test.tsx",
+            "scripts/production-service-proof.test.ts",
+            "--maxWorkers=1",
+            "--run-receipt=/tmp/e2-task-delete-rebase-gate-receipt.json",
+            "--reporter=json",
+            "--outputFile=/tmp/e2-task-delete-rebase-gate-vitest.json"
+          ],
+          "rawExitCode": 1,
+          "originalLogPath": "/tmp/e2-task-delete-rebase-gate-neutral.log",
+          "retainedLog": {
+            "path": "/tmp/e2-task-delete-first-rebase-gate-neutral.log",
+            "sha256": "2726bfb56cdb1296be4176a96b3da66e295738bad7c3b7094e03962cadc2a9cc"
+          },
+          "logNote": "Original stage log not separately retained; first failure neutral log/report preserved before overwrite."
+        }
+      ],
+      "coverage": {
+        "passed": 170,
+        "failed": 1,
+        "skipped": 0,
+        "files": 6,
+        "reportSha256": "a23b2df1c312472f702f145f4568bfb752dbce169fbcf23630caabc0222e1de8"
+      }
+    },
+    "assertions": "No production guard, deadline or exact event-ID/count assertion removed. Only own unsupported ordering expectation normalized. First fixture required-null typing repaired."
+  },
+  "normalSourceCommit": {
+    "rawExitCode": 0,
+    "bypassed": false,
+    "logSha256": "58172b06d5664a987a1456cf46cae8c8a42b7a0e1364fa0fd065e1aea8227689"
+  },
+  "publication": {
+    "sourceRevision": "956c5d0739a579f1487fff1e053373d6ad36433b",
+    "remoteConfirmed": "956c5d0739a579f1487fff1e053373d6ad36433b",
+    "normalHooks": 0,
+    "allFinalChecks": 0,
+    "finalCases": 171,
+    "finalFiles": 6,
+    "initialCases": 349,
+    "initialFiles": 12,
+    "sourceRuns": [],
+    "sourceInputsAfterJsonRebase": "All6frozen inputs byte-identical; inherited only A2d evidenceJSON after a600"
+  },
+  "retainedAuthority": {
+    "manifestRows": 331,
+    "retainedRows": 325,
+    "newPublicOperations": 0,
+    "newEvents": 0,
+    "newGrants": 0,
+    "unchangedFiles": [
+      "docs/tauri-migration/inventory.json",
+      "docs/tauri-migration/operations.json",
+      "src/shared/desktop-api.ts",
+      "src/shared/desktop-operations.ts",
+      "src/shared/task-lifecycle-codecs.ts"
+    ],
+    "inventory": {
+      "sources": 921,
+      "ipcSites": 736,
+      "existingReviewedUnresolved": 9
+    }
+  },
+  "runner": {
+    "adoptedSource": "79f409f41d754830a9d3b8d9b1a67fdf1c2036fd",
+    "bothPeersConfirmed": true,
+    "callerFiltered": true,
+    "existingCommandsMeaning": "Unchanged",
+    "scope": "Framework reports identify executed tests and actual skips. Eligible files are not asserted as executed when caller filters are present. No installed native UI/platform acceptance.",
+    "tooling": [
+      {
+        "file": "scripts/test-host-neutral.mjs",
+        "sha256": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d"
+      },
+      {
+        "file": "scripts/host-neutral-runtime.mjs",
+        "sha256": "d2e05593a81a5e018b9b086082af34710b305c6ab89d99f341775e6c360bd302"
+      },
+      {
+        "file": "scripts/host-neutral-test-policy.mjs",
+        "sha256": "cb8f1bd1d0e1c8b75a8bd13c6303491716143b854de648c5db05ddc40aa27d8b"
+      },
+      {
+        "file": "test/electron-transition-tests.json",
+        "sha256": "10de138ce2d0913a99e7648a0dc36a612aa2dd1780b708ede584782ab783d785"
+      },
+      {
+        "file": "test/setup-host-neutral-runtime.ts",
+        "sha256": "061c08a065a2a48be85a9b5e70e6e937a36cdafcbd947dab428a496ddf5d0317"
+      },
+      {
+        "file": "vitest.host-neutral.config.ts",
+        "sha256": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+      }
+    ],
+    "runtimeArtifacts": [
+      {
+        "file": "src-tauri/resources/node/node",
+        "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+      },
+      {
+        "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+        "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+      },
+      {
+        "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+        "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+      }
+    ]
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": "ff2a888dc535fb8bce254281fa7dc6324beebba94c97e1ef9d64b7dda88fcbe7",
+    "docs/tauri-migration/native-attachment-journal.md": "1413f8fdb313b9576971206b14539a9f24cf77f08a514756b604c140710226f0",
+    "src/main/database-attachment-retention.test.ts": "8f8aa40e078b87b92918d18266e88435d13b06b6b55acd99fb9b703ac0ba6e21",
+    "src/main/database/manager.ts": "94b9e254c15ec1ed83fd8283d79d53ce85d757a9940930fe1603c03ef8a8d671",
+    "src/service/production-desktop-bindings.test.ts": "3f69e633d701703f0722accf2fbeade03b896772f88f4926e540bf05bb4628f6",
+    "src/service/production-mobile.test.ts": "5dc817dbedccedeedc4652405079038eb3ef22873ec3221fa102063d647c347a",
+    "src/service/production-owner.ts": "34fc65185cfa214e7568f8425f7f40927ae42092b66f4f7e7e5c49b9e27e9a88",
+    "src/main/task-attachment-file-owner.ts": "9189352fb6267c3675250d7e3464119f283e4e7b159a77dab34e3e1647afa9cd",
+    "src/main/task-attachment-journal.ts": "e3f11451cd45d85939fc7f4faa160c71c718c1ec4946e5d8be69f9370ab5dd5e",
+    "src/main/database/schema.ts": "fd868bb21bedc5e891448f5e4d429d2cbe5bd9f037ef01f5863e122252a6611c",
+    "src/service/task-lifecycle-backend.ts": "18b0999826d28185ddf9889692e3c9aa50ec188a3a87157e93e87eacf5e7da9c",
+    "src/service/task-source-backend.ts": "cdf3784d5c934a0a0aab45b0d21c18caeb5e478f5be4bedcb438099008fa33d0",
+    "src/service/production-desktop-bindings.ts": "e5ef6681a36e29fcfcd118e65a43a6e6c778cff2ad88ce05226d2293a62730cc",
+    "src/shared/task-lifecycle-codecs.ts": "d9fb5ab4e5f4139f1b39c4f8312de6dd7633825b75e11cd24060fbd3d5e543dd",
+    "src/shared/desktop-api.ts": "aa2bc060dd47ad7c3cdb244a5d9637cd85eee323bd55ed1fbed5825287381e8f",
+    "src/shared/desktop-operations.ts": "94f92da0943c03c4d7661864d4a92eba54dbc0571e3177659c6ab8b99c30b73b",
+    "scripts/test-host-neutral.mjs": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d",
+    "vitest.host-neutral.config.ts": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+  },
+  "artifactHashes": {
+    "src-tauri/resources/service/production-stdio.mjs": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+    "src-tauri/resources/service/production-engine.mjs": "c3331b4ecfab66af359aa9f5da169b38708ede9981f8a479f3ea9af740424fec",
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": "3a7a10e2a57d095a87ba56f0060fba4417a7ead7234f37f07306738a7b82b2b8",
+    "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+    "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5",
+    "out/tauri-production-renderer/index.html": "ec4434ba802e5da07a9aa582642daf7456e786e5b0506b7c8708064ca2feea5e",
+    "out/tauri-renderer/index.html": "7b9b8905836dcf88a1f618354b8b85c3d70eddc15ccf54cd3919e447ae9b70b4"
+  },
+  "localProofArtifactHashes": {
+    "/tmp/e2-task-delete-negative-vitest.json": "96ec882ff0015d8e2a027dc9f04337519da9a9055ba075c43f262c02c7345114",
+    "/tmp/e2-task-delete-negative-receipt.json": "4a0e4424cebfe9df48cf6fb52044d192e91c97d9a08bf29ff29abc03cdbf61c0",
+    "/tmp/e2-task-delete-fixed-vitest.json": "74a0375209685b0b41ff937c875ed20de2024487e054674b0f9674c5d7aca902",
+    "/tmp/e2-task-delete-policy-vitest.json": "d6ab8e22ade012a2396b1111dadfc0eac5fdd0c839787f86e11cc95873358c9b",
+    "/tmp/e2-task-delete-first-gate-type.log": "357a762f1712fe6e0fba6529bdbe44aa74dff187f1609548cdcf5bde2213d0c9",
+    "/tmp/e2-task-delete-first-gate-results.json": "90023e1e059c9e8cbfa4069f583ae7274f25ff668bd13df7551e3994b66fae4d",
+    "/tmp/e2-task-delete-first-rebase-gate-vitest.json": "a23b2df1c312472f702f145f4568bfb752dbce169fbcf23630caabc0222e1de8",
+    "/tmp/e2-task-delete-first-rebase-gate-results.json": "5cadda92d624ae1e99a4b3903ac259975bde74e74ca20b2ccb316d29965b2032",
+    "/tmp/e2-task-delete-first-rebase-gate-neutral.log": "2726bfb56cdb1296be4176a96b3da66e295738bad7c3b7094e03962cadc2a9cc",
+    "/tmp/e2-task-delete-event-order-vitest.json": "b93358e6b1bf4fe758b67295661bdba5f6a213464f9262d310d0f8e77e3b6e6c",
+    "/tmp/e2-task-delete-gate-vitest.json": "c1c5eca0c1ef78d4f25689f9a693b214b34d2f71bb488b6be10d7fdd780e4b3e",
+    "/tmp/e2-task-delete-gate-receipt.json": "31f860afafa351118bdce853c7d5232e6fe2d90c621b53a540d91f2b358148bf",
+    "/tmp/e2-task-delete-rebase-gate-vitest.json": "f7ef115caa87d36e81f70f62f4296d941531dc393c694231679f149b408511a2",
+    "/tmp/e2-task-delete-rebase-gate-receipt.json": "8968faae589441e7db79a38906da872c08df7d0c3c8ba90563a848d2a5bb5594",
+    "/tmp/e2-task-delete-source-commit.log": "58172b06d5664a987a1456cf46cae8c8a42b7a0e1364fa0fd065e1aea8227689",
+    "/tmp/e2-task-delete-gate.py": "2ecdec136dbf4b545e7a83dba6b4072130aaa9552b396d1bc5aa7ed514a3bb00",
+    "/tmp/e2-task-delete-rebase-gate.py": "64e037c5e3e1fde68574cb46eda3d6e982878a00b4d33d00beb84775ccc30d43",
+    "/tmp/e2-task-delete-commit-if-gate.py": "fd18311175644a2d2239fce9c9f2fc7438b712796eaeedc57d185e4609db74cb"
+  },
+  "remainingLimits": [
+    "No automatic reclamation/garbage collection or separately authorized bounded whole-directory cleanup",
+    "Existing facts survive; legacy files with no facts are retained without invented durable inventory",
+    "No filesystem/SQLite atomicity or full installed process/crash/power-loss proof",
+    "No native viewer/voice availability, identity/scheme decision, live profile/provider/release/cutover or Electron retirement",
+    "Supported-target installed acceptance, #202/#208 prerequisites and user decisions remain open"
+  ],
+  "hostedCI": {
+    "status": "blocked",
+    "reason": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "sourceRuns": [],
+    "settingsEndpointsCalled": false,
+    "workflowDispatched": false
+  },
+  "acceptance": {
+    "wholeCriteriaNewlyChecked": [],
+    "issuesRemainOpen": true,
+    "noLiveReleaseOrCutover": true,
+    "nativeVoice": "unavailable",
+    "artifactViewer": "unavailable",
+    "hostedVoice": "deferred"
+  }
+}
