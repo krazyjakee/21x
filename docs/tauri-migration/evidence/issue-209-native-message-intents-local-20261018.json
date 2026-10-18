@@ -1,0 +1,549 @@
+{
+  "version": 1,
+  "issue": 209,
+  "scope": "Native renderer message-intent ownership, exact live questions, pending indicator timers and preserved kickoff/composer drafts. No Source/native/public operation/grant change.",
+  "createdAt": "2026-10-18T02:54:00.323595+00:00",
+  "baseRevision": "c00d99b6dc22a7cf8ba1084c665f025dd4318170",
+  "implementationRevision": "63171393baa130398e9813fb71ef6e1ea084431b",
+  "verificationRevision": "63171393baa130398e9813fb71ef6e1ea084431b",
+  "fixture": {
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1,
+    "description": "Actual typed native facade/transport, session hooks/store, TaskWorkspace captured callbacks and real TranscriptComposer/kickoff controls with controlled private results. Separate Source production owner/private peer/protected-file tests and actual staged stdio children. No installed UI or live-provider proof."
+  },
+  "expectedActual": [
+    {
+      "expected": "One original native message intent reaches its established Source send owner without renderer startup orchestration or replay.",
+      "actual": "Native plain send uses retained send when live, otherwise sendByTaskId; Source retains its established resume/create, saved metadata/FileOwner and durable nonce policy. Same provided nonce/attachment refs reach one command. View lane refuses duplicate/retired calls; unknown result locks review without a new nonce, rollback or automatic retry."
+    },
+    {
+      "expected": "Question answers require current exact authority and cannot wake historical sessions.",
+      "actual": "Native current live session + exact requestId/type required before approve; Source hydrated transcript/final authorization unchanged. No resume/start/general prompt for historical/missing-ID questions; one-shot local request ledger bounded4096. Fresh remains separately unavailable."
+    },
+    {
+      "expected": "Old send receipts and timeout must not alter replacement state.",
+      "actual": "Captured connection plus send token checks before cache changes; transcript/status copies retain ownership, explicit session replacement retires it. Raw failure clears only its own indicator. One timer per task is replaced/cancelled and retired with document cohort; old timeout cannot clear a newer send."
+    },
+    {
+      "expected": "Unknown native send retains user text and cannot produce unsupported optional voice work.",
+      "actual": "Kickoff text stays through pending/unknown receipts, keyed to original task; late callback cannot clear replacement text. Actual composer restores refused text, while workspace review blocks replay. Finite host-support check omits unavailable voice housekeeping and owns optional promise failure; native voice remainsOFF."
+    }
+  ],
+  "negativeProof": [
+    {
+      "revision": "c00d99b6dc22a7cf8ba1084c665f025dd4318170",
+      "command": "pnpm test:run --project renderer src/renderer/src/stores/native-agent-activity.test.ts -t \"late.*send.*receipt|old connection send|finite false send|older send timeout\"",
+      "rawExitCode": 1,
+      "failed": 6,
+      "deselected": 36,
+      "actual": "Late send/sendByTaskId overwrite newer identities; old connection cleanup clears replacement pending flag; two finite false acknowledgements accepted; old timeout clears new send.",
+      "log": {
+        "sha256": "8500ee62897791c4619b6b0ca28588296760d8ad0aa7b6138612433c163c39c2",
+        "bytes": 9144
+      }
+    },
+    {
+      "revision": "c00d99b6dc22a7cf8ba1084c665f025dd4318170",
+      "command": "pnpm test:run --project renderer src/renderer/src/components/tasks/native-task-hierarchy.test.tsx -t \"one retained Source send owner|captured native message callback|native historical question\"",
+      "rawExitCode": 1,
+      "failed": 5,
+      "deselected": 61,
+      "actual": "Published Workspace pre-starts plain message, starts after task/project-return/pagehide retirement, and resumes historical question.",
+      "method": "Temporarily used exact published session hook/store bytes with unchanged published Workspace; new test controls present. Wanted owned source saved/restored in try/finally and byte equality verified.",
+      "log": {
+        "sha256": "20aa2742dc20e579929c3f964d9b266a019ca7832648c9fb16504a4e3d3faf44",
+        "bytes": 13037
+      }
+    },
+    {
+      "componentRevision": "c00d99b6dc22a7cf8ba1084c665f025dd4318170",
+      "command": "pnpm test:run --project renderer src/renderer/src/components/tasks/native-task-hierarchy.test.tsx -t \"refused native composer draft\"",
+      "rawExitCode": 1,
+      "assertionsPassed": 1,
+      "unhandledRejections": 2,
+      "actual": "Real composer called unavailable voice.answerNotExpected on initial send and explicit retry. Framework correctly exited1 despite test assertions passing. Reproduced against unchanged published Composer with repaired Workspace/session owner in progress.",
+      "log": {
+        "sha256": "6679b798f345b82bca32b55250d403e7b4732995b0932d5044e1774dbf1a97ee",
+        "bytes": 4890
+      }
+    }
+  ],
+  "failureRepair": [
+    {
+      "failure": "Initial forced typecheck exited2: new question fixtures omitted required tool.status, with broad partial-state casts obscuring the useful type. A second typed-Map check also exposed literal strings incompatible with the SessionStatus enum.",
+      "repair": "Added pending tool status, explicit Map<string,TaskSession> fixtures and real shared SessionStatus constants; no runtime assertion or production validator relaxed. Final forced type/full gates pass.",
+      "logs": [
+        {
+          "sha256": "b90c9a4f3fdeb93fab001d58389ee02d93f7d7f21a178da1138b33d9c97f0b42",
+          "bytes": 1750
+        },
+        {
+          "sha256": "6d545a2d281a5be8b8fd837e62081b8fc889a53f04acec846dbeb717bbe75443",
+          "bytes": 5147
+        }
+      ]
+    },
+    {
+      "failure": "Final audit after the563-case integration gate reproduced one more WIP consumer defect: acknowledgement preceding agent-status left an empty cached agent ID, so a second explicit message failed INVALID_ARGUMENTS before Source.",
+      "rawExitCode": 1,
+      "failed": 1,
+      "repair": "Use the existing task send owner until cached session AND agent identity are observed; no fabricated agent, operation, authority or replay. New positive control and final full renderer/targeted Source graph pass. Source runtime code itself unchanged by this guard.",
+      "input": {
+        "revision": "bd898f99fc8af7af20bcefed37bfa4a85f3dad75",
+        "workingTreeModified": true,
+        "file": "src/renderer/src/hooks/use-agent-session.ts",
+        "sha256": "3f576c0b0a9a7fa0f7c4c0a0fa293c538d6dbb1df8bb5928d65ac2ebd3d81e70"
+      },
+      "log": {
+        "sha256": "9ce4c57305c8ae304163b1930e916896236b4e28c585b9e72613a1eb2caba13e",
+        "bytes": 5772
+      }
+    }
+  ],
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "stagedAbi": "127",
+    "application": "0.0.161",
+    "pnpm": "9.15.9",
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3",
+    "pty": "1.1.0"
+  },
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "hostNeutralRenderer": {
+      "passed": 2028,
+      "files": 156,
+      "skipped": 0,
+      "log": {
+        "sha256": "ba626e271f690edfda33b3a70c6c3031876eb8e9d02552af7ca6af03afdc1613",
+        "bytes": 1135468
+      }
+    },
+    "hostNeutralAffectedBeforeFinalCacheGuard": {
+      "passed": 563,
+      "files": 18,
+      "skipped": 0,
+      "log": {
+        "sha256": "c1d045c318ccb36c767a047062cfed9c221e739cd333010fd810a2247cd8c63d",
+        "bytes": 742960
+      }
+    },
+    "finalAffectedDelta": {
+      "passed": 152,
+      "files": 6,
+      "skipped": 0,
+      "log": {
+        "sha256": "7aeda08878e04c06f78e01a7a1c7d32a040fa4fe0f57b03ed37cfe14877f1075",
+        "bytes": 66044
+      }
+    },
+    "actualNativeWorkspaceAndComposerControls": 74,
+    "actualNativeActivitySessionControls": 47,
+    "newControls": 24,
+    "sourceBackendAndInstalledScope": "563-case graph includes inherited bd898f99 Source/mobile/staged/projection owners before the final UI-only incomplete-cache guard; Source runtime code unchanged. Final full renderer and152-case affected Source/staged graph verify that guard. Source existing-owner controls are separate from controlled UI results. No installed physical input or full multi-project cohort claim.",
+    "lint": {
+      "errors": 0,
+      "baselineWarnings": 165
+    },
+    "normalSourceHooks": {
+      "rawExitCode": 0,
+      "commands": [
+        "eslint --no-warn-ignored (lint-staged)",
+        "pnpm typecheck (tsc --build --noEmit)"
+      ]
+    },
+    "freshness": {
+      "sourceFiles": 920,
+      "ipc": 736,
+      "existingUnresolved": 9,
+      "inventory": "passed",
+      "contracts": "passed"
+    }
+  },
+  "runReceipts": {
+    "renderer": {
+      "file": {
+        "sha256": "0d0d13fd74e68f0e133d738dec01a4406347902aed0da672f5163c0aa66cc043",
+        "bytes": 92974
+      },
+      "revision": "bd898f99fc8af7af20bcefed37bfa4a85f3dad75",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": false,
+        "--production-proofs": false,
+        "--terminal-proofs": false
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 564,
+      "exclusions": [
+        {
+          "file": "scripts/production-service-proof.test.ts",
+          "reason": "Opt-in TAURI_PRODUCTION_SERVICE_PROOFS not selected"
+        },
+        {
+          "file": "scripts/production-terminal-proof.test.ts",
+          "reason": "Opt-in TAURI_TERMINAL_PROOFS not selected"
+        },
+        {
+          "file": "scripts/production-payload-recovery-proof.test.ts",
+          "reason": "Opt-in TAURI_TERMINAL_PROOFS not selected"
+        },
+        {
+          "file": "scripts/database-service-proof.test.ts",
+          "reason": "Opt-in TAURI_STANDALONE_SERVICE_PROOFS not selected"
+        },
+        {
+          "file": "scripts/configuration-service-proof.test.ts",
+          "reason": "Opt-in TAURI_STANDALONE_SERVICE_PROOFS not selected"
+        },
+        {
+          "file": "scripts/transcript-page-proof.test.ts",
+          "reason": "Opt-in TAURI_STANDALONE_SERVICE_PROOFS not selected"
+        },
+        {
+          "file": "scripts/connector-worker-service-proof.test.ts",
+          "reason": "Opt-in TAURI_STANDALONE_SERVICE_PROOFS not selected"
+        }
+      ],
+      "scope": "Eligible files are not asserted as executed. Framework summary below identifies the project/filtered execution scope."
+    },
+    "affectedBeforeFinalCacheGuard": {
+      "file": {
+        "sha256": "405cce95b5ce853c345906db1a1a4f9b8faf505444825f75cc5b2a11b757b1d3",
+        "bytes": 93080
+      },
+      "revision": "bd898f99fc8af7af20bcefed37bfa4a85f3dad75",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 571,
+      "exclusions": [],
+      "scope": "Eligible files are not asserted as executed. Framework summary below identifies the project/filtered execution scope."
+    },
+    "finalAffected": {
+      "file": {
+        "sha256": "a03d7f692f9b1b9f111662b9bfaee9f16b7ed42f3e9dd9c31800cb839e6d90a3",
+        "bytes": 93080
+      },
+      "revision": "bd898f99fc8af7af20bcefed37bfa4a85f3dad75",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 571,
+      "exclusions": [],
+      "scope": "Eligible files are not asserted as executed. Framework summary below identifies the project/filtered execution scope."
+    }
+  },
+  "commands": [
+    {
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral:audit",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "9a2f165e8868d2243c12ee95e87d5eb0f0181111cc4816af70aeff741c85d226",
+        "bytes": 165
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral -- --project=renderer --maxWorkers=4 --run-receipt=/tmp/ea209-native-send-renderer-receipt.json",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "ba626e271f690edfda33b3a70c6c3031876eb8e9d02552af7ca6af03afdc1613",
+        "bytes": 1135468
+      }
+    },
+    {
+      "command": "pnpm lint",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+        "bytes": 16719
+      }
+    },
+    {
+      "command": "pnpm tauri:production:frontend:build",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "f56b9f6e9b288c01bb0ac937592a0164a71244f05398eec614885f47d4200d70",
+        "bytes": 9737
+      }
+    },
+    {
+      "command": "pnpm build",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "d1bad95c8934ed3347aeb690c397d8a464cdf5efe90ebef86eaca7c3921b6f06",
+        "bytes": 29338
+      }
+    },
+    {
+      "command": "git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "node scripts/tauri-stage-production.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "63a30c51d1c2332ea808005602c7cb0a7185120d3c2c007a563593d0be06627b",
+        "bytes": 267
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-native-send-affected-receipt.json src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/hooks/use-agent-session.test.tsx src/renderer/src/hooks/use-agent-auto-start.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/agents/transcript/TranscriptComposer.images.test.tsx src/renderer/src/stores/agent-store.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/production-agent-backend.test.ts src/service/production-attachment-execution.test.ts src/service/production-service.test.ts src/service/production-desktop-bindings.test.ts src/service/production-mobile.test.ts src/service/task-lifecycle-backend.test.ts src/shared/production-agent-codecs.test.ts src/shared/task-lifecycle-codecs.test.ts scripts/production-service-proof.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "c1d045c318ccb36c767a047062cfed9c221e739cd333010fd810a2247cd8c63d",
+        "bytes": 742960
+      }
+    },
+    {
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "pnpm lint",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+        "bytes": 16719
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "d2d5a39f7c0da6203a96b094a5615984473304d2231ccf681434855c15b58079",
+        "bytes": 88
+      }
+    },
+    {
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e61e97884062b0ca04c86f95ede4af4f9f9cd822b94dc1e3d64091d4472e9c64",
+        "bytes": 91
+      }
+    },
+    {
+      "command": "git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-native-send-final-receipt.json src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/stores/native-agent-activity.test.ts src/service/production-agent-backend.test.ts src/service/production-attachment-execution.test.ts src/shared/production-agent-codecs.test.ts scripts/production-service-proof.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "7aeda08878e04c06f78e01a7a1c7d32a040fa4fe0f57b03ed37cfe14877f1075",
+        "bytes": 66044
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "d2d5a39f7c0da6203a96b094a5615984473304d2231ccf681434855c15b58079",
+        "bytes": 88
+      }
+    },
+    {
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e61e97884062b0ca04c86f95ede4af4f9f9cd822b94dc1e3d64091d4472e9c64",
+        "bytes": 91
+      }
+    },
+    {
+      "command": "git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    }
+  ],
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "5930c1cd30fe5be6d5b74ad93b35ce27d9f8908dd8b400e778c4bacfa76c412a",
+      "bytes": 109883
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "e2e0f604846b85f292b9610563b4f51ca55e0442e884cfc124901c8c49327108",
+      "bytes": 380628
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "017c146c1c22fd99396e2c463e6f055cb33cc6db3996a28c9732d9529b882355",
+      "bytes": 41540
+    },
+    "src/renderer/src/components/agents/transcript/TranscriptComposer.tsx": {
+      "sha256": "fe2a6107af98ee296df01a95a9073972118fde9357664ca65a99d01ff7449625",
+      "bytes": 13273
+    },
+    "src/renderer/src/components/tasks/TaskWorkspace.tsx": {
+      "sha256": "d8e468e9e59dcfdb91b6a0750e8f4246664596c600cf2867d9e409a31e487893",
+      "bytes": 50681
+    },
+    "src/renderer/src/components/tasks/native-task-hierarchy.test.tsx": {
+      "sha256": "90c9db94b8bf76f0bc7845f91e1c2626d4fee6afb2f1803bc4c56799e8e2f8c4",
+      "bytes": 58875
+    },
+    "src/renderer/src/hooks/use-agent-session.ts": {
+      "sha256": "5c1fa3dab68b643e8f002df9a9f07635a9d66f58e8529dfeb12b73cf940cc331",
+      "bytes": 13964
+    },
+    "src/renderer/src/hooks/use-task-edit-receipt.ts": {
+      "sha256": "a535b8c0927b7f39a64ed28d0cc7b11f5328d7b690e7aa9616c1a5bfeec2e6fb",
+      "bytes": 2829
+    },
+    "src/renderer/src/stores/agent-store.ts": {
+      "sha256": "a0ac8114aa702020107acafc0ee400cd6a3f78f979e75206532ec3f7f6528884",
+      "bytes": 22928
+    },
+    "src/renderer/src/stores/native-agent-activity.test.ts": {
+      "sha256": "c703c715d67e7942bdf7c3cc557bff0f088c7ea746bc8c9e90c8354d8d4a6aea",
+      "bytes": 35327
+    }
+  },
+  "artifactHashes": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "9da357ce56bd4b712a700465b8db73b4b336e1ecbca725dc91c7efc036f18d40",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "f879f61dacd022ef6b077677bfb27a1523259e2713633f687f37fc8f4fccec2b",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "9d62019245aaaac2516545600bb4ba7ea9dfee6d689d4f8c9fd7525380d6e8bd",
+      "bytes": 6266392
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/database-stdio.mjs": {
+      "sha256": "30aba17476531dfd4cd519d65282578cfcccfde53f19427cc3057d8026cafc68",
+      "bytes": 1741
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "publication": {
+    "branch": "master",
+    "fastForward": true,
+    "remoteConfirmed": "63171393baa130398e9813fb71ef6e1ea084431b",
+    "rebase": {
+      "onto": "1214a6b1c62763bc9cb4f62709713e41de1e9e9a",
+      "inheritedChanges": "Evidence JSON only; no runtime/build/test input change.",
+      "verifiedCommittedInputsByteIdentical": 10,
+      "originalLocalSource": "cdd4cc90"
+    }
+  },
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "sourceRunLookup": [],
+    "settingsOrDispatchUsed": false
+  },
+  "remainingDefects": [
+    "Installed supported-platform UI/reload/reconnect/keyboard/focus/Drop/shutdown and202 prerequisite remain open.",
+    "Completion/feedback/delete/move/create and delayed AutoRun view-lifetime audit remain separate; current slice does not certify those callers.",
+    "Exact-root Fresh remains unavailable pending separate Source contract; no startTask substitution or runtime field write.",
+    "Durable unknown delivery review and private orphan/removal journal remain separate Source owners; admitted raw prompt cannot be undone by view retirement.",
+    "Native voice/general OAuth/login remain unavailable; hosted voice deferred. Mobile saved-file execution availability remains with219 owner, not enabled by this renderer slice.",
+    "E2 code audit (not yet reproduced): whole-task/subtree DatabaseManager.deleteTaskAttachments uses recursive path deletion before SQL removal; current private journal work does not establish this authority. Separate Source/canary proof and owner contract pending; no atomic task/filesystem cleanup claim."
+  ],
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  },
+  "constraints": {
+    "syntheticOnly": true,
+    "liveProfiles": false,
+    "liveProviders": false,
+    "microphone": false,
+    "liveRelease": false,
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred",
+    "identityDecision": false,
+    "masterToMainMerge": false
+  }
+}
