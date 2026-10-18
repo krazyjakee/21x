@@ -196,6 +196,10 @@ export class ProductionDesktopBindings {
     this.tasks = new TaskLifecycleBackend({ database: services.db, manager: services.agents, registry: services.registry,
       sync: services.sync, recurrence: services.recurrence, heartbeat: services.heartbeat, automation: services.automation,
       engineEpoch: this.epoch, assertAvailable: available, ...dynamicAuthority,
+      beforeAttachmentMetadataWrite: (taskId, before, after) => {
+        available(); const files = owner.getTaskAttachmentBindingLease(); files.assertTaskAttachmentOwners(files)
+        files.files.observeMetadataChange(taskId, before, after)
+      },
       beforeTaskDeletion: () => {
         available(); const files = owner.getTaskAttachmentBindingLease(); files.assertTaskAttachmentOwners(files)
         if (files.files.inflightCount) throw new ServiceProtocolError('INVALID_REQUEST')

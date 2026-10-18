@@ -236,8 +236,10 @@ export class TaskAttachmentBackend {
           // refusal cannot preserve a dangling reference created by this remove.
           const remaining = initial.records.filter(record => record.id !== selected.id)
           const expected = JSON.stringify(remaining)
+          let intent: object | undefined
           db.transaction(() => {
             beforeEffect()
+            intent = files.beginRemovalIntent(taskId, selected, { beforeEffect, signal })
             const updated = database.updateTask(taskId, { attachments: remaining })
             if (!updated) throw new ServiceProtocolError('INVALID_REQUEST')
             expectedMetadata = expected
@@ -246,7 +248,7 @@ export class TaskAttachmentBackend {
           // Publish the accepted logical delta before raw cleanup or a caller
           // loss can refuse. A later unlink error cannot roll this state back.
           this.options.onTaskUpdated(taskId, remaining)
-          await files.remove(taskId, selected, { beforeEffect, signal })
+          await files.remove(taskId, selected, { beforeEffect, signal }, intent)
           beforeEffect()
           return undefined
         }

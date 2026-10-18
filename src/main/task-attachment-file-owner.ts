@@ -6,6 +6,7 @@ import { lstat, realpath, mkdir, open, link, unlink } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, normalize } from 'node:path'
 import type { FileAttachmentRecord } from './database/types'
+import type { TaskAttachmentJournal } from './task-attachment-journal'
 import { TASK_ATTACHMENT_LIMITS, taskAttachmentFilename, taskAttachmentId, taskAttachmentRecord } from '../shared/task-attachment-codecs'
 import { isAttachmentPathReceipt, type AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import type { WorkspacePathIdentity } from '../shared/workspace-native-callbacks'
@@ -27,7 +28,7 @@ export interface TaskAttachmentFilePrimitives {
   link(from: string, to: string): Promise<void>
   unlink(path: string): Promise<void>
 }
-export interface TaskAttachmentFileOwnerOptions { attachmentRoot: string; assertCurrent(): void; fs?: Partial<TaskAttachmentFilePrimitives> }
+export interface TaskAttachmentFileOwnerOptions { attachmentRoot: string; assertCurrent(): void; fs?: Partial<TaskAttachmentFilePrimitives>; journal?: TaskAttachmentJournal }
 export type TaskAttachmentFileCode = 'ATTACHMENT_INVALID_ARGUMENTS' | 'ATTACHMENT_PATH_REFUSED' | 'ATTACHMENT_PATH_CHANGED' | 'ATTACHMENT_CAPACITY' | 'ATTACHMENT_CLOSED' | 'ATTACHMENT_CANCELLED' | 'ATTACHMENT_BUSY' | 'ATTACHMENT_IO_FAILED' | 'ATTACHMENT_CLOSE_FAILED' | 'ATTACHMENT_DRAIN_INCOMPLETE'
 export class TaskAttachmentFileError extends Error { constructor(readonly code: TaskAttachmentFileCode) { super(code); this.name = 'TaskAttachmentFileError' } }
 function fail(code: TaskAttachmentFileCode): never { throw new TaskAttachmentFileError(code) }
@@ -36,7 +37,7 @@ const sameNode = (a: BigIntStats, b: BigIntStats): boolean => a.dev === b.dev &&
 const sameBytes = (a: BigIntStats, b: BigIntStats): boolean => sameNode(a, b) && a.size === b.size && a.nlink === b.nlink && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs
 interface DirectoryProof { taskId: string; path: string; info: BigIntStats }
 interface Handle { fd: TaskAttachmentFileHandle; closing?: Promise<void> }
-interface Publication { proof: DirectoryProof; paths: Set<string>; info: BigIntStats; digest: string; size: number; receipt: object }
+interface Publication { proof: DirectoryProof; paths: Set<string>; info: BigIntStats; digest: string; size: number; receipt: object; journalTicket?: object }
 
 /** A protected attachment root, distinct from task workspaces. All filenames
  * come from UUID + saved metadata; native callers never supply a root/path. */
@@ -45,6 +46,7 @@ export class TaskAttachmentFileOwner {
   private readonly roots: ReadonlyArray<{ path: string; info: BigIntStats }>
   private readonly ownerCurrent: () => void
   private readonly fs: TaskAttachmentFilePrimitives
+  private readonly journal: TaskAttachmentJournal | undefined
   private readonly tasks = new Map<string, BigIntStats>()
   private readonly handles = new Set<Handle>()
   private readonly flights = new Set<Promise<unknown>>()
@@ -58,7 +60,7 @@ export class TaskAttachmentFileOwner {
   private drain?: Promise<void>
   constructor(options: TaskAttachmentFileOwnerOptions) {
     if (!options || !isAbsolute(options.attachmentRoot) || normalize(options.attachmentRoot) !== options.attachmentRoot || Buffer.byteLength(options.attachmentRoot) > 4096 || /[\u0000-\u001f\u007f]/.test(options.attachmentRoot) || typeof options.assertCurrent !== 'function') fail('ATTACHMENT_INVALID_ARGUMENTS')
-    options.assertCurrent(); this.root = options.attachmentRoot; this.ownerCurrent = options.assertCurrent
+    options.assertCurrent(); this.root = options.attachmentRoot; this.ownerCurrent = options.assertCurrent; this.journal = options.journal
     const chain: Array<{ path: string; info: BigIntStats }> = []
     try {
       if (realpathSync(this.root) !== this.root) fail('ATTACHMENT_PATH_REFUSED')
@@ -76,7 +78,7 @@ export class TaskAttachmentFileOwner {
     this.fs = Object.freeze({ ...defaults, ...options.fs })
   }
   get inflightCount(): number { return this.flights.size + this.handles.size + this.retiring.size + this.pendingPublications.size }
-  assertOwners(root: string): void { if (root !== this.root) fail('ATTACHMENT_INVALID_ARGUMENTS'); if (this.closing) fail('ATTACHMENT_CLOSED') }
+  assertOwners(root: string, journal?: TaskAttachmentJournal): void { if (root !== this.root || journal !== undefined && journal !== this.journal) fail('ATTACHMENT_INVALID_ARGUMENTS'); if (this.closing) fail('ATTACHMENT_CLOSED') }
   shutdown(): void { this.closing = true }
   private profile(): void { this.ownerCurrent() }
   private current(controls: TaskAttachmentFileControls): void { this.guards.getStore()?.(); controls.beforeEffect(); if (this.closing) fail('ATTACHMENT_CLOSED'); if (controls.signal.aborted) fail('ATTACHMENT_CANCELLED'); this.profile() }
@@ -280,11 +282,15 @@ export class TaskAttachmentFileOwner {
       const proof = (await this.directory(taskId, true, guard))!, path = join(proof.path, `${metadata.id}-${metadata.filename}`), stage = join(proof.path, `.attachment-${randomUUID()}.tmp`)
       let handle: Handle | undefined, publication: Publication | undefined, written = 0
       const acknowledged = createHash('sha256')
+      // Persist intent before the first file effect. A crash can leave facts,
+      // never a reconstructed receipt that authorizes an automatic unlink.
+      const journalTicket = this.journal?.beginPublication(taskId, metadata, stage.slice(proof.path.length + 1), proof.info)
       try {
         handle = await this.openOwned(stage, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL, guard)
         const initial = await handle.fd.stat(); this.file(initial, 0)
-        publication = { proof, paths: new Set([stage]), info: initial, digest: acknowledged.copy().digest('hex'), size: 0, receipt: Object.freeze({}) }
+        publication = { proof, paths: new Set([stage]), info: initial, digest: acknowledged.copy().digest('hex'), size: 0, receipt: Object.freeze({}), journalTicket }
         accepted = publication
+        if (journalTicket) this.journal!.staged(journalTicket, initial)
         this.retiring.add(publication); this.current(guard); await this.verifyDirectory(proof)
         while (written < metadata.size) {
           const length = Math.min(65536, metadata.size - written)
@@ -304,6 +310,7 @@ export class TaskAttachmentFileOwner {
         const ready = await handle.fd.stat(); this.file(ready, metadata.size)
         if (!sameNode(initial, ready) || await this.digest(handle.fd, metadata.size, guard) !== publication.digest) fail('ATTACHMENT_PATH_CHANGED')
         await handle.fd.sync(); this.current(guard); const verified = await handle.fd.stat(); if (!sameBytes(ready, verified)) fail('ATTACHMENT_PATH_CHANGED'); publication.info = verified
+        if (journalTicket) this.journal!.ready(journalTicket, verified, publication.digest)
         await this.closeHandle(handle); handle = undefined; this.current(guard); await this.verifyDirectory(proof)
         const current = await this.step(guard, () => this.fs.lstat(stage)); if (!sameBytes(current, verified)) fail('ATTACHMENT_PATH_CHANGED')
         // link is atomic no-replace publication; rename-overwrite is never used.
@@ -314,6 +321,7 @@ export class TaskAttachmentFileOwner {
         this.current(guard); await this.fs.unlink(stage); publication.paths.delete(stage)
         const final = await this.fs.lstat(path); this.file(final, metadata.size); if (!sameNode(final, verified) || final.mtimeNs !== verified.mtimeNs) fail('ATTACHMENT_PATH_CHANGED'); publication.info = final
         this.current(guard); await this.verifyDirectory(proof)
+        if (journalTicket) this.journal!.published(journalTicket, final)
         this.publications.set(publication.receipt, publication); this.pendingPublications.add(publication); this.retiring.delete(publication); return publication.receipt
       } catch (error) {
         if (handle) {
@@ -338,7 +346,7 @@ export class TaskAttachmentFileOwner {
     }, async () => { if (accepted && (this.retiring.has(accepted) || this.pendingPublications.has(accepted))) { this.retiring.add(accepted); await this.cleanup(accepted) } })
   }
   /** Pure bookkeeping after the synchronous durable metadata commit. */
-  commit(receipt: unknown): void { if (!receipt || typeof receipt !== 'object') fail('ATTACHMENT_INVALID_ARGUMENTS'); const publication = this.publications.get(receipt); if (!publication) fail('ATTACHMENT_INVALID_ARGUMENTS'); this.pendingPublications.delete(publication); this.publications.delete(receipt) }
+  commit(receipt: unknown): void { if (!receipt || typeof receipt !== 'object') fail('ATTACHMENT_INVALID_ARGUMENTS'); const publication = this.publications.get(receipt); if (!publication) fail('ATTACHMENT_INVALID_ARGUMENTS'); if (publication.journalTicket) this.journal!.acknowledge(publication.journalTicket); this.pendingPublications.delete(publication); this.publications.delete(receipt) }
   rollback(receipt: unknown): Promise<void> {
     if (!receipt || typeof receipt !== 'object') return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
     const publication = this.publications.get(receipt); if (!publication) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
@@ -351,10 +359,16 @@ export class TaskAttachmentFileOwner {
   }
   private async performCleanup(publication: Publication): Promise<void> {
     this.profile(); if (this.handles.size) fail('ATTACHMENT_CLOSE_FAILED')
+    // A separately accepted metadata commit may have acquired this path while
+    // the original request was retiring. Preserve the canonical reference.
+    if (publication.journalTicket && this.journal!.isReferenced(publication.journalTicket)) {
+      this.journal!.acknowledge(publication.journalTicket)
+      this.retiring.delete(publication); this.pendingPublications.delete(publication); this.publications.delete(publication.receipt); return
+    }
     await this.verifyDirectory(publication.proof)
     const present: Array<{ path: string; info: BigIntStats }> = []
     for (const path of publication.paths) { try { present.push({ path, info: await this.fs.lstat(path) }) } catch (error) { if (!missing(error)) throw error; publication.paths.delete(path) } }
-    if (!present.length) { this.retiring.delete(publication); this.pendingPublications.delete(publication); this.publications.delete(publication.receipt); return }
+    if (!present.length) { if (publication.journalTicket) this.journal!.retired(publication.journalTicket); this.retiring.delete(publication); this.pendingPublications.delete(publication); this.publications.delete(publication.receipt); return }
     for (const item of present) {
       this.file(item.info, publication.size, present.length); if (!sameNode(item.info, publication.info)) fail('ATTACHMENT_PATH_CHANGED')
       const handle = await this.openOwned(item.path, constants.O_RDONLY)
@@ -365,22 +379,34 @@ export class TaskAttachmentFileOwner {
     for (const item of present) {
       await this.verifyDirectory(publication.proof); const actual = await this.fs.lstat(item.path)
       if (!sameNode(actual, item.info) || actual.size !== BigInt(publication.size) || actual.mtimeNs !== item.info.mtimeNs || actual.nlink !== BigInt(publication.paths.size)) fail('ATTACHMENT_PATH_CHANGED')
-      this.profile(); await this.fs.unlink(item.path); publication.paths.delete(item.path)
+      this.profile(); if (publication.journalTicket && this.journal!.isReferenced(publication.journalTicket)) fail('ATTACHMENT_PATH_CHANGED'); await this.fs.unlink(item.path); publication.paths.delete(item.path)
     }
+    if (publication.journalTicket) this.journal!.retired(publication.journalTicket)
     this.retiring.delete(publication); this.pendingPublications.delete(publication); this.publications.delete(publication.receipt)
   }
-  remove(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls): Promise<void> {
+  /** Source-only intent, created in the same SQLite transaction as the exact
+   * logical delta. It is never accepted from a renderer or reconstructed. */
+  beginRemovalIntent(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls): object | undefined {
+    this.current(controls); return this.journal?.beginRemoval(taskId, attachment)
+  }
+  observeMetadataChange(taskId: string, before: FileAttachmentRecord[], after: FileAttachmentRecord[]): void {
+    this.profile(); this.journal?.observeMetadataChange(taskId, before, after)
+  }
+  remove(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls, intent?: object): Promise<void> {
     if (!taskAttachmentRecord(attachment) || !taskAttachmentId(attachment.id) || !taskAttachmentFilename(attachment.filename)) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
     const metadata = Object.freeze({ ...attachment })
     return this.run(taskId, controls, async guard => {
+      const assertIntent = (): void => { if (this.journal) { if (!intent) fail('ATTACHMENT_INVALID_ARGUMENTS'); this.journal.assertRemoval(intent, taskId, metadata) } }
+      const retired = (): void => { if (intent) this.journal?.retired(intent) }
+      assertIntent()
       if (metadata.size > TASK_ATTACHMENT_LIMITS.openBytes) fail('ATTACHMENT_CAPACITY')
-      const proof = await this.directory(taskId, false, guard); if (!proof) return
+      const proof = await this.directory(taskId, false, guard); if (!proof) { retired(); return }
       const path = join(proof.path, `${metadata.id}-${metadata.filename}`); let before: BigIntStats
-      try { before = await this.step(guard, () => this.fs.lstat(path)) } catch (error) { if (!missing(error)) throw error; await this.verifyDirectory(proof); this.current(guard); return }
+      try { before = await this.step(guard, () => this.fs.lstat(path)) } catch (error) { if (!missing(error)) throw error; await this.verifyDirectory(proof); this.current(guard); assertIntent(); retired(); return }
       this.file(before, metadata.size); const handle = await this.openOwned(path, constants.O_RDONLY, guard)
-      try { this.current(guard); const fdInfo = await this.step(guard, () => handle.fd.stat()); if (!sameBytes(before, fdInfo)) fail('ATTACHMENT_PATH_CHANGED'); await this.step(guard, () => this.digest(handle.fd, metadata.size, guard)); if (!sameBytes(before, await this.step(guard, () => handle.fd.stat()))) fail('ATTACHMENT_PATH_CHANGED') } finally { await this.closeHandle(handle) }
+      try { this.current(guard); const fdInfo = await this.step(guard, () => handle.fd.stat()); if (!sameBytes(before, fdInfo)) fail('ATTACHMENT_PATH_CHANGED'); const digest = await this.step(guard, () => this.digest(handle.fd, metadata.size, guard)); if (!sameBytes(before, await this.step(guard, () => handle.fd.stat()))) fail('ATTACHMENT_PATH_CHANGED'); assertIntent(); if (intent) this.journal?.removalVerified(intent, fdInfo, digest) } finally { await this.closeHandle(handle) }
       await this.verifyDirectory(proof); const after = await this.step(guard, () => this.fs.lstat(path)); if (!sameBytes(before, after)) fail('ATTACHMENT_PATH_CHANGED')
-      this.current(guard); await this.fs.unlink(path); this.current(guard); await this.verifyDirectory(proof)
+      this.current(guard); assertIntent(); await this.fs.unlink(path); this.current(guard); await this.verifyDirectory(proof); assertIntent(); retired()
     })
   }
   async close(timeoutMs = 2000): Promise<void> {

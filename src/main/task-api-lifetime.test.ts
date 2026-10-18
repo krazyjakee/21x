@@ -89,6 +89,41 @@ describe('portable task API lifetime and tool availability', () => {
     } finally { await client.close() }
   })
 
+  it('captures production attachment policy for real HTTP and scoped MCP before any task mutation', async () => {
+    const parent = source.db.createTask(makeTask({ title: 'Scoped parent' }))!
+    const task = source.db.createTask(makeTask({ title: 'Original attachment policy', parent_task_id: parent.id }))!
+    const host: Parameters<typeof startTaskApiServer>[1] = { attachmentMetadata: 'unavailable' }
+    const port = await startTaskApiServer(source.db, host)
+    delete host.attachmentMetadata
+    const controller = { stopByTaskId: vi.fn(), startTask: vi.fn() }
+    setTaskApiAgentController(controller as unknown as NonNullable<Parameters<typeof setTaskApiAgentController>[0]>)
+    const response = await fetch(`http://127.0.0.1:${port}/update_task`, {
+      method: 'POST', headers: { Authorization: `Bearer ${getTaskApiToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: task.id, title: 'Must not write', attachments: [], status: 'agent_working' })
+    })
+    expect(await response.json()).toHaveProperty('error', 'Attachment metadata updates are unavailable through this task API')
+    const client = new Client({ name: 'production-array-policy', version: '1.0.0' })
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(buildTaskMcpUrl(port, getTaskApiToken(), { taskId: task.id, parentTaskId: parent.id }))))
+      const refused = await client.callTool({ name: 'update_own_task', arguments: { description: 'Must not write', attachments: [{ name: 'foreign.txt', path: '/foreign.txt', type: 'text/plain' }] } })
+      expect(JSON.stringify(refused)).toContain('Attachment metadata updates are unavailable')
+      expect(source.db.getTask(task.id)).toMatchObject({ title: task.title, attachments: [] })
+      expect(source.db.getTask(task.id)?.description).not.toBe('Must not write')
+      expect(controller.stopByTaskId).not.toHaveBeenCalled(); expect(controller.startTask).not.toHaveBeenCalled()
+    } finally { await client.close() }
+  })
+
+  it('preserves the legacy host attachment-array route when no production policy was captured', async () => {
+    const task = source.db.createTask(makeTask({ title: 'Legacy host attachment policy' }))!, port = await startTaskApiServer(source.db)
+    const attachments = [{ id: 'legacy-id', filename: 'legacy.txt', size: 3, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }]
+    const response = await fetch(`http://127.0.0.1:${port}/update_task`, {
+      method: 'POST', headers: { Authorization: `Bearer ${getTaskApiToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: task.id, attachments })
+    })
+    expect(await response.json()).toMatchObject({ success: true })
+    expect(source.db.getTask(task.id)?.attachments).toEqual(attachments)
+  })
+
   it('validates a close deadline before affecting admission or an active server', async () => {
     const port = await startTaskApiServer(source.db)
     await expect(closeTaskApiServer(0)).rejects.toBeInstanceOf(RangeError)

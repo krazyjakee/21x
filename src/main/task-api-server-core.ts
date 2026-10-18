@@ -34,6 +34,9 @@ export type TaskApiRouteHandler = (db: DatabaseManager, route: string, params: R
 interface ServerOwner { db: DatabaseManager; listener: TaskApiListener; startup: Promise<number> }
 export interface TaskApiHost {
   notifyUser?: (title: string, body: string) => void
+  /** Captured production policy. Raw MCP/HTTP arrays have no import receipt
+   * or original metadata baseline; the Electron host retains its old route. */
+  attachmentMetadata?: 'unavailable'
   /** Only the legacy adapter supplies the retired embedded browser host. */
   legacyBrowserRoute?: TaskApiRouteHandler
 }
@@ -86,6 +89,7 @@ export async function waitForTaskApiServer(): Promise<number | null> {
 }
 
 export function startTaskApiServer(db: DatabaseManager, host: TaskApiHost = {}): Promise<number> {
+  host = Object.freeze({ ...host })
   if (closedSources.has(db)) return Promise.reject(new Error('TASK_API_CLOSED'))
   if (active) return active.db === db ? active.startup : Promise.reject(new Error('TASK_API_ALREADY_STARTED'))
   if ([...owners].some(owner => owner.db === db && !owner.listener.isFullyClosed)) {
@@ -178,6 +182,8 @@ const ROUTE_HANDLERS = [handleTaskGroupRoute, handleTaskRoute, handleSkillRoute,
 
 /** Exported so the routes can be tested without starting an HTTP server. */
 export async function handleRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope, host: TaskApiHost = {}): Promise<unknown> {
+  if (host.attachmentMetadata === 'unavailable' && route === '/update_task' && Object.hasOwn(params, 'attachments'))
+    return { error: 'Attachment metadata updates are unavailable through this task API' }
   for (const handle of [...ROUTE_HANDLERS, ...(host.legacyBrowserRoute ? [host.legacyBrowserRoute] : [])]) {
     const result = await handle(db, route, params, trustedScope)
     if (result !== undefined) return result

@@ -79,16 +79,20 @@ implemented and proven; there is no ambient path-copy fallback. Empty-file
 operations still use the existing production manager. Linux tests of the
 unsupported branch are policy controls, not macOS/Windows runtime evidence.
 
-The current mobile HTTP adapter independently refuses saved-attachment
-start/resume/send, including omitted/empty arguments. This continuation does
-not remove that fence. Its owner must review the complete original target and
-accepted scheduler lifetimes before any future mobile resumption; merely
+The later scoped Linux mobile handoff in `bd898f99` delegates saved-attachment
+start/startTask/resume/send and current permission/question replies through the
+same retained Source backend and captured manager/FileOwner. Its original pair,
+server, graph, metadata and live-session fences remain independent admission
+requirements. Incoming nonempty create/send payloads and full-array attachment
+writes remain refused, as does saved-file execution on macOS/Windows. Merely
 having this port or matching saved records is not an execution grant.
 
 Workspace contents remain agent-editable after accepted publication. This
 does not provide a sandbox against arbitrary same-user processes, restore bytes
-after admitted effects, or implement protected orphan/removal journaling or
-hard-crash reconciliation. Installed supported-OS lifecycle, physical UI,
+after admitted effects. The later [private attachment journal](native-attachment-journal.md)
+records publication/removal facts through clean restart and controlled SIGKILL
+checkpoints; it supplies no automatic orphan cleanup or resumed intent.
+Installed supported-OS lifecycle, physical UI,
 remaining #208/#202 prerequisites and the user identity/scheme decision remain
 open. Evidence will record the exact implementation revision, commands, raw
 results, negative controls, failures/repairs and source/artifact hashes in

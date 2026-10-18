@@ -5620,6 +5620,7 @@
     "src/main/task-api/task-routes.ts",
     "src/main/task-api/ui-routes.ts",
     "src/main/task-attachment-file-owner.ts",
+    "src/main/task-attachment-journal.ts",
     "src/main/task-automation-scheduler.ts",
     "src/main/task-groups/attachments.ts",
     "src/main/task-groups/service.ts",
@@ -14477,7 +14478,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 920,
+    "files": 921,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

@@ -53,6 +53,49 @@ async function fixture(readGate?: { promise: Promise<void>; opened(): void }) {
 }
 
 describe.runIf(process.platform === 'linux')('actual production attachment execution authority (Linux)', () => {
+  it('refuses raw task API attachment arrays before a stale full-array intent can erase an accepted copy', async () => {
+    const f = await fixture(), second = { ...f.attachment, id: randomUUID(), filename: 'second.txt' }
+    const receipt = await f.services.taskAttachmentFiles.write(f.task.id, second, f.bytes, { beforeEffect() {}, signal: new AbortController().signal })
+    f.services.db.updateTask(f.task.id, { attachments: [f.attachment, second] }); f.services.taskAttachmentFiles.commit(receipt)
+    const { getTaskApiPort, getTaskApiToken } = await import('../main/task-api-server-core')
+    const response = await fetch(`http://127.0.0.1:${getTaskApiPort()}/update_task`, {
+      method: 'POST', headers: { authorization: `Bearer ${getTaskApiToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ task_id: f.task.id, title: 'Stale writer', attachments: [f.attachment] })
+    })
+    const result = await response.json()
+    expect({ rejected: !!(result as { error?: unknown }).error, attachments: f.services.db.getTask(f.task.id)?.attachments,
+      title: f.services.db.getTask(f.task.id)?.title }).toEqual({ rejected: true, attachments: [f.attachment, second], title: f.task.title })
+    expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
+    const fields = await fetch(`http://127.0.0.1:${getTaskApiPort()}/update_task`, {
+      method: 'POST', headers: { authorization: `Bearer ${getTaskApiToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ task_id: f.task.id, title: 'Field-only update' })
+    })
+    expect(await fields.json()).not.toHaveProperty('error')
+    expect(f.services.db.getTask(f.task.id)?.title).toBe('Field-only update')
+    expect(f.services.db.getTask(f.task.id)?.attachments).toEqual([f.attachment, second])
+  })
+  it('retains a durable owner for an accepted metadata-only copy across profile restart', async () => {
+    const f = await fixture(), orphanTask = f.services.db.createTask({ title: 'An accepted copy with no metadata write' })!
+    const record = { ...f.attachment, id: randomUUID(), filename: 'pending-draft.txt' }
+    const receipt = await f.services.taskAttachmentFiles.write(orphanTask.id, record, f.bytes, { beforeEffect() {}, signal: new AbortController().signal })
+    f.services.taskAttachmentFiles.commit(receipt)
+    expect(f.services.db.getTask(orphanTask.id)?.attachments).toEqual([])
+    const saved = join(f.bootstrap.paths.attachmentRoot, orphanTask.id, `${record.id}-${record.filename}`)
+    await f.owner.close()
+    vi.resetModules()
+    const { ProductionOwner } = await import('./production-owner')
+    const reopened = new ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, {
+      cliMcp: { homeDir: f.root, environment: {} }, createAdapter: () => new FakeAdapter()
+    })
+    fixtures.find(item => item.owner === f.owner)!.owner = reopened
+    const services = await reopened.start()
+    expect(services.db.getTask(orphanTask.id)?.attachments).toEqual([])
+    expect(readFileSync(saved)).toEqual(f.bytes)
+    const rows = services.db.db.prepare('SELECT value FROM settings WHERE key GLOB ?').all('__attachment_journal_v1:*') as Array<{ value: string }>
+    const ownership = rows.map(row => JSON.parse(row.value)).filter(row => row.taskId === orphanTask.id)
+    expect(ownership).toHaveLength(1)
+    expect(ownership[0]).toMatchObject({ version: 1, kind: 'publication', phase: 'published', taskId: orphanTask.id, attachment: record })
+  })
   it('refuses a saved-file symlink before an actual adapter receives attachment references', async () => {
     const f = await fixture(), outside = join(f.root, 'foreign-private.txt')
     writeFileSync(outside, 'foreign private bytes'); unlinkSync(f.saved); symlinkSync(outside, f.saved)

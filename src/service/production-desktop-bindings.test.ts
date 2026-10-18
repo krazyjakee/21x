@@ -10,7 +10,7 @@ import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProductionOwner, ProductionOwnerBootstrap } from './production-owner'
@@ -115,6 +115,31 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
 }
 
 describe('reviewed bindings attached to the actual production singleton', () => {
+  it('joins canonical attachment detachment and private journal facts through the actual task binding', async () => {
+    const f = await fixture(), task = f.services.db.createTask({ title: 'Actual binding journal' })!
+    const bytes = Buffer.from('actual protected bytes'), record = { id: randomUUID(), filename: 'journal.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+    const receipt = await f.services.taskAttachmentFiles.write(task.id, record, bytes, { beforeEffect() {}, signal: f.signal })
+    f.services.taskAttachmentFiles.commit(receipt)
+    await f.backend.invoke('db:updateTask', { id: task.id, data: { attachments: [record] }, precondition: { attachmentsBaseline: [] } }, f.caller, f.signal)
+    await f.backend.invoke('db:updateTask', { id: task.id, data: { attachments: [] }, precondition: { attachmentsBaseline: [record] } }, f.caller, f.signal)
+    const rows = f.services.db.db.prepare('SELECT key,value FROM settings WHERE key GLOB ?').all('__attachment_journal_v1:*') as Array<{ key: string; value: string }>
+    expect(rows).toHaveLength(1)
+    expect(JSON.parse(rows[0].value)).toMatchObject({ kind: 'publication', phase: 'published', taskId: task.id, attachment: record })
+    const path = join(f.bootstrap.paths.attachmentRoot, task.id, `${record.id}-${record.filename}`)
+    expect(readFileSync(path)).toEqual(bytes)
+    await expect(f.backend.invoke('settings:get', { key: rows[0].key }, f.caller, f.signal)).rejects.toThrow()
+    const publicSettings = await f.backend.invoke('settings:getAll', {}, f.caller, f.signal)
+    expect(JSON.stringify(publicSettings)).not.toContain('__attachment_journal')
+    expect(JSON.stringify(publicSettings)).not.toContain(record.id)
+    // A legacy protected record also gains durable ownership when explicitly
+    // detached; no native/path read is inferred from its metadata.
+    const legacy = { ...record, id: randomUUID(), filename: 'legacy.txt' }
+    f.services.db.updateTask(task.id, { attachments: [legacy] })
+    await f.backend.invoke('db:updateTask', { id: task.id, data: { attachments: [] }, precondition: { attachmentsBaseline: [legacy] } }, f.caller, f.signal)
+    const detached = f.services.db.db.prepare('SELECT value FROM settings WHERE key GLOB ?').all('__attachment_journal_v1:*') as Array<{ value: string }>
+    expect(detached.map(row => JSON.parse(row.value))).toContainEqual(expect.objectContaining({ kind: 'unreferenced', taskId: task.id, attachment: legacy }))
+    expect(existsSync(join(f.bootstrap.paths.attachmentRoot, task.id, `${legacy.id}-${legacy.filename}`))).toBe(false)
+  })
   it('exports actual CLI MCP and attachment responses through captured singleton owners', async () => {
     const f = await fixture(undefined, false, false, false, undefined, undefined, undefined, true)
     const cliLease = f.owner.getCliMcpBindingLease(), attachmentLease = f.owner.getTaskAttachmentBindingLease()

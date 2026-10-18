@@ -1,6 +1,6 @@
 import { TaskGroupRequestScopeError } from '../main/agent-manager/task-group-request-scope'
 import type { DatabaseManager } from '../main/database/manager'
-import type { CreateTaskData, UpdateTaskData, TaskRecord } from '../main/database/types'
+import type { CreateTaskData, UpdateTaskData, TaskRecord, FileAttachmentRecord } from '../main/database/types'
 import type { AgentManager } from '../main/agent-manager-core'
 import type { SyncManager } from '../main/sync-manager'
 import type { PluginRegistry } from '../main/plugins/registry'
@@ -42,6 +42,7 @@ export interface TaskLifecycleBackendOptions {
   canAccessConnector?(id: string, caller: DesktopCallerContext, access: Access): boolean
   emit(operation: TaskLifecycleEvent, payload: JsonValue): void
   beforeTaskDeletion?(taskIds: readonly string[]): void
+  beforeAttachmentMetadataWrite?(taskId: string, before: FileAttachmentRecord[], after: FileAttachmentRecord[]): void
   onFatalEvent(error: ServiceProtocolError): void
 }
 
@@ -295,6 +296,7 @@ export class TaskLifecycleBackend {
           if (!this.updateAllowed(id, data, caller) || !this.sameRows(this.updateRows(id, data), ids)) throw new ServiceProtocolError('INVALID_REQUEST')
           const updated = db.db.transaction(() => {
             assertAttachmentBaseline()
+            if (prepared.data.attachments !== undefined) this.options.beforeAttachmentMetadataWrite?.(id, db.getTask(id)!.attachments, prepared.data.attachments)
             const updated = updateTaskFromUser(db, id, prepared.data)
             if (updated) projectTaskLifecycleTask(updated)
             return updated

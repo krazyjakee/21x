@@ -12,6 +12,7 @@ import { ProductionUiOwner, assertUiStateReferences, assertUiCommandReferences, 
 import { CliMcpConfigManager } from '../main/cli-mcp-config/core'
 import { CliMcpFileOwner, type CliMcpFileOwnerOptions } from '../main/cli-mcp-config/portable-file-owner'
 import { TaskAttachmentFileOwner, type TaskAttachmentFileOwnerOptions } from '../main/task-attachment-file-owner'
+import { TaskAttachmentJournal } from '../main/task-attachment-journal'
 import { AttachmentExecutionOwner, AttachmentExecutionError } from '../main/attachment-execution-owner'
 import type { FileAttachmentRecord } from '../main/database/types'
 import { homedir, networkInterfaces } from 'node:os'
@@ -784,7 +785,7 @@ export class ProductionOwner {
     this.assertStarting()
     const shellWrapper = writeSecretShellWrapper(profileRoot)
     this.checkpoint('task-api')
-    const apiStartup = startTaskApiServer(db, { notifyUser: (title, body) => this.notify(title, body) })
+    const apiStartup = startTaskApiServer(db, { notifyUser: (title, body) => this.notify(title, body), attachmentMetadata: 'unavailable' })
     this.apiOwned = true
     this.stopOwners.push(() => stopTaskApiServer())
     this.drains.set('task-api', () => closeTaskApiServer())
@@ -920,9 +921,12 @@ export class ProductionOwner {
       if (!['starting', 'ready', 'stopping', 'blocked'].includes(this.phase) || processRegistry[registryKey] !== this.identity) throw new ProductionOwnerError('OWNER_CLOSING')
       this.lock!.assertHeld()
     } }
+    const attachmentJournal = new TaskAttachmentJournal({ database: db.db, profileId: this.bootstrap.profileId,
+      attachmentRoot: attachmentOptions.attachmentRoot, assertCurrent: attachmentOptions.assertCurrent })
+    attachmentOptions.journal = attachmentJournal
     const taskAttachmentFiles = this.boundaries.taskAttachmentFiles ? this.boundaries.taskAttachmentFiles(attachmentOptions) : new TaskAttachmentFileOwner(attachmentOptions)
     if (!(taskAttachmentFiles instanceof TaskAttachmentFileOwner)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
-    taskAttachmentFiles.assertOwners(this.bootstrap.paths.attachmentRoot)
+    taskAttachmentFiles.assertOwners(this.bootstrap.paths.attachmentRoot, attachmentJournal)
     this.register('task-attachment-files', () => taskAttachmentFiles.shutdown(), () => taskAttachmentFiles.close())
     attachmentExecution.owner = new AttachmentExecutionOwner({ database: db, files: taskAttachmentFiles,
       attachmentRoot: this.bootstrap.paths.attachmentRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, assertCurrent: fileOptions.assertCurrent })

@@ -7,6 +7,7 @@ import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { AgentManager } from '../main/agent-manager-core'
 import { TaskAttachmentFileOwner, type TaskAttachmentFilePrimitives } from '../main/task-attachment-file-owner'
+import { TaskAttachmentJournal } from '../main/task-attachment-journal'
 import type { FileAttachmentRecord } from '../main/database/types'
 import { TASK_ATTACHMENT_CODECS, TASK_ATTACHMENT_OPERATIONS, TASK_ATTACHMENT_LIMITS, type TaskAttachmentCodec, type TaskAttachmentOperation } from '../shared/task-attachment-codecs'
 import type { DesktopCommandMap } from '../shared/desktop-operations'
@@ -27,7 +28,9 @@ beforeEach(() => {
   db = createPortableTestDb(); root = dirname(dirname(db.getWorkspaceDir('fixture'))); attachmentRoot = join(root, 'attachments'); mkdirSync(attachmentRoot); projectId = db.getDefaultProject()!.id
   ownerValid = read = write = true; releases = []; events = []; beforeUnlink = null; afterOpen = afterPublish = null; fileReads = closeAttempts = 0; refuseClose = false
   fsOverride = { open: async (path, flags, mode) => { const fd = await open(path, flags, mode); await afterOpen?.(); return { stat: () => fd.stat({ bigint: true }), read: (b,o,l,p) => { fileReads++; return fd.read(b,o,l,p) }, write: (b,o,l,p) => fd.write(b,o,l,p), sync: () => fd.sync(), close: async () => { closeAttempts++; if (refuseClose) throw new Error('Controlled raw close failure'); await fd.close() } } }, link: async (from, to) => { await link(from, to); await afterPublish?.() }, unlink: async path => { await beforeUnlink?.(path); await unlink(path) } }
-  files = new TaskAttachmentFileOwner({ attachmentRoot, assertCurrent() { if (!db.db.open) throw new ServiceProtocolError('DISCONNECTED') }, fs: fsOverride })
+  const assertCurrent = (): void => { if (!db.db.open) throw new ServiceProtocolError('DISCONNECTED') }
+  const journal = new TaskAttachmentJournal({ database: db.db, profileId: 'synthetic-backend-journal', attachmentRoot, assertCurrent })
+  files = new TaskAttachmentFileOwner({ attachmentRoot, assertCurrent, fs: fsOverride, journal })
   manager = new AgentManager(db, { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, secrets: { kind: 'unsupported' }, configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' }, createAdapter: () => new FakeAdapter(), isCodexAppServerAdapter: () => false })
   options = { database: db, manager, files, attachmentRoot, engineEpoch: caller.engineEpoch, assertAvailable() { if (!ownerValid || !db.db.open) throw new ServiceProtocolError('DISCONNECTED') }, assertTaskAttachmentOwners(value) { if (value.database !== db || value.manager !== manager || value.files !== files || value.attachmentRoot !== attachmentRoot) throw new ServiceProtocolError('DISCONNECTED') }, isTrustedDesktop: value => value.origin === caller.origin && value.webviewId === caller.webviewId, canAccessTask: (_id, _caller, access) => access === 'read' ? read : write, canAccessProject: (_id, _caller, access) => access === 'read' ? read : write, canAccessAgent: (_id, _caller, access) => access === 'read' ? read : write, onTaskUpdated: (taskId, attachments) => { events.push({ taskId, attachments: structuredClone(attachments) }) } }
   backend = new TaskAttachmentBackend(options); vi.spyOn(console, 'log').mockImplementation(() => {}); vi.spyOn(console, 'error').mockImplementation(() => {})

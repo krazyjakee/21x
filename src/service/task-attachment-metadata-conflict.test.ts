@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { TaskAttachmentFileOwner } from '../main/task-attachment-file-owner'
+import { TaskAttachmentJournal } from '../main/task-attachment-journal'
 import { TaskAttachmentBackend } from './task-attachment-backend'
 import { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
@@ -26,6 +27,7 @@ import type { FileAttachmentRecord } from '../main/database/types'
 import { TaskStatus } from '../shared/constants'
 
 let attachments: TaskAttachmentBackend, files: TaskAttachmentFileOwner, selections: AttachmentSelectionOwner, attachmentRoot: string
+let journal: TaskAttachmentJournal
 let releases: Array<() => void>
 
 let db: ReturnType<typeof createPortableTestDb>
@@ -51,11 +53,13 @@ beforeEach(() => {
   options = { database: db, manager, sync, registry, recurrence, heartbeat, automation, engineEpoch: caller.engineEpoch,
     assertAvailable() { if (!db.db.open) throw new Error('Closed profile') }, isTrustedDesktop: value => value.webviewId === 'main' && value.origin === caller.origin,
     canAccessTask: () => true, canAccessProject: () => true, canAccessAgent: () => true, canAccessSource: () => true,
-    emit(operation, payload) { events.push({ operation, payload }) }, onFatalEvent: vi.fn() }
+    emit(operation, payload) { events.push({ operation, payload }) }, onFatalEvent: vi.fn(),
+    beforeAttachmentMetadataWrite: (id, before, after) => files.observeMetadataChange(id, before, after) }
   backend = new TaskLifecycleBackend(options)
   const root = dirname(dirname(db.getWorkspaceDir('fixture')))
   attachmentRoot = join(root, 'attachments'); mkdirSync(attachmentRoot)
-  files = new TaskAttachmentFileOwner({ attachmentRoot, assertCurrent: options.assertAvailable })
+  journal = new TaskAttachmentJournal({ database: db.db, profileId: 'synthetic-metadata-journal', attachmentRoot, assertCurrent: options.assertAvailable })
+  files = new TaskAttachmentFileOwner({ attachmentRoot, assertCurrent: options.assertAvailable, journal })
   selections = new AttachmentSelectionOwner({
     read: async request => ({ data: Buffer.alloc(request.length, 7).toString('base64') }),
     finish: async () => ({ verified: true }), retire: async () => ({ retired: true })
@@ -90,6 +94,16 @@ async function live() {
   return { task: db.getTask(task.id)!, next }
 }
 describe('actual Source attachment metadata conflict', () => {
+  it('joins a detached canonical path journal fact to the actual CAS transaction without unlink or stale intent replay', async () => {
+    const task = await call('db:createTask', [{ title: 'Actual metadata journal owner' }]), original = record()
+    db.updateTask(task.id, { attachments: [original] })
+    await call('db:updateTask', [task.id, { attachments: [] }, { attachmentsBaseline: [original] }])
+    expect(journal.inspect()).toMatchObject([{ entry: { taskId: task.id, kind: 'unreferenced', attachment: original }, classification: 'unreferenced' }])
+    await expect(call('db:updateTask', [task.id, { attachments: [original] }, { attachmentsBaseline: [original] }])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(journal.inspect()).toHaveLength(1)
+    expect(db.getTask(task.id)?.attachments).toEqual([])
+    expect(existsSync(join(attachmentRoot, task.id))).toBe(false)
+  })
   it('does not overwrite a separately accepted append with a stale full-array append', async () => {
     const task = await call('db:createTask', [{ title: 'Two independent attachment editors' }])
     const identity = { ...caller, uiLeaseId: 'ui_attachment_metadata_conflict' }
