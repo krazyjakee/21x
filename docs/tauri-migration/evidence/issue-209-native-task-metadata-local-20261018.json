@@ -1,0 +1,281 @@
+{
+  "version": 1,
+  "issue": 209,
+  "scope": "Renderer one-write metadata receipts and native inline draft lifetime; no Source/native/public operation/grant change.",
+  "baseRevision": "9f3c633cf147846157a3d190d032ee29e7c6244b",
+  "fixture": {
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1,
+    "description": "Actual typed NativeDesktopHost/client/codecs/transport, TaskWorkspace/Header/Detail/CollapsibleDescription and task store; controlled private results. Separate selected published Source lifecycle regressions exercise real protected profiles; UI does not instantiate Source DB."
+  },
+  "expectedActual": [
+    {
+      "expected": "A fallback metadata intent sends one Source mutation and awaits its accepted receipt.",
+      "actual": "Title, description, noncompletion status and recurrence flags route through one store update; supplied parent callbacks are awaited and reject absent receipts. Fallback skill defaults now persist rather than silently doing nothing."
+    },
+    {
+      "expected": "Pending or uncertain native edits retain their draft and cannot replay into a replacement.",
+      "actual": "Synchronous lane covers Enter/blur, keyboard/button, submit/Escape and overlapping detail toggles. Same-task canonical refresh preserves title/description. Unknown/refused/missing/foreign replies require reopen/review. Task key, connection/project/pagehide fence late completion and release observers."
+    },
+    {
+      "expected": "Old connection receipt cannot overwrite new cache/error or launch background export.",
+      "actual": "Native update store checks connection and exact returned task ID before publication; followup export guarded by same captured connection. Completion continues through feedback owner; attachment CAS/removal semantics unchanged."
+    }
+  ],
+  "negativeProof": {
+    "revision": "9f3c633cf147846157a3d190d032ee29e7c6244b",
+    "command": "pnpm test:run src/renderer/src/components/tasks/native-task-hierarchy.test.tsx -t \"exactly one Source metadata\"",
+    "exitCode": 1,
+    "failed": 3,
+    "deselected": 17,
+    "expected": "Each real fallback action sends one db:updateTask",
+    "actual": "Rename/description/status each sent two requests",
+    "log": {
+      "sha256": "4e5b29539506be8d2418b11cf24938713a858cfa24c2d1ba837508df5d7e6db8",
+      "bytes": 4817
+    }
+  },
+  "failureRepair": [
+    {
+      "failure": "First expanded app run passed33 but one existing subtask retirement test found multiple alert regions because idle metadata editors also published retirement alerts.",
+      "repair": "Retired editors still synchronously fence admission, but alert only for owned failure or visible inline draft; all34 then pass. No scope guard/assertion removed."
+    },
+    {
+      "failure": "One new skill fixture used singular skill:getAll instead of retained skills:getAll.",
+      "repair": "Correct finite fake wire operation to actual published name before combined gate."
+    }
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "settingsOrDispatchUsed": false,
+    "sourceRunLookup": []
+  },
+  "remainingDefects": [
+    "Installed supported-platform native UI/reload/keyboard/focus/lifecycle acceptance and #202 prerequisite remain open.",
+    "Separate triage/start/resume/agent assignment and other CRUD/completion receipt consumers still need complete renderer audit; this slice does not establish their lifecycle.",
+    "Durable unknown mutation receipt/reconciliation and protected orphan/removal journal remain open; no automatic merge/retry/rollback added.",
+    "Unavailable native voice/login/global shortcut/general OAuth unchanged; hosted voice deferred."
+  ],
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  },
+  "constraints": {
+    "syntheticOnly": true,
+    "liveProfiles": false,
+    "liveProviders": false,
+    "microphone": false,
+    "liveRelease": false,
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred",
+    "identityDecision": false,
+    "masterToMainMerge": false
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "rendererPassed": 1999,
+    "rendererFiles": 158,
+    "standalonePassed": 255,
+    "standaloneFiles": 7,
+    "actualTypedNativeHierarchyAndMetadataControls": 41,
+    "newMetadataControls": 24,
+    "skippedInSelectedFiles": 0,
+    "runnerChange": false,
+    "inventorySourceFiles": 919,
+    "inventoryIpcOperations": 736,
+    "inventoryExistingUnresolved": 9,
+    "normalSourceCommitHooks": {
+      "exitCode": 0,
+      "commands": [
+        "eslint --no-warn-ignored (lint-staged)",
+        "pnpm typecheck (tsc --build --noEmit)"
+      ]
+    },
+    "actualPublishedSourceLifecycleControls": 17,
+    "actualPublishedSourceCodecControls": 7
+  },
+  "commands": [
+    {
+      "command": "pnpm test:run --project renderer --maxWorkers=4",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "83fb8ac6e8b29cdff4032f0e87e6dc7728ba704432ae1c39fa55191d0f2cb102",
+        "bytes": 1132380
+      }
+    },
+    {
+      "command": "node scripts/tauri-stage-production.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "ebd00c635189cc451566057a6922e9c62c89823c6bf2d781a1e44103d4ff4f72",
+        "bytes": 267
+      }
+    },
+    {
+      "command": "pnpm test:tauri --production-proofs src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/stores/task-store.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/task-lifecycle-backend.test.ts src/shared/task-lifecycle-codecs.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "3a5c0ab77c00f5013c4fb90cf99ed0cc24223aa942754ae4cadc508e8393cb46",
+        "bytes": 17344
+      }
+    },
+    {
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "pnpm lint",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+        "bytes": 16719
+      }
+    },
+    {
+      "command": "pnpm tauri:production:frontend:build",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "748515b650afaf087f843887273df7f53d9c5551a576b9d4a1cecb28809d9539",
+        "bytes": 9737
+      }
+    },
+    {
+      "command": "pnpm build",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "560b875a51ba952e5a08b7a959e713b099881d6898174717d5f104ed27e734ac",
+        "bytes": 29337
+      }
+    },
+    {
+      "command": "git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs",
+      "rawExitCode": 0
+    },
+    {
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0
+    },
+    {
+      "command": "git diff --check",
+      "rawExitCode": 0
+    }
+  ],
+  "createdAt": "2026-10-18T01:41:35.171778+00:00",
+  "implementationRevision": "2563e3c901d716765993c61a9767bae886f069e5",
+  "verificationRevision": "2563e3c901d716765993c61a9767bae886f069e5",
+  "publication": {
+    "branch": "master",
+    "fastForward": true,
+    "remoteConfirmed": "2563e3c901d716765993c61a9767bae886f069e5",
+    "rebase": "origin/master unchanged from verified base; no input changes"
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "9a9484786403511859c39ed513c0eba8a74f86db17772dde04671fa2fa073d6b",
+      "bytes": 100053
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "66e4d7f0a34013bb78d56bca311a167c29d792db5fd39fed5998df2a485634df",
+      "bytes": 380581
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "832f0fc9a6fa7d61b5dac3c22aaab21008461191993343eb2608ed5e8b454936",
+      "bytes": 36822
+    },
+    "src/renderer/src/components/canvas/TaskPanelContent.tsx": {
+      "sha256": "8e8f960ac3fb44d9b9c11756d4e98883799b8cee29785dbdce6c2e7613436724",
+      "bytes": 5741
+    },
+    "src/renderer/src/components/layout/AppLayout.tsx": {
+      "sha256": "391e0556993fc744125a25483a5a35e86a2ccd92774607c1ea13f58e473ad5d8",
+      "bytes": 15495
+    },
+    "src/renderer/src/components/tasks/TaskDetailView.tsx": {
+      "sha256": "31c4e686b4fda990e0a441773330c0110dcc2c740674614596146426809c6d1a",
+      "bytes": 30314
+    },
+    "src/renderer/src/components/tasks/TaskHeaderBar.tsx": {
+      "sha256": "4607ca709013866eeb5254f0730c5e1ac17df1a0107fc2d2908879bdddcdf66c",
+      "bytes": 14749
+    },
+    "src/renderer/src/components/tasks/TaskWorkspace.tsx": {
+      "sha256": "8213f37b1fd17b662cd885839a41879205c041d2eb844f0d231be11407153cb5",
+      "bytes": 45790
+    },
+    "src/renderer/src/components/tasks/native-task-hierarchy.test.tsx": {
+      "sha256": "9fae46c3ecb42bd52fbb49ffc96f590d2f6efc28f7bf12d52b571e76e47fc63f",
+      "bytes": 30985
+    },
+    "src/renderer/src/components/ui/CollapsibleDescription.tsx": {
+      "sha256": "be5092847b3ec8d4cf4728a5a39ceb7148b02cc47e198b59173caa015723bc8b",
+      "bytes": 8896
+    },
+    "src/renderer/src/hooks/use-task-edit-receipt.ts": {
+      "sha256": "07f888dbc706a6fefc89651884ffd1e236dfdb868130ab70b798e6237ca5cb52",
+      "bytes": 2414
+    },
+    "src/renderer/src/stores/task-store.ts": {
+      "sha256": "4be1873144dbf91a2b0cadbc2a7877ef5a7d5e7a9c944b9e3ba3ad719d37cfcd",
+      "bytes": 9832
+    }
+  },
+  "artifactHashes": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "37fac9ce64dc995cd5a83983ff0dff7c3fcf4a1c5e709ed65d6867878645b3d4",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "a90ee13ef6435595f5d3a4a4f7537c59978482f25bc23ac3d3c0127677b4a486",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "464faa7cbf6213dde85db33e89760acd832a14cb9f19692845e4579ac1fa4fd4",
+      "bytes": 6227870
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    "src-tauri/resources/native/twentyonex-credential-key": {
+      "sha256": "9c1f27ade9a0ad05f7b7044edb8bd9f2bf3e70e3bd156daffc0970083a4e7009",
+      "bytes": 25759904
+    }
+  }
+}
