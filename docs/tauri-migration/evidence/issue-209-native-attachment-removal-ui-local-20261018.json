@@ -1,0 +1,302 @@
+{
+  "version": 1,
+  "issue": 209,
+  "scope": "Native renderer exact-ID removal consumes Source8244 metadata-first semantics without second full-array write, joins canonical readback after ACK/partial cleanup refusal, fences retired followups and preserves original form baseline for explicit review. Electron legacy path retained; no Source/native/public DTO/grant change.",
+  "fixture": {
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1,
+    "description": "Actual typed NativeDesktopHost/client/codecs/transport, TaskAttachments/TaskForm/TaskDialogs and real task snapshot store with controlled private results. UI does not instantiate Source DB; separately selected backend+CAS tests execute actual protected FileOwner/SQLite/AgentManager published Source paths. No installed Wry-to-Source/UI or raw native picker/drop proof in this slice."
+  },
+  "expectedActual": [
+    {
+      "expected": "One exact-ID native remove and canonical readback even when cleanup refuses after metadata commit.",
+      "actual": "ACK and partial cleanup refusal each trigger read-only task snapshot; no onChange/full-array update or replay. Pre-unlink refusal/unchanged canonical/missing readback keep known metadata, fixed hints and mutation review fence."
+    },
+    {
+      "expected": "Edit drafts cannot use canonical removal readback to silently authorize other stale full-array intent.",
+      "actual": "Unsaved text, original baseline and other known copy receipts retained until explicit close. Only exact confirmed removed ID changes local draft; no canonical merge/fresh-baseline adoption. Save locks for review after any removal attempt; project/connection replacement fences idle or pending intent."
+    },
+    {
+      "expected": "Retired view cannot publish readback or follow-up mutation.",
+      "actual": "Task replacement, held readback, project/modal change-return, pagehide and connection replacement controls pass; per-request observer cleanup owned. Electron keeps its existing remove+metadata path."
+    }
+  ],
+  "failureRepair": [
+    {
+      "failure": "Three new actual native controls fail on old UI: duplicate full-array update, missing canonical reconciliation after partial refusal and edit Save incorrectly enabled.",
+      "repair": "Native exact-ID/readback path and explicit local-only form review; no Source validator changed.",
+      "negative": {
+        "exitCode": 1,
+        "failed": 3,
+        "deselected": 45,
+        "log": {
+          "sha256": "9cb574de4cdf87dd47c8888d0fb9a8c08d344a7e27588ea86bff25a2396a5807",
+          "bytes": 8726
+        }
+      }
+    },
+    {
+      "failure": "Initial new review implementation replaced the entire local attachment draft with canonical records and discarded another known unsaved copy receipt; one focused test reproduced this.",
+      "repair": "Carry the exact captured removed ID through local-only callback, apply only its confirmed delta locally, retain other known copy receipts/original baseline/text and keep Save blocked for explicit close/review; no Source array merge/write.",
+      "negative": {
+        "exitCode": 1,
+        "failed": 1,
+        "deselected": 58,
+        "log": {
+          "sha256": "bf52e6e3697bfb02d2668be71d4a3085e8eae866feed4f5d6125716384f9469d",
+          "bytes": 15136
+        }
+      }
+    },
+    {
+      "failure": "A coalesced native Drop delivered after canonical readback but before React painted edit-draft review controls started one unexpected save; focused control fails1 before repair.",
+      "repair": "Synchronous admission refs close attachment/form intent before local draft callback/publication; same real facade/coalesced-event control passes with zero accept/save, no deadline/assertion weakened.",
+      "negative": {
+        "exitCode": 1,
+        "failed": 1,
+        "deselected": 60,
+        "log": {
+          "sha256": "fe9cd4c0d12e687b0ce30adbbea78db17bb6c85b3ddd5f59a7138aa174d998e9",
+          "bytes": 7589
+        }
+      },
+      "repairedFocused": {
+        "exitCode": 0,
+        "passed": 1,
+        "deselected": 60,
+        "log": {
+          "sha256": "8e90ac41726e7eae5f815e6d0ab9327499ae119a56083d5ec28f630b9b9c0b3f",
+          "bytes": 814
+        }
+      }
+    },
+    {
+      "failure": "Adversarial record-object retarget fixture initially reused another displayed ID, producing a duplicate React key warning.",
+      "repair": "Retarget to a distinct valid ID; unchanged exact-original-ID assertions pass60app60standalone. Final expanded61UI controls include the coalesced-event case."
+    }
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "settingsOrDispatchUsed": false,
+    "sourceRunLookup": []
+  },
+  "remainingDefects": [
+    "Only pre-unlink refusal guarantees retained bytes. Raw unlink may succeed before later cancellation/verification failure; no filesystem/SQLite atomic rollback claimed. Protected orphan/removal journal and hard-crash/unknown-copy recovery remain open.",
+    "Installed supported-platform removal/drop/reload/keyboard/focus/lifecycle acceptance and #202 prerequisite remain open.",
+    "Separate fallback TaskWorkspace taskApi.update+store.updateTask duplicate writes are audited, actual native reproduction/repair next; no completion claim for those paths here.",
+    "Unavailable native voice/login/global shortcut/general OAuth authority stays unchanged; hosted voice deferred."
+  ],
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  },
+  "constraints": {
+    "syntheticOnly": true,
+    "liveProfiles": false,
+    "liveProviders": false,
+    "microphone": false,
+    "liveRelease": false,
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred",
+    "identityDecision": false,
+    "masterToMainMerge": false
+  },
+  "createdAt": "2026-10-18T01:12:03.542946+00:00",
+  "implementationRevision": "1264386efaf41ed8bbd58b1a2295377ccd341541",
+  "verificationRevision": "1264386efaf41ed8bbd58b1a2295377ccd341541",
+  "baseRevision": "fea7040eb256cb9a8edfe0cb6c52a90c66c62c22",
+  "preRebaseBaseline": "24c580d5201b4c0bca21e2deb8cb8581a6181ce9; full1972renderer292Node before final draft-receipt/synchronous-fence repairs",
+  "inheritedSource": "a8b01ede/a3a2d257 mobile Source continuation plus fea7040e evidence; final staging/affectedNode/type/build/freshness rerun",
+  "publication": {
+    "branch": "master",
+    "fastForward": true,
+    "remoteConfirmed": "1264386efaf41ed8bbd58b1a2295377ccd341541"
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "baselineRendererPassed": 1972,
+    "baselineRendererFiles": 158,
+    "baselineStagedPassed": 292,
+    "finalAppPassed": 86,
+    "finalAppFiles": 3,
+    "finalStandalonePassed": 295,
+    "finalStandaloneFiles": 7,
+    "skippedInFinalSelectedFiles": 0,
+    "actualNativeUiControls": 61,
+    "newNativeUiControls": 16,
+    "actualSourceBackendControls": 88,
+    "selectionNote": "Legacy TaskForm.test.tsx is selected in application run (8tests); its filename in standalone command is outside existing portable includes and is not counted. Real TaskForm still executes through all61 native UI controls in standalone. No test command/config switch.",
+    "normalSourceHooks": "lint-staged/pnpm typecheck pass",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "inventory": {
+      "files": 918,
+      "ipcOperations": 736,
+      "existingUnresolved": 9
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/components/tasks/TaskForm.test.tsx",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e4ba5f5bff354316b4a3b23703f7b859eb083f0b3073e564bcdad0c87766354a",
+          "bytes": 3620
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-stage-production.mjs",
+        "exitCode": 0,
+        "log": {
+          "sha256": "ebd00c635189cc451566057a6922e9c62c89823c6bf2d781a1e44103d4ff4f72",
+          "bytes": 267
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri --production-proofs src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/components/tasks/TaskForm.test.tsx src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/renderer/src/stores/task-store.test.ts src/service/task-attachment-metadata-conflict.test.ts src/service/task-attachment-backend.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "212ae0e1e4fcb4801fa07acbe2f7f06c7a7b310a824d1990f0d29d7b3ad445e0",
+          "bytes": 59566
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "741b8a48cc2a7c5862abfe2b96f8d1fd32dd7c53a3d0799db99b1fdacd7ea25d",
+          "bytes": 9737
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "2e49d4cb3a3ead23fc0abd6ed056a1740767b8f6434da3107f27bbdb152ce64f",
+          "bytes": 29337
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy git diff --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    ],
+    "baselineCommands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "c3a3bcc6c2fb4ca2c221f3345bded5a9bffe07d2c0b0f0f2bbbe766a18ff2242",
+          "bytes": 1125904
+        }
+      },
+      {
+        "command": "affected standalone command before last repairs",
+        "exitCode": 0,
+        "passed": 292,
+        "log": {
+          "sha256": "07ffdb09845bb697900d8fe8928c44b7eeaa83cd2819abc44cb3b111de4eaacc",
+          "bytes": 58053
+        }
+      }
+    ]
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "98ab53b5873dc9ef6b6e58135d3fbefb177e2830d3759b1ad1abd02d58d2bf3c",
+      "bytes": 98371
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "84c8d5fb345f7f6d8dfafe562c566295bee420971c93662256b8cde9a581682a",
+      "bytes": 380526
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "f74b045afe7cb7be4e93160c05c3436388c170ca1d055e919345e443c4281d03",
+      "bytes": 34981
+    },
+    "src/renderer/src/components/tasks/TaskAttachments.tsx": {
+      "sha256": "f7120b3c08870364b38ecfd6e0f56d374abe1d479418f1027b667af25f25eac4",
+      "bytes": 13066
+    },
+    "src/renderer/src/components/tasks/TaskForm.tsx": {
+      "sha256": "428284fe0f2f879d4454d71a4c0e52c9d873a324bb6a4ebabaffe998116b7998",
+      "bytes": 13018
+    },
+    "src/renderer/src/components/tasks/native-attachment-ui.test.tsx": {
+      "sha256": "3e6b248b7dbf1d7bf65baae59fc629c0fe21c0ff22f3885349f3eeab39bd46b6",
+      "bytes": 61261
+    }
+  },
+  "artifacts": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "ae9e51b9bf611872c59b7c2712d22d722d919004c88624a0b8ffd40a238bcb2d",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "8be3727647cf883929d6a072b71511c0e4a6c9bc62a618ec3c053b5e78421a74",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "464faa7cbf6213dde85db33e89760acd832a14cb9f19692845e4579ac1fa4fd4",
+      "bytes": 6227870
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "out/tauri-production-renderer/assets/index-CPcvVZLS.js": {
+      "sha256": "436d6f35da3145c5596c9ab660db171fd5714cb340cc68df5accb6c2715d4279",
+      "bytes": 303135
+    },
+    "out/renderer/assets/index-D-3mgk87.js": {
+      "sha256": "6f457c71d2ba0ef09b967c144571caf0fb1313bb7daaad43460d2f4410bcf446",
+      "bytes": 3266432
+    }
+  }
+}
