@@ -1,0 +1,387 @@
+{
+  "issue": 209,
+  "sourceRevision": "6a29f07ac9d16b1dd3774ddfc57420c2dbcfc774",
+  "verifiedBase": "81a27abe87a093a26062bda47ff13a90603b270a",
+  "recordedAt": "2026-10-18T03:54:24.575298+00:00",
+  "title": "Native task completion canonical receipts and original Source choice ownership",
+  "scope": {
+    "renderer": "Actual typed native facade/transport, real task and Source stores/hooks/dialog, controlled native operation/canonical database responses. No Electron preload in new harness.",
+    "source": "Separate affected tests exercise actual SQLite/production owners/private peers/compiled Root, controlled adapter and Source children, protected deletion and2 actual staged stdio entries. These do not join native installed WebView delivery with a live remote Source action.",
+    "hardware": "Linux x64; no installed supported-platform/native input or live provider proof."
+  },
+  "expectedActual": [
+    {
+      "expected": "Completion requires an accepted canonical completed task.",
+      "actual": "Manual write checks exact accepted row; linked Source path requires accepted marker, finite action success and strict completed readback. Callback receives canonical row/title, never a synthesized old task."
+    },
+    {
+      "expected": "One original Source choice and view own each completion.",
+      "actual": "Synchronous admission prevents duplicates. Original task/project/agent/Source/external/action snapshot stays captured; observed binding replacement cannot retarget. Project withdrawal+return, pagehide, unmount, view replacement and reconnect fence later effects/callbacks. Admitted raw Source work remains owned; no cancellation/rollback promise."
+    },
+    {
+      "expected": "Unknown results remain understandable without replay.",
+      "actual": "Fixed review dialog excludes private error text; Close does not readmit the same view. Accepted marker is not reverted. Native ordinary completion refuses Captain/group anchors; exact-root Fresh remains unavailable."
+    },
+    {
+      "expected": "Native board transition keeps one lifecycle owner.",
+      "actual": "Completion delegates to the same captured owner; other nonexecution status transitions require canonical destination row. No extra renderer recovery read/Stop before Source locked mutation. Electron orchestration unchanged; full board view/drag lifetime not claimed."
+    }
+  ],
+  "negativeProof": {
+    "revision": "2d5810e62e80c190d060d91cad83b0ac1c9b7c1a",
+    "command": "pnpm test:run --project renderer src/renderer/src/hooks/native-task-completion.test.tsx",
+    "rawExitCode": 1,
+    "failed": 15,
+    "scope": "Initial15 new actual typed-facade controls against published completion hook; no native installation or live Source provider. Subsequent11 controls expand lifetime/board assertions.",
+    "log": {
+      "sha256": "e8d095139d038ca9f90c6ca1d3c368b4b9fd4128ed32cd842900ce8fff9d7682",
+      "bytes": 17636
+    },
+    "initialFour": {
+      "sha256": "3b9e926f02c72721fc6b2844c2cbc7f0ea28a3a514d38fcf29a4a34da23513ef",
+      "bytes": 8186
+    }
+  },
+  "failureRepair": [
+    {
+      "failure": "First repaired focused run21pass/2fail because review modal aria-hid the original trigger from accessibility query.",
+      "rawExitCode": 1,
+      "log": {
+        "sha256": "505b7719dbdda67be6c2cf1325baaf96d825524dc1004ddb2e33ee0a3aa18ff8",
+        "bytes": 17680
+      },
+      "repair": "Reentry helper explicitly queries the cached hidden originating button; same no-replay assertions retained.23/23 then26/26 passed."
+    },
+    {
+      "failure": "Separate retention integration typecheck caught3 TaskStatus enum literals in initial unpublished completion fixture.",
+      "rawExitCode": 2,
+      "log": {
+        "sha256": "c98667bbe498c3ff0e7d49df621b6bafdebef2e110ef18eee3b551c6ce313a52",
+        "bytes": 433
+      },
+      "repair": "Use TaskStatus.Completed without changing runtime value. Forced typecheck rerun0 both separately and this complete gate."
+    }
+  ],
+  "focused": {
+    "passed": 26,
+    "skipped": 0,
+    "rawExitCode": 0,
+    "command": "pnpm test:run --project renderer src/renderer/src/hooks/native-task-completion.test.tsx",
+    "log": {
+      "sha256": "2bca23d0438b87b9df7891f468680d4057b0f91a7936dc9a48330e3f5e778f11",
+      "bytes": 516
+    }
+  },
+  "checks": [
+    {
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral:audit",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b62357621bb78384b0d656bf5e7ac2a2ed99391f491ddb260ec602062a1ed7e0",
+        "bytes": 165
+      }
+    },
+    {
+      "command": "node scripts/tauri-stage-production.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "84fc8806443a7686f1902dd2b31dba2b76e39308d1dd2b4185b44a96dc38dfa4",
+        "bytes": 267
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --project=renderer --run-receipt=/tmp/ea209-native-completion-renderer-receipt.json",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "9c9e9b13149bd10fdd4096f4ce911e32e1e64d87ee0780a246333e5507200c66",
+        "bytes": 1145583
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-native-completion-affected-receipt.json src/renderer/src/hooks/native-task-completion.test.tsx src/renderer/src/hooks/use-task-completion.test.tsx src/renderer/src/components/tasks/native-task-crud.test.tsx src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/canvas/TaskPanelContent.test.tsx src/renderer/src/components/dashboard/task-board-transition.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/task-lifecycle-backend.test.ts src/service/production-desktop-bindings.test.ts src/service/production-mobile.test.ts src/service/production-task-feedback-acceptance.test.ts src/main/database-attachment-retention.test.ts src/shared/task-lifecycle-codecs.test.ts scripts/production-service-proof.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "93fefdbdf81474dbb34cca4f44d500bcdf175b8f56ffe0ffc0713372ec6c57f3",
+        "bytes": 562117
+      }
+    },
+    {
+      "command": "pnpm lint",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+        "bytes": 16719
+      }
+    },
+    {
+      "command": "pnpm exec vite build --config vite.tauri-production.config.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "9b929b17d3e81cedb93e5f7423bf7bbdeeca2c788de1c7f485942e22f39d389a",
+        "bytes": 9606
+      }
+    },
+    {
+      "command": "pnpm build",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "c2a7ac62eae0edcefe26b5e458595fdcefef2110912e3f980a26311e97d2e13b",
+        "bytes": 29338
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "98a8301e15a6ceaea4de6c4c5a9a5c668cd211d73179aa3530bdae9bed374555",
+        "bytes": 88
+      }
+    },
+    {
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "75066ea7702d50a5cb50d1c553f0ee20a814fd50dfcceb1e7d856e149c632848",
+        "bytes": 91
+      }
+    },
+    {
+      "command": "git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    }
+  ],
+  "runReceipts": {
+    "renderer": {
+      "artifact": {
+        "sha256": "a8df3c29527de724292107db59ae95476916b7e8f32ab00a82ec14fdc13d3e9c",
+        "bytes": 94223
+      },
+      "revision": "81a27abe87a093a26062bda47ff13a90603b270a",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 578,
+      "executedFiles": 159,
+      "passed": 2101,
+      "skipped": 0,
+      "note": "Eligible graph is not claimed executed. Project and caller filter execution counts come from framework summaries."
+    },
+    "affected": {
+      "artifact": {
+        "sha256": "c15578a6baf9c958ab80dfcfcf7a7cb74d4d18e0d2dad02003b5867beb2248bf",
+        "bytes": 94223
+      },
+      "revision": "81a27abe87a093a26062bda47ff13a90603b270a",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 578,
+      "executedFiles": 18,
+      "passed": 542,
+      "skipped": 0,
+      "note": "Eligible graph is not claimed executed. Project and caller filter execution counts come from framework summaries."
+    }
+  },
+  "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+  "normalSourceHooks": {
+    "rawExitCode": 0,
+    "commands": [
+      "eslint --no-warn-ignored (lint-staged7files)",
+      "pnpm typecheck (tsc --build --noEmit)"
+    ],
+    "verifiedRuntimeInputsUnchanged": 7
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "application": "0.0.161",
+    "pnpmActual": "9.15.9",
+    "pnpmDeclared": "9.15.2",
+    "nodePinned": "22.23.2",
+    "nodeAbi": "127",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3",
+    "pty": "1.1.0",
+    "electronLegacy": "44.0.0"
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "0996b7d41d2f8ebb2eacc857c2b04af560021d57da5994c6fcae722266a58775",
+      "bytes": 119049
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "766f01ab1e5cf0d013c9ccdf0fef4a66044d723ea1c839ac27945cf68b0a90d9",
+      "bytes": 46129
+    },
+    "src/renderer/src/components/canvas/TaskPanelContent.tsx": {
+      "sha256": "c99cc6b7160d09d26cde2fc016b0d1dc16763dd3e7b593d6ddbeaa31292af2f9",
+      "bytes": 5848
+    },
+    "src/renderer/src/components/dashboard/task-board-transition.ts": {
+      "sha256": "f39bb4adfec3f8ddd456c02f92d5db617b96ef383dd61ae8d88b9eb777fc9fe0",
+      "bytes": 2899
+    },
+    "src/renderer/src/components/layout/hooks/use-active-task-actions.ts": {
+      "sha256": "0bbf1f39f0d2eaa165ef90220047090ee75f9a72a6323d2a7520b257b3bbc769",
+      "bytes": 12563
+    },
+    "src/renderer/src/components/tasks/CompleteAtSourceDialog.tsx": {
+      "sha256": "d6e4614a9769c6f7efd35472bb726c301edbbe5ceba778cdc294599098bb6cf6",
+      "bytes": 2946
+    },
+    "src/renderer/src/hooks/native-task-completion.test.tsx": {
+      "sha256": "53334e4c56d99300170d51a9acc206272b3e3e77930f1f4d2f3edab89ed0f8fd",
+      "bytes": 17052
+    },
+    "src/renderer/src/hooks/use-task-completion.tsx": {
+      "sha256": "9e060c2f669a78667ecb1b66a2a3da3b8cc84b552adc1c66b94a6d0aacdedffb",
+      "bytes": 9986
+    },
+    "src/renderer/src/hooks/use-task-edit-receipt.ts": {
+      "sha256": "6e377100bf9e567d1fb9cfa90e555ed9d1bc6a9406a268b2c9f4c66cd58d917e",
+      "bytes": 3052
+    },
+    "src/service/task-lifecycle-backend.ts": {
+      "sha256": "18b0999826d28185ddf9889692e3c9aa50ec188a3a87157e93e87eacf5e7da9c",
+      "bytes": 31005
+    },
+    "src/service/production-desktop-bindings.ts": {
+      "sha256": "e5ef6681a36e29fcfcd118e65a43a6e6c778cff2ad88ce05226d2293a62730cc",
+      "bytes": 48671
+    },
+    "src/service/production-owner.ts": {
+      "sha256": "34fc65185cfa214e7568f8425f7f40927ae42092b66f4f7e7e5c49b9e27e9a88",
+      "bytes": 99307
+    },
+    "src/service/production-task-feedback-acceptance.test.ts": {
+      "sha256": "665690d580edf00efa216928eb61190f0f60a158d2ddbb610c594661afd1eaac",
+      "bytes": 1471
+    },
+    "scripts/production-task-feedback-proof.ts": {
+      "sha256": "5093f1e79d3f9287900f7681322d904346f9d0dccdf6f9eac18041ebb13c5334",
+      "bytes": 44003
+    },
+    "src/main/database/manager.ts": {
+      "sha256": "94b9e254c15ec1ed83fd8283d79d53ce85d757a9940930fe1603c03ef8a8d671",
+      "bytes": 127407
+    },
+    "src/service/production-mobile.test.ts": {
+      "sha256": "5dc817dbedccedeedc4652405079038eb3ef22873ec3221fa102063d647c347a",
+      "bytes": 58407
+    }
+  },
+  "artifactHashes": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "168b9a8470e46dba8f12e32ea7a8aff6abd9b6b16441d56ad87c6653d290e617",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "91bc8c596468609abc41ae1a867da62877561f7931d63a5bc5bbbcb3d8970cc1",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "f74fa2b7248601cb95381878356b8e8692a928d9f871cee2bf097d72fedb15af",
+      "bytes": 6288384
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/database-stdio.mjs": {
+      "sha256": "30aba17476531dfd4cd519d65282578cfcccfde53f19427cc3057d8026cafc68",
+      "bytes": 1741
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "freshness": {
+    "sourceFiles": 923,
+    "ipc": 736,
+    "existingUnresolved": 9,
+    "inventoryRegeneratedByteIdentical": true,
+    "operationEventGrantAdded": false
+  },
+  "publication": {
+    "fastForwardPushRawExitCode": 0,
+    "normalHooks": 0,
+    "remoteObservedMaster": "061a53da79b9d993b8e713edb188a6c0bfb57e74",
+    "sourceAncestorOfObservedMasterRawExitCode": 0,
+    "note": "B evidence-only commit immediately followed own source; ls-remote master plus fetch/ancestor confirmed publication. Rebased B JSON before this evidence; all listed source/runtime inputs byte-identical."
+  },
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "sourceRunLookup": [],
+    "settingsOrDispatchUsed": false
+  },
+  "remainingDefects": [
+    "Native feedback/learning submission and delayed AutoRun receipt lifetimes remain separate Source/UI work. Existing backend feedback proof is not this UI submission proof.",
+    "Full board drag/view receipt and installed supported-platform keyboard/input/reload/reconnect/shutdown acceptance remain open.",
+    "Exact-root Fresh unavailable pending explicit Source owner contract.",
+    "Protected attachment directories/journal facts deliberately retained after logical deletion; no cleanup/reclamation/atomicity claim. E2 continues separate filesystem authority audit.",
+    "Optional private artifact viewer unregistered/off; native counterpart prerequisite, native voice unavailable and hosted voice deferred.",
+    "202/208 and complete unavailable service/platform prerequisites remain open."
+  ],
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  },
+  "constraints": {
+    "syntheticProfilesOnly": true,
+    "liveProviders": false,
+    "microphone": false,
+    "liveRelease": false,
+    "liveDataCutover": false,
+    "electronRetirement": false,
+    "identityDecision": false,
+    "masterToMainMerge": false
+  }
+}
