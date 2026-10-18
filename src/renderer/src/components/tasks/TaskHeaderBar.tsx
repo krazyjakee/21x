@@ -8,6 +8,7 @@ import { TaskActivityBadge } from '@/components/activity/TaskActivityBadge'
 import { CodingAgentType, TASK_STATUSES, TaskStatus } from '@/types'
 import type { Agent, Task } from '@/types'
 import { MENU_ITEM_CLASS, MENU_PANEL_CLASS } from '@shared/menu-styles'
+import { useTaskEditReceipt } from '@/hooks/use-task-edit-receipt'
 
 export enum TaskPrimaryAction {
   START = 'start',
@@ -97,6 +98,7 @@ export function TaskHeaderBar({
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(task.title)
   const [menuOpen, setMenuOpen] = useState(false)
+  const receipt = useTaskEditReceipt(task.id)
 
   const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
@@ -104,7 +106,7 @@ export function TaskHeaderBar({
   const statusMenuRef = useRef<HTMLDivElement>(null)
   const agentMenuRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => setTitle(task.title), [task.title])
+  useEffect(() => { if (!editing) setTitle(task.title) }, [task.title, editing])
   useEffect(() => {
     if (!menuOpen) return
     const close = (event: PointerEvent) => {
@@ -131,13 +133,14 @@ export function TaskHeaderBar({
   }, [agentMenuOpen])
 
   const commitTitle = async () => {
+    if (!receipt.admit()) return
     const next = title.trim()
-    setEditing(false)
     if (!next || next === task.title) {
       setTitle(task.title)
+      setEditing(false)
       return
     }
-    await onRename(next)
+    await receipt.run(() => onRename(next), () => setEditing(false))
   }
 
   const actionMeta = action ? ACTION_META[action] : null
@@ -159,25 +162,28 @@ export function TaskHeaderBar({
           <input
             autoFocus
             value={title}
+            disabled={receipt.blocked}
             onChange={(event) => setTitle(event.target.value)}
             onBlur={() => void commitTitle()}
             onKeyDown={(event) => {
               if (event.key === 'Enter') void commitTitle()
-              if (event.key === 'Escape') { setTitle(task.title); setEditing(false) }
+              if (event.key === 'Escape' && receipt.admit()) { setTitle(task.title); setEditing(false) }
             }}
             className="h-8 w-full max-w-xl rounded-md border border-primary/50 bg-card px-2 text-sm font-medium outline-none"
             aria-label="Task title"
           />
         ) : (
-          <button onClick={() => setEditing(true)} className="group flex max-w-full items-center gap-1.5 text-left">
+          <button disabled={receipt.blocked} onClick={() => { if (receipt.admit()) setEditing(true) }} className="group flex max-w-full items-center gap-1.5 text-left">
             <span className="truncate text-sm font-semibold text-foreground">{task.title}</span>
             <Pencil className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
         )}
       </div>
+      {(receipt.failed || (editing && receipt.review)) && <span role="alert" className="text-xs text-muted-foreground">Task change could not be confirmed. Reopen this task and review it before trying again.</span>}
       <div ref={statusMenuRef} className="relative shrink-0">
         <button
           type="button"
+          disabled={receipt.blocked}
           onClick={() => setStatusMenuOpen((open) => !open)}
           className="group inline-flex items-center gap-0.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
           aria-label="Change task status"
@@ -197,7 +203,7 @@ export function TaskHeaderBar({
                 aria-checked={task.status === status.value}
                 onClick={() => {
                   setStatusMenuOpen(false)
-                  if (task.status !== status.value) void onStatusChange?.(status.value)
+                  if (task.status !== status.value && onStatusChange) void receipt.run(() => onStatusChange(status.value))
                 }}
                 className={`${MENU_ITEM_CLASS} hover:bg-accent`}
               >

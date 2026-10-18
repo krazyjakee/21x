@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
+import { ServiceProtocolError } from '@shared/service-protocol'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, OutputField, OutputFieldType } from '@/types'
 import { taskApi, taskSourceApi, projectApi, onTaskUpdated, onTaskCreated, onTaskDeleted, onTasksRefresh, type TaskUpdatePrecondition } from '@/lib/ipc-client'
 import { useProjectStore, getCurrentProjectId, isInProject, projectIdOf } from './project-store'
@@ -100,8 +102,13 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   updateTask: async (id, data, precondition) => {
+    const scope = captureDesktopRead(), native = getDesktopHost().kind === 'tauri'
     try {
       const raw = await taskApi.update(id, data, precondition)
+      if (native) {
+        scope.assertCurrent()
+        if (raw && raw.id !== id) throw new ServiceProtocolError('INVALID_RESULT')
+      }
       const updated = raw ? normalizeTask(raw) : null
       if (updated) {
         taskSnapshot.invalidate()
@@ -110,14 +117,14 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           error: null
         }))
         // Fire background export if task has a source
-        if (updated.source_id && updated.external_id) {
+        if ((!native || scope.isCurrent()) && updated.source_id && updated.external_id) {
           taskSourceApi.exportUpdate(id, data as Record<string, unknown>).catch(console.error)
         }
       }
       return updated || null
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      set({ error: message })
+      if (!native || scope.isCurrent()) set({ error: message })
       throw err
     }
   },

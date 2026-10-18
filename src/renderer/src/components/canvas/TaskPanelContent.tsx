@@ -70,7 +70,7 @@ export function TaskPanelContent({ panelId, taskId, panelLayout = 'both' }: Task
 
   const handleUpdateTask = useCallback(
     async (tid: string, data: Record<string, unknown>) => {
-      await updateTask(tid, data)
+      if (!await updateTask(tid, data)) throw new Error('Task change could not be confirmed.')
     },
     [updateTask]
   )

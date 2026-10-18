@@ -137,7 +137,7 @@ export function AppLayout() {
     await updateTask(taskId, { agent_id: agentId })
   }, [updateTask])
   const handleUpdateTask = useCallback(async (taskId: string, data: Record<string, unknown>) => {
-    await updateTask(taskId, data as UpdateTaskDTO)
+    if (!await updateTask(taskId, data as UpdateTaskDTO)) throw new Error('Task change could not be confirmed.')
   }, [updateTask])
   const handleDashboardTaskStatusChange = useCallback(async (task: Task, status: TaskStatus): Promise<TaskBoardTransitionResult> => {
     try {

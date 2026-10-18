@@ -1,3 +1,4 @@
+import { useTaskEditReceipt } from '@/hooks/use-task-edit-receipt'
 import { desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import React, { useEffect } from 'react'
 import { Pencil, Trash2, Calendar, User, Tag, Clock, Bot, Play, History, GitBranch, Route, Plus, X, BookOpen, AlarmClockOff, BellRing, Folder, Repeat, Star, Sparkles, Layers, Settings2, Terminal } from 'lucide-react'
@@ -35,7 +36,7 @@ interface TaskDetailViewProps {
   onAssignAgent: (agentId: string | null) => void
   onUpdateRepos: (repos: string[]) => void
   onAddRepos: () => void
-  onUpdateSkillIds?: (skillIds: string[] | null) => void
+  onUpdateSkillIds?: (skillIds: string[] | null) => void | Promise<void>
   onAddSkills?: () => void
   onStartAgent?: () => void
   canStartAgent?: boolean
@@ -53,7 +54,7 @@ interface TaskDetailViewProps {
   /** Save an inline description edit. When provided, the description becomes editable. */
   onUpdateDescription?: (description: string) => void | Promise<void>
   /** Update auto-start / auto-complete flags for recurring templates */
-  onUpdateAutoFlags?: (updates: { auto_start_agent?: boolean; auto_complete_without_review?: boolean }) => void
+  onUpdateAutoFlags?: (updates: { auto_start_agent?: boolean; auto_complete_without_review?: boolean }) => void | Promise<void>
   subtasks?: Task[]
   siblingSubtasks?: Task[]
   parentTask?: Task | null
@@ -77,6 +78,7 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
   const skills = useSkillStore((s) => s.skills)
   const fetchSkills = useSkillStore((s) => s.fetchSkills)
   const openTaskOnCanvas = useUIStore((s) => s.openTaskOnCanvas)
+  const metadata = useTaskEditReceipt(task.id)
   const isActive = task.status !== TaskStatus.Completed
 
   useEffect(() => {
@@ -94,6 +96,7 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
 
   return (
     <div className="flex flex-col h-full">
+      {metadata.failed && <p role="alert" className="px-4 py-2 text-xs text-muted-foreground">Task change could not be confirmed. Reopen this task and review it before trying again.</p>}
       {displayMode === 'full' && (
       <div className="flex items-center justify-between border-b border-border/60 px-6 py-4 shrink-0">
         <div className="flex items-center gap-2.5">
@@ -139,6 +142,7 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
             <h1 className="text-xl font-semibold">{task.title}</h1>
             {(task.description || onUpdateDescription) && (
               <CollapsibleDescription
+                key={task.id}
                 taskId={task.id}
                 description={task.description}
                 size="sm"
@@ -164,11 +168,12 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
                             <input
                               type="checkbox"
                               checked={selected}
-                              onChange={() => onUpdateNextSubtaskIds?.(
+                              disabled={metadata.blocked}
+                              onChange={() => { if (onUpdateNextSubtaskIds) void metadata.run(() => onUpdateNextSubtaskIds(
                                 selected
                                   ? nextSubtaskIds.filter((id) => id !== sibling.id)
                                   : [...nextSubtaskIds, sibling.id]
-                              )}
+                              )) }}
                             />
                             {sibling.title}
                           </label>
@@ -326,7 +331,8 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
                           <Badge key={skillId} className="gap-1 pr-1">
                             {skill.name}
                             <button
-                              onClick={() => onUpdateSkillIds(task.skill_ids!.filter((id) => id !== skillId))}
+                              disabled={metadata.blocked}
+                              onClick={() => { void metadata.run(() => onUpdateSkillIds(task.skill_ids!.filter((id) => id !== skillId))) }}
                               className="rounded-full hover:bg-foreground/10 p-0.5"
                             >
                               <X className="h-2.5 w-2.5" />
@@ -344,7 +350,8 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => onUpdateSkillIds(null)}
+                      disabled={metadata.blocked}
+                      onClick={() => { void metadata.run(() => onUpdateSkillIds(null)) }}
                       className="h-6 text-xs text-muted-foreground"
                     >
                       Reset to defaults
@@ -391,7 +398,8 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
                   <input
                     type="checkbox"
                     checked={task.auto_start_agent}
-                    onChange={(e) => onUpdateAutoFlags({ auto_start_agent: e.target.checked })}
+                    disabled={metadata.blocked}
+                    onChange={(e) => { const checked = e.target.checked; void metadata.run(() => onUpdateAutoFlags({ auto_start_agent: checked })) }}
                     className="h-4 w-4 rounded border-border bg-background text-primary cursor-pointer"
                   />
                   <span className="text-sm">Auto-start agent on new instances</span>
@@ -401,7 +409,8 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
                   <input
                     type="checkbox"
                     checked={task.auto_complete_without_review}
-                    onChange={(e) => onUpdateAutoFlags({ auto_complete_without_review: e.target.checked })}
+                    disabled={metadata.blocked}
+                    onChange={(e) => { const checked = e.target.checked; void metadata.run(() => onUpdateAutoFlags({ auto_complete_without_review: checked })) }}
                     className="h-4 w-4 rounded border-border bg-background text-primary cursor-pointer"
                   />
                   <span className="text-sm">Auto-complete without review</span>

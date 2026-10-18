@@ -488,3 +488,12 @@ Only pre-unlink refusal can guarantee retained bytes. Raw unlink may already hav
 succeeded before later cancellation/verification failure, so no SQLite/filesystem
 atomicity or manufactured rollback is claimed. Durable orphan/removal journaling,
 unknown receipt recovery and installed supported-platform acceptance remain open.
+
+
+### Awaited task metadata receipts
+
+The TaskWorkspace fallback for title, description, lifecycle status and recurrence flags previously called `taskApi.update` and then the store's `updateTask`, which sends the same Source mutation a second time. These controls now use one awaited store call, or one supplied parent callback. The parent app/canvas callbacks reject a missing accepted task receipt. Native store writes validate the returned task ID and captured connection before publishing cache/error state or launching the existing background export.
+
+Inline title and description editors keep their local text through pending replies and same-task canonical refreshes. A synchronous admission guard prevents Enter/blur, keyboard/button and submit/Escape races. Missing, foreign, refused or retired native receipts retain the draft and require the user to reopen and review the canonical task, without automatic retry or rollback. Status, recurrence flags, next-subtask choices and explicit skill-default changes own their asynchronous failures and use the same finite receipt guard; completion retains the existing feedback owner. Task replacement keys retire the old inline editors, and connection/project/pagehide retirement releases their listeners and fences late callbacks.
+
+These are renderer consumers of the existing retained `db:updateTask` operation. They add no Source operation, grant or native availability. Attachment full-array CAS and exact-ID removal semantics remain unchanged. Triage/start/resume/agent assignment and other task actions have separate lifecycle owners; this metadata slice does not establish their complete installed receipt/recovery behavior. Controlled typed-native UI regressions are separate from installed WebView/platform acceptance, which remains blocked while repository Actions is disabled.

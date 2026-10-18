@@ -518,7 +518,7 @@
       "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskDetailView.tsx",
       "kind": "call",
-      "line": 91,
+      "line": 93,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -530,7 +530,7 @@
       "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskDetailView.tsx",
       "kind": "call",
-      "line": 92,
+      "line": 94,
       "path": [
         "shell",
         "openPath"
@@ -542,7 +542,7 @@
       "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 643,
+      "line": 617,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -554,7 +554,7 @@
       "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 644,
+      "line": 618,
       "path": [
         "shell",
         "openPath"
@@ -5955,6 +5955,7 @@
     "src/renderer/src/hooks/use-session-context.ts",
     "src/renderer/src/hooks/use-snooze-tick.ts",
     "src/renderer/src/hooks/use-task-completion.tsx",
+    "src/renderer/src/hooks/use-task-edit-receipt.ts",
     "src/renderer/src/hooks/use-tasks.ts",
     "src/renderer/src/hooks/use-title-bar-overlay-theme.ts",
     "src/renderer/src/hooks/use-ui-remote-control.ts",
@@ -14475,7 +14476,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 918,
+    "files": 919,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

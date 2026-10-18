@@ -38,7 +38,7 @@ import { TaskGroupHistoryNotice } from '@/components/task-groups/TaskGroupHistor
 import { TaskStatusBadge } from './TaskStatusBadge'
 import { Markdown } from '@/components/ui/Markdown'
 
-function captureHierarchyScope(current: () => boolean) {
+function captureTaskViewScope(current: () => boolean) {
   const scope = captureDesktopRead()
   let live = true
   const withdraw = () => { live = false }
@@ -220,7 +220,7 @@ function TaskWorkspaceComponent({
 
   const handleAddSubtask = useCallback(async (title: string) => {
     if (!task) throw new Error('Subtask parent is unavailable.')
-    const captured = captureHierarchyScope(() => attachmentMounted.current && attachmentOwner.current?.id === task.id)
+    const captured = captureTaskViewScope(() => attachmentMounted.current && attachmentOwner.current?.id === task.id)
     try {
       if (!captured.current()) throw new Error('Subtask view was replaced.')
       const newSubtask = await taskApi.create({
@@ -236,7 +236,7 @@ function TaskWorkspaceComponent({
 
   const handleReorderSubtasks = useCallback(async (orderedIds: string[]) => {
     if (!task) throw new Error('Subtask parent is unavailable.')
-    const captured = captureHierarchyScope(() => attachmentMounted.current && attachmentOwner.current?.id === task.id)
+    const captured = captureTaskViewScope(() => attachmentMounted.current && attachmentOwner.current?.id === task.id)
     try {
       if (!captured.current()) throw new Error('Subtask view was replaced.')
       const accepted = await taskApi.reorderSubtasks(task.id, orderedIds)
@@ -585,58 +585,32 @@ function TaskWorkspaceComponent({
 
   const handleEditAgent = useCallback((agentId: string) => setEditingAgentId(agentId), [])
 
-  const handleUpdateSkillIds = useCallback(async (skillIds: string[] | null) => {
-    if (task?.id && onUpdateTask) await onUpdateTask(task.id, { skill_ids: skillIds })
-  }, [onUpdateTask, task?.id])
-  const handleUpdateDescription = useCallback(async (description: string) => {
-    if (!task?.id) return
-    if (onUpdateTask) {
-      await onUpdateTask(task.id, { description })
-    } else {
-      await taskApi.update(task.id, { description })
-      updateTaskInStore(task.id, { description })
-    }
+  const updateMetadata = useCallback(async (data: Record<string, unknown>) => {
+    if (!task?.id) throw new Error('Task change could not be confirmed.')
+    const captured = captureTaskViewScope(() => attachmentMounted.current && attachmentOwner.current?.id === task.id)
+    try {
+      if (!captured.current()) throw new Error('Task view was replaced.')
+      if (onUpdateTask) await onUpdateTask(task.id, data)
+      else {
+        const updated = await updateTaskInStore(task.id, data)
+        if (getDesktopHost().kind === 'tauri' && !updated) throw new Error('Task change could not be confirmed.')
+      }
+      if (!captured.current()) throw new Error('Task view was replaced.')
+    } finally { captured.release() }
   }, [onUpdateTask, task?.id, updateTaskInStore])
+  const handleUpdateDescription = useCallback((description: string) => updateMetadata({ description }), [updateMetadata])
+  const handleUpdateSkillIds = useCallback((skillIds: string[] | null) => updateMetadata({ skill_ids: skillIds }), [updateMetadata])
   const handleShowSkillSelector = useCallback(() => setShowSkillSelector(true), [])
   const handleShowSnooze = useCallback(() => setShowSnooze(true), [])
-  const handleUpdateAutoFlags = useCallback(async (updates: Record<string, unknown>) => {
-    if (!task?.id) return
-    if (onUpdateTask) {
-      await onUpdateTask(task.id, updates)
-    } else {
-      await taskApi.update(task.id, updates)
-      updateTaskInStore(task.id, updates)
-    }
-  }, [onUpdateTask, task?.id, updateTaskInStore])
-  const handleUpdateNextSubtaskIds = useCallback(async (nextSubtaskIds: string[]) => {
-    if (!task?.id) return
-    if (onUpdateTask) await onUpdateTask(task.id, { next_subtask_ids: nextSubtaskIds })
-    else await updateTaskInStore(task.id, { next_subtask_ids: nextSubtaskIds })
-  }, [onUpdateTask, task?.id, updateTaskInStore])
-
-  const handleRename = useCallback(async (title: string) => {
-    if (!task?.id) return
-    if (onUpdateTask) await onUpdateTask(task.id, { title })
-    else {
-      await taskApi.update(task.id, { title })
-      updateTaskInStore(task.id, { title })
-    }
-  }, [onUpdateTask, task?.id, updateTaskInStore])
-
+  const handleUpdateAutoFlags = useCallback((updates: Record<string, unknown>) => updateMetadata(updates), [updateMetadata])
+  const handleUpdateNextSubtaskIds = useCallback((nextSubtaskIds: string[]) => updateMetadata({ next_subtask_ids: nextSubtaskIds }), [updateMetadata])
+  const handleRename = useCallback((title: string) => updateMetadata({ title }), [updateMetadata])
   const handleStatusChange = useCallback(async (status: TaskStatus) => {
     if (!task?.id || status === task.status) return
-    // Completing a task has feedback and external-source side effects, so keep
-    // it on the same path as the persistent Complete action.
-    if (status === TaskStatus.Completed) {
-      await handleCompleteTask()
-      return
-    }
-    if (onUpdateTask) await onUpdateTask(task.id, { status })
-    else {
-      await taskApi.update(task.id, { status })
-      updateTaskInStore(task.id, { status })
-    }
-  }, [handleCompleteTask, onUpdateTask, task?.id, task?.status, updateTaskInStore])
+    // Completion retains its feedback and external-source domain owner.
+    if (status === TaskStatus.Completed) { await handleCompleteTask(); return }
+    await updateMetadata({ status })
+  }, [handleCompleteTask, task?.id, task?.status, updateMetadata])
 
   const handleOpenFolder = useCallback(async () => {
     if (!task?.id) return
@@ -757,6 +731,7 @@ function TaskWorkspaceComponent({
 
   const detailsView = isGroupExecution ? <div className="overflow-auto p-4"><p className="mb-3 text-sm text-muted-foreground">Review and approve the member tasks from this group's review panel.</p><Markdown size="base">{task.description}</Markdown></div> : (
     <TaskDetailView
+      key={task.id}
       task={task}
       agents={agents}
       onEdit={onEdit}
@@ -822,6 +797,7 @@ function TaskWorkspaceComponent({
         {!isGroupExecution && <TaskGroupHistoryNotice taskId={task.id} />}
         {groupProblem && <p role="alert" className="shrink-0 px-4 py-2 text-sm text-destructive">{groupProblem}</p>}
         {isGroupExecution ? <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-border p-3"><p className="min-w-0 flex-1 text-sm font-medium">{groupHistory ? 'Retained shared conversation' : 'Shared agent session'}</p><TaskStatusBadge status={task.status} />{primaryAction && handlePrimaryAction && <Button size="sm" onClick={handlePrimaryAction}>{primaryAction === TaskPrimaryAction.START ? 'Start group' : primaryAction === TaskPrimaryAction.RESUME ? 'Resume group' : 'Restart group'}</Button>}{!groupHistory && sessionStatus !== SessionStatus.IDLE && <Button size="sm" variant="outline" onClick={() => { void handleAbort() }}>Stop group</Button>}</header> : <TaskHeaderBar
+          key={task.id}
           task={task}
           agent={assignedAgent}
           agents={agents}
