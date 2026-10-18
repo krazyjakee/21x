@@ -1,0 +1,676 @@
+{
+  "version": 1,
+  "kind": "issue-214-private-protected-attachment-journal-local",
+  "issues": [
+    214,
+    215,
+    213
+  ],
+  "sourceRevision": "3b215ebd6e005e0f9bee2440a9f384451ea72177",
+  "sourceBaseRevision": "85678f76bfaa459288fd8da1ddd4181e78a806a5",
+  "createdAt": "2026-10-18T03:02:23.791638+00:00",
+  "environment": {
+    "os": "Linux 6.8.0-139-generic x86_64 GNU/Linux",
+    "platform": "linux",
+    "arch": "x64",
+    "schemaVersion": 37,
+    "testRuntime": {
+      "node": "v22.23.2",
+      "modules": "127",
+      "platform": "linux",
+      "arch": "x64"
+    },
+    "hostNode": "v22.22.0",
+    "pnpmActual": "9.15.9",
+    "packageManagerDeclared": "pnpm@9.15.2",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18",
+    "eslint": "10.0.1",
+    "stagedPackages": {
+      "better-sqlite3": "13.0.3",
+      "node-pty": "1.1.0",
+      "@paralleldrive/cuid2": "2.3.1",
+      "@anthropic-ai/claude-agent-sdk": "0.3.260",
+      "@anthropic-ai/sdk": "0.123.0",
+      "@opencode-ai/sdk": "1.18.28"
+    },
+    "webview": "Not executed in this Source-only continuation",
+    "nativeRust": "No native source/manifests changed; no new Cargo/installed proof claimed"
+  },
+  "fixture": {
+    "profiles": "Synthetic temporary protected production profiles and in-memory/file-backed actual schema37 databases only",
+    "credentials": "Synthetic per-fixture in-memory key-store closures; real profile reopen uses existing load mode; no OS account access",
+    "providers": "Controlled FakeAdapter/previously owned synthetic Pi fixture processes only; no live model/provider account",
+    "crash": "Private child bundle uses actual database schema/manager/journal/FileOwner and physically staged SQLite under pinned Node. Parent receives bounded private checkpoint receipts and joins real SIGKILL close before a fresh inspector process opens the same WAL database.",
+    "network": "Authenticated loopback HTTP/MCP controls only; no public/LAN/tunnel/browser effect"
+  },
+  "implemented": [
+    "Private Source profile/root/task-bound facts persist before temporary file opening and before accepted copy acknowledgement; held FD identity, size and digest checkpoints are finite.",
+    "Post-commit copy acknowledgement remains pure bookkeeping; no fallible SQL after the accepted metadata/copy boundary.",
+    "Exact-ID removal intent joins its existing logical SQLite transaction; verified raw cleanup retires matching settled facts. Uncertain/refused cleanup keeps durable facts without unlink replay.",
+    "Full-array CAS observer joins its final transaction and records detachment of legacy records; stale CAS still refuses without merge/retry. Canonical references acquired during retirement prevent byte rollback.",
+    "SQLite preflights key/value lengths, record count and aggregate bytes before materialization. Strict finite shape validation follows; persisted IDs cannot reconstruct live receipts.",
+    "Actual production settings bindings/codecs exclude private journal records.",
+    "Production TaskApiHost captures raw attachment-array unavailability before HTTP/MCP route effects. Actual stale-array overwrite negative fails on old policy; field-only/legacy positives and host-mutation/scoped-MCP controls pass."
+  ],
+  "expectedActual": [
+    {
+      "scenario": "Accepted metadata-only copy then actual protected-profile close/reopen",
+      "expected": "Metadata remains empty, bytes remain, exactly one published ownership record survives",
+      "actual": "Pass in real production owner; old policy had0ownership rows"
+    },
+    {
+      "scenario": "Authenticated stale full-array task API update",
+      "expected": "Fixed unavailable error before title/metadata/runtime effects; separately accepted record survives",
+      "actual": "Pass after repair; old policy accepted stale title and erased second record"
+    },
+    {
+      "scenario": "Raw unlink refuses after accepted exact-ID logical removal",
+      "expected": "Canonical metadata stays removed, bytes stay, verified cleanup fact survives for review",
+      "actual": "Pass with actual SQLite/FileOwner"
+    },
+    {
+      "scenario": "Journal DELETE refuses after verified copy rollback unlink",
+      "expected": "Live cleanup/profile owner retained until explicit retry; no byte restoration or replay",
+      "actual": "Pass using actual SQLite RAISE trigger; successful retry drains ownership"
+    },
+    {
+      "scenario": "SIGKILL at four file/SQLite boundaries",
+      "expected": "Fresh process opens same WAL DB and observes exact durable facts/files with no automatic mutation",
+      "actual": {
+        "node": "v22.23.2",
+        "abi": "127",
+        "results": [
+          {
+            "mode": "partial",
+            "signal": "SIGKILL",
+            "reopened": true,
+            "automaticMutation": false,
+            "rows": 1,
+            "files": 1
+          },
+          {
+            "mode": "published",
+            "signal": "SIGKILL",
+            "reopened": true,
+            "automaticMutation": false,
+            "rows": 1,
+            "files": 1
+          },
+          {
+            "mode": "remove-before",
+            "signal": "SIGKILL",
+            "reopened": true,
+            "automaticMutation": false,
+            "rows": 2,
+            "files": 1
+          },
+          {
+            "mode": "remove-after",
+            "signal": "SIGKILL",
+            "reopened": true,
+            "automaticMutation": false,
+            "rows": 2,
+            "files": 0
+          }
+        ]
+      }
+    }
+  ],
+  "passingRuntimeCoverage": {
+    "passed": 622,
+    "failed": 0,
+    "skipped": 0,
+    "files": 17,
+    "reportSha256": "40e5adba88eb875a322b2bca61ca75ad47c50e965a47b1c8caa68eb0d4f0d9fb"
+  },
+  "finalPassingRebaseGate": {
+    "revisionUnderTest": "63171393baa130398e9813fb71ef6e1ea084431b",
+    "workingTreeModified": true,
+    "callerFiltered": true,
+    "coverage": {
+      "passed": 366,
+      "failed": 0,
+      "skipped": 0,
+      "files": 8,
+      "reportSha256": "570c09bb61c364d418645c16ace7209ac09ef56df1444af49cacc860362d3700"
+    },
+    "checks": [
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-type.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "stage",
+        "argv": [
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-stage.log",
+        "logSha256": "df40beaa72d6bf315f1b3053f68ebd3d4c0eaf0a86e783c780705a1828e580d3"
+      },
+      {
+        "name": "neutral",
+        "argv": [
+          "pnpm",
+          "test:host-neutral",
+          "--",
+          "--service-proofs",
+          "--production-proofs",
+          "src/main/task-attachment-journal.test.ts",
+          "src/service/production-attachment-execution.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-service.test.ts",
+          "src/service/task-attachment-backend.test.ts",
+          "src/service/task-attachment-metadata-conflict.test.ts",
+          "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+          "src/renderer/src/lib/native-desktop-host.test.ts",
+          "--maxWorkers=1",
+          "--run-receipt=/tmp/e2-journal-rebase-gate-receipt.json",
+          "--reporter=json",
+          "--outputFile=/tmp/e2-journal-rebase-gate-vitest.json"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-neutral.log",
+        "logSha256": "7135286d5604899ce2ef6fb10004ffc2bde41eb0a70d3d213cacf1c864ae31e4"
+      },
+      {
+        "name": "lint",
+        "argv": [
+          "pnpm",
+          "lint"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-lint.log",
+        "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+      },
+      {
+        "name": "frontend",
+        "argv": [
+          "pnpm",
+          "tauri:production:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-frontend.log",
+        "logSha256": "c02eccec0e7e0caa630136ae4ee08ddcc1a5aea6676616d9aa20b9aa956964ad"
+      },
+      {
+        "name": "diagnostic",
+        "argv": [
+          "pnpm",
+          "tauri:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-diagnostic.log",
+        "logSha256": "5cac419e74cf2be13e4036a45cc9da3a43235e3618847ac2b15c474ba0ed2316"
+      },
+      {
+        "name": "inventory",
+        "argv": [
+          "node",
+          "scripts/tauri-inventory.mjs",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-inventory.log",
+        "logSha256": "d2f3d0b21cb77c8fd81226acb00793d3a744c427ee7b5e80c3fd1542028649dc"
+      },
+      {
+        "name": "contracts",
+        "argv": [
+          "node",
+          "scripts/tauri-contracts.mjs",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-contracts.log",
+        "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+      },
+      {
+        "name": "diff",
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-rebase-gate-diff.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "notFullCohortProof": true
+  },
+  "priorGatesAndRepairs": {
+    "firstCombined": [
+      {
+        "name": "stage",
+        "argv": [
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-gate-stage.log",
+        "logSha256": "5027bd8aa9b7d19d07782b1d32555206f17b139daecfd3c55e770e0702245e6d"
+      },
+      {
+        "name": "neutral",
+        "argv": [
+          "pnpm",
+          "test:host-neutral",
+          "--",
+          "--production-proofs",
+          "--service-proofs",
+          "src/main/task-attachment-journal.test.ts",
+          "src/main/task-attachment-file-owner.test.ts",
+          "src/main/attachment-execution-owner.test.ts",
+          "src/main/task-api-lifetime.test.ts",
+          "src/main/task-api-server.test.ts",
+          "src/main/task-mcp-endpoint.test.ts",
+          "src/service/production-attachment-execution.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/production-service.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-mobile.test.ts",
+          "src/service/task-attachment-backend.test.ts",
+          "src/service/task-attachment-metadata-conflict.test.ts",
+          "src/service/task-lifecycle-backend.test.ts",
+          "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+          "src/renderer/src/lib/native-desktop-host.test.ts",
+          "scripts/production-service-proof.test.ts",
+          "--maxWorkers=1",
+          "--run-receipt=/tmp/e2-journal-gate-receipt.json",
+          "--reporter=json",
+          "--outputFile=/tmp/e2-journal-gate-vitest.json"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-gate-neutral.log",
+        "logSha256": "a2d8f127a7238884a8609d227ea50e83777c095c079e465cef8cf1208aca3901"
+      },
+      {
+        "name": "crash",
+        "argv": [
+          "src-tauri/resources/node/node",
+          "scripts/attachment-journal-crash-proof.mjs"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-gate-crash.log",
+        "logSha256": "9bd41e406eebeffa821243d31938d85fd4d82acab2412fe8d635e7358ec38599"
+      },
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 2,
+        "log": "/tmp/e2-journal-gate-type.log",
+        "logSha256": "ec95c6696f40ace9fa98810f5ccf9619bfd1aaaa2cc301c563058428d66bb559"
+      },
+      {
+        "name": "lint",
+        "argv": [
+          "pnpm",
+          "lint"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-gate-lint.log",
+        "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+      },
+      {
+        "name": "frontend",
+        "argv": [
+          "pnpm",
+          "tauri:production:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-gate-frontend.log",
+        "logSha256": "c5c4aa7cee8cce567d39ed320f7474b244b4bc241cea334de284a7217295aa15"
+      },
+      {
+        "name": "diagnostic",
+        "argv": [
+          "pnpm",
+          "tauri:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-gate-diagnostic.log",
+        "logSha256": "939d82b7f71276ee73e823aea6ba14af2c76a5e315b7f75216a2775248d42a41"
+      },
+      {
+        "name": "diff",
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-gate-diff.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "expandedCombined": [
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 2,
+        "log": "/tmp/e2-journal-fixed-gate-type.log",
+        "logSha256": "15173e8a103d5a512448e2beff5ea76e1f1b40cec85e6ee41b5b0e1dc3e77311"
+      },
+      {
+        "name": "stage",
+        "argv": [
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-fixed-gate-stage.log",
+        "logSha256": "df40beaa72d6bf315f1b3053f68ebd3d4c0eaf0a86e783c780705a1828e580d3"
+      },
+      {
+        "name": "neutral",
+        "argv": [
+          "pnpm",
+          "test:host-neutral",
+          "--",
+          "--production-proofs",
+          "--service-proofs",
+          "src/main/task-attachment-journal.test.ts",
+          "src/main/task-attachment-file-owner.test.ts",
+          "src/main/attachment-execution-owner.test.ts",
+          "src/main/task-api-lifetime.test.ts",
+          "src/main/task-api-server.test.ts",
+          "src/main/task-mcp-endpoint.test.ts",
+          "src/service/production-attachment-execution.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/production-service.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-mobile.test.ts",
+          "src/service/task-attachment-backend.test.ts",
+          "src/service/task-attachment-metadata-conflict.test.ts",
+          "src/service/task-lifecycle-backend.test.ts",
+          "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+          "src/renderer/src/lib/native-desktop-host.test.ts",
+          "scripts/production-service-proof.test.ts",
+          "--maxWorkers=1",
+          "--run-receipt=/tmp/e2-journal-fixed-gate-receipt.json",
+          "--reporter=json",
+          "--outputFile=/tmp/e2-journal-fixed-gate-vitest.json"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-fixed-gate-neutral.log",
+        "logSha256": "b3d1b2e5cc4ecf9f9cfcd98016b5929e775e3f8e8c3a254f467b91208e70dd4c"
+      },
+      {
+        "name": "crash",
+        "argv": [
+          "src-tauri/resources/node/node",
+          "scripts/attachment-journal-crash-proof.mjs"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-fixed-gate-crash.log",
+        "logSha256": "9bd41e406eebeffa821243d31938d85fd4d82acab2412fe8d635e7358ec38599"
+      },
+      {
+        "name": "lint",
+        "argv": [
+          "pnpm",
+          "lint"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-fixed-gate-lint.log",
+        "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+      },
+      {
+        "name": "frontend",
+        "argv": [
+          "pnpm",
+          "tauri:production:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-fixed-gate-frontend.log",
+        "logSha256": "b37bae67f5050e8220f536d8b60c28716b440d413a9262cb510aa54e0ccdba29"
+      },
+      {
+        "name": "diagnostic",
+        "argv": [
+          "pnpm",
+          "tauri:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-fixed-gate-diagnostic.log",
+        "logSha256": "3510307303f8bb607d7cf1d465c7471f92b9f705aaeb6ada361e41f892dc46ed"
+      },
+      {
+        "name": "diff",
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-journal-fixed-gate-diff.log",
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "firstRuntimeCoverage": {
+      "passed": 621,
+      "failed": 0,
+      "skipped": 0,
+      "files": 17,
+      "reportSha256": "595936020f442d88aada11a8e87cdd45c38e0bed8e1cc13d61bf0823c5e4815c"
+    },
+    "firstTypeErrorCount": 19,
+    "secondTypeErrorCount": 1,
+    "base": "bd898f99fc8af7af20bcefed37bfa4a85f3dad75",
+    "negativeControls": [
+      {
+        "name": "actual protected-profile restart lacks durable orphan copy owner",
+        "log": "/tmp/e2-attachment-journal-real-negative.log",
+        "rawExitCode": 1,
+        "expectedFailure": "ownership rows length expected1 actual0; protected bytes and metadata survived actual reopen",
+        "logSha256": "2921726994bc38dbc824a84b52db415f6d0e0704526358c8c790b0c28f3b318a"
+      },
+      {
+        "name": "authenticated production HTTP stale attachment array erases accepted record",
+        "log": "/tmp/e2-attachment-api-stale-negative-confirmed.log",
+        "rawExitCode": 1,
+        "expectedFailure": "accepted stale title and omitted second canonical record; no journal guard present",
+        "logSha256": "e5a857f1c4d8510c7f971dbbbaa748983629e7a32e3b1c4313c7ba86731ac73a"
+      }
+    ],
+    "failureRepairNotes": [
+      "Two earlier restart attempts used wrong synthetic credential mode open; corrected to existing load. They are setup failures, not negative behavior proof.",
+      "First API negative used correct task_id before execution; confirmed received success and erased second record. Fixed production host captures unavailable policy before HTTP/MCP routes; field-only and legacy-host positives pass.",
+      "First scoped MCP fixture omitted parent scope, so update_own_task was unknown and did not exercise policy. Added actual parent row/parent_task_id and signed parent scope;9 lifetime controls pass.",
+      "Exploratory four-file gate113pass1journal retirement failure while Source retirement was being completed. Pure receipt acknowledgement and settled matching-fact retirement are covered by frozen13-case rerun0; final combined gate follows.",
+      "The four-checkpoint pinned SQLite crash proof passed under heavy.lock. After reading a log too early, an unnecessary exploratory repeat was accidentally run outside heavy.lock; it also passed but is excluded from required-gate evidence. Subsequent combined gate runs proof under lock.",
+      "First full gate runtime621/17files and four SIGKILL checkpoints passed; forced typecheck failed19 new control-flow narrowing errors. Replaced the never-returning rejection arrow with a function declaration; no rejection/validation behavior changed.",
+      "Second forced typecheck left1 error because the shared canonical-record validator returns boolean rather than a TypeScript predicate. Added a typed return after the unchanged full validator. Final rebased forced typecheck exits0.",
+      "The expanded runtime gate622/17files includes the added actual SQLite DELETE-trigger refusal after verified unlink. Final Source rebase repeats366 affected cases/8files with0skips, type/lint/stage/build/freshness0. Normal commit hooks also pass.",
+      "The final Source fetch/rebase inherited only A85678f76 evidence JSON after the tested63171393 source. All15 frozen owned inputs remained byte-identical before the fast-forward master push."
+    ],
+    "scopeLimits": [
+      "No automatic orphan collection/retry/resumed user intent. inspect reports metadata/scope relation, not physical file existence.",
+      "SIGKILL proof uses actual schema/FileOwner/SQLite in controlled child, not installed Tauri or whole SourceRoot hard crash. Separate actual SourceRoot clean protected restart is proven.",
+      "Filesystem publication and SQLite are not one atomic transaction; no power-loss/rollback claim.",
+      "No live profile/provider/microphone/release/cutover/identity or Electron retirement decision. Native voice remains unavailable.",
+      "Hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision.",
+      "Whole-task/subtree recursive deletion still uses the separately audited legacy DatabaseManager.deleteTaskAttachments path. It is a code-audit gap, not reproduced or repaired by this slice; no claim that every deletion file effect is journaled/anchored.",
+      "Source task API attachment-array updates are explicitly unavailable; schemas/operations/grants are unchanged and no stale current-DB baseline is fabricated. Field-only requests and the legacy host remain supported.",
+      "Journal capacity is4096records/8192bytes each/8MiB total; invalid/full/foreign or uncertain facts are preserved for explicit reviewed reconciliation, not truncated, auto-deleted or treated as capabilities.",
+      "Linux mobile saved-file delegationbd898f99 remains scoped to its original Source backend/paired graph; incoming nonempty payloads/full arrays and macOS/Windows saved execution remain refused."
+    ]
+  },
+  "normalSourceHooks": {
+    "rawExitCode": 0,
+    "bypassed": false,
+    "log": "/tmp/e2-journal-source-commit.log",
+    "logSha256": "1f01051738906e89a4a7c89daaa16cef0e22dfbebb5593cbb95993e81b8f053c"
+  },
+  "publication": {
+    "sourceCommit": "3b215ebd6e005e0f9bee2440a9f384451ea72177",
+    "push": "Fast-forward HEAD:master",
+    "lsRemoteMaster": "3b215ebd6e005e0f9bee2440a9f384451ea72177",
+    "normalSourceHooks": 0,
+    "ownedInputsUnchangedAfterJsonRebase": 15
+  },
+  "retainedAuthority": {
+    "manifestRows": 331,
+    "retainedRows": 325,
+    "newPublicOperations": 0,
+    "newEvents": 0,
+    "newGrants": 0,
+    "nativeCodeChanged": false,
+    "unchangedFiles": [
+      "docs/tauri-migration/operations.json",
+      "src/shared/desktop-operations.ts",
+      "src/shared/desktop-api.ts"
+    ],
+    "inventory": {
+      "sources": 921,
+      "ipcSites": 736,
+      "existingReviewedUnresolved": 9
+    },
+    "sourceOnlyPolicy": "Task API attachment-array updates unavailable; no fabricated baseline"
+  },
+  "runner": {
+    "adoptedSource": "79f409f41d754830a9d3b8d9b1a67fdf1c2036fd",
+    "bothPeersConfirmed": true,
+    "existingTestRunAndTauriMeanings": "Unchanged",
+    "receipts": [
+      {
+        "path": "/tmp/e2-journal-fixed-gate-receipt.json",
+        "sha256": "53b7f03cef2ab1b764ce622e3c1d36023d1e76f332a3cf86852b567dc94d1cd9",
+        "callerFiltered": true
+      },
+      {
+        "path": "/tmp/e2-journal-rebase-gate-receipt.json",
+        "sha256": "bac3f80311b4739530d257d4a33765b333d91dd6fdbd1f46ceef98c43ba63ae0",
+        "callerFiltered": true
+      }
+    ],
+    "tooling": [
+      {
+        "file": "scripts/test-host-neutral.mjs",
+        "sha256": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d"
+      },
+      {
+        "file": "scripts/host-neutral-runtime.mjs",
+        "sha256": "d2e05593a81a5e018b9b086082af34710b305c6ab89d99f341775e6c360bd302"
+      },
+      {
+        "file": "scripts/host-neutral-test-policy.mjs",
+        "sha256": "cb8f1bd1d0e1c8b75a8bd13c6303491716143b854de648c5db05ddc40aa27d8b"
+      },
+      {
+        "file": "test/electron-transition-tests.json",
+        "sha256": "10de138ce2d0913a99e7648a0dc36a612aa2dd1780b708ede584782ab783d785"
+      },
+      {
+        "file": "test/setup-host-neutral-runtime.ts",
+        "sha256": "061c08a065a2a48be85a9b5e70e6e937a36cdafcbd947dab428a496ddf5d0317"
+      },
+      {
+        "file": "vitest.host-neutral.config.ts",
+        "sha256": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+      }
+    ],
+    "runtimeArtifacts": [
+      {
+        "file": "src-tauri/resources/node/node",
+        "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+      },
+      {
+        "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+        "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+      },
+      {
+        "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+        "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+      }
+    ]
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": "f426b71ab4c4fd8db72ce1848de6b8645963d11cd88b0a5fc65e22f55bf54658",
+    "docs/tauri-migration/inventory.json": "ea4bf8ffc91db42b766f162fcff55b056c30144b2f56c5e0bfd0ee9d87c90c8a",
+    "docs/tauri-migration/native-attachment-execution.md": "838ae33d8d991ccbeab84a5e0c49a464d3c557a5cad7c1f2ef0685fabe245fad",
+    "docs/tauri-migration/native-attachment-journal.md": "7b016272a583a7d4feb0e6c5333f48b32010a82c2b106d285573d162025e2604",
+    "scripts/attachment-journal-crash-proof.mjs": "a52d0338eec63d0df9b7d59ca23d17aba3350d1c6cd82cb37c4aa6259b8694d0",
+    "src/main/task-api-lifetime.test.ts": "319c3007cc7cf86940518f29ccbdaf23760aa2dd146b2f489bf69ccec8640c0c",
+    "src/main/task-api-server-core.ts": "39782b167e4b3dedb27976c7f610a2e6d848db12c571f5790d1df332178ce640",
+    "src/main/task-attachment-file-owner.ts": "9189352fb6267c3675250d7e3464119f283e4e7b159a77dab34e3e1647afa9cd",
+    "src/main/task-attachment-journal.test.ts": "4d4ce6ac39caa24c953172ff3f2f36db43de3c01a3a4e2650c53e246eebb402b",
+    "src/main/task-attachment-journal.ts": "e3f11451cd45d85939fc7f4faa160c71c718c1ec4946e5d8be69f9370ab5dd5e",
+    "src/service/production-attachment-execution.test.ts": "de3cf6e16f1e78739c6b1d36169422e3a1813579ff0a8d61d3f22351ef1c6b41",
+    "src/service/production-desktop-bindings.test.ts": "aa79389d7d61fea2822e548f4a0e27a3e30b8e42414639f9cab5e800663ca23c",
+    "src/service/production-desktop-bindings.ts": "e5ef6681a36e29fcfcd118e65a43a6e6c778cff2ad88ce05226d2293a62730cc",
+    "src/service/production-owner.ts": "1963c6b8ba0f0cc2aa1648910d53321ba09306b95e711a32a385f7bcae59da93",
+    "src/service/task-attachment-backend.test.ts": "34804c3bb60d2b3e35aa508b0e6e10efd85ad74bd7601054a07b3a7bb94c9616",
+    "src/service/task-attachment-backend.ts": "4dba5aa890b751a6df6b191c3c9008d035d270f7f34b0ec3fa58e5e01244a4a0",
+    "src/service/task-attachment-metadata-conflict.test.ts": "63f4ad9059e3da322aa952279e15d5263ec0884479912c698e7750989ad04a1e",
+    "src/service/task-lifecycle-backend.ts": "18b0999826d28185ddf9889692e3c9aa50ec188a3a87157e93e87eacf5e7da9c",
+    "test/fixtures/attachment-journal-crash.ts": "fc426dac9a4e50c7618ed07cd034790b5866f394ad1422de088274fe782e19fe",
+    "src/shared/task-attachment-codecs.ts": "7b923e757b997e838f37353211889acf9dc140026be954abf94c097273beb3a7",
+    "src/shared/task-lifecycle-codecs.ts": "d9fb5ab4e5f4139f1b39c4f8312de6dd7633825b75e11cd24060fbd3d5e543dd",
+    "src/shared/production-settings-codecs.ts": "f0ee3b2055c1fe9df6f4a489d56d35f8efc9a35b767f14bb9942ab840a6b5c7a",
+    "src/main/database/manager.ts": "14f4206d12fbfd5b58b4a081c24d0361840f901bf0a696e69b9c639d877957d2",
+    "src/main/database/schema.ts": "fd868bb21bedc5e891448f5e4d429d2cbe5bd9f037ef01f5863e122252a6611c",
+    "scripts/tauri-stage-production.mjs": "048cd96ecf2ffbda945ccdc0b000695a020e1c3e979fe1519e91d203e1722ded",
+    "scripts/test-host-neutral.mjs": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d",
+    "vitest.host-neutral.config.ts": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+  },
+  "artifactHashes": {
+    "src-tauri/resources/service/production-stdio.mjs": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+    "src-tauri/resources/service/production-engine.mjs": "3b6ccbd813782568af0fbb0319655fa5ced180d50e02cb01e1bf75a7d28e364d",
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": "dfe539517edc18d806c4967abd0cdc62f23de01b70bd26105b6323957bb8bef7",
+    "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+    "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d",
+    "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5",
+    "out/tauri-production-renderer/index.html": "9da357ce56bd4b712a700465b8db73b4b336e1ecbca725dc91c7efc036f18d40",
+    "out/tauri-renderer/index.html": "7b9b8905836dcf88a1f618354b8b85c3d70eddc15ccf54cd3919e447ae9b70b4"
+  },
+  "harnessHashes": {
+    "/tmp/e2-journal-gate.py": "e34936594ae6057fd203a84b4fc8a9c4034ea3da52cc8f433f5c2b92ca64cada",
+    "/tmp/e2-journal-fixed-gate.py": "b79faddaf8165f527996bf3381f68ad8db55e282acb1831dbef7aa1277d5e683",
+    "/tmp/e2-journal-rebase-gate.py": "1f706dc437d50876ea2b610e07bbf0fe3f7e5f461154fed15ebfd80154982a16",
+    "/tmp/e2-journal-commit-if-gate.py": "5978d92e4deb95d3f745c365c37a36e051d2c50bca274789faea648984f4e48d"
+  },
+  "hostedCI": {
+    "status": "blocked",
+    "reason": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "sourceRuns": [],
+    "evidenceRuns": "Exact lookup after evidence publication is reported in issue comments",
+    "settingsEndpointsCalled": false,
+    "workflowDispatched": false
+  },
+  "acceptance": {
+    "wholeCriteriaNewlyChecked": [],
+    "issuesRemainOpen": true,
+    "noLiveReleaseOrCutover": true,
+    "noIdentityOrSchemeChoice": true,
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred"
+  }
+}
