@@ -3,6 +3,8 @@ import { lstatSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { WorkspaceFileOwner, WorkspaceFileError, type WorkspacePathReceipt } from '../main/workspace-file-owner'
 import type { ArtifactCopyFileResult } from '../shared/artifacts'
+import { ArtifactContentKind } from '../shared/artifacts'
+import { isArtifactViewerHtml } from '../shared/artifact-viewer-native'
 import { isWorkspacePathReceipt } from '../shared/workspace-native-callbacks'
 import { isUiLeaseId } from '../shared/ui-desktop-codecs'
 import { isDatabaseId } from '../shared/database-desktop-codecs'
@@ -30,6 +32,7 @@ export interface ArtifactBackendOptions {
   copyArtifact?(receipt: WorkspacePathReceipt, caller: DesktopCallerContext, signal: AbortSignal, beforeEffect: () => void): Promise<ArtifactCopyFileResult>
 }
 interface FileIdentity { dev: number; ino: number }
+export interface ArtifactViewerSnapshot { readonly html: string; beforeEffect(): void }
 
 /** Read-only retained artifact controls. Literal requested-task workspaces are
  * preserved; group reads never silently migrate/alias a member to its anchor.
@@ -60,6 +63,32 @@ export class ArtifactBackend {
     this.bindCommands()
   }
   get inflightCount(): number { return this.flights.size }
+  /** Private Source consumer only, deliberately absent from operationSchemas.
+   * Only immutable bounded HTML crosses a future native viewer boundary. The
+   * original read and its raw descriptor close remain owned by this backend. */
+  async captureViewerSnapshot(taskId: string, relativePath: string, caller: DesktopCallerContext, signal: AbortSignal): Promise<ArtifactViewerSnapshot> {
+    const codec = ARTIFACT_CODECS['artifacts:read'], payload = codec.encodeArguments([taskId, relativePath])
+    const captured = Object.freeze({ ...caller })
+    if (captured.principal !== 'trusted-desktop-main' || captured.engineEpoch !== this.options.engineEpoch || !isUiLeaseId(captured.uiLeaseId) ||
+      !captured.origin || !captured.webviewId || !this.options.isTrustedDesktop(captured) || !/\.html?$/i.test(relativePath)) throw new ServiceProtocolError('INVALID_REQUEST')
+    const original = JSON.stringify(this.scope(taskId, captured)), workspace = join(this.root, taskId), identity = await this.physical(workspace)
+    const beforeEffect = (): void => {
+      this.available(signal)
+      if (!this.options.isTrustedDesktop(captured) || JSON.stringify(this.scope(taskId, captured)) !== original) throw new ServiceProtocolError('INVALID_REQUEST')
+      try {
+        const root = lstatSync(this.root), directory = lstatSync(workspace)
+        if (!identity || root.isSymbolicLink() || root.dev !== this.rootIdentity.dev || root.ino !== this.rootIdentity.ino || realpathSync(this.root) !== this.root ||
+          !directory.isDirectory() || directory.isSymbolicLink() || directory.dev !== identity.dev || directory.ino !== identity.ino || realpathSync(workspace) !== workspace) throw new Error('Changed viewer workspace')
+      } catch { throw new ServiceProtocolError('INVALID_REQUEST') }
+    }
+    beforeEffect()
+    const wire = await this.registry.invoke('artifacts:read', payload, captured, signal)
+    if (!codec.validateWireResult(wire)) throw new ServiceProtocolError('INVALID_RESULT')
+    const content = codec.decodeResult((wire as { value: JsonValue }).value)
+    beforeEffect()
+    if (!content || content.kind !== ArtifactContentKind.TEXT || content.mimeType !== 'text/html' || !isArtifactViewerHtml(content.content)) throw new ServiceProtocolError('INVALID_REQUEST')
+    return Object.freeze({ html: content.content, beforeEffect })
+  }
   shutdown(): void { this.closing = true; for (const controller of this.controllers) controller.abort() }
   /** Raw directory/file handles remain owned through their actual close even
    * after a public request abort or this bounded shutdown deadline. */

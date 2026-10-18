@@ -4333,7 +4333,7 @@
       "expression": "desktopApi.terminal.getBuffer",
       "file": "src/renderer/src/stores/canvas-store.ts",
       "kind": "call",
-      "line": 880,
+      "line": 923,
       "path": [
         "terminal",
         "getBuffer"
@@ -6046,6 +6046,7 @@
     "src/service/agent-configuration-backend.ts",
     "src/service/agent-installer-backend.ts",
     "src/service/artifact-backend.ts",
+    "src/service/artifact-viewer-owner.ts",
     "src/service/attachment-selection-owner.ts",
     "src/service/claude-plugin-backend.ts",
     "src/service/cli-mcp-backend.ts",
@@ -6110,6 +6111,7 @@
     "src/shared/artifact-codecs.ts",
     "src/shared/artifact-native-callbacks.ts",
     "src/shared/artifact-navigation.ts",
+    "src/shared/artifact-viewer-native.ts",
     "src/shared/artifacts.ts",
     "src/shared/attachment-image-codecs.ts",
     "src/shared/attachment-image.ts",
@@ -14478,7 +14480,7 @@
   "summary": {
     "desktopAPIConsumers": 361,
     "directAPIConsumers": 1,
-    "files": 921,
+    "files": 923,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

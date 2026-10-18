@@ -1,4 +1,4 @@
-import { desktopApi, electronBrowserApi } from '@/lib/desktop-api'
+import { captureDesktopRead, desktopApi, electronBrowserApi, getDesktopHost } from '@/lib/desktop-api'
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { settingsApi } from '@/lib/ipc-client'
@@ -22,7 +22,36 @@ const SAVE_DEBOUNCE_MS = 1000
 /** Bumped per load so a slow load for the project left behind is dropped. */
 let loadSeq = 0
 /** The load under way, so a second request for the same project joins it. */
-let inflightLoad: { projectId: string; promise: Promise<void> } | null = null
+let inflightLoad: { projectId: string; promise: Promise<void>; read: ReturnType<typeof captureDesktopRead> | null } | null = null
+let loadedRead: ReturnType<typeof captureDesktopRead> | null = null
+let observedHost: ReturnType<typeof getDesktopHost> | null = null
+let releaseConnection: (() => void) | undefined
+let documentRetired = false
+let ownsPagehide = false
+
+function retireNativeLoad(): void {
+  ++loadSeq; inflightLoad = null; loadedRead = null
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = null
+  useCanvasStore.setState({ isLoaded: false })
+}
+function observeNativeConnection(): void {
+  const host = getDesktopHost()
+  if (host.kind !== 'tauri' || documentRetired || observedHost === host) return
+  releaseConnection?.(); observedHost = host
+  let generation = host.connectionGeneration, status = host.connection.status
+  releaseConnection = host.subscribeConnection(() => {
+    if (documentRetired || getDesktopHost() !== host) return
+    if (generation === host.connectionGeneration && status === host.connection.status) return
+    generation = host.connectionGeneration; status = host.connection.status
+    retireNativeLoad()
+    if (status === 'ready') void useCanvasStore.getState().loadCanvas(useCanvasStore.getState().projectId)
+  })
+  if (!ownsPagehide && typeof window !== 'undefined') {
+    ownsPagehide = true
+    window.addEventListener('pagehide', () => { documentRetired = true; retireNativeLoad(); releaseConnection?.(); releaseConnection = undefined }, { once: true })
+  }
+}
 
 // Verbose browser/terminal edge-wiring logs are off by default (they trace a
 // multi-step async connection flow). Opt in at runtime with:
@@ -284,7 +313,7 @@ let edgeCounter = 0
  */
 function persistNow(projectId: string): void {
   const state = useCanvasStore.getState()
-  if (state.projectId !== projectId || !state.isLoaded) return
+  if (state.projectId !== projectId || !state.isLoaded || documentRetired || getDesktopHost().kind === 'tauri' && !loadedRead?.isCurrent()) return
   const { viewport, panels, edges, nextZIndex } = state
   const data: CanvasPersistedState = { viewport, panels, edges, nextZIndex }
   settingsApi.set(canvasStorageKey(projectId), JSON.stringify(data)).catch((err) => {
@@ -348,12 +377,16 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
   isLoaded: false,
 
   loadCanvas: async (projectId = getCurrentProjectId()) => {
-    if (inflightLoad?.projectId === projectId) return inflightLoad.promise
+    const native = getDesktopHost().kind === 'tauri'
+    if (native) { observeNativeConnection(); if (documentRetired) return }
+    if (inflightLoad?.projectId === projectId && (!native || inflightLoad.read?.isCurrent())) return inflightLoad.promise
+    const read = native ? captureDesktopRead() : null
     const seq = ++loadSeq
 
     // The project left behind keeps what it had: write its pending save under
     // its own key before the state is replaced.
     flushSave()
+    loadedRead = null
     set({
       projectId,
       isLoaded: false,
@@ -370,14 +403,23 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
 
     const promise = (async () => {
       try {
+        read?.assertCurrent()
         const raw = await readProjectScopedSetting(CANVAS_STORAGE_KEY, projectId)
         // Another project was asked for while this one was being read.
         if (seq !== loadSeq) return
+        read?.assertCurrent()
         if (!raw) {
+          loadedRead = read
           set({ isLoaded: true })
           return
         }
         const data = JSON.parse(raw) as CanvasPersistedState
+        if (native && (!data || !Array.isArray(data.panels) || !Array.isArray(data.edges) || !data.viewport ||
+          ![data.viewport.x, data.viewport.y, data.viewport.zoom].every(value => typeof value === 'number' && Number.isFinite(value)) || data.viewport.zoom <= 0 ||
+          !Number.isSafeInteger(data.nextZIndex) || data.nextZIndex < 0 ||
+          !data.panels.every(panel => panel && typeof panel.id === 'string') || !data.edges.every(edge => edge && typeof edge.id === 'string'))) {
+          throw new Error('Saved canvas is unavailable; persistence requires a successful current read.')
+        }
         // Restore counters from persisted panel/edge IDs
         for (const p of data.panels) {
           const match = p.id.match(/^panel-(\d+)/)
@@ -392,6 +434,7 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
         const panels = data.panels.filter((p) => (p.type as string) !== 'app')
         const panelIds = new Set(panels.map((p) => p.id))
         const edges = data.edges.filter((e) => panelIds.has(e.fromPanelId) && panelIds.has(e.toPanelId))
+        loadedRead = read
         set({
           viewport: data.viewport,
           panels,
@@ -402,12 +445,12 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
       } catch (err) {
         if (seq !== loadSeq) return
         console.error('[Canvas] Failed to load persisted state:', err)
-        set({ isLoaded: true })
+        set({ isLoaded: !native })
       } finally {
         if (inflightLoad?.projectId === projectId && seq === loadSeq) inflightLoad = null
       }
     })()
-    inflightLoad = { projectId, promise }
+    inflightLoad = { projectId, promise, read }
     return promise
   },
 

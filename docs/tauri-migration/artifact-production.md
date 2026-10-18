@@ -62,3 +62,50 @@ and retained inactive data. These are scoped source tests, not installed/native
 WebView, live SDK, OS device, renderer drag/drop, platform or release evidence.
 #217/#214 remain open for their unproved production viewer/attachment/platform
 criteria. No live user profile, release or data cutover is involved.
+
+## Optional private viewer consumer
+
+`ArtifactViewerOwner` is a Source SDK, currently unregistered and absent from
+production bootstrap. Without a captured native bridge it refuses before a file
+read, lease allocation or observer callback. Its API accepts task ID, relative
+HTML path and the captured trusted caller. It never accepts renderer-provided
+HTML. The actual `ArtifactBackend.captureViewerSnapshot` obtains the immutable
+UTF-8 snapshot through its normal bounded registry/read owner, retains raw read
+closure, and captures the original task/project/group/workspace identity and
+read grants. A snapshot is data, with no live file/resource namespace.
+
+The private v1 contract agreed with the native owner is:
+
+| Operation | Exact payload | Acknowledgement |
+| --- | --- | --- |
+| `host.artifactViewer.register` | `{ viewerId, uiLeaseId, html }` | `{ viewerId, registered: true }`; reserves only, creates no child |
+| `host.artifactViewer.open` | `{ viewerId }` | `{ viewerId, opened: true }`; owned fixed document committed, no paint/user observation claim |
+| `host.artifactViewer.retire` | `{ viewerId }` | `{ viewerId, retired: true }`; raw register/open/delivery and actual child destruction joined |
+| `engine.artifactViewer.closed` | `{ viewerId, reason }` | `{ accepted }`; synchronous Source claim, cleanup outside delivery RPC |
+
+The closed reasons are exactly `closed`, `parent-retired`, `expired` and `failed`.
+The private schemas accept UUIDv4 IDs, a native-stamped document lease and at most
+128 KiB of well-formed UTF-8 HTML. No caller title, MIME, URL, label, filesystem
+path, profile/grant choice or child message exists. Native fixes those policies.
+Source exposes a frozen per-view lease synchronously before raw read/register;
+its observer records ownership only. Opening refuses until a matching validated
+registration acknowledgement and post-ack scope check, and permits one raw open
+attempt. Uncertain results do not authorize replay. Limits are 16 active leases,
+4096 IDs per owner epoch and a maximum ten-minute lifetime.
+
+Retirement fences admission synchronously, sends the original ID's retire request
+even if registration has not completed, and joins retained Source work. Failed
+retirement keeps the lease owned and retryable; it does not release admission or
+retire unrelated viewers. A bounded owner close may report timeout while raw work
+continues to drain. The parent must retain the SDK and database/profile lifetime
+until close acknowledges. Successful retirement discards its HTML snapshot. The
+closed delivery never invokes-and-awaits retirement inside the delivery handler.
+
+The native counterpart has not been implemented. A production binding still
+requires the separately excluded unprivileged WebView, sealed epoch/profile and
+current physical main-document authority, exact document delivery, actual destroy
+acknowledgement, fixed reviewed CSP/script policy, no desktop/plugin/event grants,
+no child-to-app messages, no network/file/resource grants, and native navigation,
+popup, download, permission and wrong-label/origin denial proofs. The main
+`frame-src 'none'` policy remains. This SDK adds no public operation, bootstrap
+callback, capability, native viewer availability or privileged-main iframe claim.

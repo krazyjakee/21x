@@ -11,6 +11,7 @@ import { useThemeStore } from '@/stores/theme-store'
 import { readProjectScopedSetting, projectScopedKey } from '@/lib/project-scoped-setting'
 import { getCurrentProjectId, useProjectStore } from '@/stores/project-store'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
+import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
 
 /**
  * Drawings are kept once per project under `drawing_state:<projectId>`. The
@@ -26,7 +27,36 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 /** Bumped per load so a slow load for the project left behind is dropped. */
 let loadSeq = 0
 /** The load under way, so a second request for the same project joins it. */
-let inflightLoad: { projectId: string; promise: Promise<void> } | null = null
+let inflightLoad: { projectId: string; promise: Promise<void>; read: ReturnType<typeof captureDesktopRead> | null } | null = null
+let loadedRead: ReturnType<typeof captureDesktopRead> | null = null
+let observedHost: ReturnType<typeof getDesktopHost> | null = null
+let releaseConnection: (() => void) | undefined
+let documentRetired = false
+let ownsPagehide = false
+
+function retireNativeLoad(): void {
+  ++loadSeq; inflightLoad = null; loadedRead = null
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = null
+  useDrawingStore.setState({ isLoaded: false })
+}
+function observeNativeConnection(): void {
+  const host = getDesktopHost()
+  if (host.kind !== 'tauri' || documentRetired || observedHost === host) return
+  releaseConnection?.(); observedHost = host
+  let generation = host.connectionGeneration, status = host.connection.status
+  releaseConnection = host.subscribeConnection(() => {
+    if (documentRetired || getDesktopHost() !== host) return
+    if (generation === host.connectionGeneration && status === host.connection.status) return
+    generation = host.connectionGeneration; status = host.connection.status
+    retireNativeLoad()
+    if (status === 'ready') void useDrawingStore.getState().loadDrawings(useDrawingStore.getState().projectId)
+  })
+  if (!ownsPagehide && typeof window !== 'undefined') {
+    ownsPagehide = true
+    window.addEventListener('pagehide', () => { documentRetired = true; retireNativeLoad(); releaseConnection?.(); releaseConnection = undefined }, { once: true })
+  }
+}
 
 /**
  * Distributive Omit — `Omit` over a union only keeps the *common* keys, which
@@ -102,7 +132,7 @@ let figureCounter = 0
  */
 function persistNow(projectId: string): void {
   const state = useDrawingStore.getState()
-  if (state.projectId !== projectId || !state.isLoaded) return
+  if (state.projectId !== projectId || !state.isLoaded || documentRetired || getDesktopHost().kind === 'tauri' && !loadedRead?.isCurrent()) return
   const data: DrawingPersistedState = { objects: state.objects, nextZIndex: state.nextZIndex }
   settingsApi.set(drawingStorageKey(projectId), JSON.stringify(data)).catch((err) => {
     console.error('[Drawing] Failed to persist state:', err)
@@ -158,13 +188,17 @@ export const useDrawingStore = create<DrawingState>()(subscribeWithSelector((set
   liveObject: null,
 
   loadDrawings: async (projectId = getCurrentProjectId()) => {
-    if (inflightLoad?.projectId === projectId) return inflightLoad.promise
+    const native = getDesktopHost().kind === 'tauri'
+    if (native) { observeNativeConnection(); if (documentRetired) return }
+    if (inflightLoad?.projectId === projectId && (!native || inflightLoad.read?.isCurrent())) return inflightLoad.promise
+    const read = native ? captureDesktopRead() : null
     const seq = ++loadSeq
 
     // The project left behind keeps what it had: write its pending save under
     // its own key before the state is replaced. The tool and style stay —
     // they belong to the user, not to a project.
     flushSave()
+    loadedRead = null
     set({
       projectId,
       isLoaded: false,
@@ -177,20 +211,28 @@ export const useDrawingStore = create<DrawingState>()(subscribeWithSelector((set
 
     const promise = (async () => {
       try {
+        read?.assertCurrent()
         const raw = await readProjectScopedSetting(DRAWING_STORAGE_KEY, projectId)
         // Another project was asked for while this one was being read.
         if (seq !== loadSeq) return
+        read?.assertCurrent()
         if (!raw) {
+          loadedRead = read
           set({ isLoaded: true })
           return
         }
         const data = JSON.parse(raw) as DrawingPersistedState
+        if (native && (!data || !Array.isArray(data.objects) || !Number.isSafeInteger(data.nextZIndex) || data.nextZIndex < 0 ||
+          !data.objects.every(object => object && typeof object.id === 'string'))) {
+          throw new Error('Saved drawings are unavailable; persistence requires a successful current read.')
+        }
         // Restore the ID counter from persisted figure IDs so new figures never
         // collide with loaded ones (same pattern as panels/edges in canvas-store).
         for (const o of data.objects) {
           const match = o.id.match(/^figure-(\d+)/)
           if (match) figureCounter = Math.max(figureCounter, parseInt(match[1], 10))
         }
+        loadedRead = read
         set({
           objects: data.objects,
           nextZIndex: data.nextZIndex,
@@ -199,12 +241,12 @@ export const useDrawingStore = create<DrawingState>()(subscribeWithSelector((set
       } catch (err) {
         if (seq !== loadSeq) return
         console.error('[Drawing] Failed to load persisted state:', err)
-        set({ isLoaded: true })
+        set({ isLoaded: !native })
       } finally {
         if (inflightLoad?.projectId === projectId && seq === loadSeq) inflightLoad = null
       }
     })()
-    inflightLoad = { projectId, promise }
+    inflightLoad = { projectId, promise, read }
     return promise
   },
 
