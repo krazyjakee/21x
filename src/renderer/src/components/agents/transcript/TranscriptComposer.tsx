@@ -1,4 +1,4 @@
-import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
+import { captureDesktopRead, desktopApi, desktopSupports, getDesktopHost } from '@/lib/desktop-api'
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { FileText, Paperclip, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -104,7 +104,11 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     // coming, so it is dropped and this reply is not read aloud. A spoken
     // sentence goes through here too and arms a fresh expectation of its own
     // straight afterwards, so the conversation loop is unaffected.
-    void voiceApi.answerNotExpected(taskId)
+    if (desktopSupports('voice.answerNotExpected')) {
+      // Optional voice housekeeping cannot produce an unhandled text-send
+      // rejection; native voice remains unavailable until its owner is bound.
+      void voiceApi.answerNotExpected(taskId).catch(() => {})
+    }
     const attachmentsAtSend = pendingAttachments
     const imageInputs = images.toInputs()
     // Images are stored first (as task attachments), then go with the message

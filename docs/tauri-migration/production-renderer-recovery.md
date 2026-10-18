@@ -531,3 +531,43 @@ listener behavior, not installed WebView input, provider effects or complete
 crash recovery. No operation, grant, Source backend or native availability is
 added. Installed supported-platform acceptance remains blocked while repository
 Actions is disabled.
+
+### Native message intent ownership
+
+Plain native task messages use the retained Source `send`/`sendByTaskId` owner
+directly. The renderer does not pre-start or resume a session before sending;
+Source retains its established exact task/agent authorization, resume/create,
+saved-file execution and durable intent nonce policy. Native answers require a
+current live session and the exact current question/permission request ID/type.
+Historical questions cannot resume or create a session just to receive an answer.
+Source remains the final authorization owner for every prompt/decision.
+
+An acknowledgement can precede its agent-status event. While that cache identity
+is incomplete, the next explicit instruction continues through `sendByTaskId`;
+the renderer neither invents an agent ID nor submits an invalid empty one.
+
+One synchronous view lane covers messages alongside manual task actions. Retired
+task/project/document/connection callbacks refuse before new effects. Unknown
+results retain review state, preventing another send or a new nonce from that
+view. View retirement cannot undo an already admitted raw prompt; the Source
+delivery receipt remains durable. There is no renderer retry, merge, filesystem
+fallback, accepted-copy rollback or substitute Fresh operation.
+
+Send acknowledgements validate the captured connection and local send owner
+before changing session identity or clearing a pending indicator. Actual
+transcript/status copies preserve that ownership. Explicit session replacement
+retires it, so a late result/failure cannot overwrite or clear a newer live or
+pending session. Each task has one owned indicator timer; replacement, cleanup
+and physical-document listener retirement cancel the old timer. A stale timeout
+cannot clear the next send's indicator. These are local observations, never a
+runtime Stop or Source delivery cancellation.
+
+Native kickoff text remains visible through pending/unknown replies, and a reply
+for a replaced task cannot clear its new draft. The real transcript composer
+restores refused text while the workspace requires canonical review before
+another send. Optional voice expectation housekeeping is invoked only when the
+host declares the operation, and its asynchronous failure is owned. Native
+voice remains unavailable; text sends do not invoke its unsupported operation.
+Electron retains its existing send/start orchestration. Controlled renderer
+results establish UI ownership; installed WebView/provider/platform acceptance
+and the separate completion/CRUD lifetimes remain open.

@@ -115,7 +115,9 @@ function TaskWorkspaceComponent({
   const fetchSettings = useSettingsStore((s) => s.fetchSettings)
 
   const [changesSummary, setChangesSummary] = useState<{ files: number; additions: number; deletions: number } | null>(null)
-  const [kickoffMessage, setKickoffMessage] = useState('')
+  const [kickoffDraft, setKickoffDraft] = useState({ taskId: task?.id, text: '' })
+  const kickoffMessage = kickoffDraft.taskId === task?.id ? kickoffDraft.text : ''
+  const setKickoffMessage = useCallback((text: string) => setKickoffDraft({ taskId: task?.id, text }), [task?.id])
   const [showSkillSelector, setShowSkillSelector] = useState(false)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [showSnooze, setShowSnooze] = useState(false)
@@ -461,6 +463,30 @@ function TaskWorkspaceComponent({
 
   const handleSend = useCallback(
     async (message: string, options?: { attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }> }) => {
+      if (getDesktopHost().kind === 'tauri') {
+        return actionReceipt.perform(async () => {
+          if (!task?.id) throw new Error('No current task is available for this message.')
+          const current = useAgentStore.getState().sessions.get(task.id)
+          const messages = current?.messages ?? []
+          let questionIndex = -1
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].partType === 'question' && messages[i].tool?.questions) { questionIndex = i; break }
+          }
+          if (questionIndex >= 0 && !messages.slice(questionIndex + 1).some(item => item.role === 'user')) {
+            const question = messages[questionIndex], requestId = question.tool?.requestId
+            if (!current?.sessionId || !requestId) throw new Error('Review the current session and exact question before answering.')
+            const key = `${task.id}:${requestId}`
+            if (submittedQuestionIdsRef.current.has(key) || submittedQuestionIdsRef.current.size >= 4096) throw new Error('Review this question before submitting another answer.')
+            submittedQuestionIdsRef.current.add(key)
+            await approve(true, withAttachmentNote(message, options?.attachments), question.tool?.name === 'permission' ? 'permission' : 'question', requestId)
+            return
+          }
+          if (!task.agent_id && !current?.sessionId) throw new Error('Assign an agent to this task before sending a message')
+          // The existing Source send owner owns resume/create, saved-file
+          // authority and the durable intent nonce. No renderer pre-start.
+          await sendMessage(message, options)
+        })
+      }
       // Read messages from the store at call time instead of closing over the
       // render-time array: depending on messages gives this callback a new
       // identity on every streamed delta, which defeats React.memo on every
@@ -510,7 +536,7 @@ function TaskWorkspaceComponent({
       await ensureChatSession(true)
       await sendMessage(message, options)
     },
-    [approve, ensureChatSession, sendMessage, task?.agent_id, task?.id]
+    [approve, ensureChatSession, sendMessage, task?.agent_id, task?.id, actionReceipt]
   )
 
   const handleAddAttachmentPaths = useCallback(async (filePaths: string[], receiptCurrent: () => boolean = () => true) => {
@@ -671,9 +697,16 @@ function TaskWorkspaceComponent({
       await handleTriage()
       return
     }
+    if (getDesktopHost().kind === 'tauri') {
+      try {
+        await handleSend(message)
+        if (actionReceipt.current()) setKickoffMessage('')
+      } catch { /* The task action owner retains this draft and review state. */ }
+      return
+    }
     setKickoffMessage('')
     await handleSend(message)
-  }, [handleSend, handleTriage, kickoffMessage, task?.agent_id])
+  }, [handleSend, handleTriage, kickoffMessage, task?.agent_id, actionReceipt, setKickoffMessage])
 
   const handlePullRequests = useCallback((pullRequests: Array<{ repo: string; prNumber?: number; prUrl?: string; prState?: string; prTitle?: string; ciStatus?: 'passing' | 'failing' | 'pending' | 'none' }>) => {
     if (!task?.id) return
@@ -878,6 +911,7 @@ function TaskWorkspaceComponent({
                   <div className="flex items-end gap-2 rounded-xl border border-border/50 bg-card p-2 shadow-lg">
                     <textarea
                       value={kickoffMessage}
+                      disabled={actionBlocked}
                       onChange={(event) => setKickoffMessage(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleKickoff() }
@@ -886,7 +920,7 @@ function TaskWorkspaceComponent({
                       className="max-h-32 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground"
                       aria-label="Kickoff instructions"
                     />
-                    <Button onClick={() => void handleKickoff()} disabled={!kickoffMessage.trim()} className="h-9 gap-1.5">
+                    <Button onClick={() => void handleKickoff()} disabled={!kickoffMessage.trim() || actionBlocked} className="h-9 gap-1.5">
                       {task.agent_id ? <Send className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
                       {task.agent_id ? 'Start' : 'Triage'}
                     </Button>

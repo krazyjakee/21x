@@ -62,6 +62,7 @@ const recoveringTranscripts = new Set<string>()
 const recoverAgain = new Set<string>()
 let agentDesktopGeneration = 0
 let registerAgentDesktopListeners: () => () => void
+let retirePendingSends: () => void
 
 function getProjection(taskId: string): TranscriptProjection {
   let p = projections.get(taskId)
@@ -101,9 +102,10 @@ interface AgentState {
 
   initSession: (taskId: string, sessionId: string, agentId: string) => void
   /** Mark a task as "starting" after the user sends, until a turn is confirmed. */
-  beginSend: (taskId: string) => void
+  beginSend: (taskId: string) => object
+  isCurrentSend: (taskId: string, owner: object) => boolean
   /** Clear the "starting" indicator (e.g. the send request failed). */
-  endSend: (taskId: string) => void
+  endSend: (taskId: string, owner?: object) => void
   /** Bind a task view to the durable transcript projection: load the full
    *  snapshot into the cache and render it. Idempotent; subsequent updates
    *  arrive as `transcript:changed` deltas. */
@@ -120,6 +122,12 @@ interface AgentState {
 }
 
 export const useAgentStore = create<AgentState>((set, get) => {
+  const sendReceipts = new Map<string, { owner: object; timer: ReturnType<typeof setTimeout> }>()
+  const retireSend = (taskId: string) => {
+    const entry = sendReceipts.get(taskId)
+    if (entry) clearTimeout(entry.timer)
+    sendReceipts.delete(taskId)
+  }
   // Recompute a task's derived messages from its projection cache and write it
   // into the session (creating a placeholder session if the view isn't bound yet,
   // e.g. a background-wake delta arriving before the user opens the task).
@@ -306,13 +314,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
     return () => { active = false; offTranscript?.(); offStatus?.() }
   }
 
-  const clearPendingSend = (taskId: string): void => {
+  const clearPendingSend = (taskId: string, owner?: object): void => {
+    if (owner && sendReceipts.get(taskId)?.owner !== owner) return
+    retireSend(taskId)
     set((state) => {
       const s = state.sessions.get(taskId)
       if (!s?.pendingSend) return state
       return { sessions: new Map(state.sessions).set(taskId, { ...s, pendingSend: false }) }
     })
   }
+  retirePendingSends = () => { for (const taskId of [...sendReceipts.keys()]) clearPendingSend(taskId) }
 
   // ── Return store ──
 
@@ -400,6 +411,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     },
 
     initSession: (taskId, sessionId, agentId) => {
+      retireSend(taskId)
       set((state) => {
         const existing = state.sessions.get(taskId)
         return {
@@ -417,18 +429,22 @@ export const useAgentStore = create<AgentState>((set, get) => {
     },
 
     beginSend: (taskId) => {
+      retireSend(taskId)
+      const owner = {}
+      sendReceipts.set(taskId, { owner, timer: setTimeout(() => clearPendingSend(taskId, owner), 120_000) })
       set((state) => {
         const s = state.sessions.get(taskId)
         if (!s) return state
         return { sessions: new Map(state.sessions).set(taskId, { ...s, pendingSend: true }) }
       })
-      // Safety net: never leave the composer stuck if no status ever arrives.
-      setTimeout(() => clearPendingSend(taskId), 120_000)
+      return owner
     },
 
-    endSend: (taskId) => clearPendingSend(taskId),
+    isCurrentSend: (taskId, owner) => sendReceipts.get(taskId)?.owner === owner,
+    endSend: (taskId, owner) => clearPendingSend(taskId, owner),
 
     endSession: (taskId) => {
+      retireSend(taskId)
       set((state) => {
         const session = state.sessions.get(taskId)
         if (!session) return state
@@ -443,6 +459,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     },
 
     removeSession: (taskId) => {
+      retireSend(taskId)
       projections.delete(taskId)
       set((state) => {
         const next = new Map(state.sessions)
@@ -452,6 +469,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     },
 
     resetSession: (taskId) => {
+      retireSend(taskId)
       set((state) => {
         if (!state.sessions.has(taskId)) return state
         const next = new Map(state.sessions)
@@ -499,6 +517,7 @@ export function initializeAgentDesktopState(): () => void {
     agentDesktopGeneration++
     agentSnapshot.dispose()
     cleanup()
+    retirePendingSends()
     window.removeEventListener('pagehide', release)
   }
   releaseAgentListeners = release

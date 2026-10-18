@@ -231,6 +231,7 @@ export function useAgentSessionActions(taskId: string | undefined) {
   const sendMessage = useCallback(
     async (message: string, options?: SendMessageOptions) => {
       if (!taskId) throw new Error('No taskId')
+      const receipt = captureSessionReceipt()
       // Get latest session from store, not from closure
       const currentSession = useAgentStore.getState().sessions.get(taskId)
       // Resuming an idle session is slow (the send call blocks until the resume
@@ -238,8 +239,22 @@ export function useAgentSessionActions(taskId: string | undefined) {
       // with an open input. Cleared by the first non-idle status or on failure.
       const store = useAgentStore.getState()
       const deliveryId = options?.deliveryId ?? `renderer:${crypto.randomUUID()}`
-      store.beginSend(taskId)
+      const sendOwner = store.beginSend(taskId)
       try {
+        if (receipt.native) {
+          const result = currentSession?.sessionId && currentSession.agentId
+            ? await agentSessionApi.send(currentSession.sessionId, message, taskId, currentSession.agentId, options?.attachments, deliveryId)
+            : await agentSessionApi.sendByTaskId(taskId, message, options?.attachments, deliveryId)
+          receipt.assertSuccess(result)
+          if (!store.isCurrentSend(taskId, sendOwner)) throw new ServiceProtocolError('INVALID_RESULT')
+          const resolvedId = result.newSessionId || ('sessionId' in result ? result.sessionId : undefined)
+          const latest = useAgentStore.getState().sessions.get(taskId)
+          if (latest?.sessionId && latest.sessionId !== currentSession?.sessionId && latest.sessionId !== resolvedId) throw new ServiceProtocolError('INVALID_RESULT')
+          if (currentSession?.sessionId && !latest?.sessionId) throw new ServiceProtocolError('INVALID_RESULT')
+          if (typeof resolvedId === 'string' && resolvedId) initSession(taskId, resolvedId, latest?.agentId || currentSession?.agentId || '')
+          store.endSend(taskId, sendOwner)
+          return
+        }
         if (currentSession?.sessionId) {
           const result = await agentSessionApi.send(currentSession.sessionId, message, taskId, currentSession.agentId, options?.attachments, deliveryId)
           // Session was recreated on the main process — update renderer store
@@ -258,7 +273,7 @@ export function useAgentSessionActions(taskId: string | undefined) {
           }
         }
       } catch (e) {
-        store.endSend(taskId)
+        store.endSend(taskId, receipt.native ? sendOwner : undefined)
         throw e
       }
     },

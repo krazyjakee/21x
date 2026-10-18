@@ -26,19 +26,25 @@ export function useTaskEditReceipt(taskId: string) {
     const captured = identity
     return captured.live && owner.current === captured && !captured.review && (!captured.native || captured.scope.isCurrent())
   }
-  const run = async (write: () => void | Promise<void>, accepted?: () => void) => {
+  const perform = async <T,>(write: () => T | Promise<T>, accepted?: () => void): Promise<T> => {
     const captured = identity
-    if (!current() || captured.pending) return
+    if (!current() || captured.pending) throw new Error('Review the current task before submitting another action.')
     captured.pending = true; captured.failed = false; repaint()
     try {
-      await write()
+      const result = await write()
       if (!current()) throw new Error('Task editor was replaced.')
       accepted?.()
-    } catch {
+      return result
+    } catch (error) {
       if (captured.live && owner.current === captured) {
         captured.review = captured.native; captured.failed = true; repaint()
       }
+      throw error
     } finally { captured.pending = false; if (captured.live && owner.current === captured) repaint() }
   }
-  return { run, current, admit: () => current() && !identity.pending, busy: identity.pending, review: identity.review, blocked: identity.pending || identity.review, failed: identity.failed }
+  const run = async (write: () => void | Promise<void>, accepted?: () => void) => {
+    if (!current() || identity.pending) return
+    try { await perform(write, accepted) } catch { /* This owner publishes the fixed review state. */ }
+  }
+  return { run, perform, current, admit: () => current() && !identity.pending, busy: identity.pending, review: identity.review, blocked: identity.pending || identity.review, failed: identity.failed }
 }

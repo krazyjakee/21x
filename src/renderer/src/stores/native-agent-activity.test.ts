@@ -410,3 +410,126 @@ it.each(['abort', 'approve'] as const)('owns a finite false native %s acknowledg
   expect(f.calls(`agentSession:${operation}`)).toBe(1)
   expect(f.useAgentStore.getState().sessions.get('task-1')?.sessionId).toBe('session-1')
 })
+
+it.each(['send', 'sendByTaskId'] as const)('does not replace a newer local session with a late %s receipt', async operation => {
+  const pending = held<unknown>(); f.handlers.set(`agentSession:${operation}`, () => pending.promise)
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  if (operation === 'send') f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions('task-1'))
+  let active!: Promise<unknown>
+  act(() => { active = result.current.sendMessage('Captured original instruction').catch(error => error) })
+  await vi.waitFor(() => expect(f.calls(`agentSession:${operation}`)).toBe(1))
+  let outcome: unknown
+  await act(async () => {
+    f.useAgentStore.getState().initSession('task-1', 'replacement-session', 'agent-2')
+    pending.resolve({ success: true, ...(operation === 'sendByTaskId' ? { sessionId: 'late-session' } : {}), newSessionId: 'late-session' })
+    outcome = await active
+  })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'replacement-session', agentId: 'agent-2' })
+  expect(outcome).toMatchObject({ code: 'INVALID_RESULT' })
+})
+it('does not clear a replacement pending send when an old connection send is refused', async () => {
+  const pending = held<unknown>(); f.handlers.set('agentSession:send', () => pending.promise)
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions('task-1'))
+  let active!: Promise<unknown>
+  act(() => { active = result.current.sendMessage('Old instruction').catch(error => error) })
+  await vi.waitFor(() => expect(f.calls('agentSession:send')).toBe(1))
+  await act(async () => {
+    const connected = f.host.reconnect()
+    f.useAgentStore.getState().initSession('task-1', 'replacement-session', 'agent-2')
+    f.useAgentStore.getState().beginSend('task-1')
+    await connected; await active; pending.resolve({ success: true })
+  })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'replacement-session', pendingSend: true })
+})
+it.each(['send', 'sendByTaskId'] as const)('refuses a finite false %s result', async operation => {
+  f.handlers.set(`agentSession:${operation}`, async () => ({ success: false, ...(operation === 'sendByTaskId' ? { sessionId: null } : {}) }))
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  if (operation === 'send') f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions('task-1'))
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.sendMessage('Explicit instruction').catch(error => error) })
+  expect(outcome).toMatchObject({ code: 'INVALID_RESULT' })
+  expect(f.calls(`agentSession:${operation}`)).toBe(1)
+})
+it('does not let an older send timeout clear a replacement pending send', async () => {
+  vi.useFakeTimers()
+  try {
+    f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+    f.useAgentStore.getState().beginSend('task-1')
+    await vi.advanceTimersByTimeAsync(119_999)
+    f.useAgentStore.getState().initSession('task-1', 'replacement-session', 'agent-2')
+    f.useAgentStore.getState().beginSend('task-1')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'replacement-session', pendingSend: true })
+  } finally { vi.useRealTimers() }
+})
+
+it.each(['send', 'sendByTaskId'] as const)('retains the original intent nonce and accepts matching Source identity through %s hydration', async operation => {
+  const raw = held<unknown>(); let observed: Record<string, unknown> | undefined
+  f.handlers.set(`agentSession:${operation}`, payload => { observed = payload; return raw.promise })
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  if (operation === 'send') f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions('task-1'))
+  const deliveryId = 'renderer:00000000-0000-4000-8000-000000000001', attachments = [{ id: 'saved-ref', filename: 'saved.txt', size: 3, mime_type: 'text/plain' }]
+  let active!: Promise<unknown>
+  act(() => { active = result.current.sendMessage('Owned exact intent', { deliveryId, attachments }) })
+  await vi.waitFor(() => expect(f.calls(`agentSession:${operation}`)).toBe(1))
+  expect(observed).toMatchObject({ taskId: 'task-1', message: 'Owned exact intent', deliveryId, attachments })
+  await act(async () => {
+    await f.useAgentStore.getState().hydrateTranscript('task-1')
+    f.emit(f.status(1, { sessionId: 'source-resolved' }))
+    raw.resolve({ success: true, ...(operation === 'sendByTaskId' ? { sessionId: null } : {}), newSessionId: 'source-resolved' })
+    await active
+  })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'source-resolved', agentId: 'agent-1' })
+  expect(f.calls(`agentSession:${operation}`)).toBe(1)
+})
+it('retires the previous send timer and bounds the replacement indicator to its own timeout', async () => {
+  vi.useFakeTimers()
+  try {
+    f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+    f.useAgentStore.getState().beginSend('task-1'); expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(119_999)
+    f.useAgentStore.getState().beginSend('task-1'); expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(f.useAgentStore.getState().sessions.get('task-1')?.pendingSend).toBe(true)
+    await vi.advanceTimersByTimeAsync(119_999)
+    expect(f.useAgentStore.getState().sessions.get('task-1')?.pendingSend).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+  } finally { vi.useRealTimers() }
+})
+it('retires pending send timers and local ownership with the physical document listener cohort', () => {
+  vi.useFakeTimers()
+  try {
+    f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+    const owner = f.useAgentStore.getState().beginSend('task-1')
+    expect(f.useAgentStore.getState().isCurrentSend('task-1', owner)).toBe(true)
+    expect(vi.getTimerCount()).toBe(1)
+    window.dispatchEvent(new Event('pagehide'))
+    expect(f.useAgentStore.getState().isCurrentSend('task-1', owner)).toBe(false)
+    expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'session-1', pendingSend: false })
+    expect(vi.getTimerCount()).toBe(0)
+  } finally { vi.useRealTimers() }
+})
+it('keeps using the task send owner while a successful acknowledgement precedes its agent status', async () => {
+  let count = 0
+  f.handlers.set('agentSession:sendByTaskId', async () => ++count === 1
+    ? { success: true, sessionId: null, newSessionId: 'source-resolved' }
+    : { success: true, sessionId: 'source-resolved' })
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions('task-1'))
+  await act(async () => { await result.current.sendMessage('First exact instruction') })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'source-resolved', agentId: '' })
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.sendMessage('Second explicit instruction').catch(error => error) })
+  expect(outcome).toBeUndefined()
+  expect(f.calls('agentSession:sendByTaskId')).toBe(2); expect(f.calls('agentSession:send')).toBe(0)
+})

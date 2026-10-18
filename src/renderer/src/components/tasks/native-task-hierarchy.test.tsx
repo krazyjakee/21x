@@ -4,9 +4,13 @@ import type { ReactNode } from 'react'
 import type { DragEndEvent } from '@dnd-kit/core'
 import type { Agent, Task } from '@/types'
 import type { TauriDesktopApi } from '@/lib/tauri-desktop-transport'
+import type { SendHandler } from '@/components/agents/transcript/TranscriptComposer'
+import type { TaskSession } from '@/stores/agent-store'
+import { SessionStatus } from '@shared/constants'
 const drag = vi.hoisted(() => ({ end: undefined as ((event: DragEndEvent) => void) | undefined }))
+const transcript = vi.hoisted(() => ({ send: undefined as SendHandler | undefined }))
 vi.mock('@dnd-kit/core', async original => ({ ...await original<typeof import('@dnd-kit/core')>(), DndContext: (props: { children: ReactNode; onDragEnd?: (event: DragEndEvent) => void }) => { drag.end = props.onDragEnd; return props.children } }))
-vi.mock('@/components/agents/AgentTranscriptPanel', () => ({ AgentTranscriptPanel: () => null }))
+vi.mock('@/components/agents/AgentTranscriptPanel', () => ({ AgentTranscriptPanel: ({ onSend }: { onSend?: SendHandler }) => { transcript.send = onSend; return null } }))
 function held<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(done => { resolve = done }), resolve } }
 const makeTask = (extra: Partial<Task> = {}): Task => ({
   id: 'task-1', title: 'Synthetic task', description: '', type: 'general', role: 'task', priority: 'medium', status: 'not_started', assignee: '',
@@ -43,7 +47,7 @@ beforeAll(async () => {
   agents = (await import('@/stores/agent-store')).useAgentStore
 })
 beforeEach(async () => {
-  values.clear(); handlers.clear(); invoke.mockClear(); drag.end = undefined
+  values.clear(); handlers.clear(); invoke.mockClear(); drag.end = undefined; transcript.send = undefined
   values.set('skills:getAll', []); values.set('settings:get', null); values.set('tasks:getWorkspaceDir', '/synthetic'); values.set('artifacts:scan', []); values.set('agent:getAll', []); values.set('db:getTasks', [])
   handlers.set('db:updateTask', async payload => makeTask({ ...(payload.data as Partial<Task>), id: String(payload.id) }))
   handlers.set('agentSession:getTranscriptPage', async payload => { const page = payload.page as { mode: string; after: number }; return { version: 1, taskId: payload.taskId, mode: page.mode, after: page.after, parts: [], cursor: page.after, watermark: page.after, hasMore: false } })
@@ -602,4 +606,138 @@ it('requires review after an unconfirmed native Resume without an automatic fres
   await screen.findByRole('alert')
   expect(calls('agentSession:resume')).toHaveLength(1); expect(calls('agentSession:start')).toHaveLength(0)
   expect(calls('db:getTasks')).toHaveLength(0); expect(calls('db:updateTask')).toHaveLength(0)
+})
+
+it('delegates a native message without a live session to one retained Source send owner', async () => {
+  values.set('agentSession:start', { sessionId: 'renderer-started' })
+  values.set('agentSession:send', { success: true })
+  values.set('agentSession:sendByTaskId', { success: true, sessionId: null, newSessionId: 'source-started' })
+  render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  let outcome: unknown
+  await act(async () => { outcome = await Promise.resolve(transcript.send!('Original instruction')).catch(error => error) })
+  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('agentSession:resume')).toHaveLength(0)
+  expect(calls('agentSession:sendByTaskId')).toHaveLength(1); expect(calls('agentSession:send')).toHaveLength(0)
+  expect(outcome).toBeUndefined()
+  expect(calls('agentSession:sendByTaskId')[0][1]?.payload).toMatchObject({ taskId: 'task-1', message: 'Original instruction', deliveryId: expect.stringMatching(/^renderer:/) })
+})
+it.each(['replacement', 'project-return', 'pagehide'] as const)('refuses a captured native message callback before effects after %s retirement', async retirement => {
+  values.set('agentSession:start', { sessionId: 'renderer-started' }); values.set('agentSession:send', { success: true })
+  const view = render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  const send = transcript.send!
+  if (retirement === 'replacement') view.rerender(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ id: 'task-next', agent_id: 'agent-1' })} />)
+  else if (retirement === 'pagehide') act(() => window.dispatchEvent(new Event('pagehide')))
+  else {
+    const projects = (await import('@/stores/project-store')).useProjectStore, initial = projects.getState().currentProjectId
+    act(() => { projects.setState({ currentProjectId: 'other-project' }); projects.setState({ currentProjectId: initial }) })
+  }
+  let outcome: unknown
+  await act(async () => { outcome = await Promise.resolve(send('Retired instruction')).catch(error => error) })
+  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('agentSession:send')).toHaveLength(0); expect(calls('agentSession:sendByTaskId')).toHaveLength(0)
+  expect(outcome).toBeInstanceOf(Error)
+})
+it('refuses a native historical question before resuming or starting its old session', async () => {
+  values.set('agentSession:resume', { sessionId: 'resumed-question' })
+  render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'retained-session' })} />)
+  await act(async () => {})
+  act(() => agents.setState({ sessions: new Map<string, TaskSession>([['task-1', { taskId: 'task-1', agentId: 'agent-1', sessionId: null, status: SessionStatus.IDLE, messages: [{ id: 'question-message', role: 'assistant', content: 'Old question', timestamp: new Date(), partType: 'question', tool: { name: 'question', status: 'pending', requestId: 'request-old', questions: [{ question: 'Old?', header: 'Old', options: [] }] } }] }]]) }))
+  let outcome: unknown
+  await act(async () => { outcome = await Promise.resolve(transcript.send!('Answer old question')).catch(error => error) })
+  expect(calls('agentSession:resume')).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0); expect(calls('agentSession:approve')).toHaveLength(0)
+  expect(outcome).toBeInstanceOf(Error)
+})
+
+it('admits one native message across duplicate callbacks and preserves its saved attachment references', async () => {
+  const raw = held<unknown>(); handlers.set('agentSession:sendByTaskId', () => raw.promise)
+  render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  const send = transcript.send!, refs = [{ id: 'saved-ref', filename: 'saved.txt', size: 3, mime_type: 'text/plain' }]
+  let first!: Promise<unknown>, duplicate!: Promise<unknown>
+  act(() => { first = Promise.resolve(send('One intent', { attachments: refs })); duplicate = Promise.resolve(send('One intent', { attachments: refs })).catch(error => error) })
+  await waitFor(() => expect(calls('agentSession:sendByTaskId')).toHaveLength(1))
+  expect(await duplicate).toBeInstanceOf(Error)
+  expect(calls('agentSession:sendByTaskId')[0][1]?.payload).toMatchObject({ taskId: 'task-1', message: 'One intent', attachments: refs, deliveryId: expect.stringMatching(/^renderer:/) })
+  await act(async () => { raw.resolve({ success: true, sessionId: null }); await first })
+  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('agentSession:resume')).toHaveLength(0)
+})
+it('retains an unknown native send for review instead of submitting a new nonce on retry', async () => {
+  handlers.set('agentSession:sendByTaskId', async () => undefined)
+  render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  let outcome: unknown
+  await act(async () => { outcome = await Promise.resolve(transcript.send!('Uncertain instruction')).catch(error => error) })
+  expect(outcome).toBeInstanceOf(Error); await screen.findByRole('alert')
+  await act(async () => { await Promise.resolve(transcript.send!('Uncertain instruction')).catch(error => error) })
+  expect(calls('agentSession:sendByTaskId')).toHaveLength(1); expect(calls('db:updateTask')).toHaveLength(0)
+})
+
+async function currentQuestion(type: 'permission' | 'question', requestId: string | undefined = 'request-exact') {
+  // Populate the real facade's exact session-to-task binding, then hydrate its
+  // durable transcript before publishing the controlled question to the UI.
+  values.set('agentSession:start', { sessionId: 'question-session' })
+  await host.api.agentSession.start('agent-1', 'task-1'); invoke.mockClear()
+  const view = render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'question-session' })} />)
+  await act(async () => { await agents.getState().hydrateTranscript('task-1') })
+  act(() => agents.setState({ sessions: new Map<string, TaskSession>([['task-1', { taskId: 'task-1', agentId: 'agent-1', sessionId: 'question-session', status: SessionStatus.WAITING_APPROVAL, messages: [{ id: 'question-message', role: 'assistant', content: 'Current question', timestamp: new Date(), partType: 'question', tool: { name: type, status: 'pending', requestId, questions: [{ question: 'Current?', header: 'Current', options: [] }] } }] }]]) }))
+  return view
+}
+it.each(['permission', 'question'] as const)('uses the exact current native %s request without startup or a general prompt', async type => {
+  values.set('agentSession:approve', { success: true }); await currentQuestion(type)
+  await act(async () => { await transcript.send!('Exact visual answer') })
+  expect(calls('agentSession:approve')).toHaveLength(1)
+  expect(calls('agentSession:approve')[0][1]?.payload).toMatchObject({ sessionId: 'question-session', requestId: 'request-exact', responseType: type, message: 'Exact visual answer', approved: true })
+  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('agentSession:resume')).toHaveLength(0)
+  expect(calls('agentSession:send')).toHaveLength(0); expect(calls('agentSession:sendByTaskId')).toHaveLength(0)
+  await act(async () => { await Promise.resolve(transcript.send!('Duplicate answer')).catch(error => error) })
+  expect(calls('agentSession:approve')).toHaveLength(1)
+})
+it('refuses a native current question without an exact request ID before any command', async () => {
+  await currentQuestion('question', '')
+  let outcome: unknown
+  await act(async () => { outcome = await Promise.resolve(transcript.send!('No exact request')).catch(error => error) })
+  expect(outcome).toBeInstanceOf(Error); expect(calls('agentSession:approve')).toHaveLength(0)
+  expect(calls('agentSession:send')).toHaveLength(0); expect(calls('agentSession:sendByTaskId')).toHaveLength(0)
+})
+it('retains native kickoff text through one pending send and unknown receipt without an unhandled retry', async () => {
+  const raw = held<unknown>(); handlers.set('agentSession:sendByTaskId', () => raw.promise)
+  render(<Workspace {...props} panelLayout="both" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  const input = screen.getByRole('textbox', { name: 'Kickoff instructions' })
+  fireEvent.change(input, { target: { value: 'Retain original kickoff' } })
+  act(() => { fireEvent.keyDown(input, { key: 'Enter' }); fireEvent.keyDown(input, { key: 'Enter' }) })
+  await waitFor(() => expect(calls('agentSession:sendByTaskId')).toHaveLength(1))
+  expect(input).toHaveValue('Retain original kickoff'); expect(input).toBeDisabled()
+  await act(async () => { raw.resolve(undefined) })
+  await screen.findByRole('alert'); expect(input).toHaveValue('Retain original kickoff'); expect(input).toBeDisabled()
+  expect(calls('agentSession:start')).toHaveLength(0)
+})
+it('does not clear a replacement kickoff draft after an admitted old native prompt settles', async () => {
+  const raw = held<unknown>(); handlers.set('agentSession:sendByTaskId', () => raw.promise)
+  const view = render(<Workspace {...props} panelLayout="both" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  fireEvent.change(screen.getByRole('textbox', { name: 'Kickoff instructions' }), { target: { value: 'Old instruction' } })
+  fireEvent.keyDown(screen.getByRole('textbox', { name: 'Kickoff instructions' }), { key: 'Enter' })
+  await waitFor(() => expect(calls('agentSession:sendByTaskId')).toHaveLength(1))
+  view.rerender(<Workspace {...props} panelLayout="both" agents={[configuredAgent()]} task={makeTask({ id: 'task-next', agent_id: 'agent-1' })} />)
+  const next = screen.getByRole('textbox', { name: 'Kickoff instructions' }); expect(next).toHaveValue('')
+  fireEvent.change(next, { target: { value: 'New task draft' } })
+  await act(async () => { raw.resolve({ success: true, sessionId: null }) })
+  expect(next).toHaveValue('New task draft'); expect(next).toBeEnabled(); expect(screen.queryByRole('alert')).toBeNull()
+  expect(calls('agentSession:sendByTaskId')).toHaveLength(1)
+  expect(calls('agentSession:sendByTaskId')[0][1]?.payload).toMatchObject({ taskId: 'task-1', message: 'Old instruction' })
+})
+it('restores a refused native composer draft without unsupported voice work or a replayed send', async () => {
+  const { TranscriptComposer } = await import('@/components/agents/transcript/TranscriptComposer')
+  const raw = held<unknown>(); handlers.set('agentSession:sendByTaskId', () => raw.promise)
+  render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  const send = transcript.send!
+  render(<TranscriptComposer taskId="task-1" onSend={send} isStarting={false} />)
+  const input = screen.getByRole('textbox', { name: 'Message the agent' }) as HTMLTextAreaElement
+  fireEvent.change(input, { target: { value: 'Retained composer intent' } })
+  act(() => { fireEvent.keyDown(input, { key: 'Enter' }); fireEvent.click(screen.getByRole('button', { name: 'Send message' })) })
+  await waitFor(() => expect(calls('agentSession:sendByTaskId')).toHaveLength(1))
+  expect(input).toBeDisabled()
+  await act(async () => { raw.resolve(undefined) })
+  await waitFor(() => expect(input).toHaveValue('Retained composer intent'))
+  expect(input).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+  await act(async () => {})
+  expect(input).toHaveValue('Retained composer intent')
+  expect(calls('agentSession:sendByTaskId')).toHaveLength(1)
+  expect(calls('voice:answerNotExpected')).toHaveLength(0)
 })
