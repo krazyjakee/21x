@@ -85,3 +85,12 @@ acceptance and hosted CI remain separate gates. Hosted Verify is unavailable
 while repository Actions is disabled, awaiting the user's decision. No release,
 live-profile cutover, browser restoration or hosted voice work is authorized by
 this continuation.
+
+Local verification on 18 October 2026 uses the adopted physical Node 22.23.2
+(ABI 127) runner: 2,075 renderer tests in 158 files and 329 affected Source/staged
+checks in 19 files pass without skips. Forced no-emit typecheck, lint (zero errors,
+165 baseline warnings), database/production staging, both frontends and combined
+923-source inventory/contracts pass. The affected count includes the actual Root
+retention canaries inherited from `956c5d07`; it is separate from the full renderer
+count. Eleven old-store failures, the initial rollback fixture invariant and
+viewer fixture typing/lint repairs are retained in revision evidence.
