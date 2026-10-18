@@ -110,8 +110,10 @@ export function TaskWorkspaceDialogs({
 
       <FeedbackDialog
         open={feedback.showFeedback}
-        sourceName={task.source_id ? getTaskSourceName(task, sourceName) : undefined}
-        completionDescription={getSourceCompletionDescription(task, sourceName)}
+        isBusy={feedback.feedbackBusy}
+        review={feedback.feedbackReview}
+        sourceName={(feedback.feedbackTask ?? task).source_id ? getTaskSourceName(feedback.feedbackTask ?? task, sourceName) : undefined}
+        completionDescription={getSourceCompletionDescription(feedback.feedbackTask ?? task, sourceName)}
         onSubmit={feedback.handleFeedbackSubmit}
         onSkip={feedback.handleFeedbackSkip}
         onCancel={feedback.handleFeedbackCancel}

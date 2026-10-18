@@ -644,3 +644,50 @@ feedback and protected task deletion owners; the new UI hook harness uses
 controlled canonical task/action receipts and does not establish remote Source
 mutation or installed UI delivery. Evidence:
 `issue-209-native-task-completion-local-20261018.json`.
+
+
+### Native feedback submission receipts
+
+Native session feedback captures the original task, Source/output choice and
+local conversation identity when its form opens. A single view lane keeps the
+rating/comment draft visible and disables edits/Close while a raw operation is
+owned. A changed task, project/group/parent/agent/Source binding or local session
+owner cannot retarget the pending feedback. Project withdrawal and return,
+pagehide, unmount, task replacement and reconnect fence future effects.
+
+The existing lifecycle operation must return the canonical learning task with
+matching rating, comment and completion choice before the UI sends a prompt.
+The marker uses the original task operation directly, leaving internal learning
+fields out of the content export path. It then calls the existing retained
+message owner once, with its original
+delivery nonce. That Source owner already owns resume/create and learning-only
+startup; the renderer does not pre-resume or start a second session. Source
+remains the authorization/admission owner. The marker and prompt remain two
+separately acknowledged operations, not a new atomic transaction.
+
+A missing/refused marker or uncertain send leaves fixed review guidance and
+blocks replay. Each rendered form owns its callbacks: Submit, Skip and Close
+from a cancelled form cannot borrow a newly opened form in the same task view.
+The renderer does not revert an accepted learning marker, reopen
+an editable duplicate submission or undo admitted Source work after disposal.
+Successful send acknowledgement dismisses the original form only. Skip transfers
+its captured completion choice once to the existing completion owner; it does
+not write a learning marker. Native coordinator/group anchors cannot submit
+ordinary feedback. Electron keeps its established feedback behavior.
+
+These controls do not establish live provider learning, remote source mutation,
+installed native delivery or unsupported-platform attachment execution. The final integration inherits E2's held Linux directory authority
+(`80b77216`/`ce601682`) and repeats actual Source/compiled-root canaries after
+restaging. Unsupported platforms still refuse protected reads/copy/cleanup;
+that Source delivery does not establish installed UI or all-platform authority. The optional viewer and native voice
+remain unavailable; hosted voice stays deferred.
+
+The final adopted runner passes2127renderer cases/160files,593affected UI/Source
+cases/21files and153directory/journal/profile-owner cases/4files, all without
+skips. Twenty-six typed-native controls repair13 published-hook failures and
+four own unpublished follow-up failures (cancelled-form callbacks and an invalid
+content-export attempt); the actual Source feedback acceptance and two staged
+stdio entries remain separate from the controlled UI harness. Forced no-emit
+typecheck, lint0errors165baselinewarnings, staging, both frontends and923-source
+inventory/contracts pass. Revision-bound evidence:
+`issue-209-native-task-feedback-local-20261018.json`.

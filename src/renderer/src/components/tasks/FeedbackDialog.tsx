@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils'
 interface FeedbackDialogProps {
   completionDescription?: string
   open: boolean
+  isBusy?: boolean
+  review?: boolean
   /**
    * Display name of the external source, when the task came from one. Set it to
    * show the completion choice; leave it undefined for a local task.
@@ -18,7 +20,7 @@ interface FeedbackDialogProps {
   onCancel: () => void
 }
 
-export function FeedbackDialog({ open, sourceName, onSubmit, onSkip, onCancel, completionDescription }: FeedbackDialogProps) {
+export function FeedbackDialog({ open, sourceName, onSubmit, onSkip, onCancel, completionDescription, isBusy = false, review = false }: FeedbackDialogProps) {
   const [rating, setRating] = useState(0)
   const [hoveredStar, setHoveredStar] = useState(0)
   const [comment, setComment] = useState('')
@@ -41,15 +43,17 @@ export function FeedbackDialog({ open, sourceName, onSubmit, onSkip, onCancel, c
   }
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
-      <DialogContent className="max-w-md">
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && !isBusy) onCancel() }}>
+      <DialogContent className="max-w-md" closeDisabled={isBusy}>
         <DialogHeader>
-          <DialogTitle>Session Feedback</DialogTitle>
+          <DialogTitle>{review ? 'Review feedback delivery' : isBusy ? 'Submitting feedback' : 'Session Feedback'}</DialogTitle>
           <DialogDescription>
             Rate this session to help the agent improve its skills
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-4">
+          {review ? <p role="alert">Feedback delivery could not be confirmed. Review the task and conversation before another submission. Saved feedback or an accepted message may already exist.</p> : <>
+          <fieldset disabled={isBusy} className="contents">
           <div className="flex gap-1 justify-center">
             {[1, 2, 3, 4, 5].map((star) => (
               <button
@@ -110,6 +114,8 @@ export function FeedbackDialog({ open, sourceName, onSubmit, onSkip, onCancel, c
               Submit Feedback
             </Button>
           </div>
+          </fieldset>
+          </>}
         </DialogBody>
       </DialogContent>
     </Dialog>

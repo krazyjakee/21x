@@ -1,5 +1,8 @@
-import { useCallback, useState } from 'react'
-import { useAgentStore } from '@/stores/agent-store'
+import { useCallback, useRef, useState } from 'react'
+import { getDesktopHost } from '@/lib/desktop-api'
+import { useTaskEditReceipt } from '@/hooks/use-task-edit-receipt'
+import { useProjectStore } from '@/stores/project-store'
+import { useAgentStore, SESSION_RECEIPT } from '@/stores/agent-store'
 import { useProgressToastStore } from '@/stores/progress-toast-store'
 import { taskApi } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
@@ -48,7 +51,12 @@ Update existing skills that were helpful or create new ones for patterns worth r
 }
 
 /** Completing a task that had an agent session asks for feedback, which drives a skill-learning turn. */
-export function useTaskFeedbackFlow({
+export function useTaskFeedbackFlow(options: TaskFeedbackFlowOptions) {
+  const native = useNativeTaskFeedbackFlow(options)
+  const legacy = useLegacyTaskFeedbackFlow(options)
+  return getDesktopHost().kind === 'tauri' ? native : { ...legacy, feedbackBusy: false, feedbackReview: false, feedbackTask: options.task }
+}
+function useLegacyTaskFeedbackFlow({
   task,
   sessionId,
   hasMessages,
@@ -146,4 +154,101 @@ export function useTaskFeedbackFlow({
   const handleFeedbackCancel = useCallback(() => setShowFeedback(false), [])
 
   return { showFeedback, handleCompleteTask, handleFeedbackSubmit, handleFeedbackSkip, handleFeedbackCancel }
+}
+
+
+function feedbackBinding(task: Task): string {
+  return JSON.stringify([task.id, task.project_id, task.role ?? 'task', task.group_id, task.parent_task_id, task.agent_id, task.source_id, task.external_id, task.source, task.output_fields])
+}
+interface NativeFeedbackIntent {
+  task: Task
+  binding: string
+  sendMessage: TaskFeedbackFlowOptions['sendMessage']
+  completeTask: TaskFeedbackFlowOptions['onCompleteTask']
+  current: () => boolean
+  retained: () => boolean
+  phase: 'form' | 'progress' | 'review'
+  sessionOwner?: object
+  sessionId?: string | null
+  agentId?: string
+}
+function useNativeTaskFeedbackFlow(options: TaskFeedbackFlowOptions) {
+  const projectId = useProjectStore(s => s.currentProjectId)
+  const receipt = useTaskEditReceipt(`feedback:${projectId}:${options.task?.id ?? 'no-task'}`)
+  const observed = useRef(options); observed.current = options
+  const owner = useRef<NativeFeedbackIntent | null>(null)
+  const [visible, setVisible] = useState(false)
+  // Each rendered form owns its callbacks, including Cancel/reopen in one
+  // task view. A cached callback must never borrow the replacement form.
+  const renderedIntent = owner.current
+  const assertIntent = (intent: NativeFeedbackIntent, checkSession = true) => {
+    const task = observed.current.task
+    const session = useAgentStore.getState().sessions.get(intent.task.id)
+    if (checkSession && ((session?.[SESSION_RECEIPT] ?? session) !== intent.sessionOwner || session?.sessionId !== intent.sessionId || session?.agentId !== intent.agentId)) throw new Error('The conversation owner changed.')
+    if (owner.current !== intent || !intent.current() || !task || feedbackBinding(task) !== intent.binding || task.project_id !== useProjectStore.getState().currentProjectId || task.role && task.role !== 'task') throw new Error('Review the task before submitting feedback.')
+  }
+  const handleCompleteTask = async () => {
+    if (owner.current?.retained()) { setVisible(true); return }
+    if (!receipt.admit()) return
+    const task = options.task
+    if (!task) return
+    const session = useAgentStore.getState().sessions.get(task.id)
+    const intent: NativeFeedbackIntent = { sessionOwner: session?.[SESSION_RECEIPT] ?? session, sessionId: session?.sessionId, agentId: session?.agentId, task: structuredClone(task), binding: feedbackBinding(task), sendMessage: options.sendMessage, completeTask: options.onCompleteTask, current: receipt.current, retained: receipt.retained, phase: 'form' }
+    owner.current = intent
+    if (task.role && task.role !== 'task' || task.project_id !== projectId) { intent.phase = 'review'; setVisible(true); return }
+    if (options.sessionId && options.hasMessages || task.session_id) setVisible(true)
+    else {
+      await receipt.run(async () => {
+        try { assertIntent(intent); await intent.completeTask(); if (intent.retained()) { owner.current = null; setVisible(false) } }
+        catch (error) { intent.phase = 'review'; if (intent.retained()) setVisible(true); throw error }
+      })
+    }
+  }
+  const handleFeedbackSubmit = async (rating: number, comment: string, completeAtSource: boolean) => {
+    const intent = renderedIntent
+    if (!intent || owner.current !== intent || intent.phase !== 'form' || !receipt.admit()) return
+    intent.phase = 'progress'; setVisible(true)
+    await receipt.run(async () => {
+      try {
+        assertIntent(intent)
+        if (!intent.task.agent_id) throw new Error('No learning owner is available.')
+        const accepted = await taskApi.update(intent.task.id, {
+          status: TaskStatus.AgentLearning, complete_at_source: completeAtSource,
+          feedback_rating: rating, feedback_comment: comment || null
+        })
+        assertIntent(intent)
+        if (!accepted || feedbackBinding(accepted) !== intent.binding || accepted.status !== TaskStatus.AgentLearning || accepted.feedback_rating !== rating || accepted.feedback_comment !== (comment || null) || accepted.complete_at_source !== completeAtSource) throw new Error('Learning intent was not confirmed.')
+        // The retained send owner owns resume/create, learning-only startup and
+        // its durable delivery nonce. Do not pre-start or replay from this UI.
+        await intent.sendMessage(buildFeedbackPrompt(rating, comment))
+        assertIntent(intent, false)
+        owner.current = null; setVisible(false)
+      } catch (error) {
+        intent.phase = 'review'; if (intent.retained()) setVisible(true)
+        throw error
+      }
+    })
+  }
+  const handleFeedbackSkip = async (completeAtSource: boolean) => {
+    const intent = renderedIntent
+    if (!intent || owner.current !== intent || intent.phase !== 'form' || !receipt.admit()) return
+    intent.phase = 'progress'
+    await receipt.run(async () => {
+      try {
+        assertIntent(intent)
+        // Transfer this explicit choice to the completion receipt owner. It
+        // publishes its own accepted/review state; this owner does not replay.
+        setVisible(false)
+        await intent.completeTask(completeAtSource)
+        intent.phase = 'review'
+      } catch (error) { intent.phase = 'review'; if (intent.retained()) setVisible(true); throw error }
+    })
+  }
+  const handleFeedbackCancel = () => {
+    const intent = renderedIntent
+    if (!intent || owner.current !== intent || !intent.retained() || intent.phase === 'progress') return
+    if (intent.phase === 'form') owner.current = null
+    setVisible(false)
+  }
+  return { showFeedback: visible && !!owner.current?.retained(), handleCompleteTask, handleFeedbackSubmit, handleFeedbackSkip, handleFeedbackCancel, feedbackBusy: receipt.busy, feedbackReview: owner.current?.phase === 'review', feedbackTask: owner.current?.task }
 }
