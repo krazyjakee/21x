@@ -1,0 +1,1685 @@
+{
+  "version": 1,
+  "issue": 222,
+  "recordedAt": "2026-10-18T02:00:21.093136+00:00",
+  "implementationRevision": "79f409f41d754830a9d3b8d9b1a67fdf1c2036fd",
+  "workingTreeGateScope": "Complete baseline was inherited2563e3c9 plus exact reviewed tool/test changes; subsequent f24d70e0 production-owner changes were staged and rechecked separately. Framework/runtime receipts record base revision and dirty state; this is not a clean-commit full-suite claim. Source hashes below bind published implementation.",
+  "source": [
+    {
+      "file": ".github/workflows/tauri-host-neutral.yml",
+      "sha256": "7ccd6ca4ca2b086a87e646e13073150bcce992451b4e8ec9ab2038ad6379dda8"
+    },
+    {
+      "file": "docs/tauri-migration/implementation-status.md",
+      "sha256": "db352a7e8e331e2c9cd8d6257689af3507385f7710a4747050c25c8800447ac8"
+    },
+    {
+      "file": "docs/tauri-migration/standalone-tests.md",
+      "sha256": "3415cb81b9814ab6238f9f341f971cccb8d7f8e259803a0fc7b4568e58103e34"
+    },
+    {
+      "file": "package.json",
+      "sha256": "9ac281eef68443e2fd4612301386b3a808df8ba3c51bf0eb9ea237101b3f1ed6"
+    },
+    {
+      "file": "scripts/host-neutral-runtime.mjs",
+      "sha256": "d2e05593a81a5e018b9b086082af34710b305c6ab89d99f341775e6c360bd302"
+    },
+    {
+      "file": "scripts/host-neutral-test-policy.mjs",
+      "sha256": "cb8f1bd1d0e1c8b75a8bd13c6303491716143b854de648c5db05ddc40aa27d8b"
+    },
+    {
+      "file": "scripts/host-neutral-test-policy.test.ts",
+      "sha256": "fb6a8ae06aca5f73827c67190ca621ecde7479ef906d447b57703d3277208aee"
+    },
+    {
+      "file": "scripts/production-automation-artifacts.mjs",
+      "sha256": "cf18798980289a78c0ffa1bc9a3109f9e11dc16139c8330e589c0fa68db8746e"
+    },
+    {
+      "file": "scripts/production-automation-artifacts.test.ts",
+      "sha256": "f2b98ed40f3a4a624004debedd5354db280c0f4a7a4dc71e0b2856a45a1d094a"
+    },
+    {
+      "file": "scripts/production-automation-boundary.test.ts",
+      "sha256": "5add890dc41a006cbfb58e3898e6daa202c1058aab5c175c3840131b417d8cc2"
+    },
+    {
+      "file": "scripts/test-electron-transition.mjs",
+      "sha256": "2cce2e557a87e6803662e8972a52705d61729efbb834c0ccb69b08f31dbd1949"
+    },
+    {
+      "file": "scripts/test-host-neutral.mjs",
+      "sha256": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d"
+    },
+    {
+      "file": "src/main/database-move-task.test.ts",
+      "sha256": "01e27105774af2d1f1823a510b2fe4c09c300869441609471a57caa2372ec95a"
+    },
+    {
+      "file": "src/main/database-projects.test.ts",
+      "sha256": "2ac5ecb196c7d26da6d69a1331f1c8f3ab41653c5f1038eecd7e72b36888855c"
+    },
+    {
+      "file": "src/main/database-task-activity.test.ts",
+      "sha256": "6601f7a1904692fcd216604d8b2510ed9a9a559b79a1a76c04b62baaee028735"
+    },
+    {
+      "file": "src/main/database-task-roles.test.ts",
+      "sha256": "bc948964193e05aa43f6f76d7e7effc70e143be12c71f67c5906a157137fa8e9"
+    },
+    {
+      "file": "src/main/database-worker-runtime.test.ts",
+      "sha256": "ce1bc2335f57b4bf8e872939067cab0ceb3c93edd0620136d323939d49ca8ccb"
+    },
+    {
+      "file": "src/main/database/seed.test.ts",
+      "sha256": "72b4b324081230ba05d39e398862cb2cbb5323f801e1b0604b6e67a6bda95f5c"
+    },
+    {
+      "file": "src/main/find-similar-tasks.test.ts",
+      "sha256": "24968ef81890930d65b42556a0d6f6e44da12a8246a05d2b807fcab0d9f364ca"
+    },
+    {
+      "file": "src/main/plugins/github-issues-plugin.test.ts",
+      "sha256": "49d928e84a06c15830d7f7cbd8de00e41e57f6cadd54829b8a6c6835e4121953"
+    },
+    {
+      "file": "src/main/plugins/hubspot-plugin.test.ts",
+      "sha256": "76865f41bdc8c53c3c2e696f91097120fc5991c0dacc68cce9e78bda241dbb80"
+    },
+    {
+      "file": "src/main/plugins/linear-plugin.test.ts",
+      "sha256": "b987f0f4f4918172b06d1c1fb4540d8d4c401d775fcd80dda73789f57d993100"
+    },
+    {
+      "file": "src/main/plugins/sourced-tasks.test.ts",
+      "sha256": "72eebd23b6499d58179ad88f723ef8c7fc1581a9e5a2d259efb96d154a2dd4d0"
+    },
+    {
+      "file": "src/main/pr-write-gate.test.ts",
+      "sha256": "4ffaf730cbd5c7eea9c7360fca5f6a944ff9d3840507c00bedbc458c128fb630"
+    },
+    {
+      "file": "src/main/project-status-journal.test.ts",
+      "sha256": "ada3da0be4aa07ff981d62ef4285a5de08614aa4e0ed6b94b18eec1d154a28c7"
+    },
+    {
+      "file": "src/main/project-status.test.ts",
+      "sha256": "4944b8b3279324be6c3bfa461b1ea27165a6d3c388e6be1b11766f1a99e22736"
+    },
+    {
+      "file": "src/main/session-feedback.test.ts",
+      "sha256": "f5809b4429ebf827fc4de028f46833eec9aa5f443e271ea90b217c02eccc2afb"
+    },
+    {
+      "file": "src/main/sessions/delivery-store.test.ts",
+      "sha256": "9dc5899d4933d261468cb8b65a4902af41802bbaf935cfd21f9757e010cc952e"
+    },
+    {
+      "file": "src/main/sessions/runtime-store.test.ts",
+      "sha256": "064b6245a03aef9fd4ca0f5a2cdab2f9fb9b4decd3f84e39b7570001510477e5"
+    },
+    {
+      "file": "src/main/sessions/start-queue-store.test.ts",
+      "sha256": "5194fe28ab7c496b7503b7452814a7deae10dc3f368d7a14bbeba97fc084df1b"
+    },
+    {
+      "file": "test/electron-transition-tests.json",
+      "sha256": "10de138ce2d0913a99e7648a0dc36a612aa2dd1780b708ede584782ab783d785"
+    },
+    {
+      "file": "test/host-neutral-native.test.ts",
+      "sha256": "2a39e731a41531356dba049800411d38bb28809d3dda6d31539094655e27ff67"
+    },
+    {
+      "file": "test/setup-host-neutral-runtime.ts",
+      "sha256": "061c08a065a2a48be85a9b5e70e6e937a36cdafcbd947dab428a496ddf5d0317"
+    },
+    {
+      "file": "tsconfig.node.json",
+      "sha256": "94495a53ac21f3187a3296db4246810661ce629ae0bb69c67488ea0a6ef21dde"
+    },
+    {
+      "file": "vitest.electron-transition.config.ts",
+      "sha256": "858c182e970f1442ec5119f4405e5b272293844e1207c37e6c3b7388d1974b2b"
+    },
+    {
+      "file": "vitest.host-neutral.config.ts",
+      "sha256": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+    }
+  ],
+  "environment": {
+    "os": "Linux Mint22.3 Zena",
+    "arch": "x86_64",
+    "kernel": "6.8.0-139-generic",
+    "glibc": "2.39",
+    "standaloneNode": "22.23.2",
+    "standaloneModules": "127",
+    "sqlite": "13.0.3",
+    "pty": "1.1.0",
+    "historicalElectron": "44.0.0",
+    "historicalNode": "24.18.1",
+    "historicalModules": "149",
+    "systemNodeBootstrap": "22.22.0",
+    "pnpmActual": "9.15.9",
+    "pnpmPackageManager": "9.15.2",
+    "webkitgtkInstalledNotLaunched": "2.52.6",
+    "gtkInstalledNotLaunched": "3.24.41",
+    "rust": "1.98.0"
+  },
+  "checks": {
+    "host-neutral-full": {
+      "report": "/tmp/222-host-neutral-full.json",
+      "sha256": "04ebed3936a04299012cbe64d17faede4904c9cd2327361fc6d1ccfccb7eb82b",
+      "success": true,
+      "passed": 7080,
+      "failed": 0,
+      "skipped": 3,
+      "files": 569,
+      "skips": [
+        {
+          "file": "src/main/voice/voice-worker-client.test.ts",
+          "name": "VoiceWorkerClient with the installed runtime loads the real recogniser, so the config shape cannot drift",
+          "status": "skipped"
+        },
+        {
+          "file": "src/main/voice/voice-worker-client.test.ts",
+          "name": "Parakeet v3 with the installed runtime loads the offline recogniser and transcribes a complete turn",
+          "status": "skipped"
+        },
+        {
+          "file": "src/main/voice/voice-worker-client.test.ts",
+          "name": "a single-shot turn reports a final and never a segment, so dictation cannot send by itself",
+          "status": "skipped"
+        }
+      ]
+    },
+    "historical-full": {
+      "report": "/tmp/222-historical-full.json",
+      "sha256": "b8d9c9bd4c14f723571e731ebd9842fd253e539d19f148e927c621530d337262",
+      "success": true,
+      "passed": 923,
+      "failed": 0,
+      "skipped": 1,
+      "files": 60,
+      "skips": [
+        {
+          "file": "src/main/secret-broker.test.ts",
+          "name": "Windows secret shell wrapper (PowerShell) passes a multi-line secret to the command unchanged",
+          "status": "skipped"
+        }
+      ]
+    },
+    "original-command-affected": {
+      "report": "/tmp/222-original-command-affected.json",
+      "sha256": "2e32d888d7b4d756c0a27acc82fba113a75feb18af6e2fa3be924c9d5b4e6531",
+      "success": true,
+      "passed": 193,
+      "failed": 0,
+      "skipped": 0,
+      "files": 21,
+      "skips": []
+    },
+    "rebase-affected": {
+      "report": "/tmp/222-rebase-affected.json",
+      "sha256": "51c8b3bf26156ba74827d2660a61a1847c1611118efadb83e152a8a26117cc40",
+      "success": true,
+      "passed": 144,
+      "failed": 0,
+      "skipped": 0,
+      "files": 9,
+      "skips": []
+    }
+  },
+  "runtimeReceipts": {
+    "host-neutral-full-receipt": {
+      "file": "/tmp/222-host-neutral-full-receipt.json",
+      "sha256": "f5c6b1e9bd7d1d2e381a50a4b37ed0e23f2456607d1954115d638ab8effacafb",
+      "revision": "2563e3c901d716765993c61a9767bae886f069e5",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "framework": "vitest",
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "callerFiltered": false,
+      "exclusions": [],
+      "historicalElectronFiles": 60,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "startedAt": "2026-10-18T01:43:18.385Z",
+      "endedAt": "2026-10-18T01:49:44.366Z",
+      "eligibleFiles": 569,
+      "artifacts": [
+        {
+          "file": "src-tauri/resources/node/node",
+          "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+          "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+          "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+        }
+      ],
+      "tooling": [
+        {
+          "file": "scripts/test-host-neutral.mjs",
+          "sha256": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d"
+        },
+        {
+          "file": "scripts/host-neutral-runtime.mjs",
+          "sha256": "d2e05593a81a5e018b9b086082af34710b305c6ab89d99f341775e6c360bd302"
+        },
+        {
+          "file": "scripts/host-neutral-test-policy.mjs",
+          "sha256": "cb8f1bd1d0e1c8b75a8bd13c6303491716143b854de648c5db05ddc40aa27d8b"
+        },
+        {
+          "file": "test/electron-transition-tests.json",
+          "sha256": "10de138ce2d0913a99e7648a0dc36a612aa2dd1780b708ede584782ab783d785"
+        },
+        {
+          "file": "test/setup-host-neutral-runtime.ts",
+          "sha256": "061c08a065a2a48be85a9b5e70e6e937a36cdafcbd947dab428a496ddf5d0317"
+        },
+        {
+          "file": "vitest.host-neutral.config.ts",
+          "sha256": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+        }
+      ]
+    },
+    "node-tests-receipt": {
+      "file": "/tmp/222-node-tests-receipt.json",
+      "sha256": "41a11b7c60a4a58aaa090ee5e54902e368ab1d2955558c951db03099982a3397",
+      "revision": "2563e3c901d716765993c61a9767bae886f069e5",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "framework": "node:test",
+      "proofFlags": {
+        "--service-proofs": false,
+        "--production-proofs": false,
+        "--terminal-proofs": false
+      },
+      "callerFiltered": false,
+      "exclusions": [],
+      "historicalElectronFiles": 60,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "startedAt": "2026-10-18T01:49:47.231Z",
+      "endedAt": "2026-10-18T01:49:49.158Z",
+      "eligibleFiles": 3,
+      "artifacts": [
+        {
+          "file": "src-tauri/resources/node/node",
+          "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+          "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+          "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+        }
+      ],
+      "tooling": [
+        {
+          "file": "scripts/test-host-neutral.mjs",
+          "sha256": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d"
+        },
+        {
+          "file": "scripts/host-neutral-runtime.mjs",
+          "sha256": "d2e05593a81a5e018b9b086082af34710b305c6ab89d99f341775e6c360bd302"
+        },
+        {
+          "file": "scripts/host-neutral-test-policy.mjs",
+          "sha256": "cb8f1bd1d0e1c8b75a8bd13c6303491716143b854de648c5db05ddc40aa27d8b"
+        },
+        {
+          "file": "test/electron-transition-tests.json",
+          "sha256": "10de138ce2d0913a99e7648a0dc36a612aa2dd1780b708ede584782ab783d785"
+        },
+        {
+          "file": "test/setup-host-neutral-runtime.ts",
+          "sha256": "061c08a065a2a48be85a9b5e70e6e937a36cdafcbd947dab428a496ddf5d0317"
+        },
+        {
+          "file": "vitest.host-neutral.config.ts",
+          "sha256": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+        }
+      ]
+    },
+    "rebase-affected-receipt": {
+      "file": "/tmp/222-rebase-affected-receipt.json",
+      "sha256": "f7ba3f9cfce4eaf55b5f789a1d1b98ad7d62835b2741d58f613531d3bec9237c",
+      "revision": "f24d70e051ee5ec0427cd952f2694ea9710bb38b",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "framework": "vitest",
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "callerFiltered": true,
+      "exclusions": [],
+      "historicalElectronFiles": 60,
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "startedAt": "2026-10-18T01:58:02.784Z",
+      "endedAt": "2026-10-18T01:58:48.564Z",
+      "eligibleFiles": 571,
+      "artifacts": [
+        {
+          "file": "src-tauri/resources/node/node",
+          "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+          "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+          "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+        }
+      ],
+      "tooling": [
+        {
+          "file": "scripts/test-host-neutral.mjs",
+          "sha256": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d"
+        },
+        {
+          "file": "scripts/host-neutral-runtime.mjs",
+          "sha256": "d2e05593a81a5e018b9b086082af34710b305c6ab89d99f341775e6c360bd302"
+        },
+        {
+          "file": "scripts/host-neutral-test-policy.mjs",
+          "sha256": "cb8f1bd1d0e1c8b75a8bd13c6303491716143b854de648c5db05ddc40aa27d8b"
+        },
+        {
+          "file": "test/electron-transition-tests.json",
+          "sha256": "10de138ce2d0913a99e7648a0dc36a612aa2dd1780b708ede584782ab783d785"
+        },
+        {
+          "file": "test/setup-host-neutral-runtime.ts",
+          "sha256": "061c08a065a2a48be85a9b5e70e6e937a36cdafcbd947dab428a496ddf5d0317"
+        },
+        {
+          "file": "vitest.host-neutral.config.ts",
+          "sha256": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+        }
+      ]
+    }
+  },
+  "foundation": {
+    "command": "pnpm test:host-neutral -- --node-tests --run-receipt=/tmp/222-node-tests-receipt.json",
+    "passed": 30,
+    "skipped": 0,
+    "exitCode": 0
+  },
+  "gateCommands": [
+    {
+      "command": "flock heavy.lock bash /tmp/222-final-gate.sh",
+      "exitCode": 0,
+      "scope": "Forced noEmit typecheck; lint0errors165baselinewarnings; production staging; diagnostic+production frontend builds; artifact audit; complete four-project host-neutral with all proof flags; foundation; historical cohort; manifest/contract freshness/diff."
+    },
+    {
+      "command": "flock heavy.lock bash /tmp/222-original-command-gate.sh",
+      "exitCode": 0,
+      "scope": "Unchanged original test:run command;18 migrated fixture suites and3 new tooling/proof suites."
+    },
+    {
+      "command": "flock heavy.lock bash /tmp/222-rebase-gate.sh",
+      "exitCode": 0,
+      "scope": "Inherited f24d70e0 execution owner/adapter/private-peer inputs: forced type/lint, production staging, refreshed artifact audit and affected new-runner tests, inventory/contracts/diff."
+    },
+    {
+      "command": "YAML BaseLoader assertions + bash -n and node --check extracted workflow blocks",
+      "exitCode": 0,
+      "scope": "Manual-only trigger, master-only jobs, four reviewed targets;12 shell blocks syntax checked. No hosted execution or dispatch."
+    }
+  ],
+  "artifactReports": {
+    "production-artifacts": {
+      "file": "/tmp/222-production-artifacts.json",
+      "sha256": "16cb4e2a6e1930dbec30c23df05786daf0dd32b12bc1f1a8954c28e3bb5b221e",
+      "report": {
+        "version": 1,
+        "production": [
+          {
+            "path": "out/tauri-production-renderer/assets/CommanderWorkspace-C9GkcyON.js",
+            "bytes": 36853,
+            "sha256": "95a2f357e9b8a342938eb2b4e45521b0bbe2c288a4d58a257ec173d73ac855b6"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/DashboardWorkspace-D-St72Gp.js",
+            "bytes": 29683,
+            "sha256": "89b2e2675d4ec881f8f91435fda5c763bfb1b175c9566707855c7ac6d1184af8"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/OrchestratorPanel-Dhlv8aCG.js",
+            "bytes": 8582,
+            "sha256": "d26c4aa3d61b6428690f6890957d37b333ba6aea1e51258c90c8e31bb35cc3e3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/OverviewWorkspace-C-fJMh1z.js",
+            "bytes": 6886,
+            "sha256": "f4947f9e955350529e9ea247be0bf1417dd94d211a0e60c2662cf0a27780d3f4"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/SettingsWorkspace-19nyjIiu.js",
+            "bytes": 213284,
+            "sha256": "fefe57de919a718618bed4a24db5fa900360d4a9b971921c6ccc93a775d3f2ac"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/SkillWorkspace-CQo0ET3d.js",
+            "bytes": 9740,
+            "sha256": "f971a188a178a403b825dc8672a6647724e3667fa1239fe868d7b2e5841a248a"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/abnfDiagram-N423BO3Z-BeXHLdIO.js",
+            "bytes": 1848,
+            "sha256": "7757a7fc28cefb583e81327ec68a1e88309bdd37fbc6cf5874e21b18bfd2fc99"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/arc-DGfBlNkP.js",
+            "bytes": 3439,
+            "sha256": "fe246d9f68222d351aa2195553d10060ee25d2ff908a7b75ece19b95bf35d272"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/architectureDiagram-T3A2C74G-BI5Cdocn.js",
+            "bytes": 152057,
+            "sha256": "a29a42d9d059ca70bf95c4d36587cc969722f1f83c24380f7826fac5c4e60f45"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/blockDiagram-VBNYF7ZC-CzbIIi8S.js",
+            "bytes": 75166,
+            "sha256": "f692dbdaf7d4bf5c522bf170907f7b71abca83b20a2604026dc5f9f38e88147e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/c4Diagram-5PPSVZJV-BzicKfof.js",
+            "bytes": 70009,
+            "sha256": "fa476aeee02e11aa1347ca4496809e22f814f83233239e6198b4e192f3dcb124"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/canvas-store-B0xQnnfW.js",
+            "bytes": 17884,
+            "sha256": "602b632a31af6009e27abd998bfca58a40ea7efbe285a7e119e29ee32db5caf9"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/channel-zX0cRP0E.js",
+            "bytes": 115,
+            "sha256": "cc23a58e2aae87ecbe4e09bcc73757a4421dc1585f6ebf06b0a3563c60325a48"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-2GRJ4B5K-B5oZ6WcK.js",
+            "bytes": 1883,
+            "sha256": "5875f9ee812148c95712457d6e51e808d0c3d09582b74f0e901b8b9054b17d02"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-2Q5K7J3B-BpwT1--8.js",
+            "bytes": 193,
+            "sha256": "481fc41233b511a8b8519721ec079a39d04222df4b9cbfa5b0f9422f1fdd32b0"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-5RXB4S5H-6d6AlbCt.js",
+            "bytes": 38623,
+            "sha256": "4adfc20440c5385be7a90e88e1cf21c13cb0c5087119d7c4ba4b939501d5f938"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-5VM5RSS4-WSnwWH32.js",
+            "bytes": 366,
+            "sha256": "30b17a46221fef2c168a60292943a77ff2bb7f7ebcc7221cc4d78e0de0a5950d"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-6Q2QTUOP-D1b5Tk3U.js",
+            "bytes": 15755,
+            "sha256": "7f15eead1a3d426e6ad70467a4f521a3a54b69aa5f98d32e365877e29763b679"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-GF5L2VYU-BpuV0zwC.js",
+            "bytes": 49300,
+            "sha256": "6ebf41119aab2e29d583506cf34533134a0080450bf7847712ae2bf5331a051b"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-JWPE2WC7-x7RqAX-l.js",
+            "bytes": 297,
+            "sha256": "de66282e0835dbbde099d9176a71cb510dedb8c9b98cc233dd40b08ebdf19caa"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-KBJHAD2P-lEZ6ucZ-.js",
+            "bytes": 532,
+            "sha256": "c8b18878a1f5705b2ebd47c2f87af6bfa5f8c73c32f16b767ae977b610a9b772"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-RYQCIY6F-Bp_Aoo8c.js",
+            "bytes": 7181,
+            "sha256": "0528cf0d2a2c4fcb2d95944ef1db758acb39640301eb272e852faea3006c1dae"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-XXDRQBXY-CM1N1Prx.js",
+            "bytes": 235,
+            "sha256": "9e0633295c68e246b0c3c0a406cefad849d8bde75dc453ff9d6bcbdde157374c"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/classDiagram-JCYQIIEL-eBtYrfcz.js",
+            "bytes": 506,
+            "sha256": "a2bd57763353ec40bbd64d9fc9a36ad96174d91014ecb9cd7db33bd86edeb411"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/classDiagram-v2-OCEON4UE-eBtYrfcz.js",
+            "bytes": 506,
+            "sha256": "a2bd57763353ec40bbd64d9fc9a36ad96174d91014ecb9cd7db33bd86edeb411"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/cose-bilkent-JH36ORCC-CO6qIUIN.js",
+            "bytes": 81756,
+            "sha256": "e650f56af7bee3be84eb7b036cdf871d3f3ae8c07a317769fceeb2c3cee591af"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/cynefin-VYW2F7L2-tbdE8Ypk.js",
+            "bytes": 690830,
+            "sha256": "3e1ed910027e4a25479987addc56d285bd10790483b7d82e3c9a73a3c7d92aba"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/cynefinDiagram-MW4NZA55-D7cCmR5k.js",
+            "bytes": 10136,
+            "sha256": "6379cfea9de32cdafd4b0b339225ff0ebfc7070156568255ad0bbafebd3817fb"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/cytoscape.esm-BjAbmLdb.js",
+            "bytes": 443834,
+            "sha256": "28e714acf7e77fa27562d474991cafb440435d9c7f2eed554799bda4e106a61e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/dagre-VZM6K2ZE-DVSh0L2d.js",
+            "bytes": 8942,
+            "sha256": "6518ee62a5ad7d0ae695a619feaa810bd9ae8ae1da620617147bf5350e711988"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/defaultLocale-DX6XiGOO.js",
+            "bytes": 4688,
+            "sha256": "0cefbd76f932c4eea4758d28169802589b1ad15b46607253de4bd82328998ece"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/desktop-rehydration-CQv6ePjr.js",
+            "bytes": 316,
+            "sha256": "7c60b44fb634339db9f0207e5be3e91a4161151a29d799d734b0396bc6ff2dfd"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-7IWD3JNH-Ba9jw-H8.js",
+            "bytes": 8513,
+            "sha256": "bdd6a0b3961ad2ce0e63b8e57be641b9b351fecf6b589f1d5c557666c731e371"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-B4RE2ZJO-Cgk-6rcX.js",
+            "bytes": 10857,
+            "sha256": "301d6edc4719e1bbf5db866d552887128228c37b624cf243b4da730b00df97ee"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-LBJQPF4R-DAjdJf0e.js",
+            "bytes": 4283,
+            "sha256": "150ad6c6afdc747de9223c5303f950ca054bd76cb19c43bf01299f20a7231483"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-Q27KOJAE-BRupWobk.js",
+            "bytes": 16110,
+            "sha256": "d4485cff6008aa43fc3e9e1ca59e7bee1daf44f4752911e9a0299885a996a2a3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-UB23O5K3-DSFh1ihn.js",
+            "bytes": 6266,
+            "sha256": "9bff635ad9c43d9c6cdba144c748e3f3559ce1256354cb46f20373dba9be84e3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/ebnfDiagram-BXEA7PRR-SxWj-1dQ.js",
+            "bytes": 2044,
+            "sha256": "f7a93b56f39c73dd9aa0a95b4a395fd76926943d73558d1a19232a0c0dcd6c8b"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/erDiagram-JOGREHBK-Rbvsob4T.js",
+            "bytes": 27254,
+            "sha256": "cbe93ce2636a9a0a9b088fbef3a2e535f683e1f6b78ab8298b77dbfb087e9b29"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/flowDiagram-UKHOOZJN-B31obRJD.js",
+            "bytes": 61401,
+            "sha256": "f74a94d287bf7f48286578969680065c88a0709cd6f44e222cf117b08c34eb97"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/ganttDiagram-PKOTCBZU-pFw_ArjB.js",
+            "bytes": 69734,
+            "sha256": "93a7b9eca1e9387da5dc475d7378e382a95db4c8d0012e4c2326bb4f136656b8"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/gitGraphDiagram-DS77QQ5N-2D7OLS4m.js",
+            "bytes": 29974,
+            "sha256": "8e1fe6bcad74d592cb93de62e5a4aa71eadd6fbfd26a62061d51a9e768834458"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/graph-C9eacEi8.js",
+            "bytes": 23950,
+            "sha256": "b18a97cacd3305f14dc7cd4434886925cd892c17ee7e8617b760c87540646723"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/index-XHX1zJ22.js",
+            "bytes": 303135,
+            "sha256": "9b8d6f67341870d6990a49f96487091aa085027535e8e6cedd9eca9a7a5908a9"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/infoDiagram-6WML65LV-DDH33cnE.js",
+            "bytes": 621,
+            "sha256": "b8dee753d65daa9895f0700821186aaa52391feb4001c99439aecaa6874fe231"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/init-Gi6I4Gst.js",
+            "bytes": 147,
+            "sha256": "379fa880c14ad48f43b0c23ff56b30b2b808e8460fd9f9cad8bf7cb278c5b814"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/ishikawaDiagram-WSZJBQD7-D4mKp5Qu.js",
+            "bytes": 17605,
+            "sha256": "7de49ad2f78dddaa8a984f7c507e300c488c0eedede8349ff5e4998ed070b637"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/journeyDiagram-NVQOT4AX-B2LStxip.js",
+            "bytes": 23609,
+            "sha256": "e09ed789a68e18ec5b80142da7680c12a7d7ddb442bb7c82362933c457afd0e2"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/kanban-definition-27J2QSJJ-YB6n9swk.js",
+            "bytes": 20736,
+            "sha256": "1ef2cc0f1c72dafbb75d93dce852bc28cee06ed8b91e9cc387c7547d31724542"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/katex-C5jXJg4s.js",
+            "bytes": 261329,
+            "sha256": "9e8127e147ae576d0129e22677e6949eff48f7a5f4313e2629967938126dcd16"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/layout-DEXfKzaS.js",
+            "bytes": 30997,
+            "sha256": "92d8105d9b991903e6bc7b63938385ad1ecc97dc6b9ba531b08a2a9dd96cfdf1"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/linear-BGVbIZQF.js",
+            "bytes": 5661,
+            "sha256": "d6c30623b3fc56982173c366caaf5bc3882f382556c02fedad562d17b4d41a69"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/main-1dDdlfGk.js",
+            "bytes": 1521605,
+            "sha256": "b404cf727873b21c3bdd56649c64c81ad8f2f0757a55f65a0728c4a5bf6ab1c3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/map-Czzmt4hB.js",
+            "bytes": 5070,
+            "sha256": "f15e10db8661ed2bf93075bcb018f62927333b9c2be5437933414af533c2d83c"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/mermaid.core-CEs0WIAc.js",
+            "bytes": 635513,
+            "sha256": "66a9006ab258a4cc364e975d60b0784f3e96954852d9746f518241f3eaa31906"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/mindmap-definition-FAOFIHXS-Bb_cEjWG.js",
+            "bytes": 23399,
+            "sha256": "a4df3de2161b86d44b00209ffa3162eef31f8cfc17ce19fab4da31bbffe5b22b"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/ordinal-Cboi1Yqb.js",
+            "bytes": 1189,
+            "sha256": "71be569ce2355b7f256a834b3a4c11668fe80a880b3587c1b3b14e9e5dedf478"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/overview-store-CYE-Y5LC.js",
+            "bytes": 1428,
+            "sha256": "ad3447f981d13fe88c4dd3d4e5c832e9bda9cb60db06321ecb79f90c0ed19de2"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/pegDiagram-VL7TDLO6-B7k2t4dO.js",
+            "bytes": 1995,
+            "sha256": "8cbc2c87cfd8579c816b01fdf2d771aeea7bac074ec28950ea42472b1b3a8a01"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/pieDiagram-7S7Q4E2Y-BdIJdHgG.js",
+            "bytes": 6392,
+            "sha256": "5f9f263400d8db874940e84ea60360fb4e3310182c3c34766e0368e6b055ef5e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/quadrantDiagram-CIZ2JOQS-BL82fE9N.js",
+            "bytes": 34532,
+            "sha256": "580cc341b2a51b2137328b47babe3fa33ea3c63c8417fc5b9b490dce8dd50f09"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/railroadDiagram-AXF67PYL-DxS_JH_d.js",
+            "bytes": 1645,
+            "sha256": "706cd83cc697df385e8e31729497ccea350668128133f5dd517272d9a1ff4383"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/requirementDiagram-LRYGKXZP-n47N3y6n.js",
+            "bytes": 31247,
+            "sha256": "7660838e4e821b654a17cc06448d3df3028fd56daad10e72e05880500605e1c5"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/sankeyDiagram-W5VNT64P-BkLaAF4y.js",
+            "bytes": 23429,
+            "sha256": "1a60cad69743654185517c69388320bc68c5630d470f525ab6977a224129d80a"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/sequenceDiagram-SI44F4Z6-DGiypSDP.js",
+            "bytes": 117485,
+            "sha256": "00c98051aacc7f5b8bdf9e10c1cb9208a299ddf1663650e378d88f6f595aa80e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/sizeCapture-X5ZJPWSS-B2sUg6L9.js",
+            "bytes": 1037,
+            "sha256": "ee5ad963f28593716c198b78d7a37334dbf1417d64b03db41e49fa7b5e26fb1f"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/stateDiagram-OKZ733FA-C3PDkMoX.js",
+            "bytes": 10459,
+            "sha256": "5c8d4d60181f15c8957a63bf2134e66867a89d7114f9790404a088a883a5efd7"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/stateDiagram-v2-UEYNNEHI-Ck2RV5wM.js",
+            "bytes": 467,
+            "sha256": "821e5a842b477e4609f41a6c914a6131511e48fffeef5f629d580a94faa1598f"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/swimlanes-SLNWSIFB-B5AgK2dC.js",
+            "bytes": 120325,
+            "sha256": "7f5fe0ba493554f4146e84dc992d195f9ab682f5971eee9b29f5f0be8caf6b2e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/swimlanesDiagram-ULZ7WXOC-CDfqKRTs.js",
+            "bytes": 587,
+            "sha256": "daa1308deb2e93c1289e11f3df31fd79bb303498cbdeedfca8f3e33c098c9bc3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/task-group-store-DsiLuQd0.js",
+            "bytes": 78803,
+            "sha256": "0a25f3cefad27f22bb6815668d6a78bb429aae42715bb2f7d9a67ed9f402082f"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/timeline-definition-Z64GVDOM-BldpM2ri.js",
+            "bytes": 31383,
+            "sha256": "9e3f3bd66d49a832c4fb496ad14ee4c7d0c627220aab382e6a61edc317d206aa"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/vennDiagram-T6HMQDX7-CbLXvajs.js",
+            "bytes": 42408,
+            "sha256": "0a7f1d1e27166e124861d45542b5a9313c9f9d31ba73adb6900ac9c477ab97bf"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/wardleyDiagram-T6FBY63Y-Cu9LtUW8.js",
+            "bytes": 26135,
+            "sha256": "9b66c71a7ee9768022239c8dbf7e60797e0f9557f398297ec5c4b3695a98f80d"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/xychartDiagram-ELKLHX3M-j0CBuWxA.js",
+            "bytes": 41982,
+            "sha256": "8015ce8885685010143ce2f327d63f91decfc29c0a1875ba18a3d8f1ae302aab"
+          },
+          {
+            "path": "out/tauri-production-renderer/index.html",
+            "bytes": 856,
+            "sha256": "37fac9ce64dc995cd5a83983ff0dff7c3fcf4a1c5e709ed65d6867878645b3d4"
+          }
+        ],
+        "diagnosticPositiveControl": [
+          {
+            "path": "out/tauri-renderer/assets/index-X3fiYoI6.js",
+            "bytes": 114723,
+            "sha256": "db897d76e119060b65950ee0b39d9e7764250ff143fcc13075d6b481d0234fd1"
+          },
+          {
+            "path": "out/tauri-renderer/index.html",
+            "bytes": 1618,
+            "sha256": "7b9b8905836dcf88a1f618354b8b85c3d70eddc15ccf54cd3919e447ae9b70b4"
+          }
+        ],
+        "service": [
+          {
+            "path": "src-tauri/resources/service/production-stdio.mjs",
+            "bytes": 19033,
+            "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482"
+          },
+          {
+            "path": "src-tauri/resources/service/production-engine.mjs",
+            "bytes": 6227870,
+            "sha256": "464faa7cbf6213dde85db33e89760acd832a14cb9f19692845e4579ac1fa4fd4"
+          }
+        ],
+        "manifest": {
+          "path": "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json",
+          "bytes": 1261784,
+          "sha256": "b2f15a28a343a772c7858893abc97454f6fa5e8227f0a34996b8ceda43d9f365"
+        },
+        "buildIdentity": "production-ca4564052805823d038c3df016fc6754",
+        "nativeSourcePolicy": [
+          {
+            "path": "src-tauri/src/main.rs",
+            "bytes": 24468,
+            "sha256": "842448e619935952409019dacf6c9365d73e666e3a5923fe1bb5698771b908f6"
+          },
+          {
+            "path": "src-tauri/src/production_host.rs",
+            "bytes": 61236,
+            "sha256": "3d4c1d89fd793cd43037670efe2191bed16ff029828542c62f015d0381608b00"
+          },
+          {
+            "path": "src-tauri/Cargo.toml",
+            "bytes": 1679,
+            "sha256": "b7cc27027410316ef1581267dc54a343c7b324e1968bf5559a44e94d048b0c2b"
+          },
+          {
+            "path": "src-tauri/Cargo.lock",
+            "bytes": 135619,
+            "sha256": "4b474eed2e3c5401c2fa5536a97413b6492f6d08d5a69bafb69f31a719e1ae20"
+          },
+          {
+            "path": "src-tauri/tauri.production.conf.json",
+            "bytes": 1155,
+            "sha256": "55bc453136551a171220cf8a1872cfd6ecf32a5dd7d52255144f1f7c01d3bcb1"
+          }
+        ],
+        "limitation": "Built frontend/Source artifact and real-peer checks; installed native/platform authorization remains separate evidence."
+      }
+    },
+    "production-artifacts-rebase": {
+      "file": "/tmp/222-production-artifacts-rebase.json",
+      "sha256": "564702923669c77b6d5f6ee5710f7e12772c5796a827daad6fbea6a7458bc715",
+      "report": {
+        "version": 1,
+        "production": [
+          {
+            "path": "out/tauri-production-renderer/assets/CommanderWorkspace-C9GkcyON.js",
+            "bytes": 36853,
+            "sha256": "95a2f357e9b8a342938eb2b4e45521b0bbe2c288a4d58a257ec173d73ac855b6"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/DashboardWorkspace-D-St72Gp.js",
+            "bytes": 29683,
+            "sha256": "89b2e2675d4ec881f8f91435fda5c763bfb1b175c9566707855c7ac6d1184af8"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/OrchestratorPanel-Dhlv8aCG.js",
+            "bytes": 8582,
+            "sha256": "d26c4aa3d61b6428690f6890957d37b333ba6aea1e51258c90c8e31bb35cc3e3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/OverviewWorkspace-C-fJMh1z.js",
+            "bytes": 6886,
+            "sha256": "f4947f9e955350529e9ea247be0bf1417dd94d211a0e60c2662cf0a27780d3f4"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/SettingsWorkspace-19nyjIiu.js",
+            "bytes": 213284,
+            "sha256": "fefe57de919a718618bed4a24db5fa900360d4a9b971921c6ccc93a775d3f2ac"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/SkillWorkspace-CQo0ET3d.js",
+            "bytes": 9740,
+            "sha256": "f971a188a178a403b825dc8672a6647724e3667fa1239fe868d7b2e5841a248a"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/abnfDiagram-N423BO3Z-BeXHLdIO.js",
+            "bytes": 1848,
+            "sha256": "7757a7fc28cefb583e81327ec68a1e88309bdd37fbc6cf5874e21b18bfd2fc99"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/arc-DGfBlNkP.js",
+            "bytes": 3439,
+            "sha256": "fe246d9f68222d351aa2195553d10060ee25d2ff908a7b75ece19b95bf35d272"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/architectureDiagram-T3A2C74G-BI5Cdocn.js",
+            "bytes": 152057,
+            "sha256": "a29a42d9d059ca70bf95c4d36587cc969722f1f83c24380f7826fac5c4e60f45"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/blockDiagram-VBNYF7ZC-CzbIIi8S.js",
+            "bytes": 75166,
+            "sha256": "f692dbdaf7d4bf5c522bf170907f7b71abca83b20a2604026dc5f9f38e88147e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/c4Diagram-5PPSVZJV-BzicKfof.js",
+            "bytes": 70009,
+            "sha256": "fa476aeee02e11aa1347ca4496809e22f814f83233239e6198b4e192f3dcb124"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/canvas-store-B0xQnnfW.js",
+            "bytes": 17884,
+            "sha256": "602b632a31af6009e27abd998bfca58a40ea7efbe285a7e119e29ee32db5caf9"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/channel-zX0cRP0E.js",
+            "bytes": 115,
+            "sha256": "cc23a58e2aae87ecbe4e09bcc73757a4421dc1585f6ebf06b0a3563c60325a48"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-2GRJ4B5K-B5oZ6WcK.js",
+            "bytes": 1883,
+            "sha256": "5875f9ee812148c95712457d6e51e808d0c3d09582b74f0e901b8b9054b17d02"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-2Q5K7J3B-BpwT1--8.js",
+            "bytes": 193,
+            "sha256": "481fc41233b511a8b8519721ec079a39d04222df4b9cbfa5b0f9422f1fdd32b0"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-5RXB4S5H-6d6AlbCt.js",
+            "bytes": 38623,
+            "sha256": "4adfc20440c5385be7a90e88e1cf21c13cb0c5087119d7c4ba4b939501d5f938"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-5VM5RSS4-WSnwWH32.js",
+            "bytes": 366,
+            "sha256": "30b17a46221fef2c168a60292943a77ff2bb7f7ebcc7221cc4d78e0de0a5950d"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-6Q2QTUOP-D1b5Tk3U.js",
+            "bytes": 15755,
+            "sha256": "7f15eead1a3d426e6ad70467a4f521a3a54b69aa5f98d32e365877e29763b679"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-GF5L2VYU-BpuV0zwC.js",
+            "bytes": 49300,
+            "sha256": "6ebf41119aab2e29d583506cf34533134a0080450bf7847712ae2bf5331a051b"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-JWPE2WC7-x7RqAX-l.js",
+            "bytes": 297,
+            "sha256": "de66282e0835dbbde099d9176a71cb510dedb8c9b98cc233dd40b08ebdf19caa"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-KBJHAD2P-lEZ6ucZ-.js",
+            "bytes": 532,
+            "sha256": "c8b18878a1f5705b2ebd47c2f87af6bfa5f8c73c32f16b767ae977b610a9b772"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-RYQCIY6F-Bp_Aoo8c.js",
+            "bytes": 7181,
+            "sha256": "0528cf0d2a2c4fcb2d95944ef1db758acb39640301eb272e852faea3006c1dae"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/chunk-XXDRQBXY-CM1N1Prx.js",
+            "bytes": 235,
+            "sha256": "9e0633295c68e246b0c3c0a406cefad849d8bde75dc453ff9d6bcbdde157374c"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/classDiagram-JCYQIIEL-eBtYrfcz.js",
+            "bytes": 506,
+            "sha256": "a2bd57763353ec40bbd64d9fc9a36ad96174d91014ecb9cd7db33bd86edeb411"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/classDiagram-v2-OCEON4UE-eBtYrfcz.js",
+            "bytes": 506,
+            "sha256": "a2bd57763353ec40bbd64d9fc9a36ad96174d91014ecb9cd7db33bd86edeb411"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/cose-bilkent-JH36ORCC-CO6qIUIN.js",
+            "bytes": 81756,
+            "sha256": "e650f56af7bee3be84eb7b036cdf871d3f3ae8c07a317769fceeb2c3cee591af"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/cynefin-VYW2F7L2-tbdE8Ypk.js",
+            "bytes": 690830,
+            "sha256": "3e1ed910027e4a25479987addc56d285bd10790483b7d82e3c9a73a3c7d92aba"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/cynefinDiagram-MW4NZA55-D7cCmR5k.js",
+            "bytes": 10136,
+            "sha256": "6379cfea9de32cdafd4b0b339225ff0ebfc7070156568255ad0bbafebd3817fb"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/cytoscape.esm-BjAbmLdb.js",
+            "bytes": 443834,
+            "sha256": "28e714acf7e77fa27562d474991cafb440435d9c7f2eed554799bda4e106a61e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/dagre-VZM6K2ZE-DVSh0L2d.js",
+            "bytes": 8942,
+            "sha256": "6518ee62a5ad7d0ae695a619feaa810bd9ae8ae1da620617147bf5350e711988"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/defaultLocale-DX6XiGOO.js",
+            "bytes": 4688,
+            "sha256": "0cefbd76f932c4eea4758d28169802589b1ad15b46607253de4bd82328998ece"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/desktop-rehydration-CQv6ePjr.js",
+            "bytes": 316,
+            "sha256": "7c60b44fb634339db9f0207e5be3e91a4161151a29d799d734b0396bc6ff2dfd"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-7IWD3JNH-Ba9jw-H8.js",
+            "bytes": 8513,
+            "sha256": "bdd6a0b3961ad2ce0e63b8e57be641b9b351fecf6b589f1d5c557666c731e371"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-B4RE2ZJO-Cgk-6rcX.js",
+            "bytes": 10857,
+            "sha256": "301d6edc4719e1bbf5db866d552887128228c37b624cf243b4da730b00df97ee"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-LBJQPF4R-DAjdJf0e.js",
+            "bytes": 4283,
+            "sha256": "150ad6c6afdc747de9223c5303f950ca054bd76cb19c43bf01299f20a7231483"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-Q27KOJAE-BRupWobk.js",
+            "bytes": 16110,
+            "sha256": "d4485cff6008aa43fc3e9e1ca59e7bee1daf44f4752911e9a0299885a996a2a3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/diagram-UB23O5K3-DSFh1ihn.js",
+            "bytes": 6266,
+            "sha256": "9bff635ad9c43d9c6cdba144c748e3f3559ce1256354cb46f20373dba9be84e3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/ebnfDiagram-BXEA7PRR-SxWj-1dQ.js",
+            "bytes": 2044,
+            "sha256": "f7a93b56f39c73dd9aa0a95b4a395fd76926943d73558d1a19232a0c0dcd6c8b"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/erDiagram-JOGREHBK-Rbvsob4T.js",
+            "bytes": 27254,
+            "sha256": "cbe93ce2636a9a0a9b088fbef3a2e535f683e1f6b78ab8298b77dbfb087e9b29"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/flowDiagram-UKHOOZJN-B31obRJD.js",
+            "bytes": 61401,
+            "sha256": "f74a94d287bf7f48286578969680065c88a0709cd6f44e222cf117b08c34eb97"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/ganttDiagram-PKOTCBZU-pFw_ArjB.js",
+            "bytes": 69734,
+            "sha256": "93a7b9eca1e9387da5dc475d7378e382a95db4c8d0012e4c2326bb4f136656b8"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/gitGraphDiagram-DS77QQ5N-2D7OLS4m.js",
+            "bytes": 29974,
+            "sha256": "8e1fe6bcad74d592cb93de62e5a4aa71eadd6fbfd26a62061d51a9e768834458"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/graph-C9eacEi8.js",
+            "bytes": 23950,
+            "sha256": "b18a97cacd3305f14dc7cd4434886925cd892c17ee7e8617b760c87540646723"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/index-XHX1zJ22.js",
+            "bytes": 303135,
+            "sha256": "9b8d6f67341870d6990a49f96487091aa085027535e8e6cedd9eca9a7a5908a9"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/infoDiagram-6WML65LV-DDH33cnE.js",
+            "bytes": 621,
+            "sha256": "b8dee753d65daa9895f0700821186aaa52391feb4001c99439aecaa6874fe231"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/init-Gi6I4Gst.js",
+            "bytes": 147,
+            "sha256": "379fa880c14ad48f43b0c23ff56b30b2b808e8460fd9f9cad8bf7cb278c5b814"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/ishikawaDiagram-WSZJBQD7-D4mKp5Qu.js",
+            "bytes": 17605,
+            "sha256": "7de49ad2f78dddaa8a984f7c507e300c488c0eedede8349ff5e4998ed070b637"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/journeyDiagram-NVQOT4AX-B2LStxip.js",
+            "bytes": 23609,
+            "sha256": "e09ed789a68e18ec5b80142da7680c12a7d7ddb442bb7c82362933c457afd0e2"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/kanban-definition-27J2QSJJ-YB6n9swk.js",
+            "bytes": 20736,
+            "sha256": "1ef2cc0f1c72dafbb75d93dce852bc28cee06ed8b91e9cc387c7547d31724542"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/katex-C5jXJg4s.js",
+            "bytes": 261329,
+            "sha256": "9e8127e147ae576d0129e22677e6949eff48f7a5f4313e2629967938126dcd16"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/layout-DEXfKzaS.js",
+            "bytes": 30997,
+            "sha256": "92d8105d9b991903e6bc7b63938385ad1ecc97dc6b9ba531b08a2a9dd96cfdf1"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/linear-BGVbIZQF.js",
+            "bytes": 5661,
+            "sha256": "d6c30623b3fc56982173c366caaf5bc3882f382556c02fedad562d17b4d41a69"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/main-1dDdlfGk.js",
+            "bytes": 1521605,
+            "sha256": "b404cf727873b21c3bdd56649c64c81ad8f2f0757a55f65a0728c4a5bf6ab1c3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/map-Czzmt4hB.js",
+            "bytes": 5070,
+            "sha256": "f15e10db8661ed2bf93075bcb018f62927333b9c2be5437933414af533c2d83c"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/mermaid.core-CEs0WIAc.js",
+            "bytes": 635513,
+            "sha256": "66a9006ab258a4cc364e975d60b0784f3e96954852d9746f518241f3eaa31906"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/mindmap-definition-FAOFIHXS-Bb_cEjWG.js",
+            "bytes": 23399,
+            "sha256": "a4df3de2161b86d44b00209ffa3162eef31f8cfc17ce19fab4da31bbffe5b22b"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/ordinal-Cboi1Yqb.js",
+            "bytes": 1189,
+            "sha256": "71be569ce2355b7f256a834b3a4c11668fe80a880b3587c1b3b14e9e5dedf478"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/overview-store-CYE-Y5LC.js",
+            "bytes": 1428,
+            "sha256": "ad3447f981d13fe88c4dd3d4e5c832e9bda9cb60db06321ecb79f90c0ed19de2"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/pegDiagram-VL7TDLO6-B7k2t4dO.js",
+            "bytes": 1995,
+            "sha256": "8cbc2c87cfd8579c816b01fdf2d771aeea7bac074ec28950ea42472b1b3a8a01"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/pieDiagram-7S7Q4E2Y-BdIJdHgG.js",
+            "bytes": 6392,
+            "sha256": "5f9f263400d8db874940e84ea60360fb4e3310182c3c34766e0368e6b055ef5e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/quadrantDiagram-CIZ2JOQS-BL82fE9N.js",
+            "bytes": 34532,
+            "sha256": "580cc341b2a51b2137328b47babe3fa33ea3c63c8417fc5b9b490dce8dd50f09"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/railroadDiagram-AXF67PYL-DxS_JH_d.js",
+            "bytes": 1645,
+            "sha256": "706cd83cc697df385e8e31729497ccea350668128133f5dd517272d9a1ff4383"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/requirementDiagram-LRYGKXZP-n47N3y6n.js",
+            "bytes": 31247,
+            "sha256": "7660838e4e821b654a17cc06448d3df3028fd56daad10e72e05880500605e1c5"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/sankeyDiagram-W5VNT64P-BkLaAF4y.js",
+            "bytes": 23429,
+            "sha256": "1a60cad69743654185517c69388320bc68c5630d470f525ab6977a224129d80a"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/sequenceDiagram-SI44F4Z6-DGiypSDP.js",
+            "bytes": 117485,
+            "sha256": "00c98051aacc7f5b8bdf9e10c1cb9208a299ddf1663650e378d88f6f595aa80e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/sizeCapture-X5ZJPWSS-B2sUg6L9.js",
+            "bytes": 1037,
+            "sha256": "ee5ad963f28593716c198b78d7a37334dbf1417d64b03db41e49fa7b5e26fb1f"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/stateDiagram-OKZ733FA-C3PDkMoX.js",
+            "bytes": 10459,
+            "sha256": "5c8d4d60181f15c8957a63bf2134e66867a89d7114f9790404a088a883a5efd7"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/stateDiagram-v2-UEYNNEHI-Ck2RV5wM.js",
+            "bytes": 467,
+            "sha256": "821e5a842b477e4609f41a6c914a6131511e48fffeef5f629d580a94faa1598f"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/swimlanes-SLNWSIFB-B5AgK2dC.js",
+            "bytes": 120325,
+            "sha256": "7f5fe0ba493554f4146e84dc992d195f9ab682f5971eee9b29f5f0be8caf6b2e"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/swimlanesDiagram-ULZ7WXOC-CDfqKRTs.js",
+            "bytes": 587,
+            "sha256": "daa1308deb2e93c1289e11f3df31fd79bb303498cbdeedfca8f3e33c098c9bc3"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/task-group-store-DsiLuQd0.js",
+            "bytes": 78803,
+            "sha256": "0a25f3cefad27f22bb6815668d6a78bb429aae42715bb2f7d9a67ed9f402082f"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/timeline-definition-Z64GVDOM-BldpM2ri.js",
+            "bytes": 31383,
+            "sha256": "9e3f3bd66d49a832c4fb496ad14ee4c7d0c627220aab382e6a61edc317d206aa"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/vennDiagram-T6HMQDX7-CbLXvajs.js",
+            "bytes": 42408,
+            "sha256": "0a7f1d1e27166e124861d45542b5a9313c9f9d31ba73adb6900ac9c477ab97bf"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/wardleyDiagram-T6FBY63Y-Cu9LtUW8.js",
+            "bytes": 26135,
+            "sha256": "9b66c71a7ee9768022239c8dbf7e60797e0f9557f398297ec5c4b3695a98f80d"
+          },
+          {
+            "path": "out/tauri-production-renderer/assets/xychartDiagram-ELKLHX3M-j0CBuWxA.js",
+            "bytes": 41982,
+            "sha256": "8015ce8885685010143ce2f327d63f91decfc29c0a1875ba18a3d8f1ae302aab"
+          },
+          {
+            "path": "out/tauri-production-renderer/index.html",
+            "bytes": 856,
+            "sha256": "37fac9ce64dc995cd5a83983ff0dff7c3fcf4a1c5e709ed65d6867878645b3d4"
+          }
+        ],
+        "diagnosticPositiveControl": [
+          {
+            "path": "out/tauri-renderer/assets/index-X3fiYoI6.js",
+            "bytes": 114723,
+            "sha256": "db897d76e119060b65950ee0b39d9e7764250ff143fcc13075d6b481d0234fd1"
+          },
+          {
+            "path": "out/tauri-renderer/index.html",
+            "bytes": 1618,
+            "sha256": "7b9b8905836dcf88a1f618354b8b85c3d70eddc15ccf54cd3919e447ae9b70b4"
+          }
+        ],
+        "service": [
+          {
+            "path": "src-tauri/resources/service/production-stdio.mjs",
+            "bytes": 19033,
+            "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482"
+          },
+          {
+            "path": "src-tauri/resources/service/production-engine.mjs",
+            "bytes": 6260575,
+            "sha256": "818cdb9640d923694d74e8664db18cca9517fc9d2b77b19feb16060015d425ec"
+          }
+        ],
+        "manifest": {
+          "path": "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json",
+          "bytes": 1261784,
+          "sha256": "68700b77c11f265e0312561f5e0963c8cad0cb612a1ac3af01a958bf7a0dc3bf"
+        },
+        "buildIdentity": "production-cacbf5d77c287e494eec69a0bc3ab834",
+        "nativeSourcePolicy": [
+          {
+            "path": "src-tauri/src/main.rs",
+            "bytes": 24468,
+            "sha256": "842448e619935952409019dacf6c9365d73e666e3a5923fe1bb5698771b908f6"
+          },
+          {
+            "path": "src-tauri/src/production_host.rs",
+            "bytes": 61236,
+            "sha256": "3d4c1d89fd793cd43037670efe2191bed16ff029828542c62f015d0381608b00"
+          },
+          {
+            "path": "src-tauri/Cargo.toml",
+            "bytes": 1679,
+            "sha256": "b7cc27027410316ef1581267dc54a343c7b324e1968bf5559a44e94d048b0c2b"
+          },
+          {
+            "path": "src-tauri/Cargo.lock",
+            "bytes": 135619,
+            "sha256": "4b474eed2e3c5401c2fa5536a97413b6492f6d08d5a69bafb69f31a719e1ae20"
+          },
+          {
+            "path": "src-tauri/tauri.production.conf.json",
+            "bytes": 1155,
+            "sha256": "55bc453136551a171220cf8a1872cfd6ecf32a5dd7d52255144f1f7c01d3bcb1"
+          }
+        ],
+        "limitation": "Built frontend/Source artifact and real-peer checks; installed native/platform authorization remains separate evidence."
+      }
+    },
+    "test-inventory-rebase": {
+      "file": "/tmp/222-test-inventory-rebase.json",
+      "sha256": "80912428a0dddfae4319b2997c29f7d3d0a3c29b1ba382ee4d7252ae57186c76",
+      "summary": {
+        "hostNeutral": 574,
+        "historicalElectron": 60
+      }
+    }
+  },
+  "failuresAndRepairs": [
+    {
+      "step": "Native preflight regression fixture",
+      "actual": "Two test assumptions failed: unexported SQLite native subpath and possibly absent root PTY binary under ignore-scripts.",
+      "repair": "Inventory/hash actual native files before/after; do not assume exported layout or missing optional root artifact. Final3 runtime controls pass."
+    },
+    {
+      "step": "Production boundary result decoding",
+      "actual": "Two new proof cases incorrectly decoded wire envelopes directly.",
+      "repair": "Unbox serialized result before codec; actual Source/staged/child3cases pass,27 unknown requests refused."
+    },
+    {
+      "step": "Forced typecheck",
+      "actual": "Composite project needed explicit new mjs includes and complete native-ready authority fixture.",
+      "repair": "Explicit tsconfig includes and fully typed permitted fixture; no unknown cast or check weakening. Forced typecheck passes."
+    },
+    {
+      "step": "Lint",
+      "actual": "One prefer-const error in new fixture forwarding closure;165 existing warnings.",
+      "repair": "Explicit typed const; final lint0errors165baselinewarnings."
+    }
+  ],
+  "rawEvidence": {
+    "retainedDirectory": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/222",
+    "files": [
+      {
+        "file": "222-contract-freshness.log",
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      },
+      {
+        "file": "222-contracts-rebase.log",
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      },
+      {
+        "file": "222-db-fixture-migrations.json",
+        "sha256": "fd2c93d46862b3a0db1d507c309fe4170f0549bf0d00e9bb1f04c4f9e1120606",
+        "bytes": 775
+      },
+      {
+        "file": "222-diagnostic-frontend-final.log",
+        "sha256": "a908df66e04d0785dd97c348e9b128374d37311e8226603bb01f9e95c08f3436",
+        "bytes": 497
+      },
+      {
+        "file": "222-diff-final.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      {
+        "file": "222-diff-rebase.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      {
+        "file": "222-final-gate.sh",
+        "sha256": "e656f6b7387d9d4f42e567bb88b22fae5845c872b1e1ffd89bf0a73720193b02",
+        "bytes": 1529
+      },
+      {
+        "file": "222-historical-full.json",
+        "sha256": "b8d9c9bd4c14f723571e731ebd9842fd253e539d19f148e927c621530d337262",
+        "bytes": 308043
+      },
+      {
+        "file": "222-historical-full.log",
+        "sha256": "d59b3b03aca142c70894f599097e29f4c65e09151846e25d5674685fbcf32167",
+        "bytes": 2445
+      },
+      {
+        "file": "222-host-neutral-full-receipt.json",
+        "sha256": "f5c6b1e9bd7d1d2e381a50a4b37ed0e23f2456607d1954115d638ab8effacafb",
+        "bytes": 92759
+      },
+      {
+        "file": "222-host-neutral-full.json",
+        "sha256": "04ebed3936a04299012cbe64d17faede4904c9cd2327361fc6d1ccfccb7eb82b",
+        "bytes": 2399049
+      },
+      {
+        "file": "222-host-neutral-full.log",
+        "sha256": "ca533f9c308afe0159cbbc590f0f49db86e31117f25f5f6440c69b8c4ede3819",
+        "bytes": 18517
+      },
+      {
+        "file": "222-inventory-audit.log",
+        "sha256": "bdcc0883ee002a672cd1a17815231bc18487b97dbfea2202d18492b25d423c50",
+        "bytes": 44
+      },
+      {
+        "file": "222-inventory-freshness.log",
+        "sha256": "d0c55e9af2bc353edf111065090aae1a4cadd02f1294c1fd91bd2ef10050e91e",
+        "bytes": 91
+      },
+      {
+        "file": "222-inventory-rebase.log",
+        "sha256": "e61e97884062b0ca04c86f95ede4af4f9f9cd822b94dc1e3d64091d4472e9c64",
+        "bytes": 91
+      },
+      {
+        "file": "222-lint-failed-attempt.log",
+        "sha256": "9ca05a77e2a34b1c5083769516b54db8d20f52bf3cc5978c6c37a80a73121cc0",
+        "bytes": 16925
+      },
+      {
+        "file": "222-lint-final.log",
+        "sha256": "cc5b5dfea56c5d31ea8253a0bf6c44e62293d3eaee47a31468ecc6b77d9a97d9",
+        "bytes": 16719
+      },
+      {
+        "file": "222-lint-initial.log",
+        "sha256": "9ca05a77e2a34b1c5083769516b54db8d20f52bf3cc5978c6c37a80a73121cc0",
+        "bytes": 16925
+      },
+      {
+        "file": "222-lint-rebase.log",
+        "sha256": "cc5b5dfea56c5d31ea8253a0bf6c44e62293d3eaee47a31468ecc6b77d9a97d9",
+        "bytes": 16719
+      },
+      {
+        "file": "222-neutral-main-initial.json",
+        "sha256": "e4dbcafecdd9195286e26125832ed31f4a81f2e9256d2c7634621be7c1ae20f9",
+        "bytes": 1463976
+      },
+      {
+        "file": "222-neutral-main-initial.log",
+        "sha256": "d938ca9653484de8e2ffa26ce75e01669dbf13615808f7a4653c7cb50ecec6c6",
+        "bytes": 147
+      },
+      {
+        "file": "222-node-tests-receipt.json",
+        "sha256": "41a11b7c60a4a58aaa090ee5e54902e368ab1d2955558c951db03099982a3397",
+        "bytes": 2725
+      },
+      {
+        "file": "222-node-tests.log",
+        "sha256": "9cb6c3f356534335902f50d411bf7fc66629cb5cc1e8610d9b51b4d9e0f17324",
+        "bytes": 6503
+      },
+      {
+        "file": "222-original-command-affected.json",
+        "sha256": "2e32d888d7b4d756c0a27acc82fba113a75feb18af6e2fa3be924c9d5b4e6531",
+        "bytes": 65231
+      },
+      {
+        "file": "222-original-command-affected.log",
+        "sha256": "b20ae0559216a76917697d343b0a435ba9a9c40311a9896349bc453b2e2e8158",
+        "bytes": 1597
+      },
+      {
+        "file": "222-original-command-gate.sh",
+        "sha256": "e0d5f3b5c16c5d69354374db65fd2b40903fcac01027af075451f5ab6f36bc51",
+        "bytes": 1043
+      },
+      {
+        "file": "222-prepare-connectors.log",
+        "sha256": "8b7b5960c744eadf368b84b4c91dcdb672ab8d918d573c80a11d7057d7207fb7",
+        "bytes": 2189
+      },
+      {
+        "file": "222-prepare-database.log",
+        "sha256": "60cba32a521c7cd68ecd65b68277661622d18a00581a2469a0cfda6e30a3c3d2",
+        "bytes": 305
+      },
+      {
+        "file": "222-prepare-gate.sh",
+        "sha256": "361f84c90aabd19ae0250c69aaefc7d9f301f06140dade7cc8ed0a7629f74c12",
+        "bytes": 469
+      },
+      {
+        "file": "222-prepare-production.log",
+        "sha256": "c997b33d72d740ea74537a3ff2955f46887c2c545eb351ec3d0e7aaff9a96a0b",
+        "bytes": 379
+      },
+      {
+        "file": "222-production-artifacts-rebase.json",
+        "sha256": "564702923669c77b6d5f6ee5710f7e12772c5796a827daad6fbea6a7458bc715",
+        "bytes": 17334
+      },
+      {
+        "file": "222-production-artifacts-rebase.log",
+        "sha256": "375a38f0cba5b119f24d5724ff879c3068dda3c059bdd3e06e6db52c16db2106",
+        "bytes": 143
+      },
+      {
+        "file": "222-production-artifacts.json",
+        "sha256": "16cb4e2a6e1930dbec30c23df05786daf0dd32b12bc1f1a8954c28e3bb5b221e",
+        "bytes": 17334
+      },
+      {
+        "file": "222-production-artifacts.log",
+        "sha256": "b91de25c30819d08b61b8734271114b54c4a259113ebc7de69d6a72dbdf10332",
+        "bytes": 143
+      },
+      {
+        "file": "222-production-frontend-final.log",
+        "sha256": "07e88b48e18a14d9ee07837ac497395fca430951de2ab627df565882917d937b",
+        "bytes": 9737
+      },
+      {
+        "file": "222-rebase-affected-receipt.json",
+        "sha256": "f7ba3f9cfce4eaf55b5f789a1d1b98ad7d62835b2741d58f613531d3bec9237c",
+        "bytes": 93080
+      },
+      {
+        "file": "222-rebase-affected.json",
+        "sha256": "51c8b3bf26156ba74827d2660a61a1847c1611118efadb83e152a8a26117cc40",
+        "bytes": 60120
+      },
+      {
+        "file": "222-rebase-affected.log",
+        "sha256": "1af2ba8ef9d3d214a753b413968b9558a70f0179e66bdbaac4471256540b05f9",
+        "bytes": 994
+      },
+      {
+        "file": "222-rebase-gate.sh",
+        "sha256": "940fe5e8844bda7bc4c9b1532739d0bdf16d8a2ab2f7a0fd059a6abd1d365123",
+        "bytes": 1367
+      },
+      {
+        "file": "222-stage-final.log",
+        "sha256": "c997b33d72d740ea74537a3ff2955f46887c2c545eb351ec3d0e7aaff9a96a0b",
+        "bytes": 379
+      },
+      {
+        "file": "222-stage-paths.json",
+        "sha256": "262e5e918c5ce0c965528d6e881bb68ec5467bc6aa6c69087cddbfef971e148e",
+        "bytes": 1438
+      },
+      {
+        "file": "222-stage-rebase.log",
+        "sha256": "4578c50827281a46d11306e3cf696679aa61cfc8575e58b3cd7207b113492fe4",
+        "bytes": 379
+      },
+      {
+        "file": "222-static-audit.json",
+        "sha256": "eed61318cb9be998dd939ad5788d466ef62aa1f7e9861e75a53ee207fa64d011",
+        "bytes": 77231
+      },
+      {
+        "file": "222-test-inventory-current.json",
+        "sha256": "2d8eae24f162e1ea3fd04e3a70543d673f892f9cce5af33698b1488657cabad3",
+        "bytes": 156554
+      },
+      {
+        "file": "222-test-inventory-final.json",
+        "sha256": "768ba6557c46ef08b7476a34c46d4bba59fd9b91f33197229d227f489a4a7369",
+        "bytes": 156554
+      },
+      {
+        "file": "222-test-inventory-rebase.json",
+        "sha256": "80912428a0dddfae4319b2997c29f7d3d0a3c29b1ba382ee4d7252ae57186c76",
+        "bytes": 156998
+      },
+      {
+        "file": "222-test-inventory-rebase.log",
+        "sha256": "f6215b0c1a62b59ea92fc6e177918d28f57aa4825f629e07b9a29b60255865d2",
+        "bytes": 44
+      },
+      {
+        "file": "222-test-inventory.json",
+        "sha256": "9434cbace3ac01dd50859abc8af2257d5939583209f3dc00b605a44ee4df477a",
+        "bytes": 162067
+      },
+      {
+        "file": "222-type-failed-attempt.log",
+        "sha256": "c7d8473fddb171d5fa8af5549a698c2672cfc9e4b3a191fa820915d783d2e1e4",
+        "bytes": 2510
+      },
+      {
+        "file": "222-type-final.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      {
+        "file": "222-type-gate.sh",
+        "sha256": "605bc71d1d5de0b49b2f2d1f44a700035115205a02897f5844428bf1eebbeb56",
+        "bytes": 504
+      },
+      {
+        "file": "222-type-initial.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      {
+        "file": "222-type-rebase.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    ],
+    "limitation": "Raw local receipts/logs are retained outside source tree to survive worktree cleanup. Their digests and reproducible commands are committed; no hosted artifact retention is claimed."
+  },
+  "perCriterion": {
+    "1": "source-complete on Linux: all reviewed host-neutral main/shared/renderer/mobile suites under physical pinned Node with actual SQLite/PTY ABI receipt; latest inherited owner graph separately rechecked. Cross-platform source workflow prepared, not executed.",
+    "2": "source-complete on Linux: explicit audited historical Electron credential/host/transition cohort runs separately;18 helper-only suites migrated, unchanged original command compatibility verified. Shipping Electron/runtime/tool retirement not claimed.",
+    "3": "remaining source gap: pinned installed production Tauri physical navigation/scroll/keyboard/focus/clipboard/drop harness; requires reviewed isolated instrumentation and accepted production host/UI prerequisites #208/#209. Supported-target installed runs additionally blocked by Actions/user platform availability. Existing happy-dom/source/Wry controls are not replacement acceptance.",
+    "4": "blocked: repository Actions disabled, awaiting user decision. Manual-only four-target source workflow prepared, with explicit production/terminal/installed/release exclusions; complete hosted release/native harness matrix remains unimplemented until prerequisite harness exists. No dispatch/settings change.",
+    "5": "source-complete for Source/frontend diagnostic rejection and reproducible artifacts; remaining production-native artifact gap: installed/native binary endpoint-negative proof on supported targets. Native handler/feature/plugin checks are source-only."
+  },
+  "hostedCI": {
+    "available": false,
+    "reason": "Hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision.",
+    "runs": [],
+    "settingsChanged": false,
+    "workflowsDispatched": false
+  },
+  "remainingDefects": [
+    "Pinned installed native UI replacement and native binary endpoint-negative evidence remain open (#208/#209).",
+    "Three real optional installed speech runtimes are absent; one PowerShell-only historical case unavailable on Linux. All skips enumerated from actual reports.",
+    "Static literal import audit excludes external package internals and nonliteral resolution; actual import fence/runtime executions provide separate bounded evidence.",
+    "No upstream signature/redistribution, installed Windows/macOS, live account, microphone, LAN/public tunnel, release/update/data-cutover acceptance.",
+    "Existing test commands retain original behavior. No adoption until published replacement review and both peer confirmations."
+  ]
+}
