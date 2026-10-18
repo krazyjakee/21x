@@ -1,0 +1,815 @@
+{
+  "version": 1,
+  "issue": 219,
+  "recordedAt": "2026-10-18T02:35:38.689574+00:00",
+  "implementationRevision": "bd898f99fc8af7af20bcefed37bfa4a85f3dad75",
+  "inheritedExecutionBridge": "f24d70e051ee5ec0427cd952f2694ea9710bb38b",
+  "inheritedBridgeEvidence": "75090c1095bc6654f477bc8596e9866904b4b902",
+  "inheritedRenderer": "fd49c21839fb37a90d7cff9f97fa603b0832263b",
+  "gateScope": "Exact wanted runtime/tests were tested on inherited c00d99b6 plus local changes. Receipts deliberately record dirty tree/base revision; source hashes bind the subsequently published commit. No clean-commit full-application/platform gate is claimed.",
+  "source": [
+    {
+      "file": "docs/tauri-migration/implementation-status.md",
+      "sha256": "afda6d36b53bee9f9400a1e4fd5fa816e5421ae18dd973d58061c9d09185972d"
+    },
+    {
+      "file": "docs/tauri-migration/inventory.json",
+      "sha256": "066214ded72189a6322f53cf882917f6c6f2bea9bdf84e956c7e20425518f2b6"
+    },
+    {
+      "file": "docs/tauri-migration/mobile-production.md",
+      "sha256": "4a8494df25e4ddd27b7969f26e704a7f8d5ded024a0bac64b4dc578bb9ce7688"
+    },
+    {
+      "file": "docs/tauri-migration/operations.json",
+      "sha256": "6434add395a6e681ccf7abc3c68bbd0fcb3fe9bf0c134dc2d01c34327b7c95f3"
+    },
+    {
+      "file": "src/main/mobile-api-server.ts",
+      "sha256": "b7755013c0ba88cfcb44861685e7bc5b21067e02f977182a16f4998088e81443"
+    },
+    {
+      "file": "src/service/production-desktop-bindings.ts",
+      "sha256": "782b52d18aa45f4533f742432eef31aa37c34703c29799d6c08b8713ba10819d"
+    },
+    {
+      "file": "src/service/production-mobile-actions.ts",
+      "sha256": "46998956af6b44f1ac2dde643d62d4c86bfaedf6de4db9116f0421fce65f6a65"
+    },
+    {
+      "file": "src/service/production-mobile.test.ts",
+      "sha256": "f9899660f7a06e89f8112defbca80b21b57b2ad4cf95b9292e69bc2dfb046c39"
+    }
+  ],
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "distribution": "Linux Mint22.3 Zena",
+    "kernel": "6.8.0-139-generic",
+    "glibc": "2.39",
+    "node": "22.23.2",
+    "modules": "127",
+    "sqlite": "13.0.3",
+    "pty": "1.1.0",
+    "bootstrapNode": "v22.22.0",
+    "pnpm": "9.15.9",
+    "webkitgtkInstalledNotLaunched": "2.52.6",
+    "gtkInstalledNotLaunched": "3.24.41",
+    "profiles": "Isolated synthetic encrypted profiles/key-store callbacks; actual SQLite, production owners and FileOwner; no live user store or provider account."
+  },
+  "commands": [
+    {
+      "command": "flock heavy.lock env CI=true pnpm install --frozen-lockfile",
+      "exitCode": 0,
+      "scope": "Physical own worktree installation; no node_modules symlink."
+    },
+    {
+      "command": "flock heavy.lock node scripts/tauri-prepare.mjs --native --node <existing pinned physical node> --npm-cli <explicit npm-cli>",
+      "exitCode": 0,
+      "scope": "Explicit physical Node22.23.2/SQLite13.0.3/PTY1.1.0 preparation. Copied physical already-built credential helper for hashed resource closure, not an OS key-store execution claim."
+    },
+    {
+      "command": "flock heavy.lock bash /tmp/219b-gate.sh",
+      "exitCode": 0,
+      "scope": "Final serial1-worker237main Source/staged/host cases,121mobile cases; forced noEmit typecheck, lint0errors165baselinewarnings, database/connector/production staging, mobile+diagnostic+production frontend builds, inventory920/contracts and diff."
+    },
+    {
+      "command": "node scripts/test-host-neutral.mjs --production-proofs --project=main src/service/production-service.test.ts -t \"joins the protected attachment execution graph through the actual staged\"",
+      "exitCode": 0,
+      "scope": "Original-deadline filtered rehearsal of inherited staged graph after parallel failure;1pass60filtered skips, not platform/runtime unavailability."
+    },
+    {
+      "command": "Normal git commit hooks under heavy.lock",
+      "exitCode": 0,
+      "scope": "Staged ESLint and normal noEmit typecheck passed before fast-forward Source publication."
+    }
+  ],
+  "checks": {
+    "old-source-negative": {
+      "report": "219b-old-source-negative.json",
+      "sha256": "d87ffc22b0e288d17b2d62fe84a32a64f369d88194fcdc5d6cc6159e7bc83277",
+      "success": false,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 17,
+      "files": 1,
+      "failures": [
+        {
+          "name": "actual source production mobile HTTP/WS uses the protected saved-file manager for HTTP start/resume/send and WebSocket projection",
+          "message": "AssertionError: expected 409 to be 200 // Object.is equality"
+        }
+      ]
+    },
+    "old-event-negative": {
+      "report": "219b-old-event-negative.json",
+      "sha256": "9bb54a1a6b3fab7e09f32e65a3960db811ad85bca3d9d02951e440bd24bafde9",
+      "success": false,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 34,
+      "files": 1,
+      "failures": [
+        {
+          "name": "actual source production mobile HTTP/WS projects canonical manager update records without weakening malformed partial-event refusal",
+          "message": "ServiceProtocolError: Invalid operation result."
+        }
+      ]
+    },
+    "source-first": {
+      "report": "219b-source-first.json",
+      "sha256": "5dee380bdf98d4b3a28f0dfcbe1c5b1d5c0b51d1f9d9ff0fc665def7ce5b7d5b",
+      "success": false,
+      "passed": 17,
+      "failed": 1,
+      "skipped": 0,
+      "files": 1,
+      "failures": [
+        {
+          "name": "actual source production mobile HTTP/WS uses the protected saved-file manager for HTTP start/resume/send and WebSocket projection",
+          "message": "Error: ENOENT: no such file or directory, open '/tmp/21x-mobile-production-T0NAdD/workspaces/koelsw306np3ll0s84tkqy4d/attachments/mobile-owned.txt'"
+        }
+      ]
+    },
+    "source-second": {
+      "report": "219b-source-second.json",
+      "sha256": "527218b6311b8ce705dd352d982265e60b3b8edf403aeae61ecc45ab08d2c616",
+      "success": false,
+      "passed": 23,
+      "failed": 5,
+      "skipped": 0,
+      "files": 1,
+      "failures": [
+        {
+          "name": "actual source production mobile HTTP/WS uses the protected saved-file manager for HTTP start/resume/send and WebSocket projection",
+          "message": "Error: STACK_TRACE_ERROR"
+        },
+        {
+          "name": "actual source production mobile HTTP/WS routes a parent to its saved-file subtask through the same start policy and admission",
+          "message": "Error: STACK_TRACE_ERROR"
+        },
+        {
+          "name": "actual source production mobile HTTP/WS fences original project while a real protected FD is held across mobile start",
+          "message": "AssertionError: expected 200 to be greater than or equal to 400"
+        },
+        {
+          "name": "actual source production mobile HTTP/WS captures group membership receipts and refuses a changed member during protected copy",
+          "message": "Error: STACK_TRACE_ERROR"
+        },
+        {
+          "name": "actual source production mobile HTTP/WS starts the captured group with member-namespaced protected bytes",
+          "message": "TypeError: fetch failed"
+        }
+      ]
+    },
+    "source-third": {
+      "report": "219b-source-third.json",
+      "sha256": "207e5b3424f6dc512e28b675a2885b6f07c1657d0754d3c80288edd805f730b7",
+      "success": false,
+      "passed": 28,
+      "failed": 2,
+      "skipped": 0,
+      "files": 1,
+      "failures": [
+        {
+          "name": "actual source production mobile HTTP/WS captures group membership receipts and refuses a changed member during protected copy",
+          "message": "Error: STACK_TRACE_ERROR"
+        },
+        {
+          "name": "actual source production mobile HTTP/WS starts the captured group with member-namespaced protected bytes",
+          "message": "Error: STACK_TRACE_ERROR"
+        }
+      ]
+    },
+    "source-fourth": {
+      "report": "219b-source-fourth.json",
+      "sha256": "942ca13228e8552dbebdda13a4aeafc5a560bd4326a48d44313407f9230f9a51",
+      "success": true,
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1,
+      "failures": []
+    },
+    "main-gate-failed-attempt": {
+      "report": "219b-main-gate-failed-attempt.json",
+      "sha256": "b221c6b3ba9609135447fa4e461c14929242873f05f1c4099c176394a3e9f108",
+      "success": false,
+      "passed": 236,
+      "failed": 1,
+      "skipped": 0,
+      "files": 10,
+      "failures": [
+        {
+          "name": "joins the protected attachment execution graph through the actual staged production engine",
+          "message": "Error: STACK_TRACE_ERROR"
+        }
+      ]
+    },
+    "inherited-graph-rehearsal": {
+      "report": "219b-inherited-graph-rehearsal.json",
+      "sha256": "f58de7d1ad1694db140aa1d72d132305f3ace93a65511969a33200293d72f979",
+      "success": true,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 60,
+      "files": 1,
+      "failures": []
+    },
+    "main-gate": {
+      "report": "219b-main-gate.json",
+      "sha256": "469723a0b5e1d7270591964aae91160b113aeca0ee3e2b4fa88e87f6187d1c92",
+      "success": true,
+      "passed": 237,
+      "failed": 0,
+      "skipped": 0,
+      "files": 10,
+      "failures": []
+    },
+    "mobile-gate": {
+      "report": "219b-mobile-gate.json",
+      "sha256": "4893537340d8083facca6b6b867301f3bf9c4fc285fde0ba736ae8440f2f7134",
+      "success": true,
+      "passed": 121,
+      "failed": 0,
+      "skipped": 0,
+      "files": 11,
+      "failures": []
+    }
+  },
+  "runtimeReceipts": {
+    "main-gate": {
+      "file": "219b-main-gate-receipt.json",
+      "sha256": "7e0df72751d10258885122cd98d0e3694f8534602ce830b5a8d85b3e353e7e4e",
+      "revision": "c00d99b6dc22a7cf8ba1084c665f025dd4318170",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "framework": "vitest",
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": false
+      },
+      "callerFiltered": true,
+      "exclusions": [
+        {
+          "file": "scripts/production-terminal-proof.test.ts",
+          "reason": "Opt-in TAURI_TERMINAL_PROOFS not selected"
+        },
+        {
+          "file": "scripts/production-payload-recovery-proof.test.ts",
+          "reason": "Opt-in TAURI_TERMINAL_PROOFS not selected"
+        }
+      ],
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "startedAt": "2026-10-18T02:28:23.695Z",
+      "endedAt": "2026-10-18T02:30:23.908Z",
+      "eligibleFiles": 569,
+      "artifacts": [
+        {
+          "file": "src-tauri/resources/node/node",
+          "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+          "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+          "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+        }
+      ],
+      "scope": "Framework reports identify executed tests and actual skips. Eligible files are not asserted as executed when caller filters are present. No installed native UI/platform acceptance."
+    },
+    "mobile-gate": {
+      "file": "219b-mobile-gate-receipt.json",
+      "sha256": "f7abaa24c19017e44433bd4ad6c6aeb858dc9bed34522b1f4430aea970f4687c",
+      "revision": "c00d99b6dc22a7cf8ba1084c665f025dd4318170",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "framework": "vitest",
+      "proofFlags": {
+        "--service-proofs": false,
+        "--production-proofs": false,
+        "--terminal-proofs": false
+      },
+      "callerFiltered": true,
+      "exclusions": [
+        {
+          "file": "scripts/production-service-proof.test.ts",
+          "reason": "Opt-in TAURI_PRODUCTION_SERVICE_PROOFS not selected"
+        },
+        {
+          "file": "scripts/production-terminal-proof.test.ts",
+          "reason": "Opt-in TAURI_TERMINAL_PROOFS not selected"
+        },
+        {
+          "file": "scripts/production-payload-recovery-proof.test.ts",
+          "reason": "Opt-in TAURI_TERMINAL_PROOFS not selected"
+        },
+        {
+          "file": "scripts/database-service-proof.test.ts",
+          "reason": "Opt-in TAURI_STANDALONE_SERVICE_PROOFS not selected"
+        },
+        {
+          "file": "scripts/configuration-service-proof.test.ts",
+          "reason": "Opt-in TAURI_STANDALONE_SERVICE_PROOFS not selected"
+        },
+        {
+          "file": "scripts/transcript-page-proof.test.ts",
+          "reason": "Opt-in TAURI_STANDALONE_SERVICE_PROOFS not selected"
+        },
+        {
+          "file": "scripts/connector-worker-service-proof.test.ts",
+          "reason": "Opt-in TAURI_STANDALONE_SERVICE_PROOFS not selected"
+        }
+      ],
+      "exitCode": 0,
+      "signal": null,
+      "status": "passed",
+      "startedAt": "2026-10-18T02:30:26.958Z",
+      "endedAt": "2026-10-18T02:30:34.301Z",
+      "eligibleFiles": 564,
+      "artifacts": [
+        {
+          "file": "src-tauri/resources/node/node",
+          "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+          "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+        },
+        {
+          "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+          "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+        }
+      ],
+      "scope": "Framework reports identify executed tests and actual skips. Eligible files are not asserted as executed when caller filters are present. No installed native UI/platform acceptance."
+    }
+  },
+  "mobileRootCases": {
+    "total": 71,
+    "source": 35,
+    "staged": 35,
+    "containedTunnel": 1,
+    "names": [
+      "actual source production mobile HTTP/WS keeps access disabled, serves an independent SPA on loopback, pairs hashed credentials and revokes HTTP/WS access",
+      "actual source production mobile HTTP/WS delegates learning/heartbeat/resource updates to the same production task service and projects public rows once",
+      "actual source production mobile HTTP/WS does not release a paired request guard during a held Stop or write after revocation",
+      "actual source production mobile HTTP/WS retains pairing and durable transcript across a real production owner restart without blind session replay",
+      "actual source production mobile HTTP/WS uses a real controlled Pi process for admission, exact permission/question replies, streaming and acknowledged Stop with PATH restricted",
+      "actual source production mobile HTTP/WS routes explicit source completion through actual SyncManager, joins revocation, and refuses attachment replacement without a caller baseline",
+      "actual source production mobile HTTP/WS keeps current mobile work independent of desktop grants and drains active pairing/listeners on disable",
+      "actual source production mobile HTTP/WS routes legacy source create/configuration and explicit options through encrypted production owners",
+      "actual source production mobile HTTP/WS holds raw source/configuration and resolver work until exact paired access is rechecked",
+      "actual source production mobile HTTP/WS keeps explicit sync-all sequential and routes parent edits through the real exclusion/reference owner",
+      "actual source production mobile HTTP/WS projects canonical manager update records without weakening malformed partial-event refusal",
+      "actual source production mobile HTTP/WS refuses an explicit agent override before saved-file execution just like the desktop backend",
+      "actual source production mobile HTTP/WS uses the protected saved-file manager for HTTP start and WebSocket projection",
+      "actual source production mobile HTTP/WS copies protected bytes on mobile empty-payload send without reading foreign workspace paths",
+      "actual source production mobile HTTP/WS uses the same protected copy authority on an exact saved mobile resume",
+      "actual source production mobile HTTP/WS refuses a foreign saved symlink through authenticated mobile before provider effects",
+      "actual source production mobile HTTP/WS refuses a foreign workspace symlink through authenticated mobile before provider effects",
+      "actual source production mobile HTTP/WS routes a parent to its saved-file subtask through the same start policy and admission",
+      "actual source production mobile HTTP/WS fences original pairing while a real protected FD is held across mobile start",
+      "actual source production mobile HTTP/WS fences original project while a real protected FD is held across mobile start",
+      "actual source production mobile HTTP/WS fences original agent while a real protected FD is held across mobile start",
+      "actual source production mobile HTTP/WS fences original metadata while a real protected FD is held across mobile start",
+      "actual source production mobile HTTP/WS fences original child while a real protected FD is held across mobile start",
+      "actual source production mobile HTTP/WS captures group membership receipts and refuses a changed member during protected copy",
+      "actual source production mobile HTTP/WS starts the captured group with member-namespaced protected bytes",
+      "actual source production mobile HTTP/WS retains raw FD/HTTP ownership after a client disconnect and joins quit before profile release",
+      "actual source production mobile HTTP/WS keeps an accepted admission queue in Source after the paired caller retires",
+      "actual source production mobile HTTP/WS refuses retired pairing question authority before the native provider reply",
+      "actual source production mobile HTTP/WS refuses retired metadata question authority before the native provider reply",
+      "actual source production mobile HTTP/WS refuses retired session question authority before the native provider reply",
+      "actual source production mobile HTTP/WS keeps darwin saved-file execution unavailable before effects (policy branch only)",
+      "actual source production mobile HTTP/WS keeps win32 saved-file execution unavailable before effects (policy branch only)",
+      "actual source production mobile HTTP/WS rechecks attachments after held raw initialization before attachment or provider effects",
+      "actual source production mobile HTTP/WS rechecks graph after held raw initialization before attachment or provider effects",
+      "actual source production mobile HTTP/WS keeps queued sends fenced when saved attachments change",
+      "actual staged production mobile HTTP/WS keeps access disabled, serves an independent SPA on loopback, pairs hashed credentials and revokes HTTP/WS access",
+      "actual staged production mobile HTTP/WS delegates learning/heartbeat/resource updates to the same production task service and projects public rows once",
+      "actual staged production mobile HTTP/WS does not release a paired request guard during a held Stop or write after revocation",
+      "actual staged production mobile HTTP/WS retains pairing and durable transcript across a real production owner restart without blind session replay",
+      "actual staged production mobile HTTP/WS uses a real controlled Pi process for admission, exact permission/question replies, streaming and acknowledged Stop with PATH restricted",
+      "actual staged production mobile HTTP/WS routes explicit source completion through actual SyncManager, joins revocation, and refuses attachment replacement without a caller baseline",
+      "actual staged production mobile HTTP/WS keeps current mobile work independent of desktop grants and drains active pairing/listeners on disable",
+      "actual staged production mobile HTTP/WS routes legacy source create/configuration and explicit options through encrypted production owners",
+      "actual staged production mobile HTTP/WS holds raw source/configuration and resolver work until exact paired access is rechecked",
+      "actual staged production mobile HTTP/WS keeps explicit sync-all sequential and routes parent edits through the real exclusion/reference owner",
+      "actual staged production mobile HTTP/WS projects canonical manager update records without weakening malformed partial-event refusal",
+      "actual staged production mobile HTTP/WS refuses an explicit agent override before saved-file execution just like the desktop backend",
+      "actual staged production mobile HTTP/WS uses the protected saved-file manager for HTTP start and WebSocket projection",
+      "actual staged production mobile HTTP/WS copies protected bytes on mobile empty-payload send without reading foreign workspace paths",
+      "actual staged production mobile HTTP/WS uses the same protected copy authority on an exact saved mobile resume",
+      "actual staged production mobile HTTP/WS refuses a foreign saved symlink through authenticated mobile before provider effects",
+      "actual staged production mobile HTTP/WS refuses a foreign workspace symlink through authenticated mobile before provider effects",
+      "actual staged production mobile HTTP/WS routes a parent to its saved-file subtask through the same start policy and admission",
+      "actual staged production mobile HTTP/WS fences original pairing while a real protected FD is held across mobile start",
+      "actual staged production mobile HTTP/WS fences original project while a real protected FD is held across mobile start",
+      "actual staged production mobile HTTP/WS fences original agent while a real protected FD is held across mobile start",
+      "actual staged production mobile HTTP/WS fences original metadata while a real protected FD is held across mobile start",
+      "actual staged production mobile HTTP/WS fences original child while a real protected FD is held across mobile start",
+      "actual staged production mobile HTTP/WS captures group membership receipts and refuses a changed member during protected copy",
+      "actual staged production mobile HTTP/WS starts the captured group with member-namespaced protected bytes",
+      "actual staged production mobile HTTP/WS retains raw FD/HTTP ownership after a client disconnect and joins quit before profile release",
+      "actual staged production mobile HTTP/WS keeps an accepted admission queue in Source after the paired caller retires",
+      "actual staged production mobile HTTP/WS refuses retired pairing question authority before the native provider reply",
+      "actual staged production mobile HTTP/WS refuses retired metadata question authority before the native provider reply",
+      "actual staged production mobile HTTP/WS refuses retired session question authority before the native provider reply",
+      "actual staged production mobile HTTP/WS keeps darwin saved-file execution unavailable before effects (policy branch only)",
+      "actual staged production mobile HTTP/WS keeps win32 saved-file execution unavailable before effects (policy branch only)",
+      "actual staged production mobile HTTP/WS rechecks attachments after held raw initialization before attachment or provider effects",
+      "actual staged production mobile HTTP/WS rechecks graph after held raw initialization before attachment or provider effects",
+      "actual staged production mobile HTTP/WS keeps queued sends fenced when saved attachments change",
+      "actual Source production tunnel composition with contained process refuses disabled access, starts one controlled raw child and drains it and paired sockets on quit"
+    ]
+  },
+  "resourceClosure": {
+    "version": 1,
+    "kind": "production-resource-closure",
+    "buildIdentity": "production-9c5541c04428ca190722656773d186f4",
+    "nodeVersion": "22.23.2",
+    "platform": "linux",
+    "arch": "x64",
+    "entries": {
+      "node": "node/node",
+      "credentialHelper": "native/twentyonex-credential-key",
+      "mobile": "mobile/index.html",
+      "stdio": "service/production-stdio.mjs",
+      "engine": "service/production-engine.mjs",
+      "taskMcp": "service/production-task-mcp.mjs",
+      "voiceWorker": "service/voice-worker.cjs",
+      "voiceTtsWorker": "service/voice-tts-worker.cjs"
+    },
+    "packages": {
+      "better-sqlite3": "13.0.3",
+      "node-pty": "1.1.0",
+      "@paralleldrive/cuid2": "2.3.1",
+      "@anthropic-ai/claude-agent-sdk": "0.3.260",
+      "@anthropic-ai/sdk": "0.123.0",
+      "@opencode-ai/sdk": "1.18.28"
+    },
+    "redistributionReviewComplete": false
+  },
+  "artifacts": [
+    {
+      "file": "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json",
+      "sha256": "a268e2c0b9216b4c8a1ab9391063bb43945c22f890c46f49282b2572e357a88a",
+      "bytes": 1261784
+    },
+    {
+      "file": "src-tauri/resources/node/node",
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    {
+      "file": "src-tauri/resources/native/twentyonex-credential-key",
+      "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+      "bytes": 25759896
+    },
+    {
+      "file": "src-tauri/resources/mobile/index.html",
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    {
+      "file": "src-tauri/resources/service/production-stdio.mjs",
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    {
+      "file": "src-tauri/resources/service/production-engine.mjs",
+      "sha256": "9d62019245aaaac2516545600bb4ba7ea9dfee6d689d4f8c9fd7525380d6e8bd",
+      "bytes": 6266392
+    },
+    {
+      "file": "src-tauri/resources/service/production-task-mcp.mjs",
+      "sha256": "204909046a269c83e3eb099aaac8879d32adfad766f95b9db50de3de7211abb0",
+      "bytes": 755160
+    },
+    {
+      "file": "src-tauri/resources/service/voice-worker.cjs",
+      "sha256": "2156b0cc656969fd752f7cd00b93608f848b49c843ed04f76e643c31126ca3f7",
+      "bytes": 16701
+    },
+    {
+      "file": "src-tauri/resources/service/voice-tts-worker.cjs",
+      "sha256": "b6ffd3047cf8fef809c4a3bebc24054a5d1c17863701560f94cf2548f1e3e1e2",
+      "bytes": 21835
+    }
+  ],
+  "boundaries": {
+    "physicalListeners": "Actual 127.0.0.1 HTTP/WebSockets only; inherited LAN-policy controls intercept listen and assert physical loopback. No LAN/public tunnel.",
+    "sessionOwner": "Private ProductionMobileActions delegates retained start/startTask/resume/send/approve registry to actual ProductionAgentBackend, same captured manager and existing protected execution port. No second file/runtime owner or public grant.",
+    "requestScope": "Original token/server/profile, task/project/agent/parent/role/ordered metadata, descendants, membership receipts and live session identity survive raw awaits. Scalar paired checks remain cheap; parent manager scope checks complete original graph at each raw effect.",
+    "acceptedLifetime": "Raw HTTP/FD work survives disconnect and failed bounded close until join; acknowledged queue entries retain existing Source scheduler lifetime after pair retirement. No unknown-request automatic replay.",
+    "events": "Full canonical TaskRecord owner events use existing public task projection. Strict partial codecs and malformed-event refusal remain unchanged; no private MCP/checklist fields emitted.",
+    "platform": "Saved execution Linux only. darwin/win32 branches checked on Linux refuse before any adapter effect; this is not actual non-Linux runtime evidence.",
+    "incomingFiles": "Nonempty mobile create/send payloads and full attachment-array writes still refused. No fabricated current-DB baseline, upload, append/merge/retry, implicit metadata save or rollback.",
+    "audio": "Existing real controlled Pi permission/question/projection fixture now has saved attachments on Linux. WebSocket checks reject speech audio; no microphone/hosted voice changes."
+  },
+  "failuresAndRepairs": [
+    {
+      "step": "Old saved-file policy",
+      "actual": "Valid protected file HTTP start returns409 instead of200; one genuine negative.",
+      "repair": "Delegate through retained Source backend and actual captured execution owner; supported Linux cases pass."
+    },
+    {
+      "step": "Initial own fixture",
+      "actual": "skipInitialPrompt:true bypasses initial copy, so an immediate destination-file assertion was invalid.",
+      "repair": "Start copy is tested with an initial prompt; send/resume use separate focused lifetimes and preserve every byte/canary assertion."
+    },
+    {
+      "step": "Old full canonical event",
+      "actual": "Actual group/member update closes root because strict event codec sees raw private record fields. Old-binding control throws INVALID_RESULT.",
+      "repair": "Project complete records through existing public task shape before codec; malformed partial still refuses, real group/subtask root stays ready."
+    },
+    {
+      "step": "Project withdrawal fixture",
+      "actual": "Unsupported db.updateTask project_id field did not change the row, producing200.",
+      "repair": "Explicit adversarial SQL project change; held-FD guard now actually observes changed project and prevents prompt."
+    },
+    {
+      "step": "Nested graph cost and initial compound test deadlines",
+      "actual": "Initial compound/group controls exceeded unchanged5s deadlines; cleanup of an unfinished failed group request produced one recorded unhandled fetch rejection.",
+      "repair": "Split distinct start/send/resume scenarios while retaining all assertions; parent manager scope retains original graph, scalar backend checks revalidate paired admission. Group and all held raw-work controls pass with original deadlines and no unhandled errors."
+    },
+    {
+      "step": "Forced typecheck",
+      "actual": "Five TypeScript narrowing/non-null fixture errors.",
+      "repair": "Explicit never-returning function declaration and real fixture result assertion; forced and normal-hook checks pass."
+    },
+    {
+      "step": "Coordinate freshness",
+      "actual": "Read-only contract check correctly detected stale operations coordinates.",
+      "repair": "Refreshed only claimed operations JSON after verifying no other generated output differed; retained331rows/325operations unchanged."
+    },
+    {
+      "step": "First combined two-worker gate",
+      "actual": "236pass/1inherited staged protected execution graph exceeds5s deadline; raw exit1 retained.",
+      "repair": "Original-deadline isolated rehearsal passes, then full coherent serialized gate237/0skip passes without deadline/assertion changes."
+    }
+  ],
+  "hostedCI": {
+    "available": false,
+    "reason": "Hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision.",
+    "sourceRuns": [],
+    "settingsChanged": false,
+    "workflowsDispatched": false
+  },
+  "perCriterion": {
+    "1": "source-complete on Linux: independent web client and configured/staged mobile closure; blocked Actions/installed-release targets.",
+    "2": "source-complete on Linux: opt-in access, pairing/rate/PIN/hash/session/revoke and real loopback HTTP/WS; blocked authorized real LAN/device/installed platforms.",
+    "3": "source-complete on Linux for admitted controlled task/session/HITL/projection paths including protected saved-file execution, routed graph fences and real profile restart. Installed physical window/device/platform and live-provider acceptance remain open; unsupported macOS/Windows saved execution is refused.",
+    "4": "blocked: native quick-tunnel resource authority #215, public tunnel user approval and installed targets. Controlled Source/tunnel child start/stop/quit remains proven, no public tunnel.",
+    "5": "source-complete on Linux for admitted mobile task/source/session/HITL using the same retained backend/manager/admission/domain owners. Incoming file payloads/full-array baseline transport and group review remain deliberately unavailable; shared #208/#210 daily-token/#202 prerequisites remain open."
+  },
+  "remainingDefects": [
+    "Installed physical desktop/window/device, authorized LAN/public tunnel and supported-platform acceptance are not proven.",
+    "Non-Linux protected destination publication is not implemented; macOS/Windows saved execution stays refused.",
+    "Native quick-tunnel binary/resource authority absent (#215); no implicit download or system binary borrowing.",
+    "Mobile file payload/baseline transport and group review remain refused until reviewed contracts; no broad complex-API parity claim.",
+    "Protected orphan/removal journal and hard-crash acceptance remain E2 domain; this handoff does not implement or certify pending journal work.",
+    "Source full-profile pairing remains existing authorization policy, not new per-device project grants; mobile request retries lack a new exactly-once transport contract.",
+    "Hosted Verify unavailable, Actions disabled pending user decision; no release/cutover/identity/provider/microphone decision preempted."
+  ],
+  "rawEvidence": {
+    "directory": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/219b",
+    "files": [
+      {
+        "file": "219b-build-diagnostic.log",
+        "sha256": "ac93886bb50818491f622e2d1c9f24f289e92d76f204ace32eb5d83901fca308",
+        "bytes": 498
+      },
+      {
+        "file": "219b-build-mobile.log",
+        "sha256": "05bca2070306fdc7d9b98549b59d6767c1c2d597489f63025331a9eeaf62bd5c",
+        "bytes": 6919
+      },
+      {
+        "file": "219b-build-production.log",
+        "sha256": "d0740d9dc80680d5542b64c669394d28ebf333aa52b20e6a41bd047d284e37c1",
+        "bytes": 9738
+      },
+      {
+        "file": "219b-contract-freshness.log",
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      },
+      {
+        "file": "219b-diff.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      {
+        "file": "219b-gate.sh",
+        "sha256": "67c17ed73fb8a55aceb3449a9f3b3b74896ba28aad6aeefa56513f1ce91a868d",
+        "bytes": 1624
+      },
+      {
+        "file": "219b-group-debug.log",
+        "sha256": "b2c259c46d8e20ccc0658ac0b8d3c894f8a275d0823967d94ec07aead69d934f",
+        "bytes": 10745
+      },
+      {
+        "file": "219b-group-fixed-event-debug.log",
+        "sha256": "98d5a7918d1b7ad80b6a20137e422408c39f11f95a7749c441333055fb07803a",
+        "bytes": 17594
+      },
+      {
+        "file": "219b-inherited-graph-rehearsal.json",
+        "sha256": "f58de7d1ad1694db140aa1d72d132305f3ace93a65511969a33200293d72f979",
+        "bytes": 23499
+      },
+      {
+        "file": "219b-inherited-graph-rehearsal.log",
+        "sha256": "a4e89c69ab638b6364acbd7182483abf6aa27cded6059f3b9a0be4e30f864c4e",
+        "bytes": 692
+      },
+      {
+        "file": "219b-install.log",
+        "sha256": "3099fb5f136ca1f041d57702fa884a546d3f786d8496cab4b185eb02182ed005",
+        "bytes": 7430
+      },
+      {
+        "file": "219b-inventory-freshness.log",
+        "sha256": "e61e97884062b0ca04c86f95ede4af4f9f9cd822b94dc1e3d64091d4472e9c64",
+        "bytes": 91
+      },
+      {
+        "file": "219b-lint.log",
+        "sha256": "bacde13ceab8e53fdb1aa63c01be8163a2bd5b22efd0a1f5c8c8fe11d64ea86a",
+        "bytes": 16728
+      },
+      {
+        "file": "219b-main-gate-failed-attempt-receipt.json",
+        "sha256": "1ed0a0187197a669265ad5120ae58929aeaafd03636c250072fe35e97cec06ff",
+        "bytes": 93037
+      },
+      {
+        "file": "219b-main-gate-failed-attempt.json",
+        "sha256": "b221c6b3ba9609135447fa4e461c14929242873f05f1c4099c176394a3e9f108",
+        "bytes": 95200
+      },
+      {
+        "file": "219b-main-gate-failed-attempt.log",
+        "sha256": "f3323fa0ad179c25dc7d4cd7b795dfb1386cd09bf76f7815c411134e759b72d8",
+        "bytes": 2177
+      },
+      {
+        "file": "219b-main-gate-receipt.json",
+        "sha256": "7e0df72751d10258885122cd98d0e3694f8534602ce830b5a8d85b3e353e7e4e",
+        "bytes": 93037
+      },
+      {
+        "file": "219b-main-gate.json",
+        "sha256": "469723a0b5e1d7270591964aae91160b113aeca0ee3e2b4fa88e87f6187d1c92",
+        "bytes": 92460
+      },
+      {
+        "file": "219b-main-gate.log",
+        "sha256": "4a0af0ed76a9563da3cabe9150fa5a76fd904d5744fffb36e1472795f5cb1583",
+        "bytes": 1254
+      },
+      {
+        "file": "219b-mobile-gate-receipt.json",
+        "sha256": "f7abaa24c19017e44433bd4ad6c6aeb858dc9bed34522b1f4430aea970f4687c",
+        "bytes": 92974
+      },
+      {
+        "file": "219b-mobile-gate.json",
+        "sha256": "4893537340d8083facca6b6b867301f3bf9c4fc285fde0ba736ae8440f2f7134",
+        "bytes": 38054
+      },
+      {
+        "file": "219b-mobile-gate.log",
+        "sha256": "49ee29c94588a189ab6a318ea0a994886a5a055651a5902e8727bee540d6277e",
+        "bytes": 2199
+      },
+      {
+        "file": "219b-old-event-negative.json",
+        "sha256": "9bb54a1a6b3fab7e09f32e65a3960db811ad85bca3d9d02951e440bd24bafde9",
+        "bytes": 13603
+      },
+      {
+        "file": "219b-old-event-negative.log",
+        "sha256": "616addeb0110cf65b519c17d6a70005b25aec2fc5e74694331d73f9950c6db8a",
+        "bytes": 220
+      },
+      {
+        "file": "219b-old-source-negative.json",
+        "sha256": "d87ffc22b0e288d17b2d62fe84a32a64f369d88194fcdc5d6cc6159e7bc83277",
+        "bytes": 7805
+      },
+      {
+        "file": "219b-old-source-negative.log",
+        "sha256": "390ea984e29e8225dd5dde4228b0be4d2387b55bd8bd3ccbe57d87d2ade7d537",
+        "bytes": 221
+      },
+      {
+        "file": "219b-positive-debug.log",
+        "sha256": "0baaedce92968b70c45d1bafd12907299ffb9c56b9166e8b4b7156080c43439f",
+        "bytes": 11656
+      },
+      {
+        "file": "219b-positive-trace.log",
+        "sha256": "7b3195c413b2e3d7bdda59a7bfbb13972514999907a3422aa4de49937cd0cb64",
+        "bytes": 11822
+      },
+      {
+        "file": "219b-prepare.log",
+        "sha256": "8ac760f0109c4380ccad437e3089a806496bd3e91d954f0eb23c038610fcb3bf",
+        "bytes": 2760
+      },
+      {
+        "file": "219b-source-first.json",
+        "sha256": "5dee380bdf98d4b3a28f0dfcbe1c5b1d5c0b51d1f9d9ff0fc665def7ce5b7d5b",
+        "bytes": 8457
+      },
+      {
+        "file": "219b-source-fourth-receipt.json",
+        "sha256": "4d23743a16edb0f067a6016e5ea4ac6547419a89f2eebc1c2f2882869309c907",
+        "bytes": 92974
+      },
+      {
+        "file": "219b-source-fourth.json",
+        "sha256": "942ca13228e8552dbebdda13a4aeafc5a560bd4326a48d44313407f9230f9a51",
+        "bytes": 13699
+      },
+      {
+        "file": "219b-source-second-receipt.json",
+        "sha256": "c59af13b8b3f33fcb1e59eea2494b007878899a4ff2df2451798b411834d0d22",
+        "bytes": 92974
+      },
+      {
+        "file": "219b-source-second.json",
+        "sha256": "527218b6311b8ce705dd352d982265e60b3b8edf403aeae61ecc45ab08d2c616",
+        "bytes": 19047
+      },
+      {
+        "file": "219b-source-third-receipt.json",
+        "sha256": "d008b687ed495c3aed4233be4ec045ae9562ef8a5c18c9d9d574fc117d5faad4",
+        "bytes": 92974
+      },
+      {
+        "file": "219b-source-third.json",
+        "sha256": "207e5b3424f6dc512e28b675a2885b6f07c1657d0754d3c80288edd805f730b7",
+        "bytes": 16825
+      },
+      {
+        "file": "219b-stage-connectors.log",
+        "sha256": "1a64a4714ada14c7ea057e1bb71476e2989a523450005359df2d231ffd6ac1e5",
+        "bytes": 2190
+      },
+      {
+        "file": "219b-stage-db.log",
+        "sha256": "b419851eaabd48d73cde8f39978ba339316568f5b319ee8e697151df479d15c5",
+        "bytes": 306
+      },
+      {
+        "file": "219b-stage-production.log",
+        "sha256": "ac760c4040a9fce02eb336eb85d6708b567921c14e014d48890068aa5e42bccc",
+        "bytes": 380
+      },
+      {
+        "file": "219b-trace-run.log",
+        "sha256": "e8ec3128f345475967b372515a7302653a4d7af529de610d9816e0b0c4bd4b4e",
+        "bytes": 6383
+      },
+      {
+        "file": "219b-trace2-run.log",
+        "sha256": "0542ae24b3d5fe4411e6f88b53ab067835f4ba17e2156334d411932246348efe",
+        "bytes": 6383
+      },
+      {
+        "file": "219b-trace3-run.log",
+        "sha256": "281a356df1e0952d1d83419e0686acfbe022e52e7a5d97a9064c8a711f2fc34e",
+        "bytes": 6913
+      },
+      {
+        "file": "219b-type-failed-attempt.log",
+        "sha256": "96878f264759873a797666ce781168e4d72a2ac5ff97b851535608eabb6d903d",
+        "bytes": 441
+      },
+      {
+        "file": "219b-type.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    ],
+    "scope": "Local raw reports/logs/gate script hashes retained outside worktree for cleanup survival; no hosted artifact retention claimed."
+  }
+}
