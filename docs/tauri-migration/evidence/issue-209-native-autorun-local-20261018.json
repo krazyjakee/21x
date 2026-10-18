@@ -1,0 +1,460 @@
+{
+  "issue": 209,
+  "title": "Native window AutoRun original cohort and exact-target Source start ownership",
+  "sourceRevision": "d00886db38587103f1b978ab9e32e298ad1adcb7",
+  "verifiedBase": "1b200ae8f16dc6608cfa601066cc8ea7a3f81190",
+  "recordedAt": "2026-10-18T05:03:54.063958+00:00",
+  "scope": {
+    "renderer": "Actual typed native facade/transport, real scheduler/agent/project stores, AutoRun hook and finite canonical task/event/start responses. No Electron preload in new controls.",
+    "source": "Four separate actual portable SQLite/ProductionAgentBackend/AgentManager/FakeAdapter controls for null-agent triage, durable queue, acknowledged Stop and exhausted Source-owned retries. Existing actual Root/private-peer and2 staged stdio entries run independently. These are not a joined installed WebView/provider graph.",
+    "platform": "Linux x64. No native/source operation/grant or browser/viewer/voice availability change."
+  },
+  "expectedActual": [
+    {
+      "expected": "Window AutoRun owns only original selection and future requests.",
+      "actual": "Captures document/connection/current view/project/task/agent/family/default-agent binding before delay/read; synchronous event withdrawal and enable generation fence changes, including project/move return. Pagehide/unmount/reconnect/disable retire listeners/timers; explicit new enable joins preceding client receipt."
+    },
+    {
+      "expected": "Use retained exact-target automatic start without explicit-user recovery overrides.",
+      "actual": "Calls agentSession.start(agentId,taskId), never startTask, workspace override or skipInitialPrompt. Source triage/manual Stop/retry/caps/FIFO/group mapping remain authoritative. No runtime status/assignment/session/parent-completion prewrite and no queued/nonqueued local session fabrication."
+    },
+    {
+      "expected": "No automatic UI replay or hidden unbounded work.",
+      "actual": "Serializes starts;4096 cause keys/4096 refused IDs,64 queued selections,262144 bytes per selection and2097152 queued binding bytes. Fresh-read refusal cannot become a parent start. Metadata churn/rescan cannot retry unknown cause; queue failure uses fixed review. Source heartbeat remains observation-only."
+    },
+    {
+      "expected": "Source owns durable recovery independently of the renderer.",
+      "actual": "Real Source classifies unassigned exact start as triage; persists queue with empty session receipt; refuses cancelled and terminal-failed recovery before another adapter creation or task write. Retry proof advances controlled clock through actual Source drain/retry budget before terminal refusal. Electron hooks preserve established behavior."
+    }
+  ],
+  "negativeProof": {
+    "revision": "1b200ae8f16dc6608cfa601066cc8ea7a3f81190",
+    "command": "pnpm test:run --project renderer src/renderer/src/hooks/native-agent-auto-start.test.tsx",
+    "rawExitCode": 1,
+    "failed": 8,
+    "passed": 3,
+    "scope": "Initial11 typed native controls with no preload; historical unchanged Electron Vitest launcher. Final published gates use pinned standalone Node.",
+    "log": {
+      "sha256": "df02a0e5e6abe587e5bd97b3589de96f2f2c4663486cf18f0329f7537de48ee0",
+      "bytes": 6289
+    }
+  },
+  "failureRepair": [
+    {
+      "failure": "First forced typecheck found optional IPC unsubscribe returns and a nonexistent heartbeat role in new fixture.",
+      "rawExitCode": 2,
+      "log": {
+        "sha256": "02ce038cc65e9ced58ee129a506e7d82ee1c97d4894626d7e08c33232e4808aa",
+        "bytes": 938
+      },
+      "repair": "Retain only actual unsubscribe functions; valid heartbeat_enabled fixture plus native scheduler exclusion. Shared TaskRole unchanged."
+    },
+    {
+      "failure": "Full renderer2151pass/1fail: existing native heartbeat positive assumed the now-forbidden triage prewrite and fabricated session.",
+      "rawExitCode": 1,
+      "log": {
+        "sha256": "595ce775bc36a6c825a8e854c3b2c6b4d85f3fc9438be97d7d8eb93beab75827",
+        "bytes": 1151068
+      },
+      "repair": "Keep strict no-heartbeat-transition assertions; establish positive session through actual typed canonical Source status and compare fresh-read baselines. No runtime assertion/deadline weakened."
+    },
+    {
+      "failure": "Own interval declaration violated prefer-const.",
+      "rawExitCode": 1,
+      "log": {
+        "sha256": "6dbe5ed902143538fc887340422e3383ea59d47917fb327ef7c761fed2b6b3a0",
+        "bytes": 197
+      },
+      "repair": "Declare owned interval before registering listeners; retains synchronous retirement cleanup. Earlier convenience preflight ended with cat status and is not counted as a gate; direct raw negative captured separately."
+    },
+    {
+      "failure": "New Source fixture assumed one provider startup failure was terminal; actual Source correctly scheduled its retry.",
+      "rawExitCode": 1,
+      "log": {
+        "sha256": "9531fd72ff16aed75d5665354dab71df967ecfb9382c94cc82d38a6ac47da55c",
+        "bytes": 3058
+      },
+      "repair": "Exercise actual retry/drain budget before asserting terminal failed recovery; no policy change."
+    },
+    {
+      "failure": "Own retry fixture added1 to public ISO nextRetryAt, generating invalid controlled clock and one unhandled fixture rejection.",
+      "rawExitCode": 1,
+      "log": {
+        "sha256": "f20c901b85cf9d146fb9459fe416bcab123e8b40c3b0a0ae0971f6d429d8a09e",
+        "bytes": 4692
+      },
+      "repair": "Parse existing ISO receipt with Date.parse before advancing clock; final4 Source controls and full combined gates have zero errors/skips."
+    }
+  ],
+  "sourceFocused": {
+    "rawExitCode": 0,
+    "passed": 4,
+    "skipped": 0,
+    "log": {
+      "sha256": "a4c0a7c3193bff65b0a96881515552ab32a4a70f07c7c18a376c9111bf85e4e4",
+      "bytes": 2076
+    },
+    "receipt": {
+      "artifact": {
+        "sha256": "1375ab9fa5a4d7855e7b890391a1b26f7654c7c52a5bce165a12c1ac725ff09b",
+        "bytes": 94681
+      },
+      "revision": "1b200ae8f16dc6608cfa601066cc8ea7a3f81190",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": false
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 579,
+      "actualExecution": [
+        "1 file/4 passed/0 skipped"
+      ],
+      "note": "Caller-filtered eligible graph is not claimed executed. No installed UI/provider proof."
+    }
+  },
+  "checks": [
+    {
+      "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "rtk proxy pnpm test:host-neutral:audit",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "3b43fa9b44a3a218b05345265f094a2f0d1b7d54021fc80333d4fdb2e2e7e111",
+        "bytes": 165
+      }
+    },
+    {
+      "command": "rtk proxy node scripts/tauri-stage-production.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b1b849f262a2ba4e0fade89907869fe052d54e31aa78c454e8273113853f255e",
+        "bytes": 267
+      }
+    },
+    {
+      "command": "rtk proxy pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --project=renderer --run-receipt=/tmp/ea209-native-autorun-release-renderer-receipt.json",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b18fa52fa8b6ce967871b247c976430eeafedb62dff6221b64c5a8de958b511c",
+        "bytes": 1145876
+      }
+    },
+    {
+      "command": "rtk proxy pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-native-autorun-release-affected-receipt.json src/renderer/src/hooks/native-agent-auto-start.test.tsx src/renderer/src/hooks/use-agent-auto-start.test.tsx src/renderer/src/hooks/native-task-feedback.test.tsx src/renderer/src/hooks/native-task-completion.test.tsx src/renderer/src/hooks/use-task-completion.test.tsx src/renderer/src/hooks/use-agent-session.test.tsx src/renderer/src/components/tasks/FeedbackDialog.test.tsx src/renderer/src/components/tasks/native-task-crud.test.tsx src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/canvas/TaskPanelContent.test.tsx src/renderer/src/components/dashboard/task-board-transition.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/production-agent-automatic-start.test.ts src/service/production-agent-backend.test.ts src/service/task-lifecycle-backend.test.ts src/service/production-desktop-bindings.test.ts src/service/production-mobile.test.ts src/service/production-task-feedback-acceptance.test.ts src/main/database-attachment-retention.test.ts src/shared/task-lifecycle-codecs.test.ts scripts/production-service-proof.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "669aa582707c37c37fd94eb9959faa68ea5370aa4b6f37d8e3f48bf20332bfed",
+        "bytes": 624766
+      }
+    },
+    {
+      "command": "rtk proxy pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-native-autorun-release-directory-receipt.json src/main/task-attachment-file-owner.test.ts src/main/task-attachment-journal.test.ts src/service/production-owner.test.ts src/service/task-attachment-backend.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "19517abb35e57ee8dccf9c234705cb12ea4c699c412395757b6597f400a106f4",
+        "bytes": 119311
+      }
+    },
+    {
+      "command": "rtk proxy pnpm lint",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+        "bytes": 16719
+      }
+    },
+    {
+      "command": "rtk proxy pnpm exec vite build --config vite.tauri-production.config.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "a180ba1993d7d0a3f1360ead0c405f2dea44e6c7dd2273ad6f5d1f3e2ef4feb8",
+        "bytes": 9606
+      }
+    },
+    {
+      "command": "rtk proxy pnpm build",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "19c3f3c29f4aec5663812113abf386eba5fe7b94ab76846ee29534a14a5c3949",
+        "bytes": 29337
+      }
+    },
+    {
+      "command": "rtk proxy node scripts/tauri-inventory.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "98a8301e15a6ceaea4de6c4c5a9a5c668cd211d73179aa3530bdae9bed374555",
+        "bytes": 88
+      }
+    },
+    {
+      "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      }
+    },
+    {
+      "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "75066ea7702d50a5cb50d1c553f0ee20a814fd50dfcceb1e7d856e149c632848",
+        "bytes": 91
+      }
+    },
+    {
+      "command": "rtk proxy git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    }
+  ],
+  "runReceipts": {
+    "renderer": {
+      "artifact": {
+        "sha256": "29deba9cf60ebb797343c66a97e87aae5b09e65107a1ae3cd2f5e7d3fb2c4dcb",
+        "bytes": 94724
+      },
+      "revision": "1b200ae8f16dc6608cfa601066cc8ea7a3f81190",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 581,
+      "actualExecution": [
+        "Test Files  161 passed (161)",
+        "Tests  2152 passed (2152)"
+      ],
+      "note": "Caller-filtered eligible graph is not claimed executed. No installed UI/provider proof."
+    },
+    "affected": {
+      "artifact": {
+        "sha256": "a9ed885d9609df4c81bbd5e022dab8f23c5fd4681b58b8aa43c3caea901cea38",
+        "bytes": 94724
+      },
+      "revision": "1b200ae8f16dc6608cfa601066cc8ea7a3f81190",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 581,
+      "actualExecution": [
+        "Test Files  25 passed (25)",
+        "Tests  655 passed (655)"
+      ],
+      "note": "Caller-filtered eligible graph is not claimed executed. No installed UI/provider proof."
+    },
+    "directory": {
+      "artifact": {
+        "sha256": "00eeb2efd7ce7a5a1344202b96b79a74ec9fbd26dc430751d43c25a4916976ac",
+        "bytes": 94724
+      },
+      "revision": "1b200ae8f16dc6608cfa601066cc8ea7a3f81190",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 581,
+      "actualExecution": [
+        "Test Files  4 passed (4)",
+        "Tests  153 passed (153)"
+      ],
+      "note": "Caller-filtered eligible graph is not claimed executed. No installed UI/provider proof."
+    }
+  },
+  "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+  "normalSourceHooks": {
+    "rawExitCode": 0,
+    "commands": [
+      "eslint --no-warn-ignored via lint-staged",
+      "pnpm typecheck (tsc --build --noEmit)"
+    ],
+    "verifiedRuntimeTestInputsUnchanged": 4
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "application": "0.0.161",
+    "pnpmActual": "9.15.9",
+    "pnpmDeclared": "9.15.2",
+    "nodePinned": "22.23.2",
+    "nodeAbi": "127",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3",
+    "pty": "1.1.0",
+    "electronLegacy": "44.0.0",
+    "databaseSchema": 37
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "a86b9bf2f6d21fe0f0d5fa16e96bd4bd1bbef21ccec8dd5f424eb545fafc47ed",
+      "bytes": 123874
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "38186282c3074d272946050f84c2586fe706584a056bb84005ac9c5a646cef29",
+      "bytes": 52440
+    },
+    "src/renderer/src/hooks/native-agent-auto-start.test.tsx": {
+      "sha256": "4ec2f6b352752d4de7fec82283d878074e01c59512391757455ffd797eda1d23",
+      "bytes": 14647
+    },
+    "src/renderer/src/hooks/use-agent-auto-start.ts": {
+      "sha256": "3ac986d26c1f7a34b048b3ab9a8cfa096b027fe4c5e87c8c6c2fc17c3381612d",
+      "bytes": 30805
+    },
+    "src/renderer/src/stores/native-agent-activity.test.ts": {
+      "sha256": "d5b95623f614dfc0aa9f134ce2f4495dfada93c83c9f9b351aa7003aa02c1025",
+      "bytes": 35728
+    },
+    "src/service/production-agent-automatic-start.test.ts": {
+      "sha256": "63a5bd91c4ff5fa2dbcf37dde16638e18c7a51810e02c8d397f2c6399eeb1e0a",
+      "bytes": 6167
+    },
+    "src/service/production-agent-backend.ts": {
+      "sha256": "42f7c4dfd30ca0c396b0310d0cfb96f6f5e881e56f1f61ba7d286ea103695d33",
+      "bytes": 29728
+    },
+    "src/service/production-agent-backend.test.ts": {
+      "sha256": "9829d4f38cd8aca6d05a21817f0bfa1c758a0d443b2253e2bbdbf7d272c66b0f",
+      "bytes": 20702
+    },
+    "src/main/agent-manager-core.ts": {
+      "sha256": "66747e8226bc0c165853568180db61455b5487e7ac8dfa1ff662d7cc88a9b241",
+      "bytes": 377494
+    },
+    "src/main/agent-manager/session-config-core.ts": {
+      "sha256": "1ac010e5b578a28c27c39e84644e3d0048eee8b0c1f905ec915fd68a81d7e60a",
+      "bytes": 12983
+    },
+    "src/main/sessions/start-queue-store.ts": {
+      "sha256": "edc3de46ec223a0d736dde0c2131023de7988ff8e7e3e464c247b69938d591b1",
+      "bytes": 19509
+    },
+    "src/renderer/src/lib/desktop-api.ts": {
+      "sha256": "33701eb869e1d8d2a0d732b58aa17fba11127fa419c5a07c8d2b9c12fadf1b85",
+      "bytes": 3575
+    },
+    "src/renderer/src/lib/ipc-client.ts": {
+      "sha256": "175ce8cb94e656e32e32bb05db6cafc04b7000d1d1ba05cd7f1f439370742b33",
+      "bytes": 47554
+    },
+    "src/renderer/src/stores/agent-store.ts": {
+      "sha256": "a0ac8114aa702020107acafc0ee400cd6a3f78f979e75206532ec3f7f6528884",
+      "bytes": 22928
+    },
+    "src/renderer/src/stores/agent-scheduler-store.ts": {
+      "sha256": "7d23842a27c296be175960bde5a041dada0f9677f9eab0f80deb774afb7664c3",
+      "bytes": 2512
+    },
+    "test/helpers/fake-adapter.ts": {
+      "sha256": "4a7ac1e430fd1b87014590966a92ed8c66d74335e3219713759bbf36016c4e29",
+      "bytes": 4487
+    },
+    "test/helpers/portable-db-test-helper.ts": {
+      "sha256": "b61d4701da77211029efc5dedae3f56f6b80f29a311b1981d11817ab93520549",
+      "bytes": 1148
+    },
+    "src/main/database/schema.ts": {
+      "sha256": "fd868bb21bedc5e891448f5e4d429d2cbe5bd9f037ef01f5863e122252a6611c",
+      "bytes": 69020
+    }
+  },
+  "artifactHashes": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "22a5166dfed627ee0a140463fe0a10226cb1a68671b144bc2191fc45ed057acb",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "3c751b4664b69ac0244f644368694eb60a8757b4c90abe5ea50fe8e607500906",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "9f0f7f9dbf765ce325360f58a59dc499f3a67c31514593b4259fa0525877876c",
+      "bytes": 6292310
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/database-stdio.mjs": {
+      "sha256": "30aba17476531dfd4cd519d65282578cfcccfde53f19427cc3057d8026cafc68",
+      "bytes": 1741
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "remaining": [
+    "Full board drag/view receipts remain next Source-ready renderer work. Exact-root Fresh remains unavailable.",
+    "Real-provider triage/post-Stop recovery, installed supported-platform window/hide/reload/crash/shutdown/input and202/208 prerequisites remain open.",
+    "Renderer disposal cannot undo admitted raw Source work or acknowledged queues. No UI cancellation/rollback/automatic replay promise.",
+    "Window toggle is not a Source background setting; existing automation/schedulers remain separate. Optional viewer/native voice unavailable, hosted voice deferred; directory authority Linux-only."
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "sourceExactRunLookup": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "issueClosure": {
+    "state": "OPEN",
+    "wholeCriterionNewlyTicked": false
+  },
+  "authorizationLimits": "Synthetic profiles/controlled FakeAdapter/clock only. No real providers/accounts/microphone/live data/release/cutover/Electron retirement/identity decision."
+}
