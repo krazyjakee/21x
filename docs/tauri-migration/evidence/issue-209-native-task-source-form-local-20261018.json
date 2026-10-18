@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-18T00:08:24.718791+00:00",
+  "implementationRevision": "93d658bc75696bade5df96f81d294da9fefd6f99",
+  "verificationRevision": "93d658bc75696bade5df96f81d294da9fefd6f99",
+  "preRebaseVerificationRevision": "4d1b68ea",
+  "baseRevision": "26767e231bf3c11a515beae480cf81ccd058ccb9",
+  "inheritedRebase": "7d9b03b3 (E2 JSON evidence only; exact renderer/config/inventory/domain hashes unchanged)",
+  "scope": "Actual task-source configuration receipt/project/dialog lifecycle, plugin metadata selection/recovery/disposal, exact store sync readback and honest unavailable native general HubSpot/Linear OAuth. No Source/native/public DTO/grant/identity change.",
+  "fixture": {
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1,
+    "description": "Actual typed NativeDesktopHost/client/codecs/transport, real stores, IntegrationsSettings/TaskSourceFormDialog/LinearConfigForm/HubSpotConfigForm/OAuthDialog. Controlled finite synthetic native invokes; Electron preload absent. Unrelated MCP global CLI panel mocked only; legacy form fixtures acknowledge async accepted receipts. No actual Source SQLite, OAuth provider, browser/token/store/device process effect."
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "expectedActual": [
+    {
+      "expected": "Save only closes on accepted receipt for exact project/dialog and never retries uncertain write.",
+      "actual": "Actual accepted create/update, refused/missing receipt, frozen fields, duplicate submit, canonical refresh and replacement draft controls pass; retained draft requires explicit close/review. Project change+return fences synchronously; connection replacement does not replay."
+    },
+    {
+      "expected": "Native general OAuth does not claim unavailable authority or refresh bearer data on mount/recovery.",
+      "actual": "Both provider forms disable Browser sign-in; direct OAuth dialogs show unavailable before starting flows or public callback registration. Integration row status is unavailable/unknown rather than connected/disconnected. No general OAuth handler, global browser/custom scheme or connector grant enabled. Explicit Source sync still uses existing guarded owner."
+    },
+    {
+      "expected": "Selected metadata and explicit sync retain exact observation lifetime.",
+      "actual": "Old plugin documentation cannot overwrite a new selection. Pagehide retires metadata observers/read publication, refuses submit and prevents reconnect refetch. Explicit sync causes one store-owned task readback instead of redundant UI task fetch. Three accepted-current CRUD controls clear prior failures."
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "rendererPassed": 1918,
+    "rendererFiles": 157,
+    "stagedPassed": 77,
+    "stagedFiles": 4,
+    "skipped": 0,
+    "actualTypedNativeControls": 57,
+    "newTypedNativeControls": 19,
+    "legacyStoreControls": 17,
+    "legacyFormControls": 3,
+    "typecheck": "forced build noEmit pass plus normal source hooks",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "bothFrontends": "pass",
+    "inventory": {
+      "files": 916,
+      "ipcOperations": 736,
+      "existingUnresolved": 9,
+      "change": "Renderer guarded-access/call coordinates and removed redundant optional access; retained Source rows/grants unchanged."
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "728cbb28d61ae4e8c0d437120901aa2e980126044375b3993b30372ee3da3ecc",
+          "bytes": 1125323
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/stores/native-resource-catalog-recovery.test.tsx src/renderer/src/components/settings/forms/TaskSourceFormDialog.test.tsx src/renderer/src/stores/mcp-store.test.ts src/renderer/src/stores/task-source-store.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "f0fa8c19dcc2f26972d38413611199bb0abf15d34be770d564145be3f71da190",
+          "bytes": 1612
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "dd59b4bc02aaba649e21181e6ae25ab037d48c761f6805f78d5b2bbae3a3385d",
+          "bytes": 29170
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "660b6c994eadf5045167ae565e5f1a319b98d076ddf5d52d5f46dbb1da28ec4b",
+          "bytes": 9737
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e456209d7f5b6d3b4118d87f0927372e9df96c2fa432dcb7794cdb35efd0fb06",
+          "bytes": 91
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy git diff --check",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    ]
+  },
+  "failureRepair": [
+    {
+      "failure": "Initial actual-component fixtures used Notion api_token or HubSpot auth_type in Linear records, and empty required client fields. Native finite codecs/HTML validation correctly refused; eight tests failed.",
+      "repair": "Use exact plugin-specific masked public records and synthetic required fields; wait for list before editing. No validator/requirement weakened."
+    },
+    {
+      "failure": "Old-source negative seven focused component controls fail: lost refused/project-replaced draft, stale documentation and unavailable provider/dialog policy.",
+      "repair": "Repaired actual components pass all57 native controls; negative filter intentionally selects7 (50 existing tests deselected), no full-suite skip claim.",
+      "negativeLog": {
+        "sha256": "073e7fee17e51a855c93e18d38457dd222f2244adcf4daff9f8516781d48441d",
+        "bytes": 88675
+      }
+    },
+    {
+      "failure": "Full gate inventory check exits1 after own renderer coordinates changed; contracts step not reached in set-e gate.",
+      "repair": "Obtained B219 inventory release, claimed/regenerated exactly changed renderer metadata, verified fresh916 and explicit contracts before source commit. No runtime operation/grant added.",
+      "initialInventoryLog": {
+        "sha256": "6535390137fb2114dc149f1f3da11b842db3852e26d4e0d6b548b601d583a45c",
+        "bytes": 94
+      }
+    }
+  ],
+  "sourceHashes": {
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "7193bb7e2e09339b7b338bf36723dad9824efb38d1a2dae8ad89e6fd7dd9e2c0",
+      "bytes": 380154
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "2941665fb0aacc8dc2add2e87802cf76850d59c8b97c6eaf07a7820ef652efdc",
+      "bytes": 27478
+    },
+    "src/renderer/src/components/oauth/OAuthDialog.tsx": {
+      "sha256": "5014daeca9cc8b14024e9c308592fbf8a6d079c0d507f22f68759ab8dc1eac26",
+      "bytes": 6120
+    },
+    "src/renderer/src/components/plugins/HubSpotConfigForm.tsx": {
+      "sha256": "b65f333e8bb38c6ae62ae00482e1a5900bf907e9dce639e663e797ac076cdd0e",
+      "bytes": 11999
+    },
+    "src/renderer/src/components/plugins/LinearConfigForm.tsx": {
+      "sha256": "8097db1821ea7d079a67a1fd9d9aca1e197e36c8607adfbbe62dd21afd7f0913",
+      "bytes": 7494
+    },
+    "src/renderer/src/components/settings/forms/TaskSourceFormDialog.test.tsx": {
+      "sha256": "e4359d07d6a39564aac7692e426f6d68012c0de08ced4998bfd1a6c3d1dff4a5",
+      "bytes": 3514
+    },
+    "src/renderer/src/components/settings/forms/TaskSourceFormDialog.tsx": {
+      "sha256": "e824d352d7765120917a7541867469d39b578450a922bb7b4d6734af027d6c78",
+      "bytes": 8624
+    },
+    "src/renderer/src/components/settings/tabs/IntegrationsSettings.tsx": {
+      "sha256": "092ee7f21c3352cc8ac7b6ec6d579c70258412c0ceefbd064b8de1afde254987",
+      "bytes": 11580
+    },
+    "src/renderer/src/stores/native-resource-catalog-recovery.test.tsx": {
+      "sha256": "e4df13b0679b7b4ad8efd4093f4ee7410a56e053d289a94e961d22cc787e1b65",
+      "bytes": 39057
+    },
+    "src/renderer/src/stores/task-source-store.ts": {
+      "sha256": "383ea9b317af7a3b89d3ec9cadfc01caac00f43d6d3ee28fffdff6d1b19d22c9",
+      "bytes": 7191
+    },
+    "vitest.tauri.config.ts": {
+      "sha256": "9b53038a84b034a8a87ca3694b4676350e5275e551ce08472b45cce4812e605f",
+      "bytes": 13591
+    }
+  },
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "sourceRunLookup": [],
+    "settingsOrDispatchUsed": false
+  },
+  "remainingDefects": [
+    "Native ordinary-task/draft Drop receipt UI still awaits renderer activation; E2 protocol44270289 is inherited but controlled OS proof is not installed full Source/UI acceptance.",
+    "Full-array attachment lost-update is now reproduced by E2 on actual Source. Lead assigned full backend/codec/native/generated fix to E2; A will capture exact full canonical baseline in UI after publication. No CAS/atomic append claim in this slice.",
+    "Protected unreferenced-copy journaling and durable mutation receipt reconciliation remain open.",
+    "Installed supported-platform UI lifecycle, unavailable global shortcuts/login/voice and #202 prerequisite remain open.",
+    "General HubSpot/Linear OAuth remains unavailable until real public domain/native authority exists; separate captured connector path does not satisfy it."
+  ],
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  },
+  "constraints": {
+    "syntheticOnly": true,
+    "liveProfiles": false,
+    "liveProviders": false,
+    "microphone": false,
+    "liveRelease": false,
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred",
+    "identityDecision": false,
+    "masterToMainMerge": false
+  }
+}
