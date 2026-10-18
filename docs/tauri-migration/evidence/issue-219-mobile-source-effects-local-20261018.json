@@ -1,0 +1,694 @@
+{
+  "version": 1,
+  "issue": 219,
+  "recordedAt": "2026-10-18T00:56:50.815793+00:00",
+  "implementationRevision": "a8b01ede338dca3ffaf1b3108aee74364a04dc16",
+  "baseRevision": "9439571c752a7078cb38abef53d59d55d8d5f29d",
+  "previousEvidence": "issue-219-production-mobile-local-20261018.json",
+  "fixture": {
+    "profile": "isolated synthetic protected profile; real schema37 SQLite and profile lease; in-memory synthetic OS-key-store boundary; no live ~/.config/21x data",
+    "paths": "temporary profile/workspace/attachment/resource roots, removed after acknowledged teardown",
+    "network": "All continuation controls use physical loopback sockets only; inherited LAN-policy fixtures retain the explicit loopback listen boundary. No LAN/device/public tunnel.",
+    "providers": "actual PiAdapter with controlled local RPC process, isolated HOME/PI_CODING_AGENT_DIR and empty PATH; no live provider session/account/API key",
+    "native": "readiness/drain acknowledged at synthetic host boundary; no native/media/capture/identity availability changes",
+    "mobileClient": "actual HTTP/WebSocket modules; fetch/socket constructor boundaries in DOM controls, no desktop bridge"
+  },
+  "versions": {
+    "os": "Linux",
+    "kernel": "6.8.0-139-generic",
+    "architecture": "x86_64",
+    "webview": null,
+    "webviewReason": "No installed GUI/browser proof; DOM client controls use happy-dom and socket constructor boundary",
+    "hostNode": "v22.22.0",
+    "bundledNode": "v22.23.2",
+    "pnpm": "9.15.9",
+    "schema": 37,
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "better-sqlite3": "13.0.3",
+    "ws": "8.19.0",
+    "vite": "6.4.1"
+  },
+  "sourceFiles": [
+    {
+      "path": "src/main/mobile-api-server.ts",
+      "sha256": "b629418e564b5ac893cc7be8f2992d1197e928628dfca809f5247231bdcef92c"
+    },
+    {
+      "path": "src/service/production-mobile-actions.ts",
+      "sha256": "d8e96bb2843435d566007a6262a36dfa06b7b0e52160a995c492a164b3d4efb9"
+    },
+    {
+      "path": "src/service/production-mobile.test.ts",
+      "sha256": "cb5e2d5e6e91bb3a42e239ec7306663285dc206e5ea3109791cfc5441ae4cb8b"
+    },
+    {
+      "path": "src/service/production-owner.ts",
+      "sha256": "92a114c8e1983613c77f759fc48dd8c6eb3bd4065e1df80634d1804773239158"
+    },
+    {
+      "path": "docs/tauri-migration/mobile-production.md",
+      "sha256": "ab120de6d8aa9b5d9f3321bab749f230ade4d3ca2bbcc9ecf1cd28a2e251f4cf"
+    },
+    {
+      "path": "docs/tauri-migration/inventory.json",
+      "sha256": "e5b9966fd7d59e8d6136bb22fdca3203e1ad2c281311b7d2fbfa9c01b55bc195"
+    },
+    {
+      "path": "docs/tauri-migration/operations.json",
+      "sha256": "23e45fcb80d5c633e73f718b94045014c8c5e841ff7fc0598affb31374e807c2"
+    },
+    {
+      "path": "docs/tauri-migration/implementation-status.md",
+      "sha256": "1859227c6cb031fb826f1ce6b2c5b17c1efe5d3ed6a5e3517865917c3ce12707"
+    },
+    {
+      "path": "src/service/task-source-backend.ts",
+      "sha256": "cdf3784d5c934a0a0aab45b0d21c18caeb5e478f5be4bedcb438099008fa33d0"
+    },
+    {
+      "path": "src/service/task-source-plugin-backend.ts",
+      "sha256": "9e3e32f837dc1d4b9696d7acda69e7bafcc6d6357f72f87e634e1fc96485c0ca"
+    },
+    {
+      "path": "src/service/task-lifecycle-backend.ts",
+      "sha256": "9795dd846afbe1a66e8e7c3396710a7849625a449bb716058621d446be3d548e"
+    },
+    {
+      "path": "src/shared/task-source-codecs.ts",
+      "sha256": "157ea02fdbf0db7970131aecc2986a2d44dba01d0563dd4a2c6da837030212ec"
+    },
+    {
+      "path": "src/shared/task-source-plugin-codecs.ts",
+      "sha256": "594a9cc6d7872dfb3e8286ce6376098d6b53498eaed004fbb63993d04b2b2041"
+    },
+    {
+      "path": "src/main/agent-manager-core.ts",
+      "sha256": "b04df7c7bd2b80a5a4cfaa03d3f4e945159808ee20d872b3475c05e90f27d550"
+    },
+    {
+      "path": "src/main/agent-manager/attachments.ts",
+      "sha256": "b0d7b6d445987a6f72d4f9eefdfdaa5e27f403851e3213fe496f1d164afde8d5"
+    },
+    {
+      "path": "src/service/task-attachment-backend.ts",
+      "sha256": "58d3daf2a71f14a82b068fdf420b4d04c566a50f507f074c7c0dbb8b986479bf"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "src-tauri/resources/node/node",
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    },
+    {
+      "path": "src-tauri/resources/native/twentyonex-credential-key",
+      "sha256": "b69a2bbe3fc7fdac5388ce5b0a673791dc09988ec079e2e9b68ef765e2826c83",
+      "bytes": 25759896
+    },
+    {
+      "path": "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json",
+      "sha256": "e2dd38f13a885c79b6dd4f7c5a986369669da314e6a7caa0b748e12e87faa8f3",
+      "bytes": 1263999
+    },
+    {
+      "path": "src-tauri/resources/service/production-engine.mjs",
+      "sha256": "464faa7cbf6213dde85db33e89760acd832a14cb9f19692845e4579ac1fa4fd4",
+      "bytes": 6227870
+    },
+    {
+      "path": "src-tauri/resources/service/production-stdio.mjs",
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    {
+      "path": "src-tauri/resources/service/production-task-mcp.mjs",
+      "sha256": "204909046a269c83e3eb099aaac8879d32adfad766f95b9db50de3de7211abb0",
+      "bytes": 755160
+    },
+    {
+      "path": "src-tauri/resources/mobile/index.html",
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    }
+  ],
+  "commands": [
+    {
+      "name": "typecheck",
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exit": 0,
+      "seconds": 39.16,
+      "log": "/tmp/219-sources-final-gate-typecheck.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lint",
+      "command": [
+        "pnpm",
+        "lint"
+      ],
+      "exit": 0,
+      "seconds": 21.97,
+      "log": "/tmp/219-sources-final-gate-lint.log",
+      "logSha256": "28e8774bf303a0285cfab40ab5b5bdf6c4664b1be696f37447738cfb769ff4c7"
+    },
+    {
+      "name": "app",
+      "command": [
+        "pnpm",
+        "test:run",
+        "--project",
+        "main",
+        "src/service/production-mobile.test.ts",
+        "src/service/mobile-backend.test.ts",
+        "src/main/mobile-api-server.test.ts",
+        "src/main/mobile-api-lifetime.test.ts",
+        "src/main/tunnel-manager-core.test.ts",
+        "src/service/task-lifecycle-backend.test.ts",
+        "src/service/project-configuration-backend.test.ts",
+        "src/service/task-attachment-metadata-conflict.test.ts",
+        "src/shared/task-lifecycle-codecs.test.ts",
+        "src/service/task-source-backend.test.ts",
+        "src/service/task-source-plugin-backend.test.ts",
+        "src/shared/task-source-codecs.test.ts",
+        "src/shared/task-source-plugin-codecs.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/219-sources-final-app-gate.json"
+      ],
+      "exit": 0,
+      "seconds": 14.2,
+      "log": "/tmp/219-sources-final-gate-app.log",
+      "logSha256": "16ba9d77833daba489f746cd4792977b47055e90126db64658500b28ec0eb7e6"
+    },
+    {
+      "name": "mobile",
+      "command": [
+        "pnpm",
+        "test:run",
+        "--project",
+        "mobile",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/219-sources-final-mobile-gate.json"
+      ],
+      "exit": 0,
+      "seconds": 2.13,
+      "log": "/tmp/219-sources-final-gate-mobile.log",
+      "logSha256": "fb1f7e97495f018694caf0f7121cca693e38f15e61a0b4f64f24cecb6331f337"
+    },
+    {
+      "name": "production-stage",
+      "command": [
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exit": 0,
+      "seconds": 20.44,
+      "log": "/tmp/219-sources-final-gate-production-stage.log",
+      "logSha256": "b53d7b5cb41e354da4474bf6c05dff0e3015ee1f5017444f2463a19b2d4852dd"
+    },
+    {
+      "name": "node",
+      "command": [
+        "pnpm",
+        "test:tauri",
+        "--production-proofs",
+        "src/service/production-mobile.test.ts",
+        "src/service/mobile-backend.test.ts",
+        "src/main/mobile-api-server.test.ts",
+        "src/main/mobile-api-lifetime.test.ts",
+        "src/main/tunnel-manager-core.test.ts",
+        "src/service/task-lifecycle-backend.test.ts",
+        "src/service/project-configuration-backend.test.ts",
+        "src/service/task-attachment-metadata-conflict.test.ts",
+        "src/shared/task-lifecycle-codecs.test.ts",
+        "src/service/task-source-backend.test.ts",
+        "src/service/task-source-plugin-backend.test.ts",
+        "src/shared/task-source-codecs.test.ts",
+        "src/shared/task-source-plugin-codecs.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/219-sources-final-node-gate.json"
+      ],
+      "exit": 0,
+      "seconds": 51.51,
+      "log": "/tmp/219-sources-final-gate-node.log",
+      "logSha256": "7fad6e6891f61d3de57d329f68f525291055f390d1f61e7e3907732ce50647ec"
+    },
+    {
+      "name": "entry",
+      "command": [
+        "pnpm",
+        "test:tauri",
+        "--production-proofs",
+        "scripts/production-service-proof.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/219-sources-final-entry-gate.json"
+      ],
+      "exit": 0,
+      "seconds": 4.0,
+      "log": "/tmp/219-sources-final-gate-entry.log",
+      "logSha256": "7dd5e2e94824a1676e92cf45c77a267c10335453d6ed5aae3270f7616b1aa139"
+    },
+    {
+      "name": "contracts",
+      "command": [
+        "pnpm",
+        "test:run",
+        "--project",
+        "main",
+        "scripts/tauri-contracts.test.ts",
+        "scripts/tauri-stage-production.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/219-sources-final-contracts-gate.json"
+      ],
+      "exit": 0,
+      "seconds": 1.17,
+      "log": "/tmp/219-sources-final-gate-contracts.log",
+      "logSha256": "83430065739360853bd862ae87b0f2387475143cbad3ea67db44fa0989498f94"
+    },
+    {
+      "name": "mobile-build",
+      "command": [
+        "pnpm",
+        "build:mobile"
+      ],
+      "exit": 0,
+      "seconds": 10.44,
+      "log": "/tmp/219-sources-final-gate-mobile-build.log",
+      "logSha256": "2f5a6a89a558b86cbee510ef735649c2facaa8c0f2aefa69242d672b44572ef6"
+    },
+    {
+      "name": "frontend",
+      "command": [
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exit": 0,
+      "seconds": 0.87,
+      "log": "/tmp/219-sources-final-gate-frontend.log",
+      "logSha256": "98fd7295f2b1c801261af3b57465ee8d7da4f15f56e47bff4b3cec9ca9ab46a5"
+    },
+    {
+      "name": "production-frontend",
+      "command": [
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exit": 0,
+      "seconds": 13.41,
+      "log": "/tmp/219-sources-final-gate-production-frontend.log",
+      "logSha256": "837bc15b36fe44578068c5f9b735bb87a30eb7e743239d10fbc0d2cab4bd31b4"
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "pnpm",
+        "tauri:inventory",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 4.51,
+      "log": "/tmp/219-sources-final-gate-inventory.log",
+      "logSha256": "877254dfc535c66d676eb6ed9e39fafceede55334ffc6f5cc5357207c243d053"
+    },
+    {
+      "name": "contracts-freshness",
+      "command": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 4.24,
+      "log": "/tmp/219-sources-final-gate-contracts-freshness.log",
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    {
+      "name": "diff",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 0.04,
+      "log": "/tmp/219-sources-final-gate-diff.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "error-wording-stage",
+      "command": [
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exit": 0,
+      "seconds": 18.67,
+      "log": "/tmp/219-sources-wording-gate-error-wording-stage.log",
+      "logSha256": "69a02c59f02bb6b9e9d41ea55de551c4ffd2d14936287042930e1ee49e10862f"
+    },
+    {
+      "name": "error-wording-app",
+      "command": [
+        "pnpm",
+        "test:run",
+        "--project",
+        "main",
+        "src/service/production-mobile.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/219-sources-wording-app.json"
+      ],
+      "exit": 0,
+      "seconds": 8.02,
+      "log": "/tmp/219-sources-wording-gate-error-wording-app.log",
+      "logSha256": "3776fe599fc330aaba06bf3618d3d80485ae65b2e71f654f5223ab5d707be578"
+    },
+    {
+      "name": "error-wording-node",
+      "command": [
+        "pnpm",
+        "test:tauri",
+        "--production-proofs",
+        "src/service/production-mobile.test.ts",
+        "--silent",
+        "--reporter=json",
+        "--outputFile=/tmp/219-sources-wording-node.json"
+      ],
+      "exit": 0,
+      "seconds": 16.62,
+      "log": "/tmp/219-sources-wording-gate-error-wording-node.log",
+      "logSha256": "ddd6d5c08eedec3ed82b22d09ba2f9779e6bb849c7671c8d388e72ea991cb8e0"
+    },
+    {
+      "name": "error-wording-lint",
+      "command": [
+        "pnpm",
+        "exec",
+        "eslint",
+        "src/main/mobile-api-server.ts"
+      ],
+      "exit": 0,
+      "seconds": 1.2,
+      "log": "/tmp/219-sources-wording-gate-error-wording-lint.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "pnpm",
+        "tauri:inventory",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 4.24,
+      "log": "/tmp/219-sources-wording-gate-inventory.log",
+      "logSha256": "877254dfc535c66d676eb6ed9e39fafceede55334ffc6f5cc5357207c243d053"
+    },
+    {
+      "name": "contracts-freshness",
+      "command": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 4.11,
+      "log": "/tmp/219-sources-wording-gate-contracts-freshness.log",
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    }
+  ],
+  "reports": {
+    "app": {
+      "path": "/tmp/219-sources-final-app-gate.json",
+      "sha256": "4724c0110d3198b41923780d9d99a79ed41489dddf58477ac7353873ac80e4c9",
+      "rawExit": 0,
+      "passed": 203,
+      "failed": 0,
+      "skipped": 0,
+      "files": 13
+    },
+    "node": {
+      "path": "/tmp/219-sources-final-node-gate.json",
+      "sha256": "c3aa8abb73a82b42dc55167e5b031091b68be4244f21a34309f7f76a828bf433",
+      "rawExit": 0,
+      "passed": 258,
+      "failed": 0,
+      "skipped": 0,
+      "files": 13
+    },
+    "mobile": {
+      "path": "/tmp/219-sources-final-mobile-gate.json",
+      "sha256": "c2ef82f860e92d23a80cd18af8887acdc275b7ee1eeef6fb623c37820ee34252",
+      "rawExit": 0,
+      "passed": 121,
+      "failed": 0,
+      "skipped": 0,
+      "files": 11
+    },
+    "entry": {
+      "path": "/tmp/219-sources-final-entry-gate.json",
+      "sha256": "34701ce22158148200d72af2adf4247358828794de97a4374d83d5b6548453c3",
+      "rawExit": 0,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "files": 1
+    },
+    "contracts": {
+      "path": "/tmp/219-sources-final-contracts-gate.json",
+      "sha256": "a6933365958323bf29c55f142f8f7b7cdc2dfeeeb3e4da61d6fa9d5605b7e5a4",
+      "rawExit": 0,
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2
+    }
+  },
+  "negativeControls": [
+    {
+      "base": "9439571c published runtime (source/config three controls)",
+      "report": "/tmp/219-sources-negative.json",
+      "sha256": "6aeab591bc5b65c91f03efddc91742988a85106be00921fc160936187df64671",
+      "rawExit": 1,
+      "expectedFailures": 3,
+      "passed": 0,
+      "filtered": 8,
+      "assertions": [
+        "routes legacy source create/configuration and explicit options through encrypted production owners",
+        "holds raw source/configuration and resolver work until exact paired access is rechecked",
+        "keeps explicit sync-all sequential and routes parent edits through the real exclusion/reference owner"
+      ]
+    },
+    {
+      "base": "Source/config runtime before attachment fence; exact main file hash recorded in negativeHarnessInputs",
+      "report": "/tmp/219-sources-fence-negative.json",
+      "sha256": "5ad05df22b24a4f2c3b721c16739907722b21a867cbb3ea7b30045e56e81bdd0",
+      "rawExit": 1,
+      "expectedFailures": 4,
+      "passed": 0,
+      "filtered": 11,
+      "assertions": [
+        "refuses saved attachment execution on start, resume, empty send, routed children and group members",
+        "rechecks attachments after held raw initialization before attachment or provider effects",
+        "rechecks graph after held raw initialization before attachment or provider effects",
+        "keeps queued sends fenced when saved attachments change"
+      ]
+    }
+  ],
+  "postGateChanges": [
+    "Changed only attachment refusal message from internal implementation language to Mobile sessions with saved attachments are currently unavailable.; affected Source/staged peers, eslint and resource/freshness controls repeated. Status paragraph adds final observed counts. No logic, operation, authorization or proof assertion changed."
+  ],
+  "followupReports": {
+    "source": {
+      "path": "/tmp/219-sources-wording-app.json",
+      "sha256": "dbd0a7f455f1745803c1582a8a69ca22bcf6acebb08ffc9e4d4b2add35795ea3",
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0
+    },
+    "bundled": {
+      "path": "/tmp/219-sources-wording-node.json",
+      "sha256": "67d6e05717202e21ce3258e4879c13df42ed973e5ed3bfe7a972012b14801b22",
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "regressions": [
+    "Actual protected ProductionService/private peer and real HTTP source creation/configuration: encrypted SQLite format, masked credential retention, no public config, finite metadata and resolver secret redaction.",
+    "Held SyncManager mutation/external resolver retains raw work; revocation rejects before config commit/result publication. Explicit sync-all starts sequentially and withdraws later starts; parent/subtask cycle uses the actual task backend.",
+    "Mobile start/resume/send refuses saved task attachments even with omitted/empty args; bounded target/subtask/group-member graph is captured and rechecked by the existing manager request scope. Held initialization attachments/graph changes and queued-send mutation cannot start later provider/file effects. No global manager policy is changed.",
+    "Existing admission/current HITL, projection/profile restart, disabled/pair/quit and contained real tunnel child controls repeat with the new adapter. Native and OS key store remain synthetic boundaries."
+  ],
+  "failureRepairs": [
+    "The first source/config continuation gate passed198app/121mobile/249Node/2entry/14contracts before E2 identified the automatic saved-attachment manager path. It is not used as final attachment-fence evidence; final gate reruns all affected source/staged checks.",
+    "Initial attachment tests had three fixture failures: implicit startTask ignored skipInitialPrompt without explicit agentId, so an initial prompt invalidated two call counts; another assertion used a nonexistent getSessions method. Explicit agentId now selects requestSession with skipInitialPrompt, and findSessionByTaskId checks the real owner. All original refusal/call-count assertions remain strict.",
+    "Earlier first-continuation inherited LAN listener violation and negative-client cleanup repair remain disclosed in the previous revision evidence. No initial failed check is called a pass.",
+    "Final user-facing saved-attachment refusal text was simplified after the full gate; repeated15Source/29bundled root controls, physical resource staging, eslint and inventory/contracts all pass. This is a wording-only difference, recorded separately from full-gate counts."
+  ],
+  "acceptance": [
+    {
+      "criterion": 1,
+      "statement": "source-complete on Linux (evidence): independent mobile web client, configured CI/release resource closure",
+      "remaining": "blocked: Actions disabled and installed/release platform execution"
+    },
+    {
+      "criterion": 2,
+      "statement": "source-complete on Linux (evidence): bounded opt-in/auth/pairing/rate/hashed session/expiry/revoke against real loopback HTTP/WS",
+      "remaining": "blocked: authorized LAN/device exposure and installed supported-platform acceptance"
+    },
+    {
+      "criterion": 3,
+      "statement": "remaining source gap: saved-attachment execution/read parity requires #214 protected source/destination manager bridge; such mobile execution is refused",
+      "remaining": "No-attachment actual manager/admission/HITL and durable paired/projection restart are proven; physical-window/installed platform and live-provider device acceptance remain blocked"
+    },
+    {
+      "criterion": 4,
+      "statement": "blocked: native quick-tunnel binary/resource authority (#215), public tunnel approval and installed targets",
+      "remaining": "Contained real child Source/root/core start-once/raw teardown controls pass; no implicit binary/download or real public network"
+    },
+    {
+      "criterion": 5,
+      "statement": "source-complete on Linux (evidence) for admitted mobile task/source/session paths: actual shared domain owners, no second writer; legacy source/config/options/parent source gaps are closed",
+      "remaining": "blocked: #214 protected execution bridge for saved attachments; caller-intent CAS input for mobile arrays is deliberately absent/refused per assignment. Group review remains desktop-only; no whole complex API parity or installed-platform claim"
+    }
+  ],
+  "ci": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "runQuery": "gh run list -R krazyjakee/21x --commit a8b01ede338dca3ffaf1b3108aee74364a04dc16",
+    "runs": []
+  },
+  "remaining": {
+    "issueState": "OPEN",
+    "checkboxesChanged": false,
+    "prerequisites": [
+      202,
+      208,
+      210,
+      214,
+      215
+    ],
+    "nativeQuickTunnel": "Trusted host-selected production binary/resource authority is absent; no implicit download.",
+    "attachmentExecution": "E2 confirmed metadata/display receipts are not execution authority; manager still uses ambient workspace copy/preview. Source/mobile fence does not prove detached scheduler/file pipeline ownership. Resume when #214 publishes held source/destination bridge and exact current bindings.",
+    "mobileAttachmentWrites": "Nonempty create/send and full arrays refused; never fabricate current DB baseline or silently append/merge. Public transport intent and domain file authority are prerequisites.",
+    "groupReview": "Existing portable group/review writes remain refused; no guessed conversion of single-task status into a multi-member review intent.",
+    "approvals": [
+      "Actions",
+      "LAN/device exposure",
+      "real public tunnel",
+      "live provider/account runs"
+    ],
+    "voice": "No speech audio to mobile; native voice unchanged/off and hosted voice92 deferred.",
+    "platform": "Linux source/staged process evidence only; installed Linux, macOS and Windows acceptance remains open."
+  },
+  "negativeHarnessInputs": [
+    {
+      "path": "/tmp/219-sources-negative.py",
+      "sha256": "26501b1a71553dc133f1393202eb27cb290e2e357ec135a37c837cba8042cfa4"
+    },
+    {
+      "path": "/tmp/219-sources-fence-negative.py",
+      "sha256": "a21830ce3257448525ee988bac18367777937f249c3ab888b0fb8a2023031014"
+    },
+    {
+      "path": "/tmp/219-sources-before-attachment-fence.ts",
+      "sha256": "700305e48aca0388875bee50ee62cb7930020762fa10c1a5ab721cb8ff1f303e"
+    },
+    {
+      "path": "/tmp/219-sources-final-gate.py",
+      "sha256": "130676c3d5791c1b5ce108241ddd500caca1746d7a465b284e280c04a3995c3b"
+    },
+    {
+      "path": "/tmp/219-sources-wording-gate.py",
+      "sha256": "79ece2e58bf34cf608fee90a03b0240aea72298550d1ba7456e3a014240df668"
+    }
+  ],
+  "additionalHarnessInputs": [
+    {
+      "path": "test/fixtures/agent-rpc-process.cjs",
+      "sha256": "45dda5916fffb8b7d469877857f869c26b817e265a3cd3b07d39b61089a2d322"
+    },
+    {
+      "path": "scripts/tauri-test.mjs",
+      "sha256": "3c87157d494a84b8caf79ad4ceab84ead4dc4dbaaf9c509b3073514de80d1416"
+    },
+    {
+      "path": "scripts/tauri-stage-production.mjs",
+      "sha256": "048cd96ecf2ffbda945ccdc0b000695a020e1c3e979fe1519e91d203e1722ded"
+    },
+    {
+      "path": "scripts/tauri-runtime.json",
+      "sha256": "23fe6fb61778a75e30729951e3817640ea48380f6285c9255f8ec34ac7fa5e82"
+    },
+    {
+      "path": "vitest.tauri.config.ts",
+      "sha256": "b6cd7ff83e8cf0277561f07b3c10e59edd4267d0f85e8ff702f9debad7216beb"
+    },
+    {
+      "path": "vitest.config.ts",
+      "sha256": "4e3887398ab70c63f401af2356328de780290e57a5f5d7dba42afbac4850ed61"
+    },
+    {
+      "path": "package.json",
+      "sha256": "de47d6d3ccdd8ff6458531310b06f202e9c9ebced5e3c3da3bc02dc9c0787576"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "5a542d74ebe3238d8ec51c08dab9e13df6f93396be36a2f080a129b1d44bccfc"
+    },
+    {
+      "path": "src/main/database/schema.ts",
+      "sha256": "fd868bb21bedc5e891448f5e4d429d2cbe5bd9f037ef01f5863e122252a6611c"
+    },
+    {
+      "path": "src/service/task-attachment-metadata-conflict.test.ts",
+      "sha256": "a60e99ec19c78bbdc9561698847667d9d58500209355ea03ef3afd545172e846"
+    },
+    {
+      "path": "src/shared/task-lifecycle-codecs.ts",
+      "sha256": "d9fb5ab4e5f4139f1b39c4f8312de6dd7633825b75e11cd24060fbd3d5e543dd"
+    },
+    {
+      "path": "src/service/task-lifecycle-backend.ts",
+      "sha256": "9795dd846afbe1a66e8e7c3396710a7849625a449bb716058621d446be3d548e"
+    }
+  ],
+  "inheritedRevisions": {
+    "metadataFirstRemoval": "8244c0ad6dab4ed1ca04f07315b720bda3d07610",
+    "removalEvidence": "304397024ef3da66c370b6ed60475e83a4dd45ec",
+    "hierarchy": "99d7896e4dacde0fab3e3cdfeceeb947eb02aa87",
+    "hierarchyEvidence": "24c580d5"
+  },
+  "proofComposition": {
+    "applicationProductionMobileCases": 15,
+    "bundledProductionMobileCases": 29,
+    "compiledRootVariants": 14,
+    "actualEntry": {
+      "cases": 2,
+      "scope": "Actual child private entry negotiation/pregrant closure and corrupt resource rejection; does not initialize a complete mobile host/key-store/installed GUI process."
+    },
+    "mobileNetwork": "Real loopback HTTP/WebSocket clients against actual Source and compiled production owners/private peer; key/native boundaries are synthetic. No device, real LAN/public tunnel or live provider account."
+  },
+  "temporaryHarnessRepairs": [
+    "Evidence builder failed Python syntax validation before producing any JSON (missing comprehension bracket). Repaired; final JSON parses and every source hash resolves at implementationRevision. No source or checks changed."
+  ],
+  "publication": {
+    "branch": "master",
+    "fastForward": true,
+    "remoteConfirmed": true,
+    "sourceChangeCommit": "a3a2d257",
+    "normalCommitHooks": "Source and metadata commits both passed eslint/typecheck under heavy.lock; no hook bypass",
+    "rebase": "Only A hierarchy JSON evidence arrived after final gate;13 runtime/test/config dependency hashes remained byte-identical."
+  }
+}
