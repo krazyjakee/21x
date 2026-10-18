@@ -1,0 +1,257 @@
+{
+  "version": 1,
+  "issue": 209,
+  "scope": "Actual typed-native task hierarchy observation, subtask create/reorder exact receipts, canonical readback, uncertain draft review and disposal. Source/native/public contract unchanged.",
+  "fixture": {
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1,
+    "description": "Real NativeDesktopHost/client/finite codecs/transport, TaskWorkspace/TaskDetailView/SubtasksSection/stores; Electron preload absent. Controlled exact private invoke results and readback; unrelated transcript view mocked. DndContext passes the real finite reorder handler through a controlled test callback; no physical drag claim. No Source SQLite/provider/runtime process/device effect in these UI controls."
+  },
+  "expectedActual": [
+    {
+      "expected": "Parent navigation belongs to exact literal child/parent/project and current observation lifetime.",
+      "actual": "Retired child/project-return/pagehide replies cannot replace navigation; foreign identity/project receipts are refused. Reconnect reads once per ready generation and releases listeners on retirement."
+    },
+    {
+      "expected": "Create keeps pending title until exact child receipt and canonical readback; reorder requires true receipt.",
+      "actual": "One synchronous lane prevents duplicate adds/reorders. Exact captured parent/project required; no optimistic order. Accepted create joins canonical readback; absent/foreign/refused/readback-failed replies lock review without recreation or retry. Cancelling a local draft does not unlock a create after uncertain reply."
+    },
+    {
+      "expected": "Retired mutation UI cannot publish into replacement draft or start follow-up readback.",
+      "actual": "Task replacement, project-change-and-return and pagehide controls pass. Keyed subtask component lifetimes preserve replacement drafts. Native Captain mutation controls absent; Source task exclusion/schedulers unchanged."
+    }
+  ],
+  "failureRepair": [
+    {
+      "failure": "Initial old-source Add selector matched several controls.",
+      "repair": "Target exact Subtasks header before asserting the behavior; corrected old-source pair then fails for actual stale parent publication and discarded pending-title defects.",
+      "oldSourceCorrectedNegative": {
+        "exitCode": 1,
+        "failed": 2,
+        "log": {
+          "sha256": "727c357029300a21add0f45a7958f09adf01550af51a6c0ee0419c29e1b6f34b",
+          "bytes": 13275
+        }
+      }
+    },
+    {
+      "failure": "Expanded reconnect control observed4 parent reads instead of expected2.",
+      "repair": "Coalesce repeated ready notifications by connection generation; retain explicit project invalidation. All17 controls pass.",
+      "expandedBeforeFix": {
+        "exitCode": 1,
+        "failed": 1,
+        "passed": 13,
+        "log": {
+          "sha256": "018baaf2d2f4b5db5a2737d67cfb5850d4e30f204d955a8117b11ecc239484aa",
+          "bytes": 2810
+        }
+      }
+    },
+    {
+      "failure": "Full code gate passed1959renderer225Node/type/lint/builds; contracts exits1 for stale own Workspace inventory coordinates while B owns metadata.",
+      "repair": "Respect claim, obtain explicit release, rebase8244c0ad, regenerate exact inventory918 and pass contracts/freshness plus17 rebase native controls; no output/policy weakened.",
+      "initialFreshness": {
+        "exitCode": 1,
+        "log": {
+          "sha256": "fccb9b2ad8c4ac524c12702f1e34bb0905b14169ff3efd43df279e336890fd1b",
+          "bytes": 59
+        }
+      }
+    }
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "settingsOrDispatchUsed": false,
+    "sourceRunLookup": []
+  },
+  "remainingDefects": [
+    "Installed supported-platform hierarchy/reload/reconnect/pointer/keyboard acceptance and durable mutation receipt reconciliation remain open; these DOM receipts do not establish installed UI.",
+    "E2 metadata-first exact-ID removal8244c0ad inherited; A no-second-native-write/canonical-readback/form-review integration is next independent slice. Source orphan/removal journal remains open.",
+    "TaskWorkspace fallback metadata handlers separately audited to call taskApi.update plus store.updateTask, producing duplicate Source writes; next renderer slice will reproduce/repair with actual typed controls.",
+    "Unavailable native voice/login/global shortcut and general OAuth authority plus #202 prerequisite remain open."
+  ],
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  },
+  "constraints": {
+    "syntheticOnly": true,
+    "liveProfiles": false,
+    "liveProviders": false,
+    "microphone": false,
+    "liveRelease": false,
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred",
+    "identityDecision": false,
+    "masterToMainMerge": false
+  },
+  "createdAt": "2026-10-18T00:50:58.450559+00:00",
+  "implementationRevision": "99d7896e4dacde0fab3e3cdfeceeb947eb02aa87",
+  "verificationRevision": "99d7896e4dacde0fab3e3cdfeceeb947eb02aa87",
+  "baseRevision": "6967c5eb9659c14c6d871729b38697c59b72845f",
+  "publication": {
+    "branch": "master",
+    "fastForward": true,
+    "remoteConfirmed": "99d7896e4dacde0fab3e3cdfeceeb947eb02aa87"
+  },
+  "rebase": {
+    "runtime": "8244c0ad Source attachment removal only; no native/UI/schema contract or hierarchy inputs changed;17actual native controls and normal combined typecheck pass",
+    "publication": "30439702 E2 evidence JSON only; own8file bytes match verified c6bfbb51 commit"
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "application": "0.0.161",
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3"
+  },
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "rendererPassed": 1959,
+    "rendererFiles": 158,
+    "standalonePassed": 225,
+    "standaloneFiles": 6,
+    "skipped": 0,
+    "newTypedNativeUiControls": 17,
+    "rebaseNativeControls": 17,
+    "normalSourceHooks": "lint-staged/pnpm typecheck pass",
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "inventory": {
+      "files": 918,
+      "ipcOperations": 736,
+      "existingUnresolved": 9
+    },
+    "commands": [
+      {
+        "command": "rtk proxy pnpm test:run --project renderer --maxWorkers=4",
+        "exitCode": 0,
+        "log": {
+          "sha256": "5326e70388086e210db5d73a757de3871e24a3ebeec5cded856e480cba81e76c",
+          "bytes": 1125180
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:tauri -- src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/stores/task-store.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts",
+        "exitCode": 0,
+        "log": {
+          "sha256": "4903a1b78489e40f770a1e95a841ffd5d3a93507b1224eae5ae9363056464037",
+          "bytes": 39096
+        }
+      },
+      {
+        "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+        "exitCode": 0,
+        "log": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      },
+      {
+        "command": "rtk proxy pnpm lint",
+        "exitCode": 0,
+        "log": {
+          "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+          "bytes": 16719
+        }
+      },
+      {
+        "command": "rtk proxy pnpm tauri:production:frontend:build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "63f80c24f32381627086489c1f2b39a231ecff3834db50612f4900e17318b05c",
+          "bytes": 9737
+        }
+      },
+      {
+        "command": "rtk proxy pnpm build",
+        "exitCode": 0,
+        "log": {
+          "sha256": "cf78c1fc17c7748b71cf3b42476a0d2d5504ab04861385159fc5a85a1f351546",
+          "bytes": 29253
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-contracts.mjs --check (serialized inventory repair)",
+        "exitCode": 0,
+        "log": {
+          "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+          "bytes": 43
+        }
+      },
+      {
+        "command": "rtk proxy pnpm test:run src/renderer/src/components/tasks/native-task-hierarchy.test.tsx (8244rebase)",
+        "exitCode": 0,
+        "log": {
+          "sha256": "594f2d7132a90a4dd43109c2abc4bbc489eb10563d9a58fdbe113d7ce8d884fc",
+          "bytes": 1043
+        }
+      },
+      {
+        "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+        "exitCode": 0,
+        "actual": "918files736IPC9existingunresolved"
+      },
+      {
+        "command": "rtk proxy git diff --check",
+        "exitCode": 0
+      }
+    ]
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "681c37499002720c472053712fe6556e147eccd05c87a95ec703758008e6c945",
+      "bytes": 94784
+    },
+    "docs/tauri-migration/inventory.json": {
+      "sha256": "229e1df0b6db7e8e833e965816a48ccf83aa599a6fcef7b1e387d51f0efb1d89",
+      "bytes": 380526
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "0ae5515abcd41c16d5895da41a4093f3705d437321580522b8b7d4212cdcc2a8",
+      "bytes": 32407
+    },
+    "src/renderer/src/components/tasks/SubtasksSection.tsx": {
+      "sha256": "ff504eba10df79e939c5e71c14203d70fdea2497f2cb2c5e146cb92be45a9391",
+      "bytes": 8679
+    },
+    "src/renderer/src/components/tasks/TaskDetailView.tsx": {
+      "sha256": "69cf5f8b1a5d28409739eec899c967945b4c063509d5cbe5ac1ba72afdf9b9f4",
+      "bytes": 29468
+    },
+    "src/renderer/src/components/tasks/TaskWorkspace.tsx": {
+      "sha256": "6d4b707782ea49a515e53cb8d796dea42ab27a66a56c5b4a3ef8b723ef79a548",
+      "bytes": 46113
+    },
+    "src/renderer/src/components/tasks/native-task-hierarchy.test.tsx": {
+      "sha256": "c45f1cf41f41777925deac5a31793f70c94272da8728b90d36cc192436d0f7d9",
+      "bytes": 17214
+    },
+    "vitest.tauri.config.ts": {
+      "sha256": "b6cd7ff83e8cf0277561f07b3c10e59edd4267d0f85e8ff702f9debad7216beb",
+      "bytes": 13659
+    }
+  },
+  "artifacts": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "37d962b358efd5561de727631b3b65dc6d6ed0e4ddd371bb6d8b69da73033994",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "221f3ff68540334bc48bb72a38693bf683fe8a5bbf281533ac5afc07dcee6780",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    }
+  }
+}
