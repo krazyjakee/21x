@@ -1,0 +1,447 @@
+{
+  "version": 1,
+  "issue": 209,
+  "createdAt": "2026-10-18T03:15:24.404387+00:00",
+  "implementationRevision": "a6001e1a95ee95230276c111d219c0b4813a05ff",
+  "verificationRevision": "a6001e1a95ee95230276c111d219c0b4813a05ff",
+  "baseRevision": "85678f76bfaa459288fd8da1ddd4181e78a806a5",
+  "inheritedRuntimeRevision": "3b215ebd6e005e0f9bee2440a9f384451ea72177",
+  "scope": "Native renderer create/delete/project-move and task cache document/view receipt ownership. No Source/native/public DTO/operation/grant change.",
+  "fixture": {
+    "installed": false,
+    "webview": null,
+    "schema": 37,
+    "protocol": 1,
+    "description": "Actual typed native facade/transport and real stores, TaskProjectField and Radix DeleteConfirmDialog; controlled private receipts, no preload. TaskWorkspace is mocked only in this dedicated dialog harness. Separate affected tests exercise actual SQLite/production owners/private peers/protected resources and two staged stdio children."
+  },
+  "expectedActual": [
+    {
+      "expected": "A retired document cannot overwrite replacement task cache/errors or invalidate its snapshot.",
+      "actual": "Mutation capture observes existing listener cohort generation and captured connection, without installing subscriptions. Native accepted create validates literal parent/project; move validates root/destination/unique canonical rows. Source canonical global events retain their independent authority."
+    },
+    {
+      "expected": "One native task deletion intent reaches its established Source owner.",
+      "actual": "No renderer pre-Stop/local session removal/worktree cleanup. Confirmation remains open until finite true acknowledgement; duplicate/uncertain calls remain blocked. Separate modal/task intent plus current project/document/connection fences followups; Cancel does not claim to cancel admitted Source deletion. Workspace directories explicitly retained for separate cleanup."
+    },
+    {
+      "expected": "Project moves preserve the original view and actual canonical subtree receipt.",
+      "actual": "One synchronous view lane invokes retained project:moveTask; no extra Stop/optimistic row write/retry. False/foreign receipt requires reopen/review. Replacement/project-return/pagehide/reconnect cannot close the new selection/preview or publish a success toast. Native coordinator rows cannot use ordinary move/deletion controls."
+    },
+    {
+      "expected": "Idle reconnect retirement is understandable before any runtime effect.",
+      "actual": "Picker/dialog become disabled with explicit close/reopen review guidance. Captured stale or nonordinary calls perform zero native mutations; Electron keeps existing cleanup/move orchestration."
+    }
+  ],
+  "negativeProof": {
+    "revision": "85678f76bfaa459288fd8da1ddd4181e78a806a5",
+    "command": "pnpm test:run --project renderer src/renderer/src/components/tasks/native-task-crud.test.tsx -t \"retired-document|old document create|refused native delete|native delete uses|before disabled\"",
+    "rawExitCode": 1,
+    "failed": 6,
+    "deselected": 20,
+    "actual": "Duplicate move; redundant UI Stop before delete; false deletion closes confirmation; retired-document delete/move cache changes and create failure overwrites replacement error.",
+    "method": "Exact published bytes for four modified runtime files temporarily restored; wanted work saved/restored in try/finally and byte identity verified. Corrected fixture used for final repeat.",
+    "log": {
+      "sha256": "62e07ff255f63837b1cae28ebee9d01facd0903db090934d3646125214da42ec",
+      "bytes": 12256
+    }
+  },
+  "failureRepair": [
+    {
+      "failure": "Initial new fixture attempted spying on undefined confirm; next version opened a preview modal over its delete dialog.",
+      "repair": "Explicit controlled confirm global and delete-only initial modal. Neither is counted as a Source behavior reproduction.",
+      "logs": [
+        {
+          "sha256": "cd87e692a7953444ec0ba22db420956b66556b04e7b40a82ff8d1fafd43e1418",
+          "bytes": 4295
+        },
+        {
+          "sha256": "d8dab551c55dc25940e026eee6c4fb33c3b790d51235397d0ca2666be644dc1d",
+          "bytes": 23364
+        }
+      ]
+    },
+    {
+      "failure": "Initial repaired targeted run had six failures because its empty controlled task snapshot erased the test task during queued refresh, causing the native role guard to refuse.",
+      "repair": "Controlled read returns the fixture current canonical task view; beforeEach joins its read barrier. Runtime role/receipt assertions unchanged. All30 targeted cases then passed.",
+      "log": {
+        "sha256": "dc3ba734da479468e33c6a7600056cbda25f6f7d29e4f710b858be7c5b753dac",
+        "bytes": 27702
+      }
+    },
+    {
+      "failure": "First full renderer run exposed eight real regressions caused by the new mutation capture helper reinstalling retired task subscriptions and triggering unwanted recovery reads.",
+      "rawExitCode": 1,
+      "passed": 2050,
+      "failed": 8,
+      "repair": "Removed subscription installation from mutation capture. Bootstrap remains listener owner; captured document generation alone fences old receipts. All original assertions preserved. Focused165cases passed before four final idle-reconnect/coordinator controls; final full gate verifies all source.",
+      "log": {
+        "sha256": "021d5ea0ae211bf10244fe6c6b5b66484fbc48ae6dda4678f35ffbec449e6842",
+        "bytes": 1155583
+      },
+      "receipt": {
+        "sha256": "f05459ca8e9a5b3b668636d57fb4c205d433ed8cc70d1d8be758e02b2bc10f7a",
+        "bytes": 93407
+      },
+      "initialInputs": {
+        "docs/tauri-migration/production-renderer-recovery.md": "8f24e98f7c068a27418940e88971607f2e7778496d3f177a6383eda51665a101",
+        "src/renderer/src/components/layout/TaskDialogs.tsx": "2156b002b7efdc2a905659616a5ca62aee48909bce8fde620b5aae96e5b26663",
+        "src/renderer/src/components/tasks/DeleteConfirmDialog.tsx": "15815e947411113034ca2008f279a80757faeb48899356c5bc3151b97dccc8b7",
+        "src/renderer/src/components/tasks/TaskProjectField.tsx": "f1342494898960cc97629d9bf1c346f27855cfe4f4e905b44f158bd20901e560",
+        "src/renderer/src/stores/task-store.ts": "ba762e1cda756230e9415fa1ea89a5ca890fd0ba2c512294f783edd371ed97bc",
+        "src/renderer/src/components/tasks/native-task-crud.test.tsx": "1a117f313adcc8aa7770f5a9f31cca3bd105baa4b42b194a0263cd9abcf7705b"
+      }
+    }
+  ],
+  "checks": {
+    "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "rawExitCodes": true,
+    "nativeCrudControls": 34,
+    "fullRenderer": {
+      "files": 157,
+      "passed": 2062,
+      "skipped": 0,
+      "log": {
+        "sha256": "eb3a1bc355734a961571ae639c6ba7f5aaef348afbd8918bb223d7194a5a9e11",
+        "bytes": 1138613
+      }
+    },
+    "affectedSourceAndUI": {
+      "files": 14,
+      "passed": 503,
+      "skipped": 0,
+      "log": {
+        "sha256": "5bd417ae990d8e8a9abc7f15e0f4b995e875c1d7efb46d54e5e0b927eabeefe1",
+        "bytes": 327813
+      }
+    },
+    "repairFocusedBeforeFinalAvailabilityControls": {
+      "files": 3,
+      "passed": 165,
+      "skipped": 0,
+      "log": {
+        "sha256": "923382dd3b4745ff2aa1962397ce385e810bcdd4ef1dbb256271e85a05d9c238",
+        "bytes": 14024
+      }
+    },
+    "lint": {
+      "errors": 0,
+      "baselineWarnings": 165
+    },
+    "normalSourceHooks": {
+      "rawExitCode": 0,
+      "commands": [
+        "eslint --no-warn-ignored (lint-staged)",
+        "pnpm typecheck (tsc --build --noEmit)"
+      ]
+    },
+    "freshness": {
+      "sourceFiles": 921,
+      "ipc": 736,
+      "existingUnresolved": 9,
+      "inventoryRegeneratedByteIdentical": true,
+      "contracts": "passed"
+    }
+  },
+  "runReceipts": {
+    "renderer": {
+      "file": {
+        "sha256": "d20f81901c2a1abc10facef794287fa34593862ada3d6526ce818a778803b7a2",
+        "bytes": 93407
+      },
+      "revision": "43016075da5869da41fa2fea4a561391f5f93071",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 573,
+      "scope": "Eligible graph is not claimed as executed; framework summary separately records project/filtered files."
+    },
+    "affected": {
+      "file": {
+        "sha256": "7f4784c795f0d2fc64b688059c1a78d0a52ba44a5b821f17a07049328b4b312b",
+        "bytes": 93407
+      },
+      "revision": "43016075da5869da41fa2fea4a561391f5f93071",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 573,
+      "scope": "Eligible graph is not claimed as executed; framework summary separately records project/filtered files."
+    },
+    "repairFocused": {
+      "file": {
+        "sha256": "6b963b552698665f3f662c6d2f23ca0402e363ba81ebd736006638d06a0cf8fb",
+        "bytes": 93407
+      },
+      "revision": "3b215ebd6e005e0f9bee2440a9f384451ea72177",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 573,
+      "scope": "Eligible graph is not claimed as executed; framework summary separately records project/filtered files."
+    }
+  },
+  "commands": [
+    {
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral:audit",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "2199074bafe9255910f8f239b50d568288e929ed4e711e8593e1e864440ad137",
+        "bytes": 165
+      }
+    },
+    {
+      "command": "node scripts/tauri-stage-production.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "a71a6b7e212363c494588c3621c808983d843bc94e577f12a74391fc9d370cef",
+        "bytes": 267
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --project=renderer --run-receipt=/tmp/ea209-task-crud-renderer-receipt.json",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "eb3a1bc355734a961571ae639c6ba7f5aaef348afbd8918bb223d7194a5a9e11",
+        "bytes": 1138613
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-task-crud-affected-receipt.json src/renderer/src/components/tasks/native-task-crud.test.tsx src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskForm.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/stores/task-store.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/task-lifecycle-backend.test.ts src/service/production-desktop-bindings.test.ts src/service/production-service.test.ts src/shared/task-lifecycle-codecs.test.ts scripts/production-service-proof.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "5bd417ae990d8e8a9abc7f15e0f4b995e875c1d7efb46d54e5e0b927eabeefe1",
+        "bytes": 327813
+      }
+    },
+    {
+      "command": "pnpm lint",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+        "bytes": 16719
+      }
+    },
+    {
+      "command": "pnpm exec vite build --config vite.tauri-production.config.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "013d11290398fb0d5d65163dfac6febf3eef5347f71444539b57f5e622eadfba",
+        "bytes": 9606
+      }
+    },
+    {
+      "command": "pnpm build",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "950adb24a1c1a6e50494999041ff920dd5fe371b73e9a04d12cd8f00af8129ec",
+        "bytes": 29337
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "378cb8acea593914ec80e3a3a98352c1d67c9117722ce0ef5fe4e5451be49e7d",
+        "bytes": 88
+      }
+    },
+    {
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "d2f3d0b21cb77c8fd81226acb00793d3a744c427ee7b5e80c3fd1542028649dc",
+        "bytes": 91
+      }
+    },
+    {
+      "command": "git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    }
+  ],
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "hostNode": "22.22.0",
+    "stagedNode": "22.23.2",
+    "stagedAbi": "127",
+    "application": "0.0.161",
+    "pnpm": "9.15.9",
+    "electron": "44.0.0",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3",
+    "pty": "1.1.0"
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "bad9b40f590ee602f4bcfacc0fed2d11fc0b1f2673915140e9caeb81544332cd",
+      "bytes": 113935
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "9fa57d8feb6b3dac622cb85991ff6f982404b9cec697e79536b2d7c143b0cb41",
+      "bytes": 43595
+    },
+    "src/renderer/src/components/layout/TaskDialogs.tsx": {
+      "sha256": "1992a5ef74b2aa70ace69ae6f63e673a944e30504b8378b1f7565b499c9f60d9",
+      "bytes": 13284
+    },
+    "src/renderer/src/components/tasks/DeleteConfirmDialog.tsx": {
+      "sha256": "19102e306a38af35d50945873fc69d38562491e2b476346b8849eaf075905e73",
+      "bytes": 1712
+    },
+    "src/renderer/src/components/tasks/TaskProjectField.tsx": {
+      "sha256": "472487a78368fc9b508eca21ef75ec70f172ffcdb606ec7b7bc19fff53ae1a23",
+      "bytes": 4391
+    },
+    "src/renderer/src/components/tasks/native-task-crud.test.tsx": {
+      "sha256": "40f67652aede668921990ff75e03e296d42618c482af12a199d46f3f96b5c208",
+      "bytes": 18593
+    },
+    "src/renderer/src/stores/task-store.ts": {
+      "sha256": "ca6db3c4fe37f676af793fa1ff148bb58096a1e71b786bdc619f22259b5eb3e6",
+      "bytes": 11203
+    }
+  },
+  "artifactHashes": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "ec4434ba802e5da07a9aa582642daf7456e786e5b0506b7c8708064ca2feea5e",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "4583d0d2ac6f0f5ca74c9aabcadf4cc4761facdbcad223228905877828cb31e9",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "3b6ccbd813782568af0fbb0319655fa5ced180d50e02cb01e1bf75a7d28e364d",
+      "bytes": 6285460
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/database-stdio.mjs": {
+      "sha256": "30aba17476531dfd4cd519d65282578cfcccfde53f19427cc3057d8026cafc68",
+      "bytes": 1741
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "publication": {
+    "branch": "master",
+    "fastForward": true,
+    "remoteConfirmed": "a6001e1a95ee95230276c111d219c0b4813a05ff",
+    "rebase": {
+      "inheritedRuntime": "3b215ebd6e005e0f9bee2440a9f384451ea72177",
+      "inheritedEvidence": "43016075da5869da41fa2fea4a561391f5f93071",
+      "beforeGate": "Rebased wanted work before final complete gate; five tracked wanted inputs byte-identical across JSON-only430 rebase, untracked new test preserved.",
+      "afterGate": "No upstream changes before source push."
+    }
+  },
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "sourceRunLookup": [],
+    "settingsOrDispatchUsed": false
+  },
+  "remainingDefects": [
+    "E2 actual Source negative on3b215ebd/43016075: replacing attachmentRoot with a symlink during whole-task deletion removes an outside synthetic canary. Publication/CAS/exact-ID journal proof does not establish this authority. Separate private Source retention-policy fix is in progress; no recursive cleanup, reclaimed-space or atomic filesystem/SQLite claim from this UI slice.",
+    "Completion/feedback/board transition and delayed AutoRun lifetimes remain separate UI receipt work.",
+    "Exact-root Fresh remains unavailable pending Source owner contract; durable unknown delivery review stays separate.",
+    "Installed native UI/reload/reconnect/input/shutdown on supported targets, unavailable native services and202 prerequisite remain open.",
+    "B217 reproduced11 old-store native persistence failures after refused/corrupt/oversize/shape reads, same-epoch pending saves and pagehide. Its focused78-case repair is reported but unpublished at this verification point; A delegated exactly canvas-store.ts/drawing-store.ts plus dedicated native test. Valid saved-data controls do not certify this separate gap."
+  ],
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  },
+  "constraints": {
+    "syntheticOnly": true,
+    "liveProfiles": false,
+    "liveProviders": false,
+    "microphone": false,
+    "liveRelease": false,
+    "nativeVoice": "unavailable",
+    "hostedVoice": "deferred",
+    "identityDecision": false,
+    "masterToMainMerge": false
+  },
+  "peerFindings": [
+    {
+      "owner": "engineer2/#214",
+      "revision": "3b215ebd6e005e0f9bee2440a9f384451ea72177",
+      "status": "reproduced; private Source retention repair pending publication",
+      "file": "src/service/production-desktop-bindings.test.ts",
+      "test": "never recursively deletes outside bytes through a replaced attachment root during task deletion",
+      "failed": 1,
+      "report": {
+        "path": "/tmp/e2-task-delete-negative-vitest.json",
+        "sha256": "96ec882ff0015d8e2a027dc9f04337519da9a9055ba075c43f262c02c7345114"
+      },
+      "scope": "Peer reproduction, not an A command or passing authority claim."
+    },
+    {
+      "owner": "engineerB/#217",
+      "status": "reported11 genuine old-store failures; repair78/4files passing focused controls, full gate/publication pending",
+      "scope": "Separate canvas/drawing Source read/load persistence boundary; renderer path delegation explicit, no viewer availability."
+    }
+  ]
+}
