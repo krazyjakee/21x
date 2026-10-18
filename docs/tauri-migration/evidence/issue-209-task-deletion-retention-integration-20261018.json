@@ -1,0 +1,186 @@
+{
+  "issue": 209,
+  "kind": "renderer-source-retention-integration",
+  "recordedAt": "2026-10-18T03:39:19.368453+00:00",
+  "rendererRevision": "a6001e1a95ee95230276c111d219c0b4813a05ff",
+  "rendererEvidenceRevision": "2d5810e62e80c190d060d91cad83b0ac1c9b7c1a",
+  "sourceOwnerRevision": "956c5d0739a579f1487fff1e053373d6ad36433b",
+  "sourceOwnerEvidenceRevision": "d928a12d313e086e8607a95dbc6733514b12a703",
+  "verifiedAtRevision": "956c5d0739a579f1487fff1e053373d6ad36433b",
+  "scope": "A integration of E2 private deletion retention with published native CRUD UI; no new runtime change. Synthetic profiles/canaries only. Source and compiled Root/private-peer controls plus34 CRUD and2 actual stdio entry controls.",
+  "expectedActual": {
+    "expected": "Logical task/subtree/source deletion cannot recursively unlink an outside canary through a replaced protected attachment root. Native UI retains one established Source deletion owner.",
+    "actual": "161 cases/6 files passed with zero skips. Protected directories, bytes and journal facts deliberately retained after logical deletion. Legacy policy unchanged; no atomic filesystem/SQLite, cleanup or reclaimed-space claim."
+  },
+  "checks": [
+    {
+      "command": "node scripts/tauri-stage-production.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "397c657b6282f535190e926bb98c21e74ca6091d6716ece6801e00c497ec050e",
+        "bytes": 267
+      }
+    },
+    {
+      "command": "pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-retention-integration-receipt.json src/main/database-attachment-retention.test.ts src/service/production-desktop-bindings.test.ts src/service/production-mobile.test.ts src/service/task-lifecycle-backend.test.ts src/renderer/src/components/tasks/native-task-crud.test.tsx scripts/production-service-proof.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "c54162dfdfc998df65fb6726350ef3852c8bc3bd6d8f12272d98d410d61819e8",
+        "bytes": 433565
+      }
+    },
+    {
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "pnpm lint",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+        "bytes": 16719
+      }
+    },
+    {
+      "command": "node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      }
+    },
+    {
+      "command": "node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "d2f3d0b21cb77c8fd81226acb00793d3a744c427ee7b5e80c3fd1542028649dc",
+        "bytes": 91
+      }
+    },
+    {
+      "command": "git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    }
+  ],
+  "runReceipt": {
+    "artifact": {
+      "sha256": "8ff6debf62dc14d90396e2cc10c2313b54cb0906db25c6dd9540fe9a37a16c3f",
+      "bytes": 93735
+    },
+    "runtime": {
+      "node": "v22.23.2",
+      "modules": "127",
+      "platform": "linux",
+      "arch": "x64"
+    },
+    "revision": "956c5d0739a579f1487fff1e053373d6ad36433b",
+    "workingTreeModified": true,
+    "callerFiltered": true,
+    "eligibleFiles": 575,
+    "proofFlags": {
+      "--service-proofs": true,
+      "--production-proofs": true,
+      "--terminal-proofs": true
+    },
+    "status": "passed",
+    "exitCode": 0,
+    "executedFiles": 6,
+    "passed": 161,
+    "skipped": 0,
+    "note": "Eligible graph is not claimed executed. Only untracked next-slice completion test made tree dirty; it was excluded from this filtered run and remains red against the published completion hook."
+  },
+  "failureRepair": [
+    {
+      "failure": "Forced typecheck found three TaskStatus enum literals in unpublished next-slice completion fixture, not the retention inputs.",
+      "rawExitCode": 2,
+      "log": {
+        "sha256": "c98667bbe498c3ff0e7d49df621b6bafdebef2e110ef18eee3b551c6ce313a52",
+        "bytes": 433
+      },
+      "repair": "Import and use TaskStatus.Completed, preserving runtime value; forced typecheck, lint and freshness all rerun raw0."
+    }
+  ],
+  "sourceHashes": {
+    "src/main/database/manager.ts": {
+      "sha256": "94b9e254c15ec1ed83fd8283d79d53ce85d757a9940930fe1603c03ef8a8d671",
+      "bytes": 127407
+    },
+    "src/main/database-attachment-retention.test.ts": {
+      "sha256": "8f8aa40e078b87b92918d18266e88435d13b06b6b55acd99fb9b703ac0ba6e21",
+      "bytes": 2752
+    },
+    "src/service/production-owner.ts": {
+      "sha256": "34fc65185cfa214e7568f8425f7f40927ae42092b66f4f7e7e5c49b9e27e9a88",
+      "bytes": 99307
+    },
+    "src/service/production-desktop-bindings.test.ts": {
+      "sha256": "3f69e633d701703f0722accf2fbeade03b896772f88f4926e540bf05bb4628f6",
+      "bytes": 75826
+    },
+    "src/service/production-mobile.test.ts": {
+      "sha256": "5dc817dbedccedeedc4652405079038eb3ef22873ec3221fa102063d647c347a",
+      "bytes": 58407
+    },
+    "src/service/task-lifecycle-backend.test.ts": {
+      "sha256": "b63dea4bae348b5a687d10e29c8ebfa49828434ba5522734912a8a60bb887a81",
+      "bytes": 24814
+    },
+    "src/renderer/src/components/tasks/native-task-crud.test.tsx": {
+      "sha256": "40f67652aede668921990ff75e03e296d42618c482af12a199d46f3f96b5c208",
+      "bytes": 18593
+    },
+    "src/renderer/src/components/layout/TaskDialogs.tsx": {
+      "sha256": "1992a5ef74b2aa70ace69ae6f63e673a944e30504b8378b1f7565b499c9f60d9",
+      "bytes": 13284
+    },
+    "src/renderer/src/stores/task-store.ts": {
+      "sha256": "ca6db3c4fe37f676af793fa1ff148bb58096a1e71b786bdc619f22259b5eb3e6",
+      "bytes": 11203
+    },
+    "scripts/production-service-proof.test.ts": {
+      "sha256": "68d4e586b1946a145240c813948abcca88d0bdcae902fc513c8c8bc529f61614",
+      "bytes": 5132
+    }
+  },
+  "artifactHashes": {
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "c3331b4ecfab66af359aa9f5da169b38708ede9981f8a479f3ea9af740424fec",
+      "bytes": 6285778
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/database-stdio.mjs": {
+      "sha256": "30aba17476531dfd4cd519d65282578cfcccfde53f19427cc3057d8026cafc68",
+      "bytes": 1741
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "rebase": "Inherited d928 evidence-only after successful gate; verified all listed Source inputs byte-identical to tested956.",
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "settingsOrDispatchUsed": false
+  },
+  "remainingDefects": [
+    "Bounded cleanup/reconciliation and legacy inventory; no automatic cleanup or replay.",
+    "Separate native completion15 behavior regressions reproduced against published hook; unpublished repair pending.",
+    "Canvas/drawing refused-load persistence repair delegated to B217, publication pending.",
+    "Installed supported-platform UI/lifecycle,202/208 prerequisites and unavailable services remain open."
+  ],
+  "issueClosure": {
+    "close": false,
+    "wholeCriteriaNewlyChecked": []
+  }
+}
