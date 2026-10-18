@@ -1,7 +1,7 @@
 import { TaskGroupRequestScope } from './agent-manager/task-group-request-scope'
 import { serializeTaskSend } from './task-send-lock'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
-import type { AgentManagerHost, AgentWindow } from './agent-manager/host'
+import type { AgentAttachmentExecution, AgentManagerHost, AgentWindow } from './agent-manager/host'
 import { transcriptDisplayPart } from './transcript-display'
 import { finishSessionFeedback, SessionFeedbackOwnershipChangedError, updateTaskFromUser } from './session-feedback'
 import { buildAgentSwitchRecap, buildLostSessionRecap, buildTokenBudgetedRecap, INITIAL_PROMPT_PART_PREFIX, LOST_SESSION_NOTICE, taskContextBudget } from './agent-handoff'
@@ -387,6 +387,7 @@ export class AgentManager extends EventEmitter {
   private startQueueDrainScheduled = false
   private startQueueRetryTimer: ReturnType<typeof setTimeout> | null = null
   private shuttingDown = false
+  private readonly attachmentExecution: AgentAttachmentExecution | undefined
   /** `projectId:reason` pairs the project's Captain has been told about (#65),
    *  cleared when one of the project's queued starts runs. */
   private projectLimitNotices: Set<string> = new Set()
@@ -397,6 +398,7 @@ export class AgentManager extends EventEmitter {
       throw new Error('Explicit agent manager host services are required')
     }
     this.db = db
+    this.attachmentExecution = host.attachmentExecution
     this.compactionObserver = db.db && typeof db.db.prepare === 'function' ? new ManagedSessionObserver(db.db) : null
     this.taskEngine = db.db && typeof db.db.prepare === 'function' ? new AdapterEngine(db.db, undefined, 'task') : null
     this.captainEngine = db.db && typeof db.db.prepare === 'function' ? new AdapterEngine(db.db) : null
@@ -1118,6 +1120,23 @@ export class AgentManager extends EventEmitter {
   private buildMcpServersForAdapter(agentId: string, opts?: McpServerOptions): ReturnType<typeof buildMcpServers> {
     this.taskGroupRequests.assertCurrent()
     return this.ownShutdownWork(buildMcpServers(this.db, this.oauthManager, agentId, opts, this.host, this.taskGroupRequests.capture()))
+  }
+
+  private attachmentGuard(beforeEffect: () => void): () => void {
+    const request = this.taskGroupRequests.capture()
+    return () => {
+      request?.()
+      if (this.shuttingDown) throw new Error('Attachment execution owner is stopping.')
+      this.assertWorkspaceCleanupAvailable()
+      beforeEffect()
+    }
+  }
+
+  private async syncOwnedAttachments(taskId: string, workspaceDir: string, beforeEffect: () => void): Promise<string[]> {
+    const guard = this.attachmentGuard(beforeEffect)
+    guard()
+    if (!this.attachmentExecution) return syncAttachmentsToWorkspace(this.db, taskId, workspaceDir)
+    return this.ownShutdownWork(Promise.resolve().then(() => this.attachmentExecution!.sync(taskId, workspaceDir, guard)))
   }
 
   /** Session config for follow-up calls on an existing session (send, abort, stop). */
@@ -2189,7 +2208,11 @@ export class AgentManager extends EventEmitter {
           promptText = buildTriagePrompt(task, this.projectRepoNames(task))
         } else {
           promptText = buildTaskWorkPrompt(this.db, taskId, task ?? this.db.getTask(taskId))
-          const attachmentRefs = syncAttachmentsToWorkspace(this.db, taskId, workspaceDir)
+          const attachmentSession = this.sessions.get(adapterSessionId)!
+          const attachmentRefs = await this.syncOwnedAttachments(taskId, workspaceDir, () => {
+            if (!mayStart()) throw new Error('Start ownership was withdrawn before attachment publication.')
+            this.assertSessionGeneration(adapterSessionId, attachmentSession)
+          })
           if (attachmentRefs.length > 0) {
             promptText += `\n\nAttached files (relative to your working directory):\n${attachmentRefs.join('\n')}`
           }
@@ -3221,7 +3244,10 @@ export class AgentManager extends EventEmitter {
 
     this.taskGroupRequests.assertCurrent()
     // Pick up attachments added since the session was started/last resumed.
-    syncAttachmentsToWorkspace(this.db, taskId, workspaceDir)
+    await this.syncOwnedAttachments(taskId, workspaceDir, () => {
+      this.assertAgentConfigurationAvailable(agentId)
+      if (this.taskStops.has(taskId)) throw new Error('Resume attachment ownership was withdrawn.')
+    })
 
     const task = this.db.getTask(taskId)
     await yieldEventLoop()
@@ -5940,6 +5966,9 @@ export class AgentManager extends EventEmitter {
         payload.attachments,
         `delivery-${claimed.id}`
       )), AGENT_START_TIMEOUT_MS + AGENT_SESSION_START_TIMEOUT_MS, 'Message handoff')
+      // A heartbeat is a check against captured instructions, not a durable
+      // ordinary message receipt. Stale checks stay cancelled without replay.
+      if (heartbeatDelivery) this.taskGroupRequests.assertCurrent()
       const destination = result.newSessionId || payload.sessionId || claimed.taskId || claimed.id
       this.deliveries.accept(claimed.id, this.deliveryOwner, destination)
       this.deliveries.acknowledge(claimed.id, this.deliveryOwner)
@@ -6380,7 +6409,7 @@ export class AgentManager extends EventEmitter {
     if (!session.adapter) throw new Error('Adapter not initialized')
     // Attachments added mid-session must be referenceable immediately.
     if (session.workspaceDir) {
-      syncAttachmentsToWorkspace(this.db, session.taskId, session.workspaceDir)
+      await this.syncOwnedAttachments(session.taskId, session.workspaceDir, () => this.assertSessionGeneration(sessionId, session))
     }
 
     // AgentLearning is preserved.
@@ -6411,7 +6440,11 @@ export class AgentManager extends EventEmitter {
     )
     this.assertSessionGeneration(sessionId, session)
 
-    let promptText = buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
+    let promptText = this.attachmentExecution
+      ? await this.ownShutdownWork(Promise.resolve().then(() => this.attachmentExecution!.context(session.taskId, session.workspaceDir, message, attachments,
+        this.attachmentGuard(() => this.assertSessionGeneration(sessionId, session)))))
+      : buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
+    this.assertSessionGeneration(sessionId, session)
     // A session replacing a lost one starts from a recap, not blank. Only the
     // backend sees it: the transcript keeps the user's own words.
     const recap = session.pendingRecap
@@ -6426,7 +6459,10 @@ export class AgentManager extends EventEmitter {
       return this.sendTrackedPrompt(session, sessionId, promptText, sessionConfig)
     }
     await serializeTaskSend(this, session.taskId, send)
-    this.taskGroupRequests.assertCurrent()
+    // An admitted raw prompt acknowledgement still belongs to the durable
+    // delivery after caller withdrawal. Return it for ledger acceptance while
+    // suppressing new polling/state effects; the request owner refuses reply.
+    if (!this.taskGroupRequests.isCurrent()) return
     // Stop may destroy the session while adapter acceptance is in flight.
     // The accepted call may finish, but it must not re-register polling or
     // otherwise revive the runtime after the explicit Stop boundary.
@@ -6540,7 +6576,7 @@ export class AgentManager extends EventEmitter {
         // Question replies bypass doSendAdapterMessage. Make newly pasted
         // task images available before the adapter resumes the waiting turn.
         if (session.workspaceDir) {
-          syncAttachmentsToWorkspace(this.db, session.taskId, session.workspaceDir)
+          await this.syncOwnedAttachments(session.taskId, session.workspaceDir, () => this.assertSessionGeneration(sessionId, session))
         }
       }
 

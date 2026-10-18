@@ -9,7 +9,7 @@ import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { UI_NATIVE_CALLBACK_SCHEMAS, isPrivateUiPublication, isPrivateAgentInstallation } from '../shared/ui-native-callbacks'
 import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync, symlinkSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -722,7 +722,7 @@ it.each(['open', 'download'] as const)('uses %s for real saved attachment metada
   const f = fixture(false, true, false, method === 'open', method === 'download'); await f.initialize()
   const { services, task, attachment, path } = savedAttachment(f)
   const agent = services.db.getAgents()[0]; services.db.updateAgent(agent.id, { config: { coding_agent: 'pi' } }); services.db.updateTask(task.id, { agent_id: agent.id })
-  await f.host.request('agentSession:start', { agentId: agent.id, taskId: task.id })
+  await f.host.request('agentSession:start', { agentId: agent.id, taskId: task.id, ...(process.platform === 'linux' ? {} : { skipInitialPrompt: true }) })
   expect(services.agents.hasTaskStartOwnership(task.id)).toBe(true)
   f.denyWrites()
   const getterTraces: string[] = [], actualTask = services.db.getTask.bind(services.db), actualAgent = services.db.getAgent.bind(services.db)
@@ -981,6 +981,35 @@ describe('private selection receipts through actual service peer and SQLite owne
   await expect(f.host.request('engine.attachment.selection.offer',{leaseId,selections:[selection]})).resolves.toEqual({accepted:false})
   expect(f.nativeCalls).toEqual(calls)
  })
+})
+
+async function protectedAttachmentExecutionGraph() {
+  const f = fixture(false, true, false, false, false, false, false, false, false, false, true)
+  await f.initialize()
+  const actual = f.service.getReadyServices()!, task = actual.db.createTask(makeTask())!, agent = actual.db.getAgents()[0]
+  actual.db.updateAgent(agent.id, { config: { coding_agent: 'pi' } })
+  const selection = { selectionId: randomUUID(), path: '/controlled-selected/execution.txt', filename: 'execution.txt', size: 19 }, leaseId = 'document_fixture_1'
+  expect(await f.host.request('engine.attachment.selection.offer', { leaseId, selections: [selection] })).toEqual({ accepted: true })
+  const imported = await f.host.request('engine.attachment.save', { taskId: task.id, filePath: selection.path, leaseId }) as { value: { id: string; filename: string; size: number; mime_type: string; added_at: string } }
+  expect(actual.db.getTask(task.id)!.attachments).toEqual([])
+  expect(await f.host.request('db:updateTask', { id: task.id, data: { attachments: [imported.value], agent_id: agent.id }, precondition: { attachmentsBaseline: [] } })).toMatchObject({ value: { attachments: [imported.value] } })
+  expect(await f.host.request('agentSession:start', { agentId: agent.id, taskId: task.id })).toMatchObject({ value: { sessionId: 'controlled_native' } })
+  expect(f.adapter.sendPrompt).toHaveBeenCalledOnce()
+  const path = join(f.launch.paths.workspaceRoot, task.id, 'attachments', selection.filename), expected = Buffer.alloc(selection.size, 7)
+  expect(readFileSync(path)).toEqual(expected)
+  const outside = join(f.root, 'foreign-message-preview.txt'); writeFileSync(outside, 'foreign message preview canary')
+  unlinkSync(path); symlinkSync(outside, path)
+  await f.host.request('agentSession:sendByTaskId', { taskId: task.id, message: 'Use the exact saved attachment', attachments: [{ id: imported.value.id, filename: imported.value.filename, size: imported.value.size, mime_type: imported.value.mime_type }], deliveryId: 'protected-execution-send' })
+  expect(f.adapter.sendPrompt).toHaveBeenCalledTimes(2)
+  expect(JSON.stringify(f.adapter.sendPrompt.mock.calls)).not.toContain('foreign message preview canary')
+  expect(readFileSync(outside, 'utf8')).toBe('foreign message preview canary'); expect(readFileSync(path)).toEqual(expected)
+  expect(actual.db.getTask(task.id)!.attachments).toEqual([imported.value])
+  await f.service.close(); expect(actual.db.db.open).toBe(false)
+}
+if (process.platform === 'linux') it('joins private selection import, explicit CAS and protected execution through the actual peer', protectedAttachmentExecutionGraph)
+if (process.platform === 'linux' && process.env.TAURI_PRODUCTION_SERVICE_ENTRY) it('joins the protected attachment execution graph through the actual staged production engine', async () => {
+  ;({ ProductionService, sealProductionServiceHost } = await import(/* @vite-ignore */ pathToFileURL(join(dirname(process.env.TAURI_PRODUCTION_SERVICE_ENTRY!), 'production-engine.mjs')).href))
+  await protectedAttachmentExecutionGraph()
 })
 
 

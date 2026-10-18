@@ -161,6 +161,46 @@ export class TaskAttachmentFileOwner {
     if (typeof invoke !== 'function') return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
     return this.withOpenFile(taskId, attachment, controls, receipt => invoke(receipt))
   }
+  /** Source-only execution reader. The held no-follow FD never leaves this
+   * owner; consumers receive bounded detached bytes, not ambient read paths.
+   * Publication must wait for the complete opening/closing verification. */
+  readForExecution<T>(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls,
+    consume: (read: (offset: number, length: number) => Promise<Buffer>) => Promise<T>): Promise<T> {
+    if (!taskAttachmentRecord(attachment) || typeof consume !== 'function') return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
+    const size = attachment.size
+    return this.withOpenFile(taskId, attachment, controls, async (_receipt, fd, guard) => {
+      let active = true
+      const pending = new Set<Promise<Buffer>>()
+      let readFailure: unknown
+      let readerFailed = false
+      try {
+        return await consume((offset, length) => {
+          if (pending.size >= 16) {
+            readerFailed = true; readFailure = new TaskAttachmentFileError('ATTACHMENT_BUSY')
+            const rejected = Promise.reject(readFailure); void rejected.catch(() => {}); return rejected
+          }
+          const raw = Promise.resolve().then(async () => {
+            if (!active || !Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 1 || length > 65536 || offset + length > size) fail('ATTACHMENT_INVALID_ARGUMENTS')
+            const bytes = Buffer.alloc(length); let read = 0
+            while (read < length) {
+              const result = await this.step(guard, () => fd.read(bytes, read, length - read, offset + read))
+              if (!Number.isSafeInteger(result.bytesRead) || result.bytesRead < 1 || result.bytesRead > length - read) fail('ATTACHMENT_PATH_CHANGED')
+              read += result.bytesRead
+            }
+            if (!active) fail('ATTACHMENT_CANCELLED')
+            return bytes
+          })
+          pending.add(raw)
+          void raw.then(() => pending.delete(raw), error => { readerFailed = true; readFailure ??= error; pending.delete(raw) })
+          return raw
+        })
+      } finally {
+        active = false
+        while (pending.size) await Promise.allSettled([...pending])
+        if (readerFailed) throw readFailure ?? new TaskAttachmentFileError('ATTACHMENT_IO_FAILED')
+      }
+    })
+  }
   readImage(taskId: string, attachment: FileAttachmentRecord, controls: TaskAttachmentFileControls, assertDocument?: () => Promise<void>): Promise<AttachmentImage> {
     if (!taskAttachmentRecord(attachment)) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_INVALID_ARGUMENTS'))
     if (attachment.size > ATTACHMENT_IMAGE_BYTES) return Promise.reject(new TaskAttachmentFileError('ATTACHMENT_CAPACITY'))

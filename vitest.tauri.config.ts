@@ -24,7 +24,7 @@ const mainFiles = [
   'src/main/agent-manager-cli-configuration.test.ts',
   'src/main/agent-installer/portable-installation.test.ts',
   'src/main/agent-installer/portable-detection-controls.test.ts',
-  'src/main/task-attachment-file-owner.test.ts', 'src/main/chat/task-image-attachments.test.ts',
+  'src/main/task-attachment-file-owner.test.ts', 'src/main/attachment-execution-owner.test.ts', 'src/main/chat/task-image-attachments.test.ts',
   'src/main/cli-mcp-config/*.test.ts',
   'src/service/**/*.test.ts', 'src/main/agent-manager-configuration.test.ts',
   'src/main/agent-manager-scoped-approval.test.ts', 'src/main/adapters/shared/json-rpc-acknowledgement.test.ts',

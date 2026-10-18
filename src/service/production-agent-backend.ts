@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isDatabaseId } from '../shared/database-desktop-codecs'
 import type { AgentManager } from '../main/agent-manager-core'
 import type { DatabaseManager } from '../main/database/manager'
 import type { TaskRecord } from '../main/database/types'
@@ -13,6 +14,8 @@ import type { OperationSchema } from './transport/peer'
 
 type Access = 'read' | 'write'
 type Attachments = DesktopCommandMap['agentSession:sendByTaskId']['apiArguments'][2]
+const ATTACHMENT_PRODUCING_COMMANDS = new Set<ProductionAgentOperation>(['agentSession:start', 'agentSession:startTask', 'agentSession:resume', 'agentSession:send', 'agentSession:sendByTaskId', 'agentSession:switchAgent', 'agentSession:approve', 'captainRuntime:switch', 'captainRuntime:retry', 'captainRuntime:rollback'])
+interface AttachmentRequestRow { id: string; project_id: string; agent_id: string | null; role: string; group_id: string | null; parent_task_id: string | null; attachments: string }
 export interface ProductionAgentBackendOptions {
   database: DatabaseManager
   manager: AgentManager
@@ -176,6 +179,78 @@ export class ProductionAgentBackend {
       throw new ServiceProtocolError('INVALID_RESULT')
     }
   }
+  /** A file-producing retained request keeps its original grants and graph
+   * while the actual manager awaits adapters/files. A late reply check cannot
+   * revoke bytes or a prompt already admitted by an unscoped manager. */
+  private attachmentRequestGuard(operation: ProductionAgentOperation, args: readonly unknown[], caller: DesktopCallerContext, signal: AbortSignal): (() => void) | undefined {
+    if (!ATTACHMENT_PRODUCING_COMMANDS.has(operation)) return undefined
+    const { database: db, manager } = this.options
+    let taskId: unknown
+    if (operation === 'agentSession:start' || operation === 'agentSession:resume') taskId = args[1]
+    else if (operation === 'agentSession:startTask' || operation === 'agentSession:sendByTaskId' || operation === 'agentSession:switchAgent') taskId = args[0]
+    else if (operation === 'agentSession:send') taskId = args[2] ?? manager.getSession(String(args[0]))?.taskId
+    else if (operation === 'agentSession:approve') taskId = manager.getSession(String(args[0]))?.taskId
+    else taskId = db.getCoordinatorTask(String(args[0]))?.id
+    if (!isDatabaseId(taskId)) throw new ServiceProtocolError('INVALID_REQUEST')
+    const inputId = taskId, root = this.taskAllowed(inputId, caller, 'write')
+    if (!root) throw new ServiceProtocolError('INVALID_REQUEST')
+    const seed = [...new Set([inputId, root.id])], initialAgents = new Set<string>()
+    const fields = { id: 128, project_id: 128, agent_id: 128, role: 32, group_id: 128, parent_task_id: 128, attachments: 131072 }
+    const reject = (): never => { throw new ServiceProtocolError('INVALID_REQUEST') }
+    const captain = operation.startsWith('captainRuntime:') ? manager.getCaptainRuntime(String(args[0])) : null
+    const requestedAgent = operation === 'agentSession:start' || operation === 'agentSession:resume' ? args[0]
+      : operation === 'agentSession:switchAgent' || operation === 'captainRuntime:switch' ? args[1]
+        : operation === 'captainRuntime:retry' ? captain?.candidateAgentId ?? undefined
+          : operation === 'captainRuntime:rollback' ? captain?.lastGoodAgentId ?? undefined
+        : operation === 'agentSession:send' ? args[3] : undefined
+    if (requestedAgent !== undefined) { if (!isDatabaseId(requestedAgent)) reject(); initialAgents.add(requestedAgent as string) }
+    const switching = operation === 'agentSession:switchAgent' || operation.startsWith('captainRuntime:')
+    const capture = () => {
+      const ids = new Set(seed)
+      if (operation === 'agentSession:startTask') {
+        const children = db.db.prepare('SELECT id FROM tasks WHERE parent_task_id=? ORDER BY id LIMIT 129').all(inputId) as Array<{ id: string }>
+        if (children.length > 128) reject()
+        for (const row of children) { if (!isDatabaseId(row.id)) reject(); ids.add(row.id) }
+      }
+      const marks = seed.map(() => '?').join(',')
+      const groupWhere = `state='active' AND (execution_task_id IN (${marks}) OR id IN (SELECT group_id FROM tasks WHERE id IN (${marks})))`
+      if (db.db.prepare(`SELECT 1 FROM task_groups WHERE ${groupWhere} AND (length(CAST(id AS BLOB))>128 OR length(CAST(project_id AS BLOB))>128 OR length(CAST(execution_task_id AS BLOB))>128 OR COALESCE(length(CAST(agent_id AS BLOB)),0)>128) LIMIT 1`).get(...seed, ...seed)) reject()
+      const groups = db.db.prepare(`SELECT id,project_id,agent_id,execution_task_id FROM task_groups WHERE ${groupWhere} ORDER BY id LIMIT 129`).all(...seed, ...seed) as Array<{ id: string; project_id: string; agent_id: string; execution_task_id: string }>
+      if (groups.length > 128) reject()
+      const memberships: unknown[] = []
+      for (const group of groups) {
+        if (![group.id, group.project_id, group.agent_id, group.execution_task_id].every(isDatabaseId)) reject()
+        ids.add(group.execution_task_id)
+        if (db.db.prepare('SELECT 1 FROM task_group_memberships WHERE group_id=? AND left_at IS NULL AND (length(CAST(id AS BLOB))>128 OR length(CAST(task_id AS BLOB))>128 OR length(CAST(joined_at AS BLOB))>64) LIMIT 1').get(group.id)) reject()
+        const members = db.db.prepare('SELECT id,task_id,position,joined_at FROM task_group_memberships WHERE group_id=? AND left_at IS NULL ORDER BY position,id LIMIT 129').all(group.id) as Array<{ task_id: string }>
+        if (members.length > 128) reject()
+        memberships.push(members)
+        for (const member of members) { if (!isDatabaseId(member.task_id)) reject(); ids.add(member.task_id) }
+      }
+      if (ids.size > 128) reject()
+      const values = [...ids].sort(), placeholders = values.map(() => '?').join(',')
+      const invalid = Object.entries(fields).map(([field, bytes]) => `COALESCE(length(CAST(${field} AS BLOB)),0)>${bytes}`).join(' OR ')
+      if (db.db.prepare(`SELECT 1 FROM tasks WHERE id IN (${placeholders}) AND (${invalid}) LIMIT 1`).get(...values)) reject()
+      const budget = db.db.prepare(`SELECT COALESCE(SUM(${Object.keys(fields).map(field => `COALESCE(length(CAST(${field} AS BLOB)),0)`).join('+')}),0) AS bytes FROM tasks WHERE id IN (${placeholders})`).get(...values) as { bytes: number }
+      if (!Number.isSafeInteger(budget.bytes) || budget.bytes > 890000) reject()
+      const rows = db.db.prepare(`SELECT ${Object.keys(fields).join(',')} FROM tasks WHERE id IN (${placeholders}) ORDER BY id LIMIT 129`).all(...values) as AttachmentRequestRow[]
+      if (rows.length !== values.length || rows.some(row => !isDatabaseId(row.id) || !isDatabaseId(row.project_id))) reject()
+      return { rows, groups, signature: JSON.stringify([rows.map(row => switching ? { ...row, agent_id: null } : row), groups.map(group => switching ? { ...group, agent_id: null } : group), memberships]) }
+    }
+    const initial = capture()
+    for (const row of initial.rows) { if (row.agent_id) initialAgents.add(row.agent_id); const task = db.getTask(row.id)!; const selected = this.selectedAgent(task); if (selected) initialAgents.add(selected) }
+    for (const group of initial.groups) initialAgents.add(group.agent_id)
+    return () => {
+      this.available()
+      if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
+      if (caller.engineEpoch !== this.options.engineEpoch || !this.options.isTrustedDesktop(caller)) reject()
+      for (const row of initial.rows) if (!this.options.canAccessTask(row.id, caller, 'write') || !this.options.canAccessProject(row.project_id, caller, 'write')) reject()
+      for (const id of initialAgents) if (!this.agentAllowed(id, caller, 'write')) reject()
+      const current = capture()
+      if (current.signature !== initial.signature) reject()
+      if (switching && (current.rows.some((row, index) => row.agent_id !== initial.rows[index].agent_id && row.agent_id !== requestedAgent) || current.groups.some((group, index) => group.agent_id !== initial.groups[index].agent_id && group.agent_id !== requestedAgent))) reject()
+    }
+  }
   private bind<K extends ProductionAgentOperation>(operation: K,
     authorize: (args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext) => boolean | Promise<boolean>,
     effect: (args: DesktopCommandMap[K]['apiArguments'], caller: DesktopCallerContext, signal: AbortSignal) => unknown | Promise<unknown>): void {
@@ -186,10 +261,20 @@ export class ProductionAgentBackend {
       invoke: (args, caller, signal) => this.retain((async () => {
         this.available()
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
+        const capturedCaller = Object.freeze({ ...caller })
+        const beforeEffect = this.attachmentRequestGuard(operation, args, capturedCaller, signal)
         if (!await authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
         this.available()
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
-        const result = await effect(args, caller, signal)
+        let result: unknown
+        try {
+          result = beforeEffect
+            ? await this.options.manager.withTaskGroupRequestGuard(async () => effect(args, capturedCaller, signal), beforeEffect, signal)
+            : await effect(args, caller, signal)
+        } catch (error) {
+          if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
+          throw error
+        }
         // This only suppresses a late reply. The raw accepted effect is retained
         // and durable; disconnect never rolls it back or resends it.
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')

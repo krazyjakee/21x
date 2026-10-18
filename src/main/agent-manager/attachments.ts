@@ -65,10 +65,6 @@ export function buildMessageWithAttachmentContext(
   if (!attachments || attachments.length === 0) return message
 
   const capped = attachments.slice(0, MAX_LISTED_ATTACHMENTS)
-  const omittedCount = attachments.length - capped.length
-  const refs = capped.map(
-    (att) => `- attachments/${att.filename} (${att.mime_type || 'application/octet-stream'}, ${formatAttachmentSize(att.size)})`
-  )
 
   const previewBlocks: string[] = []
   if (workspaceDir) {
@@ -91,6 +87,15 @@ export function buildMessageWithAttachmentContext(
     }
   }
 
+  return buildMessageWithAttachmentPreviews(message, attachments, previewBlocks)
+}
+
+/** Formatting only. Protected production execution supplies previews from its
+ * verified saved-file reader and never reads mutable workspace paths here. */
+export function buildMessageWithAttachmentPreviews(message: string, attachments: MessageAttachmentRef[], previewBlocks: string[]): string {
+  if (!attachments.length) return message
+  const capped = attachments.slice(0, MAX_LISTED_ATTACHMENTS), omittedCount = attachments.length - capped.length
+  const refs = capped.map(att => `- attachments/${att.filename} (${att.mime_type || 'application/octet-stream'}, ${formatAttachmentSize(att.size)})`)
   let attachmentContext = '\n\nMessage attachments (already available in your workspace):\n'
   attachmentContext += refs.join('\n')
   if (omittedCount > 0) {

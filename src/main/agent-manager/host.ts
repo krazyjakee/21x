@@ -3,6 +3,14 @@ import type { CodingAgentAdapter, McpServerConfig } from '../adapters/coding-age
 import type { McpServerOptions } from './session-config-core'
 import type { ChatSettingsSource } from '../chat/provider-factory'
 import type { ChatProvider } from '../chat/providers/types'
+import type { MessageAttachmentRef } from './attachments'
+
+/** Private Source authority, captured at application bootstrap. Public task
+ * paths/attachment records cannot construct or replace this owner. */
+export interface AgentAttachmentExecution {
+  sync(taskId: string, workspaceDir: string, beforeEffect: () => void): Promise<string[]>
+  context(taskId: string, workspaceDir: string | undefined, message: string, attachments: MessageAttachmentRef[] | undefined, beforeEffect: () => void): Promise<string>
+}
 
 /** The GUI attachment is optional; durable events never depend on one. */
 export interface AgentWindow {
@@ -39,6 +47,7 @@ export interface SessionConfigHost {
 
 /** Required host policy; importing the lifecycle never chooses a native host. */
 export interface AgentManagerHost extends SessionConfigHost {
+  attachmentExecution?: AgentAttachmentExecution
   renderer: { kind: 'unsupported' } | {
     kind: 'native'
     send(target: AgentWindow['webContents'], channel: string, ...args: unknown[]): boolean

@@ -12,6 +12,7 @@ import { ProductionUiOwner, assertUiStateReferences, assertUiCommandReferences, 
 import { CliMcpConfigManager } from '../main/cli-mcp-config/core'
 import { CliMcpFileOwner, type CliMcpFileOwnerOptions } from '../main/cli-mcp-config/portable-file-owner'
 import { TaskAttachmentFileOwner, type TaskAttachmentFileOwnerOptions } from '../main/task-attachment-file-owner'
+import { AttachmentExecutionOwner, AttachmentExecutionError } from '../main/attachment-execution-owner'
 import type { FileAttachmentRecord } from '../main/database/types'
 import { homedir, networkInterfaces } from 'node:os'
 import { PortableAgentDetectionOwner } from '../main/agent-installer/portable-detection'
@@ -816,8 +817,17 @@ export class ProductionOwner {
     const adapters = new ProductionAdapters()
     this.register('adapters', () => adapters.shutdown(), () => adapters.close())
     const factory = this.boundaries.createAdapter ?? createAdapter
+    const attachmentExecution: { owner?: AttachmentExecutionOwner } = {}
+    const ownedAttachmentExecution = (): AttachmentExecutionOwner => {
+      if (!attachmentExecution.owner) throw new AttachmentExecutionError('ATTACHMENT_EXECUTION_UNAVAILABLE')
+      return attachmentExecution.owner
+    }
     const host: AgentManagerHost = {
       ...native.agents,
+      attachmentExecution: Object.freeze({
+        sync: (...args: Parameters<AttachmentExecutionOwner['sync']>) => ownedAttachmentExecution().sync(...args),
+        context: (...args: Parameters<AttachmentExecutionOwner['context']>) => ownedAttachmentExecution().context(...args)
+      }),
       ...(energy ? { energy: energy.host } : {}),
       secrets: { kind: 'broker', getPort: () => broker.port, register: (token, agentId, ids) => broker.register(token, agentId, ids),
         unregister: token => broker.unregister(token), writeShellWrapper: () => shellWrapper },
@@ -914,6 +924,10 @@ export class ProductionOwner {
     if (!(taskAttachmentFiles instanceof TaskAttachmentFileOwner)) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
     taskAttachmentFiles.assertOwners(this.bootstrap.paths.attachmentRoot)
     this.register('task-attachment-files', () => taskAttachmentFiles.shutdown(), () => taskAttachmentFiles.close())
+    attachmentExecution.owner = new AttachmentExecutionOwner({ database: db, files: taskAttachmentFiles,
+      attachmentRoot: this.bootstrap.paths.attachmentRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, assertCurrent: fileOptions.assertCurrent })
+    const capturedAttachmentExecution = attachmentExecution.owner
+    this.register('attachment-execution', () => capturedAttachmentExecution.shutdown(), () => capturedAttachmentExecution.close())
     const uiGrants = Object.freeze({ canAccessProject: () => true, canAccessTask: () => true, canAccessAgent: () => true })
     const ui = native.ui ? new ProductionUiOwner({ database: db, manager: agents, native: native.ui,
       assertCurrent: fileOptions.assertCurrent,
