@@ -153,7 +153,7 @@
       "expression": "desktopApi.shell.openExternal",
       "file": "src/renderer/src/components/oauth/OAuthDialog.tsx",
       "kind": "call",
-      "line": 44,
+      "line": 45,
       "path": [
         "shell",
         "openExternal"
@@ -165,7 +165,7 @@
       "expression": "desktopApi.onOAuthCallback",
       "file": "src/renderer/src/components/oauth/OAuthDialog.tsx",
       "kind": "call",
-      "line": 69,
+      "line": 71,
       "path": [
         "onOAuthCallback"
       ],
@@ -208,22 +208,22 @@
       "resolution": "literal"
     },
     {
-      "column": 52,
+      "column": 70,
       "expression": "desktopApi?.oauth",
       "file": "src/renderer/src/components/plugins/HubSpotConfigForm.tsx",
       "kind": "access",
-      "line": 36,
+      "line": 39,
       "path": [
         "oauth"
       ],
       "resolution": "literal"
     },
     {
-      "column": 21,
+      "column": 39,
       "expression": "desktopApi?.oauth",
       "file": "src/renderer/src/components/plugins/HubSpotConfigForm.tsx",
       "kind": "access",
-      "line": 51,
+      "line": 56,
       "path": [
         "oauth"
       ],
@@ -234,7 +234,7 @@
       "expression": "desktopApi.shell.openExternal",
       "file": "src/renderer/src/components/plugins/HubSpotConfigForm.tsx",
       "kind": "call",
-      "line": 136,
+      "line": 141,
       "path": [
         "shell",
         "openExternal"
@@ -242,22 +242,22 @@
       "resolution": "literal"
     },
     {
-      "column": 21,
+      "column": 39,
       "expression": "desktopApi?.oauth",
       "file": "src/renderer/src/components/plugins/LinearConfigForm.tsx",
       "kind": "access",
-      "line": 27,
+      "line": 30,
       "path": [
         "oauth"
       ],
       "resolution": "literal"
     },
     {
-      "column": 21,
+      "column": 39,
       "expression": "desktopApi?.oauth",
       "file": "src/renderer/src/components/plugins/LinearConfigForm.tsx",
       "kind": "access",
-      "line": 42,
+      "line": 47,
       "path": [
         "oauth"
       ],
@@ -268,7 +268,7 @@
       "expression": "desktopApi.shell.openExternal",
       "file": "src/renderer/src/components/plugins/LinearConfigForm.tsx",
       "kind": "call",
-      "line": 66,
+      "line": 72,
       "path": [
         "shell",
         "openExternal"
@@ -288,22 +288,11 @@
       "resolution": "literal"
     },
     {
-      "column": 31,
-      "expression": "desktopApi?.oauth",
-      "file": "src/renderer/src/components/settings/tabs/IntegrationsSettings.tsx",
-      "kind": "access",
-      "line": 43,
-      "path": [
-        "oauth"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 33,
+      "column": 49,
       "expression": "desktopApi.oauth.getValidToken",
       "file": "src/renderer/src/components/settings/tabs/IntegrationsSettings.tsx",
       "kind": "call",
-      "line": 50,
+      "line": 79,
       "path": [
         "oauth",
         "getValidToken"
@@ -14470,7 +14459,7 @@
     "src/tauri-production"
   ],
   "summary": {
-    "desktopAPIConsumers": 361,
+    "desktopAPIConsumers": 360,
     "directAPIConsumers": 1,
     "files": 916,
     "operations": 736,

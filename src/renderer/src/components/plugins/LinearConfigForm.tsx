@@ -1,4 +1,4 @@
-import { desktopApi } from '@/lib/desktop-api'
+import { captureDesktopRead, getDesktopHost, desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
@@ -12,6 +12,7 @@ const OAUTH_CALLBACK_URL = 'twentyonex://oauth/callback'
 const LEGACY_OAUTH_CALLBACK_URL = 'nuanu://oauth/callback'
 
 export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: PluginFormProps) {
+  const nativeDesktop = getDesktopHost().kind === 'tauri'
   const [showOAuthDialog, setShowOAuthDialog] = useState(false)
   const [oauthConnected, setOauthConnected] = useState(false)
 
@@ -24,22 +25,26 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
 
   // Check if OAuth token exists
   useEffect(() => {
-    if (sourceId && desktopApi?.oauth) {
+    let active = true
+    const scope = captureDesktopRead()
+    if (!nativeDesktop && sourceId && desktopApi?.oauth) {
       oauthApi
         .getValidToken(sourceId)
         .then((token) => {
-          setOauthConnected(!!token)
+          if (active && scope.isCurrent()) setOauthConnected(!!token)
         })
         .catch(() => {
-          setOauthConnected(false)
+          if (active && scope.isCurrent()) setOauthConnected(false)
         })
     }
-  }, [sourceId])
+    return () => { active = false }
+  }, [sourceId, nativeDesktop])
 
   const handleOAuthSuccess = async () => {
+    if (nativeDesktop) return
     setShowOAuthDialog(false)
 
-    if (sourceId && desktopApi?.oauth) {
+    if (!nativeDesktop && sourceId && desktopApi?.oauth) {
       try {
         const token = await oauthApi.getValidToken(sourceId)
         setOauthConnected(!!token)
@@ -55,6 +60,7 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
   return (
     <>
       <div className="space-y-3">
+        {nativeDesktop ? <p className="text-xs text-muted-foreground">Browser sign-in and native redirect registration are unavailable in this preview.</p> : <>
         {/* OAuth Setup Link */}
         <div className="space-y-1.5">
           <Label>OAuth Setup</Label>
@@ -72,6 +78,8 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
             . Set redirect URI to: <code className="text-xs bg-muted px-1 rounded">{OAUTH_CALLBACK_URL}</code>
           </p>
         </div>
+
+        </>}
 
         {/* Client ID */}
         <div className="space-y-1.5">
@@ -121,6 +129,7 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
           <p className="text-xs text-muted-foreground">OAuth scopes for Linear API access</p>
         </div>
 
+        {!nativeDesktop && <>
         {/* Redirect URI — the legacy nuanu:// scheme is accepted for one release */}
         <div className="space-y-1.5">
           <Label htmlFor="redirect_uri">Redirect URI</Label>
@@ -138,12 +147,15 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
           </p>
         </div>
 
+        </>}
+
         {/* OAuth Connect Button */}
         <div className="space-y-1.5 pt-2">
           <Button
             type="button"
             onClick={() => {
-              // If no sourceId, auto-save first
+              if (nativeDesktop) return
+              // If no sourceId, save first; reopen the accepted source to connect.
               if (!sourceId && onRequestSave) {
                 const saved = onRequestSave()
                 if (!saved) return
@@ -151,27 +163,27 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
               }
               setShowOAuthDialog(true)
             }}
-            disabled={!canStartOAuth}
+            disabled={nativeDesktop || !canStartOAuth}
             variant={oauthConnected ? 'outline' : 'default'}
             className="w-full"
           >
-            {oauthConnected ? 'Connected to Linear' : 'Connect to Linear'}
+            {nativeDesktop ? 'Browser sign-in unavailable' : oauthConnected ? 'Connected to Linear' : 'Connect to Linear'}
           </Button>
-          {!sourceId && !hasCredentials && (
+          {!nativeDesktop && !sourceId && !hasCredentials && (
             <p className="text-xs text-muted-foreground">
               Fill in Client ID and Client Secret above to continue
             </p>
           )}
-          {!sourceId && hasCredentials ? (
+          {!nativeDesktop && !sourceId && hasCredentials ? (
             <p className="text-xs text-muted-foreground">
-              Click to save source and start OAuth flow
+              Save the source, then reopen it to connect
             </p>
           ) : null}
         </div>
       </div>
 
       {/* OAuth Dialog */}
-      {sourceId && showOAuthDialog && (
+      {!nativeDesktop && sourceId && showOAuthDialog && (
         <OAuthDialog
           open={showOAuthDialog}
           provider="linear"

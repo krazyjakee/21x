@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -13,7 +14,7 @@ interface TaskSourceFormDialogProps {
   plugins: PluginMeta[]
   open: boolean
   onClose: () => void
-  onSubmit: (data: CreateTaskSourceDTO) => void
+  onSubmit: (data: CreateTaskSourceDTO) => Promise<boolean>
 }
 
 export function TaskSourceFormDialog({
@@ -28,20 +29,50 @@ export function TaskSourceFormDialog({
   const [pluginConfig, setPluginConfig] = useState<Record<string, unknown>>(source?.config ?? {})
   const [documentation, setDocumentation] = useState<string | null>(null)
 
+  const [saving, setSaving] = useState(false)
+  const [reviewRequired, setReviewRequired] = useState(false)
+  const busy = useRef(false)
+  const active = useRef(false)
+  const lifetime = useRef(0)
+
   useEffect(() => {
+    ++lifetime.current
+    active.current = open
+    const retire = () => { active.current = false; ++lifetime.current }
+    window.addEventListener('pagehide', retire, { once: true })
     if (open) {
+      busy.current = false
+      setSaving(false)
+      setReviewRequired(false)
       setName(source?.name ?? '')
       setPluginId(source?.plugin_id ?? (plugins[0]?.id ?? ''))
       setPluginConfig(source?.config ?? {})
     }
+    return () => { retire(); window.removeEventListener('pagehide', retire) }
   }, [open, source?.id])
 
-  // Fetch documentation when plugin changes
+  // Read documentation for the exact displayed plugin and connection only.
   useEffect(() => {
-    if (pluginId) {
-      pluginApi.getDocumentation(pluginId).then(setDocumentation).catch(() => setDocumentation(null))
+    const host = getDesktopHost(), generation = lifetime.current
+    let disposed = false, request = 0, loadedGeneration = -1
+    const load = async () => {
+      const scope = captureDesktopRead(), connection = host.connectionGeneration ?? 0
+      if (!pluginId || !open || !active.current || !scope.isCurrent() || connection === loadedGeneration) return
+      loadedGeneration = connection
+      const revision = ++request
+      const valid = () => !disposed && active.current && generation === lifetime.current && revision === request && scope.isCurrent()
+      setDocumentation(null)
+      try {
+        const value = await pluginApi.getDocumentation(pluginId)
+        if (valid()) setDocumentation(value)
+      } catch { if (valid()) setDocumentation(null) }
     }
-  }, [pluginId])
+    void load()
+    const off = host.kind === 'tauri' ? host.subscribeConnection(() => { if (host.connection.status === 'ready') void load() }) : undefined
+    const retire = () => { disposed = true; ++request; off?.(); window.removeEventListener('pagehide', retire) }
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
+  }, [pluginId, open, source?.id])
 
   const selectedPlugin = plugins.find((p) => p.id === pluginId)
   const isValid = name.trim() && pluginId
@@ -53,16 +84,32 @@ export function TaskSourceFormDialog({
     config: pluginConfig
   })
 
+  const save = async (): Promise<boolean> => {
+    if (!isValid || busy.current || reviewRequired || !active.current) return false
+    const generation = lifetime.current, scope = captureDesktopRead()
+    if (!scope.isCurrent()) return false
+    const viewCurrent = () => active.current && generation === lifetime.current
+    busy.current = true
+    setSaving(true)
+    try {
+      const accepted = await onSubmit(buildData())
+      if (accepted && viewCurrent() && scope.isCurrent()) { onClose(); return true }
+    } catch { /* An absent receipt does not establish whether Source wrote. */ }
+    finally {
+      if (viewCurrent()) { busy.current = false; setSaving(false) }
+    }
+    if (viewCurrent()) setReviewRequired(true)
+    return false
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!isValid) return
-    onSubmit(buildData())
-    onClose()
+    void save()
   }
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-6xl">
+      <DialogContent className="max-w-6xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>{source ? 'Edit Task Source' : 'New Task Source'}</DialogTitle>
         </DialogHeader>
@@ -71,6 +118,7 @@ export function TaskSourceFormDialog({
             {/* Left Column - Form */}
             <div className="p-6 border-r border-border">
               <form onSubmit={handleSubmit} className="space-y-3">
+                <fieldset disabled={saving || reviewRequired} className="space-y-3 border-0 p-0 m-0 min-w-0">
                 <div className="space-y-1.5">
                   <Label htmlFor="ts-plugin">Plugin</Label>
                   <select
@@ -121,8 +169,8 @@ export function TaskSourceFormDialog({
                       sourceId={source?.id}
                       onRequestSave={() => {
                         // Auto-save source before OAuth when creating new source
-                        if (!source && isValid) {
-                          onSubmit(buildData())
+                        if (!source && isValid && !busy.current && !reviewRequired && active.current) {
+                          void save()
                           return true
                         }
                         return false
@@ -131,12 +179,14 @@ export function TaskSourceFormDialog({
                   )
                 })()}
 
+                </fieldset>
+                {reviewRequired && <p role="alert" className="text-xs text-destructive">Save could not be confirmed. Close this draft and review the source list before saving again.</p>}
                 <div className="flex justify-end gap-2 pt-1">
                   <Button type="button" variant="outline" size="sm" onClick={onClose}>
                     Cancel
                   </Button>
-                  <Button type="submit" size="sm" disabled={!isValid}>
-                    {source ? 'Save' : 'Add'}
+                  <Button type="submit" size="sm" disabled={!isValid || saving || reviewRequired}>
+                    {saving ? 'Saving...' : source ? 'Save' : 'Add'}
                   </Button>
                 </div>
               </form>

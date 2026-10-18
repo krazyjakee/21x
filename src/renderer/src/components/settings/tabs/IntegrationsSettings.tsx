@@ -1,25 +1,42 @@
-import { desktopApi } from '@/lib/desktop-api'
-import { useState, useEffect } from 'react'
+import { captureDesktopRead, getDesktopHost, desktopApi } from '@/lib/desktop-api'
+import { useState, useEffect, useRef } from 'react'
 import { Plus, Loader2, RefreshCw, Edit3, Trash2, CheckCircle, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { SettingsSection } from '../SettingsSection'
 import { TaskSourceFormDialog } from '../forms/TaskSourceFormDialog'
 import { useTaskSourceStore } from '@/stores/task-source-store'
-import { useTaskStore } from '@/stores/task-store'
+import { getCurrentProjectId, isInProject, useProjectStore } from '@/stores/project-store'
 import { useProjectTaskSources, useCurrentProject } from '@/hooks/use-project-tasks'
 import { pluginApi } from '@/lib/ipc-client'
 import type { CreateTaskSourceDTO, PluginMeta, TaskSource } from '@/types'
 
 export function IntegrationsSettings() {
-  const { syncingIds, createSource, updateSource, deleteSource, syncSource, fetchSources } = useTaskSourceStore()
+  const nativeDesktop = getDesktopHost().kind === 'tauri'
+  const { error, syncingIds, createSource, updateSource, deleteSource, syncSource, fetchSources } = useTaskSourceStore()
   // Sources belong to a project: this tab shows and creates the current project's.
   const sources = useProjectTaskSources()
   const currentProject = useCurrentProject()
   const projectLabel = currentProject?.name ?? 'this project'
-  const { fetchTasks } = useTaskStore()
   const [plugins, setPlugins] = useState<PluginMeta[]>([])
-  const [tsDialog, setTsDialog] = useState<{ open: boolean; source?: TaskSource }>({ open: false })
+  const [tsDialog, setTsDialog] = useState<{ open: boolean; intent: number; projectId: string; source?: TaskSource }>({ open: false, intent: 0, projectId: getCurrentProjectId() })
   const [oauthStatus, setOauthStatus] = useState<Map<string, boolean>>(new Map())
+
+  const alive = useRef(true)
+  const dialogIntent = useRef(0)
+  const openDialog = (source?: TaskSource) => setTsDialog({ open: true, source, intent: ++dialogIntent.current, projectId: getCurrentProjectId() })
+  const closeDialog = (intent: number) => {
+    if (dialogIntent.current !== intent) return
+    setTsDialog({ open: false, intent: ++dialogIntent.current, projectId: getCurrentProjectId() })
+  }
+  useEffect(() => {
+    alive.current = true
+    const projectOff = useProjectStore.subscribe((state, previous) => {
+      if (state.currentProjectId !== previous.currentProjectId) closeDialog(dialogIntent.current)
+    })
+    const retire = () => { alive.current = false; ++dialogIntent.current; projectOff(); window.removeEventListener('pagehide', retire) }
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
+  }, [])
 
   const canAddSource = plugins.length > 0
 
@@ -28,52 +45,62 @@ export function IntegrationsSettings() {
   }, [fetchSources])
 
   useEffect(() => {
-    const loadPlugins = async () => {
-      const p = await pluginApi.list()
-      setPlugins(p)
+    const host = getDesktopHost()
+    let disposed = false, revision = 0, loadedGeneration = -1
+    const load = async () => {
+      const scope = captureDesktopRead(), generation = host.connectionGeneration ?? 0
+      if (!scope.isCurrent() || generation === loadedGeneration) return
+      loadedGeneration = generation
+      const request = ++revision
+      try {
+        const plugins = await pluginApi.list()
+        if (!disposed && alive.current && request === revision && scope.isCurrent()) setPlugins(plugins)
+      } catch {
+        if (!disposed && alive.current && request === revision && scope.isCurrent()) setPlugins([])
+      }
     }
-    loadPlugins()
+    void load()
+    const off = host.kind === 'tauri' ? host.subscribeConnection(() => { if (host.connection.status === 'ready') void load() }) : undefined
+    const retire = () => { disposed = true; ++revision; off?.(); window.removeEventListener('pagehide', retire) }
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
   }, [])
 
   useEffect(() => {
-    checkOAuthStatus()
-  }, [sources.length, plugins.length])
-
-  const checkOAuthStatus = async () => {
-    if (sources.length > 0 && desktopApi?.oauth) {
-      const statusMap = new Map<string, boolean>()
+    if (nativeDesktop) return
+    const scope = captureDesktopRead()
+    let disposed = false
+    void (async () => {
+      const statuses = new Map<string, boolean>()
       for (const source of sources) {
-        const plugin = plugins.find((p) => p.id === source.plugin_id)
-        // Check OAuth status for plugins that support OAuth (Linear, HubSpot with OAuth)
-        if (plugin?.id === 'linear' || (plugin?.id === 'hubspot' && source.config.auth_type === 'oauth')) {
-          try {
-            const token = await desktopApi.oauth.getValidToken(source.id)
-            statusMap.set(source.id, !!token)
-          } catch {
-            statusMap.set(source.id, false)
-          }
+        if (disposed || !alive.current || !scope.isCurrent()) return
+        const plugin = plugins.find(p => p.id === source.plugin_id)
+        if (plugin?.id === 'linear' || plugin?.id === 'hubspot' && source.config.auth_type === 'oauth') {
+          try { statuses.set(source.id, !!await desktopApi.oauth.getValidToken(source.id)) }
+          catch { /* Failed status is unknown. */ }
         }
       }
-      setOauthStatus(statusMap)
-    }
-  }
+      if (!disposed && alive.current && scope.isCurrent()) setOauthStatus(statuses)
+    })()
+    return () => { disposed = true }
+  }, [sources, plugins, nativeDesktop])
 
+  const captureDialog = () => {
+    const scope = captureDesktopRead(), intent = tsDialog.intent, projectId = tsDialog.projectId
+    return () => alive.current && dialogIntent.current === intent && getCurrentProjectId() === projectId && scope.isCurrent()
+  }
   const handleCreateSource = async (data: CreateTaskSourceDTO) => {
-    await createSource(data)
-    setTsDialog({ open: false })
-    await checkOAuthStatus()
+    const current = captureDialog()
+    if (!current()) return false
+    const saved = await createSource({ ...data, project_id: tsDialog.projectId })
+    return !!saved && current()
   }
 
   const handleUpdateSource = async (data: CreateTaskSourceDTO) => {
-    if (tsDialog.source) {
-      await updateSource(tsDialog.source.id, {
-        name: data.name,
-        plugin_id: data.plugin_id,
-        config: data.config
-      })
-      setTsDialog({ open: false })
-      await checkOAuthStatus()
-    }
+    const current = captureDialog(), source = tsDialog.source
+    if (!source || !isInProject(source, tsDialog.projectId) || !current()) return false
+    const saved = await updateSource(source.id, { name: data.name, plugin_id: data.plugin_id, config: data.config })
+    return !!saved && current()
   }
 
   const handleDeleteSource = async (id: string) => {
@@ -83,8 +110,8 @@ export function IntegrationsSettings() {
   }
 
   const handleSyncSource = async (sourceId: string) => {
+    // The store owns the exact sync receipt and canonical readback.
     await syncSource(sourceId)
-    await fetchTasks()
   }
 
   return (
@@ -98,7 +125,7 @@ export function IntegrationsSettings() {
             {sources.length} source{sources.length !== 1 ? 's' : ''} in {projectLabel}
           </p>
           {canAddSource && (
-            <Button size="sm" onClick={() => setTsDialog({ open: true })}>
+            <Button size="sm" onClick={() => openDialog()}>
               <Plus className="h-3.5 w-3.5" />
               Add Source
             </Button>
@@ -113,7 +140,7 @@ export function IntegrationsSettings() {
                 : `No task sources in ${projectLabel} yet`}
             </p>
             {canAddSource && (
-              <Button size="sm" onClick={() => setTsDialog({ open: true })}>
+              <Button size="sm" onClick={() => openDialog()}>
                 <Plus className="h-3.5 w-3.5" />
                 Add Your First Source
               </Button>
@@ -124,7 +151,7 @@ export function IntegrationsSettings() {
             {sources.map((source) => {
               const plugin = plugins.find((p) => p.id === source.plugin_id)
               const requiresOAuth = plugin?.id === 'linear' || (plugin?.id === 'hubspot' && source.config.auth_type === 'oauth')
-              const oauthConnected = requiresOAuth ? (oauthStatus.get(source.id) ?? false) : true
+              const oauthConnected = requiresOAuth ? (nativeDesktop ? undefined : oauthStatus.get(source.id)) : true
               const isConnected = source.enabled && (!requiresOAuth || oauthConnected)
 
               return (
@@ -141,7 +168,7 @@ export function IntegrationsSettings() {
                         </span>
                         {requiresOAuth && (
                           <span className="flex items-center gap-1 text-[10px]">
-                            {oauthConnected ? (
+                            {nativeDesktop ? <span className="text-muted-foreground">OAuth sign-in unavailable</span> : oauthConnected === undefined ? <span className="text-muted-foreground">OAuth status unknown</span> : oauthConnected ? (
                               <>
                                 <CheckCircle className="h-3 w-3 text-primary" />
                                 <span className="text-primary">OAuth Connected</span>
@@ -180,7 +207,7 @@ export function IntegrationsSettings() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => setTsDialog({ open: true, source })}
+                        onClick={() => openDialog(source)}
                         title="Edit"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
@@ -203,11 +230,13 @@ export function IntegrationsSettings() {
         )}
       </SettingsSection>
 
+      {error && <p role="alert" className="text-xs text-destructive">Source operation could not be confirmed. Review the current source before retrying.</p>}
       <TaskSourceFormDialog
+        key={tsDialog.intent}
         source={tsDialog.source}
         plugins={plugins}
         open={tsDialog.open}
-        onClose={() => setTsDialog({ open: false })}
+        onClose={() => closeDialog(tsDialog.intent)}
         onSubmit={tsDialog.source ? handleUpdateSource : handleCreateSource}
       />
     </>

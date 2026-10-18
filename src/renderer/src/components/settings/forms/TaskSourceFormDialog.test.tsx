@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { TaskSourceFormDialog } from './TaskSourceFormDialog'
 import type { PluginMeta, TaskSource } from '@/types'
 
@@ -21,8 +21,8 @@ const PLUGINS = [
  * clickable"): every control must accept input and the form must submit.
  */
 describe('TaskSourceFormDialog interaction', () => {
-  it('lets the user pick a plugin, type a name and add the source', () => {
-    const onSubmit = vi.fn()
+  it('lets the user pick a plugin, type a name and add the source', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(true)
     const onClose = vi.fn()
     render(<TaskSourceFormDialog plugins={PLUGINS} open onClose={onClose} onSubmit={onSubmit} />)
 
@@ -44,11 +44,11 @@ describe('TaskSourceFormDialog interaction', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect(onSubmit).toHaveBeenCalledWith({ mcp_server_id: null, name: 'Work issues', plugin_id: 'github-issues', config: {} })
-    expect(onClose).toHaveBeenCalled()
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
   it('reopens an existing source with its values and saves edits', () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn().mockResolvedValue(true)
     const source = { id: 'src-1', name: 'Old name', plugin_id: 'linear', config: { team: 'ENG' } } as unknown as TaskSource
     render(<TaskSourceFormDialog source={source} plugins={PLUGINS} open onClose={vi.fn()} onSubmit={onSubmit} />)
 
@@ -63,7 +63,7 @@ describe('TaskSourceFormDialog interaction', () => {
   })
 
   it('cancel closes without submitting', () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn().mockResolvedValue(true)
     const onClose = vi.fn()
     render(<TaskSourceFormDialog plugins={PLUGINS} open onClose={onClose} onSubmit={onSubmit} />)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))

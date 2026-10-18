@@ -1,4 +1,4 @@
-import { desktopApi } from '@/lib/desktop-api'
+import { captureDesktopRead, getDesktopHost, desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
@@ -10,6 +10,7 @@ import type { PluginFormProps } from './PluginFormProps'
 import type { ConfigFieldOption } from '@/types'
 
 export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: PluginFormProps) {
+  const nativeDesktop = getDesktopHost().kind === 'tauri'
   const [showOAuthDialog, setShowOAuthDialog] = useState(false)
   const [oauthConnected, setOauthConnected] = useState(false)
   const [pipelines, setPipelines] = useState<ConfigFieldOption[]>([])
@@ -33,22 +34,26 @@ export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: 
 
   // Check if OAuth token exists (only for OAuth auth type)
   useEffect(() => {
-    if (value.auth_type === 'oauth' && sourceId && desktopApi?.oauth) {
+    let active = true
+    const scope = captureDesktopRead()
+    if (!nativeDesktop && value.auth_type === 'oauth' && sourceId && desktopApi?.oauth) {
       oauthApi
         .getValidToken(sourceId)
         .then((token) => {
-          setOauthConnected(!!token)
+          if (active && scope.isCurrent()) setOauthConnected(!!token)
         })
         .catch(() => {
-          setOauthConnected(false)
+          if (active && scope.isCurrent()) setOauthConnected(false)
         })
     }
-  }, [sourceId, value.auth_type])
+    return () => { active = false }
+  }, [sourceId, value.auth_type, nativeDesktop])
 
   const handleOAuthSuccess = async () => {
+    if (nativeDesktop) return
     setShowOAuthDialog(false)
 
-    if (sourceId && desktopApi?.oauth) {
+    if (!nativeDesktop && sourceId && desktopApi?.oauth) {
       try {
         const token = await oauthApi.getValidToken(sourceId)
         setOauthConnected(!!token)
@@ -176,7 +181,8 @@ export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: 
               <Button
                 type="button"
                 onClick={() => {
-                  // If no sourceId, auto-save first
+                  if (nativeDesktop) return
+                  // If no sourceId, save first; reopen the accepted source to connect.
                   if (!sourceId && onRequestSave) {
                     const saved = onRequestSave()
                     if (!saved) return
@@ -184,20 +190,20 @@ export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: 
                   }
                   setShowOAuthDialog(true)
                 }}
-                disabled={!canStartOAuth}
+                disabled={nativeDesktop || !canStartOAuth}
                 variant={oauthConnected ? 'outline' : 'default'}
                 className="w-full"
               >
-                {oauthConnected ? 'Connected to HubSpot' : 'Connect to HubSpot'}
+                {nativeDesktop ? 'Browser sign-in unavailable' : oauthConnected ? 'Connected to HubSpot' : 'Connect to HubSpot'}
               </Button>
-              {!sourceId && !hasOAuthCredentials && (
+              {!nativeDesktop && !sourceId && !hasOAuthCredentials && (
                 <p className="text-xs text-muted-foreground">
                   Fill in Client ID and Client Secret above to continue
                 </p>
               )}
-              {!sourceId && hasOAuthCredentials ? (
+              {!nativeDesktop && !sourceId && hasOAuthCredentials ? (
                 <p className="text-xs text-muted-foreground">
-                  Click to save source and start OAuth flow
+                  Save the source, then reopen it to connect
                 </p>
               ) : null}
             </div>

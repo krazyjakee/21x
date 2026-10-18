@@ -6,6 +6,10 @@ import type { TauriDesktopApi } from '@/lib/tauri-desktop-transport'
 import { rehydrateMcpDesktopState, retireMcpDesktopState, useMcpStore } from './mcp-store'
 import { rehydrateTaskSourceDesktopState, retireTaskSourceDesktopState, useTaskSourceStore } from './task-source-store'
 import { useProjectStore } from './project-store'
+import { IntegrationsSettings } from '@/components/settings/tabs/IntegrationsSettings'
+import { OAuthDialog } from '@/components/oauth/OAuthDialog'
+import { LinearConfigForm } from '@/components/plugins/LinearConfigForm'
+import { HubSpotConfigForm } from '@/components/plugins/HubSpotConfigForm'
 import { ToolsMcpSettings } from '@/components/settings/tabs/ToolsMcpSettings'
 import { MCP_SECRET_SET_MARKER } from '@shared/mcp-codecs'
 import { TASK_SOURCE_KEY_SET_MARKER } from '@shared/task-source-codecs'
@@ -368,4 +372,169 @@ it.each(['create', 'update', 'delete'] as const)('clears a prior MCP failure onl
   f.values.set('mcp:' + method, method === 'delete' ? true : mcp())
   await mutate('mcp', method)
   expect(useMcpStore.getState().error).toBeNull()
+})
+
+
+const integrationSource = (id = 'source_fixture', fields: Partial<TaskSource> = {}) => source(id, { plugin_id: 'linear', config: { client_id: 'synthetic-client', client_secret: TASK_SOURCE_KEY_SET_MARKER }, ...fields })
+const pluginMeta = (id = 'linear') => ({ id, displayName: id === 'hubspot' ? 'HubSpot' : 'Linear', description: 'Synthetic integration', icon: 'fixture' })
+async function sourceSettings(existing: TaskSource[] = []) {
+  f.values.set('plugin:list', [pluginMeta()]); f.values.set('plugin:getDocumentation', null); f.values.set('taskSource:getAll', existing)
+  render(<IntegrationsSettings />)
+  await screen.findByRole('button', { name: 'Add Source' })
+  if (existing.length) await screen.findByText(existing[0].name)
+}
+async function newSourceDraft(name = 'Draft source') {
+  fireEvent.click(screen.getByRole('button', { name: 'Add Source' }))
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: name } })
+  fireEvent.change(screen.getByLabelText('OAuth Client ID'), { target: { value: 'synthetic-client' } })
+  fireEvent.change(screen.getByLabelText('OAuth Client Secret'), { target: { value: 'synthetic-not-a-secret' } })
+}
+const sourceSubmit = () => screen.getByRole('dialog').querySelector<HTMLButtonElement>('button[type=submit]')!
+
+it('waits for an accepted project-bound task-source create before closing its frozen draft', async () => {
+  const pending = held<unknown>(); finish.push(() => pending.resolve(integrationSource('accepted')))
+  f.handlers.set('taskSource:create', () => pending.promise)
+  await sourceSettings(); await newSourceDraft(); fireEvent.click(sourceSubmit())
+  fireEvent.submit(sourceSubmit().closest('form')!)
+  await waitFor(() => expect(f.calls('taskSource:create')).toHaveLength(1))
+  expect(screen.getByLabelText('Name')).toHaveValue('Draft source'); expect(screen.getByLabelText('Name')).toBeDisabled()
+  expect(f.calls('taskSource:create')[0][1]?.payload).toMatchObject({ data: { project_id: 'project_fixture' } })
+  await act(async () => { pending.resolve(integrationSource('accepted')); await pending.promise })
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(f.calls('taskSource:create')).toHaveLength(1)
+})
+
+it('retains a refused source draft without replay or invented source identity', async () => {
+  f.handlers.set('taskSource:create', async () => { throw new Error('private-source-canary') })
+  await sourceSettings(); await newSourceDraft(); fireEvent.click(sourceSubmit())
+  await screen.findByText('Save could not be confirmed. Close this draft and review the source list before saving again.')
+  expect(screen.getByLabelText('Name')).toHaveValue('Draft source'); expect(sourceSubmit()).toBeDisabled()
+  fireEvent.submit(sourceSubmit().closest('form')!)
+  expect(f.calls('taskSource:create')).toHaveLength(1); expect(screen.queryByText('private-source-canary')).toBeNull()
+})
+
+it('keeps a replacement source draft when an earlier accepted create reply arrives', async () => {
+  const pending = held<unknown>(); finish.push(() => pending.resolve(integrationSource('accepted')))
+  f.handlers.set('taskSource:create', () => pending.promise)
+  await sourceSettings(); await newSourceDraft('Old draft'); fireEvent.click(sourceSubmit())
+  await waitFor(() => expect(f.calls('taskSource:create')).toHaveLength(1))
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); await newSourceDraft('New draft')
+  await act(async () => { pending.resolve(integrationSource('accepted')); await pending.promise })
+  expect(screen.getByLabelText('Name')).toHaveValue('New draft'); expect(sourceSubmit()).toBeEnabled()
+})
+
+it('retires a source draft on synchronous project change and return before raw save settlement', async () => {
+  const pending = held<unknown>(); finish.push(() => pending.resolve(integrationSource('accepted')))
+  f.handlers.set('taskSource:create', () => pending.promise)
+  await sourceSettings(); await newSourceDraft(); fireEvent.click(sourceSubmit())
+  await waitFor(() => expect(f.calls('taskSource:create')).toHaveLength(1))
+  act(() => { useProjectStore.setState({ currentProjectId: 'other_project' }); useProjectStore.setState({ currentProjectId: 'project_fixture' }) })
+  expect(screen.queryByRole('dialog')).toBeNull(); await newSourceDraft('Returned project draft')
+  await act(async () => { pending.resolve(integrationSource('accepted')); await pending.promise })
+  expect(screen.getByLabelText('Name')).toHaveValue('Returned project draft')
+  expect(f.calls('taskSource:create')).toHaveLength(1)
+})
+
+it('keeps source edits across canonical refresh and blocks uncertain update receipt replay', async () => {
+  await sourceSettings([integrationSource('source_fixture')])
+  fireEvent.click(screen.getByTitle('Edit')); fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Unsaved source edit' } })
+  f.values.set('taskSource:getAll', [integrationSource('source_fixture', { name: 'Concurrent canonical edit' })])
+  await act(async () => { await useTaskSourceStore.getState().fetchSources() })
+  expect(screen.getByLabelText('Name')).toHaveValue('Unsaved source edit')
+  f.values.set('taskSource:update', null); fireEvent.click(sourceSubmit())
+  await screen.findByText('Save could not be confirmed. Close this draft and review the source list before saving again.')
+  expect(sourceSubmit()).toBeDisabled(); expect(f.calls('taskSource:update')).toHaveLength(1)
+})
+
+it('fences a source save after reconnect without closing or replaying its uncertain draft', async () => {
+  const pending = held<unknown>(); finish.push(() => pending.resolve(integrationSource('accepted')))
+  f.handlers.set('taskSource:create', () => pending.promise)
+  await sourceSettings(); await newSourceDraft(); fireEvent.click(sourceSubmit())
+  await waitFor(() => expect(f.calls('taskSource:create')).toHaveLength(1))
+  await act(async () => { await f.host.reconnect() })
+  await act(async () => { pending.resolve(integrationSource('accepted')); await pending.promise })
+  await screen.findByText('Save could not be confirmed. Close this draft and review the source list before saving again.')
+  expect(f.calls('taskSource:create')).toHaveLength(1); expect(screen.getByLabelText('Name')).toHaveValue('Draft source')
+})
+
+it.each(['linear', 'hubspot'])('shows native %s sign-in as unavailable rather than connected/disconnected or refreshed bearer status', async plugin => {
+  f.values.set('plugin:list', [pluginMeta(plugin)]); f.values.set('taskSource:getAll', [integrationSource('source_fixture', { plugin_id: plugin, config: plugin === 'hubspot' ? { auth_type: 'oauth' } : {} })])
+  render(<IntegrationsSettings />)
+  await screen.findByText('OAuth sign-in unavailable')
+  expect(screen.queryByText('OAuth Required')).toBeNull(); expect(screen.queryByText('OAuth Connected')).toBeNull()
+  expect(f.calls('oauth:getValidToken')).toHaveLength(0); expect(f.calls('taskSource:sync')).toHaveLength(0)
+  await act(async () => { await f.host.reconnect() })
+  expect(f.calls('oauth:getValidToken')).toHaveLength(0); expect(f.calls('oauth:startLocalhostFlow')).toHaveLength(0)
+})
+
+it.each(['linear', 'hubspot'])('keeps the actual native %s provider form inert even with stored client fields', async provider => {
+  const Component = provider === 'linear' ? LinearConfigForm : HubSpotConfigForm
+  render(<Component sourceId="source_fixture" value={{ auth_type: 'oauth', client_id: 'synthetic', client_secret: TASK_SOURCE_KEY_SET_MARKER }} onChange={vi.fn()} />)
+  const button = await screen.findByRole('button', { name: 'Browser sign-in unavailable' })
+  expect(button).toBeDisabled(); fireEvent.click(button)
+  expect(screen.queryByText('OAuth Required')).toBeNull()
+  expect(f.calls('oauth:getValidToken')).toHaveLength(0); expect(f.calls('oauth:startFlow')).toHaveLength(0)
+  expect(f.calls('oauth:startLocalhostFlow')).toHaveLength(0); expect(f.calls('plugin:resolveOptions')).toHaveLength(0)
+})
+
+it.each(['linear', 'hubspot'])('refuses a manually rendered native %s general OAuth dialog before effect/listener registration', async provider => {
+  render(<OAuthDialog open provider={provider} config={{}} sourceId="source_fixture" onSuccess={vi.fn()} onCancel={vi.fn()} />)
+  await screen.findByText('Browser sign-in is unavailable in this preview.')
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+  expect(f.calls('oauth:startFlow')).toHaveLength(0); expect(f.calls('oauth:startLocalhostFlow')).toHaveLength(0)
+  expect(f.calls('oauth:exchangeCode')).toHaveLength(0)
+})
+
+it('uses only the source store canonical readback after an explicit source sync', async () => {
+  await sourceSettings([integrationSource('source_fixture')])
+  f.values.set('taskSource:sync', { source_id: 'source_fixture', imported: 0, updated: 0, errors: [] })
+  fireEvent.click(screen.getByTitle('Sync now'))
+  await waitFor(() => expect(useTaskSourceStore.getState().syncingIds.size).toBe(0))
+  await waitFor(() => expect(f.calls('db:getTasks')).toHaveLength(1))
+  expect(f.calls('taskSource:sync')).toHaveLength(1)
+})
+
+
+it('closes an existing source edit only after the exact accepted update receipt', async () => {
+  const pending = held<unknown>(); finish.push(() => pending.resolve(integrationSource()))
+  f.handlers.set('taskSource:update', () => pending.promise)
+  await sourceSettings([integrationSource()]); fireEvent.click(screen.getByTitle('Edit'))
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Accepted source edit' } }); fireEvent.click(sourceSubmit())
+  await waitFor(() => expect(f.calls('taskSource:update')).toHaveLength(1))
+  expect(screen.getByLabelText('Name')).toBeDisabled()
+  await act(async () => { pending.resolve(integrationSource('source_fixture', { name: 'Accepted source edit' })); await pending.promise })
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(f.calls('taskSource:update')).toHaveLength(1)
+})
+
+it.each(['create', 'update', 'delete'] as const)('clears a previous source error only after accepted current %s', async method => {
+  useTaskSourceStore.setState({ sources: [source()], error: 'Earlier failure' })
+  f.values.set('taskSource:' + method, method === 'delete' ? true : source())
+  await mutate('source', method)
+  expect(useTaskSourceStore.getState().error).toBeNull()
+})
+
+it('keeps plugin documentation on its exact selection while an older read settles', async () => {
+  const pending = held<unknown>(); finish.push(() => pending.resolve('Old plugin guidance'))
+  f.values.set('plugin:list', [pluginMeta(), pluginMeta('hubspot')]); f.values.set('taskSource:getAll', [])
+  f.handlers.set('plugin:getDocumentation', args => (args?.payload as { pluginId: string }).pluginId === 'linear' ? pending.promise : Promise.resolve('Current plugin guidance'))
+  render(<IntegrationsSettings />); await screen.findByRole('button', { name: 'Add Source' })
+  await newSourceDraft(); await waitFor(() => expect(f.calls('plugin:getDocumentation')).toHaveLength(1))
+  fireEvent.change(screen.getByLabelText('Plugin'), { target: { value: 'hubspot' } })
+  await screen.findByText('Current plugin guidance')
+  await act(async () => { pending.resolve('Old plugin guidance'); await pending.promise })
+  expect(screen.queryByText('Old plugin guidance')).toBeNull(); expect(screen.getByText('Current plugin guidance')).toBeVisible()
+})
+
+it('retires source form and plugin metadata observers on pagehide before reconnect or late documentation', async () => {
+  const pending = held<unknown>(); finish.push(() => pending.resolve('Retired documentation'))
+  f.handlers.set('plugin:getDocumentation', () => pending.promise)
+  await sourceSettings(); await newSourceDraft(); await waitFor(() => expect(f.calls('plugin:getDocumentation')).toHaveLength(1))
+  const lists = f.calls('plugin:list').length
+  act(() => { window.dispatchEvent(new Event('pagehide')) })
+  await act(async () => { await f.host.reconnect(); pending.resolve('Retired documentation'); await pending.promise })
+  expect(screen.queryByText('Retired documentation')).toBeNull()
+  expect(f.calls('plugin:list')).toHaveLength(lists); expect(f.calls('plugin:getDocumentation')).toHaveLength(1)
+  fireEvent.submit(sourceSubmit().closest('form')!)
+  expect(f.calls('taskSource:create')).toHaveLength(0)
 })

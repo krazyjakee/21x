@@ -62,7 +62,7 @@ export const useTaskSourceStore = create<TaskSourceState>((set, get) => ({
       const source = await taskSourceApi.create(data.project_id ? data : { ...data, project_id: getCurrentProjectId() })
       if (current()) {
         invalidateMetadata()
-        set((state) => ({ sources: [...state.sources.filter(item => item.id !== source.id), source] }))
+        set((state) => ({ error: null, sources: [...state.sources.filter(item => item.id !== source.id), source] }))
       }
       return source
     } catch (err) {
@@ -78,7 +78,7 @@ export const useTaskSourceStore = create<TaskSourceState>((set, get) => ({
       if (updated && current()) {
         invalidateMetadata()
         set((state) => ({
-          sources: state.sources.map((s) => (s.id === id ? updated : s))
+          error: null, sources: state.sources.map((s) => (s.id === id ? updated : s))
         }))
       }
       return updated || null
@@ -95,7 +95,7 @@ export const useTaskSourceStore = create<TaskSourceState>((set, get) => ({
       if (success && current()) {
         invalidateMetadata()
         set((state) => ({
-          sources: state.sources.filter((s) => s.id !== id)
+          error: null, sources: state.sources.filter((s) => s.id !== id)
         }))
       }
       return success

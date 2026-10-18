@@ -1,4 +1,4 @@
-import { desktopApi } from '@/lib/desktop-api'
+import { getDesktopHost, desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/Dialog'
 import { Button } from '../ui/Button'
@@ -16,12 +16,13 @@ interface OAuthDialogProps {
 type FlowState = 'waiting' | 'success' | 'error'
 
 export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCancel }: OAuthDialogProps) {
+  const nativeDesktop = getDesktopHost().kind === 'tauri'
   const [state, setState] = useState<FlowState>('waiting')
   const [error, setError] = useState<string | null>(null)
   const flowStartedRef = useRef(false)
 
   const startOAuthFlow = useCallback(async () => {
-    if (flowStartedRef.current) return // Prevent duplicate calls
+    if (nativeDesktop || flowStartedRef.current) return // Prevent duplicate calls
     flowStartedRef.current = true
 
     try {
@@ -48,22 +49,23 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
       setState('error')
       flowStartedRef.current = false
     }
-  }, [provider, config, sourceId, onSuccess])
+  }, [provider, config, sourceId, onSuccess, nativeDesktop])
 
   // Auto-start OAuth flow when dialog opens (only once)
   useEffect(() => {
+    if (nativeDesktop) return
     if (open) {
-      startOAuthFlow()
+      void startOAuthFlow()
     } else {
       // Reset state when dialog closes
       setState('waiting')
       setError(null)
       flowStartedRef.current = false
     }
-  }, [open, startOAuthFlow])
+  }, [open, startOAuthFlow, nativeDesktop])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || nativeDesktop) return
 
     // Listen for OAuth callback from main process
     const unlisten = desktopApi.onOAuthCallback?.(async ({ code, state: oauthState }) => {
@@ -84,7 +86,7 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
     })
 
     return unlisten
-  }, [open, provider, sourceId, onSuccess])
+  }, [open, provider, sourceId, onSuccess, nativeDesktop])
 
   const providerDisplayName =
     provider === 'linear' ? 'Linear' :
@@ -102,7 +104,8 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          {state === 'waiting' && (
+          {nativeDesktop && <><p className="text-sm text-muted-foreground">Browser sign-in is unavailable in this preview.</p><Button onClick={onCancel} variant="outline">Close</Button></>}
+          {!nativeDesktop && state === 'waiting' && (
             <>
               <div className="flex flex-col gap-2 items-center py-4">
                 <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -116,7 +119,7 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
             </>
           )}
 
-          {state === 'success' && (
+          {!nativeDesktop && state === 'success' && (
             <div className="flex flex-col gap-2 items-center py-4">
               <div className="h-12 w-12 rounded-full bg-emerald-500/20 flex items-center justify-center">
                 <svg className="h-6 w-6 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -129,7 +132,7 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
             </div>
           )}
 
-          {state === 'error' && (
+          {!nativeDesktop && state === 'error' && (
             <>
               <div className="flex flex-col gap-2 items-center py-4">
                 <div className="h-12 w-12 rounded-full bg-destructive/20 flex items-center justify-center">

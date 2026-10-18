@@ -149,7 +149,7 @@ export default defineConfig({
           'src/renderer/src/components/layout/DesktopHostStatus.test.tsx', 'src/renderer/src/hooks/use-title-bar-overlay-theme.test.tsx', 'src/renderer/src/stores/commander-desktop-recovery.test.ts',
           'src/renderer/src/components/ui/Markdown.native-attachments.test.tsx', 'src/renderer/src/components/ui/Markdown.test.tsx', 'src/renderer/src/components/ui/Markdown.stability.test.tsx',
           'src/renderer/src/stores/native-configuration-recovery.test.ts',
-          'src/renderer/src/stores/native-resource-catalog-recovery.test.tsx', 'src/renderer/src/lib/native-attachment-drop-owner.test.ts', 'src/shared/native-attachment-drop.test.ts', 'src/renderer/src/stores/mcp-store.test.ts', 'src/renderer/src/stores/task-source-store.test.ts',
+          'src/renderer/src/stores/native-resource-catalog-recovery.test.tsx', 'src/renderer/src/components/settings/forms/TaskSourceFormDialog.test.tsx', 'src/renderer/src/lib/native-attachment-drop-owner.test.ts', 'src/shared/native-attachment-drop.test.ts', 'src/renderer/src/stores/mcp-store.test.ts', 'src/renderer/src/stores/task-source-store.test.ts',
           'src/renderer/src/components/projects/ProjectEditorDialog.native.test.tsx', 'src/renderer/src/lib/project-editor.test.ts',
           'src/renderer/src/hooks/native-overdue.test.tsx', 'src/renderer/src/hooks/use-snooze-tick.test.ts', 'src/renderer/src/stores/skill-store.test.ts',
           'src/renderer/src/components/commander/CommanderChatPane.images.test.tsx', 'src/renderer/src/components/dashboard/DashboardWorkspace.test.tsx',
