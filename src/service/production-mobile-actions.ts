@@ -1,4 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { ProductionAgentBackend } from './production-agent-backend'
+import { PRODUCTION_AGENT_CODECS, type ProductionAgentOperation } from '../shared/production-agent-codecs'
+import type { DesktopCommandMap } from '../shared/desktop-operations'
 import type { MobileTaskActions } from '../main/mobile-api-server'
 import type { CreateTaskData, UpdateTaskData, CreateTaskSourceData, UpdateTaskSourceData } from '../main/database/types'
 import { TaskSourceBackend } from './task-source-backend'
@@ -19,6 +22,7 @@ import type { DesktopCallerContext } from './transport/desktop-registry'
 export class ProductionMobileActions implements MobileTaskActions {
   private readonly context = new AsyncLocalStorage<() => void>()
   private readonly backend: TaskLifecycleBackend
+  private readonly sessions: ProductionAgentBackend
   private readonly sources: TaskSourceBackend
   private readonly plugins: TaskSourcePluginBackend
   private closing = false
@@ -28,6 +32,9 @@ export class ProductionMobileActions implements MobileTaskActions {
     this.caller = Object.freeze({ principal: 'trusted-desktop-main', engineEpoch: options.engineEpoch })
     const available = (): void => { options.assertAvailable(); if (this.closing) throw new ServiceProtocolError('DISCONNECTED'); if (this.context.getStore()) this.current() }
     const check = (): boolean => { this.current(); return true }
+    this.sessions = new ProductionAgentBackend({ ...options, assertAvailable: available,
+      // The retained session backend snapshots this private caller before effects.
+      isTrustedDesktop: caller => caller.principal === this.caller.principal && caller.engineEpoch === this.caller.engineEpoch && check(), canAccessTask: check, canAccessProject: check, canAccessAgent: check })
     this.backend = new TaskLifecycleBackend({ ...options,
       assertAvailable: available,
       isTrustedDesktop: caller => caller === this.caller && check(),
@@ -45,8 +52,8 @@ export class ProductionMobileActions implements MobileTaskActions {
     this.sources = new TaskSourceBackend({ ...shared, recurrence: options.recurrence, heartbeat: options.heartbeat, automation: options.automation, emit: options.emit, onFatalEvent: options.onFatalEvent })
     this.plugins = new TaskSourcePluginBackend({ ...shared, canManageConfiguration: check, canBorrowSourceCredentials: check, canResolveUnsavedConfig: check })
   }
-  shutdown(): void { this.closing = true; this.backend.shutdown() }
-  async close(): Promise<void> { this.shutdown(); await Promise.all([this.backend.close(), this.sources.close(), this.plugins.close()]) }
+  shutdown(): void { this.closing = true; this.backend.shutdown(); this.sessions.shutdown() }
+  async close(): Promise<void> { this.shutdown(); await Promise.all([this.backend.close(), this.sessions.close(), this.sources.close(), this.plugins.close()]) }
   private current(): void {
     const guard = this.context.getStore()
     if (this.closing || !guard) throw new ServiceProtocolError('INVALID_REQUEST')
@@ -71,6 +78,34 @@ export class ProductionMobileActions implements MobileTaskActions {
       const value = result as { defined: boolean; value?: import('../shared/service-protocol').JsonValue }
       return codec.decodeResult(value.defined ? value.value : undefined)
     })
+  }
+  /** Session effects use the retained desktop backend, its original request
+   * capture and the single manager's protected execution port. The request
+   * guard is paired HTTP authority, never an independent filesystem grant. */
+  private session(operation: ProductionAgentOperation, args: unknown[], guard: () => void): Promise<unknown> {
+    return this.context.run(guard, async () => {
+      guard()
+      const codec = PRODUCTION_AGENT_CODECS[operation]
+      const result = await this.sessions.registry.invoke(operation, codec.encodeArguments(args as never), this.caller, new AbortController().signal)
+      if (!codec.validateWireResult(result)) throw new ServiceProtocolError('INVALID_RESULT')
+      const value = result as { defined: boolean; value?: import('../shared/service-protocol').JsonValue }
+      return codec.decodeResult(value.defined ? value.value : undefined)
+    })
+  }
+  async start(taskId: string, agentId: string | undefined, skip: boolean | undefined, guard: () => void): Promise<unknown> {
+    if (agentId) return this.session('agentSession:start', [agentId, taskId, undefined, skip], guard)
+    const result = await this.session('agentSession:startTask', [taskId], guard) as DesktopCommandMap['agentSession:startTask']['result']
+    return { sessionId: result.sessionId ?? '', action: result.action, startedTaskId: result.startedTaskId, agentId: result.agentId,
+      ...(result.action === 'queued' ? { queued: true, queuePosition: result.queuePosition, queueReason: result.queueReason } : {}) }
+  }
+  resume(taskId: string, agentId: string, sessionId: string, guard: () => void): Promise<unknown> {
+    return this.session('agentSession:resume', [agentId, taskId, sessionId], guard)
+  }
+  send(sessionId: string, message: string, taskId: string | undefined, agentId: string | undefined, guard: () => void): Promise<unknown> {
+    return this.session('agentSession:send', [sessionId, message, taskId, agentId], guard)
+  }
+  approve(sessionId: string, approved: boolean, message: string | undefined, type: 'permission' | 'question', requestId: string, guard: () => void): Promise<unknown> {
+    return this.session('agentSession:approve', [sessionId, approved, message, type, requestId], guard)
   }
   syncSource(id: string, guard: () => void): Promise<unknown> { return this.source('taskSource:sync', [id], guard) }
   createSource(data: CreateTaskSourceData, guard: () => void): Promise<unknown> { return this.source('taskSource:create', [data], guard) }

@@ -51,14 +51,41 @@ to its actual local update or scoped source action; source refusal/withdrawal
 cannot manufacture completion. Attachment replacement is explicitly refused
 without a caller-supplied baseline; the adapter never reads the latest database
 array to pretend it was the caller's original intent. Nonempty attachment create
-and send remain unavailable. Saved task attachment records also fence mobile
-start/resume/send, even when the request omits attachments: the manager otherwise
-automatically enters its ambient workspace-copy/preview pipeline. The request
-captures and rechecks the target, routed children and current group members across
-raw awaits; changed graphs and saved files reject before later effects. A matched
-metadata row or display receipt is not a protected execution/read lease. That
-held-file/destination bridge remains a #214 prerequisite. `attachments:save` stays metadata-only, and the
-separate #214/#210 CAS contract is not bypassed.
+and send remain unavailable. On Linux, saved records may reach the production
+manager's captured protected execution owner. Start/startTask/resume/send and
+current permission/question actions delegate to the same retained
+`ProductionAgentBackend` as desktop, borrowing the existing single manager and
+its private FileOwner/destination-FD port. The adapter constructs no filesystem
+owner and exposes no path, file grant or renderer-selectable callback. Its
+private caller is captured only in Source; original paired authentication and
+server/profile identity remain in the request guard.
+
+The mobile guard captures bounded original task/project/agent/parent/role,
+ordered saved metadata, routed descendants, active group/member receipts and
+live session identity. The retained backend adds its own exact task/agent and
+current HITL authorization. Both guards follow raw awaits before effects;
+metadata, membership or caller changes refuse later copy/prompt/reply work.
+Missing Source delegation and macOS/Windows saved execution stay unavailable;
+no ambient path fallback is enabled. Matching metadata alone is never a file
+lease: actual bytes still require the manager's held no-follow saved reader and
+Linux held destination-directory publication. `attachments:save` stays
+metadata-only and the separate #214/#210 CAS contract is not bypassed.
+
+An HTTP disconnect leaves its admitted raw route/FD cleanup owned until it
+joins; an unknown reply is not permission to retry. Profile shutdown fences new
+work and joins raw requests before file/database release. An acknowledged
+admission queue entry belongs to the existing durable Source scheduler, as on
+desktop: subsequent pair retirement does not cancel that accepted queue. Its
+later start uses the shared manager's current domain checks and protected file
+owner, detached from the completed HTTP request. This does not give pending
+or unacknowledged HTTP work detached authorization.
+
+The production event boundary projects complete canonical manager task records
+through the existing public task shape before the unchanged update codec.
+Group/member and subtask starts emit those full records, including private
+storage columns; passing them unprojected previously closed the root. Partial
+updates still validate strictly and malformed partials still cause refusal.
+No event schema, retained operation or grant is broadened.
 
 Session/HITL routes use the same manager. Approval responses capture current
 task/agent/session/request/type and require the real scoped method's `handled`
@@ -151,3 +178,27 @@ exposure acceptance. An initial selected gate ran those pre-existing tests befor
 this boundary was added and briefly bound synthetic all-interface listeners;
 that validation mistake is recorded in the revision evidence, and the repaired
 gate is required. No live profile or public tunnel was involved.
+
+
+## Protected saved-file continuation validation
+
+The adopted standalone runner's accepted combined gate uses one worker and the
+original deadlines: 237 Source/staged/host cases in ten files plus 121 mobile
+client cases in eleven files, zero skips. This includes 35 real mobile-root
+cases in each Source and compiled-engine variant, one contained tunnel case,
+and two actual private-entry subprocess cases. The earlier parallel gate passed
+236 cases and exceeded the inherited staged execution graph's five-second
+budget; its original-deadline isolated rehearsal and the complete serialized
+rerun pass. No timeout or assertion was weakened.
+
+The old saved-file refusal returns 409 for the new valid start control, and the
+old canonical task-update boundary throws INVALID_RESULT for a full manager
+record. Own initial skip-prompt/copy expectations, project-move fixture and type
+narrowing mistakes are repaired. Repeated nested graph reconstruction also
+exceeded group-test deadlines: cheap scalar paired checks and the retained
+parent manager graph scope now enforce their separate checks, with all held-file
+withdrawal controls passing. Source/staged group/subtask, canonical event,
+permission/question, protected-profile restart and byte/canary assertions pass.
+The two non-Linux branch controls run on Linux and are policy evidence only.
+Revision-bound commands, hashes, failures and exclusions are recorded in
+`evidence/issue-219-mobile-attachment-execution-local-20261018.json`.

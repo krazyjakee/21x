@@ -2,10 +2,10 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { TunnelManagerCore } from '../main/tunnel-manager-core'
 import { once } from 'node:events'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -145,7 +145,7 @@ async function fixture(kind: string, controlledProvider?: ChatProvider, reuse?: 
     listModels: vi.fn(async () => [{ id: 'model_one', name: 'Model one' }])
   }
   const keys = reuse?.keys ?? new Map<string, Buffer>(),
-    events: Array<{ operation: string; payload: JsonValue }> = []
+    events: Array<{ operation: string; payload: JsonValue }> = [], ownerEventFailures: Array<{ operation: string; fields: string[] }> = []
   let eventHook: ((event: { operation: string; payload: JsonValue }) => void) | undefined
   const schemas: Record<string, OperationSchema> = Object.fromEntries(
     Object.entries(PRODUCTION_COMMAND_CODECS).map(([operation, codec]) => [
@@ -229,7 +229,7 @@ async function fixture(kind: string, controlledProvider?: ChatProvider, reuse?: 
           drainOwnedProcesses: async () => ({ acknowledged: true }),
           openExternal: async () => {},
           notify: () => {},
-          emit: callbacks.emitOwnerEvent,
+          emit: (operation, payload) => { try { callbacks.emitOwnerEvent(operation, payload) } catch (error) { ownerEventFailures.push({ operation, fields: isRecord(payload) && isRecord(payload.updates) ? Object.keys(payload.updates) : [] }); throw error } },
           sendUiCommand: () => ({ ok: false, detail: 'No native voice availability' })
         }
       })
@@ -283,6 +283,7 @@ async function fixture(kind: string, controlledProvider?: ChatProvider, reuse?: 
     caller,
     host,
     events,
+    ownerEventFailures,
     adapter,
     task,
     service,
@@ -300,6 +301,22 @@ async function fixture(kind: string, controlledProvider?: ChatProvider, reuse?: 
   }
 }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); releases.push(() => resolve()); return { promise, resolve } }
+
+async function savedFile(f: Awaited<ReturnType<typeof fixture>>, taskId: string, text = 'protected mobile fixture') {
+  const bytes = Buffer.from(text), file = { id: randomUUID(), filename: 'mobile-owned.txt', size: bytes.length, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00.000Z' }
+  const receipt = await f.services.taskAttachmentFiles.write(taskId, file, bytes, { beforeEffect() {}, signal: new AbortController().signal })
+  f.db.updateTask(taskId, { attachments: [file] }); f.services.taskAttachmentFiles.commit(receipt)
+  return { bytes, file, path: join(f.root, 'attachments', taskId, `${file.id}-${file.filename}`), workspace: f.db.getWorkspaceDir(taskId) }
+}
+
+function holdSavedFile(f: Awaited<ReturnType<typeof fixture>>) {
+  const entered = deferred(), held = deferred(), files = f.services.taskAttachmentFiles, original = files.readForExecution.bind(files)
+  const read: typeof files.readForExecution = (id, file, controls, consume) => original(id, file, controls, async reader => {
+    entered.resolve(); await held.promise; return consume(reader)
+  })
+  vi.spyOn(files, 'readForExecution').mockImplementation(read)
+  return { entered, held }
+}
 
 async function post(base: string, path: string, value: unknown, token?: string) {
   return fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(value) })
@@ -383,6 +400,7 @@ for (const kind of cases) describe(`actual ${kind} production mobile HTTP/WS`, (
   it('retains pairing and durable transcript across a real production owner restart without blind session replay', async () => {
     const f = await fixture(kind), base = await enable(f), device = await pair(f, base), stream = await socket(base, device.sessionToken)
     const task = f.task('Durable phone projection')
+    const saved = process.platform === 'linux' ? await savedFile(f, task.id) : undefined
     const started = await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id }, device.sessionToken)
     expect(started.status).toBe(200)
     f.db.upsertTranscriptParts(task.id, [{ id: 'durable_mobile_part', role: 'assistant', partType: 'text', content: 'Persisted before service restart' }])
@@ -398,6 +416,7 @@ for (const kind of cases) describe(`actual ${kind} production mobile HTTP/WS`, (
     expect(next.db.getTranscriptDelta(task.id, 0)).toEqual(before)
     expect(next.adapter.createSession).not.toHaveBeenCalled()
     expect(next.manager.findSessionByTaskId(task.id)).toBeUndefined()
+    if (saved) { expect(next.db.getTask(task.id)?.attachments).toEqual([saved.file]); expect(readFileSync(saved.path)).toEqual(saved.bytes) }
     const again = await socket(address, device.sessionToken)
     again.ws.send(JSON.stringify({ type: 'ping' }))
     await vi.waitFor(() => expect(again.events.some(event => event.type === 'pong')).toBe(true))
@@ -414,6 +433,7 @@ for (const kind of cases) describe(`actual ${kind} production mobile HTTP/WS`, (
     cleanups.push(() => adapter.closeOwnedSessions())
     const base = await enable(f), device = await pair(f, base), stream = await socket(base, device.sessionToken)
     const task = f.task('Real phone provider'), second = f.task('Queued real phone provider')
+    if (process.platform === 'linux') await savedFile(f, task.id)
     const started = await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id }, device.sessionToken)
     expect(started.status).toBe(200)
     const live = await started.json() as { sessionId: string }
@@ -543,25 +563,152 @@ for (const kind of cases) describe(`actual ${kind} production mobile HTTP/WS`, (
     expect(cycle.status).toBe(409); expect(f.db.getTask(parent.id)?.parent_task_id).toBeNull()
   })
 
-  it('refuses saved attachment execution on start, resume, empty send, routed children and group members', async () => {
-    const f = await fixture(kind), base = await enable(f), device = await pair(f, base)
-    const file = { id: 'saved_file', filename: 'saved.txt', size: 3, mime_type: 'text/plain', added_at: '2026-10-18T00:00:00Z' }
-    const blocked = f.task('Saved attachments'); f.db.updateTask(blocked.id, { attachments: [file], session_id: 'stored_session' })
-    expect((await post(base, '/api/sessions/start', { taskId: blocked.id, skipInitialPrompt: true }, device.sessionToken)).status).toBe(409)
-    expect((await post(base, `/api/sessions/stored_session/resume`, { taskId: blocked.id, agentId: blocked.agent_id }, device.sessionToken)).status).toBe(409)
-    const parent = f.task('Parent without files'), child = f.task('Child with files')
-    f.db.updateTask(child.id, { parent_task_id: parent.id, attachments: [file] })
-    expect((await post(base, '/api/sessions/start', { taskId: parent.id }, device.sessionToken)).status).toBe(409)
-    const a=f.task('Group A'), b=f.task('Group B'), group=f.db.createTaskGroup({ title: 'Group', task_ids: [a.id,b.id] })
-    f.db.db.prepare('UPDATE tasks SET attachments=? WHERE id=?').run(JSON.stringify([file]), b.id)
-    expect((await post(base, '/api/sessions/start', { taskId: a.id }, device.sessionToken)).status).toBe(409)
-    expect((await post(base, '/api/sessions/start', { taskId: group.execution_task_id }, device.sessionToken)).status).toBe(409)
-    expect(f.adapter.createSession).not.toHaveBeenCalled(); expect(f.adapter.resumeSession).not.toHaveBeenCalled()
-    const safe=f.task('No attachments'), started=await post(base, '/api/sessions/start', { taskId: safe.id, agentId: safe.agent_id, skipInitialPrompt: true }, device.sessionToken)
-    expect(started.status).toBe(200); const { sessionId }=await started.json() as { sessionId: string }
-    f.db.updateTask(safe.id, { attachments: [file] })
-    expect((await post(base, `/api/sessions/${sessionId}/send`, { message: 'No explicit files', attachments: [] }, device.sessionToken)).status).toBe(409)
-    expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
+  it('projects canonical manager update records without weakening malformed partial-event refusal', async () => {
+    const f = await fixture(kind), task = f.task('Canonical task event'), full = f.db.getTask(task.id)!
+    const raw = { taskId: task.id, updates: full }
+    expect(validateProductionEventWire('task:updated', raw)).toBe(false)
+    const projected = f.bindings.encodeOwnerEvent('task:updated', raw)
+    expect(validateProductionEventWire('task:updated', projected)).toBe(true)
+    expect(JSON.stringify(projected)).not.toContain('mcp_scope_nonce')
+    expect(f.service.owner.snapshot().phase).toBe('ready')
+    expect(() => f.bindings.encodeOwnerEvent('task:updated', { taskId: task.id, updates: { unsupported: 'not a public task field' } })).toThrow()
+  })
+  it.runIf(process.platform === 'linux')('refuses an explicit agent override before saved-file execution just like the desktop backend', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task = f.task('Exact saved-file assignment'); await savedFile(f, task.id)
+    const other = f.db.createAgent({ name: 'Unassigned provider', config: { coding_agent: 'pi' } })!
+    expect((await post(base, '/api/sessions/start', { taskId: task.id, agentId: other.id }, device.sessionToken)).status).toBe(409)
+    expect(f.adapter.createSession).not.toHaveBeenCalled(); expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
+    expect(f.db.getTask(task.id)?.agent_id).toBe(task.agent_id)
+  })
+  it.runIf(process.platform === 'linux')('uses the protected saved-file manager for HTTP start and WebSocket projection', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), stream = await socket(base, device.sessionToken), task = f.task('Saved-file mobile start'), saved = await savedFile(f, task.id)
+    const started = await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id }, device.sessionToken)
+    expect(started.status).toBe(200); expect(f.adapter.createSession).toHaveBeenCalledOnce(); expect(f.adapter.sendPrompt).toHaveBeenCalledOnce()
+    expect(readFileSync(join(saved.workspace, 'attachments', saved.file.filename))).toEqual(saved.bytes)
+    await vi.waitFor(() => expect(stream.events.some(event => event.type === 'task:updated')).toBe(true))
+    expect(stream.events.some(event => event.type.startsWith('voice:speech:'))).toBe(false)
+    expect((await post(base, `/api/tasks/${task.id}`, { attachments: [] }, device.sessionToken)).status).toBe(409)
+    expect((await post(base, '/api/tasks', { title: 'Incoming file create', attachments: [saved.file] }, device.sessionToken)).status).toBeGreaterThanOrEqual(400)
+    expect(f.db.getTask(task.id)?.attachments).toEqual([saved.file])
+  })
+  it.runIf(process.platform === 'linux')('copies protected bytes on mobile empty-payload send without reading foreign workspace paths', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task = f.task('Saved-file mobile send')
+    const started = await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id, skipInitialPrompt: true }, device.sessionToken)
+    expect(started.status).toBe(200); const { sessionId } = await started.json() as { sessionId: string }
+    const saved = await savedFile(f, task.id), outside = join(f.root, 'private-canary.txt'); writeFileSync(outside, 'mobile-foreign-preview-canary')
+    mkdirSync(join(saved.workspace, 'attachments')); symlinkSync(outside, join(saved.workspace, 'attachments', saved.file.filename))
+    const sent = await post(base, `/api/sessions/${sessionId}/send`, { message: 'Read saved task context', attachments: [] }, device.sessionToken)
+    expect(sent.status).toBe(200); expect(f.adapter.sendPrompt).toHaveBeenCalledOnce()
+    expect(readFileSync(join(saved.workspace, 'attachments', saved.file.filename))).toEqual(saved.bytes)
+    expect(readFileSync(outside, 'utf8')).toBe('mobile-foreign-preview-canary'); expect(JSON.stringify(f.adapter.sendPrompt.mock.calls)).not.toContain('mobile-foreign-preview-canary')
+    expect((await post(base, `/api/sessions/${sessionId}/send`, { message: 'Incoming files refused', attachments: [saved.file] }, device.sessionToken)).status).toBe(400)
+    expect(f.adapter.sendPrompt).toHaveBeenCalledOnce()
+  })
+  it.runIf(process.platform === 'linux')('uses the same protected copy authority on an exact saved mobile resume', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task = f.task('Saved-file mobile resume'), saved = await savedFile(f, task.id)
+    const started = await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id, skipInitialPrompt: true }, device.sessionToken)
+    expect(started.status).toBe(200); const { sessionId } = await started.json() as { sessionId: string }
+    await f.manager.stopSession(sessionId, false)
+    const resumed = await post(base, `/api/sessions/${sessionId}/resume`, { taskId: task.id, agentId: task.agent_id }, device.sessionToken)
+    expect(resumed.status).toBe(200); expect(f.adapter.resumeSession).toHaveBeenCalledOnce()
+    expect(readFileSync(join(saved.workspace, 'attachments', saved.file.filename))).toEqual(saved.bytes)
+  })
+  it.runIf(process.platform === 'linux').each(['saved', 'workspace'] as const)('refuses a foreign %s symlink through authenticated mobile before provider effects', async where => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task = f.task('Hostile saved target'), saved = await savedFile(f, task.id)
+    const outside = join(f.root, 'foreign'); mkdirSync(outside); const canary = join(outside, saved.file.filename); writeFileSync(canary, 'foreign remains')
+    if (where === 'saved') { unlinkSync(saved.path); symlinkSync(canary, saved.path) }
+    else { mkdirSync(saved.workspace, { recursive: true }); symlinkSync(outside, join(saved.workspace, 'attachments')) }
+    const response = await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id }, device.sessionToken)
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(f.adapter.sendPrompt).not.toHaveBeenCalled(); expect(readFileSync(canary, 'utf8')).toBe('foreign remains')
+    expect(await response.text()).not.toContain(outside)
+  })
+  it.runIf(process.platform === 'linux')('routes a parent to its saved-file subtask through the same start policy and admission', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), parent = f.task('Mobile parent'), child = f.task('Mobile saved child')
+    f.db.updateTask(child.id, { parent_task_id: parent.id }); const saved = await savedFile(f, child.id)
+    const response = await post(base, '/api/sessions/start', { taskId: parent.id }, device.sessionToken)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ startedTaskId: child.id, action: 'subtask_started' })
+    expect(readFileSync(join(saved.workspace, 'attachments', saved.file.filename))).toEqual(saved.bytes)
+    expect(f.adapter.sendPrompt).toHaveBeenCalledOnce(); expect(f.manager.findSessionByTaskId(parent.id)).toBeUndefined()
+  })
+  it.runIf(process.platform === 'linux').each(['pairing', 'project', 'agent', 'metadata', 'child'] as const)('fences original %s while a real protected FD is held across mobile start', async change => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task = f.task('Held saved-file start'), saved = await savedFile(f, task.id), gate = holdSavedFile(f)
+    const response = post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id }, device.sessionToken)
+    await gate.entered.promise
+    expect(f.services.taskAttachmentFiles.inflightCount).toBeGreaterThan(0)
+    if (change === 'pairing') await f.command('mobile:revokeSession', [device.sessionId])
+    else if (change === 'project') f.db.db.prepare('UPDATE tasks SET project_id=? WHERE id=?').run(f.db.createProject({ name: 'Replacement project' })!.id, task.id)
+    else if (change === 'agent') f.db.updateTask(task.id, { agent_id: f.db.createAgent({ name: 'Replacement agent', config: { coding_agent: 'pi' } })!.id })
+    else if (change === 'metadata') f.db.updateTask(task.id, { attachments: [] })
+    else f.db.updateTask(f.task('Late routed child').id, { parent_task_id: task.id })
+    gate.held.resolve(); expect((await response).status).toBeGreaterThanOrEqual(400)
+    expect(f.adapter.sendPrompt).not.toHaveBeenCalled(); expect(readFileSync(saved.path)).toEqual(saved.bytes)
+    await vi.waitFor(() => expect(f.services.taskAttachmentFiles.inflightCount).toBe(0))
+  })
+  it.runIf(process.platform === 'linux')('captures group membership receipts and refuses a changed member during protected copy', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), a = f.task('Member A'), b = f.task('Member B'), saved = await savedFile(f, b.id)
+    const group = f.db.createTaskGroup({ title: 'Mobile file group', task_ids: [a.id, b.id] }), gate = holdSavedFile(f)
+    const response = post(base, '/api/sessions/start', { taskId: a.id, agentId: a.agent_id }, device.sessionToken)
+    await gate.entered.promise
+    f.db.db.prepare('UPDATE task_group_memberships SET left_at=? WHERE group_id=? AND task_id=? AND left_at IS NULL').run('2026-10-18T01:00:00Z', group.id, b.id)
+    gate.held.resolve(); expect((await response).status).toBeGreaterThanOrEqual(400)
+    expect(f.adapter.sendPrompt).not.toHaveBeenCalled(); expect(readFileSync(saved.path)).toEqual(saved.bytes)
+  })
+  it.runIf(process.platform === 'linux')('starts the captured group with member-namespaced protected bytes', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), a = f.task('Member A'), b = f.task('Member B'), saved = await savedFile(f, b.id)
+    const group = f.db.createTaskGroup({ title: 'Mobile file group', task_ids: [a.id, b.id] })
+    const response = await post(base, '/api/sessions/start', { taskId: a.id, agentId: a.agent_id }, device.sessionToken)
+    expect(response.status).toBe(200); expect(f.manager.findSessionByTaskId(group.execution_task_id)).toBeDefined()
+    expect(f.ownerEventFailures).toEqual([]); expect(f.service.owner.snapshot().phase).toBe('ready')
+    expect(JSON.stringify(f.events)).not.toContain('mcp_scope_nonce')
+    expect(f.adapter.sendPrompt).toHaveBeenCalledOnce()
+    const prompt = JSON.stringify(f.adapter.sendPrompt.mock.calls); expect(prompt).toContain(b.id); expect(prompt).toContain(saved.file.filename)
+  })
+  it.runIf(process.platform === 'linux')('retains raw FD/HTTP ownership after a client disconnect and joins quit before profile release', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task = f.task('Disconnected file start'), saved = await savedFile(f, task.id), gate = holdSavedFile(f), abort = new AbortController()
+    const request = fetch(base + '/api/sessions/start', { method: 'POST', signal: abort.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${device.sessionToken}` }, body: JSON.stringify({ taskId: task.id, agentId: task.agent_id }) })
+    const rejected = expect(request).rejects.toBeDefined(); await gate.entered.promise; abort.abort(); await rejected
+    await expect(f.service.owner.close(25)).rejects.toMatchObject({ code: 'OWNER_DRAIN_BLOCKED' })
+    expect(f.db.db.open).toBe(true); expect(f.services.taskAttachmentFiles.inflightCount).toBeGreaterThan(0)
+    gate.held.resolve(); await f.service.close()
+    expect(f.db.db.open).toBe(false); expect(f.adapter.sendPrompt).not.toHaveBeenCalled(); expect(readFileSync(saved.path)).toEqual(saved.bytes)
+  })
+  it.runIf(process.platform === 'linux')('keeps an accepted admission queue in Source after the paired caller retires', async () => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), blocker = f.task('Admission blocker'), next = f.task('Queued file task'), saved = await savedFile(f, next.id)
+    const first = await post(base, '/api/sessions/start', { taskId: blocker.id, agentId: blocker.agent_id }, device.sessionToken)
+    expect(first.status).toBe(200); const { sessionId } = await first.json() as { sessionId: string }
+    const queued = await post(base, '/api/sessions/start', { taskId: next.id, agentId: next.agent_id }, device.sessionToken)
+    expect(queued.status).toBe(200); expect(await queued.json()).toMatchObject({ queued: true })
+    await f.command('mobile:revokeSession', [device.sessionId]); await f.manager.stopSession(sessionId, false)
+    await vi.waitFor(() => expect(f.manager.findSessionByTaskId(next.id)).toBeDefined())
+    await vi.waitFor(() => expect(f.adapter.sendPrompt.mock.calls.length).toBe(2))
+    expect(readFileSync(join(saved.workspace, 'attachments', saved.file.filename))).toEqual(saved.bytes)
+    expect(f.manager.getStartQueue()).toEqual([])
+  })
+  it.runIf(process.platform === 'linux').each(['pairing', 'metadata', 'session'] as const)('refuses retired %s question authority before the native provider reply', async change => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task = f.task('Scoped question with file'); await savedFile(f, task.id)
+    const pending = vi.fn(async () => [{ requestId: 'mobile-question', responseType: 'question' as const }]), reply = vi.fn(async () => true)
+    Object.assign(f.adapter, { getPendingRequests: pending, respondToQuestion: reply })
+    const started = await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id }, device.sessionToken)
+    expect(started.status).toBe(200); const { sessionId } = await started.json() as { sessionId: string }
+    const entered = deferred(), held = deferred(); pending.mockImplementationOnce(async () => { entered.resolve(); await held.promise; return [{ requestId: 'mobile-question', responseType: 'question' as const }] })
+    const response = post(base, `/api/sessions/${sessionId}/approve`, { approved: true, responseType: 'question', requestId: 'mobile-question', message: 'Held answer' }, device.sessionToken)
+    await entered.promise
+    if (change === 'pairing') await f.command('mobile:revokeSession', [device.sessionId])
+    else if (change === 'metadata') f.db.updateTask(task.id, { attachments: [] })
+    else f.db.updateTask(task.id, { session_id: 'foreign_runtime' })
+    held.resolve()
+    expect((await response).status).toBeGreaterThanOrEqual(400); expect(reply).not.toHaveBeenCalled()
+  })
+  it.runIf(process.platform === 'linux').each(['darwin', 'win32'] as const)('keeps %s saved-file execution unavailable before effects (policy branch only)', async platform => {
+    const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task = f.task('Unsupported policy target'); await savedFile(f, task.id)
+    const original = Object.getOwnPropertyDescriptor(process, 'platform')!
+    try {
+      Object.defineProperty(process, 'platform', { ...original, value: platform })
+      expect((await post(base, '/api/sessions/start', { taskId: task.id, agentId: task.agent_id }, device.sessionToken)).status).toBe(409)
+    } finally { Object.defineProperty(process, 'platform', original) }
+    expect(f.adapter.createSession).not.toHaveBeenCalled(); expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
   })
   it.each(['attachments', 'graph'])('rechecks %s after held raw initialization before attachment or provider effects', async change => {
     const f = await fixture(kind), base = await enable(f), device = await pair(f, base), task=f.task('Held initialize')

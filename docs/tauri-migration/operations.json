@@ -8973,7 +8973,7 @@
         {
           "column": 7,
           "file": "src/main/mobile-api-server.ts",
-          "line": 986,
+          "line": 1019,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -9189,7 +9189,7 @@
         {
           "column": 7,
           "file": "src/main/mobile-api-server.ts",
-          "line": 941,
+          "line": 974,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -12895,7 +12895,7 @@
         {
           "column": 24,
           "file": "src/main/mobile-api-server.ts",
-          "line": 1129,
+          "line": 1162,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13064,7 +13064,7 @@
         {
           "column": 24,
           "file": "src/main/mobile-api-server.ts",
-          "line": 1093,
+          "line": 1126,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13285,7 +13285,7 @@
         {
           "column": 28,
           "file": "src/main/mobile-api-server.ts",
-          "line": 1163,
+          "line": 1196,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -13293,7 +13293,7 @@
         {
           "column": 26,
           "file": "src/main/mobile-api-server.ts",
-          "line": 1209,
+          "line": 1242,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"

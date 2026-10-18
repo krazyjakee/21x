@@ -356,6 +356,14 @@ export class ProductionDesktopBindings {
     try {
       if (operation === 'transcript:changed') payload = encodeDurableTranscriptEvent(this.services.db, payload)
       if (operation === 'task:created' && isRecord(payload) && hasExactKeys(payload, ['task'])) payload = { task: projectTaskLifecycleTask(payload.task) }
+      if (operation === 'task:updated' && isRecord(payload) && hasExactKeys(payload, ['taskId', 'updates'])) {
+        // The manager emits full canonical records for related tasks. Project
+        // those through the same public task shape as create/read; strict
+        // partial updates still reach the existing codec unchanged.
+        let full: JsonValue | undefined
+        try { full = projectTaskLifecycleTask(payload.updates) } catch { /* A partial update must validate as such. */ }
+        if (full !== undefined) payload = { taskId: payload.taskId, updates: full }
+      }
       if (operation === 'tasks:refresh' && payload === undefined) payload = {}
       const codec = PRODUCTION_EVENT_CODECS[operation as keyof typeof PRODUCTION_EVENT_CODECS]
       if ('encodePayload' in codec) return codec.encodePayload(payload as never)

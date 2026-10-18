@@ -287,6 +287,10 @@ export function startMobileApiServer(
 }
 
 export interface MobileTaskActions {
+  start(taskId: string, agentId: string | undefined, skip: boolean | undefined, guard: () => void): Promise<unknown>
+  resume(taskId: string, agentId: string, sessionId: string, guard: () => void): Promise<unknown>
+  send(sessionId: string, message: string, taskId: string | undefined, agentId: string | undefined, guard: () => void): Promise<unknown>
+  approve(sessionId: string, approved: boolean, message: string | undefined, type: 'permission' | 'question', requestId: string, guard: () => void): Promise<unknown>
   syncSource(id: string, guard: () => void): Promise<unknown>
   createSource(data: CreateTaskSourceData, guard: () => void): Promise<unknown>
   updateSource(id: string, data: UpdateTaskSourceData, guard: () => void): Promise<unknown>
@@ -529,14 +533,18 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
     if (mobileDistRoot) { assertMobileApiDeps(currentOwner!.deps); preflightMobileData(pathname) }
     const owner = currentOwner!
     const token = bearerToken(req)
-    const executionGuard = body && mobileDistRoot ? captureMobileExecutionGuard(pathname, body, owner.deps.db, owner.deps.agentManager) : undefined
-    const guard = (): void => {
+    const executionGuard = body && mobileDistRoot ? captureMobileExecutionGuard(pathname, body, owner.deps.db, owner.deps.agentManager, owner.deps.taskActions) : undefined
+    const access = (): void => {
       if (owner.closing || currentOwner !== owner || !validateSession(token, false))
         throw Object.assign(new Error('Mobile access ended.'), { status: 401 })
-      executionGuard?.()
     }
+    const guard = (): void => { access(); executionGuard?.() }
+    // The manager's parent scope checks the original graph at every raw effect.
+    // The retained backend's per-reference checks need only paired admission;
+    // recursively rebuilding that graph for each scalar grant adds no fence.
+    const actionGuard = executionGuard && owner.deps.taskActions ? access : guard
     const result = body && mobileDistRoot && !pathname.startsWith('/api/auth/pair/')
-      ? await owner.deps.agentManager.withTaskGroupRequestGuard(() => routePost(pathname, body, req, guard), guard, new AbortController().signal)
+      ? await owner.deps.agentManager.withTaskGroupRequestGuard(() => routePost(pathname, body, req, actionGuard), guard, new AbortController().signal)
       : body ? await routePost(pathname, body, req) : await routeGet(pathname, url)
     if (mobileDistRoot && !pathname.startsWith('/api/auth/pair/')) guard()
     if (res.destroyed) return
@@ -554,33 +562,58 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
   }
 }
 
-/** A matching metadata record is not authority to read/copy its bytes. Until
- * #214 supplies an execution FileOwner bridge, mobile starts/resumes/sends must
- * not enter the manager's ambient attachment pipeline, including routed children
- * and group members. The captured graph fence follows the real manager request
- * scope across raw awaits; it neither grants file access nor changes that owner. */
-function captureMobileExecutionGuard(pathname: string, params: Record<string, unknown>, db: DatabaseManager, agent: AgentManager): (() => void) | undefined {
-  const session = pathname.match(/^\/api\/sessions\/([^/]+)\/(resume|send)$/)
-  const taskId = pathname === '/api/sessions/start' || session?.[2] === 'resume' ? params.taskId : session?.[2] === 'send' ? agent.getSession(session[1])?.taskId : undefined
+/** Capture the original HTTP target, routed descendants and active group
+ * receipts. The Source action delegates to the desktop backend/manager; this
+ * snapshot supplies no file authority. Missing Source delegation and non-Linux
+ * saved-file execution remain refused before any manager side effect. */
+function captureMobileExecutionGuard(pathname: string, params: Record<string, unknown>, db: DatabaseManager, agent: AgentManager, actions?: MobileTaskActions): (() => void) | undefined {
+  const session = pathname.match(/^\/api\/sessions\/([^/]+)\/(resume|send|approve)$/)
+  const taskId = pathname === '/api/sessions/start' || session?.[2] === 'resume' ? params.taskId : session ? agent.getSession(session[1])?.taskId : undefined
   if (typeof taskId !== 'string' || !isDatabaseId(taskId)) return undefined
+  const live = session && session[2] !== 'resume' ? agent.getSession(session[1]) : undefined
+  const liveTaskId = live?.taskId, liveAgentId = live?.agentId
+  function fail(size = false): never { throw Object.assign(new Error(size ? 'Mobile execution scope exceeds the supported size.' : 'Mobile execution scope changed.'), { status: size ? 413 : 409 }) }
   const read = (): string => {
-    const pending = [taskId], rows = new Map<string, unknown>()
+    if (live && (agent.getSession(session![1]) !== live || live.taskId !== liveTaskId || live.agentId !== liveAgentId || db.getTask(liveTaskId!)?.session_id !== session![1])) fail()
+    const project = db.db.prepare('SELECT project_id FROM tasks WHERE id=?').get(taskId) as { project_id: string } | undefined
+    if (!project || !isDatabaseId(project.project_id)) fail()
+    const pending = [taskId], rows = new Map<string, unknown>(), memberships: unknown[] = []
+    let bytes = 0
     while (pending.length) {
       const id = pending.pop()!
       if (rows.has(id)) continue
-      if (rows.size >= 128) throw Object.assign(new Error('Mobile execution scope exceeds the supported size.'), { status: 413 })
-      const row = db.db.prepare('SELECT id,project_id,parent_task_id,group_id,role,attachments FROM tasks WHERE id=?').get(id) as { id: string; project_id: string; parent_task_id: string | null; group_id: string | null; role: string; attachments: string | null } | undefined
-      if (!row) throw Object.assign(new Error('Mobile execution target changed.'), { status: 409 })
-      if (row.attachments !== null && row.attachments !== '[]') throw Object.assign(new Error('Mobile sessions with saved attachments are currently unavailable.'), { status: 409 })
-      const group = db.getTaskGroupByTask(id)
-      rows.set(id, { id: row.id, project: row.project_id, parent: row.parent_task_id, group: row.group_id, role: row.role, execution: group?.execution_task_id ?? null })
-      if (group) pending.push(group.execution_task_id, ...db.getTaskGroupMembers(group.id).map(member => member.id))
-      pending.push(...db.getSubtasks(id).map(child => child.id))
+      if (!isDatabaseId(id)) fail()
+      if (rows.size >= 128) fail(true)
+      const fields = { id: 128, project_id: 128, agent_id: 128, parent_task_id: 128, group_id: 128, role: 32, attachments: 131072 }
+      const lengths = Object.entries(fields).map(([field, max]) => `COALESCE(length(CAST(${field} AS BLOB)),0)>${max}`).join(' OR ')
+      if (db.db.prepare(`SELECT 1 FROM tasks WHERE id=? AND (${lengths})`).get(id)) fail(true)
+      const row = db.db.prepare('SELECT id,project_id,agent_id,parent_task_id,group_id,role,attachments FROM tasks WHERE id=?').get(id) as { id: string; project_id: string; agent_id: string | null; parent_task_id: string | null; group_id: string | null; role: string; attachments: string | null } | undefined
+      if (!row || row.project_id !== project.project_id || !db.db.prepare('SELECT 1 FROM projects WHERE id=?').get(row.project_id)) fail()
+      bytes += Buffer.byteLength(JSON.stringify(row))
+      if (bytes > 890000) fail(true)
+      if (row.attachments !== null && row.attachments !== '[]' && (!actions || process.platform !== 'linux')) throw Object.assign(new Error('Mobile saved-file execution is unavailable on this host.'), { status: 409 })
+      const groupScope = "state='active' AND (execution_task_id=? OR id IN (SELECT group_id FROM task_group_memberships WHERE task_id=? AND left_at IS NULL))"
+      if (db.db.prepare(`SELECT 1 FROM task_groups WHERE ${groupScope} AND (length(CAST(id AS BLOB))>128 OR length(CAST(project_id AS BLOB))>128 OR length(CAST(execution_task_id AS BLOB))>128 OR COALESCE(length(CAST(agent_id AS BLOB)),0)>128) LIMIT 1`).get(id, id)) fail(true)
+      const groups = db.db.prepare(`SELECT id,project_id,agent_id,execution_task_id FROM task_groups WHERE ${groupScope} LIMIT 2`).all(id, id) as Array<{ id: string; project_id: string; agent_id: string; execution_task_id: string }>
+      if (groups.length > 1) fail()
+      const group = groups[0]
+      if (group && (group.project_id !== project.project_id || ![group.id, group.agent_id, group.execution_task_id].every(isDatabaseId))) fail()
+      rows.set(id, { ...row, execution: group?.execution_task_id ?? null })
+      if (group) {
+        if (db.db.prepare('SELECT 1 FROM task_group_memberships WHERE group_id=? AND left_at IS NULL AND (length(CAST(id AS BLOB))>128 OR length(CAST(task_id AS BLOB))>128 OR length(CAST(joined_at AS BLOB))>64) LIMIT 1').get(group.id)) fail(true)
+        const members = db.db.prepare('SELECT id,task_id,position,joined_at FROM task_group_memberships WHERE group_id=? AND left_at IS NULL ORDER BY position,id LIMIT 129').all(group.id) as Array<{ task_id: string }>
+        if (members.length > 128 || members.some(item => Buffer.byteLength(JSON.stringify(item)) > 512)) fail(true)
+        memberships.push([group.id, group.project_id, group.agent_id, group.execution_task_id, members])
+        pending.push(group.execution_task_id, ...members.map(member => member.task_id))
+      }
+      const children = db.db.prepare('SELECT id FROM tasks WHERE parent_task_id=? ORDER BY id LIMIT 129').all(id) as Array<{ id: string }>
+      if (children.length > 128) fail(true)
+      pending.push(...children.map(child => child.id))
     }
-    return JSON.stringify([...rows].sort(([a], [b]) => a.localeCompare(b)))
+    return JSON.stringify([[...rows].sort(([a], [b]) => a.localeCompare(b)), memberships.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))])
   }
   const captured = read()
-  return () => { if (read() !== captured) throw Object.assign(new Error('Mobile execution scope changed.'), { status: 409 }) }
+  return () => { if (read() !== captured) fail() }
 }
 
 /** Reject oversized legacy rows before their JSON deserializers are entered.
@@ -1218,6 +1251,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const { agentId, taskId, skipInitialPrompt } = params as { agentId?: string; taskId: string; skipInitialPrompt?: boolean }
     if (mobileDistRoot && (!hasExactKeys(params, ['taskId'], ['agentId', 'skipInitialPrompt']) || !isDatabaseId(taskId) || agentId !== undefined && !isDatabaseId(agentId) || skipInitialPrompt !== undefined && typeof skipInitialPrompt !== 'boolean')) throw Object.assign(new Error('Invalid session start.'), { status: 400 })
     if (!taskId) throw Object.assign(new Error('taskId is required'), { status: 400 })
+    if (actions && guard) return actions.start(taskId, agentId, skipInitialPrompt, guard)
     if (!agentId) {
       // No explicit agent: the same routing as the desktop's Start button and
       // the scheduler (next subtask, triage, the task's own agent), which is
@@ -1249,6 +1283,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const { agentId, taskId } = params as { agentId: string; taskId: string }
     if (mobileDistRoot && (!hasExactKeys(params, ['agentId', 'taskId']) || !isDatabaseId(agentId) || !isDatabaseId(taskId) || db.getTask(taskId)?.session_id !== sessionId || db.getTask(taskId)?.agent_id !== agentId)) throw Object.assign(new Error('Session binding changed.'), { status: 409 })
     if (!agentId || !taskId) throw Object.assign(new Error('agentId and taskId are required'), { status: 400 })
+    if (actions && guard) return actions.resume(taskId, agentId, sessionId, guard)
     const newSessionId = await agent.resumeSession(agentId, taskId, sessionId)
     return { sessionId: newSessionId }
   }
@@ -1268,6 +1303,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       if (!hasExactKeys(params, ['message'], ['taskId', 'agentId', 'attachments']) || typeof message !== 'string' || !message.trim() || Buffer.byteLength(message) > 65_536 || message.includes('\0') || !live || taskId !== undefined && taskId !== live.taskId || aid !== undefined && aid !== live.agentId || attachments !== undefined && (!Array.isArray(attachments) || attachments.length !== 0)) throw Object.assign(new Error('Invalid session message or attachment binding.'), { status: 400 })
     }
     if (!message) throw Object.assign(new Error('message is required'), { status: 400 })
+    if (actions && guard) return actions.send(sessionId, message, taskId, aid, guard)
     const result = await agent.sendMessage(sessionId, message, taskId, aid, attachments)
     return { success: true, ...result }
   }
@@ -1284,6 +1320,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     }
     if (mobileDistRoot && (!hasExactKeys(params, ['approved', 'responseType', 'requestId'], ['message']) || !agent.getSession(sessionId) || !['permission', 'question'].includes(responseType as string) || typeof requestId !== 'string' || !requestId || Buffer.byteLength(requestId) > 512 || message !== undefined && (typeof message !== 'string' || Buffer.byteLength(message) > 65_536 || message.includes('\0')))) throw Object.assign(new Error('Invalid current approval request.'), { status: 400 })
     if (typeof approved !== 'boolean') throw Object.assign(new Error('approved (boolean) is required'), { status: 400 })
+    if (actions && guard) return actions.approve(sessionId, approved, message, responseType!, requestId!, guard)
     if (mobileDistRoot) {
       const live = agent.getSession(sessionId)!
       const result = await agent.respondToScopedPermission({ sessionId, taskId: live.taskId, agentId: live.agentId, approved, message, responseType: responseType!, requestId: requestId! })
