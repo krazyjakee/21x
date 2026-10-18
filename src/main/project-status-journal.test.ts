@@ -4,7 +4,7 @@
  * cursor-stable and capped; old entries roll up by month, idempotently.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from './database'
 import { decodeHistoryCursor, encodeHistoryCursor, readProjectStatusHistory } from './project-status'
 import { handleTaskRoute } from './task-api/task-routes'

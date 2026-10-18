@@ -30,7 +30,7 @@ import { GitHubIssuesPlugin } from './github-issues-plugin'
 import { PluginActionId, type PluginContext } from './types'
 import { TaskStatus } from '../../shared/constants'
 import type { DatabaseManager, TaskRecord } from '../database'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import { GITHUB_ISSUES_FIRST_SYNC, GITHUB_ISSUES_RESYNC } from '../../../test/fixtures/github-issues'
 
 type GhCallback = (error: Error | null, stdout?: string, stderr?: string) => void

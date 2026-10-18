@@ -7,7 +7,7 @@ import { PluginActionId, type PluginContext } from './types'
 import { TaskStatus } from '../../shared/constants'
 import type { DatabaseManager, TaskRecord } from '../database'
 import type { OAuthManager } from '../oauth/oauth-manager'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import { LINEAR_ISSUES_FIRST_SYNC, LINEAR_ISSUES_RESYNC, LINEAR_UPLOAD_URL } from '../../../test/fixtures/linear-issues'
 
 const mockClientInstance = {

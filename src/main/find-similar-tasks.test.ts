@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import { buildSimilarTasksQuery } from './task-search'
 import type { DatabaseManager } from './database'

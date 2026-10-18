@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { buildProjectStatus } from './project-status'
 import { handleTaskRoute } from './task-api/task-routes'
 import { callToolForScope, FULL_ACCESS_SCOPE, listToolsForScope } from './mcp-servers/task-management-core'

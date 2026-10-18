@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from '../database'
 import type { GitHubIssue, GitHubManager } from '../github-manager'
 import { TaskStatus } from '../../shared/constants'

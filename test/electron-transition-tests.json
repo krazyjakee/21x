@@ -1,0 +1,252 @@
+{
+  "version": 1,
+  "scope": "Historical adapter tests stay runnable separately. No existing test command is changed. Literal import review is conservative; successful standalone execution and resource closure provide separate evidence.",
+  "historical": [
+    {
+      "file": "scripts/after-pack.test.ts",
+      "reason": "Historical Electron packaging/fuse hook; not a production service dependency."
+    },
+    {
+      "file": "src/main/agent-installer/install.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-installer/installer-utils-network.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-manager-activity.test.ts",
+      "reason": "Historical AgentManager Electron host constructor/adapter graph; standalone production owners exercise the portable manager."
+    },
+    {
+      "file": "src/main/agent-manager-admission.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-manager-concurrency.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-manager-coordinator.test.ts",
+      "reason": "Historical AgentManager Electron host constructor/adapter graph; standalone production owners exercise the portable manager."
+    },
+    {
+      "file": "src/main/agent-manager-project-captains.test.ts",
+      "reason": "Historical AgentManager Electron host constructor/adapter graph; standalone production owners exercise the portable manager."
+    },
+    {
+      "file": "src/main/agent-manager-project-limits.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-manager.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-manager/captain-context.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-manager/project-repos.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-manager/session-config.test.ts",
+      "reason": "Historical AgentManager Electron host constructor/adapter graph; standalone production owners exercise the portable manager."
+    },
+    {
+      "file": "src/main/agent-manager/skill-model.test.ts",
+      "reason": "Historical AgentManager Electron host constructor/adapter graph; standalone production owners exercise the portable manager."
+    },
+    {
+      "file": "src/main/agent-manager/skills-sync-scope.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/agent-manager/workspace-docs-skill-scope.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/artifact-clipboard.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/auto-updater.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/cli-mcp-config/cli-mcp-config.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/commander/commander-images.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/crash-logger.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/database-encryption.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/database-migration.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/database-role-migration.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/database-skill-preferred-model.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/database-skill-scope.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/database.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/database/captain-migration.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/guarded-ipc-send.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/heartbeat-scheduler-host.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/ipc-handlers.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc-sender.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/agent-configuration.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/chat-images.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/chat-lifetime.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/chat.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/commander-actions.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/commander-lifetime.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/mcp-lifetime.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/session-context.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/voice-ingress.test.ts",
+      "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/oauth/oauth-manager-refresh.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/panel-browser-broker.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/platform/credential-setting-format.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/platform/electron-secret-storage.test.ts",
+      "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
+    },
+    {
+      "file": "src/main/pr-review-attestations.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/recurrence-scheduler-host.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/scheduled-coordination-host.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/secret-broker-lifetime.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/secret-broker.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/task-api-browser-recording.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/task-api-voice-tools.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/tunnel-manager.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/voice/voice-session-manager-speech.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/voice/voice-session-manager.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/voice/voice-setup.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/workspace-cleanup-scheduler-host.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/main/worktree-manager.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
+      "file": "src/renderer/src/components/commander/CommanderCallHost.confirmation-ownership.test.tsx",
+      "reason": "Historical Commander/Electron IPC interoperability graph; DOM mocks do not establish native Tauri behavior."
+    },
+    {
+      "file": "src/renderer/src/components/commander/CommanderCallHost.terminal-ownership.test.tsx",
+      "reason": "Historical Commander/Electron IPC interoperability graph; DOM mocks do not establish native Tauri behavior."
+    }
+  ],
+  "importDenialControls": [
+    {
+      "file": "test/tauri-runtime.test.ts",
+      "reason": "Deliberately imports the forbidden module and requires rejection; never supplies an Electron runtime/mock host."
+    }
+  ]
+}

@@ -1,0 +1,140 @@
+name: Tauri host-neutral test evidence
+
+# Preparation only while repository Actions is disabled. No automatic trigger
+# and no installed/native UI acceptance is implied by this source-only matrix.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-host-neutral-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  portable:
+    if: github.ref == 'refs/heads/master'
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - label: linux-x64
+            runner: ubuntu-24.04
+            arch: x64
+          - label: windows-x64
+            runner: windows-2022
+            arch: x64
+          - label: macos-x64
+            runner: macos-15-intel
+            arch: x64
+          - label: macos-arm64
+            runner: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      MAKEFLAGS: '-j1'
+      npm_package_config_node_gyp_jobs: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+          architecture: ${{ matrix.arch }}
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Record source scope and explicit unavailable evidence
+        run: |
+          node - <<'JS'
+          const fs = require('node:fs')
+          fs.mkdirSync('test-evidence', { recursive: true })
+          fs.writeFileSync('test-evidence/availability.json', JSON.stringify({
+            version: 1, revision: process.env.GITHUB_SHA, hostedExecution: true,
+            platform: process.platform, arch: process.arch,
+            scope: 'Host-neutral source and database/connector private-pipe tests',
+            unavailable: [
+              { area: 'installed-native-ui', reason: 'Not selected by this source-only workflow; happy-dom is not physical OS input evidence' },
+              { area: 'production-and-terminal-private-pipe-wrappers', reason: 'Not staged/selected here; run receipts enumerate opt-in file exclusions' },
+              { area: 'release-install-update-and-live-provider-accounts', reason: 'No release, account, data cutover or public exposure is authorized by this workflow' }
+            ]
+          }, null, 2) + '\n')
+          JS
+      - name: Install locked tooling without Electron/native lifecycle builds
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Explicitly prepare pinned standalone Node and native packages
+        run: pnpm tauri:prepare:native
+      - name: Stage database and connector proof entries
+        run: |
+          pnpm tauri:prepare:database
+          pnpm tauri:prepare:connectors
+      - name: Review every test cohort
+        run: pnpm test:host-neutral:audit -- --report=test-evidence/test-inventory.json
+      - name: Run all eligible main shared renderer mobile and service tests
+        run: pnpm test:host-neutral -- --service-proofs --silent --reporter=json --outputFile=test-evidence/vitest.json --run-receipt=test-evidence/vitest-run.json
+      - name: Run standalone foundation subprocess tests
+        run: pnpm test:host-neutral -- --node-tests --run-receipt=test-evidence/node-run.json > test-evidence/node-tests.log 2>&1
+      - name: Require successful framework and runtime receipts
+        run: |
+          node - <<'JS'
+          const fs = require('node:fs')
+          const report = JSON.parse(fs.readFileSync('test-evidence/vitest.json', 'utf8'))
+          if (!report.success || report.numFailedTests || report.numPassedTests < 1) process.exit(1)
+          for (const name of ['vitest-run.json', 'node-run.json']) {
+            const receipt = JSON.parse(fs.readFileSync('test-evidence/' + name, 'utf8'))
+            if (receipt.status !== 'passed' || receipt.exitCode !== 0 || receipt.callerFiltered || receipt.runtime.node !== 'v22.23.2' || receipt.runtime.modules !== '127') process.exit(1)
+            if (name === 'vitest-run.json' && report.testResults.length !== receipt.eligibleTests.length) process.exit(1)
+          }
+          const tap = fs.readFileSync('test-evidence/node-tests.log', 'utf8')
+          const tests = tap.match(/^# tests ([0-9]+)$/m)
+          if (!tests || Number(tests[1]) < 1 || !/^# fail 0$/m.test(tap)) process.exit(1)
+          JS
+      - name: Retain failed skipped and successful evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-neutral-${{ matrix.label }}-${{ github.sha }}
+          path: test-evidence/
+          if-no-files-found: error
+
+  historical-electron:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+          cache: pnpm
+      - name: Prepare the retained historical Electron environment
+        run: pnpm install --frozen-lockfile
+      - name: Record the explicit historical policy
+        run: |
+          node -e "require('node:fs').mkdirSync('test-evidence', { recursive: true })"
+          pnpm test:host-neutral:audit -- --report=test-evidence/test-inventory.json
+      - name: Run only reviewed historical adapters and credential transitions
+        run: pnpm test:electron-transition -- --silent --reporter=json --outputFile=test-evidence/electron-transition.json
+      - name: Require a nonempty successful historical report
+        run: |
+          node - <<'JS'
+          const r = require('./test-evidence/electron-transition.json')
+          const inventory = require('./test-evidence/test-inventory.json')
+          const expected = inventory.tests.filter(row => row.framework === 'vitest' && row.cohort === 'historical-electron').length
+          if (!r.success || r.numFailedTests || r.numPassedTests < 1 || r.testResults.length !== expected) process.exit(1)
+          JS
+      - name: Retain historical evidence separately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-electron-linux-${{ github.sha }}
+          path: test-evidence/
+          if-no-files-found: error

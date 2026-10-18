@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 
 const NOW = '2026-01-01T00:00:00.000Z'

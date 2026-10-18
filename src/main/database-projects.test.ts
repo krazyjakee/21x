@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import Database from 'better-sqlite3'
 import { applySchema, createTables, runMigrations } from './database/schema'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { TASK_ROLE_CAPTAIN } from '../shared/task-roles'
 

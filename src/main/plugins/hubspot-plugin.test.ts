@@ -6,7 +6,7 @@ import { HubSpotPlugin } from './hubspot-plugin'
 import type { PluginContext } from './types'
 import { TaskStatus } from '../../shared/constants'
 import type { DatabaseManager, TaskRecord } from '../database'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import {
   HUBSPOT_ACCOUNT,
   HUBSPOT_CONTACTS,

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import { ensureProjectCaptain, seedCaptainTasks } from './database/seed'
 import { handleTaskRoute } from './task-api/task-routes'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'

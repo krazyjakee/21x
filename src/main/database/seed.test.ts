@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import { LEGACY_COORDINATOR_SKILL_CONTENT, LEGACY_COORDINATOR_SKILL_NAME, seedOrchestratorSkill } from './captain-migration'
 import type { DatabaseManager } from '../database'
 

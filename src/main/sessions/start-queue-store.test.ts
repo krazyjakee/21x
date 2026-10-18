@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import { makeAgent, makeTask } from '../../../test/helpers/task-fixtures'
 import type { DatabaseManager, TaskRecord } from '../database'
 import { DurableStartQueueStore, START_QUEUE_MAX_RETRIES } from './start-queue-store'

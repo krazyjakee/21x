@@ -45,6 +45,9 @@
     "tauri:build": "tauri build",
     "test:tauri:spike": "node --test --test-concurrency=1 src/service/feasibility.test.mjs scripts/tauri-prepare.test.mjs scripts/tauri-stage-connectors.test.mjs",
     "test:tauri": "node scripts/tauri-test.mjs",
+    "test:host-neutral": "node scripts/test-host-neutral.mjs",
+    "test:host-neutral:audit": "node scripts/host-neutral-test-policy.mjs --check",
+    "test:electron-transition": "node scripts/test-electron-transition.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {

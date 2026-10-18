@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager, UpdateTaskData } from './database'
 import { applySchema } from './database/schema'
 import { migrateTaskActivity } from './database/task-activity-migration'

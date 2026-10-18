@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import { DeliveryStore } from './delivery-store'
 
 describe('DeliveryStore', () => {
