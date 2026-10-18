@@ -1,0 +1,285 @@
+{
+  "formatVersion": 1,
+  "issues": [
+    214,
+    210
+  ],
+  "sourceRevision": "8244c0ad6dab4ed1ca04f07315b720bda3d07610",
+  "sourceBaseRevision": "6967c5eb9659c14c6d871729b38697c59b72845f",
+  "status": "scoped Source exact-ID metadata-first attachment removal; whole issues remain OPEN; renderer removal integration, journals and execution bridge not claimed",
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "hostNode": "22.22.0",
+    "appElectron": "44.0.0",
+    "appElectronNode": "24.18.1",
+    "bundledNode": "22.23.2",
+    "pnpm": "9.15.9",
+    "vitest": "4.0.18",
+    "betterSqlite3": "13.0.3",
+    "cargo": "1.98.0",
+    "tauri": "2.12.3",
+    "profiles": "synthetic temporary SQLite profiles and controlled selected bytes only",
+    "versionsVerifiedBy": [
+      "node -p process.versions.node",
+      "pnpm --version",
+      "ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron -p JSON.stringify(runtime/package versions)",
+      "src-tauri/resources/node/node -p process.versions.node",
+      "cargo --version"
+    ],
+    "uid": 1000
+  },
+  "contract": {
+    "public": "attachments.remove(taskId,attachmentId):Promise<void>",
+    "production": "exact-ID canonical metadata delta under existing task exclusion; publish accepted metadata before protected raw unlink",
+    "appendEditOrder": "separate full-array CAS remains unchanged",
+    "save": "metadata-only remains unchanged",
+    "electron": "legacy file removal plus renderer metadata update unchanged",
+    "partialCleanup": "post-commit cleanup error/cancellation does not roll back canonical metadata; only pre-unlink refusal guarantees retained bytes",
+    "replay": "absent exact record rejects; no automatic retry or merge"
+  },
+  "negativeProof": {
+    "baseRevision": "fe4be31631cf32bab2909b7fdd3245a9950f6e13",
+    "command": "pnpm test:run src/service/task-attachment-metadata-conflict.test.ts -t \"keeps every currently referenced file\"",
+    "log": "/tmp/e2-attachment-removal-interleaving-old-source.log",
+    "rawExitCode": 1,
+    "actual": "actual protected import A/B; remove A unlinked bytes leaving metadata A; legitimate append A,B accepted; stale removal CAS rejected; canonical metadata still referenced absent A",
+    "expected": "a refused stale metadata replacement cannot leave a dangling record introduced by accepted exact-ID removal",
+    "negativeFixture": "/tmp/e2-removal-negative-proof-source.ts",
+    "logSha256": "8ab307b34a6102dd2c7c9b22ada210701e7bae7401789cb0a3bf146ac6eb9195",
+    "fixtureSha256": "28382f4c879351a0ddb49f52bce930355422fc2236b5ec40b4d6acd826bbb230"
+  },
+  "newControls": {
+    "actualSourceSQLite": 1,
+    "protectedFilesystem": 4,
+    "actualPrivatePeer": 2,
+    "kernelDenial": "readable non-writable task directory makes real unlink fail; no mocked filesystem rejection; executed on this non-root Linux host",
+    "privateEvent": "one exact attachments metadata event, distinct from fixture last_activity_at observations",
+    "heldRawUnlink": "accepted metadata/event precedes raw unlink; cancellation retains raw work and close timeout retains ownership until completion"
+  },
+  "failuresAndRepairs": [
+    "Original Source interleaving regression failed with missing bytes behind a retained canonical record before implementation.",
+    "Initial new private-peer event assertion counted unrelated existing last_activity_at events from fixture setup. Probe distinguished those events from the exact attachments delta; focused and full source/Node reruns assert the exact metadata event once. No production event or validation rule weakened."
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "sourceRuns": [],
+    "evidenceRuns": "Exact lookup after publication will be recorded in issue comments",
+    "settingsCalls": false,
+    "dispatch": false
+  },
+  "remaining": [
+    "A-owned native remove consumer must omit second full-array write and reconcile canonical readback with manual review after partial/unknown cleanup",
+    "Protected orphan-copy/removal-intent journaling and hard-crash recovery",
+    "AgentManager workspace copy/preview execution bridge does not borrow protected FileOwner FD authority; B HTTP saved-file execution remains refused",
+    "Installed supported-target UI/native lifecycle and202/208 prerequisites",
+    "Actions/final identity/schemes/master-to-main/live-provider decisions; hosted voice deferred"
+  ],
+  "execution": {
+    "lane": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "script": "/tmp/e2-removal-gate.sh",
+    "normalCommitHooks": "required source/evidence lint-staged and no-emit typecheck under lane; no bypass",
+    "scriptSha256": "f2371c7eb65f53e018dfbd2a630794ed5b0b9873949cded3aad1e30dfbf414a5",
+    "normalSourceCommitHooks": {
+      "rawExitCode": 0,
+      "stagedTypescriptFiles": 4,
+      "checks": [
+        "eslint --no-warn-ignored",
+        "pnpm typecheck:tsc --build --noEmit"
+      ],
+      "bypassed": false
+    }
+  },
+  "observedCounts": {
+    "app": {
+      "files": 7,
+      "passed": 335,
+      "skipped": 0
+    },
+    "standalone": {
+      "files": 8,
+      "passed": 338,
+      "skipped": 0,
+      "existingActualStagedEntryControls": 2
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "inventory": {
+      "sources": 918,
+      "ipcSites": 736,
+      "existingReviewedUnresolved": 9
+    }
+  },
+  "retainedAuthority": {
+    "newOperations": 0,
+    "newEvents": 0,
+    "newGrants": 0,
+    "nativeCodeChanged": false
+  },
+  "scope": {
+    "profiles": "synthetic temporary SQLite profiles/files only",
+    "notClaimed": [
+      "atomic filesystem+SQLite transaction",
+      "byte restoration after admitted unlink",
+      "installed physical UI or all-platform proof",
+      "live account/provider/microphone/credential access",
+      "release/profile cutover/Electron retirement"
+    ]
+  },
+  "createdAt": "2026-10-18T00:49:01.945945+00:00",
+  "gates": [
+    {
+      "name": "app",
+      "argv": [
+        "pnpm",
+        "test:run",
+        "src/service/task-attachment-metadata-conflict.test.ts",
+        "src/service/task-attachment-backend.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/task-lifecycle-backend.test.ts",
+        "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+        "src/renderer/src/lib/native-desktop-host.test.ts"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-app.log",
+      "logSha256": "a38331b93c44592301947130399c89098ad772fd7170d4b3100399098c452dc4"
+    },
+    {
+      "name": "type",
+      "argv": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-type.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lint",
+      "argv": [
+        "pnpm",
+        "lint"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-lint.log",
+      "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+    },
+    {
+      "name": "stage",
+      "argv": [
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-stage.log",
+      "logSha256": "d2736b608730bebfa91b5db8e7e086e48345a01b200072599ee40d54a24f2284"
+    },
+    {
+      "name": "node",
+      "argv": [
+        "node",
+        "scripts/tauri-test.mjs",
+        "--production-proofs",
+        "src/service/task-attachment-metadata-conflict.test.ts",
+        "src/service/task-attachment-backend.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/task-lifecycle-backend.test.ts",
+        "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+        "src/renderer/src/lib/native-desktop-host.test.ts",
+        "scripts/production-service-proof.test.ts"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-node.log",
+      "logSha256": "ebecbc6e889b1a0c5d980ed553f7f7a8c81a58673a755f7ec6f41a9f97f0d51d"
+    },
+    {
+      "name": "frontend",
+      "argv": [
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-frontend.log",
+      "logSha256": "3048eed8344144d407e2b08255f8468d9a7d39b382df1f0d04950aa0636e3967"
+    },
+    {
+      "name": "diagnostic-frontend",
+      "argv": [
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-diagnostic-frontend.log",
+      "logSha256": "f74d0fde84a2e8db52b8c959d5cd9536fa5868124f08c7514bd9ad0f5db15fed"
+    },
+    {
+      "name": "contracts",
+      "argv": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-contracts.log",
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    {
+      "name": "inventory",
+      "argv": [
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-inventory.log",
+      "logSha256": "181f938067247040999ede2b1735c148784d5814c67265755c68fb6b849f56e1"
+    },
+    {
+      "name": "diff",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-removal-diff.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": "70f5f85c03791eec233518dcdbe7500f97adf1828071251a99d566e07fb94b2e",
+    "docs/tauri-migration/native-attachment-removal.md": "aec0daef9558a7ab22e859b2535b7a1277bc8e39b81218fb12adbe1dc5a4eb27",
+    "src/service/production-service.test.ts": "cdc9c30a1b59186e28f27e943c232b8c1b82ca62b68bd3fd5571d0e1294850ae",
+    "src/service/task-attachment-backend.test.ts": "988d25d5ffcbc4e4ab623d495f0ae3d8e7843d8ad371ec4aa3fd08102dc97961",
+    "src/service/task-attachment-backend.ts": "58d3daf2a71f14a82b068fdf420b4d04c566a50f507f074c7c0dbb8b986479bf",
+    "src/service/task-attachment-metadata-conflict.test.ts": "a60e99ec19c78bbdc9561698847667d9d58500209355ea03ef3afd545172e846",
+    "src/main/task-attachment-file-owner.ts": "865245490d35b3f29c4f6afab806c62441ab48f82611520e0710e784c01ffca0",
+    "src/service/task-lifecycle-backend.ts": "9795dd846afbe1a66e8e7c3396710a7849625a449bb716058621d446be3d548e",
+    "src/service/production-owner.ts": "143c0c78b5811f229d547f2e1e0f12807a76e0bb130b1a8110f13085bd7d3b92",
+    "src/renderer/src/components/tasks/native-attachment-ui.test.tsx": "ae201dd1a2e103ed0e1b045d909321197afca8770877384d6971f6c8da9dd666",
+    "scripts/production-service-proof.test.ts": "68d4e586b1946a145240c813948abcca88d0bdcae902fc513c8c8bc529f61614"
+  },
+  "artifactHashes": {
+    "src-tauri/resources/service/production-stdio.mjs": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+    "src-tauri/resources/service/production-engine.mjs": "ce116468f9eda71ea815dbf8028b0127626b5bbb08b51fa87964b9aa8650469c",
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": "f6cbc2a06e2bb26e6760df1a69748e9a39da0e751d45e63c6412359a90172c76",
+    "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+    "out/tauri-production-renderer/index.html": "543e3e00639839cc7bcc8ceee7f3d999af02843cab0d67cd47cef2273e447a60",
+    "out/tauri-renderer/index.html": "7b9b8905836dcf88a1f618354b8b85c3d70eddc15ccf54cd3919e447ae9b70b4"
+  },
+  "publication": {
+    "sourceCommit": "8244c0ad6dab4ed1ca04f07315b720bda3d07610",
+    "sourcePush": "fast-forward6967c5eb..8244c0ad HEAD->master; rawexit0",
+    "lsRemote": "8244c0ad6dab4ed1ca04f07315b720bda3d07610 refs/heads/master",
+    "fetchRebase": "Current branch up to date; gate inputs unchanged",
+    "sourceRuns": []
+  }
+}
