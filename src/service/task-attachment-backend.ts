@@ -231,7 +231,24 @@ export class TaskAttachmentBackend {
         if (operation === 'attachments:remove') {
           const selected = initial.records.find(record => record.id === args[1])
           if (!selected) throw new ServiceProtocolError('INVALID_REQUEST')
-          await files.remove(taskId, selected, { beforeEffect, signal }); beforeEffect(); return undefined
+          // The retained exact-ID operation owns its logical metadata delta.
+          // Commit it before irreversible unlink so a later full-array CAS
+          // refusal cannot preserve a dangling reference created by this remove.
+          const remaining = initial.records.filter(record => record.id !== selected.id)
+          const expected = JSON.stringify(remaining)
+          db.transaction(() => {
+            beforeEffect()
+            const updated = database.updateTask(taskId, { attachments: remaining })
+            if (!updated) throw new ServiceProtocolError('INVALID_REQUEST')
+            expectedMetadata = expected
+            beforeEffect()
+          })()
+          // Publish the accepted logical delta before raw cleanup or a caller
+          // loss can refuse. A later unlink error cannot roll this state back.
+          this.options.onTaskUpdated(taskId, remaining)
+          await files.remove(taskId, selected, { beforeEffect, signal })
+          beforeEffect()
+          return undefined
         }
         const store: TaskImageStore = {
           getTask(id) { if (id !== taskId) throw new ServiceProtocolError('INVALID_REQUEST'); beforeEffect(); return { attachments: metadata().records } },

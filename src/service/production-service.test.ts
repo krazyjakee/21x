@@ -9,7 +9,7 @@ import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { UI_NATIVE_CALLBACK_SCHEMAS, isPrivateUiPublication, isPrivateAgentInstallation } from '../shared/ui-native-callbacks'
 import { UI_DESKTOP_CODECS } from '../shared/ui-desktop-codecs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -258,6 +258,40 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
 }
 
 describe('actual private production peer', () => {
+  it('publishes exact-ID logical removal through the actual peer without a second full-array write', async () => {
+    const f = fixture(); await f.initialize()
+    const { services, task, attachment, path } = savedAttachment(f, 3)
+    const sibling = { ...attachment, id: randomUUID(), filename: 'sibling.bin' }, siblingPath = join(dirname(path), `${sibling.id}-${sibling.filename}`)
+    writeFileSync(siblingPath, Buffer.alloc(3, 9)); services.db.updateTask(task.id, { attachments: [attachment, sibling] })
+    expect(await f.host.request('attachments:remove', { taskId: task.id, attachmentId: attachment.id })).toEqual({ defined: false })
+    expect(existsSync(path)).toBe(false); expect(readFileSync(siblingPath)).toEqual(Buffer.alloc(3, 9))
+    expect(await f.host.request('db:getTask', { id: task.id })).toMatchObject({ value: { attachments: [sibling] } })
+    const removalEvents = () => f.wireEvents.filter(event => event.operation === 'task:updated' && isRecord(event.payload) && event.payload.taskId === task.id && isRecord(event.payload.updates) && Object.hasOwn(event.payload.updates, 'attachments'))
+    await expect.poll(() => removalEvents().length).toBe(1)
+    expect(removalEvents()[0].payload).toEqual({ taskId: task.id, updates: { attachments: [sibling] } })
+    await expect(f.host.request('db:updateTask', { id: task.id, data: { attachments: [] }, precondition: { attachmentsBaseline: [attachment, sibling] } })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(services.db.getTask(task.id)?.attachments).toEqual([sibling])
+    await f.service.close()
+  })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('retains canonical removal and actual protected bytes after kernel unlink permission refusal over the private peer', async () => {
+    const f = fixture(); await f.initialize()
+    const { services, task, attachment, path } = savedAttachment(f, 3), directory = dirname(path)
+    chmodSync(directory, 0o500)
+    try {
+      await expect(f.host.request('attachments:remove', { taskId: task.id, attachmentId: attachment.id })).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+      expect(services.db.getTask(task.id)?.attachments).toEqual([])
+      expect(readFileSync(path)).toEqual(Buffer.alloc(3, 7))
+      expect(await f.host.request('db:getTask', { id: task.id })).toMatchObject({ value: { attachments: [] } })
+      const removalEvents = () => f.wireEvents.filter(event => event.operation === 'task:updated' && isRecord(event.payload) && event.payload.taskId === task.id && isRecord(event.payload.updates) && Object.hasOwn(event.payload.updates, 'attachments'))
+      await expect.poll(() => removalEvents().length).toBe(1)
+      expect(removalEvents()[0].payload).toEqual({ taskId: task.id, updates: { attachments: [] } })
+      await expect(f.host.request('attachments:remove', { taskId: task.id, attachmentId: attachment.id })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+      expect(readFileSync(path)).toEqual(Buffer.alloc(3, 7))
+    } finally { chmodSync(directory, 0o700) }
+    await f.service.close()
+  })
+
   it('carries an exact separate attachment CAS baseline through the actual private peer without stale overwrite', async () => {
     const f = fixture(); await f.initialize()
     const services = f.service.getReadyServices()!, task = services.db.createTask(makeTask())!

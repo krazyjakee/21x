@@ -1,7 +1,7 @@
 import { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, symlinkSync, linkSync, renameSync } from 'node:fs'
-import { link, open } from 'node:fs/promises'
+import { link, open, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
@@ -20,12 +20,13 @@ const image = { name: '../写真.png', mimeType: 'image/png' as const, data: 'iV
 function held() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve }); return { promise, release } }
 let db: ReturnType<typeof createPortableTestDb>, manager: AgentManager, files: TaskAttachmentFileOwner, backend: TaskAttachmentBackend, options: TaskAttachmentBackendOptions
 let root: string, attachmentRoot: string, projectId: string, ownerValid: boolean, read: boolean, write: boolean, releases: Array<() => void>, events: Array<{ taskId: string; attachments: FileAttachmentRecord[] }>
+let beforeUnlink: ((path: string) => Promise<void>) | null
 let afterOpen: (() => Promise<void>) | null, afterPublish: (() => Promise<void>) | null, fsOverride: Partial<TaskAttachmentFilePrimitives>
 let fileReads: number, refuseClose: boolean, closeAttempts: number
 beforeEach(() => {
   db = createPortableTestDb(); root = dirname(dirname(db.getWorkspaceDir('fixture'))); attachmentRoot = join(root, 'attachments'); mkdirSync(attachmentRoot); projectId = db.getDefaultProject()!.id
-  ownerValid = read = write = true; releases = []; events = []; afterOpen = afterPublish = null; fileReads = closeAttempts = 0; refuseClose = false
-  fsOverride = { open: async (path, flags, mode) => { const fd = await open(path, flags, mode); await afterOpen?.(); return { stat: () => fd.stat({ bigint: true }), read: (b,o,l,p) => { fileReads++; return fd.read(b,o,l,p) }, write: (b,o,l,p) => fd.write(b,o,l,p), sync: () => fd.sync(), close: async () => { closeAttempts++; if (refuseClose) throw new Error('Controlled raw close failure'); await fd.close() } } }, link: async (from, to) => { await link(from, to); await afterPublish?.() } }
+  ownerValid = read = write = true; releases = []; events = []; beforeUnlink = null; afterOpen = afterPublish = null; fileReads = closeAttempts = 0; refuseClose = false
+  fsOverride = { open: async (path, flags, mode) => { const fd = await open(path, flags, mode); await afterOpen?.(); return { stat: () => fd.stat({ bigint: true }), read: (b,o,l,p) => { fileReads++; return fd.read(b,o,l,p) }, write: (b,o,l,p) => fd.write(b,o,l,p), sync: () => fd.sync(), close: async () => { closeAttempts++; if (refuseClose) throw new Error('Controlled raw close failure'); await fd.close() } } }, link: async (from, to) => { await link(from, to); await afterPublish?.() }, unlink: async path => { await beforeUnlink?.(path); await unlink(path) } }
   files = new TaskAttachmentFileOwner({ attachmentRoot, assertCurrent() { if (!db.db.open) throw new ServiceProtocolError('DISCONNECTED') }, fs: fsOverride })
   manager = new AgentManager(db, { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, secrets: { kind: 'unsupported' }, configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' }, createAdapter: () => new FakeAdapter(), isCodexAppServerAdapter: () => false })
   options = { database: db, manager, files, attachmentRoot, engineEpoch: caller.engineEpoch, assertAvailable() { if (!ownerValid || !db.db.open) throw new ServiceProtocolError('DISCONNECTED') }, assertTaskAttachmentOwners(value) { if (value.database !== db || value.manager !== manager || value.files !== files || value.attachmentRoot !== attachmentRoot) throw new ServiceProtocolError('DISCONNECTED') }, isTrustedDesktop: value => value.origin === caller.origin && value.webviewId === caller.webviewId, canAccessTask: (_id, _caller, access) => access === 'read' ? read : write, canAccessProject: (_id, _caller, access) => access === 'read' ? read : write, canAccessAgent: (_id, _caller, access) => access === 'read' ? read : write, onTaskUpdated: (taskId, attachments) => { events.push({ taskId, attachments: structuredClone(attachments) }) } }
@@ -268,14 +269,14 @@ describe('actual task attachment bindings and accepted-effect ownership', () => 
     }
     expect(opened).toHaveBeenCalledTimes(1); expect(downloaded).toHaveBeenCalledTimes(1)
   })
-  it('saves real sanitized images and durable records, emits ordinary task updates, and removes only the exact file', async () => {
+  it('saves real sanitized images and durable records, emits ordinary task updates, and removes exact metadata before its file', async () => {
     const value = task(), ambient = vi.spyOn(db, 'getAttachmentsDir').mockImplementation(() => { throw new Error('Ambient directory forbidden') })
     expect(Object.keys(backend.operationSchemas(caller))).toEqual(TASK_ATTACHMENT_OPERATIONS.filter(operation => operation !== 'attachments:save' && operation !== 'attachments:open' && operation !== 'attachments:download'))
     const first = await call('chatImages:saveToTask', [value.id, [image]]), second = await call('chatImages:saveToTask', [value.id, [image]])
     expect(first[0]?.filename).toBe('写真.png'); expect(second[0]?.filename).toBe('写真-2.png'); expect(metadata(value.id)).toEqual([...first, ...second]); expect(events).toEqual([{ taskId: value.id, attachments: first }, { taskId: value.id, attachments: [...first, ...second] }])
     const selected = first[0]!, path = join(attachmentRoot, value.id, `${selected.id}-${selected.filename}`); expect(readFileSync(path)).toEqual(Buffer.from(image.data, 'base64'))
     const other = join(attachmentRoot, value.id, `${selected.id}-personal.txt`); writeFileSync(other, 'personal')
-    expect(await call('attachments:remove', [value.id, selected.id])).toBeUndefined(); expect(existsSync(path)).toBe(false); expect(readFileSync(other, 'utf8')).toBe('personal'); expect(metadata(value.id)).toEqual([...first, ...second]); expect(ambient).not.toHaveBeenCalled()
+    expect(await call('attachments:remove', [value.id, selected.id])).toBeUndefined(); expect(existsSync(path)).toBe(false); expect(readFileSync(other, 'utf8')).toBe('personal'); expect(metadata(value.id)).toEqual(second); expect(events.at(-1)).toEqual({ taskId: value.id, attachments: second }); expect(ambient).not.toHaveBeenCalled()
   })
   it('preserves genuine Captain and literal member storage while requiring current and former group grants', async () => {
     db.ensureCoordinatorTask(projectId); const captain = db.getCoordinatorTask(projectId)!, captainSaved = await call('chatImages:saveToTask', [captain.id, [image]])
@@ -330,6 +331,61 @@ describe('actual task attachment bindings and accepted-effect ownership', () => 
   })
 })
 
+
+describe('Source-owned exact-ID logical removal before physical cleanup', () => {
+  async function ready() {
+    const value = task(), records = await call('chatImages:saveToTask', [value.id, [image, image]])
+    const selected = records[0]!, path = join(attachmentRoot, value.id, `${selected.id}-${selected.filename}`)
+    events = []
+    return { value, records, selected, path }
+  }
+  it('publishes canonical metadata before holding raw unlink and excludes a second Source mutation', async () => {
+    const { value, records, selected, path } = await ready(), gate = held()
+    let entered = false
+    beforeUnlink = async target => { expect(target).toBe(path); entered = true; await gate.promise }
+    const work = call('attachments:remove', [value.id, selected.id]); releases.push(gate.release)
+    await vi.waitFor(() => expect(entered).toBe(true))
+    expect(metadata(value.id)).toEqual([records[1]])
+    expect(events).toEqual([{ taskId: value.id, attachments: [records[1]] }])
+    expect(readFileSync(path)).toEqual(Buffer.from(image.data, 'base64'))
+    await expect(manager.runTaskLifecycleMutation([value.id], async () => { throw new Error('Overlapping writer must never run') })).rejects.toThrow('already being updated')
+    gate.release(); await work
+    expect(existsSync(path)).toBe(false); expect(events).toHaveLength(1)
+    expect(readFileSync(join(attachmentRoot, value.id, `${records[1]!.id}-${records[1]!.filename}`))).toEqual(Buffer.from(image.data, 'base64'))
+  })
+  it('keeps canonical logical removal and untouched bytes after a real pre-unlink refusal without replay', async () => {
+    const { value, records, selected, path } = await ready()
+    let attempts = 0
+    beforeUnlink = async () => { attempts++; throw new Error('Controlled raw unlink refusal') }
+    await expect(call('attachments:remove', [value.id, selected.id])).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    expect(metadata(value.id)).toEqual([records[1]])
+    expect(events).toEqual([{ taskId: value.id, attachments: [records[1]] }])
+    expect(readFileSync(path)).toEqual(Buffer.from(image.data, 'base64'))
+    await expect(call('attachments:remove', [value.id, selected.id])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(attempts).toBe(1); expect(events).toHaveLength(1)
+  })
+  it('rolls back rejected metadata before entering any filesystem deletion', async () => {
+    const { value, records, selected, path } = await ready(), original = db.updateTask.bind(db), unlinkSpy = vi.fn(async () => {})
+    beforeUnlink = unlinkSpy
+    vi.spyOn(db, 'updateTask').mockImplementation((id, data) => { const result = original(id, data); if (data.attachments) write = false; return result })
+    await expect(call('attachments:remove', [value.id, selected.id])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(metadata(value.id)).toEqual(records); expect(events).toEqual([]); expect(unlinkSpy).not.toHaveBeenCalled()
+    expect(readFileSync(path)).toEqual(Buffer.from(image.data, 'base64'))
+  })
+  it('joins admitted raw unlink through cancellation and close deadline while retaining accepted canonical state', async () => {
+    const { value, records, selected, path } = await ready(), gate = held(), abort = new AbortController()
+    let entered = false
+    beforeUnlink = async () => { entered = true; await gate.promise }; releases.push(gate.release)
+    const work = call('attachments:remove', [value.id, selected.id], abort.signal).catch(error => error)
+    await vi.waitFor(() => expect(entered).toBe(true))
+    abort.abort()
+    await expect(backend.close(20)).rejects.toMatchObject({ code: 'TIMEOUT' })
+    expect(db.db.open).toBe(true); expect(backend.inflightCount).toBe(1); expect(existsSync(path)).toBe(true)
+    expect(metadata(value.id)).toEqual([records[1]]); expect(events).toEqual([{ taskId: value.id, attachments: [records[1]] }])
+    gate.release(); expect(await work).toMatchObject({ code: 'CANCELLED' }); await backend.close(); await files.close()
+    expect(existsSync(path)).toBe(false); expect(backend.inflightCount).toBe(0); expect(events).toHaveLength(1)
+  })
+})
 
 describe('native selection import under actual Source task ownership',()=>{
  const identity={...caller,uiLeaseId:'ui_selection_fixture'}, selected={selectionId:'61f07006-c85b-438e-83a7-497c77b0dcae',path:'/tmp/selected.txt',filename:'selected.txt',size:1048577}

@@ -5,7 +5,7 @@ import { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
@@ -202,4 +202,35 @@ describe('actual Source attachment metadata conflict', () => {
     expect(adapter.destroySession).not.toHaveBeenCalled()
     expect(events.filter(event => event.operation === 'task:updated')).toHaveLength(0)
   })
+  it('keeps every currently referenced file after a refused metadata removal with an accepted interleaving append', async () => {
+    const task = await call('db:createTask', [{ title: 'Removal metadata interleaving' }])
+    const identity = { ...caller, uiLeaseId: 'ui_attachment_removal_conflict' }
+    async function copy(filename: string) {
+      const path = `/controlled-removal-selection/${filename}`
+      expect(selections.offer({ leaseId: identity.uiLeaseId, selections: [{ selectionId: randomUUID(), path, filename, size: 3 }] })).toEqual({ accepted: true })
+      const codec = TASK_ATTACHMENT_CODECS['attachments:save']
+      const wire = await attachments.registry.invoke('attachments:save', codec.encodeArguments([task.id, path]), identity, new AbortController().signal)
+      return codec.decodeResult((wire as { value: JsonValue }).value)
+    }
+    const first = await copy('first.txt'), second = await copy('second.txt')
+    await call('db:updateTask', [task.id, { attachments: [first] }, { attachmentsBaseline: [] }])
+    const baseline = (await call('db:getTask', [task.id]))!.attachments
+    const codec = TASK_ATTACHMENT_CODECS['attachments:remove']
+    await attachments.registry.invoke('attachments:remove', codec.encodeArguments([task.id, first.id]), identity, new AbortController().signal)
+    // Source accepted the exact-ID delta before deleting bytes; old full-array
+    // append intent cannot restore the removed record or overwrite other work.
+    expect(db.getTask(task.id)?.attachments).toEqual([])
+    expect(existsSync(join(attachmentRoot, task.id, `${first.id}-${first.filename}`))).toBe(false)
+    await expect(call('db:updateTask', [task.id, { attachments: [first, second] }, { attachmentsBaseline: [first] }])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    // A separate explicit decision after canonical read can append the retained
+    // second copy. This is not an automatic retry or merge by the remove owner.
+    const fresh = (await call('db:getTask', [task.id]))!.attachments
+    await call('db:updateTask', [task.id, { attachments: [...fresh, second] }, { attachmentsBaseline: fresh }])
+    await expect(call('db:updateTask', [task.id, { attachments: [] }, { attachmentsBaseline: baseline }])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(db.getTask(task.id)?.attachments).toEqual([second])
+    // A preserved canonical record must not silently point at deleted bytes.
+    for (const metadata of db.getTask(task.id)!.attachments)
+      expect(existsSync(join(attachmentRoot, task.id, `${metadata.id}-${metadata.filename}`))).toBe(true)
+  })
+
 })
