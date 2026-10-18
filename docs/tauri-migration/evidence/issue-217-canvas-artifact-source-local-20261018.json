@@ -1,0 +1,812 @@
+{
+  "version": 1,
+  "issue": 217,
+  "recordedAt": "2026-10-18T03:46:36.912015+00:00",
+  "implementationRevision": "81a27abe87a093a26062bda47ff13a90603b270a",
+  "sourceRevision": "1dd35a9f78dead4be8451b54ac6319f086cfd330",
+  "testedRuntimeRevision": "6a41ffe7bec789badb682eb7fc0686ad175bcd69",
+  "publicationRebase": "Inherited A0230ca3e evidence JSON only; git diff 6a41ffe7 HEAD -- src scripts was empty. Status/domain verification notes were added after the gate, with normal hooks. No runtime/test input changed.",
+  "scope": "Linux Source/staged production persistence and browser refusal; native renderer persistence fences; optional/off Source viewer SDK only",
+  "environment": {
+    "os": "Linux Mint 22.3",
+    "kernel": "6.8.0-139-generic",
+    "arch": "x64",
+    "node": "22.23.2",
+    "nodeABI": "127",
+    "betterSqlite3": "13.0.3",
+    "nodePty": "1.1.0",
+    "vitest": "4.0.18",
+    "schema": 37,
+    "webview": "not launched in this assignment; installed WebKit 2.52.6 is not production viewer proof"
+  },
+  "inherited": {
+    "taskDeletionRetention": "956c5d0739a579f1487fff1e053373d6ad36433b",
+    "taskDeletionEvidence": "d928a12d313e086e8607a95dbc6733514b12a703",
+    "rendererCRUD": "a6001e1a95ee95230276c111d219c0b4813a05ff"
+  },
+  "sourceHashes": [
+    {
+      "file": "docs/tauri-migration/artifact-production.md",
+      "sha256": "044085c9f258fc190bce838b259cdd5fb6ed6f7f0005e05f0dd23138ee378a7d"
+    },
+    {
+      "file": "docs/tauri-migration/canvas-browser-retirement.md",
+      "sha256": "6a58f8f4354332214699ecf9ff363fff5d7f92319f5a43b1725e089898ab81bb"
+    },
+    {
+      "file": "docs/tauri-migration/evidence/issue-209-task-deletion-retention-integration-20261018.json",
+      "sha256": "44e80e1c5ed90eb114b6e151c8d9c427d945eae67fc7386bb67ee1827a1daafa"
+    },
+    {
+      "file": "docs/tauri-migration/implementation-status.md",
+      "sha256": "dad14fa16bb5167b44531e6b3a8a960c3e56b58599019f13c5a27c9e45409519"
+    },
+    {
+      "file": "docs/tauri-migration/inventory.json",
+      "sha256": "7c66e7df4a4da0243ed0a9b0a60cd1c11597117fb0b00716f2d63b7a54ff6b5f"
+    },
+    {
+      "file": "src/renderer/src/stores/canvas-store.ts",
+      "sha256": "14fef7eb77bb2160c64615b09b455f6123ccdb7c25b4acdd396e539894efb9b6"
+    },
+    {
+      "file": "src/renderer/src/stores/drawing-store.ts",
+      "sha256": "2f187a9eebb13103777cf194b2a7377d8431270c0395d2a6327d68025d50bd21"
+    },
+    {
+      "file": "src/renderer/src/stores/native-canvas-persistence.test.ts",
+      "sha256": "af97796692a00dc8463631cf5b30555b77b67d93985df734cb8cb8fb9b635b5d"
+    },
+    {
+      "file": "src/service/artifact-backend.ts",
+      "sha256": "20278cc325fd567812992463acce26f54ae3785be1d78d0d4a3bb66217c0b837"
+    },
+    {
+      "file": "src/service/artifact-viewer-owner.test.ts",
+      "sha256": "52c60757f779e4d63bd54265d7d48cc2ac4b642847041fff6bbb3eb99cc92230"
+    },
+    {
+      "file": "src/service/artifact-viewer-owner.ts",
+      "sha256": "32274d55ea74f5d78452ff8947f5037ac25d596976a3a0cfd8d2ebb50673d804"
+    },
+    {
+      "file": "src/service/production-canvas-retirement.test.ts",
+      "sha256": "778525fd224d98790ba64ff74c2843999f419184246f87629674c2792df81751"
+    },
+    {
+      "file": "src/shared/artifact-viewer-native.ts",
+      "sha256": "9a0fc14dbf2eba20900c81f9b4ac9ea8dee101dd92636c7fd69f4ac84e8584b6"
+    }
+  ],
+  "artifactHashes": [
+    {
+      "file": "src-tauri/resources/node/node",
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+    },
+    {
+      "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+    },
+    {
+      "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+      "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+    },
+    {
+      "file": "src-tauri/resources/service/production-engine.mjs",
+      "sha256": "f74fa2b7248601cb95381878356b8e8692a928d9f871cee2bf097d72fedb15af"
+    },
+    {
+      "file": "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json",
+      "sha256": "431b6cb736bf51f5384640b0d9980f18bcb0e28cb8cd3db7c712fd583e280a51"
+    }
+  ],
+  "runScope": "Full renderer project plus explicitly filtered affected Source/staged suite; not a whole host-neutral cohort run",
+  "commands": [
+    {
+      "name": "renderer",
+      "argv": [
+        "pnpm",
+        "test:host-neutral",
+        "--",
+        "--project=renderer",
+        "--maxWorkers=1",
+        "--run-receipt=/tmp/eb217-combined-renderer-receipt.json",
+        "--reporter=dot",
+        "--reporter=json",
+        "--outputFile=/tmp/eb217-combined-renderer-vitest.json",
+        "--silent"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-renderer.log"
+    },
+    {
+      "name": "type",
+      "argv": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-type.log"
+    },
+    {
+      "name": "lint",
+      "argv": [
+        "pnpm",
+        "lint"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-lint.log"
+    },
+    {
+      "name": "database",
+      "argv": [
+        "pnpm",
+        "tauri:prepare:database"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-database.log"
+    },
+    {
+      "name": "stage",
+      "argv": [
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-stage.log"
+    },
+    {
+      "name": "audit",
+      "argv": [
+        "pnpm",
+        "test:host-neutral:audit"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-audit.log"
+    },
+    {
+      "name": "tests",
+      "argv": [
+        "pnpm",
+        "test:host-neutral",
+        "--",
+        "--production-proofs",
+        "--service-proofs",
+        "--maxWorkers=1",
+        "src/service/production-canvas-retirement.test.ts",
+        "src/service/artifact-viewer-owner.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/production-mobile.test.ts",
+        "src/main/database-attachment-retention.test.ts",
+        "src/service/artifact-backend.test.ts",
+        "src/service/workspace-file-backend.test.ts",
+        "src/service/production-settings-backend.test.ts",
+        "src/service/production-task-mcp.test.ts",
+        "src/service/task-mcp-stdio-proxy.test.ts",
+        "scripts/production-service-proof.test.ts",
+        "src/shared/artifact-codecs.test.ts",
+        "src/shared/production-settings-codecs.test.ts",
+        "src/shared/desktop-contracts.test.ts",
+        "src/renderer/src/components/canvas/native-browser-retirement.test.tsx",
+        "src/renderer/src/stores/native-canvas-persistence.test.ts",
+        "src/renderer/src/stores/canvas-store.test.ts",
+        "src/renderer/src/stores/drawing-store.test.ts",
+        "src/renderer/src/components/canvas/drawing/DrawingLayer.test.tsx",
+        "--run-receipt=/tmp/eb217-combined-receipt.json",
+        "--reporter=dot",
+        "--reporter=json",
+        "--outputFile=/tmp/eb217-combined-vitest.json",
+        "--silent"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-tests.log"
+    },
+    {
+      "name": "frontend",
+      "argv": [
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-frontend.log"
+    },
+    {
+      "name": "diagnostic",
+      "argv": [
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-diagnostic.log"
+    },
+    {
+      "name": "inventory",
+      "argv": [
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-inventory.log"
+    },
+    {
+      "name": "contracts",
+      "argv": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-contracts.log"
+    },
+    {
+      "name": "diff",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "log": "/tmp/eb217-combined-diff.log"
+    }
+  ],
+  "proofs": [
+    {
+      "expected": "Exact dormant canvas/drawing JSON and recording bytes survive shutdown/reopen and rollback without browser effects",
+      "actual": "Real SQLite profiles, fragmented private peer, actual Root and staged Root, stopped-profile rehearsal and encrypted backup ownership; working HTTP canary receives zero saved-URL requests; exact JSON/hash/inode comparisons pass"
+    },
+    {
+      "expected": "Removed browser commands/routes/MCP tools are absent or rejected while retained positives work",
+      "actual": "Six removed private commands refused by actual engine; authenticated loopback JSON routes explicitly return Unknown route; official MCP client sees no advertised/executable browser tools; task list/settings positives pass"
+    },
+    {
+      "expected": "Failed native loads, reconnects and retired documents cannot overwrite canonical data",
+      "actual": "Eleven actual typed-facade old-source controls fail; repaired stores require successful current scoped read, withdraw pending saves, retry read-only on reconnect, drop held old replies and retire on pagehide; Electron fixtures retained"
+    },
+    {
+      "expected": "Optional viewer owner grants no production viewer authority",
+      "actual": "No native bridge refuses before read/allocation. Actual Root artifact backend supplies bounded immutable HTML snapshot to synthetic private receipts only. Early open refused; ACK/scope/one-shot/held FD/register/open/failed retire/callback-cycle tests pass. Production bootstrap and public operation manifest unchanged; native viewer unavailable"
+    }
+  ],
+  "failuresAndRepairs": [
+    "Initial unused import failed forced typecheck; removed until the later Root viewer fixture required it.",
+    "Two initial rollback byte-hash assertions incorrectly included intentional WAL-to-DELETE normalization of the rehearsal working copy. Moved that copy byte invariant after explicit normalization; retained separate untouched stopped-production database hash, exact JSON/resource/backup assertions and actual rollback Root reopen.",
+    "Eleven genuine old-store behavior failures reproduced lost-data writes/reconnect/pagehide effects before repair; raw reports archived.",
+    "Viewer fixture inferred optional undefined in JsonValue union and used invalid peer role engine. Corrected explicit JsonValue return and existing service role; forced typecheck passed without weakening assertions.",
+    "Provider error interrupted previous turn. Wanted WIP remained intact and lead saved backup; resumed focused stage/type/59-case gate passed before local commit/rebase.",
+    "Normal commit hooks rejected two prefer-const errors in the new SDK and fixture. Corrected declarations, reran normal hooks and full combined gate; no hooks bypassed.",
+    "Overlapping generated-file claims were noticed before mutation. B released, E2 explicitly released, B reclaimed; generated operations remained byte-identical."
+  ],
+  "criteria": {
+    "1": "remaining source/integration gap: installed retained task/terminal/layering/preview/drop matrix; owned native persistence recovery repaired and controlled renderer tests pass",
+    "2": "remaining source gap: production native viewer counterpart, sealed bootstrap and UI consumption. Optional Source SDK is implemented and tested but deliberately unregistered/unavailable",
+    "3": "blocked: current production separately excluded WebView/native hostile command/plugin/event/navigation and destruction proof requires E2 native viewer; historical diagnostics retain original scope only",
+    "4": "source-complete on Linux: actual Source/staged private commands, authenticated HTTP/MCP and actual typed native inert renderer controls; installed supported-target acceptance remains unclaimed",
+    "5": "source-complete on Linux: exact synthetic production profile and rollback/recording preservation plus native recovery fences; installed supported-target acceptance remains unclaimed"
+  },
+  "remainingDefects": [
+    "No production native artifact viewer authority or public UI binding",
+    "No privileged-main iframe isolation claim; frame-src none unchanged",
+    "Installed supported-platform UI/native viewer matrix and prerequisite issues209/215/202 remain open",
+    "No live-profile cutover, automatic recording replay/deletion, real provider account, microphone, LAN/public tunnel or release proof"
+  ],
+  "ci": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "sourceRuns": [],
+    "statusRuns": [],
+    "runLookupCommand": "gh run list -R krazyjakee/21x --commit <published-sha> --json databaseId,status,conclusion,url",
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "rawEvidence": [
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-canvas-fixed-receipt.json",
+      "sha256": "b88b6cea45581ac61bf27c4987ee8e40bb0a4b23df68a1a83fe45870705016b5",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-canvas-fixed-vitest.json",
+      "sha256": "c1e0bdeb0dab3ddb3a2f1da6ca27f3bdb5fe341128ffeebb7361e3df0a8d0b5f",
+      "summary": {
+        "numTotalTests": 78,
+        "numPassedTests": 78,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 18,
+        "success": true
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-canvas-fixed.log",
+      "sha256": "926b1437e14f0b688f066c0f81071634d0ccc127d478880230c0ed26f1f03f88",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-canvas-old-receipt.json",
+      "sha256": "c3ff197881df00860eb8d339fd9c13be7c031d6ae220a532b915c2474558ee00",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-canvas-old-vitest.json",
+      "sha256": "6378bb995c8531abc1421f4e6d20980fd5d8cb3cacd66ee2ccc1d41b63a84047",
+      "summary": {
+        "numTotalTests": 11,
+        "numPassedTests": 0,
+        "numFailedTests": 11,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 0,
+        "success": false
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-canvas-old.log",
+      "sha256": "fb13db3a4849ba272424b26a2046b8dc9ca2dcf05b29b66178e006d0b7c197e9",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-audit.log",
+      "sha256": "498947131ef31612ed2f2f36008ba5d224fd74efc28d138ac357c81789f72650",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-contracts.log",
+      "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-database.log",
+      "sha256": "7102523e1dfe275aba0ab3e61af1178086eb0791f57001aab49e170cc84204a7",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-diagnostic.log",
+      "sha256": "1231c3fbe4f04807c1a6ba606aaf92d6428b205b6a0810ea920d745055faed05",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-diff.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-frontend.log",
+      "sha256": "a018049fe8b03ef180b513b4bab0fd3e31570552b65e1ebe9b1314d1d8d17b77",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-gate.py",
+      "sha256": "7d05228245236dcf130fb4dc05a6177231c2736d6afb9e6b1109ba9c3f080197",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-inventory.log",
+      "sha256": "75066ea7702d50a5cb50d1c553f0ee20a814fd50dfcceb1e7d856e149c632848",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-lint.log",
+      "sha256": "8de91aeefe772e105d8381c8946a550a9bb4e7d08aea276e7437da0a7ee036c5",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-receipt.json",
+      "sha256": "787c1dc7b6f47cb0698d3f6fb2d01611f10c46367d3c574cbabf73316b100a98",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-renderer-receipt.json",
+      "sha256": "6f64bb89b1a5f4eb3caa8100abd822a929dfdd9aaf731a1ea917bcdfb69e2860",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-renderer-vitest.json",
+      "sha256": "244eb333ef76ddf9ea65c301200c469dd648a98d372817a6d70dd4b258fca870",
+      "summary": {
+        "numTotalTests": 2075,
+        "numPassedTests": 2075,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 462,
+        "success": true
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-renderer.log",
+      "sha256": "05f319e4210aa3135e254aef3e90cf13cde440008b025ed0d9138882fde61d52",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-results.json",
+      "sha256": "ea8e0f02a34dc4f53965c81e9bc9e25021fc6571481b7a86315914782bad6533",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-stage.log",
+      "sha256": "784546d4a3ccd22f1952a807b46b3970b8e4252fa1c777928d2f8f3269afd59f",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-tests.log",
+      "sha256": "54ed4b07fe589efb28814c3137b2856f4e1604477d1f612d54c3ee194b76c28e",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-combined-vitest.json",
+      "sha256": "e538738bb29124da4dd4f17d300e0301f8a8ecab70c17df371f31696d5ef3368",
+      "summary": {
+        "numTotalTests": 329,
+        "numPassedTests": 329,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 53,
+        "success": true
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-evidence.py",
+      "sha256": "6cdfe1651df55d159e95b4cfee81173c0e9f1025af48378dc68fcf59ea691404",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-audit.log",
+      "sha256": "6d2cf0d84422903f84c25bf3045de11625cb55c9905d3a2506f8de7b542b1545",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-contracts.log",
+      "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-database.log",
+      "sha256": "1c314041c74640a75481dc11649da43d036172fbb768fc4ab4ecaffa57b265f7",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-diagnostic.log",
+      "sha256": "5f69296ca88cdcb14bb74933008d29505fa504b40f39c74ba1ec7cb041308d5e",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-diff.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-frontend.log",
+      "sha256": "c8aa93c36a9e90d6433fa0163323294b4abd3677307163017c157144b7a10a1d",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-gate.py",
+      "sha256": "3f91f18c2c1d94b64911af925b2e7181f822a091b8c8a4ed9cc3f174639100da",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-inventory.log",
+      "sha256": "e61e97884062b0ca04c86f95ede4af4f9f9cd822b94dc1e3d64091d4472e9c64",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-lint.log",
+      "sha256": "8de91aeefe772e105d8381c8946a550a9bb4e7d08aea276e7437da0a7ee036c5",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-receipt.json",
+      "sha256": "88911343ce355ad4deaf2a6657c18d84c2510d968183e90df5fbfc0ddde643bc",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-results.json",
+      "sha256": "f1d9436cae292e31fe2b913a2769caf93a79fbe318b1bcdb7d4e973b9ec31138",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-stage.log",
+      "sha256": "99ea6561a13094aca46f27e102fd98542d3976f4cfdba6f58f83cc4e706151f2",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-tests.log",
+      "sha256": "301b5ecf39cd7734cc2e4d436880cb6d068613a45b7933825bf4d613e66ffa1c",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-final-vitest.json",
+      "sha256": "e536eeb46a071ff9efa8d1b0c473298b1375f91c4ca59e0b313ea1bd2cead5ee",
+      "summary": {
+        "numTotalTests": 195,
+        "numPassedTests": 195,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 40,
+        "success": true
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-initial-gate.py",
+      "sha256": "6d34c99ead35bbcb960ee000f74be181bf2660e2e249e84cb10bc9d26f8f9be3",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-initial-prepare.log",
+      "sha256": "fe67e9cd369d1c5fb4d697008fa1cc420356e58359d3bbed66bed84ee71d9e74",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-initial-results.json",
+      "sha256": "5ac901e976a7b8fd57667593b00e57345359d597971c98403f792c15c7a2bcf3",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-initial-type.log",
+      "sha256": "7f72db74ac68c149fe8da68cac8ee48b50b53ae1da7457d86a99fd484491bb42",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-install.log",
+      "sha256": "8173544ab9347bf3aa4b56f35152db980df29471efc634c35fe0b4ab1a95e83a",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-issue.json",
+      "sha256": "6545625f159fdf037a30d9a4d4c583013698a54d8850e6e61bb389cd6c4985a6",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-audit.log",
+      "sha256": "89f96f78b354920e40c80794c4307de91e487c16119898d02406ae1cd88192f3",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-contracts.log",
+      "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-database.log",
+      "sha256": "9f140447366daa1009352195194593e865539216503511f69f277ddb4af69c40",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-diagnostic.log",
+      "sha256": "34127bd2b336264af2c3ea0f6c11502884b9c86932fa6ff6e256c8675c83520f",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-diff.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-frontend.log",
+      "sha256": "f02a63e4b627a84d535a0e4b6662142ad9744899426671a5ea9a3a2e58f19429",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-gate.py",
+      "sha256": "adb877d61cf4082a4ecb8b9b873517eb1f774a1311dd618a6fdfa9cbe9e3489f",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-inventory.log",
+      "sha256": "d2f3d0b21cb77c8fd81226acb00793d3a744c427ee7b5e80c3fd1542028649dc",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-lint.log",
+      "sha256": "8de91aeefe772e105d8381c8946a550a9bb4e7d08aea276e7437da0a7ee036c5",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-receipt.json",
+      "sha256": "10d09adaa77d5048d080994c4947c7244d4fbce36bd5d5c4d1b9b9fd3c3cb001",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-results.json",
+      "sha256": "7562aa74cb76837d3686630a58ffcfeb4c8fc226ccaac839d82118e0904ec3ac",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-stage.log",
+      "sha256": "1ff3abbbd679e247346b510fe2f00c851cb25558c21bd235bfb88c094d2eb843",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-tests.log",
+      "sha256": "f1ebe79466e528dfd4e36af67850b96cf96e0f4018f8535cd581e6eeab1272e4",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-rebase-vitest.json",
+      "sha256": "2ec222fe7dba8d345d84d769b7b01002ac165b115f49f848574e67a73e0367c2",
+      "summary": {
+        "numTotalTests": 195,
+        "numPassedTests": 195,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 40,
+        "success": true
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-resume-focused-receipt.json",
+      "sha256": "6bbe49f440ce0d3d522bdb5b0045d626648a21c322ddd6b7561d95116ddf111a",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-resume-focused-results.json",
+      "sha256": "81f216fb97c6f7b5aabc050bbcbbe1c6922d11673baf42e5bcafb894bb1691b7",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-resume-focused-stage.log",
+      "sha256": "a5d19f774983da1bc1efe051144ce1e857ccf9ecb112853b4db7b01b63e87b10",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-resume-focused-tests.log",
+      "sha256": "edd242a380c68af7e6f82fc9c32beea52d437e8160987196cf3f42a21cc799d2",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-resume-focused-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-resume-focused-vitest.json",
+      "sha256": "994ab013dd08a751046e45fb6db19bb6798311ba109efaebd44e3ac3529a7c93",
+      "summary": {
+        "numTotalTests": 59,
+        "numPassedTests": 59,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 11,
+        "success": true
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-resume-focused.py",
+      "sha256": "f9fc18b450c4e040ead94c18041e251581ada241c8aca6f10c983d064bd571c3",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-second-gate.py",
+      "sha256": "b40869bc4bc4609e3986e42fdaaf8ba8fcd96fcdf46ebf6c1c2eb0d430dd1eca",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-second-receipt.json",
+      "sha256": "0a4f5d56d492e8ee5ad4fe5b0b111ae64bf97dbb465e9845032ad1eaf54ec3ee",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-second-results.json",
+      "sha256": "821a6184c941ec99271f904d7800ad22970bc6135960e94ff4fe74754cb584c2",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-second-stage.log",
+      "sha256": "99ea6561a13094aca46f27e102fd98542d3976f4cfdba6f58f83cc4e706151f2",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-second-test.log",
+      "sha256": "5e6d5cfa456d41139205fabcf3d5dd385fd152368a90c6a3c43b51666ae5469b",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-second-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-second-vitest.json",
+      "sha256": "f21baeef173a7de617658026abaf898ddf25da1f001ca7bd191e09aba2847c1a",
+      "summary": {
+        "numTotalTests": 10,
+        "numPassedTests": 8,
+        "numFailedTests": 2,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 0,
+        "success": false
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-third-receipt.json",
+      "sha256": "4dcf5b50dde4e2cc89b55d2680fe4d1b4a985b6ec0bfde713b0021a2ecf81b4e",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-third-test.log",
+      "sha256": "59511f036e38424933dbeca2c9d98c89a3ba1ea21da15044865d84458a65f756",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-third-vitest.json",
+      "sha256": "02f57a6c8559b371272c635628854419edd8a3190a6e6e005fa7606617a3a401",
+      "summary": {
+        "numTotalTests": 10,
+        "numPassedTests": 10,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 3,
+        "success": true
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-gate.py",
+      "sha256": "ccca4b268654998e94f0c8ef4bcb86cc7036d199a9c27cd9683b2fba4aa1bf90",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-results.json",
+      "sha256": "04ee9b1f1020fa88cc7e60fb211d0945de5e8cc842524ba77787de5fcfd64471",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-second-gate.py",
+      "sha256": "e09ec376506403250b83553ede86e97f8ad3d652ddc2aacad83f494c4097d676",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-second-receipt.json",
+      "sha256": "2f82d01f313b7265d4cbf75be4868cadd405a5a11caa5cad4e7745ebc2975ac5",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-second-results.json",
+      "sha256": "d4ae9c7eb85e25e5164e749dce4317826ab2370183ed81689e6b494a0b942a28",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-second-tests.log",
+      "sha256": "99c6cefee2c08816b38b648d0b423847d023268ff90a785c0379623e3d05d34d",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-second-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": null
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-second-vitest.json",
+      "sha256": "bd5b9513f4ca90a96e8120428d70ce9b3138a8f1626211777bc5529f6e102c3b",
+      "summary": {
+        "numTotalTests": 34,
+        "numPassedTests": 34,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 5,
+        "success": true
+      }
+    },
+    {
+      "file": "/mnt/Rusty/GitHub/21x/.git/issue-closing/batch35/217/eb217-viewer-type.log",
+      "sha256": "af7e57ca085b1d8d7b2d9339bcfbf6dd4b17a8e78eb03503cdaeb9e0ad1e0394",
+      "summary": null
+    }
+  ]
+}
