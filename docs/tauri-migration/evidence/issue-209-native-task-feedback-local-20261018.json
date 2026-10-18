@@ -1,0 +1,447 @@
+{
+  "issue": 209,
+  "title": "Native feedback original form/conversation ownership and canonical learning/send receipts",
+  "sourceRevision": "64ae6d43b340cb4f44df671a30ceef9b05529f27",
+  "verifiedBase": "ce601682f171df30e8d627983437f1d2081b2d5a",
+  "recordedAt": "2026-10-18T04:40:25.839888+00:00",
+  "scope": {
+    "renderer": "Actual typed native facade/transport, real task/agent stores and retained message owner, feedback hook/dialog with controlled canonical task/operation responses; no Electron preload.",
+    "source": "Independent actual SQLite/production owners/private peers/compiled Root tests, controlled providers and two actual staged stdio entries. No installed WebView/live provider feedback proof.",
+    "directoryAuthority": "Inherits80b7721682d1d9df4392ada37764b042df1a33bc+ce601682; restages actual Source and repeats real/compiled Root canaries plus FileOwner/profile-close/journal controls. E2 paragraph carried unchanged. No all-platform/atomicity/automatic cleanup claim."
+  },
+  "expectedActual": [
+    {
+      "expected": "Original task, Source/output choice, conversation and form callbacks own feedback.",
+      "actual": "Capture task/project/agent/group/parent/Source/external/output binding and session receipt. Duplicate admission and stale Submit/Skip/Close cannot borrow a replacement form, task, session or connection."
+    },
+    {
+      "expected": "The existing learning marker must be canonical before one retained send.",
+      "actual": "Direct task operation requires exact canonical learning/rating/comment/choice; internal learning fields never go through external content export. Existing send owner owns recovery/start and original delivery nonce; no renderer pre-resume/create."
+    },
+    {
+      "expected": "Pending/unknown work stays understandable without replay or rollback.",
+      "actual": "Rating/comment remain visible; edits and Close disabled while raw work owned. Missing/refused marker or uncertain send yields fixed review. Accepted marker is never rolled back. View retirement fences later effects but cannot undo admitted Source work."
+    },
+    {
+      "expected": "Skip and legacy behavior preserve their owners.",
+      "actual": "Captured Skip transfers exactly once to completion owner without learning write. Ordinary feedback refuses Captain/group anchors. Electron feedback behavior preserved."
+    }
+  ],
+  "negativeProof": {
+    "revision": "cc97a7aafc8235aeb640e9144c436e7c8b81d2a4",
+    "command": "pnpm test:run --project renderer src/renderer/src/hooks/native-task-feedback.test.tsx",
+    "rawExitCode": 1,
+    "failed": 13,
+    "passed": 2,
+    "scope": "Published-hook failures; controlled typed native bridge, not installed delivery or real provider.",
+    "log": {
+      "sha256": "4488774e7f0a43d922eb8f6243d5062890a229f9a46b255222b675c20776de52",
+      "bytes": 65663
+    }
+  },
+  "failureRepair": [
+    {
+      "failure": "Initial positive fixture emitted background transcript INVALID_RESULT warnings.",
+      "repair": "Supply exact bounded transcript page receipts before full negative run; not counted as behavior failure."
+    },
+    {
+      "failure": "Own first repair allowed callbacks from a cancelled form to target a newly opened form.",
+      "rawExitCode": 1,
+      "failed": 3,
+      "log": {
+        "sha256": "8127036fbaddfe3c2985061b8be2f7c1072cda802dd664e32f32cacdbee95659",
+        "bytes": 6791
+      },
+      "repair": "Each render captures its form intent; Submit/Skip/Cancel require exact current owner. All25 focused and second broad gate passed."
+    },
+    {
+      "failure": "Own marker wrapper attempted external content export of internal feedback fields; finite codec rejected it locally.",
+      "rawExitCode": 1,
+      "failed": 1,
+      "log": {
+        "sha256": "4e92d0cd70df9cbd61a016886e4abe0276cb101ce083ecad85c8f3f2bc3888ca",
+        "bytes": 5090
+      },
+      "repair": "Use original direct task operation, not TaskStore content-export wrapper. No remote external effect claimed; new actual retained-send positive checks zero export attempts.26 focused pass, then final inherited gate."
+    }
+  ],
+  "earlierPassingGates": [
+    {
+      "note": "Initial22-control repair; predates later cancelled-form and export followups.",
+      "renderer": {
+        "summary": [
+          "Test Files  160 passed (160)",
+          "Tests  2123 passed (2123)"
+        ],
+        "log": {
+          "sha256": "2a35467e561f0502bbb436cad521da91c1ebf59971e48b7ec1db32b4c7123d55",
+          "bytes": 1145673
+        }
+      },
+      "affected": {
+        "summary": [
+          "Test Files  21 passed (21)",
+          "Tests  588 passed (588)"
+        ],
+        "log": {
+          "sha256": "634f4af7c27b6ee674dcd3066a7ae7e98e18afc20a501da5cbddc885669158f0",
+          "bytes": 617313
+        }
+      }
+    },
+    {
+      "note": "25-control cancelled-form repair; predates final direct task-operation export fix.",
+      "renderer": {
+        "summary": [
+          "Test Files  160 passed (160)",
+          "Tests  2126 passed (2126)"
+        ],
+        "log": {
+          "sha256": "8c7a542bb088181ed28dd5c387cf79c4ce32e714aabaae12b30cb254137f46b4",
+          "bytes": 1145727
+        }
+      },
+      "affected": {
+        "summary": [
+          "Test Files  21 passed (21)",
+          "Tests  591 passed (591)"
+        ],
+        "log": {
+          "sha256": "09fad209402c082b31a30b9ab6aa5b705fd2bee8cceb72f340e41f89e9734501",
+          "bytes": 615649
+        }
+      }
+    }
+  ],
+  "focused": {
+    "passed": 26,
+    "skipped": 0,
+    "rawExitCode": 0,
+    "log": {
+      "sha256": "c11dec95939747258538ce78e80dc0478889377050f505892376b71d37b6d67a",
+      "bytes": 512
+    }
+  },
+  "checks": [
+    {
+      "command": "rtk proxy pnpm exec tsc --build --noEmit --force",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "command": "rtk proxy pnpm test:host-neutral:audit",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e77cb161db0ed536b3e8a0785de1911e86c3d8a0dd0dd9338762971a3368b9bf",
+        "bytes": 165
+      }
+    },
+    {
+      "command": "rtk proxy node scripts/tauri-stage-production.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b1b849f262a2ba4e0fade89907869fe052d54e31aa78c454e8273113853f255e",
+        "bytes": 267
+      }
+    },
+    {
+      "command": "rtk proxy pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --project=renderer --run-receipt=/tmp/ea209-native-feedback-release-renderer-receipt.json",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "f50134efe3a3a94c8589fec45da4c918926daeba3a0ff0c6d92846bf3b132b47",
+        "bytes": 1145674
+      }
+    },
+    {
+      "command": "rtk proxy pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-native-feedback-release-affected-receipt.json src/renderer/src/hooks/native-task-feedback.test.tsx src/renderer/src/hooks/native-task-completion.test.tsx src/renderer/src/hooks/use-task-completion.test.tsx src/renderer/src/hooks/use-agent-session.test.tsx src/renderer/src/components/tasks/FeedbackDialog.test.tsx src/renderer/src/components/tasks/native-task-crud.test.tsx src/renderer/src/components/tasks/native-task-hierarchy.test.tsx src/renderer/src/components/tasks/native-attachment-ui.test.tsx src/renderer/src/components/tasks/TaskWorkspace.test.tsx src/renderer/src/components/canvas/TaskPanelContent.test.tsx src/renderer/src/components/dashboard/task-board-transition.test.ts src/renderer/src/stores/native-agent-activity.test.ts src/renderer/src/lib/native-desktop-host.test.ts src/renderer/src/lib/tauri-desktop-transport.test.ts src/service/task-lifecycle-backend.test.ts src/service/production-desktop-bindings.test.ts src/service/production-mobile.test.ts src/service/production-task-feedback-acceptance.test.ts src/main/database-attachment-retention.test.ts src/shared/task-lifecycle-codecs.test.ts scripts/production-service-proof.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "107b636792d19e7e3c400193f0caba5653fa2da1c35d03697ef9a2091062d210",
+        "bytes": 618512
+      }
+    },
+    {
+      "command": "rtk proxy pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --maxWorkers=1 --run-receipt=/tmp/ea209-native-feedback-release-directory-receipt.json src/main/task-attachment-file-owner.test.ts src/main/task-attachment-journal.test.ts src/service/production-owner.test.ts src/service/task-attachment-backend.test.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "7b17a014c1f185b7ebf6da06937b2ab2320f08d8b62ae33d9b5ddc75e65d124d",
+        "bytes": 119190
+      }
+    },
+    {
+      "command": "rtk proxy pnpm lint",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "b07f1759c67eb76c6195da1c8e3a8d04bce7bda0780c83980e60fc54d83f8347",
+        "bytes": 16719
+      }
+    },
+    {
+      "command": "rtk proxy pnpm exec vite build --config vite.tauri-production.config.ts",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "eac383a2abbae77d96bd3ce27dada42acb572478c28a7a47e6a6e5f910d0121b",
+        "bytes": 9606
+      }
+    },
+    {
+      "command": "rtk proxy pnpm build",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "9753aaa2731dc3ac39cff9055a6bd7ee5ec44b97b0d117dbaa29f5e96980234b",
+        "bytes": 29337
+      }
+    },
+    {
+      "command": "rtk proxy node scripts/tauri-inventory.mjs",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "98a8301e15a6ceaea4de6c4c5a9a5c668cd211d73179aa3530bdae9bed374555",
+        "bytes": 88
+      }
+    },
+    {
+      "command": "rtk proxy node scripts/tauri-contracts.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+        "bytes": 43
+      }
+    },
+    {
+      "command": "rtk proxy node scripts/tauri-inventory.mjs --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "75066ea7702d50a5cb50d1c553f0ee20a814fd50dfcceb1e7d856e149c632848",
+        "bytes": 91
+      }
+    },
+    {
+      "command": "rtk proxy git diff --check",
+      "rawExitCode": 0,
+      "log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    }
+  ],
+  "runReceipts": {
+    "renderer": {
+      "artifact": {
+        "sha256": "83950da5379f8f3535cef3597caafd15932017245f37e6881876387e2fdb5e78",
+        "bytes": 94389
+      },
+      "revision": "ce601682f171df30e8d627983437f1d2081b2d5a",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 579,
+      "actualExecution": [
+        "Test Files  160 passed (160)",
+        "Tests  2127 passed (2127)"
+      ],
+      "note": "Eligible files are not claimed executed. Project/caller filters and actual framework summaries are separate."
+    },
+    "affected": {
+      "artifact": {
+        "sha256": "35283dfcda1fe16f3dfbbb251d1fff6bbe77910acb7e788b3c6b283482fc1334",
+        "bytes": 94389
+      },
+      "revision": "ce601682f171df30e8d627983437f1d2081b2d5a",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 579,
+      "actualExecution": [
+        "Test Files  21 passed (21)",
+        "Tests  593 passed (593)"
+      ],
+      "note": "Eligible files are not claimed executed. Project/caller filters and actual framework summaries are separate."
+    },
+    "directory": {
+      "artifact": {
+        "sha256": "2d32d3ff1f898e09a0756a1063390f872228202066cf79e2448dcd3c4ed7bcc9",
+        "bytes": 94389
+      },
+      "revision": "ce601682f171df30e8d627983437f1d2081b2d5a",
+      "workingTreeModified": true,
+      "runtime": {
+        "node": "v22.23.2",
+        "modules": "127",
+        "platform": "linux",
+        "arch": "x64"
+      },
+      "callerFiltered": true,
+      "proofFlags": {
+        "--service-proofs": true,
+        "--production-proofs": true,
+        "--terminal-proofs": true
+      },
+      "status": "passed",
+      "exitCode": 0,
+      "eligibleFiles": 579,
+      "actualExecution": [
+        "Test Files  4 passed (4)",
+        "Tests  153 passed (153)"
+      ],
+      "note": "Eligible files are not claimed executed. Project/caller filters and actual framework summaries are separate."
+    }
+  },
+  "heavyLock": "/mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+  "normalSourceHooks": {
+    "rawExitCode": 0,
+    "commands": [
+      "eslint --no-warn-ignored via lint-staged",
+      "pnpm typecheck (tsc --build --noEmit)"
+    ],
+    "verifiedRendererRuntimeTestInputsUnchanged": 5
+  },
+  "versions": {
+    "os": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "application": "0.0.161",
+    "pnpmActual": "9.15.9",
+    "pnpmDeclared": "9.15.2",
+    "nodePinned": "22.23.2",
+    "nodeAbi": "127",
+    "vitest": "4.0.18",
+    "sqlite": "13.0.3",
+    "pty": "1.1.0",
+    "electronLegacy": "44.0.0"
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/implementation-status.md": {
+      "sha256": "57d31a734d495e86f9d854524e410a6e7e9f1a91366c1eb2bd47890b96af7a29",
+      "bytes": 122463
+    },
+    "docs/tauri-migration/production-renderer-recovery.md": {
+      "sha256": "1f0a6b3a28434054605597608a4a2b618565b15985ecab80834e40958cc69932",
+      "bytes": 49161
+    },
+    "src/renderer/src/components/tasks/FeedbackDialog.tsx": {
+      "sha256": "f4b738212a126edd0ac38580164c729305305aa143cf019157c13e8121ccb1e6",
+      "bytes": 5394
+    },
+    "src/renderer/src/components/tasks/workspace/TaskWorkspaceDialogs.tsx": {
+      "sha256": "3ccfbb611b1f2346e2c22cc86ce02c5468356ebc7c626c0af902d0ea8ead361b",
+      "bytes": 5240
+    },
+    "src/renderer/src/components/tasks/workspace/useTaskFeedbackFlow.ts": {
+      "sha256": "15e5e662d0e7254af44868fcdd8eb7c6fdda9c9fa830fb44cbb66ec07f9544be",
+      "bytes": 11898
+    },
+    "src/renderer/src/components/ui/Dialog.tsx": {
+      "sha256": "550fd9c5806924235bb0c202d12a9ba6bd9522ccd5eee76b322c449d55934d93",
+      "bytes": 3505
+    },
+    "src/renderer/src/hooks/native-task-feedback.test.tsx": {
+      "sha256": "613ad6d7d726022c132a075e29e911f9fb57e25d1ef5550a50ab5653f281d788",
+      "bytes": 17950
+    },
+    "src/service/task-lifecycle-backend.ts": {
+      "sha256": "18b0999826d28185ddf9889692e3c9aa50ec188a3a87157e93e87eacf5e7da9c",
+      "bytes": 31005
+    },
+    "src/service/production-desktop-bindings.ts": {
+      "sha256": "e5ef6681a36e29fcfcd118e65a43a6e6c778cff2ad88ce05226d2293a62730cc",
+      "bytes": 48671
+    },
+    "src/service/production-owner.ts": {
+      "sha256": "34fc65185cfa214e7568f8425f7f40927ae42092b66f4f7e7e5c49b9e27e9a88",
+      "bytes": 99307
+    },
+    "src/service/production-task-feedback-acceptance.test.ts": {
+      "sha256": "665690d580edf00efa216928eb61190f0f60a158d2ddbb610c594661afd1eaac",
+      "bytes": 1471
+    },
+    "scripts/production-task-feedback-proof.ts": {
+      "sha256": "5093f1e79d3f9287900f7681322d904346f9d0dccdf6f9eac18041ebb13c5334",
+      "bytes": 44003
+    },
+    "src/main/task-attachment-file-owner.ts": {
+      "sha256": "28a7204ef582e2fff7352d05a42a99690b7c2dad8542ff4b1aea93b2a6689833",
+      "bytes": 40233
+    },
+    "src/main/task-attachment-file-owner.test.ts": {
+      "sha256": "1f9113a972ac73b4e135caa3506015c723865315d33c7e6329d53d3248ff3ddb",
+      "bytes": 31612
+    },
+    "src/service/production-mobile.test.ts": {
+      "sha256": "5dc817dbedccedeedc4652405079038eb3ef22873ec3221fa102063d647c347a",
+      "bytes": 58407
+    }
+  },
+  "artifactHashes": {
+    "out/tauri-production-renderer/index.html": {
+      "sha256": "2b6be19214fe20a924922d21516f564ac4561f4f2fed5b8998adfefbaad066d6",
+      "bytes": 856
+    },
+    "out/renderer/index.html": {
+      "sha256": "e7e2a67f7109dc38c192fd6dfddc68e4db64f04bf9c8cd1cf7b5bbe9c2579d77",
+      "bytes": 3101
+    },
+    "out/mobile/index.html": {
+      "sha256": "d4051aa1fbd3d457f48f6bb1974a95c40aef9ba83c819113b22d043d08695db4",
+      "bytes": 900
+    },
+    "src-tauri/resources/service/production-engine.mjs": {
+      "sha256": "9f0f7f9dbf765ce325360f58a59dc499f3a67c31514593b4259fa0525877876c",
+      "bytes": 6292310
+    },
+    "src-tauri/resources/service/production-stdio.mjs": {
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+      "bytes": 19033
+    },
+    "src-tauri/resources/service/database-stdio.mjs": {
+      "sha256": "30aba17476531dfd4cd519d65282578cfcccfde53f19427cc3057d8026cafc68",
+      "bytes": 1741
+    },
+    "src-tauri/resources/node/node": {
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+      "bytes": 124836408
+    }
+  },
+  "remaining": [
+    "Marker and prompt remain two acknowledged operations, not an atomic transaction. Unknown delivery requires manual review; no replay/rollback.",
+    "Delayed AutoRun and full board drag/view lifetime remain next Source-ready renderer slices. Exact-root Fresh remains unavailable.",
+    "Live configured-provider learning, remote Source mutation, installed native input/keyboard/window/hide/reload/crash/shutdown and supported-platform acceptance remain open.",
+    "202/208 prerequisites remain open; protected directory authority Linux-only. Optional native viewer and voice unavailable; hosted voice deferred."
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled, awaiting user decision",
+    "sourceExactRunLookup": [],
+    "settingsChanged": false,
+    "workflowDispatched": false
+  },
+  "issueClosure": {
+    "state": "OPEN",
+    "wholeCriterionNewlyTicked": false
+  },
+  "authorizationLimits": "Synthetic profiles/controlled provider processes only; no live data/provider/account/microphone/release/cutover/Electron retirement/identity decision."
+}
