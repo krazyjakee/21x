@@ -571,7 +571,7 @@ function captureMobileExecutionGuard(pathname: string, params: Record<string, un
       if (rows.size >= 128) throw Object.assign(new Error('Mobile execution scope exceeds the supported size.'), { status: 413 })
       const row = db.db.prepare('SELECT id,project_id,parent_task_id,group_id,role,attachments FROM tasks WHERE id=?').get(id) as { id: string; project_id: string; parent_task_id: string | null; group_id: string | null; role: string; attachments: string | null } | undefined
       if (!row) throw Object.assign(new Error('Mobile execution target changed.'), { status: 409 })
-      if (row.attachments !== null && row.attachments !== '[]') throw Object.assign(new Error('Saved attachments require the protected execution bridge on the desktop.'), { status: 409 })
+      if (row.attachments !== null && row.attachments !== '[]') throw Object.assign(new Error('Mobile sessions with saved attachments are currently unavailable.'), { status: 409 })
       const group = db.getTaskGroupByTask(id)
       rows.set(id, { id: row.id, project: row.project_id, parent: row.parent_task_id, group: row.group_id, role: row.role, execution: group?.execution_task_id ?? null })
       if (group) pending.push(group.execution_task_id, ...db.getTaskGroupMembers(group.id).map(member => member.id))
