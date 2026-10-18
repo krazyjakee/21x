@@ -1,3 +1,4 @@
+import { ArtifactViewerOwner, type ArtifactViewerLease } from './artifact-viewer-owner'
 import type { AttachmentSelectionOwner } from './attachment-selection-owner'
 import { UiStateBackend } from './ui-state-backend'
 import { TrayPreferenceBackend } from './tray-preference-backend'
@@ -143,6 +144,7 @@ export class ProductionDesktopBindings {
   private readonly mobile: MobileBackend | null
   private readonly agentInstaller: AgentInstallerBackend
   private readonly artifacts: ArtifactBackend
+  private readonly artifactViewers: ArtifactViewerOwner | null
   private readonly voice: VoiceManagementBackend | null
   private readonly gitProviders: GitProviderBackend
   private readonly groups: TaskGroupBackend
@@ -316,6 +318,9 @@ export class ProductionDesktopBindings {
         emitProgress: (progress, caller) => installationLease.emitProgress!(progress, caller.uiLeaseId!) } : { emitProgress: undefined }) })
     this.artifacts = new ArtifactBackend({ database: services.db, ...owner.getArtifactBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
       canAccessAgent: dynamicAuthority.canAccessAgent, isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canAccessTask: dynamicAuthority.canAccessTask, canAccessProject: dynamicAuthority.canAccessProject })
+    const viewerLease = owner.getArtifactViewerBindingLease()
+    this.artifactViewers = viewerLease ? new ArtifactViewerOwner({ engineEpoch: this.epoch, artifacts: this.artifacts, native: viewerLease.native,
+      assertAvailable: () => { available(); viewerLease.assertAvailable() } }) : null
     const voiceLease = owner.getVoiceBindingLease()
     this.voice = voiceLease ? new VoiceManagementBackend({ ...voiceLease, engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageVoice: dynamicAuthority.canManageGlobalConfiguration }) : null
@@ -335,10 +340,17 @@ export class ProductionDesktopBindings {
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canPublishUi: dynamicAuthority.isTrustedDesktop,
       canAccessProject: dynamicAuthority.canAccessProject, canAccessTask: dynamicAuthority.canAccessTask, canAccessAgent: dynamicAuthority.canAccessAgent }) : null
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.projectConfiguration.shutdown(); this.tray.shutdown(); this.ui?.shutdown(); this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
+      this.closed = true; this.projectConfiguration.shutdown(); this.tray.shutdown(); this.ui?.shutdown(); this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifactViewers?.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
       void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close(), this.sessionContext.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.projectConfiguration.close(), this.tray.close(), this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close(), this.ui?.close()]).then(() => undefined))
+    }, () => Promise.all([this.projectConfiguration.close(), this.tray.close(), this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifactViewers?.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close(), this.ui?.close()]).then(() => undefined))
   }
+
+  /** Source-only consumer; absent from operationSchemas and desktop dispatch. */
+  registerArtifactViewer(taskId: string, relativePath: string, caller: DesktopCallerContext, controls: { signal?: AbortSignal; onOwnedLease?(lease: ArtifactViewerLease): void } = {}): Promise<ArtifactViewerLease> {
+    if (!this.artifactViewers) return Promise.reject(new ServiceProtocolError('UNKNOWN_OPERATION'))
+    return this.artifactViewers.register(taskId, relativePath, caller, controls)
+  }
+  artifactViewerClosed(payload: unknown): { accepted: boolean } { return this.artifactViewers?.closed(payload) ?? { accepted: false } }
 
   static async attach(owner: ProductionOwner, options: ProductionDesktopBindingOptions): Promise<ProductionDesktopBindings> {
     return owner.run(services => new ProductionDesktopBindings(owner, services, options))

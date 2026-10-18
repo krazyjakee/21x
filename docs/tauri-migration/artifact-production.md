@@ -65,8 +65,10 @@ criteria. No live user profile, release or data cutover is involved.
 
 ## Optional private viewer consumer
 
-`ArtifactViewerOwner` is a Source SDK, currently unregistered and absent from
-production bootstrap. Without a captured native bridge it refuses before a file
+`ArtifactViewerOwner` is a Source SDK with optional sealed private native authority.
+The Linux production launch can capture this authority alongside its physical
+UI owner; public desktop/renderer/stdio viewer operations remain unregistered.
+Without a captured native bridge it refuses before a file
 read, lease allocation or observer callback. Its API accepts task ID, relative
 HTML path and the captured trusted caller. It never accepts renderer-provided
 HTML. The actual `ArtifactBackend.captureViewerSnapshot` obtains the immutable
@@ -101,11 +103,14 @@ continues to drain. The parent must retain the SDK and database/profile lifetime
 until close acknowledges. Successful retirement discards its HTML snapshot. The
 closed delivery never invokes-and-awaits retirement inside the delivery handler.
 
-The native counterpart has not been implemented. A production binding still
-requires the separately excluded unprivileged WebView, sealed epoch/profile and
-current physical main-document authority, exact document delivery, actual destroy
-acknowledgement, fixed reviewed CSP/script policy, no desktop/plugin/event grants,
-no child-to-app messages, no network/file/resource grants, and native navigation,
-popup, download, permission and wrong-label/origin denial proofs. The main
-`frame-src 'none'` policy remains. This SDK adds no public operation, bootstrap
-callback, capability, native viewer availability or privileged-main iframe claim.
+The private native counterpart and sealed Source binding are described in
+[native-artifact-viewer.md](native-artifact-viewer.md). Linux uses a separately
+excluded incognito WebView with JavaScript disabled, one immutable document,
+fixed CSP, exact physical-parent ownership and acknowledged destruction. The
+actual Wry component fixture covers hostile resource/IPC policy and native
+lifetime; separate real Source/profile tests use synthetic native receipts.
+Neither proves installed all-platform integration or privileged-main iframe
+isolation. macOS/Windows remain unsupported. The main `frame-src 'none'` policy
+and public viewer unavailability remain. No new retained operation/grant or
+external OS scheme is added; a public consumer requires a separate reviewed
+contract and actual end-to-end evidence.

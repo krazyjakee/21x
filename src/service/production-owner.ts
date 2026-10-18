@@ -65,6 +65,7 @@ import { YouTrackPlugin } from '../main/plugins/youtrack-plugin'
 import { ConnectorBridgeCore } from '../main/plugins/connector-bridge-core'
 import { getConnectorRuntime, disposeConnectorRuntime, closeConnectorRuntime, type ConnectorRuntimeHost, type ConnectorRuntime } from '../main/connectors/bridge/runtime-core'
 import type { ConnectorOAuthFlowAuthority } from '../main/oauth/connector-oauth-flow'
+import type { ArtifactViewerNativeBridge } from '../shared/artifact-viewer-native'
 import { ConnectorBridgeService } from '../main/connectors/bridge/service'
 import { SessionContextService } from '../main/sessions/context-service'
 import { createPackagedConnectorTransport, validateConnectorResources } from '../main/connectors/piece-host/packaged-resources'
@@ -140,6 +141,8 @@ export interface ProductionOwnerBootstrap {
     /** Trusted capability, separate from merely having an erroring callback. */
     oauthBrowser?: 'available' | 'unavailable'
     connectorOAuthFlows?: ConnectorOAuthFlowAuthority
+    /** Private static viewer authority; never a public desktop operation. */
+    artifactViewer?: ArtifactViewerNativeBridge
     notify(title: string, body: string): void
     emit(channel: string, data: unknown): void
     ui?: ProductionUiNativeHost
@@ -658,6 +661,18 @@ export class ProductionOwner {
     } }
   }
 
+  getArtifactViewerBindingLease() {
+    this.getDatabaseBindingLease()
+    const native = this.bootstrap.native, bridge = native.artifactViewer
+    if (!bridge) return null
+    if (['register', 'open', 'retire'].some(key => typeof Reflect.get(bridge, key) !== 'function')) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    const register = bridge.register, open = bridge.open, retire = bridge.retire
+    const captured = Object.freeze({ register: register.bind(bridge), open: open.bind(bridge), retire: retire.bind(bridge) })
+    return { native: captured, assertAvailable: (): void => {
+      this.getDatabaseBindingLease()
+      if (this.bootstrap.native !== native || native.artifactViewer !== bridge || bridge.register !== register || bridge.open !== open || bridge.retire !== retire) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+    } }
+  }
   getArtifactBindingLease() {
     this.getDatabaseBindingLease()
     const services = this.services!, workspaceRoot = this.bootstrap.paths.workspaceRoot, files = services.workspaceFiles

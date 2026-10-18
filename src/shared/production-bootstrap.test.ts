@@ -11,6 +11,14 @@ export function launchDescriptor(root = '/private-fixture'): ProductionLaunchDes
 }
 
 describe('sealed production launch descriptor codecs', () => {
+  it('requires exact native UI authority for the private viewer without granting a public operation', () => {
+    const value = launchDescriptor()
+    expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, artifactViewer: 'unsupported' } })).toBe(true)
+    expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, artifactViewer: 'host' } })).toBe(false)
+    expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, ui: 'host', artifactViewer: 'host' } })).toBe(true)
+    expect(isProductionLaunchDescriptor({ ...value, capabilities: { ...value.capabilities, ui: 'host', artifactViewer: true } })).toBe(false)
+    expect(isProductionInitialize({ launchId: value.launchId, protocolVersion: 1, artifactViewer: 'host' })).toBe(false)
+  })
   it('accepts only finite redacted owner metadata, including failures after initialization', () => {
     for (const code of PRODUCTION_RECOVERY_CODES) expect(isProductionOwnerState({ phase: 'failed', stage: 'database', code, owned: false })).toBe(true)
     const value = { phase: 'new', stage: 'new', code: null, owned: false }

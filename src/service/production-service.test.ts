@@ -1,3 +1,5 @@
+import { ARTIFACT_VIEWER_NATIVE_SCHEMAS, ARTIFACT_VIEWER_CLOSED_SCHEMA } from '../shared/artifact-viewer-native'
+import type { ArtifactViewerLease } from './artifact-viewer-owner'
 import { NATIVE_ATTACHMENT_IMAGE_CODECS } from '../shared/attachment-image-codecs'
 import { NATIVE_WINDOW_STATE_SCHEMAS } from '../shared/native-window-state'
 import { ATTACHMENT_SELECTION_SCHEMAS, isSelectionOffer, isSelectionRevocation } from '../shared/attachment-selection-callbacks'
@@ -54,12 +56,16 @@ function descriptor(root: string): ProductionLaunchDescriptor {
     capabilities: { externalUrls: 'unsupported', notifications: 'unsupported', energy: 'unsupported', ui: 'unsupported', voice: 'unsupported',
       configuredMcp: 'disabled', managedTaskMcp: 'disabled', connectors: 'disabled' } }
 }
-function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false, oauth = false, selections = false, windowState = false) {
+function fixture(workspaceFiles = false, ui = false, installation = false, attachmentOpening = false, attachmentDownloading = false, artifactClipboard = false, notifications = false, tray = false, energy = false, oauth = false, selections = false, windowState = false, artifactViewer = false) {
   let selectedAdapter: CodingAgentAdapter | null = null
   let privateCallbacks: ProductionPrivateCallbacks | null = null
   let notificationAcknowledgement: Promise<void> | null = null
   let notificationResult: 'shown' | 'denied' | 'error' | 'malformed' | 'timeout' = 'shown'
   const notificationCalls: Array<{ operation: string; payload: JsonValue }> = []
+  const viewerCalls: Array<{ operation: string; payload: JsonValue }> = []
+  let refuseViewerRetirement = false
+  let viewerRegisterAck: Promise<void> | null = null, viewerRetireAck: Promise<void> | null = null
+  const viewerRegisterWork = new Map<string, Promise<JsonValue>>(), viewerRetired = new Set<string>(), viewerOpened = new Set<string>()
   const energyCalls: boolean[] = []
   let energyAcknowledgement: Promise<void> | null = null
   let energyResult: 'applied' | 'refused' | 'error' | 'malformed' = 'applied'
@@ -84,6 +90,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   if (attachmentOpening) launch.capabilities.attachmentFiles = 'host'
   if (attachmentDownloading) launch.capabilities.attachmentDownloads = 'host'
   if (artifactClipboard) launch.capabilities.artifactClipboard = 'host'
+  if (artifactViewer) launch.capabilities.artifactViewer = 'host'
   if (oauth) { launch.capabilities.oauthFlows = 'host'; launch.capabilities.externalUrls = 'host' }
   const selectedNode = process.env.TAURI_NODE_RUNTIME ?? join(process.cwd(), 'src-tauri', 'resources', 'node', process.platform === 'win32' ? 'node.exe' : 'node')
   const fixtureNpm = join(root, 'npm-cli.js')
@@ -118,6 +125,28 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   schemas['engine.initialize'] = { validatePayload: value => isRecord(value), validateResult: isBootstrapResult }
   schemas['engine.ownerState'] = { validatePayload: value => isRecord(value) && hasExactKeys(value, []), validateResult: isProductionOwnerState }
   schemas['engine.shutdown'] = { validatePayload: value => isRecord(value), validateResult: value => isRecord(value) && value.stopped === true }
+  schemas['engine.artifactViewer.closed'] = ARTIFACT_VIEWER_CLOSED_SCHEMA
+  if (artifactViewer) for (const [operation, schema] of Object.entries(ARTIFACT_VIEWER_NATIVE_SCHEMAS)) schemas[operation] = { ...schema, handle: async payload => {
+    if (!isRecord(payload) || typeof payload.viewerId !== 'string') throw new Error('invalid private viewer fixture request')
+    const id = payload.viewerId
+    viewerCalls.push({ operation, payload: structuredClone(payload) as JsonValue })
+    if (operation === 'host.artifactViewer.retire') {
+      viewerRetired.add(id); await Promise.allSettled([...(viewerRegisterWork.has(id) ? [viewerRegisterWork.get(id)!] : [])]); await viewerRetireAck
+      if (refuseViewerRetirement) throw new ServiceProtocolError('DISCONNECTED')
+      return { viewerId: id, retired: true }
+    }
+    if (operation === 'host.artifactViewer.open') {
+      if (viewerRetired.has(id) || viewerOpened.has(id) || !uiLease) throw new ServiceProtocolError('CANCELLED')
+      viewerOpened.add(id); return { viewerId: id, opened: true }
+    }
+    const raw = (async (): Promise<JsonValue> => {
+      await viewerRegisterAck
+      if (viewerRetired.has(id) || !uiLease || payload.uiLeaseId !== uiLease) throw new ServiceProtocolError('CANCELLED')
+      return { viewerId: id, registered: true }
+    })()
+    viewerRegisterWork.set(id, raw)
+    try { return await raw } finally { viewerRegisterWork.delete(id) }
+  } }
   schemas['engine.oauth.callback'] = OAUTH_DELIVERY_SCHEMA
   if (oauth) for (const [operation, schema] of Object.entries(OAUTH_NATIVE_CALLBACK_SCHEMAS)) schemas[operation] = { ...schema, handle: payload => {
     nativeCalls.push(operation)
@@ -239,6 +268,7 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
         ...(attachmentOpening ? { openAttachment: callbacks.openAttachment } : {}),
         ...(attachmentDownloading ? { downloadAttachment: callbacks.downloadAttachment } : {}),
         ...(artifactClipboard ? { copyArtifact: callbacks.copyArtifact } : {}),
+        ...(artifactViewer ? { artifactViewer: callbacks.artifactViewer } : {}),
         openExternal: callbacks.openExternal, ...(workspaceFiles ? { openPath: callbacks.openPath, showItemInFolder: callbacks.showItemInFolder } : {}), notify: callbacks.notify, sendUiCommand: () => ({ ok: false, detail: 'Explicit fixture capability' }) } }) }
   }), { write: async bytes => { deliver(host, bytes) } }); services.push(service)
   const initialize = async (): Promise<void> => {
@@ -249,6 +279,8 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
   return { root, launch, service, host, adapter, wireEvents, nativeCalls, initialize, deny: () => { permitted = false }, rejectDrain: () => { badDrain = true },
     useAdapter: (value: CodingAgentAdapter) => { selectedAdapter = value }, allow: () => { permitted = true },
     notificationCalls, privateCallbacks: () => privateCallbacks!, holdNotificationAcknowledgement: (raw: Promise<void> | null) => { notificationAcknowledgement = raw }, setNotificationResult: (value: typeof notificationResult) => { notificationResult = value },
+    refuseViewerRetire: (value: boolean) => { refuseViewerRetirement = value },
+    viewerCalls, holdViewerRegister: (raw: Promise<void> | null) => { viewerRegisterAck = raw }, holdViewerRetire: (raw: Promise<void> | null) => { viewerRetireAck = raw },
     energyCalls, holdEnergyAcknowledgement: (raw: Promise<void> | null) => { energyAcknowledgement = raw }, setEnergyResult: (value: typeof energyResult) => { energyResult = value },
     attachmentReceipts, attachmentAuthorizations, denyWrites: () => { grantWrites = false }, holdAttachmentAcknowledgement: (raw: Promise<void>) => { attachmentAcknowledgement = raw },
     installationProgress, acceptedUi, changeUiLease: (lease: string | null) => { uiLease = lease }, holdUiAcknowledgement: (raw: Promise<void>) => { uiAcknowledgement = raw },
@@ -1064,4 +1096,83 @@ if (process.env.TAURI_PRODUCTION_SERVICE_ENTRY) it('uses the actual staged produ
  f.changeUiLease('new_staged_document');await expect(f.host.request('engine.attachment.image',input)).rejects.toMatchObject({code:'STALE_EPOCH'})
  expect(f.attachmentReceipts).toEqual([]);expect(f.uiSnapshots()).toBeGreaterThanOrEqual(5)
  await f.service.close();expect(services.db.db.open).toBe(false)
+})
+
+
+describe('private viewer consumer around the actual production owner', () => {
+  async function ready(enabled = true) {
+    const f = fixture(false, true, false, false, false, false, false, false, false, false, false, false, enabled)
+    await f.initialize()
+    const actual = f.service.getReadyServices()!, task = actual.db.createTask(makeTask())!
+    const directory = join(f.launch.paths.workspaceRoot, task.id); mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, 'preview.html'), '<!doctype html><b>immutable Source snapshot</b>')
+    const caller = { principal: 'trusted-desktop-main' as const, engineEpoch: f.service.owner.snapshot().epoch!, webviewId: 'main', origin: 'tauri://localhost', uiLeaseId: 'document_fixture_1' }
+    return { ...f, actual, task, directory, caller }
+  }
+  it('binds actual authorized immutable snapshots privately without registering any public viewer operation', async () => {
+    const f = await ready()
+    const lease = await f.service.registerArtifactViewer(f.task.id, 'preview.html', f.caller)
+    expect(f.viewerCalls).toEqual([{ operation: 'host.artifactViewer.register', payload: { viewerId: lease.viewerId, uiLeaseId: 'document_fixture_1', html: '<!doctype html><b>immutable Source snapshot</b>' } }])
+    writeFileSync(join(f.directory, 'preview.html'), '<p>replacement must not retarget</p>')
+    await lease.open()
+    expect(f.viewerCalls.filter(call => call.operation === 'host.artifactViewer.open')).toHaveLength(1)
+    await expect(lease.open()).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(f.host.request('engine.artifactViewer.open', { viewerId: lease.viewerId })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    await expect(f.host.request('artifacts:openViewer', { taskId: f.task.id, relativePath: 'preview.html' })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    await lease.close()
+    expect(f.viewerCalls.filter(call => call.operation === 'host.artifactViewer.retire')).toHaveLength(1)
+  })
+  it('refuses absent authority before native registration', async () => {
+    const unavailable = await ready(false)
+    await expect(unavailable.service.registerArtifactViewer(unavailable.task.id, 'preview.html', unavailable.caller)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+    expect(unavailable.viewerCalls).toEqual([])
+  })
+  it('refuses foreign grants, traversal and symlink snapshots before native registration', async () => {
+    const f = await ready()
+    for (const path of ['../preview.html', '/tmp/outside.html']) await expect(f.service.registerArtifactViewer(f.task.id, path, f.caller)).rejects.toBeDefined()
+    symlinkSync(join(f.directory, 'preview.html'), join(f.directory, 'alias.html'))
+    await expect(f.service.registerArtifactViewer(f.task.id, 'alias.html', f.caller)).rejects.toBeDefined()
+    f.deny()
+    await expect(f.service.registerArtifactViewer(f.task.id, 'preview.html', f.caller)).rejects.toBeDefined()
+    expect(f.viewerCalls.filter(call => call.operation !== 'host.artifactViewer.retire')).toEqual([])
+  })
+  it('joins a held raw register and its owned retirement after original read authority is withdrawn', async () => {
+    const f = await ready(), raw = deferred()
+    f.holdViewerRegister(raw.promise)
+    let owned: ArtifactViewerLease | undefined
+    const registration = f.service.registerArtifactViewer(f.task.id, 'preview.html', f.caller, { onOwnedLease: lease => { owned = lease } })
+    const settled = registration.catch(error => error)
+    await vi.waitFor(() => expect(f.viewerCalls.some(call => call.operation === 'host.artifactViewer.register')).toBe(true))
+    f.deny(); raw.finish()
+    expect(await settled).toBeInstanceOf(Error)
+    await owned!.close()
+    expect(f.viewerCalls.filter(call => call.operation === 'host.artifactViewer.open')).toHaveLength(0)
+    expect(f.viewerCalls.filter(call => call.operation === 'host.artifactViewer.retire')).toHaveLength(1)
+  })
+  it('retains the actual profile lock when native viewer retirement refuses and releases only after acknowledged retry', async () => {
+    const f = await ready()
+    const lease = await f.service.registerArtifactViewer(f.task.id, 'preview.html', f.caller)
+    await lease.open(); f.refuseViewerRetire(true)
+    try {
+      await expect(f.service.owner.close()).rejects.toMatchObject({ code: 'OWNER_DRAIN_BLOCKED' })
+      expect(f.service.owner.snapshot()).toMatchObject({ phase: 'blocked', owned: true })
+      expect(() => acquireProfileLock(f.launch.paths.profileRoot)).toThrow('PROFILE_DUPLICATE_OWNER')
+      f.refuseViewerRetire(false); await f.service.owner.close()
+      const lock = acquireProfileLock(f.launch.paths.profileRoot); lock.release()
+      expect(f.service.owner.snapshot()).toMatchObject({ phase: 'stopped', owned: false })
+    } finally { f.refuseViewerRetire(false); await lease.close(); await f.service.owner.close() }
+  })
+  it('acknowledges native closed delivery before asynchronous retirement rather than making a delivery cycle', async () => {
+    const f = await ready(), retirement = deferred()
+    const lease = await f.service.registerArtifactViewer(f.task.id, 'preview.html', f.caller)
+    await lease.open(); f.holdViewerRetire(retirement.promise)
+    try {
+      expect(await f.host.request('engine.artifactViewer.closed', { viewerId: lease.viewerId, reason: 'closed' })).toEqual({ accepted: true })
+      await vi.waitFor(() => expect(f.viewerCalls.some(call => call.operation === 'host.artifactViewer.retire')).toBe(true))
+      let closed = false; const closing = lease.close().then(() => { closed = true })
+      await new Promise(resolve => setImmediate(resolve)); expect(closed).toBe(false)
+      expect(await f.host.request('engine.artifactViewer.closed', { viewerId: lease.viewerId, reason: 'closed' })).toEqual({ accepted: false })
+      retirement.finish(); await closing; expect(closed).toBe(true)
+    } finally { retirement.finish(); await lease.close() }
+  })
 })

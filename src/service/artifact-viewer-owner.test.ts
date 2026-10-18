@@ -93,6 +93,20 @@ async function fixture() {
 }
 const count = (calls: Array<{ operation: string }>, suffix: string) => calls.filter(row => row.operation.endsWith('.' + suffix)).length
 describe('optional private artifact viewer actual SQLite/filesystem consumer', () => {
+  it('stops admission synchronously while raw native retirement remains owned by close', async () => {
+    const f = await fixture(), lease = await f.owner.register(task.id, 'preview.html', caller)
+    f.owner.stop()
+    await expect(lease.open()).rejects.toMatchObject({ code: 'CANCELLED' })
+    await expect(f.owner.register(task.id, 'preview.html', caller)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+    const retirement = f.heldRetire()
+    let closed = false
+    const closing = f.owner.close().then(() => { closed = true })
+    await vi.waitFor(() => expect(count(f.calls, 'retire')).toBe(1))
+    expect(closed).toBe(false); expect(f.owner.inflightCount).toBe(1)
+    retirement.resolve(); await closing
+    expect(f.owner.inflightCount).toBe(0)
+    expect(count(f.calls, 'open')).toBe(0)
+  })
   it('stays unavailable without native authority and performs no read, allocation or observer callback', async () => {
     const read = vi.spyOn(artifacts, 'captureViewerSnapshot'), observer = vi.fn()
     const owner = new ArtifactViewerOwner({ engineEpoch: epoch, artifacts, assertAvailable() {} })

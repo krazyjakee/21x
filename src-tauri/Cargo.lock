@@ -4325,6 +4325,7 @@ dependencies = [
  "raw-window-handle",
  "serde_json",
  "sha2",
+ "soup3",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

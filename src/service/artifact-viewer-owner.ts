@@ -15,7 +15,7 @@ export interface ArtifactViewerLease {
 export interface ArtifactViewerOwnerOptions {
   engineEpoch: string
   artifacts: ArtifactBackend
-  /** Captured private authority only; absent in current production bootstrap. */
+  /** Captured private authority only; never a public desktop operation. */
   native?: ArtifactViewerNativeBridge
   assertAvailable(): void
 }
@@ -37,9 +37,9 @@ interface Entry {
 }
 const safeError = (error: unknown): ServiceProtocolError => error instanceof ServiceProtocolError ? error : new ServiceProtocolError('INTERNAL_ERROR')
 
-/** Optional private Source consumer, deliberately unregistered. No renderer can
- * submit HTML or obtain a viewer by constructing this SDK/schema. Native child
- * authority and the production UI binding remain separately unavailable. */
+/** Optional private Source consumer. The sealed Linux host can supply the
+ * excluded native authority; no renderer/stdio operation exposes this SDK.
+ * Public UI binding remains separately unavailable. */
 export class ArtifactViewerOwner {
   private readonly entries = new Map<string, Entry>()
   private readonly native: ArtifactViewerNativeBridge | undefined
@@ -112,13 +112,19 @@ export class ArtifactViewerOwner {
   }
   async close(timeoutMs = 2000): Promise<void> {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) throw new RangeError('Invalid artifact viewer shutdown deadline')
-    this.closing = true
+    this.stop()
     const work = Promise.allSettled([...this.entries.values()].map(entry => this.retire(entry))).then(results => {
       if (results.some(result => result.status === 'rejected')) throw new ServiceProtocolError('DISCONNECTED')
     })
     let timer: ReturnType<typeof setTimeout> | undefined
     try { await Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ServiceProtocolError('TIMEOUT')), timeoutMs) })]) }
     finally { if (timer) clearTimeout(timer) }
+  }
+  /** Fence synchronously before other owner cleanup starts. Raw retirement is
+   * still joined by close(), including a refused/late native destruction ACK. */
+  stop(): void {
+    this.closing = true
+    for (const entry of this.entries.values()) this.fence(entry)
   }
   private current(entry: Entry): void {
     if (this.closing || entry.closed || entry.controller.signal.aborted || this.entries.get(entry.id) !== entry) throw new ServiceProtocolError('CANCELLED')

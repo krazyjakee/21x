@@ -200,6 +200,8 @@ pub struct ProductionCapabilities {
     pub tray: HostCapability,
     #[serde(default = "unsupported_host_capability")]
     pub oauth_flows: HostCapability,
+    #[serde(default = "unsupported_host_capability")]
+    pub artifact_viewer: HostCapability,
     pub external_urls: HostCapability,
     pub notifications: HostCapability,
     pub energy: HostCapability,
@@ -259,6 +261,22 @@ pub struct ProductionOAuthHost {
     pub invoke: Arc<dyn Fn(String, Value, String) -> HostFuture<Value> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
 }
+pub struct ProductionArtifactViewerHost {
+    pub invoke: Arc<dyn Fn(String, Value, String) -> HostFuture<Value> + Send + Sync>,
+    pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
+}
+/// Fence synchronously and start GUI retirement independently of containment.
+/// The supervisor retains the returned receipt and joins it after killing the
+/// Source tree, so either slow authority cannot abandon or postpone the other.
+fn start_viewer_retirement(viewer: &ProductionArtifactViewerHost) -> HostFuture<()> {
+    let raw = (viewer.close)();
+    let pending = tokio::spawn(raw);
+    Box::pin(async move {
+        pending
+            .await
+            .map_err(|_| EngineError::new("DISCONNECTED"))?
+    })
+}
 pub struct ProductionAttachmentSelectionHost {
     pub invoke: Arc<dyn Fn(String, Value, String) -> HostFuture<Value> + Send + Sync>,
     pub close: Arc<dyn Fn() -> HostFuture<()> + Send + Sync>,
@@ -266,6 +284,7 @@ pub struct ProductionAttachmentSelectionHost {
 pub struct ProductionNativeHost {
     pub attachment_selection: Option<ProductionAttachmentSelectionHost>,
     pub oauth: Option<ProductionOAuthHost>,
+    pub artifact_viewer: Option<ProductionArtifactViewerHost>,
     pub workspace_cleanup: Option<ProductionCleanupHost>,
     pub workspace_file: Option<ProductionWorkspaceHost>,
     pub attachment_file: Option<ProductionAttachmentHost>,
@@ -586,6 +605,8 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
         || capabilities.voice != HostCapability::Unsupported
         || capabilities.oauth_flows == HostCapability::Host
             && capabilities.external_urls != HostCapability::Host
+        || capabilities.artifact_viewer == HostCapability::Host
+            && capabilities.ui != HostCapability::Host
         || capabilities.attachment_selections == HostCapability::Host
             && capabilities.ui != HostCapability::Host
         || capabilities.window_state == HostCapability::Host
@@ -930,6 +951,8 @@ impl ProductionEngine {
             != host.workspace_cleanup.is_some()
             || (launch.descriptor.capabilities.oauth_flows == HostCapability::Host)
                 != host.oauth.is_some()
+            || (launch.descriptor.capabilities.artifact_viewer == HostCapability::Host)
+                != host.artifact_viewer.is_some()
             || (launch.descriptor.capabilities.external_urls == HostCapability::Host
                 && host.open_external.is_none())
             || (launch.descriptor.capabilities.notifications == HostCapability::Host
@@ -1042,6 +1065,14 @@ impl ProductionEngine {
             }
             supervise.0.ready.store(false, Ordering::SeqCst);
             supervise.0.stopping.store(true, Ordering::SeqCst);
+            // Fence child admission synchronously, but do not delay Source
+            // containment while waiting for GUI destruction acknowledgements.
+            let viewer_retirement = supervise
+                .0
+                .host
+                .artifact_viewer
+                .as_ref()
+                .map(start_viewer_retirement);
             if let Some(cleanup) = &supervise.0.host.workspace_cleanup {
                 let _ = (cleanup.close)().await;
             }
@@ -1053,6 +1084,7 @@ impl ProductionEngine {
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
+            supervise.join_viewer_retirement(viewer_retirement).await;
             let _ = exited_tx.send(true);
         });
         let reader = engine.clone();
@@ -1111,6 +1143,43 @@ impl ProductionEngine {
         self.0.epoch.lock().unwrap().clone()
     }
     /// Native-only ingress; never part of the retained renderer command surface.
+    async fn join_viewer_retirement(&self, initial: Option<HostFuture<()>>) {
+        let Some(mut retirement) = initial else {
+            return;
+        };
+        loop {
+            if retirement.await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let Some(viewer) = &self.0.host.artifact_viewer else {
+                return;
+            };
+            retirement = (viewer.close)();
+        }
+    }
+    pub async fn deliver_artifact_viewer_closed(
+        &self,
+        epoch: &str,
+        payload: Value,
+    ) -> Result<Value, EngineError> {
+        if self.epoch() != epoch {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        if self.0.descriptor.capabilities.artifact_viewer != HostCapability::Host {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !crate::production_artifact_viewer::closed(&payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        if !self.0.ready.load(Ordering::SeqCst)
+            || self.0.stopping.load(Ordering::SeqCst)
+            || self.0.closed.load(Ordering::SeqCst)
+        {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        self.request("engine.artifactViewer.closed", payload).await
+    }
     pub async fn deliver_oauth(&self, epoch: &str, payload: Value) -> Result<Value, EngineError> {
         if epoch != self.epoch() {
             return Err(EngineError::new("STALE_EPOCH"));
@@ -1835,6 +1904,9 @@ impl ProductionEngine {
                         "engine.attachment.save" => {
                             crate::production_attachment_selection::save_result(result)
                         }
+                        "engine.artifactViewer.closed" => {
+                            crate::production_artifact_viewer::delivery_receipt(result)
+                        }
                         "engine.oauth.callback" => {
                             crate::production_oauth::delivery_receipt(result)
                         }
@@ -2004,6 +2076,46 @@ impl ProductionEngine {
                     .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?;
                 let result = (host.invoke)(operation.into(), payload.clone(), self.epoch()).await?;
                 if !crate::production_attachment_selection::result(operation, &result) {
+                    return Err(EngineError::new("INVALID_RESULT"));
+                }
+                Ok(result)
+            }
+            "host.artifactViewer.register"
+            | "host.artifactViewer.open"
+            | "host.artifactViewer.retire" => {
+                use crate::production_artifact_viewer as viewer;
+                let retiring = operation == "host.artifactViewer.retire";
+                if !(if operation == "host.artifactViewer.register" {
+                    viewer::registration(payload)
+                } else {
+                    viewer::identity(payload)
+                }) {
+                    return Err(EngineError::new("INVALID_ARGUMENTS"));
+                }
+                if self.0.descriptor.capabilities.artifact_viewer != HostCapability::Host {
+                    return Err(EngineError::new("UNKNOWN_OPERATION"));
+                }
+                if !self.0.prepared.load(Ordering::SeqCst)
+                    || self.0.closed.load(Ordering::SeqCst)
+                    || !retiring
+                        && (!self.0.ready.load(Ordering::SeqCst)
+                            || self.0.stopping.load(Ordering::SeqCst))
+                {
+                    return Err(EngineError::new("DISCONNECTED"));
+                }
+                let host = self
+                    .0
+                    .host
+                    .artifact_viewer
+                    .as_ref()
+                    .ok_or_else(|| EngineError::new("UNKNOWN_OPERATION"))?;
+                let result = (host.invoke)(operation.into(), payload.clone(), self.epoch()).await?;
+                let field = match operation {
+                    "host.artifactViewer.register" => "registered",
+                    "host.artifactViewer.open" => "opened",
+                    _ => "retired",
+                };
+                if !viewer::receipt(&result, field, payload["viewerId"].as_str().unwrap()) {
                     return Err(EngineError::new("INVALID_RESULT"));
                 }
                 Ok(result)
@@ -2229,6 +2341,9 @@ impl ProductionEngine {
                 }
                 if let Some(oauth) = &self.0.host.oauth {
                     (oauth.close)().await?;
+                }
+                if let Some(viewer) = &self.0.host.artifact_viewer {
+                    (viewer.close)().await?;
                 }
                 if let Some(files) = &self.0.host.workspace_file {
                     (files.close)().await?;
@@ -3041,6 +3156,12 @@ mod linux {
                 }
                 supervise.0.ready.store(false, Ordering::SeqCst);
                 supervise.0.stopping.store(true, Ordering::SeqCst);
+                let viewer_retirement = supervise
+                    .0
+                    .host
+                    .artifact_viewer
+                    .as_ref()
+                    .map(start_viewer_retirement);
                 // Pipe loss retires tickets too. Accepted raw observation work
                 // retains its own owner/FD leases until NativeWorkOwner joins it.
                 if let Some(cleanup) = &supervise.0.host.workspace_cleanup {
@@ -3055,6 +3176,7 @@ mod linux {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 let reaped = child.wait().await.is_ok();
+                supervise.join_viewer_retirement(viewer_retirement).await;
                 if reaped {
                     let _ = exited_tx.send(true);
                 }
@@ -3261,6 +3383,7 @@ mod tests {
                 artifact_clipboard: HostCapability::Unsupported,
                 tray: HostCapability::Unsupported,
                 oauth_flows: HostCapability::Unsupported,
+                artifact_viewer: HostCapability::Unsupported,
                 external_urls: HostCapability::Unsupported,
                 notifications: HostCapability::Unsupported,
                 energy: HostCapability::Unsupported,
@@ -4120,6 +4243,41 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn viewer_crash_retirement_starts_without_waiting_for_source_containment_and_retains_raw_ack(
+    ) {
+        let fenced = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let raw_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (release, wait) = oneshot::channel();
+        let gate = Arc::new(std::sync::Mutex::new(Some(wait)));
+        let (fence, started) = (fenced.clone(), raw_started.clone());
+        let viewer = ProductionArtifactViewerHost {
+            invoke: Arc::new(|_, _, _| {
+                Box::pin(async { Err(EngineError::new("UNKNOWN_OPERATION")) })
+            }),
+            close: Arc::new(move || {
+                fence.store(true, Ordering::SeqCst);
+                let (started, wait) = (started.clone(), gate.lock().unwrap().take().unwrap());
+                Box::pin(async move {
+                    started.store(true, Ordering::SeqCst);
+                    wait.await.map_err(|_| EngineError::new("DISCONNECTED"))
+                })
+            }),
+        };
+        let receipt = start_viewer_retirement(&viewer);
+        assert!(fenced.load(Ordering::SeqCst));
+        tokio::task::yield_now().await;
+        assert!(
+            raw_started.load(Ordering::SeqCst),
+            "GUI destruction must start even while containment cleanup has not joined its receipt"
+        );
+        let joined = tokio::spawn(receipt);
+        tokio::task::yield_now().await;
+        assert!(!joined.is_finished(), "raw native receipt is retained");
+        release.send(()).unwrap();
+        joined.await.unwrap().unwrap();
+    }
+
     #[test]
     fn trusted_descriptor_has_exact_path_and_capability_fields_without_credentials() {
         let root = Temporary::new();
@@ -4146,6 +4304,7 @@ mod tests {
     fn ui_host() -> ProductionNativeHost {
         ProductionNativeHost {
             oauth: None,
+            artifact_viewer: None,
             workspace_cleanup: None,
             workspace_file: None,
             attachment_file: None,

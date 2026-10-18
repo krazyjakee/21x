@@ -29,11 +29,14 @@ import { FULL_ACCESS_SCOPE, listToolsForScope } from '../main/mcp-servers/task-m
 import type { DesktopCallerContext } from './transport/desktop-registry'
 import { ServicePeer, type OperationSchema } from './transport/peer'
 import { OAuthFlowOwner } from './oauth-flow-owner'
+import type { ArtifactViewerLease } from './artifact-viewer-owner'
+import { ARTIFACT_VIEWER_NATIVE_SCHEMAS, ARTIFACT_VIEWER_CLOSED_SCHEMA, type ArtifactViewerNativeBridge } from '../shared/artifact-viewer-native'
 import { OAUTH_DELIVERY_SCHEMA, OAUTH_NATIVE_CALLBACK_SCHEMAS, type NativeOAuthBridge } from '../shared/oauth-native-callbacks'
 
 export interface ProductionPrivateCallbacks {
   /** Private app-owned leases; does not enable legacy renderer OAuth routes. */
   oauthFlows?: OAuthFlowOwner
+  artifactViewer?: ArtifactViewerNativeBridge
   cleanupObservation: WorkspaceCleanupObserver
   copyArtifact(receipt: WorkspacePathReceipt, leaseId: string, beforeEffect: () => void): Promise<ArtifactCopyFileResult>
   openAttachment(receipt: AttachmentPathReceipt, leaseId: string): Promise<void>
@@ -100,6 +103,12 @@ export class ProductionService {
   }) {
     if (!sealed.has(host)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const construction = host.construction, descriptor = construction.descriptor
+    const viewerRequest = (operation: keyof typeof ARTIFACT_VIEWER_NATIVE_SCHEMAS, payload: object): Promise<unknown> => this.retain(this.peer.request(operation, payload as JsonValue))
+    const viewerBridge = Object.freeze<ArtifactViewerNativeBridge>({
+      register: async request => await viewerRequest('host.artifactViewer.register', request) as Awaited<ReturnType<ArtifactViewerNativeBridge['register']>>,
+      open: async request => await viewerRequest('host.artifactViewer.open', request) as Awaited<ReturnType<ArtifactViewerNativeBridge['open']>>,
+      retire: async request => await viewerRequest('host.artifactViewer.retire', request) as Awaited<ReturnType<ArtifactViewerNativeBridge['retire']>>
+    })
     const oauthRequest = async (operation: keyof typeof OAUTH_NATIVE_CALLBACK_SCHEMAS, payload: object): Promise<unknown> => this.retain(this.peer.request(operation, payload as JsonValue))
     const oauthBridge: NativeOAuthBridge = {
       register: async request => await oauthRequest('host.oauth.register', request) as Awaited<ReturnType<NativeOAuthBridge['register']>>,
@@ -120,6 +129,7 @@ export class ProductionService {
     }) : null
     const callbacks: ProductionPrivateCallbacks = {
       ...(this.oauthFlows ? { oauthFlows: this.oauthFlows } : {}),
+      ...(descriptor.capabilities.artifactViewer === 'host' ? { artifactViewer: viewerBridge } : {}),
       cleanupObservation: async (request, signal) => {
         if (descriptor.capabilities.workspaceCleanup !== 'host') throw new ServiceProtocolError('UNKNOWN_OPERATION')
         if (request.action !== 'release' && signal.aborted) throw new ServiceProtocolError('CANCELLED')
@@ -224,6 +234,7 @@ export class ProductionService {
       }
     }
     const bootstrap = construction.constructBootstrap(callbacks)
+    if (descriptor.capabilities.artifactViewer === 'host' ? bootstrap.native.artifactViewer !== callbacks.artifactViewer || descriptor.capabilities.ui !== 'host' : bootstrap.native.artifactViewer !== undefined) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (bootstrap.profileId !== descriptor.profileId || Object.entries(descriptor.paths).some(([key, value]) => bootstrap.paths[key as keyof typeof bootstrap.paths] !== value) ||
       bootstrap.credentials.mode !== (descriptor.profileIntent === 'create-new' ? 'create' : 'load')) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     if (descriptor.capabilities.notifications === 'host' ? bootstrap.native.agents.notifications.kind !== 'native' : bootstrap.native.agents.notifications.kind !== 'unsupported') throw new ServiceProtocolError('INVALID_ARGUMENTS')
@@ -278,6 +289,7 @@ export class ProductionService {
         if (!this.initialized || this.closing || !this.bindings || !isRecord(value)) throw new ServiceProtocolError('INVALID_REQUEST')
         return this.retain(this.bindings.invoke('attachments:save', { taskId: value.taskId, filePath: value.filePath } as JsonValue, { ...this.caller, uiLeaseId: value.leaseId as string }, signal))
       } }
+    operations['engine.artifactViewer.closed'] = { ...ARTIFACT_VIEWER_CLOSED_SCHEMA, handle: payload => this.bindings?.artifactViewerClosed(payload) ?? { accepted: false } }
     operations['engine.oauth.callback'] = { ...OAUTH_DELIVERY_SCHEMA, handle: payload => {
       if (!this.initialized || this.closing || !this.oauthFlows) return { accepted: false }
       // Synchronous claim only. The caller's owned waiter performs token work.
@@ -414,6 +426,7 @@ export class ProductionService {
     for (const [operation, schema] of Object.entries(PRODUCTION_HOST_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.attachmentSelections === 'host') for (const [operation, schema] of Object.entries(ATTACHMENT_SELECTION_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.oauthFlows === 'host') for (const [operation, schema] of Object.entries(OAUTH_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
+    if (descriptor.capabilities.artifactViewer === 'host') for (const [operation, schema] of Object.entries(ARTIFACT_VIEWER_NATIVE_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.externalUrls === 'host') operations['host.shell.openExternal'] = { validatePayload: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateRequest, validateResult: HOST_OPERATION_SCHEMAS['host.shell.openExternal'].validateResult }
     if (descriptor.capabilities.workspaceFiles === 'host') for (const [operation, schema] of Object.entries(WORKSPACE_NATIVE_CALLBACK_SCHEMAS)) operations[operation] = schema
     if (descriptor.capabilities.workspaceCleanup === 'host') operations['host.workspace.cleanupObservation'] = WORKSPACE_CLEANUP_CALLBACK_SCHEMA
@@ -435,6 +448,12 @@ export class ProductionService {
       } })
   }
   /** Sealed host policy can inspect the actual ready singleton, never RPC data. */
+  /** Captured Source producer only. No renderer/stdio operation registers this
+   * entry point; HTML is read by the existing authorized ArtifactBackend. */
+  registerArtifactViewer(taskId: string, relativePath: string, caller: DesktopCallerContext, controls: { signal?: AbortSignal; onOwnedLease?(lease: ArtifactViewerLease): void } = {}): Promise<ArtifactViewerLease> {
+    if (!this.initialized || this.closing || !this.bindings) return Promise.reject(new ServiceProtocolError('UNKNOWN_OPERATION'))
+    return this.bindings.registerArtifactViewer(taskId, relativePath, caller, controls)
+  }
   getReadyServices(): ProductionServices | null {
     return !this.closing && this.owner.snapshot().phase === 'ready' ? this.services : null
   }
@@ -548,6 +567,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
         // Browser opening alone does not register or own OAuth deep-link callbacks.
         oauthBrowser: 'unavailable',
         ...(descriptor.capabilities.oauthFlows === 'host' && callbacks.oauthFlows ? { connectorOAuthFlows: callbacks.oauthFlows } : {}),
+        ...(descriptor.capabilities.artifactViewer === 'host' && callbacks.artifactViewer ? { artifactViewer: callbacks.artifactViewer } : {}),
         ...(descriptor.capabilities.ui === 'host' ? { ui: callbacks.ui, emitInstallationProgress: callbacks.emitInstallationProgress } : {}),
         notify: callbacks.notify, emit: callbacks.emitOwnerEvent,
         sendUiCommand: () => ({ ok: false, detail: 'Private production launch has no reviewed UI command callback' }) }

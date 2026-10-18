@@ -38,6 +38,8 @@ pub(crate) mod native_energy;
 use native_energy::NativeEnergyOwner;
 #[path = "native_artifact_clipboard.rs"]
 pub(crate) mod native_artifact_clipboard;
+#[path = "native_artifact_viewer.rs"]
+pub(crate) mod native_artifact_viewer;
 #[path = "native_attachment_download.rs"]
 pub(crate) mod native_attachment_download;
 #[path = "native_attachment_drop.rs"]
@@ -61,6 +63,7 @@ struct ProductionState {
     native_work: NativeWorkOwner,
     oauth: native_oauth::NativeOAuthOwner,
     ui: NativeUiOwner,
+    artifact_viewer: native_artifact_viewer::NativeArtifactViewerOwner,
     drops: native_attachment_drop::DropOwner,
     window: NativeWindowOwner,
     notifications: NativeNotificationOwner,
@@ -847,6 +850,7 @@ async fn start(
     tray_available: bool,
     energy: Option<NativeEnergyOwner>,
     drops: native_attachment_drop::DropOwner,
+    artifact_viewer: native_artifact_viewer::NativeArtifactViewerOwner,
 ) -> Result<ProductionEngine, EngineError> {
     let containment = production_containment()?;
     let resources = app
@@ -964,6 +968,11 @@ async fn start(
             },
             external_urls: HostCapability::Host,
             oauth_flows: HostCapability::Host,
+            artifact_viewer: if cfg!(target_os = "linux") {
+                HostCapability::Host
+            } else {
+                HostCapability::Unsupported
+            },
             notifications: if cfg!(target_os = "linux") {
                 HostCapability::Host
             } else {
@@ -1069,6 +1078,11 @@ async fn start(
         },
         ProductionNativeHost {
             oauth: Some(oauth.host(app, native_work.clone())),
+            artifact_viewer: if cfg!(target_os = "linux") {
+                Some(artifact_viewer.host(app, ui.clone()))
+            } else {
+                None
+            },
             workspace_cleanup,
             workspace_file,
             attachment_file,
@@ -1148,7 +1162,7 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![engine_status, desktop_invoke])
-        .setup(|app| {
+        .setup(move |app| {
             let native_work = NativeWorkOwner::default();
             let oauth = native_oauth::NativeOAuthOwner::default();
             oauth.reject_cold_callback(
@@ -1158,6 +1172,18 @@ pub fn run() {
                     .collect::<Vec<_>>(),
             );
             let ui = NativeUiOwner::default();
+            let viewer_app = app.handle().clone();
+            let artifact_viewer = native_artifact_viewer::NativeArtifactViewerOwner::new(
+                native_work.clone(),
+                Arc::new(move |epoch, payload| {
+                    let app = viewer_app.clone();
+                    Box::pin(async move {
+                        available_engine(&app, Some(&epoch))?
+                            .deliver_artifact_viewer_closed(&epoch, payload)
+                            .await
+                    })
+                }),
+            );
             let drops = native_attachment_drop::DropOwner::default();
             let notifications = NativeNotificationOwner::new(app.handle(), native_work.clone())
                 .map_err(|_| std::io::Error::other("PRODUCTION_NOTIFICATION_UNAVAILABLE"))?;
@@ -1181,6 +1207,7 @@ pub fn run() {
                 tray.as_ref().is_some_and(|owner| owner.is_available()),
                 energy.clone(),
                 drops.clone(),
+                artifact_viewer.clone(),
             ));
             let saved_window = match &started {
                 Ok(engine) => {
@@ -1201,6 +1228,7 @@ pub fn run() {
                     native_work: native_work.clone(),
                     oauth: oauth.clone(),
                     ui: ui.clone(),
+                    artifact_viewer: artifact_viewer.clone(),
                     drops: drops.clone(),
                     window: window_owner.clone(),
                     notifications: notifications.clone(),
@@ -1214,6 +1242,7 @@ pub fn run() {
                     native_work,
                     oauth: oauth.clone(),
                     ui: ui.clone(),
+                    artifact_viewer: artifact_viewer.clone(),
                     drops: drops.clone(),
                     window: window_owner.clone(),
                     notifications: notifications.clone(),
@@ -1229,6 +1258,9 @@ pub fn run() {
             let navigation_ui = ui.clone();
             let navigation_drops = drops.clone();
             let page_ui = ui.clone();
+            let (navigation_viewer, navigation_app) =
+                (artifact_viewer.clone(), app.handle().clone());
+            let (page_viewer, page_app) = (artifact_viewer.clone(), app.handle().clone());
             let media_navigation = native_media::StartupNavigation::default();
             let window = tauri::WebviewWindowBuilder::new(app, "main", native_media::initial_url())
                 .title("21x Production Preview")
@@ -1243,10 +1275,12 @@ pub fn run() {
                     }
                     media_navigation.application();
                     navigation_drops.retire_document();
+                    navigation_viewer.stop_document(&navigation_app);
                     navigation_ui.navigation(ticket).is_ok()
                 })
                 .on_page_load(move |window, payload| match payload.event() {
                     tauri::webview::PageLoadEvent::Started => {
+                        page_viewer.stop_document(&page_app);
                         // A hidden first load must obtain its physical handle
                         // before recording the start; never infer readiness from
                         // an unmatched completion after native realization.
@@ -1270,6 +1304,16 @@ pub fn run() {
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
             ui.watch_destroy(ticket, &window)
                 .map_err(|_| std::io::Error::other("PRODUCTION_UI_UNAVAILABLE"))?;
+            #[cfg(target_os = "linux")]
+            artifact_viewer
+                .watch_parent(&window)
+                .map_err(|_| std::io::Error::other("PRODUCTION_VIEWER_UNAVAILABLE"))?;
+            let (destroy_viewer, destroy_app) = (artifact_viewer.clone(), app.handle().clone());
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    destroy_viewer.stop_document(&destroy_app);
+                }
+            });
             native_attachment_drop::watch(&window, ticket, ui.clone(), drops.clone());
             let restored =
                 native_window::apply_restore(&window, saved_window).unwrap_or_else(|_| {
@@ -1317,6 +1361,7 @@ pub fn run() {
             let state = handle.state::<ProductionState>();
             // Fence synchronously before another native command/callback can
             // reserve work; failed drains never allow application exit.
+            state.artifact_viewer.stop();
             if state.window.stop().is_err()
                 || state.oauth.stop().is_err()
                 || state.ui.close().is_err()
