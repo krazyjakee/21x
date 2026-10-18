@@ -137,7 +137,7 @@ it('retains accepted file receipts without automatic retry when metadata persist
   await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
   expect(f.calls('attachments:save')).toHaveLength(2); expect(f.calls('db:updateTask')).toHaveLength(1)
   expect(screen.queryByText('1.txt')).toBeNull()
-  await f.host.reconnect(); expect(f.calls('attachments:save')).toHaveLength(2)
+  await act(async () => { await f.host.reconnect() }); expect(f.calls('attachments:save')).toHaveLength(2)
 })
 it('owns a pending picker through double click and ignores a retired task before saving', async () => {
   const pick = held<unknown>(); f.handlers.set('attachments:pick', () => pick.promise)
@@ -601,7 +601,7 @@ it('captures the complete ordered baseline before raw file save and never refres
   expect(f.calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'task-1', data: { attachments: [attachment(9), attachment(8), attachment(1)] }, precondition: { attachmentsBaseline: [attachment(9), attachment(8)] } })
   expect(f.calls('db:updateTask')).toHaveLength(1); expect(f.calls('db:getTask')).toHaveLength(0)
   expect(f.calls('attachments:remove')).toHaveLength(0); expect(document.body.textContent).not.toContain('private-conflict')
-  await f.host.reconnect(); expect(f.calls('db:updateTask')).toHaveLength(1)
+  await act(async () => { await f.host.reconnect() }); expect(f.calls('db:updateTask')).toHaveLength(1)
 })
 
 it('keeps a workspace import baseline when canonical props change during its raw copy', async () => {
@@ -632,7 +632,7 @@ it('retains an edit intent baseline across canonical refresh and locks an uncert
   const data = (f.calls('db:updateTask')[0][1]?.payload as { data: Record<string, unknown> }).data
   expect(data).not.toHaveProperty('_attachmentsBaseline'); expect(data).not.toHaveProperty('_pendingFiles')
   expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
-  await f.host.reconnect(); expect(f.calls('db:updateTask')).toHaveLength(1)
+  await act(async () => { await f.host.reconnect() }); expect(f.calls('db:updateTask')).toHaveLength(1)
 })
 
 it('uses the accepted new task attachment receipt as draft import baseline', async () => {
@@ -662,4 +662,160 @@ it('does not close or overwrite a replacement edit dialog after a raw save settl
   await act(async () => { saving.resolve(makeTask({ title: 'Old save', attachments: [attachment(9)] })) })
   expect(stores.ui.getState().activeModal).toBe('edit'); expect(screen.getByLabelText('Title')).toHaveValue('Replacement draft')
   expect(f.calls('db:updateTask')).toHaveLength(1)
+})
+
+
+function CanonicalExisting() {
+  const task = stores.tasks(state => state.tasks.find(record => record.id === 'task-1'))!
+  return <TaskAttachments items={task.attachments} taskId={task.id} onChange={async (next, baseline) => {
+    await stores.tasks.getState().updateTask(task.id, { attachments: next }, { attachmentsBaseline: baseline! })
+  }} />
+}
+function canonicalRemoval(partial = false) {
+  const original = makeTask({ attachments: [attachment(9), attachment(8)] })
+  stores.tasks.setState({ tasks: [original] })
+  f.handlers.set('attachments:remove', async () => {
+    f.values.set('db:getTasks', [{ ...original, attachments: [attachment(8)] }])
+    if (partial) throw { code: 'IO_ERROR', detail: 'private-unlink-canary' }
+  })
+  return original
+}
+it('consumes native exact-ID removal through canonical readback without a second full-array write', async () => {
+  canonicalRemoval(); render(<CanonicalExisting />)
+  fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await waitFor(() => expect(screen.queryByText('9.txt')).toBeNull())
+  expect(screen.getByText('8.txt')).toBeInTheDocument()
+  expect(f.calls('attachments:remove')).toHaveLength(1); expect(f.calls('db:getTasks')).toHaveLength(1)
+  expect(f.calls('db:updateTask')).toHaveLength(0)
+})
+it('reconciles accepted native metadata after raw cleanup refusal and never replays removal', async () => {
+  canonicalRemoval(true); render(<CanonicalExisting />)
+  fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await screen.findByRole('alert')
+  expect(screen.queryByText('9.txt')).toBeNull(); expect(screen.getByText('8.txt')).toBeInTheDocument()
+  expect(document.body.textContent).not.toContain('private-unlink-canary')
+  expect(f.calls('db:getTasks')).toHaveLength(1); expect(f.calls('db:updateTask')).toHaveLength(0)
+  await act(async () => { await f.host.reconnect() }); expect(f.calls('attachments:remove')).toHaveLength(1)
+})
+it('preserves edit text and locks Save for canonical review after native exact-ID removal', async () => {
+  canonicalRemoval(); stores.ui.setState({ activeModal: 'edit', editingTaskId: 'task-1' })
+  const noop = vi.fn(async () => {})
+  render(<TaskDialogs agents={[]} showToast={vi.fn()} completeTask={noop} onGoToFullView={noop} onNavigateFromPreview={noop} onAssignAgent={noop} onUpdateTask={noop} />)
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Other unsaved edit' } })
+  fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await waitFor(() => expect(screen.queryByText('9.txt')).toBeNull())
+  expect(screen.getByLabelText('Title')).toHaveValue('Other unsaved edit')
+  expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
+  expect(screen.getByText('Attachment removal needs review. Close this draft and review the saved task before saving other edits.')).toBeInTheDocument()
+  expect(f.calls('db:updateTask')).toHaveLength(0)
+})
+
+it('keeps canonical records on pre-unlink refusal and fences another native removal until review', async () => {
+  const original = canonicalRemoval(); f.values.set('db:getTasks', [original])
+  f.handlers.set('attachments:remove', async () => { throw { code: 'FORBIDDEN', detail: 'private-scope-canary' } })
+  render(<CanonicalExisting />); fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await screen.findByRole('alert'); expect(screen.getByText('9.txt')).toBeInTheDocument()
+  expect(screen.getAllByTitle('Remove attachment').every(button => (button as HTMLButtonElement).disabled)).toBe(true)
+  expect(screen.getByRole('button', { name: 'Add files' })).toBeDisabled()
+  expect(document.body.textContent).not.toContain('private-scope-canary'); expect(f.calls('db:updateTask')).toHaveLength(0)
+})
+it('requires review after acknowledged removal with failed canonical readback without fabricating metadata', async () => {
+  canonicalRemoval(); f.handlers.set('db:getTasks', async () => { throw { code: 'DISCONNECTED' } })
+  render(<CanonicalExisting />); fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await screen.findByRole('alert'); expect(screen.getByText('9.txt')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Add files' })).toBeDisabled()
+  expect(f.calls('attachments:remove')).toHaveLength(1); expect(f.calls('db:updateTask')).toHaveLength(0)
+  await act(async () => { await f.host.reconnect() }); expect(f.calls('attachments:remove')).toHaveLength(1)
+})
+it('refuses a void removal acknowledgement whose canonical record remains referenced', async () => {
+  const original = canonicalRemoval(); f.handlers.set('attachments:remove', async () => {}); f.values.set('db:getTasks', [original])
+  render(<CanonicalExisting />); fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await screen.findByRole('alert'); expect(screen.getByText('9.txt')).toBeInTheDocument()
+  expect(f.calls('db:updateTask')).toHaveLength(0)
+})
+it('does not publish a held removal readback into a replacement task attachment component', async () => {
+  canonicalRemoval(); const read = held<unknown>(); f.handlers.set('db:getTasks', () => read.promise)
+  const changed = vi.fn(), settled = vi.fn(), view = render(<TaskAttachments items={[attachment(9)]} taskId="task-1" onChange={changed} onNativeRemovalSettled={settled} />)
+  fireEvent.click(screen.getByTitle('Remove attachment'))
+  await waitFor(() => expect(f.calls('db:getTasks')).toHaveLength(1))
+  view.rerender(<TaskAttachments items={[attachment(8)]} taskId="replacement-task" onChange={changed} onNativeRemovalSettled={settled} />)
+  await act(async () => { read.resolve([makeTask({ attachments: [] })]) })
+  expect(settled).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled(); expect(screen.getByText('8.txt')).toBeInTheDocument()
+})
+it.each(['pagehide', 'project-return', 'modal-return', 'connection'] as const)('retires native removal followups on %s while raw work remains Source-owned', async event => {
+  const remove = held<unknown>(); f.handlers.set('attachments:remove', () => remove.promise)
+  const settled = vi.fn(); render(<TaskAttachments items={[attachment(9)]} taskId="task-1" onChange={vi.fn()} onNativeRemovalSettled={settled} />)
+  fireEvent.click(screen.getByTitle('Remove attachment'))
+  await waitFor(() => expect(f.calls('attachments:remove')).toHaveLength(1))
+  if (event === 'pagehide') act(() => window.dispatchEvent(new Event('pagehide')))
+  if (event === 'project-return') {
+    const projects = (await import('@/stores/project-store')).useProjectStore, initial = projects.getState().currentProjectId
+    act(() => { projects.setState({ currentProjectId: 'temporary-project' }); projects.setState({ currentProjectId: initial }) })
+  }
+  if (event === 'modal-return') act(() => { stores.ui.setState({ activeModal: 'create' }); stores.ui.setState({ activeModal: null }) })
+  if (event === 'connection') await act(async () => { await f.host.reconnect() })
+  await act(async () => { remove.resolve(undefined) })
+  expect(f.calls('db:getTasks')).toHaveLength(0); expect(f.calls('db:updateTask')).toHaveLength(0); expect(settled).not.toHaveBeenCalled()
+  expect(f.calls('attachments:remove')).toHaveLength(1)
+})
+it.each(['connection', 'project-return'] as const)('keeps the original native form baseline and refuses Save after %s', async event => {
+  stores.tasks.setState({ tasks: [makeTask({ attachments: [attachment(9)] })] }); stores.ui.setState({ activeModal: 'edit', editingTaskId: 'task-1' })
+  const noop = vi.fn(async () => {})
+  render(<TaskDialogs agents={[]} showToast={vi.fn()} completeTask={noop} onGoToFullView={noop} onNavigateFromPreview={noop} onAssignAgent={noop} onUpdateTask={noop} />)
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Original unsaved edit' } })
+  if (event === 'connection') await act(async () => { await f.host.reconnect() })
+  else {
+    const projects = (await import('@/stores/project-store')).useProjectStore, initial = projects.getState().currentProjectId
+    act(() => { projects.setState({ currentProjectId: 'temporary-project' }); projects.setState({ currentProjectId: initial }) })
+  }
+  expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled(); expect(screen.getByLabelText('Title')).toHaveValue('Original unsaved edit')
+  fireEvent.submit(screen.getByLabelText('Title').closest('form')!)
+  expect(f.calls('db:updateTask')).toHaveLength(0)
+})
+
+it('preserves other known unsaved import receipts while applying only confirmed exact-ID removal to a review draft', async () => {
+  canonicalRemoval(); stores.ui.setState({ activeModal: 'edit', editingTaskId: 'task-1' }); f.values.set('attachments:pick', ['/synthetic/1.txt'])
+  const noop = vi.fn(async () => {})
+  render(<TaskDialogs agents={[]} showToast={vi.fn()} completeTask={noop} onGoToFullView={noop} onNavigateFromPreview={noop} onAssignAgent={noop} onUpdateTask={noop} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Add files' })); await screen.findByText('1.txt')
+  expect(f.calls('db:updateTask')).toHaveLength(0)
+  fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await waitFor(() => expect(screen.queryByText('9.txt')).toBeNull())
+  expect(screen.getByText('1.txt')).toBeInTheDocument(); expect(screen.getByText('8.txt')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
+  expect(f.calls('attachments:save')).toHaveLength(1); expect(f.calls('db:updateTask')).toHaveLength(0)
+  expect(stores.tasks.getState().tasks[0].attachments).toEqual([attachment(8)])
+})
+
+it('captures the exact removed ID before raw work and refuses later record-object retargeting', async () => {
+  const original = canonicalRemoval(), removing = held<unknown>(), item = { ...attachment(9) }, settled = vi.fn()
+  f.handlers.set('attachments:remove', () => removing.promise); f.values.set('db:getTasks', [{ ...original, attachments: [attachment(8)] }])
+  render(<TaskAttachments items={[item, attachment(8)]} taskId="task-1" onChange={vi.fn()} onNativeRemovalSettled={settled} />)
+  fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await waitFor(() => expect(f.calls('attachments:remove')).toHaveLength(1))
+  item.id = attachment(7).id
+  await act(async () => { removing.resolve(undefined) })
+  await waitFor(() => expect(settled).toHaveBeenCalledExactlyOnceWith(attachment(9).id, [attachment(8)]))
+  expect(f.calls('attachments:remove')[0][1]?.payload).toEqual({ taskId: 'task-1', attachmentId: attachment(9).id })
+  expect(f.calls('db:updateTask')).toHaveLength(0)
+})
+
+it('fences a coalesced native offer before React commits the edit-draft review controls', async () => {
+  await enableDrops(); const original = canonicalRemoval(); stores.ui.setState({ activeModal: 'edit', editingTaskId: 'task-1' })
+  let context = ''
+  f.handlers.set('db:getTasks', async () => {
+    // Drain the current RPC/readback continuations without yielding a browser
+    // paint, then deliver an already queued native offer for the same context.
+    let remaining = 100
+    const deliver = () => { if (--remaining) queueMicrotask(deliver); else f.emitDrop(context, ['/synthetic/1.txt']) }
+    queueMicrotask(deliver)
+    return [{ ...original, attachments: [attachment(8)] }]
+  })
+  const noop = vi.fn(async () => {})
+  render(<TaskDialogs agents={[]} showToast={vi.fn()} completeTask={noop} onGoToFullView={noop} onNavigateFromPreview={noop} onAssignAgent={noop} onUpdateTask={noop} />)
+  context = await acknowledgedDropContext()
+  fireEvent.click(screen.getAllByTitle('Remove attachment')[0])
+  await waitFor(() => expect(f.calls('native.attachment.drop.close')).toHaveLength(1))
+  expect(f.calls('attachments:save')).toHaveLength(0); expect(f.calls('native.attachment.drop.accept')).toHaveLength(0)
+  expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
 })

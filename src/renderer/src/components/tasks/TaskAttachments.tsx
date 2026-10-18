@@ -1,3 +1,6 @@
+import { rehydrateTaskDesktopState, useTaskStore } from '@/stores/task-store'
+import { useProjectStore } from '@/stores/project-store'
+import { useUIStore } from '@/stores/ui-store'
 import { useNativeAttachmentDrop } from '@/hooks/use-native-attachment-drop'
 import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import { useState, useCallback, useEffect, useRef } from 'react'
@@ -18,6 +21,7 @@ interface TaskAttachmentsProps {
   items: FileAttachment[]
   onChange: (items: FileAttachment[], baseline?: FileAttachment[]) => void | Promise<void>
   taskId: string | null
+  onNativeRemovalSettled?: (attachmentId: string, canonical: FileAttachment[] | undefined) => void
   readOnly?: boolean
   disabled?: boolean
   pendingFiles?: PendingFile[]
@@ -31,25 +35,37 @@ export function TaskAttachments({
   readOnly = false,
   disabled = false,
   pendingFiles = [],
-  onPendingChange
+  onPendingChange,
+  onNativeRemovalSettled
 }: TaskAttachmentsProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [reviewRequired, setReviewRequired] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const dropRoot = useRef<HTMLDivElement | null>(null)
-  const pending = useRef(false), mounted = useRef(true)
-  const current = useRef({ taskId, items, pendingFiles, onChange, onPendingChange })
-  current.current = { taskId, items, pendingFiles, onChange, onPendingChange }
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const pending = useRef(false), mounted = useRef(true), review = useRef(false)
+  const current = useRef({ taskId, items, pendingFiles, onChange, onPendingChange, onNativeRemovalSettled })
+  current.current = { taskId, items, pendingFiles, onChange, onPendingChange, onNativeRemovalSettled }
+  useEffect(() => {
+    mounted.current = true
+    const retire = () => { mounted.current = false; window.removeEventListener('pagehide', retire) }
+    window.addEventListener('pagehide', retire, { once: true })
+    return retire
+  }, [])
 
-  const run = async (action: (isCurrent: () => boolean) => Promise<void>, allowReadOnly = false) => {
-    if (disabled || pending.current || readOnly && !allowReadOnly) return
+  const run = async (action: (isCurrent: () => boolean) => Promise<void>, allowReadOnly = false, failureMessage = ATTACHMENT_IMPORT_FAILURE) => {
+    if (disabled || pending.current || (readOnly || review.current) && !allowReadOnly) return
     const owner = taskId, scope = captureDesktopRead()
-    const isCurrent = () => mounted.current && current.current.taskId === owner && scope.isCurrent()
+    let retained = true
+    const offProject = useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) retained = false })
+    const offUi = useUIStore.subscribe((state, previous) => {
+      if (state.activeModal !== previous.activeModal || state.editingTaskId !== previous.editingTaskId || state.dashboardPreviewTaskId !== previous.dashboardPreviewTaskId) retained = false
+    })
+    const isCurrent = () => retained && mounted.current && current.current.taskId === owner && scope.isCurrent()
     pending.current = true; setBusy(true); setError(null)
     try { await action(isCurrent) }
-    catch { if (isCurrent()) setError(ATTACHMENT_IMPORT_FAILURE) }
-    finally { pending.current = false; if (mounted.current) setBusy(false) }
+    catch { if (isCurrent()) setError(failureMessage) }
+    finally { offProject(); offUi(); pending.current = false; if (mounted.current) setBusy(false) }
   }
 
   const processFilePaths = useCallback(
@@ -83,7 +99,7 @@ export function TaskAttachments({
 
   useNativeAttachmentDrop({
     root: dropRoot, identity: taskId ?? 'new-task-draft', enabled: !readOnly,
-    busy: () => disabled || pending.current,
+    busy: () => disabled || review.current || pending.current,
     capacity: () => 128 - current.current.items.length - current.current.pendingFiles.length,
     consume: async (paths, receiptCurrent) => {
       await run(async localCurrent => { await processFilePaths(paths, () => localCurrent() && receiptCurrent()) })
@@ -106,29 +122,29 @@ export function TaskAttachments({
 
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
-      if (readOnly || disabled) return
+      if (readOnly || disabled || reviewRequired) return
       e.preventDefault()
       e.stopPropagation()
       setIsDragging(true)
     },
-    [readOnly, disabled]
+    [readOnly, disabled, reviewRequired]
   )
 
   const handleDragLeave = useCallback(
     (e: React.DragEvent) => {
-      if (readOnly || disabled) return
+      if (readOnly || disabled || reviewRequired) return
       e.preventDefault()
       e.stopPropagation()
       setIsDragging(false)
     },
-    [readOnly, disabled]
+    [readOnly, disabled, reviewRequired]
   )
 
   const handleDrop = (e: React.DragEvent) => {
       e.preventDefault()
       e.stopPropagation()
       setIsDragging(false)
-      if (readOnly || disabled) return
+      if (readOnly || disabled || reviewRequired) return
 
       if (getDesktopHost().kind === 'tauri') {
         setError(NATIVE_FILE_DROP_MESSAGE)
@@ -142,15 +158,36 @@ export function TaskAttachments({
   }
 
   const handleRemove = async (attachment: FileAttachment) => {
+    const attachmentId = attachment.id
+    const failureMessage = 'Attachment removal could not be fully confirmed. Reopen the task and review its saved attachments before trying again.'
     await run(async isCurrent => {
-      const baseline = copyAttachmentBaseline(current.current.items)
-      if (taskId) await attachmentApi.remove(taskId, attachment.id)
-      if (isCurrent()) {
-        const next = baseline.filter(a => a.id !== attachment.id)
-        if (getDesktopHost().kind === 'tauri') await current.current.onChange(next, baseline)
-        else await current.current.onChange(next)
+      if (getDesktopHost().kind === 'tauri' && taskId) {
+        // Source owns the exact-ID metadata delta before raw unlink. A rejected
+        // reply can still follow an accepted delta; read canonical state and
+        // never submit a second full-array replacement or replay the unlink.
+        let failed = false, canonical: FileAttachment[] | undefined
+        try { await attachmentApi.remove(taskId, attachmentId) } catch { failed = true }
+        if (!isCurrent()) return
+        try {
+          await rehydrateTaskDesktopState()
+          if (!isCurrent()) return
+          const saved = useTaskStore.getState().tasks.find(task => task.id === taskId)
+          if (saved) canonical = copyAttachmentBaseline(saved.attachments)
+        } catch { failed = true }
+        if (!isCurrent()) return
+        const uncertain = failed || !canonical || canonical.some(item => item.id === attachmentId)
+        // Admission must close before React paints disabled draft controls.
+        if (uncertain || current.current.onNativeRemovalSettled) { review.current = true; setReviewRequired(true) }
+        current.current.onNativeRemovalSettled?.(attachmentId, canonical)
+        if (uncertain) {
+          throw new Error(failureMessage)
+        }
+        return
       }
-    })
+      const baseline = copyAttachmentBaseline(current.current.items)
+      if (taskId) await attachmentApi.remove(taskId, attachmentId)
+      if (isCurrent()) await current.current.onChange(baseline.filter(item => item.id !== attachmentId))
+    }, false, failureMessage)
   }
 
   const handleRemovePending = (id: string) => {
@@ -223,7 +260,7 @@ export function TaskAttachments({
                 <button
                   type="button"
                   onClick={() => handleRemove(a)}
-                  disabled={busy || disabled}
+                  disabled={busy || disabled || reviewRequired}
                   className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive cursor-pointer"
                   title="Remove attachment"
                 >
@@ -242,7 +279,7 @@ export function TaskAttachments({
                   type="button"
                   onClick={() => handleRemovePending(f.id)}
                   aria-label={`Remove ${f.filename}`}
-                  disabled={busy || disabled}
+                  disabled={busy || disabled || reviewRequired}
                   className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive cursor-pointer"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -257,7 +294,7 @@ export function TaskAttachments({
         <button
           type="button"
           onClick={handleAdd}
-          disabled={busy || disabled}
+          disabled={busy || disabled || reviewRequired}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground cursor-pointer"
         >
           <Paperclip className="h-3.5 w-3.5" />

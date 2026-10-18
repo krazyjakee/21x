@@ -451,3 +451,40 @@ UI handler through a controlled DndContext; physical keyboard/pointer dragging
 and installed platform acceptance are not claimed. Two corrected old-source
 controls reproduce parent-reply replacement and discarded pending-title defects.
 No Source/native/public operation, policy, grant or voice availability changes.
+
+
+## Canonical native attachment removal and draft review
+
+The native UI consumes the metadata-first exact-ID `attachments.remove` semantics
+published by #214 at8244c0ad. It invokes removal once, then joins read-only canonical
+task snapshot reconciliation after either acknowledgement or raw cleanup refusal.
+It never follows native removal with `db.updateTask`, a replacement attachment
+array or automatic unlink replay. Source remains the metadata delta/filesystem
+owner and emits its accepted canonical event before later cleanup can refuse.
+Electron retains its existing remove plus explicit metadata update behavior.
+
+If canonical state still references the target, is unavailable, or cleanup refused,
+the UI shows fixed review guidance and blocks further attachment mutation in that
+view. It never invents a successful removal or filesystem rollback. Read-only
+Open/Download remain separate authorized operations. Closing/reopening the saved
+task permits explicit review; reconnect does not replay removal. View replacement,
+project/modal change-and-return, pagehide and connection replacement fence pending
+readback/publication and release per-request subscriptions.
+
+An edit draft preserves its unsaved text and original CAS baseline after a native
+removal attempt. It applies only the confirmed removed ID locally and retains other known unsaved
+import receipts until explicit draft close, without merging concurrent canonical
+records or adopting a fresh baseline. It locks Save and requires close/canonical review before submitting other edits.
+Admission fences synchronously before React paints disabled controls, including
+an already queued native Drop delivered after raw readback. It never silently
+adopts that new readback as a baseline to authorize a stale full-array intent. Native forms also fence idle or pending Save intent on
+connection or project replacement, retaining the draft for explicit review.
+
+The actual typed-native UI controls cover success, cleanup refusal, pre-unlink
+refusal, missing/unchanged canonical state, readback failure, late view/readback
+retirement and form review. These use controlled receipts; the separately executed
+Source backend/CAS regressions use actual protected files/SQLite/AgentManager.
+Only pre-unlink refusal can guarantee retained bytes. Raw unlink may already have
+succeeded before later cancellation/verification failure, so no SQLite/filesystem
+atomicity or manufactured rollback is claimed. Durable orphan/removal journaling,
+unknown receipt recovery and installed supported-platform acceptance remain open.

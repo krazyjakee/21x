@@ -1,6 +1,7 @@
 import { copyAttachmentBaseline } from '@/lib/task-attachment-import'
 import { useState, useEffect, useRef } from 'react'
-import { getDesktopHost } from '@/lib/desktop-api'
+import { useProjectStore } from '@/stores/project-store'
+import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -50,8 +51,10 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
   const [recurrencePattern, setRecurrencePattern] = useState<RecurrencePattern | null>(null)
   const [autoStartAgent, setAutoStartAgent] = useState(false)
   const [autoCompleteWithoutReview, setAutoCompleteWithoutReview] = useState(false)
+  const initialScope = useRef(captureDesktopRead())
   const active = useRef(true)
   const generation = useRef(0)
+  const review = useRef(false)
   const [reviewRequired, setReviewRequired] = useState(false)
   const submitting = useRef(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -62,7 +65,15 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
 
   useEffect(() => {
     active.current = true
-    const retire = () => { active.current = false; ++generation.current; window.removeEventListener('pagehide', retire) }
+    const host = getDesktopHost()
+    const fence = () => {
+      if (!active.current) return
+      ++generation.current; review.current = true; setReviewRequired(true); setIsSubmitting(false)
+      setSubmitError('Task context changed. Close this draft and review the saved task before saving again.')
+    }
+    const offConnection = host.kind === 'tauri' ? host.subscribeConnection(() => { if (!initialScope.current.isSameConnection()) fence() }) : () => {}
+    const offProject = host.kind === 'tauri' ? useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) fence() }) : () => {}
+    const retire = () => { active.current = false; ++generation.current; offConnection(); offProject(); window.removeEventListener('pagehide', retire) }
     window.addEventListener('pagehide', retire, { once: true })
     return retire
   }, [])
@@ -103,7 +114,7 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!title.trim() || submitting.current || reviewRequired || !active.current) return
+    if (!title.trim() || submitting.current || review.current || !active.current || getDesktopHost().kind === 'tauri' && !initialScope.current.isCurrent()) return
     const intent = generation.current
     const current = () => active.current && generation.current === intent
 
@@ -143,7 +154,7 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
     } catch (err) {
       if (!current()) return
       if (getDesktopHost().kind === 'tauri') {
-        setReviewRequired(true)
+        review.current = true; setReviewRequired(true)
         setSubmitError('Task save could not be confirmed. Close this draft and review the task list before saving again.')
       } else setSubmitError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -182,6 +193,13 @@ export function TaskForm({ task, prefill, onSubmit, onCancel }: TaskFormProps) {
         <TaskAttachments
           items={attachments}
           onChange={next => setAttachments(next)}
+          onNativeRemovalSettled={(attachmentId, canonical) => {
+            review.current = true
+            if (canonical && !canonical.some(item => item.id === attachmentId)) setAttachments(previous => previous.filter(item => item.id !== attachmentId))
+            // Do not replace the original baseline to authorize other stale edits.
+            setReviewRequired(true)
+            setSubmitError('Attachment removal needs review. Close this draft and review the saved task before saving other edits.')
+          }}
           taskId={task?.id ?? null}
           disabled={isSubmitting || reviewRequired}
           readOnly={getDesktopHost().kind === 'tauri' && !!task && task.role !== 'task'}
