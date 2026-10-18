@@ -1,0 +1,739 @@
+{
+  "version": 1,
+  "kind": "issue-214-protected-directory-authority-local",
+  "issues": [
+    214,
+    215
+  ],
+  "sourceRevision": "80b7721682d1d9df4392ada37764b042df1a33bc",
+  "sourceBaseRevision": "cc97a7aafc8235aeb640e9144c436e7c8b81d2a4",
+  "createdAt": "2026-10-18T04:29:02.779413+00:00",
+  "environment": {
+    "os": "Linux 6.8.0-139-generic x86_64 GNU/Linux",
+    "testRuntime": {
+      "node": "v22.23.2",
+      "modules": "127",
+      "platform": "linux",
+      "arch": "x64"
+    },
+    "schemaVersion": 37,
+    "hostNode": "v22.22.0",
+    "pnpmActual": "9.15.9",
+    "packageManagerDeclared": "pnpm@9.15.2",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18",
+    "eslint": "10.0.1",
+    "stagedPackages": {
+      "better-sqlite3": "13.0.3",
+      "node-pty": "1.1.0",
+      "@paralleldrive/cuid2": "2.3.1",
+      "@anthropic-ai/claude-agent-sdk": "0.3.260",
+      "@anthropic-ai/sdk": "0.123.0",
+      "@opencode-ai/sdk": "1.18.28"
+    },
+    "nativeRust": "No native source/manifests changed; no Cargo/installed proof claimed"
+  },
+  "fixture": "Synthetic profiles, local controlled filesystem races, controlled provider executables and two separate staged stdio entries only; no live profiles/accounts, native installed UI, network provider or OS credential access.",
+  "implemented": [
+    "Linux held O_DIRECTORY|O_NOFOLLOW directory FD validated by fstat before private proc-FD syscall paths; mkdir anchored to held root, file open/link/unlink/rollback anchored to held task directory.",
+    "Canonical metadata/native receipts/journal facts unchanged; cleanup reacquires verified directory authority, never persists numeric FD capability.",
+    "Actual directory-close acknowledgement is owned through cancellation, late acceptance, refused close, explicit retry, admission and profile shutdown. Copy ACK waits close; commit remains pure bookkeeping.",
+    "Missing supported directory authority refuses before mkdir/file-open/producer bytes; no ambient path fallback. NonLinux protected read/copy/cleanup remains unavailable. Whole-task retention and metadata-first exact-ID delta unchanged."
+  ],
+  "expectedActual": {
+    "outsideCanary": "Published old Source deleted outside same-name canary during actual kernel unlink with controlled ancestor swap; fixed Source preserves outside canary and addresses original held directory.",
+    "closeReceipt": "Two actual ProductionOwner synthetic profile cases retain duplicate-owner exclusion while root/task directory close refuses; explicit acknowledged retry releases profile.",
+    "crash": {
+      "node": "v22.23.2",
+      "abi": "127",
+      "results": [
+        {
+          "mode": "partial",
+          "signal": "SIGKILL",
+          "reopened": true,
+          "automaticMutation": false,
+          "rows": 1,
+          "files": 1
+        },
+        {
+          "mode": "published",
+          "signal": "SIGKILL",
+          "reopened": true,
+          "automaticMutation": false,
+          "rows": 1,
+          "files": 1
+        },
+        {
+          "mode": "remove-before",
+          "signal": "SIGKILL",
+          "reopened": true,
+          "automaticMutation": false,
+          "rows": 2,
+          "files": 1
+        },
+        {
+          "mode": "remove-after",
+          "signal": "SIGKILL",
+          "reopened": true,
+          "automaticMutation": false,
+          "rows": 2,
+          "files": 0
+        }
+      ]
+    },
+    "reports": {
+      "negative": {
+        "passed": 0,
+        "failed": 1,
+        "pendingOrFiltered": 32,
+        "executedFiles": 1,
+        "report": {
+          "file": "/tmp/e2-exact-unlink-negative-vitest.json",
+          "sha256": "0944d76263b7a41d8b338c70cddb13524cccb20da283e46a07faaf828a603f6c",
+          "bytes": 14434
+        }
+      },
+      "fixed": {
+        "passed": 1,
+        "failed": 0,
+        "pendingOrFiltered": 32,
+        "executedFiles": 1,
+        "report": {
+          "file": "/tmp/e2-exact-unlink-fixed-vitest.json",
+          "sha256": "c197b42716fb6b22f425e07413d3dfcd8035712798b8ef20064219a2ff7593b5",
+          "bytes": 14141
+        }
+      },
+      "first": {
+        "passed": 438,
+        "failed": 1,
+        "pendingOrFiltered": 0,
+        "executedFiles": 13,
+        "report": {
+          "file": "/tmp/e2-directory-fd-first-gate-vitest.json",
+          "sha256": "237a263607705cdf748e1c113877a25411c49638e93fa8bcebc0bfff9c54ad4d",
+          "bytes": 176882
+        }
+      },
+      "runtime": {
+        "passed": 441,
+        "failed": 0,
+        "pendingOrFiltered": 0,
+        "executedFiles": 13,
+        "report": {
+          "file": "/tmp/e2-directory-fd-runtime-gate-vitest.json",
+          "sha256": "a06ce2aef160ae361bdaf58bdaa82407434c682b70c0b253aeea7db12086e23a",
+          "bytes": 177100
+        }
+      },
+      "final": {
+        "passed": 168,
+        "failed": 0,
+        "pendingOrFiltered": 0,
+        "executedFiles": 5,
+        "report": {
+          "file": "/tmp/e2-directory-fd-final-gate-vitest.json",
+          "sha256": "37b4b56e1d37b01e63c27ec52bfcc37eb77a4683ef8fd4b072cad7267d8fed3a",
+          "bytes": 67802
+        }
+      },
+      "owner": {
+        "passed": 31,
+        "failed": 0,
+        "pendingOrFiltered": 0,
+        "executedFiles": 1,
+        "report": {
+          "file": "/tmp/e2-directory-fd-owner-vitest.json",
+          "sha256": "1f6577e5e1bcf8c5237abf14f9c956c39db7206e7ba80e3aeab2e102ae1af15c",
+          "bytes": 12801
+        }
+      },
+      "profile": {
+        "passed": 2,
+        "failed": 0,
+        "pendingOrFiltered": 27,
+        "executedFiles": 1,
+        "report": {
+          "file": "/tmp/e2-directory-fd-profile-vitest.json",
+          "sha256": "ec982ec3cf90ca3f4e610b2279fed5983d97a5cc380f9fb805d37417d03691e2",
+          "bytes": 11029
+        }
+      }
+    }
+  },
+  "checks": {
+    "firstAttempt": [
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-first-gate-type.log"
+      },
+      {
+        "name": "stage",
+        "argv": [
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-first-gate-stage.log"
+      },
+      {
+        "name": "neutral",
+        "argv": [
+          "pnpm",
+          "test:host-neutral",
+          "--",
+          "--service-proofs",
+          "--production-proofs",
+          "--terminal-proofs",
+          "src/main/task-attachment-file-owner.test.ts",
+          "src/main/task-attachment-journal.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/task-lifecycle-backend.test.ts",
+          "src/service/task-source-backend.test.ts",
+          "src/service/task-attachment-backend.test.ts",
+          "src/service/task-attachment-metadata-conflict.test.ts",
+          "src/service/production-attachment-execution.test.ts",
+          "src/service/production-mobile.test.ts",
+          "src/service/production-service.test.ts",
+          "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+          "scripts/production-service-proof.test.ts",
+          "--maxWorkers=1",
+          "--run-receipt=/tmp/e2-directory-fd-gate-receipt.json",
+          "--reporter=json",
+          "--outputFile=/tmp/e2-directory-fd-gate-vitest.json"
+        ],
+        "rawExitCode": 1,
+        "log": "/tmp/e2-directory-fd-first-gate-neutral.log"
+      }
+    ],
+    "expandedRuntime": [
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-runtime-gate-type.log"
+      },
+      {
+        "name": "stage",
+        "argv": [
+          "pnpm",
+          "tauri:prepare:production"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-runtime-gate-stage.log"
+      },
+      {
+        "name": "neutral",
+        "argv": [
+          "pnpm",
+          "test:host-neutral",
+          "--",
+          "--service-proofs",
+          "--production-proofs",
+          "--terminal-proofs",
+          "src/main/task-attachment-file-owner.test.ts",
+          "src/main/task-attachment-journal.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/task-lifecycle-backend.test.ts",
+          "src/service/task-source-backend.test.ts",
+          "src/service/task-attachment-backend.test.ts",
+          "src/service/task-attachment-metadata-conflict.test.ts",
+          "src/service/production-attachment-execution.test.ts",
+          "src/service/production-mobile.test.ts",
+          "src/service/production-service.test.ts",
+          "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+          "scripts/production-service-proof.test.ts",
+          "--maxWorkers=1",
+          "--run-receipt=/tmp/e2-directory-fd-gate-receipt.json",
+          "--reporter=json",
+          "--outputFile=/tmp/e2-directory-fd-gate-vitest.json"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-runtime-gate-neutral.log"
+      },
+      {
+        "name": "crash",
+        "argv": [
+          "src-tauri/resources/node/node",
+          "scripts/attachment-journal-crash-proof.mjs"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-runtime-gate-crash.log"
+      },
+      {
+        "name": "lint",
+        "argv": [
+          "pnpm",
+          "lint"
+        ],
+        "rawExitCode": 1,
+        "log": "/tmp/e2-directory-fd-runtime-gate-lint.log"
+      }
+    ],
+    "final": [
+      {
+        "name": "neutral",
+        "argv": [
+          "pnpm",
+          "test:host-neutral",
+          "--",
+          "--service-proofs",
+          "--production-proofs",
+          "--terminal-proofs",
+          "src/main/task-attachment-file-owner.test.ts",
+          "src/service/production-desktop-bindings.test.ts",
+          "src/service/production-owner.test.ts",
+          "src/service/production-mobile.test.ts",
+          "scripts/production-service-proof.test.ts",
+          "--maxWorkers=1",
+          "--run-receipt=/tmp/e2-directory-fd-final-gate-receipt.json",
+          "--reporter=json",
+          "--outputFile=/tmp/e2-directory-fd-final-gate-vitest.json"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-final-gate-neutral.log"
+      },
+      {
+        "name": "type",
+        "argv": [
+          "pnpm",
+          "exec",
+          "tsc",
+          "--build",
+          "--noEmit",
+          "--force"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-final-gate-type.log"
+      },
+      {
+        "name": "lint",
+        "argv": [
+          "pnpm",
+          "lint"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-final-gate-lint.log"
+      },
+      {
+        "name": "frontend",
+        "argv": [
+          "pnpm",
+          "tauri:production:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-final-gate-frontend.log"
+      },
+      {
+        "name": "diagnostic",
+        "argv": [
+          "pnpm",
+          "tauri:frontend:build"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-final-gate-diagnostic.log"
+      },
+      {
+        "name": "inventory",
+        "argv": [
+          "node",
+          "scripts/tauri-inventory.mjs",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-final-gate-inventory.log"
+      },
+      {
+        "name": "contracts",
+        "argv": [
+          "node",
+          "scripts/tauri-contracts.mjs",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-final-gate-contracts.log"
+      },
+      {
+        "name": "diff",
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "rawExitCode": 0,
+        "log": "/tmp/e2-directory-fd-final-gate-diff.log"
+      }
+    ]
+  },
+  "failuresAndRepairs": [
+    {
+      "failure": "First combined run 438passed/1failed: own backend test intercepted canonical ambient unlink path and threw before releasing its gate.",
+      "repair": "Require proc-FD dirname and exact realpath to original file; metadata/event/exclusion/byte assertions preserved. Expanded runtime 441/0."
+    },
+    {
+      "failure": "Expanded runtime lint raw1: own new canary fixture let declaration assigned once; 165existing warnings.",
+      "repair": "const swap initialized before armed=true; runtime FileOwner unchanged. Final affected168/0 plus full lint0errors165existingwarnings/type/build/freshness."
+    }
+  ],
+  "normalSourceCommit": {
+    "rawExitCode": 0,
+    "ownedPaths": [
+      "src/main/task-attachment-file-owner.ts",
+      "src/main/task-attachment-file-owner.test.ts",
+      "src/service/production-desktop-bindings.test.ts",
+      "src/service/production-owner.test.ts",
+      "src/service/task-attachment-backend.test.ts",
+      "docs/tauri-migration/native-attachment-journal.md",
+      "docs/tauri-migration/native-attachment-execution.md",
+      "docs/tauri-migration/native-attachment-directory-authority.md"
+    ],
+    "runtimeCases": 441,
+    "finalCases": 168,
+    "revision": "80b7721682d1d9df4392ada37764b042df1a33bc"
+  },
+  "publication": {
+    "sourceRevision": "80b7721682d1d9df4392ada37764b042df1a33bc",
+    "remoteConfirmed": "80b7721682d1d9df4392ada37764b042df1a33bc",
+    "normalHooks": 0,
+    "sourceRuns": []
+  },
+  "runner": {
+    "adoptedSource": "79f409f41d754830a9d3b8d9b1a67fdf1c2036fd",
+    "bothPeersConfirmed": true,
+    "callerFiltered": true,
+    "existingCommandsMeaning": "Unchanged",
+    "scope": "All this continuation suites are caller-filtered; eligible neutral files are not claimed executed. Framework executed files and pending/filtered tests are reported separately.",
+    "tooling": [
+      {
+        "file": "scripts/test-host-neutral.mjs",
+        "sha256": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d"
+      },
+      {
+        "file": "scripts/host-neutral-runtime.mjs",
+        "sha256": "d2e05593a81a5e018b9b086082af34710b305c6ab89d99f341775e6c360bd302"
+      },
+      {
+        "file": "scripts/host-neutral-test-policy.mjs",
+        "sha256": "cb8f1bd1d0e1c8b75a8bd13c6303491716143b854de648c5db05ddc40aa27d8b"
+      },
+      {
+        "file": "test/electron-transition-tests.json",
+        "sha256": "10de138ce2d0913a99e7648a0dc36a612aa2dd1780b708ede584782ab783d785"
+      },
+      {
+        "file": "test/setup-host-neutral-runtime.ts",
+        "sha256": "061c08a065a2a48be85a9b5e70e6e937a36cdafcbd947dab428a496ddf5d0317"
+      },
+      {
+        "file": "vitest.host-neutral.config.ts",
+        "sha256": "f008cd2fe70386c378182dba86370db19cf94b79e88ff9ca46be348244497e14"
+      }
+    ],
+    "runtimeArtifacts": [
+      {
+        "file": "src-tauri/resources/node/node",
+        "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+      },
+      {
+        "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+        "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+      },
+      {
+        "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+        "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+      }
+    ]
+  },
+  "sourceHashes": [
+    {
+      "file": "src/main/task-attachment-file-owner.ts",
+      "sha256": "28a7204ef582e2fff7352d05a42a99690b7c2dad8542ff4b1aea93b2a6689833"
+    },
+    {
+      "file": "src/main/task-attachment-file-owner.test.ts",
+      "sha256": "1f9113a972ac73b4e135caa3506015c723865315d33c7e6329d53d3248ff3ddb"
+    },
+    {
+      "file": "src/service/production-desktop-bindings.test.ts",
+      "sha256": "2dc2aa635275941d240d8ca4f8a5ea8a1441cc34550d70e8e157db7e418e4697"
+    },
+    {
+      "file": "src/service/production-owner.test.ts",
+      "sha256": "ccf771dcb0a15d5cd470f6eb7855cac3d051087bb122588ff233590c6138fa95"
+    },
+    {
+      "file": "src/service/task-attachment-backend.test.ts",
+      "sha256": "9b0027c84ecad7ea49ec3ba256f7d434cefa8dc9ba6d8f8bf18a30f5f007b92e"
+    },
+    {
+      "file": "docs/tauri-migration/native-attachment-journal.md",
+      "sha256": "130b848cdb95bfa4491228564b069cf61e27a3f66d3e558698f735a3dffd1df6"
+    },
+    {
+      "file": "docs/tauri-migration/native-attachment-execution.md",
+      "sha256": "e44719d8b6a1970cb759e89cd4e50aafb98210ca4a46eb96941734281e909f16"
+    },
+    {
+      "file": "docs/tauri-migration/native-attachment-directory-authority.md",
+      "sha256": "e33dae56fd1da3db98a765556f8342b64f6a7fad527abf020d9f95cc7a1a1ce0"
+    },
+    {
+      "file": "src/main/task-attachment-journal.ts",
+      "sha256": "e3f11451cd45d85939fc7f4faa160c71c718c1ec4946e5d8be69f9370ab5dd5e"
+    },
+    {
+      "file": "src/service/task-attachment-backend.ts",
+      "sha256": "4dba5aa890b751a6df6b191c3c9008d035d270f7f34b0ec3fa58e5e01244a4a0"
+    },
+    {
+      "file": "src/service/production-owner.ts",
+      "sha256": "34fc65185cfa214e7568f8425f7f40927ae42092b66f4f7e7e5c49b9e27e9a88"
+    },
+    {
+      "file": "src/service/production-desktop-bindings.ts",
+      "sha256": "e5ef6681a36e29fcfcd118e65a43a6e6c778cff2ad88ce05226d2293a62730cc"
+    },
+    {
+      "file": "scripts/attachment-journal-crash-proof.mjs",
+      "sha256": "a52d0338eec63d0df9b7d59ca23d17aba3350d1c6cd82cb37c4aa6259b8694d0"
+    },
+    {
+      "file": "scripts/test-host-neutral.mjs",
+      "sha256": "429e001c2cc87dbb44594282fd2abb7b3540ca55fe48f7e23ee8b2e7ed5fc85d"
+    }
+  ],
+  "artifactHashes": [
+    {
+      "file": "src-tauri/resources/node/node",
+      "sha256": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327"
+    },
+    {
+      "file": "src-tauri/resources/service/production-engine.mjs",
+      "sha256": "9f0f7f9dbf765ce325360f58a59dc499f3a67c31514593b4259fa0525877876c"
+    },
+    {
+      "file": "src-tauri/resources/service/production-stdio.mjs",
+      "sha256": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482"
+    },
+    {
+      "file": "src-tauri/resources/service/production-task-mcp.mjs",
+      "sha256": "204909046a269c83e3eb099aaac8879d32adfad766f95b9db50de3de7211abb0"
+    },
+    {
+      "file": "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json",
+      "sha256": "5401280652d25d20dafeaf965e7b07085b0ced896f92a39bc44b7a37272a4612"
+    },
+    {
+      "file": "src-tauri/resources/service/node_modules/better-sqlite3/prebuilds/linux-x64.node",
+      "sha256": "6fd4292c6c5f352436cd85c9e1cb286978efa43c20ae350973f83414ced9991d"
+    },
+    {
+      "file": "src-tauri/resources/service/node_modules/node-pty/build/Release/pty.node",
+      "sha256": "0934354174ea1bb78a6e1f89b4e9d48e4167bd470157508ef0ee0bd0fa4ad7f5"
+    }
+  ],
+  "localProofArtifactHashes": [
+    {
+      "file": "/tmp/e2-exact-unlink-negative-vitest.json",
+      "sha256": "0944d76263b7a41d8b338c70cddb13524cccb20da283e46a07faaf828a603f6c",
+      "bytes": 14434
+    },
+    {
+      "file": "/tmp/e2-exact-unlink-negative-receipt.json",
+      "sha256": "f0feedf07503fa34629e912ffa678be96398c848963f73ac78bb29dddc541049",
+      "bytes": 93524
+    },
+    {
+      "file": "/tmp/e2-exact-unlink-fixed-vitest.json",
+      "sha256": "c197b42716fb6b22f425e07413d3dfcd8035712798b8ef20064219a2ff7593b5",
+      "bytes": 14141
+    },
+    {
+      "file": "/tmp/e2-exact-unlink-fixed-receipt.json",
+      "sha256": "d5dbb7edb8bfd330450071d571c6e276764fa8d6015db1f7022b679957f75fce",
+      "bytes": 93524
+    },
+    {
+      "file": "/tmp/e2-directory-fd-first-gate-vitest.json",
+      "sha256": "237a263607705cdf748e1c113877a25411c49638e93fa8bcebc0bfff9c54ad4d",
+      "bytes": 176882
+    },
+    {
+      "file": "/tmp/e2-directory-fd-first-gate-receipt.json",
+      "sha256": "66fb466f1a3f2fcc73b8d174c2aebf0c5f505f17145db7019f67d06a7c7646bd",
+      "bytes": 94223
+    },
+    {
+      "file": "/tmp/e2-directory-fd-runtime-gate-vitest.json",
+      "sha256": "a06ce2aef160ae361bdaf58bdaa82407434c682b70c0b253aeea7db12086e23a",
+      "bytes": 177100
+    },
+    {
+      "file": "/tmp/e2-directory-fd-runtime-gate-receipt.json",
+      "sha256": "621d4a720ca5ffaae0c0b05c19a11c5f7ccb9c6f590e0121f2841f53201baeb0",
+      "bytes": 94223
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-vitest.json",
+      "sha256": "37b4b56e1d37b01e63c27ec52bfcc37eb77a4683ef8fd4b072cad7267d8fed3a",
+      "bytes": 67802
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-receipt.json",
+      "sha256": "c0d145aa0a639b1ab4e7d85dbbb3f72b7d7c78d7121d353205101ed9fdff75d0",
+      "bytes": 94223
+    },
+    {
+      "file": "/tmp/e2-directory-fd-owner-vitest.json",
+      "sha256": "1f6577e5e1bcf8c5237abf14f9c956c39db7206e7ba80e3aeab2e102ae1af15c",
+      "bytes": 12801
+    },
+    {
+      "file": "/tmp/e2-directory-fd-owner-receipt.json",
+      "sha256": "28b2435724e972569022cffd33f24bdbd9588016a10010220b397b5cab0154fb",
+      "bytes": 93461
+    },
+    {
+      "file": "/tmp/e2-directory-fd-profile-vitest.json",
+      "sha256": "ec982ec3cf90ca3f4e610b2279fed5983d97a5cc380f9fb805d37417d03691e2",
+      "bytes": 11029
+    },
+    {
+      "file": "/tmp/e2-directory-fd-profile-receipt.json",
+      "sha256": "3bfd7fce00f07f022c388f2c9cdef4072fbcce32b79460a464a38b6b20dbfd32",
+      "bytes": 94180
+    },
+    {
+      "file": "/tmp/e2-directory-fd-first-gate-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "/tmp/e2-directory-fd-first-gate-stage.log",
+      "sha256": "55460b89c31f8dd84cc8266382a23e6a00a9d21491d75d5b7323ae7d12f36cef",
+      "bytes": 380
+    },
+    {
+      "file": "/tmp/e2-directory-fd-first-gate-neutral.log",
+      "sha256": "880ab8280e333d6b7d7820d1693294f1d8376db4e9120b08463af4d210fe1bba",
+      "bytes": 1425
+    },
+    {
+      "file": "/tmp/e2-directory-fd-runtime-gate-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "/tmp/e2-directory-fd-runtime-gate-stage.log",
+      "sha256": "55460b89c31f8dd84cc8266382a23e6a00a9d21491d75d5b7323ae7d12f36cef",
+      "bytes": 380
+    },
+    {
+      "file": "/tmp/e2-directory-fd-runtime-gate-neutral.log",
+      "sha256": "545e6b7ddabd63b4f772ef688557c158c3380a85ea7a6dd7b665481f53569be6",
+      "bytes": 1375
+    },
+    {
+      "file": "/tmp/e2-directory-fd-runtime-gate-crash.log",
+      "sha256": "9bd41e406eebeffa821243d31938d85fd4d82acab2412fe8d635e7358ec38599",
+      "bytes": 453
+    },
+    {
+      "file": "/tmp/e2-directory-fd-runtime-gate-lint.log",
+      "sha256": "bb8ff413c0080fc59ec869dc9e6f1cf6626660b4dc385830268b4cd0518f9210",
+      "bytes": 16935
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-neutral.log",
+      "sha256": "0a7f0a9e86d898b7cedadfcad496d7768e5238907d6be601bd17e598f68171c6",
+      "bytes": 845
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-type.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-lint.log",
+      "sha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1",
+      "bytes": 16728
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-frontend.log",
+      "sha256": "8873566d1bedf8fbd160da1b7cdfecf476d61383678a24014a74cdc1d1af2399",
+      "bytes": 9738
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-diagnostic.log",
+      "sha256": "d5e14df2fdc28c36ed4a592e6e514bd63cc1d82f3fd1958ff8d74daacd9fe693",
+      "bytes": 498
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-inventory.log",
+      "sha256": "75066ea7702d50a5cb50d1c553f0ee20a814fd50dfcceb1e7d856e149c632848",
+      "bytes": 91
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-contracts.log",
+      "sha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b",
+      "bytes": 43
+    },
+    {
+      "file": "/tmp/e2-directory-fd-final-gate-diff.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "file": "/tmp/e2-directory-fd-frozen-inputs.json",
+      "sha256": "3937f382097988078f8830d6a8fd2db2716adfff576e85cc71002bc2fa282949",
+      "bytes": 963
+    },
+    {
+      "file": "/tmp/e2-directory-fd-source-commit-result.json",
+      "sha256": "8ed4d3c22f83dfdbef9a177ca50361fc54bcf651bbf0881e11481ea1ed184772",
+      "bytes": 579
+    },
+    {
+      "file": "/tmp/e2-directory-fd-source-commit.log",
+      "sha256": "e3afc2930eb0b2adfa4edb89af7377b7c303d2b1206872b3d385b27f2d4b29fc",
+      "bytes": 898
+    }
+  ],
+  "remainingLimits": [
+    "Linux proc-FD authority only; macOS/Windows protected read/copy/cleanup parity unavailable pending equivalent supported native directory authority.",
+    "Ancestor replacement controls do not establish complete hostile same-directory leaf rename/inode reuse immunity or all filesystem behaviours.",
+    "SIGKILL cases use actual schema/FileOwner children and staged Node/SQLite, not whole installed ProductionRoot or power-loss proof.",
+    "No filesystem/SQLite atomicity, automatic orphan collection, complete legacy-file inventory, installed native/all-platform or physical UI proof.",
+    "Native viewer/voice, final identity/scheme, packaged targets/Actions and live provider acceptance remain separate prerequisites; no public operation/grant added."
+  ],
+  "hostedCI": {
+    "status": "blocked",
+    "reason": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "sourceRuns": [],
+    "settingsEndpointsCalled": false,
+    "workflowDispatched": false
+  },
+  "acceptance": {
+    "wholeCriterionChecked": false,
+    "issuesClosed": false,
+    "umbrella202Unchanged": true
+  }
+}
