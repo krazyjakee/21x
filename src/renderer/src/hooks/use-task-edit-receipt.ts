@@ -1,44 +1,44 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef } from 'react'
 import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
 import { useProjectStore } from '@/stores/project-store'
 
 /** One mounted task editor owns each raw write, including an uncertain reply. */
 export function useTaskEditReceipt(taskId: string) {
-  const owner = useRef({ taskId, native: getDesktopHost().kind === 'tauri', scope: captureDesktopRead(), live: true, pending: false, review: false })
-  const currentId = useRef(taskId); currentId.current = taskId
-  const [busy, setBusy] = useState(false), [review, setReview] = useState(false), [failed, setFailed] = useState(false)
+  const identity = useMemo(() => ({ taskId, native: getDesktopHost().kind === 'tauri', scope: captureDesktopRead(), live: true, pending: false, review: false, failed: false }), [taskId])
+  const owner = useRef(identity); owner.current = identity
+  const [, repaint] = useReducer(value => value + 1, 0)
   useEffect(() => {
-    const captured = owner.current
+    const captured = identity
     captured.live = true
     let off = () => {}, offProject = () => {}
     const release = () => { off(); offProject(); window.removeEventListener('pagehide', withdraw) }
     const withdraw = () => {
       if (!captured.native || !captured.live || captured.review) return
-      captured.review = true; release(); setReview(true)
+      captured.review = true; release(); if (owner.current === captured) repaint()
     }
     const host = getDesktopHost()
     off = captured.native ? host.subscribeConnection(() => { if (!captured.scope.isCurrent()) withdraw() }) : () => {}
     offProject = useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) withdraw() })
     window.addEventListener('pagehide', withdraw)
     return () => { captured.live = false; release() }
-  }, [])
+  }, [identity])
   const current = () => {
-    const captured = owner.current
-    return captured.live && captured.taskId === currentId.current && !captured.review && (!captured.native || captured.scope.isCurrent())
+    const captured = identity
+    return captured.live && owner.current === captured && !captured.review && (!captured.native || captured.scope.isCurrent())
   }
   const run = async (write: () => void | Promise<void>, accepted?: () => void) => {
-    const captured = owner.current
+    const captured = identity
     if (!current() || captured.pending) return
-    captured.pending = true; setBusy(true); setFailed(false)
+    captured.pending = true; captured.failed = false; repaint()
     try {
       await write()
       if (!current()) throw new Error('Task editor was replaced.')
       accepted?.()
     } catch {
-      if (captured.live && captured.taskId === currentId.current) {
-        captured.review = captured.native; setReview(captured.review); setFailed(true)
+      if (captured.live && owner.current === captured) {
+        captured.review = captured.native; captured.failed = true; repaint()
       }
-    } finally { captured.pending = false; if (captured.live && captured.taskId === currentId.current) setBusy(false) }
+    } finally { captured.pending = false; if (captured.live && owner.current === captured) repaint() }
   }
-  return { run, current, admit: () => current() && !owner.current.pending, busy, review, blocked: busy || review, failed }
+  return { run, current, admit: () => current() && !identity.pending, busy: identity.pending, review: identity.review, blocked: identity.pending || identity.review, failed: identity.failed }
 }

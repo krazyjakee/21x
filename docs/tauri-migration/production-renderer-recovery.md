@@ -497,3 +497,37 @@ The TaskWorkspace fallback for title, description, lifecycle status and recurren
 Inline title and description editors keep their local text through pending replies and same-task canonical refreshes. A synchronous admission guard prevents Enter/blur, keyboard/button and submit/Escape races. Missing, foreign, refused or retired native receipts retain the draft and require the user to reopen and review the canonical task, without automatic retry or rollback. Status, recurrence flags, next-subtask choices and explicit skill-default changes own their asynchronous failures and use the same finite receipt guard; completion retains the existing feedback owner. Task replacement keys retire the old inline editors, and connection/project/pagehide retirement releases their listeners and fences late callbacks.
 
 These are renderer consumers of the existing retained `db:updateTask` operation. They add no Source operation, grant or native availability. Attachment full-array CAS and exact-ID removal semantics remain unchanged. Triage/start/resume/agent assignment and other task actions have separate lifecycle owners; this metadata slice does not establish their complete installed receipt/recovery behavior. Controlled typed-native UI regressions are separate from installed WebView/platform acceptance, which remains blocked while repository Actions is disabled.
+
+### Native manual session actions
+
+Native Triage sends one awaited canonical status mutation before one explicit
+session start. An uncertain start never rolls that accepted status back. Start,
+Resume, Triage and assignment share a synchronous view-owned lane; task,
+project, connection and pagehide retirement fence subsequent calls. An uncertain
+reply locks that view for explicit canonical review instead of replaying it.
+Unassignment joins a finite successful Stop before its field update. Handoff
+uses the manager-owned switch and read-only task reconciliation, without a second
+assignment write after success or failure. A known-ended Resume joins canonical
+task reconciliation and never starts a fresh session automatically.
+
+Start, Resume and Switch retain a local session identity across transcript and
+status copies. Their pending cleanup cannot end a replacement request/session,
+and an old connection reply cannot publish into the new connection. Stop also
+checks its finite success receipt and exact current session before clearing local
+state. Abort and approval refuse a finite false acknowledgement; approval still
+requires the existing exact request ID and hydrated transcript authority.
+Typed heartbeat/disconnect observations do not trigger AutoRun idle/triage work.
+This change does not establish every delayed AutoRun or send/completion lifetime.
+
+Native Fresh/Restart is explicitly unavailable before Stop, local session
+removal or runtime-field writes. The retained Source task codec refuses renderer
+`session_id` writes, and ordinary `startTask` has a selected-child policy that
+cannot substitute for exact-root Fresh. A finite Source restart owner/contract
+is separate #212 work. Electron retains its existing Fresh behavior.
+
+The regression graph uses actual renderer hooks, stores, typed native codecs and
+workspace controls with controlled native results. It proves local receipt and
+listener behavior, not installed WebView input, provider effects or complete
+crash recovery. No operation, grant, Source backend or native availability is
+added. Installed supported-platform acceptance remains blocked while repository
+Actions is disabled.

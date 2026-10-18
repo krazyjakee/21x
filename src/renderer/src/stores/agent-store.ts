@@ -16,7 +16,12 @@ import { recordAgentStatus } from '@/lib/activity/session-activity-adapter'
 export { SessionStatus }
 export type { AgentMessage }
 
+// Local request ownership survives transcript/status copies, but each explicit
+// initSession starts a new identity. This never crosses the desktop wire.
+export const SESSION_RECEIPT = Symbol('session-receipt')
+
 export interface TaskSession {
+  [SESSION_RECEIPT]?: object
   sessionId: string | null
   agentId: string
   taskId: string
@@ -399,6 +404,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const existing = state.sessions.get(taskId)
         return {
           sessions: new Map(state.sessions).set(taskId, {
+            [SESSION_RECEIPT]: {},
             sessionId,
             agentId,
             taskId,

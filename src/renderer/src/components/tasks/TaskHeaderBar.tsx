@@ -47,6 +47,7 @@ interface TaskHeaderBarProps {
   task: Task
   agent?: Agent | null
   agents?: Agent[]
+  agentActionDisabled?: boolean
   onAssignAgent?: (agentId: string | null) => void | Promise<void>
   action?: TaskPrimaryAction | null
   onAction?: () => void
@@ -76,6 +77,7 @@ export function TaskHeaderBar({
   task,
   agent,
   agents,
+  agentActionDisabled,
   onAssignAgent,
   action,
   onAction,
@@ -238,6 +240,7 @@ export function TaskHeaderBar({
           <div ref={agentMenuRef} className="relative">
             <button
               type="button"
+              disabled={agentActionDisabled}
               onClick={() => setAgentMenuOpen((open) => !open)}
               className="group inline-flex max-w-36 items-center gap-1.5 rounded-full border border-border/50 bg-card px-2 py-1 text-[11px] text-muted-foreground outline-none hover:border-border hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
               aria-label="Change agent"
@@ -254,6 +257,7 @@ export function TaskHeaderBar({
                 <button
                   type="button"
                   role="menuitemradio"
+                  disabled={agentActionDisabled}
                   aria-checked={!task.agent_id}
                   onClick={() => {
                     setAgentMenuOpen(false)
@@ -272,6 +276,7 @@ export function TaskHeaderBar({
                       key={a.id}
                       type="button"
                       role="menuitemradio"
+                      disabled={agentActionDisabled}
                       aria-checked={task.agent_id === a.id}
                       onClick={() => {
                         setAgentMenuOpen(false)

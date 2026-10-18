@@ -1,3 +1,5 @@
+import type { Task, Agent } from '@/types'
+import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { TauriDesktopApi } from '@/lib/tauri-desktop-transport'
 
@@ -55,7 +57,7 @@ beforeEach(async () => {
   f = await fixture()
 })
 afterEach(() => {
-  f.release(); vi.restoreAllMocks()
+  cleanup(); f.release(); vi.restoreAllMocks()
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: legacy })
 })
 
@@ -245,4 +247,166 @@ it('bounds an agent snapshot continuously crossed by accepted user edits without
   expect(f.calls('agent:getAll')).toBe(8); expect(f.calls('agent:update')).toBe(8)
   expect(f.useAgentStore.getState().isLoading).toBe(false)
   expect(f.useAgentStore.getState().error).toBeTruthy()
+})
+
+const emptyTranscript = (payload: Record<string, unknown>) => {
+  const page = payload.page as { mode: string; after: number }
+  return Promise.resolve({ version: 1, taskId: payload.taskId, mode: page.mode, after: page.after, parts: [], cursor: page.after, watermark: page.after, hasMore: false })
+}
+it.each(['start', 'resume', 'switchAgent'] as const)('keeps replacement session state when an old-connection %s receipt is withdrawn', async operation => {
+  const pending = held<unknown>(), boot = held<unknown>()
+  f.handlers.set(`agentSession:${operation}`, () => pending.promise)
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions(undefined))
+  let old!: Promise<unknown>
+  act(() => { old = (operation === 'start' ? result.current.start('agent-1', 'task-1') : operation === 'resume' ? result.current.resume('agent-1', 'task-1', 'persisted-session') : result.current.switchAgent('task-1', 'agent-1')).catch(error => error) })
+  await vi.waitFor(() => expect(f.calls(`agentSession:${operation}`)).toBe(1))
+  f.setBootstrap(() => boot.promise)
+  await act(async () => {
+    const reconnect = f.host.reconnect()
+    f.useAgentStore.getState().initSession('task-1', 'replacement-session', 'agent-2')
+    boot.resolve({ available: true, protocolVersion: 1, engineEpoch: 'engine-1' })
+    await reconnect; await old
+    pending.resolve({ sessionId: 'old-session' })
+  })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'replacement-session', agentId: 'agent-2', status: 'working' })
+})
+it('refuses a false Stop receipt without retiring the current session', async () => {
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  f.handlers.set('agentSession:stop', async () => ({ success: false }))
+  f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions('task-1'))
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.stop().catch(error => error) })
+  expect(outcome).toMatchObject({ code: 'INVALID_RESULT' })
+  expect(f.useAgentStore.getState().sessions.get('task-1')?.sessionId).toBe('session-1')
+})
+it.each(['new-session', ''])('does not end a newer same-task identity %j when an older Stop acknowledgement settles', async sessionId => {
+  const pending = held<unknown>(); f.handlers.set('agentSession:stop', () => pending.promise)
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions('task-1'))
+  const stopped = result.current.stop().catch(error => error)
+  await vi.waitFor(() => expect(f.calls('agentSession:stop')).toBe(1))
+  await act(async () => {
+    f.useAgentStore.getState().initSession('task-1', sessionId, 'agent-2')
+    pending.resolve({ success: true }); expect(await stopped).toMatchObject({ code: 'INVALID_RESULT' })
+  })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId, agentId: 'agent-2' })
+})
+
+it.each(['start', 'resume', 'switchAgent'] as const)('accepts the matching Source status identity before a %s acknowledgement', async operation => {
+  const pending = held<unknown>(); f.handlers.set(`agentSession:${operation}`, () => pending.promise)
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions(undefined))
+  let active!: Promise<unknown>
+  act(() => { active = operation === 'start' ? result.current.start('agent-1', 'task-1') : operation === 'resume' ? result.current.resume('agent-1', 'task-1', 'session-1') : result.current.switchAgent('task-1', 'agent-1') })
+  await vi.waitFor(() => expect(f.calls(`agentSession:${operation}`)).toBe(1))
+  await act(async () => { f.emit(f.status()); pending.resolve({ sessionId: 'session-1' }); await active })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'session-1', agentId: 'agent-1', status: 'working' })
+})
+it('clears only its exact old provisional session on disconnect without leaving phantom work', async () => {
+  const pending = held<unknown>(); f.handlers.set('agentSession:start', () => pending.promise)
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions(undefined))
+  let old!: Promise<unknown>
+  act(() => { old = result.current.start('agent-1', 'task-1').catch(error => error) })
+  await vi.waitFor(() => expect(f.calls('agentSession:start')).toBe(1))
+  await act(async () => { await f.host.reconnect(); await old; pending.resolve({ sessionId: 'late-session' }) })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: null, status: 'idle' })
+})
+it('does not clear a newer provisional request after an older failed start', async () => {
+  const pending = held<unknown>(); f.handlers.set('agentSession:start', () => pending.promise)
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions(undefined))
+  let old!: Promise<unknown>
+  act(() => { old = result.current.start('agent-1', 'task-1').catch(error => error) })
+  await vi.waitFor(() => expect(f.calls('agentSession:start')).toBe(1))
+  await act(async () => {
+    f.useAgentStore.getState().initSession('task-1', '', 'agent-1')
+    pending.resolve(undefined); await old
+  })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: '', status: 'working' })
+})
+
+it.each(['start', 'resume', 'switchAgent'] as const)('preserves %s request ownership across actual transcript hydration', async operation => {
+  const pending = held<unknown>(); f.handlers.set(`agentSession:${operation}`, () => pending.promise)
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions(undefined))
+  let active!: Promise<unknown>
+  act(() => { active = operation === 'start' ? result.current.start('agent-1', 'task-1') : operation === 'resume' ? result.current.resume('agent-1', 'task-1', 'session-1') : result.current.switchAgent('task-1', 'agent-1') })
+  const placeholder = f.useAgentStore.getState().sessions.get('task-1')
+  await act(async () => { await f.useAgentStore.getState().hydrateTranscript('task-1') })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).not.toBe(placeholder)
+  await act(async () => { pending.resolve({ sessionId: 'session-1' }); await active })
+  expect(f.useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: 'session-1', agentId: 'agent-1' })
+})
+it('does not replace a foreign live Source identity after provisional transcript hydration', async () => {
+  const pending = held<unknown>(); f.handlers.set('agentSession:start', () => pending.promise)
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions(undefined))
+  let active!: Promise<unknown>
+  act(() => { active = result.current.start('agent-1', 'task-1').catch(error => error) })
+  await act(async () => { await f.useAgentStore.getState().hydrateTranscript('task-1'); f.emit(f.status(1, { sessionId: 'foreign-session' })) })
+  let outcome: unknown
+  await act(async () => { pending.resolve({ sessionId: 'session-1' }); outcome = await active })
+  expect(outcome).toMatchObject({ code: 'INVALID_RESULT' })
+  expect(f.useAgentStore.getState().sessions.get('task-1')?.sessionId).toBe('foreign-session')
+})
+
+const autoTask = (extra: Partial<Task> = {}): Task => ({
+  id: 'task-1', title: 'Synthetic task', description: '', type: 'general', role: 'task', priority: 'medium', status: 'not_started', assignee: '',
+  source: 'manual', project_id: 'default', created_at: '2026-10-17T20:00:00.000Z', updated_at: '2026-10-17T20:00:00.000Z',
+  due_date: null, agent_id: null, external_id: null, source_id: null, session_id: null, snoozed_until: null,
+  resolution: null, feedback_comment: null, recurrence_parent_id: null, last_occurrence_at: null, next_occurrence_at: null,
+  heartbeat_last_check_at: null, heartbeat_next_check_at: null, parent_task_id: null,
+  is_recurring: false, heartbeat_enabled: false, auto_start_agent: false, auto_complete_without_review: false,
+  labels: [], attachments: [], repos: [], output_fields: [], skill_ids: null, feedback_rating: null,
+  recurrence_pattern: null, heartbeat_interval_minutes: null, complete_at_source: null, next_subtask_ids: [], sort_order: 0, ...extra
+} as Task)
+
+it('keeps an enabled native auto-run observation inert for a poll/disconnect heartbeat', async () => {
+  vi.useFakeTimers()
+  const task = autoTask(), selected = { ...agent(), config: { coding_agent: 'pi', model: 'synthetic/model' } } as Agent
+  f.handlers.set('db:updateTask', async () => autoTask({ status: 'triaging' } as Partial<Task>))
+  f.handlers.set('db:getTask', async () => task)
+  f.handlers.set('agentSession:start', async () => ({ sessionId: 'session-1' }))
+  const scheduler = (await import('./agent-scheduler-store')).useAgentSchedulerStore
+  const { useAgentAutoStart } = await import('@/hooks/use-agent-auto-start')
+  scheduler.getState().enable()
+  const input = { tasks: [task], agents: [selected], showToast: vi.fn() }
+  const view = renderHook(() => useAgentAutoStart(input))
+  let observed: unknown, afterHeartbeat: unknown
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+    expect(f.calls('db:updateTask')).toBe(1); expect(f.calls('agentSession:start')).toBe(1)
+    observed = f.useAgentStore.getState().sessions.get('task-1')
+    expect(observed).toMatchObject({ sessionId: 'session-1', status: 'working' })
+    await act(async () => {
+      f.emit(f.status(1, { status: 'idle', heartbeat: true, disconnected: true }))
+      afterHeartbeat = f.useAgentStore.getState().sessions.get('task-1')
+      await vi.advanceTimersByTimeAsync(600)
+    })
+    expect(afterHeartbeat).toBe(observed)
+    expect(f.calls('db:getTask')).toBe(0)
+    expect(f.calls('db:updateTask')).toBe(1); expect(f.calls('agentSession:start')).toBe(1)
+  } finally { view.unmount(); scheduler.getState().disable(); vi.useRealTimers() }
+})
+
+it.each(['abort', 'approve'] as const)('owns a finite false native %s acknowledgement as a refusal', async operation => {
+  f.handlers.set('agentSession:getTranscriptPage', emptyTranscript)
+  f.handlers.set(`agentSession:${operation}`, async () => ({ success: false }))
+  f.useAgentStore.getState().initSession('task-1', 'session-1', 'agent-1')
+  const { useAgentSessionActions } = await import('@/hooks/use-agent-session')
+  const { result } = renderHook(() => useAgentSessionActions('task-1'))
+  await act(async () => { f.emit(f.status()); await f.useAgentStore.getState().hydrateTranscript('task-1') })
+  let outcome: unknown
+  await act(async () => { outcome = await (operation === 'abort' ? result.current.abort() : result.current.approve(true, undefined, 'permission', 'request-1')).catch(error => error) })
+  expect(outcome).toMatchObject({ code: 'INVALID_RESULT' })
+  expect(f.calls(`agentSession:${operation}`)).toBe(1)
+  expect(f.useAgentStore.getState().sessions.get('task-1')?.sessionId).toBe('session-1')
 })

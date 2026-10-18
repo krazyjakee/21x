@@ -518,7 +518,7 @@
       "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskDetailView.tsx",
       "kind": "call",
-      "line": 93,
+      "line": 94,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -530,7 +530,7 @@
       "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskDetailView.tsx",
       "kind": "call",
-      "line": 94,
+      "line": 95,
       "path": [
         "shell",
         "openPath"
@@ -542,7 +542,7 @@
       "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 617,
+      "line": 663,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -554,7 +554,7 @@
       "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 618,
+      "line": 664,
       "path": [
         "shell",
         "openPath"
@@ -4274,7 +4274,7 @@
       "expression": "desktopApi?.agentSession?.getTranscriptSnapshot",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "access",
-      "line": 151,
+      "line": 156,
       "path": [
         "agentSession",
         "getTranscriptSnapshot"
@@ -4286,7 +4286,7 @@
       "expression": "desktopApi.agentSession.getTranscriptPage",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "call",
-      "line": 163,
+      "line": 168,
       "path": [
         "agentSession",
         "getTranscriptPage"
@@ -4298,7 +4298,7 @@
       "expression": "desktopApi?.agentSession?.getTranscriptDelta",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "access",
-      "line": 194,
+      "line": 199,
       "path": [
         "agentSession",
         "getTranscriptDelta"
@@ -4310,7 +4310,7 @@
       "expression": "desktopApi.agentSession.getTranscriptPage",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "call",
-      "line": 210,
+      "line": 215,
       "path": [
         "agentSession",
         "getTranscriptPage"

@@ -63,7 +63,7 @@ export function TaskPanelContent({ panelId, taskId, panelLayout = 'both' }: Task
 
   const handleAssignAgent = useCallback(
     async (tid: string, agentId: string | null) => {
-      await updateTask(tid, { agent_id: agentId })
+      if (!await updateTask(tid, { agent_id: agentId })) throw new Error('Task assignment could not be confirmed.')
     },
     [updateTask]
   )

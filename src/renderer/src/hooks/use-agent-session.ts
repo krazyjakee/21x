@@ -1,6 +1,32 @@
+import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
+import { ServiceProtocolError } from '@shared/service-protocol'
 import { useCallback, useEffect, useMemo } from 'react'
 import { agentSessionApi } from '@/lib/ipc-client'
-import { useAgentStore, SessionStatus } from '@/stores/agent-store'
+import { useAgentStore, SessionStatus, SESSION_RECEIPT } from '@/stores/agent-store'
+
+function captureSessionReceipt() {
+  const native = getDesktopHost().kind === 'tauri', scope = captureDesktopRead()
+  if (native) scope.assertCurrent()
+  let pending: object | undefined
+  return {
+    rememberPending(taskId: string) { pending = useAgentStore.getState().sessions.get(taskId)?.[SESSION_RECEIPT] },
+    native,
+    current: () => !native || scope.isCurrent(),
+    assertCurrent() { if (native) scope.assertCurrent() },
+    assertSuccess(result: { success: boolean }) { if (native) { scope.assertCurrent(); if (!result.success) throw new ServiceProtocolError('INVALID_RESULT') } },
+    assertSession(taskId: string, agentId: string, sessionId: string) {
+      if (!native) return
+      scope.assertCurrent()
+      const current = useAgentStore.getState().sessions.get(taskId)
+      const ownsPlaceholder = pending && current?.[SESSION_RECEIPT] === pending && current.sessionId === ''
+      if (!current || current.agentId !== agentId || !ownsPlaceholder && (!sessionId || current.sessionId !== sessionId)) throw new ServiceProtocolError('INVALID_RESULT')
+    },
+    ownsPending(taskId: string, agentId: string) {
+      const current = useAgentStore.getState().sessions.get(taskId)
+      return !native || !!pending && current?.[SESSION_RECEIPT] === pending && current.agentId === agentId && current.sessionId === ''
+    }
+  }
+}
 
 export type { AgentMessage } from '@/stores/agent-store'
 
@@ -84,10 +110,13 @@ export function useAgentSessionActions(taskId: string | undefined) {
 
   const start = useCallback(
     async (agentId: string, tId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => {
+      const receipt = captureSessionReceipt()
       // Pre-register so events arriving during start() are captured via taskId fallback
       initSession(tId, '', agentId)
+      receipt.rememberPending(tId)
       try {
         const result = await agentSessionApi.start(agentId, tId, workspaceDir, skipInitialPrompt)
+        receipt.assertSession(tId, agentId, result.sessionId)
         if (result.queued) {
           // A durable queue row is not a live session. Leave the task idle;
           // TaskWorkspace renders queue/retry state separately.
@@ -104,7 +133,7 @@ export function useAgentSessionActions(taskId: string | undefined) {
         // the panel on "Agent is starting..." forever — drop it and let the
         // user retry. The main process also surfaces the reason in the
         // transcript and as an error status (see requestSession).
-        endSession(tId)
+        if (receipt.ownsPending(tId, agentId)) endSession(tId)
         throw err
       }
     },
@@ -115,14 +144,17 @@ export function useAgentSessionActions(taskId: string | undefined) {
 
   const resume = useCallback(
     async (agentId: string, tId: string, ocSessionId: string) => {
+      const receipt = captureSessionReceipt()
       // NOTE: do NOT clear the message list here. The durable transcript
       // projection is hydrated into the view on mount; clearing would wipe that
       // full history, and the resume replay would only partially repopulate it.
       // The replay batch dedups against the hydrated messages (shared part ids),
       // so nothing is lost or duplicated by leaving them in place.
       initSession(tId, '', agentId)
+      receipt.rememberPending(tId)
       try {
         const result = await agentSessionApi.resume(agentId, tId, ocSessionId)
+        receipt.assertSession(tId, agentId, result.sessionId)
         if (result.ended) {
           // Session ended normally (task completed) — clean up the pre-registered session
           removeSession(tId)
@@ -133,7 +165,7 @@ export function useAgentSessionActions(taskId: string | undefined) {
       } catch (err) {
         // Resume failed — clear the pre-registered session so the panel
         // doesn't sit on the "starting" state (start() does the same).
-        endSession(tId)
+        if (receipt.ownsPending(tId, agentId)) endSession(tId)
         throw err
       }
     },
@@ -142,20 +174,23 @@ export function useAgentSessionActions(taskId: string | undefined) {
 
   const switchAgent = useCallback(
     async (tId: string, newAgentId: string) => {
+      const receipt = captureSessionReceipt()
       // Pre-register so events arriving during the switch are captured via
       // taskId fallback, same as start(). The main process stops the
       // outgoing agent's session and seeds the new one with a recap of the
       // existing transcript — nothing to clear here, the durable transcript
       // projection already reflects the prior conversation.
       initSession(tId, '', newAgentId)
+      receipt.rememberPending(tId)
       try {
         const { sessionId } = await agentSessionApi.switchAgent(tId, newAgentId)
+        receipt.assertSession(tId, newAgentId, sessionId)
         initSession(tId, sessionId, newAgentId)
         return sessionId
       } catch (err) {
         // The outgoing session was already stopped on the main side; without
         // this the panel would keep showing an agent that no longer exists.
-        endSession(tId)
+        if (receipt.ownsPending(tId, newAgentId)) endSession(tId)
         throw err
       }
     },
@@ -165,20 +200,30 @@ export function useAgentSessionActions(taskId: string | undefined) {
   const abort = useCallback(async () => {
     const currentSession = useAgentStore.getState().sessions.get(taskId!)
     if (!currentSession?.sessionId) return
-    await agentSessionApi.abort(currentSession.sessionId)
+    const receipt = captureSessionReceipt()
+    receipt.assertSuccess(await agentSessionApi.abort(currentSession.sessionId))
   }, [taskId])
 
   const stop = useCallback(async () => {
     if (!taskId) return
+    const receipt = captureSessionReceipt()
     const currentSession = useAgentStore.getState().sessions.get(taskId)
+    let stoppedSessionId = currentSession?.sessionId ?? null
     if (currentSession?.sessionId) {
       console.log('[use-agent-session] stop() called for session:', currentSession.sessionId)
-      await agentSessionApi.stop(currentSession.sessionId)
+      receipt.assertSuccess(await agentSessionApi.stop(currentSession.sessionId))
     } else {
       // Fallback: session mapping lost in renderer — ask the backend
       // to find and stop the session by taskId directly.
       console.log('[use-agent-session] stop() no sessionId, falling back to stopByTaskId:', taskId)
-      await agentSessionApi.stopByTaskId(taskId)
+      const result = await agentSessionApi.stopByTaskId(taskId)
+      receipt.assertSuccess(result); stoppedSessionId = result.sessionId
+    }
+    receipt.assertCurrent()
+    if (receipt.native) {
+      const current = useAgentStore.getState().sessions.get(taskId)
+      if (current?.sessionId && current.sessionId !== stoppedSessionId) throw new ServiceProtocolError('INVALID_RESULT')
+      if (current?.sessionId === '' && current !== currentSession && (!current[SESSION_RECEIPT] || current[SESSION_RECEIPT] !== currentSession?.[SESSION_RECEIPT])) throw new ServiceProtocolError('INVALID_RESULT')
     }
     endSession(taskId)
   }, [taskId, endSession])
@@ -224,7 +269,8 @@ export function useAgentSessionActions(taskId: string | undefined) {
     async (approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string) => {
       const currentSession = useAgentStore.getState().sessions.get(taskId!)
       if (!currentSession?.sessionId) throw new Error('No active session')
-      await agentSessionApi.approve(currentSession.sessionId, approved, message, responseType, requestId)
+      const receipt = captureSessionReceipt()
+      receipt.assertSuccess(await agentSessionApi.approve(currentSession.sessionId, approved, message, responseType, requestId))
     },
     [taskId]
   )

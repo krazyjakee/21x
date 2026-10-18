@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import type { DragEndEvent } from '@dnd-kit/core'
-import type { Task } from '@/types'
+import type { Agent, Task } from '@/types'
 import type { TauriDesktopApi } from '@/lib/tauri-desktop-transport'
 const drag = vi.hoisted(() => ({ end: undefined as ((event: DragEndEvent) => void) | undefined }))
 vi.mock('@dnd-kit/core', async original => ({ ...await original<typeof import('@dnd-kit/core')>(), DndContext: (props: { children: ReactNode; onDragEnd?: (event: DragEndEvent) => void }) => { drag.end = props.onDragEnd; return props.children } }))
@@ -28,6 +28,7 @@ const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => 
 const calls = (operation: string) => invoke.mock.calls.filter(([, args]) => args?.operation === operation)
 let host: ReturnType<typeof import('@/lib/native-desktop-host').createNativeDesktopHost>, release: () => void
 let Workspace: typeof import('./TaskWorkspace').TaskWorkspace
+let agents: typeof import('@/stores/agent-store').useAgentStore
 let tasks: typeof import('@/stores/task-store').useTaskStore
 const legacy = window.electronAPI
 const props = { agents: [], panelLayout: 'task-only' as const, onEdit: vi.fn(), onDelete: vi.fn(), onUpdateAttachments: vi.fn(), onUpdateOutputFields: vi.fn(), onCompleteTask: vi.fn(), onAssignAgent: vi.fn(), onNavigateToTask: vi.fn() }
@@ -39,6 +40,7 @@ beforeAll(async () => {
   host.setRehydrator(async () => {}); await host.reconnect()
   Workspace = (await import('./TaskWorkspace')).TaskWorkspace
   tasks = (await import('@/stores/task-store')).useTaskStore
+  agents = (await import('@/stores/agent-store')).useAgentStore
 })
 beforeEach(async () => {
   values.clear(); handlers.clear(); invoke.mockClear(); drag.end = undefined
@@ -46,9 +48,10 @@ beforeEach(async () => {
   handlers.set('db:updateTask', async payload => makeTask({ ...(payload.data as Partial<Task>), id: String(payload.id) }))
   handlers.set('agentSession:getTranscriptPage', async payload => { const page = payload.page as { mode: string; after: number }; return { version: 1, taskId: payload.taskId, mode: page.mode, after: page.after, parts: [], cursor: page.after, watermark: page.after, hasMore: false } })
   tasks.setState({ tasks: [], selectedTaskId: null })
+  agents.setState({ sessions: new Map(), agents: [], error: null })
   await host.reconnect()
 })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 afterAll(() => { release(); Object.defineProperty(window, 'electronAPI', { configurable: true, value: legacy }) })
 
 it('refuses an old parent read after the workspace changes to another child', async () => {
@@ -409,4 +412,194 @@ it.each(['title', 'description'] as const)('retains a pending %s draft when Esca
   await waitFor(() => expect(calls('db:updateTask')).toHaveLength(1))
   expect(input).toBeInTheDocument(); expect(input).toHaveValue(field === 'title' ? 'Preserved rename' : 'Preserved description')
   await act(async () => { write.resolve(makeTask()) })
+})
+
+const configuredAgent = (id = 'agent-1'): Agent => ({ id, name: `Synthetic ${id}`, server_url: 'http://localhost:4096', config: { coding_agent: 'pi', model: 'synthetic/model' }, is_default: id === 'agent-1', created_at: '2026-10-18', updated_at: '2026-10-18' } as Agent)
+const triageButton = () => screen.getAllByRole('button', { name: 'Triage' })[0]
+it('sends one triage status write before one explicit session start', async () => {
+  values.set('agentSession:start', { sessionId: 'triage-session' })
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask()} />)
+  fireEvent.click(triageButton())
+  await waitFor(() => expect(calls('agentSession:start')).toHaveLength(1))
+  expect(calls('db:updateTask')).toHaveLength(1)
+  expect(calls('db:updateTask')[0][1]?.payload).toEqual({ id: 'task-1', data: { status: 'triaging' } })
+})
+it('does not roll back an accepted triage status after an uncertain session start', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  handlers.set('agentSession:start', async () => { throw new Error('synthetic unavailable start') })
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask()} />)
+  fireEvent.click(triageButton())
+  await waitFor(() => expect(calls('agentSession:start')).toHaveLength(1)); await act(async () => {})
+  expect(calls('db:updateTask')).toHaveLength(1)
+  expect(calls('db:updateTask').every(([, args]) => (args?.payload as { data: { status: string } }).data.status === 'triaging')).toBe(true)
+  vi.restoreAllMocks()
+})
+it('does not replace assignment after a failed handoff', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  handlers.set('agentSession:switchAgent', async () => { throw new Error('synthetic unavailable handoff') })
+  const assign = vi.fn(async () => {})
+  render(<Workspace {...props} onAssignAgent={assign} agents={[configuredAgent(), configuredAgent('agent-2')]} task={makeTask({ agent_id: 'agent-1', session_id: 'original-session' })} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Change agent' }))
+  fireEvent.click(screen.getByTestId('header-agent-option-agent-2'))
+  await waitFor(() => expect(calls('agentSession:switchAgent')).toHaveLength(1)); await act(async () => {})
+  expect(assign).not.toHaveBeenCalled(); expect(calls('db:updateTask')).toHaveLength(0)
+  vi.restoreAllMocks()
+})
+it('joins the exact Stop receipt before unassigning the agent', async () => {
+  const stop = held<unknown>(); handlers.set('agentSession:stop', () => stop.promise)
+  const assign = vi.fn(async () => {})
+  agents.getState().initSession('task-1', 'session-owned', 'agent-1')
+  render(<Workspace {...props} onAssignAgent={assign} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'session-owned' })} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Change agent' }))
+  fireEvent.click(screen.getByTestId('header-agent-option-unassigned'))
+  await waitFor(() => expect(calls('agentSession:stop')).toHaveLength(1))
+  const beforeStop = assign.mock.calls.length
+  await act(async () => { stop.resolve({ success: true }) })
+  await waitFor(() => expect(assign).toHaveBeenCalledTimes(1))
+  expect(beforeStop).toBe(0)
+})
+
+it('admits one triage action across duplicate native controls while its status write is pending', async () => {
+  const write = held<unknown>(); handlers.set('db:updateTask', () => write.promise); values.set('agentSession:start', { sessionId: 'triage-session' })
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask()} />)
+  const controls = screen.getAllByRole('button', { name: 'Triage' })
+  act(() => { fireEvent.click(controls[0]); fireEvent.click(controls.at(-1)!) })
+  await waitFor(() => expect(calls('db:updateTask')).toHaveLength(1))
+  await act(async () => { write.resolve(makeTask({ status: 'triaging' } as Partial<Task>)) })
+  await waitFor(() => expect(calls('agentSession:start')).toHaveLength(1))
+  expect(calls('db:updateTask')).toHaveLength(1)
+})
+it('refuses triage session startup on a missing status receipt without replay', async () => {
+  handlers.set('db:updateTask', async () => undefined)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask()} />)
+  fireEvent.click(triageButton()); await screen.findByRole('alert')
+  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('db:updateTask')).toHaveLength(1)
+  await act(async () => { await host.reconnect() })
+  expect(calls('agentSession:start')).toHaveLength(0)
+})
+it.each(['project', 'pagehide', 'connection'] as const)('withdraws triage followups after %s retirement without rolling back accepted status', async reason => {
+  const write = held<unknown>(); handlers.set('db:updateTask', () => write.promise)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask()} />); fireEvent.click(triageButton())
+  await waitFor(() => expect(calls('db:updateTask')).toHaveLength(1))
+  if (reason === 'project') {
+    const projects = (await import('@/stores/project-store')).useProjectStore, initial = projects.getState().currentProjectId
+    act(() => { projects.setState({ currentProjectId: 'temporary-project' }); projects.setState({ currentProjectId: initial }) })
+  } else if (reason === 'pagehide') act(() => window.dispatchEvent(new Event('pagehide')))
+  else await act(async () => { await host.reconnect() })
+  await act(async () => { write.resolve(makeTask({ status: 'triaging' } as Partial<Task>)) })
+  await screen.findByRole('alert')
+  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('db:updateTask')).toHaveLength(1)
+})
+it('allows the replacement task action while retiring an old pending triage callback', async () => {
+  const write = held<unknown>()
+  handlers.set('db:updateTask', payload => payload.id === 'task-1' ? write.promise : Promise.resolve(makeTask({ id: String(payload.id), status: 'triaging' } as Partial<Task>)))
+  values.set('agentSession:start', { sessionId: 'replacement-triage' })
+  const view = render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask()} />)
+  fireEvent.click(triageButton()); await waitFor(() => expect(calls('db:updateTask')).toHaveLength(1))
+  view.rerender(<Workspace {...props} agents={[configuredAgent()]} task={makeTask({ id: 'task-next' })} />)
+  fireEvent.click(triageButton()); await waitFor(() => expect(calls('agentSession:start')).toHaveLength(1))
+  await act(async () => { write.resolve(makeTask({ status: 'triaging' } as Partial<Task>)) })
+  expect(calls('agentSession:start')[0][1]?.payload).toMatchObject({ taskId: 'task-next' })
+  expect(calls('agentSession:start')).toHaveLength(1); expect(screen.queryByRole('alert')).toBeNull()
+})
+it('joins canonical handoff readback without issuing a second assignment mutation', async () => {
+  const read = held<unknown>(); handlers.set('db:getTasks', () => read.promise)
+  values.set('agentSession:switchAgent', { sessionId: 'new-session' })
+  const assign = vi.fn(async () => {})
+  render(<Workspace {...props} onAssignAgent={assign} agents={[configuredAgent(), configuredAgent('agent-2')]} task={makeTask({ agent_id: 'agent-1', session_id: 'original-session' })} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Change agent' })); fireEvent.click(screen.getByTestId('header-agent-option-agent-2'))
+  await waitFor(() => expect(calls('db:getTasks')).toHaveLength(1))
+  expect(screen.getByRole('button', { name: 'Change agent' })).toBeDisabled(); expect(assign).not.toHaveBeenCalled()
+  await act(async () => { read.resolve([makeTask({ agent_id: 'agent-2', session_id: 'new-session' })]) })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Change agent' })).toBeEnabled())
+  expect(tasks.getState().tasks[0].agent_id).toBe('agent-2'); expect(assign).not.toHaveBeenCalled(); expect(calls('db:updateTask')).toHaveLength(0)
+})
+it('retains a refused handoff for review without retrying assignment or switching', async () => {
+  handlers.set('agentSession:switchAgent', async () => { throw new Error('synthetic refusal') })
+  const assign = vi.fn(async () => {})
+  render(<Workspace {...props} onAssignAgent={assign} agents={[configuredAgent(), configuredAgent('agent-2')]} task={makeTask({ agent_id: 'agent-1', session_id: 'original-session' })} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Change agent' })); fireEvent.click(screen.getByTestId('header-agent-option-agent-2'))
+  await screen.findByRole('alert'); expect(screen.getByRole('button', { name: 'Change agent' })).toBeDisabled()
+  await act(async () => { await host.reconnect() })
+  expect(calls('agentSession:switchAgent')).toHaveLength(1); expect(assign).not.toHaveBeenCalled(); expect(calls('db:getTasks')).toHaveLength(0)
+})
+it('does not unassign after a finite false Stop receipt', async () => {
+  values.set('agentSession:stop', { success: false }); const assign = vi.fn(async () => {})
+  agents.getState().initSession('task-1', 'session-owned', 'agent-1')
+  render(<Workspace {...props} onAssignAgent={assign} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'session-owned' })} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Change agent' })); fireEvent.click(screen.getByTestId('header-agent-option-unassigned'))
+  await screen.findByRole('alert'); expect(assign).not.toHaveBeenCalled()
+  expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('session-owned')
+})
+it('does not unassign a retired task after its old Stop acknowledgement', async () => {
+  const stop = held<unknown>(); handlers.set('agentSession:stop', () => stop.promise); const assign = vi.fn(async () => {})
+  agents.getState().initSession('task-1', 'session-owned', 'agent-1')
+  const view = render(<Workspace {...props} onAssignAgent={assign} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'session-owned' })} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Change agent' })); fireEvent.click(screen.getByTestId('header-agent-option-unassigned'))
+  await waitFor(() => expect(calls('agentSession:stop')).toHaveLength(1))
+  view.rerender(<Workspace {...props} onAssignAgent={assign} agents={[configuredAgent()]} task={makeTask({ id: 'task-next', agent_id: 'agent-1' })} />)
+  await act(async () => { stop.resolve({ success: true }) })
+  expect(assign).not.toHaveBeenCalled(); expect(screen.queryByRole('alert')).toBeNull()
+})
+it('refuses a native Fresh shortcut before Stop, session removal or runtime-field writes', async () => {
+  const { dispatchTaskShortcut, onShortcutFeedback, TaskShortcutAction } = await import('@/lib/keyboard-shortcuts')
+  const feedback = vi.fn(), off = onShortcutFeedback(feedback), update = vi.fn(async (id: string, data: Record<string, unknown>) => { await tasks.getState().updateTask(id, data) })
+  render(<Workspace {...props} onUpdateTask={update} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'retained-session' })} />)
+  await act(async () => {})
+  act(() => {
+    agents.setState({ sessions: new Map([['task-1', { taskId: 'task-1', agentId: 'agent-1', sessionId: null, status: 'idle', messages: [{ id: 'retained-message', role: 'assistant', content: 'Retained transcript', timestamp: new Date() }] }]]) } as Parameters<typeof agents.setState>[0])
+    dispatchTaskShortcut({ action: TaskShortcutAction.RUN, taskId: 'task-1' })
+  })
+  await act(async () => {})
+  expect(update).not.toHaveBeenCalled(); expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
+  expect(agents.getState().sessions.get('task-1')?.messages[0].content).toBe('Retained transcript')
+  expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('unavailable') }))
+  off()
+})
+it('keeps native incompatible-session Fresh UI unavailable', async () => {
+  const { IncompatibleSessionDialog } = await import('./IncompatibleSessionDialog')
+  const start = vi.fn(); render(<IncompatibleSessionDialog open onOpenChange={vi.fn()} onStartFresh={start} />)
+  expect(screen.queryByRole('button', { name: 'Start New Session' })).toBeNull()
+  expect(screen.getByText(/Starting a fresh session is unavailable/)).toBeInTheDocument(); expect(start).not.toHaveBeenCalled()
+})
+
+it('admits one explicit native Start across duplicate controls while retaining the pending action', async () => {
+  const start = held<unknown>(); handlers.set('agentSession:start', () => start.promise)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  const controls = screen.getAllByRole('button', { name: 'Start' })
+  act(() => { fireEvent.click(controls[0]); fireEvent.click(controls.at(-1)!) })
+  await waitFor(() => expect(calls('agentSession:start')).toHaveLength(1))
+  expect(screen.getByRole('button', { name: 'Change agent' })).toBeDisabled()
+  await act(async () => { start.resolve({ sessionId: 'started-session' }) })
+  expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('started-session')
+  expect(calls('db:updateTask')).toHaveLength(0)
+})
+it('retains an uncertain explicit native Start for review without replay', async () => {
+  handlers.set('agentSession:start', async () => undefined)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
+  fireEvent.click(screen.getAllByRole('button', { name: 'Start' })[0])
+  await screen.findByRole('alert'); expect(screen.queryByRole('button', { name: 'Start' })).toBeNull()
+  const { dispatchTaskShortcut, TaskShortcutAction } = await import('@/lib/keyboard-shortcuts')
+  act(() => dispatchTaskShortcut({ action: TaskShortcutAction.RUN, taskId: 'task-1' }))
+  expect(calls('agentSession:start')).toHaveLength(1)
+})
+it('joins canonical metadata after a known-ended native Resume without starting fresh', async () => {
+  const read = held<unknown>(); handlers.set('db:getTasks', () => read.promise)
+  values.set('agentSession:resume', { sessionId: '', ended: true })
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'retained-session' })} />)
+  fireEvent.click(screen.getAllByRole('button', { name: /^(Resume|Resume Session)$/ })[0])
+  await waitFor(() => expect(calls('db:getTasks')).toHaveLength(1))
+  expect(screen.getByRole('button', { name: 'Change agent' })).toBeDisabled()
+  await act(async () => { read.resolve([makeTask({ agent_id: 'agent-1', session_id: null })]) })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Change agent' })).toBeEnabled())
+  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('db:updateTask')).toHaveLength(0)
+  expect(tasks.getState().tasks[0].session_id).toBeNull()
+})
+it('requires review after an unconfirmed native Resume without an automatic fresh start', async () => {
+  handlers.set('agentSession:resume', async () => undefined)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'retained-session' })} />)
+  fireEvent.click(screen.getAllByRole('button', { name: /^(Resume|Resume Session)$/ })[0])
+  await screen.findByRole('alert')
+  expect(calls('agentSession:resume')).toHaveLength(1); expect(calls('agentSession:start')).toHaveLength(0)
+  expect(calls('db:getTasks')).toHaveLength(0); expect(calls('db:updateTask')).toHaveLength(0)
 })

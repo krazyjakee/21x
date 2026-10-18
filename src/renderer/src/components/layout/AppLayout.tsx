@@ -134,7 +134,7 @@ export function AppLayout() {
   }, [completeTask, selectedTaskId])
 
   const handleAssignAgent = useCallback(async (taskId: string, agentId: string | null) => {
-    await updateTask(taskId, { agent_id: agentId })
+    if (!await updateTask(taskId, { agent_id: agentId })) throw new Error('Task assignment could not be confirmed.')
   }, [updateTask])
   const handleUpdateTask = useCallback(async (taskId: string, data: Record<string, unknown>) => {
     if (!await updateTask(taskId, data as UpdateTaskDTO)) throw new Error('Task change could not be confirmed.')

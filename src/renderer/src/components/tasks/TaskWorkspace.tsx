@@ -1,3 +1,4 @@
+import { useTaskEditReceipt } from '@/hooks/use-task-edit-receipt'
 import { NativeAttachmentDropManaged, useNativeAttachmentDrop } from '@/hooks/use-native-attachment-drop'
 import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import { LayoutList, Send, Sparkles } from 'lucide-react'
@@ -61,7 +62,7 @@ interface TaskWorkspaceProps {
   onUpdateAttachments: (attachments: FileAttachment[], baseline?: FileAttachment[]) => void | Promise<void>
   onUpdateOutputFields: (fields: OutputField[]) => void
   onCompleteTask: (completeAtSource?: boolean) => void
-  onAssignAgent: (taskId: string, agentId: string | null) => void
+  onAssignAgent: (taskId: string, agentId: string | null) => void | Promise<void>
   onUpdateTask?: (taskId: string, data: Record<string, unknown>) => Promise<void>
   onNavigateToTask?: (taskId: string) => void
   /** When provided, each subtask shows an action to open it as a separate canvas window/panel. */
@@ -102,6 +103,8 @@ function TaskWorkspaceComponent({
   const isGroupMember = !!task?.group_id && !isGroupExecution
   const { start, resume, switchAgent, abort, stop, sendMessage, approve } = useAgentSessionActions(isGroupMember ? undefined : task?.id)
   const [groupProblem, setGroupProblem] = useState('')
+  const actionReceipt = useTaskEditReceipt(task?.id ?? '')
+  const actionBlocked = getDesktopHost().kind === 'tauri' && actionReceipt.blocked
   const groupRestricted = async () => { setGroupProblem('Review member tasks in the group. Group configuration is managed from the shared conversation.'); }
   // Narrow per-field selectors: the transcript (TaskTranscriptPane) owns the
   // messages subscription, so streamed deltas don't re-render this workspace.
@@ -307,6 +310,10 @@ function TaskWorkspaceComponent({
 
   const handleStartSession = useCallback(async () => {
     if (!task?.agent_id || startingRef.current || sessionId) return
+    if (getDesktopHost().kind === 'tauri') {
+      await actionReceipt.run(() => start(task.agent_id!, task.id).then(() => {}))
+      return
+    }
     startingRef.current = true
 
     try {
@@ -316,10 +323,18 @@ function TaskWorkspaceComponent({
     } finally {
       startingRef.current = false
     }
-  }, [task?.agent_id, task?.id, sessionId, start])
+  }, [task?.agent_id, task?.id, sessionId, start, actionReceipt])
 
   const handleResumeSession = useCallback(async () => {
     if (!task?.agent_id || !task?.session_id || startingRef.current || sessionId) return
+    if (getDesktopHost().kind === 'tauri') {
+      await actionReceipt.run(async () => {
+        const resumed = await resume(task.agent_id!, task.id, task.session_id!)
+        if (!actionReceipt.current()) throw new Error('Task view was replaced.')
+        if (!resumed) await rehydrateTaskDesktopState()
+      })
+      return
+    }
     startingRef.current = true
     try {
       await resume(task.agent_id, task.id, task.session_id)
@@ -330,11 +345,30 @@ function TaskWorkspaceComponent({
     } finally {
       startingRef.current = false
     }
-  }, [task?.agent_id, task?.id, task?.session_id, sessionId, resume, fetchTasks])
+  }, [task?.agent_id, task?.id, task?.session_id, sessionId, resume, fetchTasks, actionReceipt])
 
   const handleAssignAgent = useCallback(
-    (agentId: string | null) => {
+    async (agentId: string | null) => {
       if (!task) return
+      if (getDesktopHost().kind === 'tauri') {
+        await actionReceipt.run(async () => {
+          if (!agentId && sessionId) {
+            await stop()
+            if (!actionReceipt.current()) throw new Error('Task view was replaced.')
+            await onAssignAgent(task.id, null)
+            if (!actionReceipt.current()) throw new Error('Task view was replaced.')
+            removeSession(task.id)
+          } else if (agentId && task.agent_id && task.agent_id !== agentId && (sessionId || task.session_id)) {
+            await switchAgent(task.id, agentId)
+            if (!actionReceipt.current()) throw new Error('Task view was replaced.')
+            await rehydrateTaskDesktopState()
+            if (!actionReceipt.current()) throw new Error('Task view was replaced.')
+          } else {
+            await onAssignAgent(task.id, agentId)
+          }
+        })
+        return
+      }
 
       // Unassigning stops and removes the session entirely.
       if (!agentId && sessionId) {
@@ -358,7 +392,7 @@ function TaskWorkspaceComponent({
 
       onAssignAgent(task.id, agentId)
     },
-    [task, sessionId, stop, switchAgent, onAssignAgent, removeSession]
+    [task, sessionId, stop, switchAgent, onAssignAgent, removeSession, actionReceipt]
   )
 
   const handleTriage = useCallback(async () => {
@@ -366,6 +400,14 @@ function TaskWorkspaceComponent({
 
     const defaultAgent = agents.find((a) => a.is_default) || agents[0]
     if (!defaultAgent) return
+    if (getDesktopHost().kind === 'tauri') {
+      await actionReceipt.run(async () => {
+        const updated = await updateTaskInStore(task.id, { status: TaskStatus.Triaging })
+        if (!updated || !actionReceipt.current()) throw new Error('Task change could not be confirmed.')
+        await start(defaultAgent.id, task.id)
+      })
+      return
+    }
 
     try {
       await taskApi.update(task.id, { status: TaskStatus.Triaging })
@@ -376,7 +418,7 @@ function TaskWorkspaceComponent({
       await taskApi.update(task.id, { status: TaskStatus.NotStarted })
       updateTaskInStore(task.id, { status: TaskStatus.NotStarted })
     }
-  }, [task, agents, start, updateTaskInStore])
+  }, [task, agents, start, updateTaskInStore, actionReceipt])
 
   const handleAbort = useCallback(() => {
     if (sessionId) {
@@ -565,6 +607,10 @@ function TaskWorkspaceComponent({
 
   const handleStartFreshSession = useCallback(async () => {
     if (!task?.agent_id) return
+    if (getDesktopHost().kind === 'tauri') {
+      dispatchShortcutFeedback('Fresh-session restart is unavailable in this native build.', true)
+      return
+    }
     startingRef.current = true
     try {
       if (sessionId) {
@@ -687,13 +733,13 @@ function TaskWorkspaceComponent({
   // Triage uses the default agent (or the first agent in the list as a fallback).
   const triageAgent = !task.agent_id ? (agents.find((a) => a.is_default) || agents[0] || null) : null
   const triageAgentConfigured = isAgentConfigured(triageAgent)
-  const canResume = !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && !hasMessages
-  const canRestart = !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && hasMessages
+  const canResume = !actionBlocked && !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && !hasMessages
+  const canRestart = getDesktopHost().kind !== 'tauri' && !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && hasMessages
   const hasPendingRecovery = recoveryState !== null && ['queued', 'retrying', 'claimed', 'starting'].includes(recoveryState.state)
-  const canStart = !groupHistory && task.agent_id && assignedAgentConfigured && !task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE
+  const canStart = !actionBlocked && !groupHistory && task.agent_id && assignedAgentConfigured && !task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed
     && !hasPendingRecovery
-  const canTriage = !isGroupExecution && !task.agent_id && agents.length > 0 && triageAgentConfigured && sessionStatus === SessionStatus.IDLE
+  const canTriage = !actionBlocked && !isGroupExecution && !task.agent_id && agents.length > 0 && triageAgentConfigured && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed && task.status !== TaskStatus.Triaging
 
   let primaryAction: TaskPrimaryAction | null = null
@@ -740,6 +786,7 @@ function TaskWorkspaceComponent({
       onUpdateOutputFields={onUpdateOutputFields}
       onCompleteTask={handleCompleteTask}
       onAssignAgent={handleAssignAgent}
+      agentActionDisabled={actionBlocked}
       onUpdateRepos={repoSetup.handleUpdateRepos}
       onAddRepos={repoSetup.handleAddRepos}
       onUpdateSkillIds={handleUpdateSkillIds}
@@ -777,7 +824,7 @@ function TaskWorkspaceComponent({
       taskId={task.id}
       agentId={task.agent_id ?? undefined}
       onStop={handleAbort}
-      onRestart={groupHistory ? undefined : handleStartFreshSession}
+      onRestart={groupHistory || getDesktopHost().kind === 'tauri' ? undefined : handleStartFreshSession}
       onSend={groupHistory ? undefined : handleSend}
       onPickAttachments={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handlePickAttachments}
       onAddAttachmentPaths={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handleAddAttachmentPaths}
@@ -795,6 +842,7 @@ function TaskWorkspaceComponent({
     <>
       <div ref={dropRoot} className="ui-scale relative flex h-full min-h-0 flex-col bg-background">
         {!isGroupExecution && <TaskGroupHistoryNotice taskId={task.id} />}
+        {actionReceipt.failed && <p role="alert" className="shrink-0 px-4 py-2 text-sm text-destructive">Task action could not be confirmed. Reopen this task and review its current session before trying again.</p>}
         {groupProblem && <p role="alert" className="shrink-0 px-4 py-2 text-sm text-destructive">{groupProblem}</p>}
         {isGroupExecution ? <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-border p-3"><p className="min-w-0 flex-1 text-sm font-medium">{groupHistory ? 'Retained shared conversation' : 'Shared agent session'}</p><TaskStatusBadge status={task.status} />{primaryAction && handlePrimaryAction && <Button size="sm" onClick={handlePrimaryAction}>{primaryAction === TaskPrimaryAction.START ? 'Start group' : primaryAction === TaskPrimaryAction.RESUME ? 'Resume group' : 'Restart group'}</Button>}{!groupHistory && sessionStatus !== SessionStatus.IDLE && <Button size="sm" variant="outline" onClick={() => { void handleAbort() }}>Stop group</Button>}</header> : <TaskHeaderBar
           key={task.id}
@@ -802,6 +850,7 @@ function TaskWorkspaceComponent({
           agent={assignedAgent}
           agents={agents}
           onAssignAgent={handleAssignAgent}
+          agentActionDisabled={actionBlocked}
           action={primaryAction}
           onAction={handlePrimaryAction}
           onComplete={() => void handleCompleteTask()}

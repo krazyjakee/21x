@@ -1,3 +1,4 @@
+import { isAgentStatusHeartbeat } from '@shared/activity'
 import { useEffect, useRef, useCallback } from 'react'
 import { useAgentSchedulerStore } from '@/stores/agent-scheduler-store'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
@@ -303,7 +304,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
     if (!isEnabled) return
 
     const unsubscribe = onAgentStatus((event: AgentStatusEvent) => {
-      if (event.status !== SessionStatus.IDLE) return
+      if (isAgentStatusHeartbeat(event) || event.status !== SessionStatus.IDLE) return
 
       const agentId = event.agentId
       const taskId = event.taskId

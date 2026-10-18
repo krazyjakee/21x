@@ -33,7 +33,8 @@ interface TaskDetailViewProps {
   onUpdateAttachments: (attachments: FileAttachment[], baseline?: FileAttachment[]) => void | Promise<void>
   onUpdateOutputFields: (fields: OutputField[]) => void
   onCompleteTask: () => void
-  onAssignAgent: (agentId: string | null) => void
+  agentActionDisabled?: boolean
+  onAssignAgent: (agentId: string | null) => void | Promise<void>
   onUpdateRepos: (repos: string[]) => void
   onAddRepos: () => void
   onUpdateSkillIds?: (skillIds: string[] | null) => void | Promise<void>
@@ -72,7 +73,7 @@ interface TaskDetailViewProps {
   showPrimaryActions?: boolean
 }
 
-function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttachments, onUpdateOutputFields, onCompleteTask, onAssignAgent, onUpdateRepos, onAddRepos, onUpdateSkillIds, onAddSkills, onStartAgent, canStartAgent, onResumeAgent, canResumeAgent, onRestartAgent, canRestartAgent, onSnooze, onUnsnooze, onReassign, onTriage, canTriage, onEditAgent, onUpdateDescription, onUpdateAutoFlags, subtasks, siblingSubtasks, parentTask, onUpdateNextSubtaskIds, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks, displayMode = 'full', showOutputFields = true, showPrimaryActions = true }: TaskDetailViewProps) {
+function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttachments, onUpdateOutputFields, onCompleteTask, onAssignAgent, agentActionDisabled, onUpdateRepos, onAddRepos, onUpdateSkillIds, onAddSkills, onStartAgent, canStartAgent, onResumeAgent, canResumeAgent, onRestartAgent, canRestartAgent, onSnooze, onUnsnooze, onReassign, onTriage, canTriage, onEditAgent, onUpdateDescription, onUpdateAutoFlags, subtasks, siblingSubtasks, parentTask, onUpdateNextSubtaskIds, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks, displayMode = 'full', showOutputFields = true, showPrimaryActions = true }: TaskDetailViewProps) {
   // Per-field selectors — a selector-less useSkillStore() re-renders this
   // large view on every skill-store mutation.
   const skills = useSkillStore((s) => s.skills)
@@ -204,6 +205,7 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
                 <div className="flex items-center gap-2 flex-wrap">
                   <select
                     value={task.agent_id || ''}
+                    disabled={agentActionDisabled}
                     onChange={(e) => onAssignAgent(e.target.value || null)}
                     className="bg-transparent border border-border rounded px-2 py-1 text-sm cursor-pointer"
                   >
