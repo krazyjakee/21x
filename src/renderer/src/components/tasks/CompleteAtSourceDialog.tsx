@@ -17,6 +17,8 @@ export interface CompleteAtSourceDialogProps {
   sourceName: string
   /** True while one of the two completion paths runs. */
   isBusy?: boolean
+  /** Native receipt state; legacy dialogs retain the source choice. */
+  mode?: 'choice' | 'progress' | 'review'
   /** Complete the task in the external source, then locally. */
   onCompleteAtSource: () => void
   /** Complete the task locally only — the user updates the source. */
@@ -33,6 +35,7 @@ export function CompleteAtSourceDialog({
   taskTitle,
   sourceName,
   isBusy = false,
+  mode = 'choice',
   onCompleteAtSource,
   onCompleteManually,
   onCancel
@@ -41,16 +44,19 @@ export function CompleteAtSourceDialog({
     <AlertDialog open={isOpen} onOpenChange={(open) => !open && !isBusy && onCancel()}>
       <AlertDialogContent data-testid="complete-at-source-dialog">
         <AlertDialogHeader>
-          <AlertDialogTitle>Complete in {sourceName}?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {mode === 'choice' ? `Complete in ${sourceName}?` : mode === 'progress' ? 'Completing task' : 'Review task completion'}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            "{taskTitle}" came from {sourceName}. 21x can close it there for you, or you can
-            mark it complete here only and update {sourceName} yourself.
+            {mode === 'choice' ? <>"{taskTitle}" came from {sourceName}. 21x can close it there for you, or you can
+            mark it complete here only and update {sourceName} yourself.</> : mode === 'progress' ? <>Waiting for the accepted task state for "{taskTitle}".</> : <span role="alert">Completion could not be confirmed. Review the current task and source before taking another action. An accepted change may already have occurred.</span>}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="flex-col-reverse sm:flex-row sm:justify-end">
           <AlertDialogCancel disabled={isBusy} onClick={onCancel}>
-            Cancel
+            {mode === 'choice' ? 'Cancel' : 'Close'}
           </AlertDialogCancel>
+          {mode === 'choice' && <>
           <Button
             variant="outline"
             disabled={isBusy}
@@ -66,6 +72,7 @@ export function CompleteAtSourceDialog({
           >
             Complete at source
           </Button>
+          </>}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

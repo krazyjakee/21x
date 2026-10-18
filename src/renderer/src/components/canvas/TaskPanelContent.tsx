@@ -33,7 +33,7 @@ export function TaskPanelContent({ panelId, taskId, panelLayout = 'both' }: Task
   const openEditModal = useUIStore((s) => s.openEditModal)
   const openDeleteModal = useUIStore((s) => s.openDeleteModal)
   // Completion is server-confirmed through the shared hook (same for every source).
-  const { requestComplete, completionDialog } = useTaskCompletion()
+  const { requestComplete, completionDialog } = useTaskCompletion({ viewKey: `canvas:${panelId}:${taskId}` })
 
   const handleEdit = useCallback(() => {
     if (task) openEditModal(task.id)

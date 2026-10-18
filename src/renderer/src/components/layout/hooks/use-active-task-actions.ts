@@ -51,7 +51,7 @@ export function useActiveTaskActions({
   filteredTasksRef.current = tasks
 
   // Completion is server-confirmed through the shared hook (same for every source).
-  const { requestComplete, completionDialog } = useTaskCompletion({ onToast: showToast })
+  const { requestComplete, completionDialog } = useTaskCompletion({ onToast: showToast, viewKey: dashboardPreviewTaskId || selectedTaskId || 'dashboard' })
 
   const selectNextActiveTask = useCallback(
     (completedTaskId: string) => {

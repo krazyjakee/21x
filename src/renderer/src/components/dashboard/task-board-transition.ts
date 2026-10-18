@@ -1,3 +1,4 @@
+import { getDesktopHost } from '@/lib/desktop-api'
 import { TaskStatus } from '@/types'
 import type { Task, UpdateTaskDTO } from '@/types'
 import type { AgentTaskStartResult, QueuedAgentStart } from '@/types/electron'
@@ -33,6 +34,18 @@ export async function transitionTaskFromBoard(
       return { phase: 'queued', queuePosition: result.queuePosition }
     }
     return { phase: 'working' }
+  }
+
+  if (getDesktopHost().kind === 'tauri') {
+    if (task.role && task.role !== 'task') throw new Error('Ordinary task transitions are unavailable here.')
+    // The production lifecycle owner already withdraws execution under its
+    // task lock. A separate renderer Stop would create a second mutation.
+    if (status === TaskStatus.Completed) await deps.completeTask(task.id)
+    else {
+      const accepted = await deps.updateTask(task.id, { status }) as Partial<Task> | null | undefined
+      if (!accepted || accepted.id !== task.id || accepted.status !== status) throw new Error('Task transition was not confirmed. Review the current task before another action.')
+    }
+    return { phase: 'moved' }
   }
 
   const stopOwnedWork = async (): Promise<void> => {

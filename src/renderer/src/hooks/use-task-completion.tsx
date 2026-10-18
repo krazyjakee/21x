@@ -1,13 +1,18 @@
 import { CompleteAtSourceDialog } from '@/components/tasks/CompleteAtSourceDialog'
 import { getTaskCompletionAction, getTaskSourceName } from '@shared/task-completion'
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { getDesktopHost } from '@/lib/desktop-api'
+import { useProjectStore } from '@/stores/project-store'
+import { useTaskEditReceipt } from './use-task-edit-receipt'
 import { useTaskSourceStore } from '@/stores/task-source-store'
-import { useTaskStore } from '@/stores/task-store'
+import { rehydrateTaskDesktopState, useTaskStore } from '@/stores/task-store'
 import { TaskStatus } from '@/types'
 import type { Task } from '@/types'
 
 export interface UseTaskCompletionOptions {
   onToast?: (message: string, isError?: boolean) => void
+  /** The mounted task view, distinct from the task chosen from a board. */
+  viewKey?: string
 }
 export interface CompleteTaskRequestOptions {
   completeAtSource?: boolean
@@ -16,7 +21,13 @@ export interface CompleteTaskRequestOptions {
 }
 
 /** Ask before a source write; a manual completion changes only the local task. */
-export function useTaskCompletion({ onToast }: UseTaskCompletionOptions = {}) {
+export function useTaskCompletion(options: UseTaskCompletionOptions = {}) {
+  // Both hooks remain unconditional; host installation precedes the renderer.
+  const native = useNativeTaskCompletion(options)
+  const legacy = useLegacyTaskCompletion(options)
+  return getDesktopHost().kind === 'tauri' ? native : legacy
+}
+function useLegacyTaskCompletion({ onToast }: UseTaskCompletionOptions) {
   const [pending, setPending] = useState<{ taskId: string; options?: CompleteTaskRequestOptions } | null>(null)
   const [isBusy, setIsBusy] = useState(false)
   const sources = useTaskSourceStore(s => s.sources)
@@ -73,6 +84,101 @@ export function useTaskCompletion({ onToast }: UseTaskCompletionOptions = {}) {
     onCompleteAtSource={() => void requestComplete(pending.taskId, { ...pending.options, completeAtSource: true })}
     onCompleteManually={() => void requestComplete(pending.taskId, { ...pending.options, completeAtSource: false })}
     onCancel={() => setPending(null)}
+  /> : null
+  return { requestComplete, completionDialog }
+}
+
+function completionBinding(task: Task): string {
+  return JSON.stringify([task.id, task.project_id, task.role ?? 'task', task.source_id, task.external_id, task.source, task.agent_id, task.output_fields])
+}
+interface NativeCompletionIntent {
+  task: Task
+  binding: string
+  options?: CompleteTaskRequestOptions
+  current: () => boolean
+  retained: () => boolean
+  phase: 'choice' | 'progress' | 'review'
+}
+function useNativeTaskCompletion({ onToast, viewKey }: UseTaskCompletionOptions) {
+  const projectId = useProjectStore(s => s.currentProjectId)
+  const selectedTaskId = useTaskStore(s => s.selectedTaskId)
+  const receipt = useTaskEditReceipt(`completion:${projectId}:${viewKey ?? selectedTaskId ?? 'dashboard'}`)
+  const owner = useRef<NativeCompletionIntent | null>(null)
+  const [visible, setVisible] = useState<NativeCompletionIntent | null>(null)
+  const sources = useTaskSourceStore(s => s.sources)
+  const assertIntent = (intent: NativeCompletionIntent) => {
+    const current = useTaskStore.getState().tasks.find(row => row.id === intent.task.id)
+    if (owner.current !== intent || !intent.current() || !current || completionBinding(current) !== intent.binding) {
+      throw new Error('Review the task before completing it.')
+    }
+  }
+  const acceptTask = (intent: NativeCompletionIntent, task: Task | null | undefined, status?: TaskStatus) => {
+    assertIntent(intent)
+    if (!task || completionBinding(task) !== intent.binding || status && task.status !== status) throw new Error('Task completion was not confirmed.')
+    return task
+  }
+  const execute = async (intent: NativeCompletionIntent, completeAtSource: boolean) => {
+    if (owner.current !== intent || intent.phase !== 'choice' || !intent.current() || !receipt.admit()) return
+    intent.phase = 'progress'; setVisible({ ...intent })
+    await receipt.run(async () => {
+      try {
+        assertIntent(intent)
+        if (intent.task.project_id !== useProjectStore.getState().currentProjectId || intent.task.role && intent.task.role !== 'task') throw new Error('Ordinary task completion is unavailable here.')
+        await intent.options?.beforeComplete?.()
+        assertIntent(intent)
+        if (intent.task.status === TaskStatus.AgentLearning) {
+          acceptTask(intent, await useTaskStore.getState().updateTask(intent.task.id, { status: TaskStatus.ReadyForReview }), TaskStatus.ReadyForReview)
+        }
+        let completed: Task
+        if (!intent.task.source_id || !completeAtSource) {
+          completed = acceptTask(intent, await useTaskStore.getState().updateTask(intent.task.id, { status: TaskStatus.Completed, ...(intent.task.source_id ? { complete_at_source: false } : {}) }), TaskStatus.Completed)
+        } else {
+          acceptTask(intent, await useTaskStore.getState().updateTask(intent.task.id, { complete_at_source: true }))
+          assertIntent(intent)
+          const action = getTaskCompletionAction(intent.task.output_fields)
+          const result = await useTaskSourceStore.getState().executeAction(action, intent.task.id, intent.task.source_id)
+          assertIntent(intent)
+          if (result.success !== true) throw new Error('Source completion was not confirmed.')
+          await rehydrateTaskDesktopState()
+          completed = acceptTask(intent, useTaskStore.getState().tasks.find(row => row.id === intent.task.id), TaskStatus.Completed)
+        }
+        assertIntent(intent)
+        intent.options?.onCompleted?.(completed)
+        // Selection callbacks may retire this view. They already received the
+        // canonical receipt; do not publish into a replacement view afterward.
+        if (intent.current()) onToast?.(`"${completed.title}" completed`)
+        if (owner.current === intent) { owner.current = null; if (intent.retained()) setVisible(null) }
+      } catch (error) {
+        intent.phase = 'review'
+        if (owner.current === intent && intent.retained()) setVisible({ ...intent })
+        throw error
+      }
+    })
+  }
+  const requestComplete = async (taskId: string, options?: CompleteTaskRequestOptions) => {
+    const previous = owner.current
+    if (previous && previous.retained()) { setVisible({ ...previous }); return }
+    if (!receipt.admit()) return
+    const task = useTaskStore.getState().tasks.find(row => row.id === taskId)
+    if (!task) return
+    const intent: NativeCompletionIntent = { task: structuredClone(task), binding: completionBinding(task), options, current: receipt.current, retained: receipt.retained, phase: 'choice' }
+    owner.current = intent; setVisible({ ...intent })
+    if (!task.source_id || options?.completeAtSource !== undefined || task.role && task.role !== 'task' || task.project_id !== projectId) await execute(intent, options?.completeAtSource === true)
+  }
+  const intent = owner.current
+  const completionDialog = visible && intent && intent.retained() ? <CompleteAtSourceDialog
+    isOpen={true}
+    taskTitle={intent.task.title}
+    sourceName={getTaskSourceName(intent.task, sources.find(source => source.id === intent.task.source_id)?.name)}
+    mode={intent.phase}
+    isBusy={receipt.busy}
+    onCompleteAtSource={() => void execute(intent, true)}
+    onCompleteManually={() => void execute(intent, false)}
+    onCancel={() => {
+      if (intent.phase === 'progress') return
+      if (intent.phase === 'choice') owner.current = null
+      setVisible(null)
+    }}
   /> : null
   return { requestComplete, completionDialog }
 }

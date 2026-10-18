@@ -4,7 +4,7 @@ import { useProjectStore } from '@/stores/project-store'
 
 /** One mounted task editor owns each raw write, including an uncertain reply. */
 export function useTaskEditReceipt(taskId: string) {
-  const identity = useMemo(() => ({ taskId, native: getDesktopHost().kind === 'tauri', scope: captureDesktopRead(), live: true, pending: false, review: false, failed: false }), [taskId])
+  const identity = useMemo(() => ({ taskId, native: getDesktopHost().kind === 'tauri', scope: captureDesktopRead(), live: true, retired: false, pending: false, review: false, failed: false }), [taskId])
   const owner = useRef(identity); owner.current = identity
   const [, repaint] = useReducer(value => value + 1, 0)
   useEffect(() => {
@@ -13,15 +13,16 @@ export function useTaskEditReceipt(taskId: string) {
     let off = () => {}, offProject = () => {}
     const release = () => { off(); offProject(); window.removeEventListener('pagehide', withdraw) }
     const withdraw = () => {
-      if (!captured.native || !captured.live || captured.review) return
-      captured.review = true; release(); if (owner.current === captured) repaint()
+      if (!captured.native || !captured.live || captured.retired) return
+      captured.retired = true; captured.review = true; release(); if (owner.current === captured) repaint()
     }
     const host = getDesktopHost()
     off = captured.native ? host.subscribeConnection(() => { if (!captured.scope.isCurrent()) withdraw() }) : () => {}
-    offProject = useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) withdraw() })
+    offProject = captured.native ? useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) withdraw() }) : () => {}
     window.addEventListener('pagehide', withdraw)
     return () => { captured.live = false; release() }
   }, [identity])
+  const retained = () => identity.live && owner.current === identity && !identity.retired && (!identity.native || identity.scope.isCurrent())
   const current = () => {
     const captured = identity
     return captured.live && owner.current === captured && !captured.review && (!captured.native || captured.scope.isCurrent())
@@ -46,5 +47,5 @@ export function useTaskEditReceipt(taskId: string) {
     if (!current() || identity.pending) return
     try { await perform(write, accepted) } catch { /* This owner publishes the fixed review state. */ }
   }
-  return { run, perform, current, admit: () => current() && !identity.pending, busy: identity.pending, review: identity.review, blocked: identity.pending || identity.review, failed: identity.failed }
+  return { run, perform, current, retained, admit: () => current() && !identity.pending, busy: identity.pending, review: identity.review, blocked: identity.pending || identity.review, failed: identity.failed }
 }

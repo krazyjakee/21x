@@ -600,6 +600,47 @@ These controls establish renderer receipt ownership, not atomic Source deletion
 or filesystem authority. E2 separately reproduced DatabaseManager whole-task recursive attachment cleanup
 deleting an outside synthetic canary after an attachment-root rename/symlink
 (on3b215ebd/43016075). Current journal/CAS/exact-ID removal work does not certify
-that path. A private Source retention-policy repair is owned separately by E2;
-this renderer slice establishes no recursive cleanup authority. Installed native
-input and platform acceptance remain open.
+that path. E2's private Source retention policy (`956c5d07`, evidence `d928a12d`) now
+retains protected directories and journal facts during logical task/subtree/source
+deletion. A separately restaged integration run passed161 Source/compiled Root,
+private-peer and native CRUD cases with zero skips (evidence
+`issue-209-task-deletion-retention-integration-20261018.json`). This establishes
+no recursive cleanup authority, atomic filesystem/SQLite deletion or reclaimed
+space. Installed native input and platform acceptance remain open.
+
+
+### Native completion receipts
+
+Native completion captures the original task, project, agent, Source/external
+binding, completion action and mounted view. One synchronous lane owns the
+choice and raw operations through completion or review. A Source choice uses
+that captured intent; it cannot be retargeted by replacing the observed task.
+Project withdrawal and return, pagehide, unmount, view replacement and reconnect
+fence later writes/actions/readback callbacks. Already admitted Source work
+cannot be undone by disposing a view.
+
+Manual completion requires the accepted canonical completed row. Source
+completion requires its accepted local marker, finite successful action and
+strict canonical completed readback. A refused or uncertain step publishes
+fixed review wording without exposing private errors, manufacturing a completed
+row, reverting an accepted marker or replaying the action. Closing review does
+not readmit that same view's intent. Successful callbacks receive the canonical
+row, including authoritative changes to its title. Native coordinator rows
+cannot use ordinary completion.
+
+Native board completion routes through this same completion owner. Other board
+status moves require a canonical destination row from the existing lifecycle
+owner; the renderer no longer performs an extra recovery read/Stop before that
+owner's locked transition. Electron keeps its established completion and board
+orchestration. This is not full board drag/view receipt acceptance or a new
+exact-root Fresh operation. Feedback/learning submission, delayed AutoRun and
+installed supported-platform interaction remain separate work.
+
+Twenty-six actual typed-facade completion/board controls reproduce and repair
+15 published-hook failures. The complete host-neutral renderer gate passed
+2101/159files; affected UI/Source/staged/private-peer gate passed542/18files,
+both with zero skips. The latter independently exercises actual production
+feedback and protected task deletion owners; the new UI hook harness uses
+controlled canonical task/action receipts and does not establish remote Source
+mutation or installed UI delivery. Evidence:
+`issue-209-native-task-completion-local-20261018.json`.
