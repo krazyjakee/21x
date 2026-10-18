@@ -9,17 +9,10 @@ import type { Artifact, ArtifactContent, PullRequestDetails } from '@shared/arti
 import type { VoiceCapabilities } from '@shared/voice'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 
-const MOBILE_API_PORT = '20620'
-// When served via a reverse proxy (Cloudflare tunnel, https with no explicit port),
-// use relative URLs — the proxy handles the port mapping.
-const isBehindProxy =
-  typeof window !== 'undefined' &&
-  window.location.protocol === 'https:' &&
-  !window.location.port
-const BASE =
-  typeof window !== 'undefined' && !isBehindProxy && window.location.port !== MOBILE_API_PORT
-    ? `http://${window.location.hostname}:${MOBILE_API_PORT}`
-    : ''
+// Development Vite is separate from the server. Packaged/served web clients
+// retain their exact HTTP(S) origin, including explicitly configured ports.
+const BASE = import.meta.env.DEV && typeof window !== 'undefined' && window.location.port !== '20620'
+  ? `${window.location.protocol}//${window.location.hostname}:20620` : ''
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}

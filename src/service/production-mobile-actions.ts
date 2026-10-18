@@ -1,0 +1,61 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+import type { MobileTaskActions } from '../main/mobile-api-server'
+import type { CreateTaskData, UpdateTaskData } from '../main/database/types'
+import { TaskLifecycleBackend, type TaskLifecycleBackendOptions } from './task-lifecycle-backend'
+import { TASK_LIFECYCLE_CODECS, type TaskLifecycleOperation } from '../shared/task-lifecycle-codecs'
+import { getTaskCompletionAction } from '../shared/task-completion'
+import { ServiceProtocolError } from '../shared/service-protocol'
+import type { DesktopCallerContext } from './transport/desktop-registry'
+
+/** Private HTTP adapter, never a desktop grant or a second domain owner.
+ * The server captures paired authentication; every delegated reference/effect
+ * rechecks that exact request. Only these finite route methods are exposed. */
+export class ProductionMobileActions implements MobileTaskActions {
+  private readonly context = new AsyncLocalStorage<() => void>()
+  private readonly backend: TaskLifecycleBackend
+  private readonly caller: DesktopCallerContext
+  constructor(private readonly options: Pick<TaskLifecycleBackendOptions,
+    'database' | 'manager' | 'sync' | 'registry' | 'recurrence' | 'heartbeat' | 'automation' | 'engineEpoch' | 'emit' | 'assertAvailable' | 'onFatalEvent'>) {
+    this.caller = Object.freeze({ principal: 'trusted-desktop-main', engineEpoch: options.engineEpoch })
+    const check = (): boolean => { this.current(); return true }
+    this.backend = new TaskLifecycleBackend({ ...options,
+      assertAvailable: () => { options.assertAvailable(); if (this.context.getStore()) this.current() },
+      isTrustedDesktop: caller => caller === this.caller && check(),
+      canAccessTask: check, canAccessProject: check, canAccessAgent: check, canAccessSource: check,
+      canUseSourcePlugin: check, canAccessMcpServer: check, canAccessConnector: check })
+  }
+  shutdown(): void { this.backend.shutdown() }
+  close(): Promise<void> { return this.backend.close() }
+  private current(): void {
+    const guard = this.context.getStore()
+    if (!guard) throw new ServiceProtocolError('INVALID_REQUEST')
+    guard()
+  }
+  private run(operation: TaskLifecycleOperation, args: unknown[], guard: () => void): Promise<unknown> {
+    return this.context.run(guard, async () => {
+      guard()
+      const codec = TASK_LIFECYCLE_CODECS[operation]
+      const result = await this.backend.registry.invoke(operation, codec.encodeArguments(args as never), this.caller, new AbortController().signal)
+      if (!codec.validateWireResult(result)) throw new ServiceProtocolError('INVALID_RESULT')
+      const value = result as { defined: boolean; value?: import('../shared/service-protocol').JsonValue }
+      return codec.decodeResult(value.defined ? value.value : undefined)
+    })
+  }
+  create(data: CreateTaskData, guard: () => void): Promise<unknown> { return this.run('db:createTask', [data], guard) }
+  update(id: string, data: UpdateTaskData, guard: () => void): Promise<unknown> { return this.run('db:updateTask', [id, data], guard) }
+  async reorder(id: string, ids: string[], guard: () => void): Promise<unknown> {
+    await this.run('db:reorderSubtasks', [id, ids], guard)
+    return { success: true }
+  }
+  async complete(id: string, atSource: boolean, guard: () => void): Promise<unknown> {
+    guard()
+    const task = this.options.database.getTask(id)
+    if (!task) throw new ServiceProtocolError('INVALID_REQUEST')
+    if (task.source_id && atSource) {
+      const result = await this.run('plugin:executeAction', [getTaskCompletionAction(task.output_fields), id, task.source_id], guard) as { success: boolean }
+      return { completed: result.success, status: this.options.database.getTask(id)?.status }
+    }
+    await this.update(id, { status: 'completed', ...(task.source_id ? { complete_at_source: false } : {}) }, guard)
+    return { completed: true, status: this.options.database.getTask(id)?.status }
+  }
+}

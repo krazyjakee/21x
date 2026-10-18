@@ -22,6 +22,7 @@ import { GitProviderProcessOwner, type GitProviderProcessOwnerOptions } from '..
 import { ProductionVoiceActionOwner, type VoiceActionAuthority } from './production-voice-actions'
 import { createProductionVoiceOwner, type ProductionVoiceOwner, type ProductionVoiceResources } from './production-voice-owner'
 import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobileAccessSettings, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, type MobileApiDeps } from '../main/mobile-api-server'
+import { ProductionMobileActions } from './production-mobile-actions'
 import { TunnelManagerCore } from '../main/tunnel-manager-core'
 import SQLite from 'better-sqlite3'
 import { createRequire } from 'node:module'
@@ -1101,7 +1102,15 @@ export class ProductionOwner {
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)
       if (!isAbsolute(distRoot) || actual !== distRoot || !location || location.startsWith('..') || isAbsolute(location) || lstatSync(distRoot).isSymbolicLink() || !lstatSync(join(distRoot, 'index.html')).isFile() || lstatSync(join(distRoot, 'index.html')).isSymbolicLink() ||
         port !== undefined && (!Number.isSafeInteger(port) || port < 0 || port > 65535)) throw new ProductionOwnerError('MOBILE_RESOURCES_UNAVAILABLE')
-      const deps = Object.freeze({ db, agentManager: agents, githubManager: github, gitlabManager: gitlab, forgejoManager: forgejo, syncManager: sync, pluginRegistry: registry, mobileDistRoot: actual, taskOwners: Object.freeze({ recurrence, heartbeat, automation }) })
+      const taskActions = new ProductionMobileActions({ database: db, manager: agents, sync, registry, recurrence, heartbeat, automation, engineEpoch: this.epoch,
+        assertAvailable: () => {
+          if (this.abort.signal.aborted || !['starting', 'ready'].includes(this.phase) || processRegistry[registryKey] !== this.identity || this.services?.db !== db) throw new ProductionOwnerError('OWNER_CLOSING')
+          this.lock!.assertHeld()
+        },
+        emit: (channel, data) => this.emit(channel, data),
+        onFatalEvent: () => { void this.close().catch(() => {}) } })
+      this.register('mobile-actions', () => taskActions.shutdown(), () => taskActions.close())
+      const deps = Object.freeze({ taskActions, db, agentManager: agents, githubManager: github, gitlabManager: gitlab, forgejoManager: forgejo, syncManager: sync, pluginRegistry: registry, mobileDistRoot: actual, taskOwners: Object.freeze({ recurrence, heartbeat, automation }) })
       const tunnel = this.boundaries.mobileTunnel ?? null
       if (tunnel !== null && !(tunnel instanceof TunnelManagerCore)) throw new ProductionOwnerError('MOBILE_TUNNEL_OWNER_INVALID')
       setMobileApiDeps(deps)

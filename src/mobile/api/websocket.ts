@@ -44,23 +44,19 @@ export function connectWebSocket(): void {
     return
   }
 
-  const MOBILE_API_PORT = '20620'
-  // When served via a reverse proxy (Cloudflare tunnel, https with no explicit port),
-  // use same-origin WebSocket — the proxy handles the port mapping.
-  const isBehindProxy = window.location.protocol === 'https:' && !window.location.port
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = isBehindProxy
-    ? window.location.host
-    : window.location.port !== MOBILE_API_PORT
-      ? `${window.location.hostname}:${MOBILE_API_PORT}`
-      : window.location.host
+  const host = import.meta.env.DEV && window.location.port !== '20620'
+    ? `${window.location.hostname}:20620` : window.location.host
   let url = `${protocol}//${host}/ws`
   const token = getAuthToken()
   if (token) url += `?token=${encodeURIComponent(token)}`
 
-  ws = new WebSocket(url)
+  stopHeartbeat()
+  const connection = new WebSocket(url)
+  ws = connection
 
-  ws.onopen = () => {
+  connection.onopen = () => {
+    if (ws !== connection) return
     console.log('[WS] Connected')
     const isReconnect = hasConnectedBefore
     hasConnectedBefore = true
@@ -74,7 +70,8 @@ export function connectWebSocket(): void {
     }
   }
 
-  ws.onmessage = (event) => {
+  connection.onmessage = (event) => {
+    if (ws !== connection) return
     try {
       const { type, payload } = JSON.parse(event.data)
 
@@ -95,15 +92,17 @@ export function connectWebSocket(): void {
     }
   }
 
-  ws.onclose = () => {
+  connection.onclose = () => {
+    if (ws !== connection) return
     console.log('[WS] Disconnected, reconnecting...')
+    ws = null
     stopHeartbeat()
     onStatusChange?.(false)
     scheduleReconnect()
   }
 
-  ws.onerror = () => {
-    ws?.close()
+  connection.onerror = () => {
+    if (ws === connection) connection.close()
   }
 
   // Register visibility listener once so we reconnect immediately when
@@ -112,6 +111,18 @@ export function connectWebSocket(): void {
     visibilityListenerAdded = true
     document.addEventListener('visibilitychange', handleVisibilityChange)
   }
+}
+
+/** Retire this document's transport without closing a newer connection from a
+ * late callback. Callers can reconnect explicitly; mutations are never replayed. */
+export function disconnectWebSocket(): void {
+  const connection = ws
+  ws = null
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+  stopHeartbeat()
+  if (visibilityListenerAdded) { document.removeEventListener('visibilitychange', handleVisibilityChange); visibilityListenerAdded = false }
+  connection?.close()
+  onStatusChange?.(false)
 }
 
 export function onEvent(type: string, handler: EventHandler): () => void {

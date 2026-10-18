@@ -34,14 +34,40 @@ Reconnect reads that projection; HTTP mutation retries have no new exactly-once
 nonce contract and must not be replayed automatically. Native desktop reconnect
 likewise does not replay accepted mobile configuration changes.
 
-Portable HTTP writes validate the shared task schemas, reject coordinator/group
-structural edits, and enter the real task lifecycle lease. Source name/enabled
-changes enter the real SyncManager mutation lease and recheck source/task bindings
-and paired access after raw work drains. Source creation, credential/config/
-binding changes, integration option resolution, source-side completion and grouped
-review, resource/project/parent reassignment, learning and heartbeat configuration remain explicit desktop-only effects on this mobile path; they require
-additional exact production owner integration. Nonempty attachment sends also
-remain unavailable on this path. These refusals preserve existing stored data.
+Production HTTP task create/update/order/completion delegates to the same
+`TaskLifecycleBackend` used by desktop. Its private `ProductionMobileActions`
+adapter borrows the one SQLite/AgentManager/SyncManager/scheduler graph; it
+creates no runtime or storage owner. The HTTP server captures the paired token
+and exact server owner after bounded body parsing. An owned manager request
+scope rechecks that authority across awaits, raw Stop, source effects and
+prewrite. Accepted scheduler work detaches only through the existing accepted
+task-effects owner. Metadata and execution status edits cannot invent a second
+state writer or bypass real admission. Canonical events publish once through the
+root to desktop and authenticated mobile sinks.
+
+Ordinary task resource/agent/skill references, learning and heartbeat changes now
+use the desktop service's real validation and effects. Task completion delegates
+to its actual local update or scoped source action; source refusal/withdrawal
+cannot manufacture completion. Attachment replacement is explicitly refused
+without a caller-supplied baseline; the adapter never reads the latest database
+array to pretend it was the caller's original intent. Nonempty attachment create
+and send remain unavailable. `attachments:save` stays metadata-only, and the
+separate #214/#210 CAS contract is not bypassed.
+
+Session/HITL routes use the same manager. Approval responses capture current
+task/agent/session/request/type and require the real scoped method's `handled`
+receipt. A stale or duplicate request returns conflict, rather than successful
+HTTP after an unhandled legacy reply. Public task reads and events project only
+declared fields; private MCP nonces/checklist storage never cross this boundary.
+The broadcaster rejects speech/TTS names even when called directly, in addition
+to the root's finite mobile event list.
+
+Source name/enabled changes enter the real SyncManager mutation lease and recheck source/task bindings
+and paired access after raw work drains. Source creation, credential/config/binding
+changes, integration option resolution, grouped review and parent reassignment
+remain explicit desktop-only effects on this mobile route. These are not
+automatically enabled by the full-profile pairing contract. Nonempty attachment
+sends also remain unavailable on this path. These refusals preserve existing stored data.
 Legacy Electron routes retain their existing behavior.
 
 Control results are finite schemas: up to 128 session rows, 64 KiB total output,
@@ -78,3 +104,33 @@ source mutation joins, bounds, contained SPA resources and late provider writes.
 Tunnel tests use controlled raw child/stream receipts. They are not installed
 device, cloudflared-network, live SDK, process-tree, platform or release evidence.
 Those #219 gates remain open. Hosted voice #92 remains deferred.
+
+
+## Linux production continuation (#219)
+
+The web client retains HTTP(S) same-origin reads and sockets, including explicit
+ports, in production. Only Vite development uses the existing fixed server-port
+override. Socket handlers capture their own connection; late close/error/message
+callbacks cannot affect a replacement, and root unmount retires timers and the
+visibility observer. No desktop bridge is imported by the web client.
+
+The Source/staged regressions exercise the actual protected-profile production
+owner, strict private peer, SQLite, task backend, session manager and schedulers
+with real loopback HTTP/WebSocket clients. A controlled Pi process with isolated
+HOME/PATH supplies permission/question/streaming receipts. A real protected
+profile is closed and reopened; paired hashes and durable transcript identities
+survive without blind provider replay. Native callbacks and key-store hardware
+are synthetic boundaries. Controlled tunnel proof uses a real local Node child,
+no public network, and verifies one process, private config, failed-close
+retention and raw close before removal. Native production has no enabled quick
+tunnel binary authority; no cloudflared/device/LAN or installed platform proof
+is claimed. Hosted Verify is unavailable because repository Actions is disabled,
+awaiting user decision; no settings changes or workflows are dispatched.
+
+The focused inherited LAN-policy tests intercept only the requested all-interface
+listen and bind their physical fixture sockets to loopback; they assert both the
+requested policy and the actual loopback address. They do not establish LAN
+exposure acceptance. An initial selected gate ran those pre-existing tests before
+this boundary was added and briefly bound synthetic all-interface listeners;
+that validation mistake is recorded in the revision evidence, and the repaired
+gate is required. No live profile or public tunnel was involved.

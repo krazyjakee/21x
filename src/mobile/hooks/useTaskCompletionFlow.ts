@@ -6,7 +6,8 @@ import { useAgentStore } from '../stores/agent-store'
 
 async function completeTaskNow(task: Task, completeAtSource = true): Promise<void> {
   try {
-    await api.tasks.complete(task.id, completeAtSource)
+    const result = await api.tasks.complete(task.id, completeAtSource)
+    if (!result.completed) throw new Error('The task source has not confirmed completion.')
   } catch (error) {
     window.alert(error instanceof Error ? error.message : 'The task source has not confirmed completion.')
   }

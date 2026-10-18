@@ -1,3 +1,4 @@
+import { Server as HttpServer } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
@@ -84,6 +85,16 @@ async function websocket(base: string, token: string) {
 }
 describe('production mobile controls and actual loopback owners', () => {
   it('binds ten exact operations, keeps access opt-in, and refuses unavailable quick tunnels before any effect', async () => {
+    // Exercise the requested host policy without exposing this fixture on LAN.
+    const originalListen = HttpServer.prototype.listen
+    const physical: HttpServer[] = []
+    const listen = vi.spyOn(HttpServer.prototype, 'listen').mockImplementation(function(this: HttpServer, ...args: unknown[]) {
+      physical.push(this)
+      const effective = [...args]
+      if (effective[1] === '0.0.0.0') effective[1] = '127.0.0.1'
+      return Reflect.apply(originalListen, this, effective)
+    })
+
     expect(Object.keys(backend.operationSchemas(caller))).toEqual([...MOBILE_OPERATIONS]); expect(getMobileApiBinding()).toBeNull()
     expect(await call('mobile:getInfo', [])).toMatchObject({ enabled: false, lanAccess: false, tunnelActive: false, port: 20620 })
     await expect(call('mobile:startTunnel', [])).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' }); expect(getMobileApiBinding()).toBeNull()
@@ -91,6 +102,8 @@ describe('production mobile controls and actual loopback owners', () => {
     expect((await fetch(base + '/')).status).toBe(200); expect(await (await fetch(base + '/')).text()).toContain('without desktop bridge')
     const enabled = await call('mobile:getInfo', []); expect(enabled.port).toBe(Number(new URL(base).port))
     await call('mobile:setAccess', [{ lanAccess: true }]); expect(getMobileApiBinding()?.host).toBe('0.0.0.0')
+    expect(listen.mock.calls.at(-1)?.[1]).toBe('0.0.0.0')
+    expect(physical.at(-1)!.address()).toMatchObject({ address: '127.0.0.1' })
     expect((await call('mobile:getInfo', [])).lanUrl).toContain('192.0.2.10')
     await call('mobile:setAccess', [{ enabled: false }]); expect(getMobileApiBinding()).toBeNull()
   })
@@ -217,4 +230,16 @@ describe('production mobile controls and actual loopback owners', () => {
     gate.release(); await retry; expect(db.getTask(task.id)?.title).toBe('Raw work joined'); expect(adapter.sendPrompt).toHaveBeenCalledTimes(2)
     await expect(call('mobile:setAccess', [{ enabled: true }])).rejects.toBeDefined(); expect(getMobileApiBinding()).toBeNull()
   })
+  it('never broadcasts speech audio or TTS metadata to an authenticated mobile socket, including direct callers', async () => {
+    const base = await enable(), device = await pair(base), ws = await websocket(base, device.sessionToken)
+    const received: string[] = []; ws.on('message', data => received.push(String(data)))
+    for (const channel of ['voice:speech:start', 'voice:speech:chunk', 'voice:speech:end', 'voice:tts:chunk'])
+      broadcastToMobileClients(channel, { audio: 'synthetic-private-PCM', speechId: 'desktop-only' })
+    ws.send(JSON.stringify({ type: 'ping' }))
+    await vi.waitFor(() => expect(received.some(data => data.includes('pong'))).toBe(true))
+    expect(received).toHaveLength(1)
+    expect(received.join('')).not.toContain('synthetic-private-PCM')
+    const closed = once(ws, 'close'); ws.terminate(); await closed
+  })
+
 })

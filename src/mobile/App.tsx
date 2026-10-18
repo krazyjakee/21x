@@ -13,6 +13,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { PairPage } from './pages/PairPage'
 import { ArtifactViewerPage } from './pages/ArtifactViewerPage'
 import { ProjectsOverviewPage } from './pages/ProjectsOverviewPage'
+import { disconnectWebSocket } from './api/websocket'
 import { getPairCodeFromUrl, hasSessionToken } from './api/auth'
 
 export type Route =
@@ -28,6 +29,7 @@ export type Route =
   | { page: 'overview' }
 
 export function App() {
+  useEffect(() => () => disconnectWebSocket(), [])
   const pairCode = getPairCodeFromUrl()
   const [paired, setPaired] = useState(() => !pairCode && hasSessionToken())
   const [route, setRoute] = useState<Route>({ page: 'list' })

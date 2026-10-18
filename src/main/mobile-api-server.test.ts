@@ -1,3 +1,4 @@
+import { Server as HttpServer } from 'node:http'
 import { SyncManager } from './sync-manager'
 import { finishSessionFeedback, updateTaskFromUser } from './session-feedback'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -570,6 +571,16 @@ describe('mobile-api-server: mobile access settings', () => {
   })
 
   it('binds to 127.0.0.1 unless LAN access is opted into, and rebinds on change', async () => {
+    // Exercise the requested host policy without exposing this fixture on LAN.
+    const originalListen = HttpServer.prototype.listen
+    const physical: HttpServer[] = []
+    const listen = vi.spyOn(HttpServer.prototype, 'listen').mockImplementation(function(this: HttpServer, ...args: unknown[]) {
+      physical.push(this)
+      const effective = [...args]
+      if (effective[1] === '0.0.0.0') effective[1] = '127.0.0.1'
+      return Reflect.apply(originalListen, this, effective)
+    })
+
     const db = setup()
     db.setSetting(MOBILE_ACCESS_ENABLED_SETTING, 'true')
 
@@ -581,11 +592,14 @@ describe('mobile-api-server: mobile access settings', () => {
     db.setSetting(MOBILE_LAN_ACCESS_SETTING, 'true')
     const lanPort = await applyMobileAccessSettings(0)
     expect(getMobileApiBinding()).toEqual({ host: '0.0.0.0', port: lanPort })
+    expect(listen.mock.calls.at(-1)?.[1]).toBe('0.0.0.0')
+    expect(physical.at(-1)!.address()).toMatchObject({ address: '127.0.0.1', port: lanPort })
 
     db.setSetting(MOBILE_ACCESS_ENABLED_SETTING, 'false')
     expect(await applyMobileAccessSettings(0)).toBeNull()
     expect(getMobileApiBinding()).toBeNull()
     await expect(fetch(`http://127.0.0.1:${lanPort}/api/tasks`)).rejects.toThrow()
+    listen.mockRestore()
   })
 })
 

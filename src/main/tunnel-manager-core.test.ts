@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { spawn as spawnChild } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
@@ -56,5 +57,37 @@ describe('portable tunnel actual raw-child receipts', () => {
     expect(owner.url).toBeNull(); await expect(owner.start(20620)).rejects.toThrow('TUNNEL_BUSY'); expect(owner.inflightCount).toBe(1)
     child.finish(); const next = owner.start(20620), rejected = expect(next).rejects.toThrow('TUNNEL_OUTPUT_LIMIT')
     child.stdout.write('private-output'.repeat(6000)); await rejected; expect(owner.inflightCount).toBe(1)
+  })
+})
+
+
+describe('controlled real tunnel process without network', () => {
+  it('coalesces one process, keeps failed-close ownership and joins actual exit/streams before config removal', async () => {
+    const fixture = join(root, 'controlled-tunnel.cjs'), receipt = join(root, 'tunnel-receipt.json'), release = join(root, 'release')
+    writeFileSync(fixture, `const fs = require('node:fs');
+process.on('SIGTERM',()=>{});
+fs.writeFileSync(process.env.TUNNEL_RECEIPT, JSON.stringify({pid:process.pid,args:process.argv.slice(2),path:process.env.PATH,home:process.env.HOME}));
+console.log('https://synthetic-local.trycloudflare.com');
+console.error('Registered tunnel connection connIndex=0');
+setInterval(()=>{if(fs.existsSync(process.env.TUNNEL_RELEASE))process.exit(0)},10);
+`)
+    const actualSpawn = vi.fn<TunnelHost['spawn']>((_binary, args, options) => spawnChild(process.execPath, [fixture, ...args], options) as ChildProcessWithoutNullStreams)
+    const actual = new TunnelManagerCore({ binary: process.execPath, privateRoot: root, environment: { HOME: root, PATH: '', TUNNEL_RECEIPT: receipt, TUNNEL_RELEASE: release }, spawn: actualSpawn, connectTimeoutMs: 2000 })
+    try {
+      const first = actual.start(20620); expect(actual.start(20620)).toBe(first)
+      expect(await first).toBe('https://synthetic-local.trycloudflare.com')
+      expect(actualSpawn).toHaveBeenCalledOnce()
+      const proof = JSON.parse(readFileSync(receipt, 'utf8')) as {pid:number;args:string[];path:string;home:string}
+      expect(proof).toMatchObject({ path: '', home: root }); expect(proof.args.at(-1)).toBe('http://127.0.0.1:20620')
+      const config = proof.args[2]!
+      expect(readFileSync(config, 'utf8')).toBe('')
+      expect(() => process.kill(proof.pid, 0)).not.toThrow()
+      await expect(actual.close(5)).rejects.toThrow('TUNNEL_SHUTDOWN_INCOMPLETE')
+      expect(actual.url).toBeNull(); expect(actual.inflightCount).toBe(1); expect(existsSync(config)).toBe(true)
+      await expect(actual.start(20620)).rejects.toThrow('TUNNEL_CLOSED')
+      writeFileSync(release, '1'); await actual.close()
+      expect(actual.inflightCount).toBe(0); expect(existsSync(config)).toBe(false)
+      expect(() => process.kill(proof.pid, 0)).toThrow()
+    } finally { writeFileSync(release, '1'); await actual.close() }
   })
 })

@@ -33,7 +33,7 @@ import type { HeartbeatSchedulerCore } from './heartbeat-scheduler-core'
 import type { TaskAutomationScheduler } from './task-automation-scheduler'
 import { mimeTypeForPath } from './mime'
 import { hasExactKeys, isRecord } from '../shared/service-protocol'
-import { TASK_LIFECYCLE_CODECS, isTaskLifecycleCreate, isTaskLifecycleUpdate } from '../shared/task-lifecycle-codecs'
+import { TASK_LIFECYCLE_CODECS, projectTaskLifecycleTask, isTaskLifecycleCreate, isTaskLifecycleUpdate } from '../shared/task-lifecycle-codecs'
 import { isDatabaseId } from '../shared/database-desktop-codecs'
 
 // ── State ────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ export function getMobileSessionIdleDays(db: DatabaseManager): number {
 }
 
 function validateSession(provided: string | null | undefined, touch = true): boolean {
-  if (!provided || !dbRef) return false
+  if (!provided || !dbRef || mobileDistRoot && !isMobileAccessEnabled(dbRef)) return false
   if (provided.length > 128 || /[\u0000-\u0020\u007f]/.test(provided)) return false
   const hash = hashToken(provided)
   if (dbRef.db.prepare('SELECT 1 FROM mobile_sessions WHERE token_hash=? AND (length(CAST(id AS BLOB))>128 OR length(CAST(device_name AS BLOB))>256) LIMIT 1').get(hash)) return false
@@ -158,13 +158,14 @@ export function startMobileApiServer(
   forgejoManager?: ForgejoManager | null,
   host = '127.0.0.1',
   distRoot?: string,
-  taskOwners?: MobileApiDeps['taskOwners']
+  taskOwners?: MobileApiDeps['taskOwners'],
+  taskActions?: MobileTaskActions
 ): Promise<number> {
   if (closedMobileSources.has(db)) return Promise.reject(new Error('MOBILE_API_CLOSED'))
-  const deps: MobileApiDeps = { db, agentManager, githubManager, syncManager, pluginRegistry, gitlabManager, forgejoManager, mobileDistRoot: distRoot, taskOwners: taskOwners ? { ...taskOwners } : undefined }
+  const deps: MobileApiDeps = { db, agentManager, githubManager, syncManager, pluginRegistry, gitlabManager, forgejoManager, mobileDistRoot: distRoot, taskActions, taskOwners: taskOwners ? { ...taskOwners } : undefined }
   if (currentOwner) return sameMobileDeps(currentOwner.deps, deps) ? currentOwner.startup : Promise.reject(new Error('MOBILE_API_ALREADY_STARTED'))
   if (mobileOwners.size) return stopMobileApiServer().then(() => startMobileApiServer(
-    db, agentManager, githubManager, port, syncManager, pluginRegistry, gitlabManager, forgejoManager, host, distRoot, taskOwners))
+    db, agentManager, githubManager, port, syncManager, pluginRegistry, gitlabManager, forgejoManager, host, distRoot, taskOwners, taskActions))
 
   if (distRoot !== undefined) {
     try {
@@ -285,6 +286,12 @@ export function startMobileApiServer(
 
 }
 
+export interface MobileTaskActions {
+  create(data: CreateTaskData, guard: () => void): Promise<unknown>
+  update(id: string, data: UpdateTaskData, guard: () => void): Promise<unknown>
+  reorder(id: string, ids: string[], guard: () => void): Promise<unknown>
+  complete(id: string, atSource: boolean, guard: () => void): Promise<unknown>
+}
 export interface MobileApiDeps {
   db: DatabaseManager
   agentManager: AgentManager
@@ -295,6 +302,7 @@ export interface MobileApiDeps {
   forgejoManager?: ForgejoManager | null
   /** Trusted host-selected physical SPA root; never supplied by a renderer. */
   mobileDistRoot?: string
+  taskActions?: MobileTaskActions
   taskOwners?: { recurrence: RecurrenceSchedulerCore; heartbeat: HeartbeatSchedulerCore; automation: TaskAutomationScheduler }
 }
 
@@ -306,7 +314,7 @@ function sameMobileDeps(left: MobileApiDeps, right: MobileApiDeps): boolean {
   return left.db === right.db && left.agentManager === right.agentManager && left.githubManager === right.githubManager &&
     (left.syncManager ?? null) === (right.syncManager ?? null) && (left.pluginRegistry ?? null) === (right.pluginRegistry ?? null) &&
     (left.gitlabManager ?? null) === (right.gitlabManager ?? null) && (left.forgejoManager ?? null) === (right.forgejoManager ?? null) &&
-    (left.mobileDistRoot ?? null) === (right.mobileDistRoot ?? null) && left.taskOwners?.recurrence === right.taskOwners?.recurrence && left.taskOwners?.heartbeat === right.taskOwners?.heartbeat && left.taskOwners?.automation === right.taskOwners?.automation
+    (left.mobileDistRoot ?? null) === (right.mobileDistRoot ?? null) && left.taskActions === right.taskActions && left.taskOwners?.recurrence === right.taskOwners?.recurrence && left.taskOwners?.heartbeat === right.taskOwners?.heartbeat && left.taskOwners?.automation === right.taskOwners?.automation
 }
 
 /** Proves the installed singleton is the borrowed production owner's exact lease. */
@@ -342,7 +350,7 @@ export function applyMobileAccessSettings(port = MOBILE_API_PORT): Promise<numbe
     await stopMobileApiServer()
     return startMobileApiServer(
       deps.db, deps.agentManager, deps.githubManager, port, deps.syncManager,
-      deps.pluginRegistry, deps.gitlabManager, deps.forgejoManager, host, deps.mobileDistRoot, deps.taskOwners
+      deps.pluginRegistry, deps.gitlabManager, deps.forgejoManager, host, deps.mobileDistRoot, deps.taskOwners, deps.taskActions
     )
   }
   applying++
@@ -410,8 +418,20 @@ export async function closeMobileApiServer(timeoutMs = 2000): Promise<void> {
  * Broadcasts to all connected WebSocket clients.
  */
 export function broadcastToMobileClients(channel: string, data: unknown): void {
+  // Speech PCM and synthesis metadata are desktop-only, including direct callers.
+  if (channel.startsWith('voice:speech:') || channel.startsWith('voice:tts:')) return
   if (wsClients.size === 0) return
 
+  // Public task rows carry no private MCP scope nonce or checklist storage.
+  if (mobileDistRoot && isRecord(data)) {
+    const packet = data
+    if (channel === 'task:created') data = { task: projectTaskLifecycleTask(packet.task) }
+    if (channel === 'task:updated' && typeof packet.taskId === 'string') {
+      const task = dbRef?.getTask(packet.taskId)
+      if (!task) return
+      data = { taskId: packet.taskId, updates: projectTaskLifecycleTask(task) }
+    }
+  }
   const message = JSON.stringify({ type: channel, payload: data })
   for (const ws of wsClients) {
     if (!validateSession(wsTokens.get(ws) ?? null, false)) { ws.terminate(); continue }
@@ -500,9 +520,19 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
   try {
     const body = req.method === 'POST' ? await readJsonBody(req, MAX_BODY_BYTES) : undefined
     if (isClosing()) return
+    if (mobileDistRoot && !isMobileAccessEnabled(dbRef!)) throw Object.assign(new Error('Mobile access is disabled.'), { status: 503 })
     if (pathname !== '/api/auth/pair/initiate' && pathname !== '/api/auth/pair/verify' && !validateSession(bearerToken(req))) throw Object.assign(new Error('Unauthorized'), { status: 401 })
     if (mobileDistRoot) { assertMobileApiDeps(currentOwner!.deps); preflightMobileData(pathname) }
-    const result = body ? await routePost(pathname, body, req) : await routeGet(pathname, url)
+    const owner = currentOwner!
+    const token = bearerToken(req)
+    const guard = (): void => {
+      if (owner.closing || currentOwner !== owner || !validateSession(token, false))
+        throw Object.assign(new Error('Mobile access ended.'), { status: 401 })
+    }
+    const result = body && mobileDistRoot && !pathname.startsWith('/api/auth/pair/')
+      ? await owner.deps.agentManager.withTaskGroupRequestGuard(() => routePost(pathname, body, req, guard), guard, new AbortController().signal)
+      : body ? await routePost(pathname, body, req) : await routeGet(pathname, url)
+    if (mobileDistRoot && !pathname.startsWith('/api/auth/pair/')) guard()
     if (res.destroyed) return
     const encoded = JSON.stringify(result)
     if (mobileDistRoot && Buffer.byteLength(encoded) > 8 * 1024 * 1024) throw Object.assign(new Error('Mobile response exceeds the supported size.'), { status: 413 })
@@ -628,7 +658,7 @@ async function routeGet(pathname: string, url: URL): Promise<unknown> {
       return 0
     })
 
-    return tasks
+    return mobileDistRoot ? tasks.map(projectTaskLifecycleTask) : tasks
   }
 
   // GET /api/tasks/:taskId/transcript — full durable transcript snapshot.
@@ -689,7 +719,7 @@ async function routeGet(pathname: string, url: URL): Promise<unknown> {
   if (taskMatch) {
     const task = db.getTask(taskMatch[1])
     if (!task) throw Object.assign(new Error('Task not found'), { status: 404 })
-    return task
+    return mobileDistRoot ? projectTaskLifecycleTask(task) : task
   }
 
   // GET /api/agents
@@ -837,9 +867,10 @@ async function routeGet(pathname: string, url: URL): Promise<unknown> {
 
 // ── POST routes ──────────────────────────────────────────────
 
-async function routePost(pathname: string, params: Record<string, unknown>, req?: IncomingMessage): Promise<unknown> {
+async function routePost(pathname: string, params: Record<string, unknown>, req?: IncomingMessage, guard?: () => void): Promise<unknown> {
   const agent = agentRef!
   const db = dbRef!
+  const actions = mobileDistRoot ? currentOwner?.deps.taskActions : undefined
   if (mobileDistRoot && !isRecord(params)) throw Object.assign(new Error('Invalid request.'), { status: 400 })
 
   // POST /api/auth/pair/initiate — phone sends init code, server generates PIN
@@ -954,7 +985,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     if (!syncManagerRef) throw Object.assign(new Error('Sync manager not available'), { status: 503 })
     const sources = db.getTaskSources().filter((s: { enabled: boolean }) => s.enabled)
     const results = await Promise.allSettled(
-      sources.map((s: { id: string }) => syncManagerRef!.importTasks(s.id))
+      sources.map((s: { id: string }) => syncManagerRef!.importTasks(s.id, guard))
     )
     return results.map((r) =>
       r.status === 'fulfilled' ? (mobileDistRoot ? fixedMobileSyncResult(r.value) : r.value) : { error: mobileDistRoot ? 'Task source sync failed.' : String((r as PromiseRejectedResult).reason) }
@@ -966,7 +997,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   if (sourceSyncMatch) {
     if (mobileDistRoot && (!isDatabaseId(sourceSyncMatch[1]) || !hasExactKeys(params, []))) throw Object.assign(new Error('Invalid sync request.'), { status: 400 })
     if (!syncManagerRef) throw Object.assign(new Error('Sync manager not available'), { status: 503 })
-    const result = await syncManagerRef.importTasks(sourceSyncMatch[1])
+    const result = await syncManagerRef.importTasks(sourceSyncMatch[1], guard)
     return mobileDistRoot ? fixedMobileSyncResult(result) : result
   }
 
@@ -1003,6 +1034,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       const children = db.getSubtasks(parentId)
       if (children.length !== orderedIds.length || children.some(task => task.group_id || task.role !== 'task' || !orderedIds.includes(task.id))) throw Object.assign(new Error('Task order must include only the current subtasks.'), { status: 409 })
     }
+    if (actions && guard) return actions.reorder(parentId, orderedIds, guard)
     if (mobileDistRoot) await runMobileTaskMutation(db, agent, [parentId, ...orderedIds], req, async () => { db.reorderSubtasks(parentId, orderedIds) })
     else db.reorderSubtasks(parentId, orderedIds)
     broadcastToMobileClients('task:subtasks-reordered', { parentId, orderedIds })
@@ -1015,7 +1047,8 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     if (mobileDistRoot) {
       if (!isTaskLifecycleCreate(params) || Object.hasOwn(params, 'recurrence_parent_id') || Object.hasOwn(params, 'next_subtask_ids') || params.status !== undefined && params.status !== TaskStatus.NotStarted) throw Object.assign(new Error('Invalid task fields.'), { status: 400 })
       if (!hasExactKeys(params, ['title'], CREATE_TASK_FIELDS.filter(key => key !== 'title'))) throw Object.assign(new Error('Create this task configuration on the desktop.'), { status: 400 })
-      assertProductionTaskFields(db, params)
+      if (Array.isArray(params.attachments) && params.attachments.length) throw Object.assign(new Error('Import attachments on the desktop.'), { status: 409 })
+      if (!actions) assertProductionTaskFields(db, params)
       if (typeof params.parent_task_id === 'string') {
         assertProductionOrdinaryTask(db, params.parent_task_id)
         const parent = db.getTask(params.parent_task_id)!
@@ -1034,6 +1067,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       // anything else lands in the desktop's current project.
       data.project_id = resolveDefaultProjectId(db)
     }
+    if (actions && guard) return actions.create(data, guard)
     const created = mobileDistRoot && data.parent_task_id
       ? await runMobileTaskMutation(db, agent, [data.parent_task_id, ...db.getSubtasks(data.parent_task_id).map(child => child.id)], req, async () => db.createTask(data)) : db.createTask(data)
     if (!created) throw Object.assign(new Error('Failed to create task'), { status: 500 })
@@ -1054,6 +1088,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     if (mobileDistRoot) {
       if (!hasExactKeys(params, [], ['completeAtSource']) || params.completeAtSource !== undefined && typeof params.completeAtSource !== 'boolean') throw Object.assign(new Error('Invalid completion choice.'), { status: 400 })
       assertProductionOrdinaryTask(db, taskId)
+      if (actions && guard) return actions.complete(taskId, params.completeAtSource !== false, guard)
       if (task.source_id && params.completeAtSource !== false) throw Object.assign(new Error('Complete this task at its source on the desktop.'), { status: 503 })
       if (agent.hasTaskStartOwnership(taskId) || task.status === TaskStatus.AgentLearning) throw Object.assign(new Error('Stop the task before completing it on mobile.'), { status: 409 })
       if (db.getSubtasks(taskId).some(child => ![TaskStatus.Completed, TaskStatus.ReadyForReview].includes(child.status as TaskStatus))) throw Object.assign(new Error('Finish the subtasks before completing this task.'), { status: 409 })
@@ -1102,9 +1137,11 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     if (!existing) throw Object.assign(new Error('Task not found'), { status: 404 })
     if (mobileDistRoot) {
       assertProductionOrdinaryTask(db, taskId)
+      if (actions && Object.hasOwn(params, 'attachments')) throw Object.assign(new Error('Attachment replacement requires an explicit baseline on the desktop.'), { status: 409 })
       if (!isTaskLifecycleUpdate(params) || ['parent_task_id', 'next_subtask_ids', 'last_occurrence_at', 'next_occurrence_at', 'heartbeat_last_check_at', 'heartbeat_next_check_at'].some(key => Object.hasOwn(params, key))) throw Object.assign(new Error('Invalid task fields.'), { status: 400 })
       if (params.status === TaskStatus.Completed && (existing.source_id || agent.findSessionByTaskId(taskId))) throw Object.assign(new Error('Use the task completion controls after stopping this task.'), { status: 409 })
     }
+    if (actions && guard) return actions.update(taskId, params as UpdateTaskData, guard)
     if (mobileDistRoot) assertProductionTaskFields(db, params, existing)
     const update = async () => {
       const previous = db.getTask(taskId)!
@@ -1195,7 +1232,11 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     }
     if (mobileDistRoot && (!hasExactKeys(params, ['approved', 'responseType', 'requestId'], ['message']) || !agent.getSession(sessionId) || !['permission', 'question'].includes(responseType as string) || typeof requestId !== 'string' || !requestId || Buffer.byteLength(requestId) > 512 || message !== undefined && (typeof message !== 'string' || Buffer.byteLength(message) > 65_536 || message.includes('\0')))) throw Object.assign(new Error('Invalid current approval request.'), { status: 400 })
     if (typeof approved !== 'boolean') throw Object.assign(new Error('approved (boolean) is required'), { status: 400 })
-    await agent.respondToPermission(sessionId, approved, message, undefined, responseType, requestId)
+    if (mobileDistRoot) {
+      const live = agent.getSession(sessionId)!
+      const result = await agent.respondToScopedPermission({ sessionId, taskId: live.taskId, agentId: live.agentId, approved, message, responseType: responseType!, requestId: requestId! })
+      if (!result.handled) throw Object.assign(new Error('Approval request is no longer current.'), { status: 409 })
+    } else await agent.respondToPermission(sessionId, approved, message, undefined, responseType, requestId)
     return { success: true }
   }
 
