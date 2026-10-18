@@ -1,0 +1,706 @@
+{
+  "formatVersion": 1,
+  "issues": [
+    214
+  ],
+  "sourceRevision": "f24d70e051ee5ec0427cd952f2694ea9710bb38b",
+  "sourceBaseRevision": "54ffb9e4cf73b765ec0983d4a6891b7f630f47e0",
+  "createdAt": "2026-10-18T01:53:24.049254+00:00",
+  "status": "scoped Linux protected attachment execution; issue remains OPEN; mobile and unsupported-platform saved-file execution remain refused",
+  "contract": {
+    "privatePort": "AgentManagerHost.attachmentExecution sync/context captured at sealed Source construction",
+    "savedBytes": "TaskAttachmentFileOwner no-follow held FD; bounded detached chunks; complete source verification and close precede workspace publication",
+    "destination": "Linux held directory FDs, exclusive staging, digest readback, exact-entry rename; no ambient path fallback",
+    "previews": "verified saved bytes <=24KiB;3previews/1200characters each; never mutable workspace paths",
+    "caller": "original bounded task/project/agent/parent/group/metadata scope before raw awaits; existing manager request ownership",
+    "acceptedPrompt": "raw prompt acknowledgement remains durable after cancellation; no followup polling/state revival",
+    "publicOperationsAdded": 0,
+    "publicGrantsAdded": 0,
+    "mobile": "independently refused pending complete integration and detached scheduler review",
+    "electron": "existing host helper path retained"
+  },
+  "negativeProofs": [
+    {
+      "baseRevision": "99d7896e",
+      "log": "/tmp/e2-attachment-execution-old-source.log",
+      "rawExitCode": 1,
+      "actual": "two actual production-owner/AgentManager start failures: saved-file symlink and workspace attachment-directory symlink/outside overwrite; third control calls the existing preview helper directly with a synthetic workspace symlink and observes foreign canary bytes",
+      "logSha256": "199fcdd5ca2543504e324dffc65ee798d7ed1d16ab0f283651dbb9d7062a7941",
+      "fixture": "/tmp/e2-attachment-execution-negative-source.ts"
+    },
+    {
+      "baseRevision": "unpublished bridge with old ProductionAgentBackend caller handling",
+      "log": "/tmp/e2-execution-caller-withdrawal-old-source.log",
+      "rawExitCode": 1,
+      "actual": "one adapter prompt after original task/project/agent grant withdrawal during held protected read; late reply refusal was too late",
+      "logSha256": "3b5df3f5d41f4c76ed5701504ecbb613dc2af3e06c770d06997520a963788085",
+      "oldBackendRevision": "54ffb9e4cf73b765ec0983d4a6891b7f630f47e0",
+      "oldBackendSha256": "a12bbcae2630901fdcbbd0ea5b5050c7a5312375fbdb96335521a7939d9458ab",
+      "configuration": "execution prototype active while ProductionAgentBackend still used its published pre-guard implementation; the proof is explicitly not a claim about a fully published intermediate bridge revision"
+    }
+  ],
+  "focusedProofs": {
+    "owner": {
+      "passed": 18,
+      "log": "/tmp/e2-execution-owner-final-focused.log"
+    },
+    "productionRoot": {
+      "passed": 10,
+      "log": "/tmp/e2-execution-root-final-focused.log"
+    },
+    "privatePeer": {
+      "passed": 1,
+      "filtered": 58,
+      "log": "/tmp/e2-execution-peer-focused.log",
+      "limit": "controlled native selected bytes and adapter; actual Source/private-peer/SQLite/CAS/copy path; not a physical OS picker run"
+    }
+  },
+  "failuresAndRepairs": [
+    "Initial fixture secret-store setup reused an already initialized Electron module; resetModules/dynamic owner import restored the existing isolated fixture boundary. Setup errors were not counted as negative proof.",
+    "Actual caller-withdrawal regression reproduced a prompt before late refusal; captured manager request scope now fences raw attachment and prompt work.",
+    "Initial full backend compatibility run found cancellation mapped to INTERNAL_ERROR and accepted-send durable nonce loss. Cancellation mapping repaired and actual raw prompt acknowledgement preserved without later polling/state effects; existing13 backend controls pass.",
+    "Initial forced typecheck found async effect typing and delegate rest tuple errors; corrected exact async and Parameters types.",
+    "Owner fixtures corrected immutable project-update use and wrong group removal helper; actual SQL project change/current group membership controls now pass.",
+    "Generic filesystem errors are normalized to finite private refusal while retained cleanup remains owned; no assertion, deadline or production guard weakened.",
+    "First combined app run:1062passed/1failed. Existing changed-heartbeat-file control expected cancelled durable delivery but broad accepted-send preservation produced acknowledged. Repair must retain heartbeat-specific stale-check cancellation separately from ordinary accepted send receipts; no assertion change.",
+    "First combined standalone run reproduced only the same existing heartbeat assertion:581passed/1failed. Production staging, forced typecheck, both frontend builds, contracts/inventory and diff passed. Full lint failed one new prefer-const error;165existing warnings unchanged.",
+    "Repair uses an explicit private owner holder that refuses before construction and a heartbeat-specific post-raw captured-scope check before delivery acceptance. Existing stale heartbeat and ordinary accepted-send cancellation controls each pass unchanged; repaired full gate is separately recorded.",
+    "Final separately logged combined rerun passes all10 raw checks:1063app/582standalone0skip, forced typecheck, lint0errors/165existingwarnings, production staging, bothfrontends, contracts/inventory/diff. Both existing heartbeat cancellation and ordinary accepted-send nonce controls remain unchanged."
+  ],
+  "limits": {
+    "files": 128,
+    "totalBytes": 67108864,
+    "ownedRequests": 4,
+    "readChunkBytes": 65536,
+    "previewBytes": 24576,
+    "previewCount": 3,
+    "previewCharacters": 1200,
+    "pendingReadsPerConsumer": 16
+  },
+  "remaining": [
+    "macOS/Windows equivalent anchored destination authority and installed supported-target proof",
+    "mobile original-target and accepted detached-scheduler scope integration; existing refusal remains",
+    "protected orphan/removal-intent journals and hard-crash reconciliation",
+    "workspace remains agent-editable after accepted publication; not a same-user process sandbox",
+    "208/202 prerequisites and identity/scheme/platform/Actions decisions; native voice remains unavailable"
+  ],
+  "hostedCI": {
+    "status": "hosted Verify unavailable: repository Actions disabled (actions/permissions enabled:false), awaiting user decision",
+    "sourceRuns": [],
+    "settingsCalls": false,
+    "dispatch": false,
+    "evidenceRuns": "Exact lookup after evidence publication is reported in issue comment"
+  },
+  "scope": {
+    "profiles": "synthetic temporary SQLite/files only",
+    "adapters": "controlled fixtures; no live provider/account/API key",
+    "nativeCodeChanged": false,
+    "releaseOrLiveProfileCutover": false
+  },
+  "execution": {
+    "lane": "flock /mnt/Rusty/GitHub/21x/.git/issue-closing/heavy.lock",
+    "script": "/tmp/e2-execution-fixed-gate.py",
+    "existingCommandsUnchanged": true,
+    "normalHooksRequired": true,
+    "scriptSha256": "e5221562d3a6c78b7a6ec82edd458858460bdb9c9af751f274beaf2d704d4a47",
+    "gateRawExitCode": 0,
+    "rebaseScriptSha256": "684d71ed5ee505be61077d35e30d30538f516d75c5c146ce633ab6c7eeb1ca98"
+  },
+  "firstCombinedGate": [
+    {
+      "name": "app",
+      "argv": [
+        "pnpm",
+        "test:run",
+        "src/main/agent-manager-activity-outcomes.test.ts",
+        "src/main/agent-manager-activity.test.ts",
+        "src/main/agent-manager-admission.test.ts",
+        "src/main/agent-manager-captain-managed.test.ts",
+        "src/main/agent-manager-captain-rollover.test.ts",
+        "src/main/agent-manager-cli-configuration.test.ts",
+        "src/main/agent-manager-compaction.test.ts",
+        "src/main/agent-manager-concurrency.test.ts",
+        "src/main/agent-manager-configuration.test.ts",
+        "src/main/agent-manager-coordinator.test.ts",
+        "src/main/agent-manager-project-captains.test.ts",
+        "src/main/agent-manager-project-limits.test.ts",
+        "src/main/agent-manager-provider-recovery.test.ts",
+        "src/main/agent-manager-scoped-approval.test.ts",
+        "src/main/agent-manager-task-group-request.test.ts",
+        "src/main/agent-manager-task-managed.test.ts",
+        "src/main/agent-manager.test.ts",
+        "src/main/agent-manager/activity-observations.test.ts",
+        "src/main/agent-manager/captain-context.test.ts",
+        "src/main/agent-manager/credit-exhaustion.test.ts",
+        "src/main/agent-manager/mcp-probe-service.test.ts",
+        "src/main/agent-manager/project-repos.test.ts",
+        "src/main/agent-manager/provider-failure.test.ts",
+        "src/main/agent-manager/session-config.test.ts",
+        "src/main/agent-manager/skill-model.test.ts",
+        "src/main/agent-manager/skills-sync-scope.test.ts",
+        "src/main/agent-manager/task-group-request-scope.test.ts",
+        "src/main/agent-manager/transcript-events-core.test.ts",
+        "src/main/agent-manager/workspace-docs-request-scope.test.ts",
+        "src/main/agent-manager/workspace-docs-skill-scope.test.ts",
+        "src/main/attachment-execution-owner.test.ts",
+        "src/main/task-attachment-file-owner.test.ts",
+        "src/main/task-groups/service.test.ts",
+        "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+        "src/renderer/src/lib/native-desktop-host.test.ts",
+        "src/service/production-agent-backend.test.ts",
+        "src/service/production-attachment-execution.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/production-mobile.test.ts",
+        "src/service/production-owner.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/task-attachment-backend.test.ts",
+        "src/service/task-attachment-metadata-conflict.test.ts",
+        "src/service/task-lifecycle-backend.test.ts"
+      ],
+      "rawExitCode": 1,
+      "log": "/tmp/e2-execution-app.log",
+      "logSha256": "ee006bc5d8ec0669bab2696c5da530cc209921ac28a4bc98ad65ef9df91b1813"
+    },
+    {
+      "name": "type",
+      "argv": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-type.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lint",
+      "argv": [
+        "pnpm",
+        "lint"
+      ],
+      "rawExitCode": 1,
+      "log": "/tmp/e2-execution-lint.log",
+      "logSha256": "3067cb15848b2d43e7b695b6a9ca112522b8c8ee624d82d065026f1c97ce93bf"
+    },
+    {
+      "name": "stage",
+      "argv": [
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-stage.log",
+      "logSha256": "d41d5d257234749031779718835ee069b3cc8cc8529fc551fe504a11ba3c8775"
+    },
+    {
+      "name": "node",
+      "argv": [
+        "node",
+        "scripts/tauri-test.mjs",
+        "--production-proofs",
+        "src/main/attachment-execution-owner.test.ts",
+        "src/main/task-attachment-file-owner.test.ts",
+        "src/service/production-attachment-execution.test.ts",
+        "src/service/production-agent-backend.test.ts",
+        "src/service/production-owner.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/production-mobile.test.ts",
+        "src/service/task-attachment-backend.test.ts",
+        "src/service/task-attachment-metadata-conflict.test.ts",
+        "src/service/task-lifecycle-backend.test.ts",
+        "src/main/task-groups/service.test.ts",
+        "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+        "src/renderer/src/lib/native-desktop-host.test.ts",
+        "src/main/agent-manager-configuration.test.ts",
+        "src/main/agent-manager-cli-configuration.test.ts",
+        "src/main/agent-manager-scoped-approval.test.ts",
+        "src/main/agent-manager-task-group-request.test.ts",
+        "src/main/agent-manager-captain-managed.test.ts",
+        "src/main/agent-manager-task-managed.test.ts",
+        "src/main/agent-manager/workspace-docs-request-scope.test.ts",
+        "src/main/agent-manager/task-group-request-scope.test.ts",
+        "scripts/production-service-proof.test.ts"
+      ],
+      "rawExitCode": 1,
+      "log": "/tmp/e2-execution-node.log",
+      "logSha256": "1495f2009f41179d6dd3f5f5d5eedac756a0187107360e6951143360a76675ba"
+    },
+    {
+      "name": "frontend",
+      "argv": [
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-frontend.log",
+      "logSha256": "063a01c8191cd880ff3e08c7cc010e0183ab1725024778dce295b557a14f28b1"
+    },
+    {
+      "name": "diagnostic-frontend",
+      "argv": [
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-diagnostic-frontend.log",
+      "logSha256": "681f18b87c90baf9cc6c285ecdfe9a4cc533f85ead9c4554373256c219ab9c70"
+    },
+    {
+      "name": "contracts",
+      "argv": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-contracts.log",
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    {
+      "name": "inventory",
+      "argv": [
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-inventory.log",
+      "logSha256": "d0c55e9af2bc353edf111065090aae1a4cadd02f1294c1fd91bd2ef10050e91e"
+    },
+    {
+      "name": "diff",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-diff.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "firstCombinedObserved": {
+    "app": {
+      "passed": 1062,
+      "failed": 1,
+      "files": 44
+    },
+    "standalone": {
+      "passed": 581,
+      "failed": 1,
+      "files": 23
+    }
+  },
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "kernel": "6.8.0-139-generic",
+    "hostNode": "22.22.0",
+    "hostABI": "127",
+    "bundledNode": "22.23.2",
+    "bundledABI": "127",
+    "electron": "44.0.0",
+    "electronNode": "24.18.1",
+    "vitest": "4.0.18",
+    "pnpm": "9.15.9",
+    "betterSqlite3": "13.0.3",
+    "webview": "not exercised by this Source-only continuation",
+    "schemaVersion": 37
+  },
+  "observedCounts": {
+    "app": {
+      "files": 44,
+      "passed": 1063,
+      "skipped": 0
+    },
+    "standalone": {
+      "files": 23,
+      "passed": 582,
+      "skipped": 0,
+      "existingActualStagedEntryProofs": 2,
+      "newActualStagedAttachmentGraph": 1
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "inventoryBeforePeerRebase": {
+      "sources": 919,
+      "ipcSites": 736,
+      "existingReviewedUnresolved": 9
+    },
+    "rebase": {
+      "app": 201,
+      "node": 201
+    },
+    "combinedInventory": {
+      "sources": 920,
+      "ipcSites": 736,
+      "existingReviewedUnresolved": 9
+    }
+  },
+  "newControls": {
+    "owner": 18,
+    "actualProductionRoot": 10,
+    "actualPrivatePeerAttachmentGraph": 1,
+    "sameGraphAgainstStagedProductionEngine": 1,
+    "unchangedAcceptedSendCancellationAndStaleHeartbeatControls": "both pass in full app and standalone suites",
+    "unsupportedPlatform": "nonempty execution fails closed; Linux policy test is not macOS/Windows runtime evidence"
+  },
+  "gates": [
+    {
+      "name": "app",
+      "argv": [
+        "pnpm",
+        "test:run",
+        "src/main/agent-manager-activity-outcomes.test.ts",
+        "src/main/agent-manager-activity.test.ts",
+        "src/main/agent-manager-admission.test.ts",
+        "src/main/agent-manager-captain-managed.test.ts",
+        "src/main/agent-manager-captain-rollover.test.ts",
+        "src/main/agent-manager-cli-configuration.test.ts",
+        "src/main/agent-manager-compaction.test.ts",
+        "src/main/agent-manager-concurrency.test.ts",
+        "src/main/agent-manager-configuration.test.ts",
+        "src/main/agent-manager-coordinator.test.ts",
+        "src/main/agent-manager-project-captains.test.ts",
+        "src/main/agent-manager-project-limits.test.ts",
+        "src/main/agent-manager-provider-recovery.test.ts",
+        "src/main/agent-manager-scoped-approval.test.ts",
+        "src/main/agent-manager-task-group-request.test.ts",
+        "src/main/agent-manager-task-managed.test.ts",
+        "src/main/agent-manager.test.ts",
+        "src/main/agent-manager/activity-observations.test.ts",
+        "src/main/agent-manager/captain-context.test.ts",
+        "src/main/agent-manager/credit-exhaustion.test.ts",
+        "src/main/agent-manager/mcp-probe-service.test.ts",
+        "src/main/agent-manager/project-repos.test.ts",
+        "src/main/agent-manager/provider-failure.test.ts",
+        "src/main/agent-manager/session-config.test.ts",
+        "src/main/agent-manager/skill-model.test.ts",
+        "src/main/agent-manager/skills-sync-scope.test.ts",
+        "src/main/agent-manager/task-group-request-scope.test.ts",
+        "src/main/agent-manager/transcript-events-core.test.ts",
+        "src/main/agent-manager/workspace-docs-request-scope.test.ts",
+        "src/main/agent-manager/workspace-docs-skill-scope.test.ts",
+        "src/main/attachment-execution-owner.test.ts",
+        "src/main/task-attachment-file-owner.test.ts",
+        "src/main/task-groups/service.test.ts",
+        "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+        "src/renderer/src/lib/native-desktop-host.test.ts",
+        "src/service/production-agent-backend.test.ts",
+        "src/service/production-attachment-execution.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/production-mobile.test.ts",
+        "src/service/production-owner.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/task-attachment-backend.test.ts",
+        "src/service/task-attachment-metadata-conflict.test.ts",
+        "src/service/task-lifecycle-backend.test.ts"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-app.log",
+      "logSha256": "31a86e70fc52ad4bec4c3c612b11bcf73b2fe8f19ce96a9255c36218922e2f2f"
+    },
+    {
+      "name": "type",
+      "argv": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-type.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lint",
+      "argv": [
+        "pnpm",
+        "lint"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-lint.log",
+      "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+    },
+    {
+      "name": "stage",
+      "argv": [
+        "pnpm",
+        "tauri:prepare:production"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-stage.log",
+      "logSha256": "1a8e2e4237fb3dbedddb7d4fb444d8003129b119cae5f1ddceceae911d493bfe"
+    },
+    {
+      "name": "node",
+      "argv": [
+        "node",
+        "scripts/tauri-test.mjs",
+        "--production-proofs",
+        "src/main/attachment-execution-owner.test.ts",
+        "src/main/task-attachment-file-owner.test.ts",
+        "src/service/production-attachment-execution.test.ts",
+        "src/service/production-agent-backend.test.ts",
+        "src/service/production-owner.test.ts",
+        "src/service/production-service.test.ts",
+        "src/service/production-desktop-bindings.test.ts",
+        "src/service/production-mobile.test.ts",
+        "src/service/task-attachment-backend.test.ts",
+        "src/service/task-attachment-metadata-conflict.test.ts",
+        "src/service/task-lifecycle-backend.test.ts",
+        "src/main/task-groups/service.test.ts",
+        "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+        "src/renderer/src/lib/native-desktop-host.test.ts",
+        "src/main/agent-manager-configuration.test.ts",
+        "src/main/agent-manager-cli-configuration.test.ts",
+        "src/main/agent-manager-scoped-approval.test.ts",
+        "src/main/agent-manager-task-group-request.test.ts",
+        "src/main/agent-manager-captain-managed.test.ts",
+        "src/main/agent-manager-task-managed.test.ts",
+        "src/main/agent-manager/workspace-docs-request-scope.test.ts",
+        "src/main/agent-manager/task-group-request-scope.test.ts",
+        "scripts/production-service-proof.test.ts"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-node.log",
+      "logSha256": "d9bd8b2525f905386a733da2ee13054f2fb09ba968970e92cc8463f76d71e5f6"
+    },
+    {
+      "name": "frontend",
+      "argv": [
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-frontend.log",
+      "logSha256": "610f9096f7db13d8b332010dcd8518f557530cbb8676d79ae209002f99ded8d9"
+    },
+    {
+      "name": "diagnostic-frontend",
+      "argv": [
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-diagnostic-frontend.log",
+      "logSha256": "3d5d26c5b6100a99474ec19c9390040cb57b10dafe08cc1c2970c792afcbdf36"
+    },
+    {
+      "name": "contracts",
+      "argv": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-contracts.log",
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    {
+      "name": "inventory",
+      "argv": [
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-inventory.log",
+      "logSha256": "d0c55e9af2bc353edf111065090aae1a4cadd02f1294c1fd91bd2ef10050e91e"
+    },
+    {
+      "name": "diff",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-fixed-diff.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "rebase": {
+    "onto": "2563e3c901d716765993c61a9767bae886f069e5",
+    "inputComparison": "all11 owned runtime/test inputs have identical SHA256 before/after rebase; peer changes limited to renderer metadata consumers/docs/inventory",
+    "statusConflict": "preserved complete published Astatus and added verified E2 paragraph",
+    "autostash": "owna507394389bd031629d36ccd0d4aec898294d79e restored, checked and dropped; unrelatedb34e790c959cef3254de9d806aeb44b129656c89 untouched",
+    "combinedInventoryExpected": 920,
+    "affectedGate": "/tmp/e2-execution-rebase-gate.py"
+  },
+  "publication": {
+    "sourceCommit": "f24d70e051ee5ec0427cd952f2694ea9710bb38b",
+    "sourcePush": "54ffb9e4..f24d70e0 HEAD->master; raw0",
+    "lsRemote": "f24d70e051ee5ec0427cd952f2694ea9710bb38b refs/heads/master",
+    "sourceRuns": [],
+    "finalRebase": "inherited A54ffb9e4 evidence JSON only; all11 runtime/test input SHA256 unchanged",
+    "publishedAt": "2026-10-18T01:53:04.555424+00:00"
+  },
+  "rebaseGates": [
+    {
+      "name": "app",
+      "argv": [
+        "pnpm",
+        "test:run",
+        "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+        "src/renderer/src/components/tasks/native-task-hierarchy.test.tsx",
+        "src/renderer/src/lib/native-desktop-host.test.ts"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-app.log",
+      "logSha256": "6d24399632ca12efda620ad8e2092519fe71226639a8142aa01783113fd61fc7"
+    },
+    {
+      "name": "node",
+      "argv": [
+        "node",
+        "scripts/tauri-test.mjs",
+        "src/renderer/src/components/tasks/native-attachment-ui.test.tsx",
+        "src/renderer/src/components/tasks/native-task-hierarchy.test.tsx",
+        "src/renderer/src/lib/native-desktop-host.test.ts"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-node.log",
+      "logSha256": "8f89cb41a63fe470ee7a7aa18d77aed2350b6f4ffeee4e38358a53c3ca09d564"
+    },
+    {
+      "name": "type",
+      "argv": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--build",
+        "--noEmit",
+        "--force"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-type.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lint",
+      "argv": [
+        "pnpm",
+        "lint"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-lint.log",
+      "logSha256": "541c1fab33072f615084bf1dd00acc46d7a4ba6ce10c6ae1c5b9bcd2500027f1"
+    },
+    {
+      "name": "frontend",
+      "argv": [
+        "pnpm",
+        "tauri:production:frontend:build"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-frontend.log",
+      "logSha256": "fdea038cfeb88ecd1ec6162ed89a1729988fe826a5c9a9d03cdb0b432f665a73"
+    },
+    {
+      "name": "diagnostic-frontend",
+      "argv": [
+        "pnpm",
+        "tauri:frontend:build"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-diagnostic-frontend.log",
+      "logSha256": "70152e88e9fe3181247a6c56ac7e6eb38571c637f604a2992bd32ccfd3b45b68"
+    },
+    {
+      "name": "contracts",
+      "argv": [
+        "node",
+        "scripts/tauri-contracts.mjs",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-contracts.log",
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    {
+      "name": "inventory",
+      "argv": [
+        "node",
+        "scripts/tauri-inventory.mjs",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-inventory.log",
+      "logSha256": "e61e97884062b0ca04c86f95ede4af4f9f9cd822b94dc1e3d64091d4472e9c64"
+    },
+    {
+      "name": "diff",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "rawExitCode": 0,
+      "log": "/tmp/e2-execution-rebase-diff.log",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "normalSourceCommitHooks": {
+    "rawExitCode": 0,
+    "log": "/tmp/e2-execution-source-commit.log",
+    "counts": {
+      "app": 201,
+      "node": 201
+    },
+    "logSha256": "d5b86efdc5762038959dbe9a2858f91d632d0de15594f993a9816cfdd148319b",
+    "bypassed": false,
+    "commitBeforeEvidenceOnlyRebase": "82562fe91531fae95b70782a017d88101750f21d",
+    "finalRebaseLimit": "Only peer evidence JSON inherited afterward; all11 owned runtime/test inputs byte-identical. No check bypass."
+  },
+  "retainedAuthority": {
+    "totalRows": 331,
+    "retainedRows": 325,
+    "existingOperationsSignaturesPoliciesGrants": "recursive comparison ignoring only source line fields is identical",
+    "newPublicOperations": 0,
+    "newPublicEvents": 0,
+    "newPublicGrants": 0,
+    "nativeCodeChanged": false
+  },
+  "sourceHashes": {
+    "docs/tauri-migration/event-forwarding-review.json": "a14ab066f320ca3d4bed3302729df525536488af17cc08fb8eb36f05f8cb5147",
+    "docs/tauri-migration/implementation-status.md": "89af97bd591b82f61fe2906f4a87d1a865f09c41d7b045f801db6e4a0b2496fc",
+    "docs/tauri-migration/inventory.json": "6066e7c3ea8a307f10c5d7e70efd7ec9fbee3226ccab132f1f0069482dd5a2ce",
+    "docs/tauri-migration/native-attachment-execution.md": "331575057f933ce4a259ac4363a94c60cb7ffbeb58467dcd705afb36dc29843c",
+    "docs/tauri-migration/operations.json": "ed8b33121b468675367cbf760794b6ce82c058bd7ae1e5f4e0e77e7426a1a022",
+    "src/main/agent-manager-core.ts": "66747e8226bc0c165853568180db61455b5487e7ac8dfa1ff662d7cc88a9b241",
+    "src/main/agent-manager/attachments.ts": "7aa834c8342a61d10851812487770b0b81fddbf0b1170f5d288c0653c21e0d83",
+    "src/main/agent-manager/host.ts": "3f7e52e44b04b31473ea8b00c74e73f548562e56a52e2d3c7162ad71bf790af9",
+    "src/main/attachment-execution-owner.test.ts": "584411b2e82ef61d43901285b5bd4400ece91d2ad7438a1f98013a99d8c420b9",
+    "src/main/attachment-execution-owner.ts": "774b6d055e85af1210f92e2a850c6e2c3fb0bd07e62a10ea4d58dda062f40f4c",
+    "src/main/task-attachment-file-owner.ts": "206e07c248e008cbbf963a0d8fbf8dddbb37620a16b0cd00b18c85d19e61da4d",
+    "src/service/production-agent-backend.ts": "42f7c4dfd30ca0c396b0310d0cfb96f6f5e881e56f1f61ba7d286ea103695d33",
+    "src/service/production-attachment-execution.test.ts": "a99433d66a0046e880a3dd5f8b650f61981b4818d8a0639dda4383b6df8b1527",
+    "src/service/production-owner.ts": "b6aa44127aef39b203b7a51e89e8a96106ae78e2d90ce97bd0189cc324d63614",
+    "src/service/production-service.test.ts": "a94406146b585b19bff00fcebba51b9bf02f5431890894b5713bc69c836e239a",
+    "src/shared/desktop-event-forwarding.ts": "659b22f88fd90c77aac0a438da5aca7d04ec332424aa9bd06f4df7a82c112f28",
+    "vitest.tauri.config.ts": "99d2df79869fa6f4bdad62dbb5fc12828acab214721082edf09856095d893378",
+    "src/main/agent-manager/task-group-request-scope.ts": "7aa93411d987f40a435a64a6b2b95352dc08404ddbf5f1b2cc62ffe0ca11281c",
+    "src/main/sessions/delivery-store.ts": "3441ea7cf0949abfcf73f31ee2f0009717672bc52924f56749f55cb09f76d50e",
+    "test/helpers/fake-adapter.ts": "4a7ac1e430fd1b87014590966a92ed8c66d74335e3219713759bbf36016c4e29",
+    "scripts/production-service-proof.test.ts": "68d4e586b1946a145240c813948abcca88d0bdcae902fc513c8c8bc529f61614",
+    "scripts/tauri-stage-production.mjs": "048cd96ecf2ffbda945ccdc0b000695a020e1c3e979fe1519e91d203e1722ded",
+    "scripts/tauri-test.mjs": "3c87157d494a84b8caf79ad4ceab84ead4dc4dbaaf9c509b3073514de80d1416"
+  },
+  "artifactHashes": {
+    "src-tauri/resources/service/production-stdio.mjs": "19f2820285faef629213e3def33a294035091f790d3cce03a4b3ca66f8b65482",
+    "src-tauri/resources/service/production-engine.mjs": "818cdb9640d923694d74e8664db18cca9517fc9d2b77b19feb16060015d425ec",
+    "src-tauri/resources/service/PRODUCTION_RESOURCE_MANIFEST.json": "40e3d5c1dc811681ff16902977548e983df730f677cc0c7094c051989f252290",
+    "src-tauri/resources/node/node": "3517c2df0b2f8cd7f422b4b8450ef81c6889f08eb03e281d6de9079b15e6a327",
+    "out/tauri-production-renderer/index.html": "37fac9ce64dc995cd5a83983ff0dff7c3fcf4a1c5e709ed65d6867878645b3d4",
+    "out/tauri-renderer/index.html": "7b9b8905836dcf88a1f618354b8b85c3d70eddc15ccf54cd3919e447ae9b70b4"
+  }
+}
