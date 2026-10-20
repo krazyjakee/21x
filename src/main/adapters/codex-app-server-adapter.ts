@@ -724,8 +724,10 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     child.once('close', () => this.liveSessions.delete(session))
     child.on('exit', (code, signal) => {
       console.log(`[CodexAppServerAdapter] process exited: code=${code}, signal=${signal}`)
-      this.settleExitedSession(session, code, signal)
+      // Nothing will ever answer these; do not hold their callers on the 30 s
+      // RPC timeout against a closed pipe.
       rejectPending(session.lastError ?? `Codex app-server exited (${exitDescription(code, signal)})`)
+      this.settleExitedSession(session, code, signal)
     })
 
     return session
