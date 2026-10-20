@@ -44,6 +44,38 @@ describe('activity clock', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('settles a passed deadline once, even when a subscriber keeps re-registering it', () => {
+    // THE LOOP. A subscriber that re-registers the same past deadline on every
+    // tick re-armed the clock at its 25 ms margin forever, waking every
+    // indicator at ~40 Hz after one stale observation.
+    const expiry = 15_000
+    const unsubscribe = useActivityClock.subscribe(() => scheduleActivityDeadline(expiry))
+    try {
+      scheduleActivityDeadline(expiry)
+      advance(15_025)
+      expect(useActivityClock.getState().tick).toBe(1)
+
+      for (let i = 0; i < 40; i++) advance(25)
+      expect(useActivityClock.getState().tick).toBe(1)
+      expect(pendingActivityDeadlines()).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('still arms a future deadline after a tick', () => {
+    scheduleActivityDeadline(1_000)
+    advance(1_025)
+    expect(useActivityClock.getState().tick).toBe(1)
+    scheduleActivityDeadline(900) // already observed as passed
+    expect(vi.getTimerCount()).toBe(0)
+    scheduleActivityDeadline(5_000)
+    expect(vi.getTimerCount()).toBe(1)
+    advance(4_000)
+    expect(useActivityClock.getState().tick).toBe(2)
+  })
+
   it('ignores null deadlines', () => {
     scheduleActivityDeadline(null)
     expect(vi.getTimerCount()).toBe(0)
