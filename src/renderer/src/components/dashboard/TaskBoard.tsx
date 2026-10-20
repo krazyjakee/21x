@@ -1,3 +1,6 @@
+import { getDesktopHost } from '@/lib/desktop-api'
+import { useNativeBoardDrag } from './use-native-board-drag'
+import { useNativeBoardRecovery } from './use-native-board-recovery'
 import { useMemo, useCallback, useEffect, useRef, useState, memo } from 'react'
 import { Clock, AlertCircle, CheckCircle2, ExternalLink, Bot, Terminal } from 'lucide-react'
 import {
@@ -37,7 +40,7 @@ const EMPTY_GROUPS: TaskGroupRecord[] = []
 import { TASK_STATUS_STYLES, type TaskStatusStyle } from '@shared/task-status-styles'
 import { TaskStatus, CodingAgentType } from '@/types'
 import type { Task, Agent } from '@/types'
-import type { TaskBoardTransitionPhase, TaskBoardTransitionResult } from './task-board-transition'
+import type { TaskBoardTransitionContext, TaskBoardTransitionPhase, TaskBoardTransitionResult } from './task-board-transition'
 
 // ── Status column definitions ─────────────────────────────────
 // Styling comes from the shared status map so the board, the task lists and
@@ -439,7 +442,7 @@ function CompletedDropTarget({ count, isDraggingTask }: { count: number; isDragg
 }
 
 export interface TaskBoardProps {
-  onStatusChange?: (task: Task, status: TaskStatus) => void | TaskBoardTransitionResult | Promise<void | TaskBoardTransitionResult>
+  onStatusChange?: (task: Task, status: TaskStatus, context?: TaskBoardTransitionContext) => void | TaskBoardTransitionResult | Promise<void | TaskBoardTransitionResult>
 }
 
 // ── TaskBoard ──────────────────────────────────────────────
@@ -488,10 +491,14 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
   )
 
   const visibleTaskIds = topLevelTasks.map(task => task.id).sort().join(',')
+  const native = getDesktopHost().kind === 'tauri'
+  const clearSettled = useCallback((ids: string[]) => setTransitionStates(current => { const next = { ...current }; for (const id of ids) delete next[id]; return next }), [])
+  const nativeRecovery = useNativeBoardRecovery(projectId, visibleTaskIds, clearSettled)
   // The durable queue is authoritative across reloads. Rehydrate it on mount
   // and follow main-process state changes so Queued/Starting never depend on
   // an optimistic drag that existed only in this renderer lifetime.
   useEffect(() => {
+    if (native) return undefined
     let disposed = false
     let revision = 0
     const applyQueue = (queue: Awaited<ReturnType<typeof agentApi.getStartQueue>>): void => {
@@ -543,9 +550,9 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
       disposed = true
       unsubscribe?.()
     }
-  }, [visibleTaskIds])
+  }, [native, visibleTaskIds])
 
-  const displayedTransitions = useMemo(() => ({ ...transitionStates, ...durableStates }), [transitionStates, durableStates])
+  const displayedTransitions = useMemo(() => ({ ...transitionStates, ...(native ? nativeRecovery.states : durableStates) }), [transitionStates, durableStates, native, nativeRecovery.states])
 
   // Open task preview modal (rendered by AppLayout with full TaskWorkspace)
   const handleSelectTask = useCallback((taskId: string) => {
@@ -671,6 +678,9 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
     }
   }, [onStatusChange, topLevelTasks, groups])
 
+  const nativeDrag = useNativeBoardDrag({ projectId, tasks: topLevelTasks, groups, onStatusChange,
+    setDragged: setDraggedTaskId,
+    setPhase: (id, phase) => setTransitionStates(current => { const next = { ...current }; if (phase) next[id] = phase; else delete next[id]; return next }) })
   const activeGroups = groups.filter(group => group.state === 'active' && group.status !== TaskStatus.Completed)
   const groupColumn = (group: TaskGroupRecord) => group.status === TaskStatus.AgentLearning ? TaskStatus.ReadyForReview : COLUMNS.some(column => column.key === group.status) ? group.status : TaskStatus.NotStarted
 
@@ -678,11 +688,13 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
     <DndContext
       sensors={sensors}
       collisionDetection={boardCollisionDetection}
-      onDragStart={handleDragStart}
-      onDragCancel={() => setDraggedTaskId(null)}
-      onDragEnd={(event) => { void handleDragEnd(event) }}
+      onDragStart={native ? nativeDrag.start : handleDragStart}
+      onDragCancel={native ? nativeDrag.cancel : () => setDraggedTaskId(null)}
+      onDragEnd={(event) => { void (native ? nativeDrag.end(event) : handleDragEnd(event)) }}
     >
       <section>
+        {nativeRecovery.failed && <p role="alert" className="mb-3 text-sm text-destructive">Recovery status is unavailable. Review the current tasks before starting work.</p>}
+        {nativeDrag.review && <p role="alert" className="mb-3 text-sm text-destructive">Review the current board before another action. An earlier request may already have been accepted.</p>}
         {groupError && <p role="alert" className="mb-3 text-sm text-destructive">{groupError}<button className="ml-2 underline" onClick={() => { void useTaskGroupStore.getState().fetch(projectId) }}>Retry groups</button></p>}
         {/* Header */}
         <div className="flex items-center justify-between mb-4">

@@ -768,3 +768,45 @@ and 153 directory-owner tests, all without skips. Forced typecheck, lint
 923-source freshness/contracts pass. Revision-bound receipts and the five
 published-code failures are in
 `evidence/issue-209-completion-source-export-local-20261018.json`.
+
+
+### Native board gestures and recovery reads
+
+The native board captures an ordinary task or exact group at drag start. One
+synchronous receipt admits the drop. Cached callbacks, duplicate drops, a
+cancelled/replaced gesture, task/source/agent/group changes, project change and
+return, pagehide, unmount and connection replacement cannot borrow another
+view's intent. Before the first effect it also checks the original status and
+content; observed change and return withdraws the intent. After admission,
+canonical Source updates remain authoritative, and retirement does not undo an
+accepted prompt, queue or write.
+
+Explicit runtime drops retain the existing `agentSession.startTask` policy.
+This differs from window AutoRun's exact-target `agentSession.start` contract.
+The board writes no runtime status/session before that owner and creates no
+renderer session for a queued receipt. Native local status changes use the
+existing lifecycle operation; a linked Source export follows only its accepted
+canonical receipt and current originating board. Completion keeps the existing
+choice owner, with the originating board's pre-effect guard carried into the
+later dialog choice. Group moves retain the existing finite group operation
+and membership/execution-owner receipt. Group triage remains unavailable.
+An unavailable/unknown receipt enters fixed manual review; the board never
+retries it automatically or issues a compensating Stop.
+
+Recovery hydration is a separate read-only owner. At most four reads are active,
+notifications coalesce behind that batch, and a snapshot covers at most 512
+visible tasks. Larger boards show unavailable recovery status rather than
+flooding the client. Results must match their original literal task/project;
+newer queue events supersede held snapshots. Current-connection readiness can
+refresh these observations without replaying a drag. Pagehide/project retirement
+releases listeners and fences old reads. Canonical cancelled/settled recovery
+clears transient queue badges; a queued badge never moves the task to Working.
+
+Regression coverage uses the real typed facade/transport, production stores,
+board and completion dialog with controlled native receipts and finite Dnd
+callbacks. It does not prove installed pointer/keyboard interaction. The existing
+actual keyboard drag/cancel test remains a separate legacy positive control.
+Independent real Source task/group/agent, private-peer, compiled Root and
+protected-directory proofs are repeated in the integration gate; these do not
+turn the controlled renderer receipts into installed UI or real-provider proof.
+General content-editor followups outside this board remain separate work.

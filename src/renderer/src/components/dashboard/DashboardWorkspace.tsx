@@ -4,11 +4,10 @@ import { HeroSection } from './HeroSection'
 import { CommandInput } from './CommandInput'
 import { TaskSearch } from './TaskSearch'
 import { TaskBoard } from './TaskBoard'
-import type { Task, TaskStatus } from '@/types'
-import type { TaskBoardTransitionResult } from './task-board-transition'
+import type { TaskBoardProps } from './TaskBoard'
 
 interface DashboardWorkspaceProps {
-  onTaskStatusChange?: (task: Task, status: TaskStatus) => void | TaskBoardTransitionResult | Promise<void | TaskBoardTransitionResult>
+  onTaskStatusChange?: TaskBoardProps['onStatusChange']
 }
 
 export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspaceProps = {}) {

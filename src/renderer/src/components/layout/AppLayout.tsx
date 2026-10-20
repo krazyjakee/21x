@@ -1,4 +1,4 @@
-import { desktopApi, desktopSupports } from '@/lib/desktop-api'
+import { desktopApi, desktopSupports, getDesktopHost } from '@/lib/desktop-api'
 import { ATTACHMENT_IMPORT_FAILURE, attachmentPrecondition } from '@/lib/task-attachment-import'
 import { DesktopHostStatus } from './DesktopHostStatus'
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react'
@@ -17,7 +17,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useAgentAutoStart } from '@/hooks/use-agent-auto-start'
 import { useOverdueNotifications } from '@/hooks/use-overdue-notifications'
-import { agentApi, agentSessionApi, settingsApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
+import { agentApi, agentSessionApi, settingsApi, taskApi, taskSourceApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
 import { isOverdue, isSnoozed } from '@/lib/utils'
 import { onShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import { TASK_STATUSES, TaskStatus } from '@/types'
@@ -33,7 +33,7 @@ import { ProjectEditorDialog } from '@/components/projects/ProjectEditorDialog'
 import { useActiveTaskActions } from './hooks/use-active-task-actions'
 import { useGlobalShortcuts } from './hooks/use-global-shortcuts'
 import { transitionTaskFromBoard } from '@/components/dashboard/task-board-transition'
-import type { TaskBoardTransitionResult } from '@/components/dashboard/task-board-transition'
+import type { TaskBoardTransitionContext, TaskBoardTransitionResult } from '@/components/dashboard/task-board-transition'
 import { CommanderCallHost } from '@/components/commander/CommanderCallHost'
 import { CommanderCallSurfaces } from '@/components/commander/CommanderCallSurfaces'
 
@@ -139,20 +139,26 @@ export function AppLayout() {
   const handleUpdateTask = useCallback(async (taskId: string, data: Record<string, unknown>) => {
     if (!await updateTask(taskId, data as UpdateTaskDTO)) throw new Error('Task change could not be confirmed.')
   }, [updateTask])
-  const handleDashboardTaskStatusChange = useCallback(async (task: Task, status: TaskStatus): Promise<TaskBoardTransitionResult> => {
+  const handleDashboardTaskStatusChange = useCallback(async (task: Task, status: TaskStatus, context?: TaskBoardTransitionContext): Promise<TaskBoardTransitionResult> => {
     try {
       const result = await transitionTaskFromBoard(task, status, {
         startTask: agentSessionApi.startTask,
         stopByTaskId: agentSessionApi.stopByTaskId,
         getStartRecoveryState: agentApi.getStartRecoveryState,
-        updateTask,
+        updateTask: getDesktopHost().kind === 'tauri' ? taskApi.update : updateTask,
+        exportUpdate: (id, data) => taskSourceApi.exportUpdate(id, data as Record<string, unknown>),
         completeTask
-      })
+      }, context)
+      context?.assertCurrent()
       if (result.phase === 'queued') {
         showToast(`Queued "${task.title}" to start${result.queuePosition ? ` (position ${result.queuePosition})` : ''}`)
       }
       return result
     } catch (error) {
+      if (getDesktopHost().kind === 'tauri') {
+        try { context?.assertCurrent(); showToast('Task transition was not confirmed. Review the current board before another action.', true) } catch { /* The originating board retired. */ }
+        throw error
+      }
       const statusLabel = TASK_STATUSES.find((entry) => entry.value === status)?.label ?? status
       showToast(`Could not move "${task.title}" to ${statusLabel}: ${error instanceof Error ? error.message : String(error)}`, true)
       throw error
