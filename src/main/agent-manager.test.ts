@@ -2337,6 +2337,35 @@ describe('AgentManager session ID re-keying (public session API)', () => {
     await expect(mgr.respondToPermission('unknown-id', true)).rejects.toThrow('Session not found: unknown-id')
   })
 
+  /**
+   * The idle reaper released the runtime (or the app restarted) while a view
+   * still showed its request. The request is gone; the reply must still reach
+   * the task instead of failing "Session not found" on every retry.
+   */
+  it('respondToPermission delivers a reply to a released session as a message', async () => {
+    const mockDb = createMockDb({ coding_agent: 'claude-code' })
+    vi.mocked(mockDb.getTasks).mockReturnValue([{ id: 'task-1', agent_id: 'agent-1', session_id: 'released-id' }] as never)
+    const mgr = new AgentManager(mockDb)
+    const send = vi.spyOn(mgr, 'sendMessage').mockResolvedValue({})
+
+    await expect(mgr.respondToPermission('released-id', true, 'Please carry on')).resolves.toBeUndefined()
+
+    expect(mockDb.getTasks).toHaveBeenCalledWith({ includeCoordinators: true })
+    expect(send).toHaveBeenCalledWith('released-id', 'Please carry on', 'task-1', 'agent-1')
+  })
+
+  it('respondToPermission drops a bare yes/no for a released session', async () => {
+    const mockDb = createMockDb({ coding_agent: 'claude-code' })
+    vi.mocked(mockDb.getTasks).mockReturnValue([{ id: 'task-1', agent_id: 'agent-1', session_id: 'released-id' }] as never)
+    const mgr = new AgentManager(mockDb)
+    const send = vi.spyOn(mgr, 'sendMessage').mockResolvedValue({})
+
+    await expect(mgr.respondToPermission('released-id', false, 'No')).resolves.toBeUndefined()
+    await expect(mgr.respondToPermission('released-id', true)).resolves.toBeUndefined()
+
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('abortSession aborts the re-keyed backend session and marks it idle', async () => {
     const { mgr, fake } = await startRekeyedSession()
 

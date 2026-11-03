@@ -6523,8 +6523,29 @@ export class AgentManager extends EventEmitter {
     responseType?: 'permission' | 'question',
     requestId?: string
   ): Promise<void> {
+    if (!this.shuttingDown && !this.resolveSession(sessionId) && await this.replyToReleasedSession(sessionId, approved, message)) return
     this.assertAgentConfigurationAvailable(this.resolveSession(sessionId)?.session.agentId)
     return this.ownShutdownWork(this.respondToPermissionNow(sessionId, approved, message, optionId, responseType, requestId).then(() => undefined))
+  }
+
+  /**
+   * A reply to a session whose runtime is gone: the idle reaper released it,
+   * or the app restarted. The request it answered died with that runtime, so
+   * nothing is waiting for a yes or no. A view that still shows the request
+   * would otherwise fail "Session not found" on every retry. Deliver any text
+   * as an ordinary message instead; sendMessage resumes the conversation from
+   * the task's persisted session_id.
+   *
+   * Returns false when no task owns this session id, leaving the caller's
+   * normal "Session not found" error in place.
+   */
+  private async replyToReleasedSession(sessionId: string, approved: boolean, message?: string): Promise<boolean> {
+    const task = this.db.getTasks({ includeCoordinators: true }).find((row) => row.session_id === sessionId)
+    if (!task) return false
+    console.log(`[AgentManager] Reply for released session ${sessionId} (task ${task.id}); its request ended with the runtime`)
+    if (!approved || !message?.trim()) return true
+    await this.sendMessage(sessionId, message, task.id, task.agent_id ?? undefined)
+    return true
   }
 
   private async respondToPermissionNow(

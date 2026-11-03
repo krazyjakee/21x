@@ -242,7 +242,9 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       const live = captainTaskId ? useAgentStore.getState().sessions.get(captainTaskId) : undefined
       const messages = live?.messages || []
       const lastMessage = messages[messages.length - 1]
-      if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
+      // Only while the Captain is actually waiting: a question card left over
+      // from an answered or released turn must not swallow new messages.
+      if (live?.status === SessionStatus.WAITING_APPROVAL && lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
         await approve(true, withAttachmentNote(message.message, message.options?.attachments))
       } else {
         await sendMessage(message.message, { ...message.options, deliveryId: message.deliveryId })
