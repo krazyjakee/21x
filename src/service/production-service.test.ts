@@ -356,7 +356,7 @@ describe('actual private production peer', () => {
     const { projectEvents } = await import('../main/project-events')
     const projectEvent = vi.fn(); release.push(projectEvents.onEvent(projectEvent))
     db.updateProject(project.id, { settings: { ...project.settings, captain_wakeups: { enabled: false } } })
-    const agent = db.getAgents()[0]; db.updateAgent(agent.id, { config: { coding_agent: 'pi', auth_method: 'subscription', max_parallel_sessions: 1 } })
+    const agent = db.getAgents()[0]; db.updateAgent(agent.id, { config: { coding_agent: 'pi', auth_method: 'subscription', permission_mode: 'ask', max_parallel_sessions: 1 } })
     const task = db.createTask(makeTask())!; db.updateTask(task.id, { agent_id: agent.id })
     const started = await f.host.request('agentSession:start', { agentId: agent.id, taskId: task.id }) as { value: { sessionId: string } }
     let waitingId: string | undefined

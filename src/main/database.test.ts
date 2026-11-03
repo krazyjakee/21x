@@ -515,7 +515,7 @@ describe('Settings CRUD', () => {
     db.setSetting('b', '2')
     const all = db.getAllSettings()
     // The one-time Claude Code permission migration records its run flag.
-    expect(all).toEqual({ a: '1', b: '2', 'migration:claude-code-permission-mode': '1' })
+    expect(all).toEqual({ a: '1', b: '2', 'migration:claude-code-permission-mode': '1', 'migration:agents-full-access': '1' })
   })
 
   it('deleteSetting removes entry', () => {
@@ -887,7 +887,7 @@ describe('hosted service data removal on upgrade', () => {
     expect(skillColumns).not.toContain('enterprise_skill_id')
     expect(skillColumns).not.toContain('uses_at_last_sync')
 
-    expect(manager.getAllSettings()).toEqual({ theme: 'dark', 'migration:claude-code-permission-mode': '1' })
+    expect(manager.getAllSettings()).toEqual({ theme: 'dark', 'migration:claude-code-permission-mode': '1', 'migration:agents-full-access': '1' })
   })
 
   it('is safe to run again', () => {

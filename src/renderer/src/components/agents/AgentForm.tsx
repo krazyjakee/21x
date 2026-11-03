@@ -68,7 +68,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
     agent?.config.auth_method ?? 'subscription'
   )
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
-    agent?.config.permission_mode ?? 'ask'
+    agent?.config.permission_mode ?? 'allow'
   )
   const [sandboxMode, setSandboxMode] = useState<AgentSandboxMode>(
     agent?.config.sandbox_mode ?? 'danger-full-access'
@@ -278,7 +278,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
           ? authMethod
           : undefined,
         permission_mode: permissionMode,
-        sandbox_mode: codingAgent === CodingAgentType.CODEX ? sandboxMode : undefined,
+        sandbox_mode: sandboxMode,
         system_prompt: systemPrompt.trim() || undefined,
         // #150: the hard cap. max_parallel_sessions mirrors it for older readers.
         concurrency_cap: Math.max(1, Math.min(MAX_HARD_CAP, Math.floor(maxParallelSessions) || 1)),

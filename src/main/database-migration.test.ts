@@ -410,4 +410,50 @@ describe('DatabaseManager migrations on an existing install', () => {
     expect(modeOf(final, 'claude-ask')).toBe('ask')
     final.close()
   })
+
+  /**
+   * Agents default to full access. Upgrading moves every existing agent there
+   * once, and never overrides an agent switched back to 'ask' afterwards.
+   */
+  it('grants every existing agent full access exactly once', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const now = new Date().toISOString()
+    const raw = openRaw()
+    const insert = raw.prepare(
+      'INSERT INTO agents (id, name, server_url, config, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)'
+    )
+    insert.run('codex-ask', 'Codex ask', '', JSON.stringify({ coding_agent: 'codex', permission_mode: 'ask', sandbox_mode: 'workspace-write' }), now, now)
+    insert.run('pi-unset', 'Pi unset', '', JSON.stringify({ coding_agent: 'pi' }), now, now)
+    raw.prepare("DELETE FROM settings WHERE key = 'migration:agents-full-access'").run()
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('10')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const configOf = (db: InstanceType<typeof RawDatabase>, id: string): Record<string, unknown> =>
+      JSON.parse((db.prepare('SELECT config FROM agents WHERE id = ?').get(id) as { config: string }).config) as Record<string, unknown>
+    const after = openRaw()
+    for (const id of ['codex-ask', 'pi-unset']) {
+      expect(configOf(after, id)).toMatchObject({ permission_mode: 'allow', sandbox_mode: 'danger-full-access' })
+    }
+
+    after
+      .prepare('UPDATE agents SET config = ? WHERE id = ?')
+      .run(JSON.stringify({ coding_agent: 'codex', permission_mode: 'ask' }), 'codex-ask')
+    after.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('10')
+    after.close()
+
+    const third = new DatabaseManager()
+    third.initialize()
+    third.close?.()
+
+    const final = openRaw()
+    expect(configOf(final, 'codex-ask').permission_mode).toBe('ask')
+    final.close()
+  })
 })

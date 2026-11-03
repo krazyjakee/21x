@@ -120,3 +120,25 @@ describe('mcpOptionsForTask scopes (#56)', () => {
     expect(mcpOptionsForTask('heartbeat-x', null, checked)).toEqual({ ensureTaskManagement: false, projectId: 'proj-b', artifactTaskId: 'x' })
   })
 })
+
+describe('assembleSessionConfig access', () => {
+  const task: Partial<TaskRecord> = { id: 'task-1', title: 'Fix login', role: 'task', agent_id: 'agent-x' }
+  const configWith = (extra: Record<string, unknown>) => {
+    const agent = { id: 'agent-a', name: 'a', config: { coding_agent: 'claude-code', ...extra } } as unknown as AgentRecord
+    return assembleSessionConfig(EMPTY_DB, agent, { agentId: agent.id, taskId: 'task-1', task: task as TaskRecord, workspaceDir: '/tmp/ws', mcpServers: {} })
+  }
+
+  for (const backend of BACKENDS) {
+    it(`runs a ${backend} agent with no stored setting at full access and no sandbox`, () => {
+      const config = configFor(backend, task)
+      expect(config.permissionMode).toBe('allow')
+      expect(config.sandboxMode).toBe('danger-full-access')
+    })
+  }
+
+  it('keeps an agent explicitly set to ask', () => {
+    const config = configWith({ permission_mode: 'ask', sandbox_mode: 'workspace-write' })
+    expect(config.permissionMode).toBe('ask')
+    expect(config.sandboxMode).toBe('workspace-write')
+  })
+})

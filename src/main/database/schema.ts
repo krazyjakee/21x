@@ -1142,6 +1142,9 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v11: the Claude Code adapter now honours permission_mode.
   preserveClaudeCodePermissionBehaviour(db)
+
+  // Agents run with full permissions and no sandbox by default.
+  grantAgentsFullAccess(db)
 }
 
 /**
@@ -1387,6 +1390,36 @@ function preserveClaudeCodePermissionBehaviour(db: Database.Database): void {
     config.permission_mode = 'allow'
     db.prepare('UPDATE agents SET config = ? WHERE id = ?').run(JSON.stringify(config), agent.id)
     console.log(`[Database Migration] Kept automatic permissions for Claude Code agent ${agent.id}`)
+  }
+
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(flag, '1')
+}
+
+/**
+ * Agents default to the most access each backend offers: no approval prompts
+ * and no sandbox. Move every existing agent there once, so agents saved with
+ * the old 'ask' default stop pausing for approval.
+ *
+ * Runs once, guarded by a settings flag, so an agent the user later switches
+ * back to 'ask' keeps that choice across schema bumps.
+ */
+function grantAgentsFullAccess(db: Database.Database): void {
+  const flag = 'migration:agents-full-access'
+  if (db.prepare('SELECT value FROM settings WHERE key = ?').get(flag)) return
+
+  const agents = db.prepare('SELECT id, config FROM agents').all() as { id: string; config: string }[]
+  for (const agent of agents) {
+    let config: Record<string, unknown>
+    try {
+      config = JSON.parse(agent.config || '{}') as Record<string, unknown>
+    } catch {
+      continue
+    }
+    if (config.permission_mode === 'allow' && config.sandbox_mode === 'danger-full-access') continue
+    config.permission_mode = 'allow'
+    config.sandbox_mode = 'danger-full-access'
+    db.prepare('UPDATE agents SET config = ? WHERE id = ?').run(JSON.stringify(config), agent.id)
+    console.log(`[Database Migration] Granted full access to agent ${agent.id}`)
   }
 
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(flag, '1')

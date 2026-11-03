@@ -267,8 +267,11 @@ export function assembleSessionConfig(
     // tool map (Claude Code reads enabledTools from mcpServers directly).
     tools: opencodeDisallowedToolMap(params.mcpServers),
     authMethod: agent.config?.auth_method,
-    permissionMode: agent.config?.permission_mode,
-    sandboxMode: agent.config?.sandbox_mode,
+    // Agents run with the most access each backend offers unless the agent is
+    // explicitly set to ask: no approval prompts (Claude Code bypassPermissions,
+    // Codex approval 'never', OpenCode, Cursor and Pi auto-approve) and no sandbox.
+    permissionMode: agent.config?.permission_mode ?? 'allow',
+    sandboxMode: agent.config?.sandbox_mode ?? 'danger-full-access',
     apiKeys: agent.config?.api_keys,
     tillDone: shouldEnableTillDone(params.taskId, params.task)
   }
