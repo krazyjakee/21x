@@ -1,28 +1,22 @@
 /**
  * Maps an agent's permission setting onto Claude Code's own permission modes.
  *
- * 21x stores a two-valued `permission_mode` ('ask' | 'allow') per agent, and
- * `agent-manager.ts` passes it to every adapter as `SessionConfig.permissionMode`.
- * OpenCode, Codex, ACP and Pi all honour it. The Claude Code adapter used to
- * ignore it and hardcode `bypassPermissions`, so every Claude Code session ran
- * unrestricted whatever the agent form said.
+ * Production sessions always arrive with `permissionMode: 'allow'` (see
+ * assembleSessionConfig): agents run without approval prompts. That maps to
+ * Claude Code's `'default'` mode, NOT `'bypassPermissions'`, so every gated
+ * tool call still passes through the adapter's `canUseTool` callback. The
+ * callback approves it at once unless ./tool-safety.ts finds it dangerous
+ * (deleting outside the workspace, touching system paths, wiping disks), and
+ * only those rare requests reach the user.
  *
- * The rule: a mode may resolve to something STRICTER than the user asked for,
- * never to something looser. `'bypassPermissions'` is reachable from exactly
- * one input, an explicit `'allow'`. An absent mode resolves to `'default'`, so a
- * caller that forgets the field cannot silently restore the bypass.
+ *  permissionMode | sandboxMode        | Claude Code mode | canUseTool
+ *  ---------------|--------------------|------------------|-------------------------
+ *  'allow'        | (any)              | 'default'        | approve unless dangerous
+ *  'ask'          | 'read-only'        | 'plan'           | ask the user
+ *  'ask'          | 'workspace-write'  | 'default'        | ask the user
+ *  (absent)       | (absent)           | 'default'        | ask the user
  *
- *  permissionMode | sandboxMode        | Claude Code mode
- *  ---------------|--------------------|------------------
- *  'allow'        | (any)              | 'bypassPermissions'
- *  'ask'          | 'read-only'        | 'plan'
- *  'ask'          | 'workspace-write'  | 'default'
- *  'ask'          | (absent)           | 'default'
- *  (absent)       | (absent)           | 'default'      <-- NOT bypass
- *
- * In `'default'` and `'plan'` Claude Code asks before running tools that need
- * approval; the adapter routes those requests to the 21x approval UI through
- * the SDK's `canUseTool` callback.
+ * 'ask' remains for proof harnesses that construct a SessionConfig directly.
  */
 
 /** Claude Code's own permission modes that this mapping can produce. */
@@ -37,15 +31,15 @@ export type AdapterSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-
  * Resolve the adapter's permission setting (plus `sandboxMode`, which carries
  * the read-only case that 'ask' | 'allow' cannot) into Claude Code's mode.
  *
- * Total: every input yields a defined mode, and only an explicit `'allow'`
- * yields `'bypassPermissions'`.
+ * Total: every input yields a defined mode. `'bypassPermissions'` is never
+ * used, because it would skip the dangerous-request check.
  */
 export function claudeCodePermissionMode(config: {
   permissionMode?: AdapterPermissionMode
   sandboxMode?: AdapterSandboxMode
 }): ClaudeCodePermissionMode {
   if (config.permissionMode === 'allow') {
-    return 'bypassPermissions'
+    return 'default'
   }
   if (config.sandboxMode === 'read-only') {
     return 'plan'

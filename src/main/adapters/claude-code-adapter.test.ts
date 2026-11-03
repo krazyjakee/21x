@@ -1371,12 +1371,14 @@ describe('sendPrompt permission mode', () => {
     expect(typeof options.canUseTool).toBe('function')
   })
 
-  it("passes 'bypassPermissions' with the bypass flag and no canUseTool for permissionMode 'allow'", async () => {
+  it("passes 'default' with a canUseTool bridge and no bypass flag for permissionMode 'allow'", async () => {
     const { options } = await runPrompt({ ...base, permissionMode: 'allow' })
 
-    expect(options.permissionMode).toBe('bypassPermissions')
-    expect(options.allowDangerouslySkipPermissions).toBe(true)
-    expect(options.canUseTool).toBeUndefined()
+    // Not bypassPermissions: canUseTool must still see each request so the
+    // dangerous ones can reach the user.
+    expect(options.permissionMode).toBe('default')
+    expect(Object.prototype.hasOwnProperty.call(options, 'allowDangerouslySkipPermissions')).toBe(false)
+    expect(typeof options.canUseTool).toBe('function')
   })
 
   it("passes 'plan' for permissionMode 'ask' with a read-only sandbox", async () => {
@@ -1425,6 +1427,26 @@ describe('canUseTool approval bridge', () => {
   function request(canUseTool: any, toolName: string, input: any, toolUseID: string, extra: any = {}) {
     return canUseTool(toolName, input, { signal: new AbortController().signal, toolUseID, ...extra })
   }
+
+  it("approves ordinary requests at once under permissionMode 'allow'", async () => {
+    const { adapter, session, canUseTool, onDataAvailable } = setup()
+    session.config.permissionMode = 'allow'
+    const input = { command: 'rm -rf build && npm test' }
+
+    await expect(request(canUseTool, 'Bash', input, 'tool-1')).resolves.toEqual({ behavior: 'allow', updatedInput: input })
+    await expect(request(canUseTool, 'mcp__task-management__update_project_status', { status: 'ok' }, 'tool-2')).resolves.toMatchObject({ behavior: 'allow' })
+    expect(onDataAvailable).not.toHaveBeenCalled()
+    expect(adapter.getPendingApproval('s1')).toBeNull()
+  })
+
+  it("still asks before a dangerous request under permissionMode 'allow'", async () => {
+    const { adapter, session, canUseTool } = setup()
+    session.config.permissionMode = 'allow'
+    void request(canUseTool, 'Bash', { command: 'rm -rf /etc/nginx' }, 'tool-1')
+
+    expect((await adapter.getStatus('s1', {} as any)).type).toBe('waiting_approval')
+    expect(adapter.getPendingApproval('s1')?.question).toBe('Allow Bash: rm -rf /etc/nginx This deletes the system path /etc/nginx.')
+  })
 
   it('surfaces a request as a pending approval and WAITING_APPROVAL status', async () => {
     const { adapter, canUseTool, onDataAvailable } = setup()

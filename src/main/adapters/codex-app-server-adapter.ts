@@ -54,6 +54,7 @@ import {
 } from './shared/json-rpc'
 import { onJsonLines } from './shared/jsonl'
 import { groupPartsIntoMessages } from './shared/session-messages'
+import { dangerousToolReason } from './tool-safety'
 
 const DEFAULT_CODEX_APP_SERVER_MODEL = 'gpt-6-astra'
 const LABEL = 'CodexAppServerAdapter'
@@ -1107,7 +1108,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     params: Record<string, unknown>
   ): void {
     const responseKind = this.getApprovalResponseKind(request.method)
-    if (session.config.permissionMode === 'allow' && responseKind !== 'userInput') {
+    if (session.config.permissionMode === 'allow' && responseKind !== 'userInput' &&
+      !dangerousToolReason({ input: params, workspaceDir: session.config.workspaceDir })) {
       const selected = responseKind === 'execCommand' ? 'approved' : 'accept'
       this.sendRpcResponse(session, request.id, this.buildApprovalResponse(responseKind, selected, true))
       return

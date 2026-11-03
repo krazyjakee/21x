@@ -134,7 +134,7 @@ describe.skipIf(process.platform !== 'linux')('actual adapter children with rest
     let backend = new ProductionAgentBackend(backendOptions)
     cleanup.push(async () => { await backend.close(); await manager.stopAllSessions(); await owner.close(); db.close() })
     const command = (operation: string, payload: import('../shared/service-protocol').JsonValue) => backend.registry.invoke(operation, payload, caller, new AbortController().signal)
-    const agent = db.createAgent({ name: 'Synthetic process agent', config: { coding_agent: 'pi', auth_method: 'subscription', permission_mode: 'ask' } })!
+    const agent = db.createAgent({ name: 'Synthetic process agent', config: { coding_agent: 'pi', auth_method: 'subscription' } })!
     const task = db.createTask({ title: 'Synthetic process task' })!; db.updateTask(task.id, { agent_id: agent.id })
     const started = await command('agentSession:start', { agentId: agent.id, taskId: task.id }) as { value: { sessionId: string } }
     const sessionId = started.value.sessionId
@@ -150,7 +150,7 @@ describe.skipIf(process.platform !== 'linux')('actual adapter children with rest
     expect(manager.getSession(sessionId)).toBeDefined()
     const pid = JSON.parse(readFileSync(f.receipt, 'utf8')).pid
     await expect.poll(() => db.getTranscriptParts(task.id).some(part => part.content === 'Synthetic retained reply')).toBe(true)
-    const next = db.createAgent({ name: 'Synthetic replacement', config: { coding_agent: 'pi', auth_method: 'subscription', permission_mode: 'ask' } })!
+    const next = db.createAgent({ name: 'Synthetic replacement', config: { coding_agent: 'pi', auth_method: 'subscription' } })!
     const switched = await command('agentSession:switchAgent', { taskId: task.id, newAgentId: next.id }) as { value: { sessionId: string } }
     const replacementId = switched.value.sessionId
     expect(replacementId).not.toBe(sessionId)
@@ -178,8 +178,8 @@ describe.skipIf(process.platform !== 'linux')('actual adapter children with rest
     const backend = new ProductionAgentBackend({ manager, database: db, engineEpoch: caller.engineEpoch, assertAvailable() {},
       isTrustedDesktop: () => true, canAccessTask: () => true, canAccessProject: () => true, canAccessAgent: () => true })
     cleanup.push(async () => { await backend.close(); await manager.stopAllSessions(); await owner.close(); db.close() })
-    const next = db.createAgent({ name: 'Synthetic quota fallback', config: { coding_agent: 'pi', auth_method: 'subscription', permission_mode: 'ask' } })!
-    const primary = db.createAgent({ name: 'Synthetic exhausted provider', config: { coding_agent: 'pi', auth_method: 'subscription', permission_mode: 'ask',
+    const next = db.createAgent({ name: 'Synthetic quota fallback', config: { coding_agent: 'pi', auth_method: 'subscription' } })!
+    const primary = db.createAgent({ name: 'Synthetic exhausted provider', config: { coding_agent: 'pi', auth_method: 'subscription',
       system_prompt: 'TWENTYX_SYNTHETIC_QUOTA', fallback_agent_ids: [next.id] } })!
     const task = db.createTask({ title: 'Synthetic quota recovery' })!; db.updateTask(task.id, { agent_id: primary.id })
     const started = await backend.registry.invoke('agentSession:start', { agentId: primary.id, taskId: task.id }, caller, new AbortController().signal) as { value: { sessionId: string } }

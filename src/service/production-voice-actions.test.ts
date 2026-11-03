@@ -246,7 +246,7 @@ async function fixture(kind: string) {
     })
   const task = (title: string, assigned = true) => {
     const agent = db.getAgents()[0]
-    db.updateAgent(agent.id, { config: { coding_agent: 'pi', permission_mode: 'ask', max_parallel_sessions: 1 } })
+    db.updateAgent(agent.id, { config: { coding_agent: 'pi', max_parallel_sessions: 1 } })
     const row=db.createTask({ title, project_id: project.id })!
     if(assigned)db.updateTask(row.id,{agent_id:agent.id})
     return db.getTask(row.id)!

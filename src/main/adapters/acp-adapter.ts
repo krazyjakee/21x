@@ -52,6 +52,7 @@ import {
 } from './shared/json-rpc'
 import { onJsonLines } from './shared/jsonl'
 import { groupPartsIntoMessages } from './shared/session-messages'
+import { dangerousToolReason } from './tool-safety'
 
 interface AcpPermissionRequest {
   requestId: string | number
@@ -977,7 +978,13 @@ export class AcpAdapter implements CodingAgentAdapter {
 
     console.log(`[${this.label}] Permission request for ${toolCall?.kind} ${toolCall?.toolCallId} (options: ${approvalOptions.map((o) => o.optionId).join(', ')})`)
 
-    if (session.config.permissionMode === 'allow') {
+    const danger = session.config.permissionMode === 'allow' && dangerousToolReason({
+      toolName: toolCall?.kind,
+      input: (toolCall as { rawInput?: unknown } | undefined)?.rawInput,
+      commands: toolCall?.title ? [toolCall.title] : [],
+      workspaceDir: session.config.workspaceDir
+    })
+    if (session.config.permissionMode === 'allow' && !danger) {
       const offered = (optionId: string): string | undefined =>
         approvalOptions.find((option) => option.optionId === optionId)?.optionId
       const autoApprovedOptionId = offered('approved-for-session')

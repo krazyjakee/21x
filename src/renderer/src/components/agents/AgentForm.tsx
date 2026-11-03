@@ -15,7 +15,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { SkillSelectorDialog } from '@/components/skills/SkillSelectorDialog'
 import { SecretSelector } from '@/components/secrets/SecretSelector'
 import { CLAUDE_REASONING_EFFORT_VALUES, CODEX_REASONING_EFFORT_VALUES } from '@shared/reasoning-effort'
-import type { Agent, CreateAgentDTO, UpdateAgentDTO, AgentMcpServerEntry, ClaudeAuthMethod, AgentPermissionMode, AgentSandboxMode } from '@/types'
+import type { Agent, CreateAgentDTO, UpdateAgentDTO, AgentMcpServerEntry, ClaudeAuthMethod } from '@/types'
 import type { ReasoningEffort } from '@/types'
 import { CodingAgentType, CODING_AGENTS, CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS } from '@/types'
 import { MAX_HARD_CAP, agentHardCap } from '@shared/concurrency'
@@ -66,12 +66,6 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   // Auth method state (Claude Code and Codex)
   const [authMethod, setAuthMethod] = useState<ClaudeAuthMethod>(
     agent?.config.auth_method ?? 'subscription'
-  )
-  const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
-    agent?.config.permission_mode ?? 'allow'
-  )
-  const [sandboxMode, setSandboxMode] = useState<AgentSandboxMode>(
-    agent?.config.sandbox_mode ?? 'danger-full-access'
   )
 
   // API keys state
@@ -277,8 +271,9 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
         auth_method: (codingAgent === CodingAgentType.CLAUDE_CODE || codingAgent === CodingAgentType.CODEX || codingAgent === CodingAgentType.CURSOR)
           ? authMethod
           : undefined,
-        permission_mode: permissionMode,
-        sandbox_mode: sandboxMode,
+        // Agents always run with full access; store what actually applies.
+        permission_mode: 'allow',
+        sandbox_mode: 'danger-full-access',
         system_prompt: systemPrompt.trim() || undefined,
         // #150: the hard cap. max_parallel_sessions mirrors it for older readers.
         concurrency_cap: Math.max(1, Math.min(MAX_HARD_CAP, Math.floor(maxParallelSessions) || 1)),
@@ -417,38 +412,6 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
 
       {(codingAgent === CodingAgentType.OPENCODE || codingAgent === CodingAgentType.CLAUDE_CODE || codingAgent === CodingAgentType.CODEX || codingAgent === CodingAgentType.CURSOR || codingAgent === CodingAgentType.PI) && (
         <>
-          <div className="space-y-1.5">
-            <Label htmlFor="agent-permission-mode">Permissions</Label>
-            <select
-              id="agent-permission-mode"
-              value={permissionMode}
-              onChange={(e) => setPermissionMode(e.target.value as AgentPermissionMode)}
-              className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm cursor-pointer"
-            >
-              <option value="ask">Ask before tools/commands</option>
-              <option value="allow">Allow automatically</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              {codingAgent === CodingAgentType.CODEX || codingAgent === CodingAgentType.CURSOR || codingAgent === CodingAgentType.PI
-                ? `Allow automatically auto-approves ${codingAgent === CodingAgentType.CURSOR ? 'Cursor' : codingAgent === CodingAgentType.PI ? 'Pi' : 'Codex'} permission requests for this agent.`
-                : 'Controls how this agent handles tool and command approval prompts.'}
-            </p>
-          </div>
-          {codingAgent === CodingAgentType.CODEX && (
-            <div className="space-y-1.5">
-              <Label htmlFor="agent-sandbox-mode">Sandbox</Label>
-              <select
-                id="agent-sandbox-mode"
-                value={sandboxMode}
-                onChange={(e) => setSandboxMode(e.target.value as AgentSandboxMode)}
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm cursor-pointer"
-              >
-                <option value="read-only">Read only</option>
-                <option value="danger-full-access">Full access</option>
-                <option value="workspace-write">Workspace write</option>
-              </select>
-            </div>
-          )}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label htmlFor="agent-model">Model</Label>

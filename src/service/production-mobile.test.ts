@@ -258,7 +258,7 @@ async function fixture(kind: string, controlledProvider?: ChatProvider, reuse?: 
   }
   const task = (title: string, assigned = true) => {
     const agent = db.getAgents()[0]
-    db.updateAgent(agent.id, { config: { coding_agent: 'pi', permission_mode: 'ask', max_parallel_sessions: 1 } })
+    db.updateAgent(agent.id, { config: { coding_agent: 'pi', max_parallel_sessions: 1 } })
     const row=db.createTask({ title, project_id: project.id })!
     if(assigned)db.updateTask(row.id,{agent_id:agent.id})
     return db.getTask(row.id)!
@@ -386,7 +386,7 @@ for (const kind of cases) describe(`actual ${kind} production mobile HTTP/WS`, (
     const task = await created.json() as { id: string }
     expect(task).not.toHaveProperty('mcp_scope_nonce')
     const agent = f.db.getAgents()[0]
-    f.db.updateAgent(agent.id, { config: { coding_agent: 'pi', permission_mode: 'ask', max_parallel_sessions: 1 } })
+    f.db.updateAgent(agent.id, { config: { coding_agent: 'pi', max_parallel_sessions: 1 } })
     const changed = await post(base, `/api/tasks/${task.id}`, { agent_id: agent.id, heartbeat_interval_minutes: 30, heartbeat_enabled: true }, device.sessionToken)
     expect(changed.status).toBe(200)
     expect(f.db.getTask(task.id)).toMatchObject({ agent_id: agent.id, heartbeat_enabled: true })

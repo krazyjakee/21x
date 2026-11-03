@@ -28,6 +28,7 @@ import { findClaudeExecutable } from './claude-code-executable'
 import { cleanSessionFile, isValidClaudeSessionId, loadSessionHistory } from './claude-code-history'
 import { buildToolTitle, ClaudeSystemSubtype, convertSDKMessageToParts, resultErrorText } from './claude-code-message-converter'
 import { claudeCodePermissionMode } from './permission-mode'
+import { dangerousToolReason } from './tool-safety'
 import { claudeServerPrefix, claudeToolIds, resolveDisallowedToolNames } from '../mcp-tool-limits'
 import { buildShellExports } from './shared/shell-exports'
 
@@ -347,12 +348,19 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
         return Promise.resolve({ behavior: 'deny', message: 'The request was cancelled.', interrupt: true })
       }
 
+      // Agents run without approval prompts; only a dangerous request asks.
+      const danger = session.config.permissionMode === 'allow'
+        ? dangerousToolReason({ toolName, input, workspaceDir: session.config.workspaceDir })
+        : undefined
+      if (danger === null) return Promise.resolve({ behavior: 'allow', updatedInput: input })
+
       return new Promise<PermissionResult>((resolve) => {
         const detail = buildToolTitle(toolName, input)
+        const prompt = title || (detail ? `Allow ${toolName}: ${detail}` : `Allow ${toolName}?`)
         const approval: PendingClaudeApproval = {
           requestId: toolUseID,
           toolCallId: toolUseID,
-          question: title || (detail ? `Allow ${toolName}: ${detail}` : `Allow ${toolName}?`),
+          question: danger ? `${prompt} This ${danger}.` : prompt,
           options: [
             { optionId: 'approved', name: 'Yes', kind: 'allow' },
             { optionId: 'approved-for-session', name: 'Always', kind: 'allow' },
@@ -550,16 +558,10 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       effort,
       systemPrompt: config.systemPrompt,
       abortController,
-      // The agent's own permission setting (see ./permission-mode.ts). Only an
-      // explicit 'allow' bypasses permission checks; 'ask' and an unset mode
-      // run in Claude Code's asking mode, with each request routed to the 21x
-      // approval UI through canUseTool.
+      // See ./permission-mode.ts. Every gated tool call reaches canUseTool,
+      // which approves it at once unless it is dangerous (./tool-safety.ts).
       permissionMode: claudePermissionMode,
-      // The SDK requires this flag to honour 'bypassPermissions'. Passing it for
-      // any other mode would make that mode decorative.
-      ...(claudePermissionMode === 'bypassPermissions'
-        ? { allowDangerouslySkipPermissions: true }
-        : { canUseTool: this.buildCanUseTool(sessionId, session) }),
+      canUseTool: this.buildCanUseTool(sessionId, session),
       ...this.buildIsolationOptions(config),
       ...(hooks ? { hooks } : {}),
     }
@@ -974,7 +976,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
   ): Promise<boolean> {
     const session = this.sessions.get(sessionId)
     if (!session || requestId !== undefined && !session.pendingQuestions?.has(requestId)) return false
-    // Claude Code runs with bypassPermissions, so AskUserQuestion ends the
+    // canUseTool denies AskUserQuestion with interrupt, so it ends the
     // session turn (it appears in permission_denials in the result message).
     // Send the user's answer as a follow-up prompt to continue the conversation.
     const answerText = Object.values(answers).filter(Boolean).join('\n')

@@ -129,16 +129,16 @@ describe('assembleSessionConfig access', () => {
   }
 
   for (const backend of BACKENDS) {
-    it(`runs a ${backend} agent with no stored setting at full access and no sandbox`, () => {
+    it(`runs a ${backend} agent at full access and no sandbox`, () => {
       const config = configFor(backend, task)
       expect(config.permissionMode).toBe('allow')
       expect(config.sandboxMode).toBe('danger-full-access')
     })
   }
 
-  it('keeps an agent explicitly set to ask', () => {
-    const config = configWith({ permission_mode: 'ask', sandbox_mode: 'workspace-write' })
-    expect(config.permissionMode).toBe('ask')
-    expect(config.sandboxMode).toBe('workspace-write')
+  it('ignores a stored ask or sandbox setting: there is no permission setting', () => {
+    const config = configWith({ permission_mode: 'ask', sandbox_mode: 'read-only' })
+    expect(config.permissionMode).toBe('allow')
+    expect(config.sandboxMode).toBe('danger-full-access')
   })
 })

@@ -34,7 +34,7 @@ createInterface({ input: process.stdin }).on('line', line => {
         out({ type: 'agent_settled' })
         return
       }
-      out({ type: 'extension_ui_request', id: 'native-permission-211', method: 'confirm', title: 'Synthetic permission', message: 'Allow the synthetic action?' })
+      out({ type: 'extension_ui_request', id: 'native-permission-211', method: 'confirm', title: 'Synthetic permission', message: 'Allow rm -rf /etc/synthetic?' })
     } else if (request.type === 'extension_ui_response' && request.id === 'native-permission-211' && !request.cancelled) {
       out({ type: 'extension_ui_request', id: 'native-question-211', method: 'input', title: 'Synthetic answer', message: 'Choose a synthetic value' })
     } else if (request.type === 'extension_ui_response' && request.id === 'native-question-211' && !request.cancelled) {

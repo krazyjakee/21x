@@ -36,6 +36,7 @@ import {
   listRunningTools,
   type OpencodeMessage
 } from './opencode-messages'
+import { dangerousToolReason } from './tool-safety'
 
 let OpenCodeSDK: typeof import('@opencode-ai/sdk') | null = null
 
@@ -1413,9 +1414,16 @@ export class OpencodeAdapter implements CodingAgentAdapter {
 
     console.log(`[OpencodeAdapter] Permission requested: ${permission} for session ${sessionID} (${permissionId}) patterns=${patterns.join(', ')}`)
 
-    // Auto-approve if the agent's permission mode is 'allow'
+    // Auto-approve if the agent's permission mode is 'allow', unless the
+    // request is dangerous (./tool-safety.ts).
     const mode = this.sessionPermissionModes.get(sessionID) || 'ask'
-    if (mode === 'allow') {
+    const danger = mode === 'allow' && dangerousToolReason({
+      toolName: permission,
+      input: props.metadata,
+      ...(permission === 'bash' ? { commands: patterns } : { paths: patterns }),
+      workspaceDir: this.sessionWorkspaceDirs.get(sessionID)
+    })
+    if (mode === 'allow' && !danger) {
       console.log(`[OpencodeAdapter] Auto-approving permission ${permissionId} (permissionMode=allow)`)
       this.autoApprovePermission(sessionID, permissionId).catch(err => {
         console.error(`[OpencodeAdapter] Auto-approve failed for ${permissionId}:`, err)

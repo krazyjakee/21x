@@ -33,6 +33,7 @@ import {
 } from './pi-config'
 import { execFileAsync, findExecutable } from '../find-executable'
 import { onJsonLines } from './shared/jsonl'
+import { dangerousToolReason } from './tool-safety'
 
 const RPC_TIMEOUT_MS = 15_000
 const MAX_BUFFERED_PARTS = 1_000
@@ -597,7 +598,9 @@ export class PiAdapter implements CodingAgentAdapter {
       options: Array.isArray(event.options) ? event.options.filter((option): option is string => typeof option === 'string') : [],
     }
 
-    if (method === 'confirm' && session.config.permissionMode === 'allow') {
+    // Confirmations are approved automatically unless dangerous (./tool-safety.ts).
+    if (method === 'confirm' && session.config.permissionMode === 'allow' &&
+      !dangerousToolReason({ commands: [request.title, request.message], workspaceDir: session.config.workspaceDir })) {
       this.sendRecord(session, { type: 'extension_ui_response', id, confirmed: true })
       return
     }

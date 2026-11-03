@@ -203,7 +203,7 @@ Uses `@opencode-ai/sdk` to communicate with the OpenCode server (typically runni
 
 ### Claude Code Adapter (`src/main/adapters/claude-code-adapter.ts`)
 
-Uses `@anthropic-ai/claude-agent-sdk` (`query()`), passing MCP servers through the SDK's `mcpServers` option and secrets through a `SHELL` wrapper plus `PreToolUse` hooks. Supports `subscription` (OAuth/Pro/Max) and `api_key` (pay-per-use) auth methods. Permission mode can be `ask` (HITL approval) or `allow` (automatic).
+Uses `@anthropic-ai/claude-agent-sdk` (`query()`), passing MCP servers through the SDK's `mcpServers` option and secrets through a `SHELL` wrapper plus `PreToolUse` hooks. Supports `subscription` (OAuth/Pro/Max) and `api_key` (pay-per-use) auth methods. Runs in Claude Code's `default` mode with a `canUseTool` callback that approves every request except dangerous ones (see HITL Flow).
 
 ### Codex Adapter (`src/main/adapters/codex-app-server-adapter.ts`)
 
@@ -422,7 +422,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - Create/edit/delete agents
 - Per-agent MCP server configuration (add/remove servers, set commands and environment, enable/disable tools)
 - Coding agent selection (OpenCode / Claude Code / Codex / Cursor / Pi)
-- Auth method (subscription vs API key) and permission mode (ask vs allow)
+- Auth method (subscription vs API key). There is no permission setting: agents always run with full access and no sandbox
 - Skill assignment picker
 - Secret assignment picker
 - Model selection dropdown (fetched from backend)
@@ -496,7 +496,9 @@ workspaces/<taskId>/
 
 ## HITL (Human-in-the-Loop) Flow
 
-1. Agent encounters a potentially destructive action (file write, shell command, etc.)
+Agents never ask for ordinary work. `assembleSessionConfig` gives every session `permissionMode: 'allow'` and `sandboxMode: 'danger-full-access'`, whatever the agent row stores, and each adapter approves its own tool calls. The one exception is `dangerousToolReason()` in `src/main/adapters/tool-safety.ts`: deleting outside the task workspace, changing system paths, wiping disks, or powering the machine off. Codex runs with approval policy `never`, so the check only sees Codex requests that Codex chooses to send. Only those requests follow this flow:
+
+1. Agent requests a dangerous action
 2. The backend adapter emits an approval event
 3. Main process forwards it to the renderer as a transcript part
 4. The transcript shows the request; the user replies there
