@@ -68,8 +68,11 @@ describe('Commander stage controls', () => {
 
   it('retains unavailable reasons and typing, with a relevant fix rather than capture', () => {
     useVoiceStore.setState({ permission: 'denied' })
-    stage(); fireEvent.click(screen.getByLabelText('Turn voice mode on'))
-    expect(screen.getByText(/Microphone access is blocked/)).toBeTruthy()
+    stage()
+    expect(screen.queryByLabelText('Turn voice mode on')).toBeNull()
+    expect(screen.getAllByText(/Microphone access is blocked/)).toHaveLength(1)
+    expect(screen.getAllByText('Mic blocked')).toHaveLength(1)
+    expect(screen.queryByLabelText(/^You, microphone/)).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByRole('button', { name: 'Open voice settings' })).toBeTruthy()
     const field = screen.getByLabelText('Typed draft'); fireEvent.change(field, { target: { value: 'typing remains usable' } })
