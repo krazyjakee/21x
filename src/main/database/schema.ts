@@ -80,7 +80,7 @@ import { createTaskGroupTables, migrateTaskGroups } from './task-groups-migratio
  * 35 → 36: durable planned session handoff steps (#103).
  * 36 → 37: shared task-group execution anchors and retained membership/progress (#192).
  */
-const SCHEMA_VERSION = 37
+const SCHEMA_VERSION = 38
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
