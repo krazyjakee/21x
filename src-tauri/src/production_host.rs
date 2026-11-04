@@ -819,6 +819,24 @@ fn attach_tray_close(
         });
     });
 }
+/// WebKitGTK's GPU buffer path on the NVIDIA proprietary driver made each
+/// keystroke cost ~55 ms of WebView CPU (typing visibly lagged). Shared-memory
+/// DMA-BUF buffers keep compositing on and cut that to ~15 ms. Applied only on
+/// NVIDIA, only before GTK starts, and never over the user's own WEBKIT_* choice.
+#[cfg(target_os = "linux")]
+fn tune_webkit_rendering() {
+    let user_choice = std::env::vars_os().any(|(name, _)| {
+        name.to_str().is_some_and(|name| {
+            name.starts_with("WEBKIT_") && name.contains("DMABUF")
+                || name == "WEBKIT_DISABLE_COMPOSITING_MODE"
+        })
+    });
+    if user_choice || !std::path::Path::new("/proc/driver/nvidia/version").exists() {
+        return;
+    }
+    std::env::set_var("WEBKIT_FORCE_DMABUF_RENDERER", "1");
+    std::env::set_var("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1");
+}
 fn production_containment() -> Result<DelegatedCgroup, EngineError> {
     #[cfg(windows)]
     {
@@ -1150,7 +1168,11 @@ async fn start(
 }
 
 pub fn run() {
-    // Join a delegated scope while this process is still single-threaded.
+    // Environment first, while no other thread can read it; the scope request
+    // below starts GDBus's worker thread.
+    #[cfg(target_os = "linux")]
+    tune_webkit_rendering();
+    // Join a delegated scope before Tauri, GTK or the engine start threads.
     #[cfg(target_os = "linux")]
     let _ = native_scope::delegation_root();
     let context = tauri::generate_context!();
