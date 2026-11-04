@@ -525,7 +525,7 @@ it('shows a fixed bootstrap failure, disconnects an earlier client and keeps mut
   }) : original(command, args))
   const before = f.invoke.mock.calls.length
   await expect(f.host.reconnect()).rejects.toMatchObject({ code: 'DISCONNECTED' })
-  expect(f.host.bootstrapFailure).toBe('Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.')
+  expect(f.host.bootstrapFailure).toBe('21x could not isolate its agents. On Linux this needs a systemd user session: log out and back in, then open 21x again. Changes are paused.')
   expect(f.host.connection.status).toBe('disconnected'); expect(f.host.hydrationPending).toBe(true)
   await expect(f.host.api.settings.set('theme', 'light')).rejects.toMatchObject({ code: 'DISCONNECTED' })
   expect(f.invoke.mock.calls.length).toBe(before + 1)

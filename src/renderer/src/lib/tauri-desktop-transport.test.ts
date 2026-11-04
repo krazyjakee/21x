@@ -84,7 +84,8 @@ it('unwraps only the exact three current document notices and revokes old listen
 
 it('projects only known startup failures into fixed redacted provisioning guidance', () => {
   const status = (code: string, phase: string) => ({ protocolVersion: 1, production: true, available: false, startupFailure: { code, phase, path: '/private/profile', error: 'private credential detail' } })
-  expect(productionBootstrapMessage(status('PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-delegation-missing'))).toBe('Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.')
+  expect(productionBootstrapMessage(status('PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-delegation-missing'))).toBe('21x could not isolate its agents. On Linux this needs a systemd user session: log out and back in, then open 21x again. Changes are paused.')
+  expect(productionBootstrapMessage(status('PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-delegated-cgroup-v2'))).toBe('Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.')
   expect(productionBootstrapMessage(status('PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-windows-private-fd3-unavailable'))).toContain('Windows yet')
   expect(productionBootstrapMessage(status('INVALID_RESULT', 'production-manifest-digest'))).toContain('resources could not be verified')
   for (const phase of ['production-resources', 'production-manifest-build-digest', 'production-manifest-build-identity']) expect(productionBootstrapMessage(status('INVALID_RESULT', phase))).toContain('resources could not be verified')

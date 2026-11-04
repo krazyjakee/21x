@@ -57,7 +57,9 @@ export function productionBootstrapMessage(value: unknown): string | null {
       'production-windows-process-observation', 'production-windows-job-drain', 'production-windows-job-stop'].includes(phase)) return 'Windows process supervision is unavailable. Check the native environment and relaunch the app. Changes are paused.'
     if (phase === 'production-windows-private-fd3-unavailable') return 'This preview cannot supervise desktop processes on Windows yet. Changes are paused.'
     if (phase === 'production-detached-descendant-containment-unavailable') return 'This preview cannot supervise desktop processes on this platform yet. Changes are paused.'
-    if (['production-delegation-missing', 'production-delegated-cgroup-v2', 'production-owned-receipts', 'production-prepare-not-acknowledged'].includes(phase)) return 'Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.'
+    // Linux provisions its own delegated systemd scope; only a session without systemd misses it.
+    if (phase === 'production-delegation-missing') return '21x could not isolate its agents. On Linux this needs a systemd user session: log out and back in, then open 21x again. Changes are paused.'
+    if (['production-delegated-cgroup-v2', 'production-owned-receipts', 'production-prepare-not-acknowledged'].includes(phase)) return 'Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.'
   }
   if (['DISCONNECTED', 'TIMEOUT'].includes(code) && phase === 'production-private-bootstrap-write') return 'The private desktop service channel could not be established. Relaunch the app. Changes are paused.'
   if (code === 'PRODUCTION_GUARDIAN_UNAVAILABLE' && phase === 'production-private-guardian-receipt') return 'Desktop process supervision is unavailable. Provision the native environment and relaunch the app. Changes are paused.'
