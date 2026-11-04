@@ -122,10 +122,14 @@ containing newly computed file hashes.
 
 The preview creates a fresh isolated profile under its separate application
 identifier. It never imports Electron data or selects a profile through IPC.
-After explicit native dependency preparation and credential-helper staging,
-`pnpm tauri:production:dev` or `pnpm tauri:production:build` selects this feature
-and configuration. On Linux the host provisions its own delegation before any
-thread starts: it asks the user's systemd manager (`StartTransientUnit` on the
+`pnpm tauri:production:dev` and `pnpm tauri:production:build` now prepare pinned
+standalone Node dependencies, build `src-tauri/credentials` with `cargo --locked`,
+and stage the resulting physical credential helper before the production resource
+manifest is generated. A clean clone needs `pnpm install --frozen-lockfile` and
+the pinned Node 22.23.2 plus the platform's native build dependencies; no manual
+helper copy is needed. The staged helper is included in the manifest, and missing
+or linked helpers are rejected. On Linux the host provisions its own delegation
+before any thread starts: it asks the user's systemd manager (`StartTransientUnit` on the
 session bus) to move the process into a transient `twentyonex-<pid>.scope` with
 `Delegate=yes`, waits until `/proc/self/cgroup` shows the move, and uses that
 scope as the delegated cgroup-v2 root (`src-tauri/src/native_scope.rs`). No

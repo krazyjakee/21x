@@ -32,6 +32,7 @@
     "tauri:inventory": "node scripts/tauri-inventory.mjs",
     "tauri:prepare": "node scripts/tauri-prepare.mjs",
     "tauri:prepare:native": "node scripts/tauri-prepare.mjs --native",
+    "tauri:prepare:credential-helper": "node scripts/tauri-stage-credential-helper.mjs",
     "tauri:prepare:database": "node scripts/tauri-stage-database.mjs",
     "tauri:prepare:production": "node scripts/tauri-stage-production.mjs",
     "tauri:prepare:connectors": "node scripts/tauri-stage-connectors.mjs",
