@@ -171,6 +171,32 @@ describe('actual production application owner', () => {
     const services = await f.owner.start()
     expect(services.db.getProjects().length).toBeGreaterThan(0)
   })
+  describe('reopening a profile with the app-managed task MCP', () => {
+    function managed(f: Awaited<ReturnType<typeof fixture>>) {
+      const script = join(f.root, 'task-mcp.mjs'); writeFileSync(script, '')
+      return { ...f.bootstrap, managedTaskMcp: { command: process.execPath, args: [script], tools: [], environment: {} } }
+    }
+    it('refreshes the managed row it created instead of refusing it', async () => {
+      const f = await fixture(), bootstrap = managed(f)
+      const first = new f.ProductionOwner(bootstrap, f.boundaries); owners.push(first)
+      const created = (await first.start()).db.getMcpServers().filter(server => server.name === 'task-management')
+      expect(created).toHaveLength(1)
+      await first.close()
+      const next = new f.ProductionOwner({ ...bootstrap, credentials: { ...bootstrap.credentials, mode: 'load' } }, f.boundaries); owners.push(next)
+      const reopened = (await next.start()).db.getMcpServers().filter(server => server.name === 'task-management')
+      expect(reopened.map(server => server.id)).toEqual(created.map(server => server.id))
+    })
+    it('still fails closed on a task-management row it cannot prove it created', async () => {
+      const f = await fixture(), bootstrap = managed(f)
+      const first = new f.ProductionOwner(bootstrap, f.boundaries); owners.push(first)
+      await first.start(); await first.close()
+      const raw = new SQLite(join(bootstrap.paths.profileRoot, '21x.db'))
+      try { raw.prepare("DELETE FROM settings WHERE key = '__managed_task_mcp_id'").run() } finally { raw.close() }
+      const next = new f.ProductionOwner({ ...bootstrap, credentials: { ...bootstrap.credentials, mode: 'load' } }, f.boundaries); owners.push(next)
+      await expect(next.start()).rejects.toThrow('AMBIGUOUS_MANAGED_MCP_SERVER')
+      expect(next.recoveryState()).toMatchObject({ stage: 'database', code: 'AMBIGUOUS_MANAGED_MCP_SERVER' })
+    })
+  })
   it.each([
     ['a declared root with contents', (profileRoot: string) => { mkdirSync(join(profileRoot, 'workspaces')); writeFileSync(join(profileRoot, 'workspaces', 'left-over'), 'x') }],
     ['an undeclared directory', (profileRoot: string) => { mkdirSync(join(profileRoot, 'other')) }],

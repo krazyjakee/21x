@@ -103,7 +103,8 @@ export interface ProtectedApplicationKeyStore {
 export async function initializeProtectedSecretStorage(
   store: ProtectedApplicationKeyStore,
   profileId: string,
-  mode: 'load' | 'create'
+  mode: 'load' | 'create',
+  options: { adoptExistingKey?: boolean } = {}
 ): Promise<AuthenticatedSecretStorage> {
   // The trusted caller must hold the cross-host profile lock before create:
   // OS generic credential stores do not provide compare-and-create atomics.
@@ -111,7 +112,12 @@ export async function initializeProtectedSecretStorage(
   try {
     if (mode === 'create') {
       const generated = randomBytes(32)
-      try { await store.create(profileId, generated) } finally { generated.fill(0) }
+      try { await store.create(profileId, generated) } catch (error) {
+        // A first launch interrupted after storing its key but before writing
+        // any data leaves a key that protects nothing. Only a caller that has
+        // proven the profile empty may reuse it instead of failing forever.
+        if (!options.adoptExistingKey || (error as { code?: unknown })?.code !== 'KEYSTORE_ALREADY_EXISTS') throw error
+      } finally { generated.fill(0) }
     } else if (mode !== 'load') throw new ProtectedSecretStorageError('INVALID_SECRET_KEY')
     key = await store.load(profileId)
     return new AuthenticatedSecretStorage(key, profileId)

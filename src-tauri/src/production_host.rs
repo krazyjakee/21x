@@ -234,17 +234,13 @@ fn workspace_file_host(
     }
     #[cfg(target_os = "linux")]
     {
-        use std::os::unix::fs::DirBuilderExt;
         // Trusted isolated bootstrap path; there is no public picker/root grant.
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&descriptor.paths.workspace_root)
-            .map_err(|_| {
-                unavailable(
-                    "PRODUCTION_NATIVE_FILE_AUTHORITY_UNAVAILABLE",
-                    "production-native-file-root",
-                )
-            })?;
+        ensure_private_dir(&descriptor.paths.workspace_root).map_err(|_| {
+            unavailable(
+                "PRODUCTION_NATIVE_FILE_AUTHORITY_UNAVAILABLE",
+                "production-native-file-root",
+            )
+        })?;
         let owner = NativeWorkspaceFileOwner::open(descriptor.paths.workspace_root.clone())
             .map_err(|_| {
                 unavailable(
@@ -333,16 +329,12 @@ fn attachment_file_host(
     }
     #[cfg(target_os = "linux")]
     {
-        use std::os::unix::fs::DirBuilderExt;
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&descriptor.paths.attachment_root)
-            .map_err(|_| {
-                unavailable(
-                    "PRODUCTION_NATIVE_FILE_AUTHORITY_UNAVAILABLE",
-                    "production-native-attachment-root",
-                )
-            })?;
+        ensure_private_dir(&descriptor.paths.attachment_root).map_err(|_| {
+            unavailable(
+                "PRODUCTION_NATIVE_FILE_AUTHORITY_UNAVAILABLE",
+                "production-native-attachment-root",
+            )
+        })?;
         let owner = NativeAttachmentFileOwner::open(descriptor.paths.attachment_root.clone())
             .map_err(|_| {
                 unavailable(
@@ -837,6 +829,25 @@ fn tune_webkit_rendering() {
     std::env::set_var("WEBKIT_FORCE_DMABUF_RENDERER", "1");
     std::env::set_var("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1");
 }
+const PERSISTENT_PROFILE_ID: &str = "tauri-default";
+/// Create a private directory, or accept an existing real directory (never a
+/// symlink), so a profile and its roots survive relaunches.
+fn ensure_private_dir(path: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err(std::io::Error::other("not a private directory")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            builder.create(path)
+        }
+        Err(error) => Err(error),
+    }
+}
 fn production_containment() -> Result<DelegatedCgroup, EngineError> {
     #[cfg(windows)]
     {
@@ -912,32 +923,32 @@ async fn start(
         .map_err(|_| unavailable("DISCONNECTED", "production-clock"))?
         .as_nanos();
     let launch_id = format!("production_{}_{stamp}", std::process::id());
-    let profile_id = format!("preview_{}_{stamp}", std::process::id());
+    // One persistent profile per installation: the app reopens the same data
+    // on every launch. A profile without a database (first launch, or one
+    // interrupted before the database existed) is created afresh.
+    let profile_id = PERSISTENT_PROFILE_ID.to_owned();
     let base = app
         .path()
         .app_local_data_dir()
-        .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?
-        .join("isolated-previews");
+        .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?;
     std::fs::create_dir_all(&base)
         .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?;
     let base = std::fs::canonicalize(base)
         .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?;
-    let profile_root = base.join(&profile_id);
-    let mut builder = std::fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder
-        .create(&profile_root)
+    let profile_root = base.join("profile");
+    ensure_private_dir(&profile_root)
         .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?;
+    let profile_intent = match std::fs::symlink_metadata(profile_root.join("21x.db")) {
+        Ok(metadata) if metadata.is_file() => ProfileIntent::LoadAuthenticatedCopy,
+        Ok(_) => return Err(unavailable("INVALID_ARGUMENTS", "production-profile")),
+        Err(_) => ProfileIntent::CreateNew,
+    };
     let descriptor = ProductionDescriptor {
         version: 1,
         kind: "production-private-launch".into(),
         launch_id,
         profile_id,
-        profile_intent: ProfileIntent::CreateNew,
+        profile_intent,
         build_identity,
         resource_manifest_sha256: digest,
         paths: ProductionPaths {
