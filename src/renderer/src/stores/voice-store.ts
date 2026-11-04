@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { settingsApi, voiceApi, voiceElevenLabsApi, voiceTtsApi } from '@/lib/ipc-client'
 import { voiceCapture } from '@/lib/voice-capture'
 import { voicePlayback } from '@/lib/voice-playback'
+import { isAutomaticSpeech, speechInFocus, SPEECH_FOCUS_CHECK_MS } from '@/lib/voice-speech-focus'
 import { BargeInGate } from '@/lib/voice-barge-in'
 import { clearActiveComposer } from '@/lib/voice-dictation-target'
 import { VOICE_SETTING_KEYS, type VoiceErrorEvent, type VoiceStateEvent } from '@shared/voice'
@@ -289,6 +290,30 @@ function stopPlaybackForUser(): void {
   // and a gate left holding swallows every word into the open turn.
   bargeInGate.setSpeaking(false)
   useVoiceStore.setState({ speaking: false, speechText: '' })
+}
+
+let focusCheck: ReturnType<typeof setInterval> | null = null
+
+function stopFollowingFocus(): void {
+  if (focusCheck !== null) clearInterval(focusCheck)
+  focusCheck = null
+}
+
+/**
+ * Silences a reply the moment its owner leaves focus. It is checked on a timer
+ * because focus has too many sources to subscribe to: the window, the view, the
+ * selected session, the drawer, and any panel that can show a transcript.
+ */
+function followSpeechFocus(owner: string | undefined): void {
+  stopFollowingFocus()
+  focusCheck = setInterval(() => {
+    const { speaking } = useVoiceStore.getState()
+    if (speaking && speechInFocus(owner)) return
+    stopFollowingFocus()
+    if (!speaking) return
+    stopPlaybackForUser()
+    void voiceTtsApi.stop()
+  }, SPEECH_FOCUS_CHECK_MS)
 }
 
 const bargeInGate = new BargeInGate({
@@ -849,6 +874,18 @@ if (hasTtsBridge()) {
     if (!owner) return
     if (sameSpeechOwner(stoppedSpeech, owner) || sameSpeechOwner(closedSpeech, owner)) return
 
+    // A reply out of focus stays in the chat. An empty start only opens the
+    // passage; its first words arrive straight after and silence it, because
+    // main can only remember a message as talked over once some of it was sent.
+    const automatic = isAutomaticSpeech(event.source)
+    if (automatic && !speechInFocus(event.taskId)) {
+      if (event.text) {
+        stoppedSpeech = owner
+        void voiceTtsApi.stop()
+      }
+      return
+    }
+
     // Playback retains the highest generation even after stop. This is the
     // renderer-side backstop against delayed IPC or a reused speech ID.
     const wasCurrent = voicePlayback.currentSpeechId === owner.speechId &&
@@ -872,6 +909,8 @@ if (hasTtsBridge()) {
         speechId: event.speechId,
         microphoneOpen: Boolean(useVoiceStore.getState().turnId),
       })
+      if (automatic) followSpeechFocus(event.taskId)
+      else stopFollowingFocus()
     }
     openPassage = owner
     useVoiceStore.setState({ speaking: true, speechText: event.text })

@@ -248,7 +248,9 @@ stage above Chat; both surfaces use the shared interface scale and readable
 markdown/code typography. Leaving Commander during a call, or pressing PiP,
 shows the in-app floating call. It preserves the original call session; opening
 Project reports or another Chat never retargets its microphone. The floating
-view is part of this window, not an always-on-top OS window.
+view is part of this window, not an always-on-top OS window. The Commander
+speaks only while this window has focus and its session or the floating call is
+showing; anything else stays in Chat (see `docs/voice-tts.md`).
 
 - **Stage:** an abstract presence tile shows an icon and a state word. The user
   tile shows an initial, a real input meter while its owned microphone runs,
