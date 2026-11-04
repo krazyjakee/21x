@@ -4,7 +4,9 @@ import { dirname, isAbsolute, join, normalize } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { FileSnapshot } from './file-store'
 
-export const CLI_MCP_FILE_LIMITS = Object.freeze({ fileBytes: 256 * 1024, aggregateBytes: 512 * 1024 })
+// ~/.claude.json also holds Claude Code's per-project history and routinely
+// exceeds 256 KiB (multi-MB for heavy users); a cap below that hid every CLI.
+export const CLI_MCP_FILE_LIMITS = Object.freeze({ fileBytes: 16 * 1024 * 1024, aggregateBytes: 32 * 1024 * 1024 })
 export interface CliMcpFilePrimitives {
   lstat(path:string):BigIntStats; realpath(path:string):string; mkdir(path:string):void
   open(path:string,flags:number,mode?:number):number; fstat(fd:number):BigIntStats

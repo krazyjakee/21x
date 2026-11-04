@@ -6,6 +6,8 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+2026-11-04 user-configured MCP: the production host now enables `configuredMcp`, so agents can use local and header-authenticated remote MCP servers (verified end to end on Linux: a stdio server added in Settings → Tools & MCP and called by Claude Code). Global MCP (CLIs) also failed for real users: the CLI file owner capped each config file at 256 KiB and all three at 512 KiB, while `~/.claude.json` carries Claude Code's per-project history (374 KB here, multi-MB for heavy users). Caps are now 16 MiB per file and 32 MiB in total.
+
 2026-11-04 persistent profile and first-launch Electron import (#220), verified on Linux with a paused copy of a real 432 MB, schema-32 Electron profile (381 tasks, 4 projects):
 
 - **Persistent profile**: one profile per installation (`<app data>/profile`, id `tauri-default`), created on first launch and reopened afterwards. The service records the task-management row it creates under a profile-key-authenticated marker and refreshes only that row on reopen; an unproven row still fails closed (`AMBIGUOUS_MANAGED_MCP_SERVER`, now reported with guidance). A first launch interrupted after storing its key adopts that key instead of failing forever.

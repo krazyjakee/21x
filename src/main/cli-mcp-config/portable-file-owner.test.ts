@@ -28,14 +28,17 @@ describe('actual captured CLI files and stores', () => {
     const open = vi.fn(openSync), files = own({ open })
     write(files.paths.claudeConfig, 'x'.repeat(CLI_MCP_FILE_LIMITS.fileBytes + 1))
     expect(() => files.readAll()).toThrow('CLI_MCP_FILE_LIMIT'); expect(open).not.toHaveBeenCalled()
-    write(files.paths.claudeConfig, 'x'.repeat(200000)); write(files.paths.opencode, 'x'.repeat(200000)); write(files.paths.codex, 'x'.repeat(200000))
+    // Each file is within its own cap; together they exceed the aggregate.
+    const third = 'x'.repeat(Math.floor(CLI_MCP_FILE_LIMITS.aggregateBytes / 3) + 1)
+    write(files.paths.claudeConfig, third); write(files.paths.opencode, third); write(files.paths.codex, third)
     expect(() => createDefaultStores({}, home, files)[0].load()).toThrow('CLI_MCP_FILE_LIMIT'); expect(open).not.toHaveBeenCalled()
-    expect(readFileSync(files.paths.claudeConfig).length).toBe(200000)
+    expect(readFileSync(files.paths.claudeConfig).length).toBe(third.length)
   })
   it('refuses publication that would exceed aggregate size before creating scratch', () => {
-    const files = own(); write(files.paths.claudeConfig, 'x'.repeat(200000)); write(files.paths.opencode, 'x'.repeat(200000))
+    const third = 'x'.repeat(Math.floor(CLI_MCP_FILE_LIMITS.aggregateBytes / 3) + 1)
+    const files = own(); write(files.paths.claudeConfig, third); write(files.paths.opencode, third)
     const before = files.readSnapshot(files.paths.codex)
-    expect(() => files.writeAtomic(before.path, 'x'.repeat(200000), before)).toThrow('CLI_MCP_FILE_LIMIT')
+    expect(() => files.writeAtomic(before.path, third, before)).toThrow('CLI_MCP_FILE_LIMIT')
     expect(readdirSync(home).some(name => name.endsWith('.tmp'))).toBe(false)
   })
   it('refuses symlinks, hardlinks and replaced parents without reading/modifying unrelated data', () => {
