@@ -31,6 +31,7 @@ const SAFE_STORAGE_SETTING_PREFIX = 'safeStorage:v1:'
 const RECORD_PREFIX = '21x-record-credential:'
 /** Marker shared with the production owner: the managed task MCP row it may refresh. */
 export const MANAGED_TASK_MCP_MARKER = '__managed_task_mcp_id'
+const IMPORT_SETTLED = 'Imported from the previous 21x app; not resumed automatically'
 /** How many legacy credentials could not be read and were cleared for re-entry. */
 export const DROPPED_CREDENTIALS_SETTING = '__electron_import_cleared_credentials'
 
@@ -173,6 +174,17 @@ function convertCredentials(path: string, rawDecode: (value: Buffer) => string |
         for (const key of TASK_SOURCE_STORED_CREDENTIAL_FIELDS) if (result[key] !== undefined) result[key] = record(result[key])
         return result
       })
+      // Work the old app was in the middle of (lost sessions awaiting a
+      // recap, undelivered messages, queued starts) may be weeks old. It is
+      // settled, not resumed: nothing acts on the first launch by itself, and
+      // every task stays where it was for the user to restart.
+      const settle = (table: string, sql: string): void => { if (tables.has(table)) db.prepare(sql).run() }
+      settle('agent_provider_recovery', `UPDATE agent_provider_recovery SET state = 'cancelled', record = json_set(record, '$.state', 'cancelled')
+        WHERE state IN ('sending', 'accepted', 'retrying', 'dispatching') AND json_valid(record)`)
+      settle('delivery_outbox', `UPDATE delivery_outbox SET state = 'cancelled', last_error = '${IMPORT_SETTLED}'
+        WHERE state IN ('pending', 'claimed', 'accepted')`)
+      settle('agent_start_queue', `UPDATE agent_start_queue SET state = 'cancelled', last_error = '${IMPORT_SETTLED}'
+        WHERE state IN ('queued', 'retrying', 'claimed', 'starting')`)
       // Electron owned its task-management row by name. The import is the
       // trusted step that hands exactly that row to the new profile.
       if (tables.has('mcp_servers')) {

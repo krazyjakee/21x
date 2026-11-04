@@ -3,6 +3,7 @@ import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper
 import type { DatabaseManager, TranscriptPartInput } from './database/manager'
 import { encodeDurableTranscriptEvent } from '../service/transcript-events'
 import { DATABASE_EVENT_CODECS } from '../shared/database-desktop-codecs'
+import { TRANSCRIPT_EVENT_LIMITS } from '../shared/transcript-page'
 
 let db: DatabaseManager
 let taskId: string
@@ -32,13 +33,15 @@ describe('bounded durable transcript events', () => {
   })
 
   it('counts UTF-8 bytes independently of part count', () => {
-    const source = event(Array.from({ length: 32 }, (_, i) => ({ id: `p-${i}`, content: '🚀'.repeat(4096) })))
+    // 32 parts together exceed one page in UTF-8 bytes; 4 of them fit.
+    const rocket = '🚀'.repeat(Math.ceil(TRANSCRIPT_EVENT_LIMITS.bytes / 32 / 4) + 1)
+    const source = event(Array.from({ length: 32 }, (_, i) => ({ id: `p-${i}`, content: rocket })))
     expect(encodeDurableTranscriptEvent(db, source)).toEqual({ taskId, parts: [], maxRev: source.maxRev, reloadRequired: true })
-    expect(encodeDurableTranscriptEvent(db, { ...source, parts: source.parts.slice(0, 4) })).toMatchObject({ parts: Array(4).fill({ content: '🚀'.repeat(4096) }) })
+    expect(encodeDurableTranscriptEvent(db, { ...source, parts: source.parts.slice(0, 4) })).toMatchObject({ parts: Array(4).fill({ content: rocket }) })
   })
 
   it.each(['content', 'tool', 'payload'] as const)('never materializes an oversized %s for an event', field => {
-    const value = 'x'.repeat(2_000_000)
+    const value = 'x'.repeat(TRANSCRIPT_EVENT_LIMITS.fieldChars + 1)
     const source = event([{ id: 'huge', content: field === 'content' ? value : 'saved',
       ...(field === 'tool' ? { tool: { output: value } } : {}), ...(field === 'payload' ? { payload: { output: value } } : {}) }])
     expect(db.getTranscriptEventPart(taskId, 'huge')).toEqual({ rev: source.maxRev })
@@ -66,7 +69,7 @@ describe('bounded durable transcript events', () => {
   })
 
   it('verifies exact durable permission identity even when its display payload is oversized', () => {
-    event([{ id: 'question-r1', tool: { name: 'permission', status: 'running', requestId: 'r1', output: 'x'.repeat(2_000_000) } }])
+    event([{ id: 'question-r1', tool: { name: 'permission', status: 'running', requestId: 'r1', output: 'x'.repeat(TRANSCRIPT_EVENT_LIMITS.fieldChars + 1) } }])
     expect(db.getTranscriptEventPart(taskId, 'question-r1')?.part).toBeUndefined()
     expect(db.hasTranscriptPermission(taskId, 'question-r1', 'r1')).toBe(true)
     expect(db.hasTranscriptPermission(taskId, 'question-r1', 'r2')).toBe(false)
