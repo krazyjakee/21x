@@ -1,11 +1,12 @@
 /** Private, host-neutral stdio contract. Stdout contains only these NDJSON frames. */
 export const SERVICE_PROTOCOL_VERSION = 1 as const
 export const SERVICE_LIMITS = {
-  frameBytes: 1024 * 1024,
+  // Real profiles exceed 1 MiB in whole-list reads (a 381-task board is ~1.5 MB).
+  frameBytes: 16 * 1024 * 1024,
   pendingRequests: 128,
   activeRequests: 128,
   queuedFrames: 128,
-  queuedBytes: 4 * 1024 * 1024,
+  queuedBytes: 64 * 1024 * 1024,
   requestTimeoutMs: 30_000
 } as const
 /** Long installation work has a finite deadline without widening ordinary calls. */

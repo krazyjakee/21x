@@ -32,7 +32,8 @@ use tokio::{
 #[path = "production_windows.rs"]
 mod windows;
 
-const MAX_FRAME: usize = 1024 * 1024;
+// Matches SERVICE_LIMITS.frameBytes: real task boards exceed 1 MiB.
+const MAX_FRAME: usize = 16 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
 
 const OWNER_PHASES: &[&str] = &[
@@ -69,6 +70,10 @@ const OWNER_RECOVERY_CODES: &[&str] = &[
     "DATABASE_UNAVAILABLE",
     "RESOURCE_UNAVAILABLE",
     "MANAGED_MCP_RESOURCE_UNAVAILABLE",
+    "AMBIGUOUS_MANAGED_MCP_SERVER",
+    "ELECTRON_PROFILE_IN_USE",
+    "ELECTRON_PROFILE_INVALID",
+    "ELECTRON_CREDENTIALS_UNAVAILABLE",
     "CONNECTOR_RESOURCES_REQUIRED",
     "AGENT_CLI_UNAVAILABLE",
     "NATIVE_RUNTIME_UNAVAILABLE",
@@ -226,6 +231,9 @@ pub struct ProductionDescriptor {
     pub resource_manifest_sha256: String,
     pub paths: ProductionPaths,
     pub capabilities: ProductionCapabilities,
+    /// Electron profile to import into a new profile, chosen by trusted native setup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_profile_root: Option<PathBuf>,
 }
 pub type HostFuture<T> = Pin<Box<dyn Future<Output = Result<T, EngineError>> + Send>>;
 pub type ProductionEnergyScope = Arc<dyn Fn() -> Result<(), EngineError> + Send + Sync>;
@@ -1044,7 +1052,7 @@ impl ProductionEngine {
             last_callback: Mutex::new(0),
             last_event: Mutex::new(0),
             request_slots: Arc::new(Semaphore::new(128)),
-            queue_bytes: Arc::new(Semaphore::new(4 * 1024 * 1024)),
+            queue_bytes: Arc::new(Semaphore::new(64 * 1024 * 1024)),
             callback_slots: Arc::new(Semaphore::new(128)),
             callback_work: AtomicU64::new(0),
             #[cfg(test)]
@@ -3135,7 +3143,7 @@ mod linux {
                 last_callback: Mutex::new(0),
                 last_event: Mutex::new(0),
                 request_slots: Arc::new(Semaphore::new(128)),
-                queue_bytes: Arc::new(Semaphore::new(4 * 1024 * 1024)),
+                queue_bytes: Arc::new(Semaphore::new(64 * 1024 * 1024)),
                 callback_slots: Arc::new(Semaphore::new(128)),
                 callback_work: AtomicU64::new(0),
                 #[cfg(test)]
@@ -3363,6 +3371,7 @@ mod tests {
             launch_id: "native_launch_fixture_01".into(),
             profile_id: "synthetic-profile".into(),
             profile_intent: ProfileIntent::CreateNew,
+            legacy_profile_root: None,
             build_identity: "production-fixture".into(),
             resource_manifest_sha256: "a".repeat(64),
             paths: ProductionPaths {
@@ -3459,7 +3468,7 @@ mod tests {
                     last_callback: Mutex::new(0),
                     last_event: Mutex::new(0),
                     request_slots: Arc::new(Semaphore::new(128)),
-                    queue_bytes: Arc::new(Semaphore::new(4 * 1024 * 1024)),
+                    queue_bytes: Arc::new(Semaphore::new(64 * 1024 * 1024)),
                     callback_slots: Arc::new(Semaphore::new(128)),
                     callback_work: AtomicU64::new(0),
                     cancellation_budget: Duration::from_millis(20),

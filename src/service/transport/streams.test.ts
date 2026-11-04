@@ -110,7 +110,8 @@ describe('private pipe acknowledged streams', () => {
   it('disconnects a saturated publisher so durable owners must rehydrate on a new epoch', async () => {
     const blocked = deferred(), disconnect = vi.fn()
     const peer = new ServicePeer({ role: 'service', engineEpoch: 'epoch', operations: {}, eventSchemas: { changed: value => typeof value === 'string' }, write: () => blocked.promise, onDisconnect: disconnect })
-    const payload = 'x'.repeat(64 * 1024)
+    // Sized from the queued-byte budget so fewer than 128 events overflow it.
+    const payload = 'x'.repeat(Math.ceil(SERVICE_LIMITS.queuedBytes / 64))
     let overflow = false
     for (let index = 0; index < 128; index++) {
       try { peer.emit('changed', payload, index + 1) } catch (error) { expect(error).toMatchObject({ code: 'BACKPRESSURE' }); overflow = true; break }

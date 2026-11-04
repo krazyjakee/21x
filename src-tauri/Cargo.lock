@@ -4298,6 +4298,7 @@ name = "twentyonex-credentials"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "dbus-secret-service",
  "keyring",
  "serde",
  "serde_json",

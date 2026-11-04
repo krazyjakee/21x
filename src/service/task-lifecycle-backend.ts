@@ -237,7 +237,7 @@ export class TaskLifecycleBackend {
       const result: TaskRecord[] = []
       for (const row of (project === undefined ? rows.iterate() : rows.iterate(project)) as Iterable<{ id: string; project_id: string }>) {
         if (!this.taskAllowed(row.id, caller, 'read')) continue
-        if (result.length === 128) throw new ServiceProtocolError('INVALID_RESULT')
+        // The whole board is one read; the codec's byte bound governs, not a count.
         result.push(db.getTask(row.id)!)
       }
       return result

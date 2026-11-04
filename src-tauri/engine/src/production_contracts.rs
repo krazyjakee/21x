@@ -3734,8 +3734,9 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
             bounded_bytes(&value["value"], 512000) && source_result(operation, &value["value"])
         };
     }
+    // Whole-list reads (a real board is >1 MiB) share the 16 MiB transport frame.
     if !COMMANDS.contains(&operation)
-        || !bounded_bytes(value, 1024 * 1024)
+        || !bounded_bytes(value, 15 * 1024 * 1024)
         || !object(value, &["defined"], &["value"])
     {
         return false;

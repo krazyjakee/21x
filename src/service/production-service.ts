@@ -551,6 +551,7 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
   const host = sealProductionServiceHost({ descriptor, authority, caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' },
     unbridgedOwnerEvent: () => { process.stderr.write('PRODUCTION_NATIVE_EVENT_UNSUPPORTED\n') },
     constructBootstrap: callbacks => ({ agentInstallation: { nodeExecutable: resources.node }, profileId: descriptor.profileId, paths: descriptor.paths,
+      ...(descriptor.legacyProfileRoot === undefined ? {} : { legacyImport: { profileRoot: descriptor.legacyProfileRoot, appName: '21x' } }),
       credentials: { store: new NativeApplicationKeyStore(resources.credentialHelper), mode: descriptor.profileIntent === 'create-new' ? 'create' : 'load' },
       ...(resources.mobileDistRoot === undefined ? {} : { mobile: { distRoot: resources.mobileDistRoot } }),
       ...(resources.voice === undefined ? {} : { voice: { ...resources.voice, node: resources.node } }),

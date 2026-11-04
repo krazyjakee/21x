@@ -83,6 +83,10 @@ fn handle(request: &Request) -> Result<serde_json::Value, &'static str> {
             }
             twentyonex_credentials::create(&request.account, key.as_slice())?;
         }
+        "load-electron-safe-storage" if request.key.is_none() => {
+            let password = twentyonex_credentials::load_electron_safe_storage(&request.account)?;
+            response["key"] = json!(STANDARD.encode(password.as_slice()));
+        }
         "delete-fixture" if request.key.is_none() => {
             twentyonex_credentials::delete_fixture(&request.account)?
         }

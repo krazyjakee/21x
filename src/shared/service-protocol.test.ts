@@ -401,7 +401,9 @@ describe('bidirectional bounded service peer', () => {
     expect((await Promise.all(calls)).every(error => ['TIMEOUT', 'BACKPRESSURE'].includes(code(error)!))).toBe(true)
     await expect(host.request('test.echo', null)).rejects.toBeInstanceOf(ServiceProtocolError)
     const byteLimited = peer({ write: () => new Promise(() => {}) })
-    const largeCalls = Array.from({ length: 5 }, () => byteLimited.request('test.echo', 'a'.repeat(900_000)).catch(error => error))
+    // Four requests fit the queued-byte budget; the fifth overflows it.
+    const large = 'a'.repeat(Math.floor(SERVICE_LIMITS.queuedBytes / 4.5))
+    const largeCalls = Array.from({ length: 5 }, () => byteLimited.request('test.echo', large).catch(error => error))
     expect(code(await largeCalls[4])).toBe('BACKPRESSURE')
     expect(byteLimited.pendingCount).toBe(4)
     byteLimited.disconnect()

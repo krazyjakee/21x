@@ -32,6 +32,7 @@ import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-
 import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
+import { ElectronProfileImportError, MANAGED_TASK_MCP_MARKER, importElectronProfile } from './electron-profile-import'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
 import { createHash, randomUUID } from 'node:crypto'
@@ -40,7 +41,7 @@ import { McpProbeService } from '../main/agent-manager/mcp-probe-service'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync, statSync } from 'node:fs'
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DatabaseManager, type DatabaseRuntimeOptions } from '../main/database/manager'
-import { decryptSettingValue, decryptRecordCredential } from '../main/database/serializers'
+import { decryptSettingValue, decryptRecordCredential, encryptSettingValue } from '../main/database/serializers'
 import { acquireProfileLock, type ProfileLock } from '../main/platform/profile-lock'
 import { initializeProtectedSecretStorage, type AuthenticatedSecretStorage, type ProtectedApplicationKeyStore } from '../main/platform/authenticated-secret-storage'
 import { configureSecretStorage, releaseSecretStorage } from '../main/platform/secret-storage'
@@ -119,6 +120,8 @@ export interface ProductionOwnerBootstrap {
   profileId: string
   paths: DatabaseRuntimeOptions['paths'] & { reposRoot: string; resourceRoot: string; tempRoot: string }
   credentials: { store: ProtectedApplicationKeyStore; mode: 'load' | 'create' }
+  /** Electron profile whose data seeds a newly created profile (original untouched). */
+  legacyImport?: { profileRoot: string; appName: string }
   managedTaskMcp: DatabaseRuntimeOptions['managedTaskMcp']
   connectors: { kind: 'disabled'; reason: string } | { kind: 'enabled' }
   /** Verified browser resource root; absent artifacts never expose mobile access. */
@@ -301,7 +304,9 @@ export class ProductionOwner {
       // failure cannot turn its blocked shutdown into an automatic lease release.
       if (this.abort.signal.aborted) throw new ProductionOwnerError(code)
       this.code = code
-      try { await this.close() } catch { throw new ProductionOwnerError(code) }
+      // A drain that outlasts its deadline keeps the lease, but the reported
+      // reason stays the startup failure, not the shutdown that followed it.
+      try { await this.close() } catch { this.update('blocked', failedStage, code); throw new ProductionOwnerError(code) }
       this.update('failed', failedStage, code)
       throw new ProductionOwnerError(code)
     })
@@ -770,7 +775,7 @@ export class ProductionOwner {
           !isAbsolute(runtime.args[0]) || !existsSync(runtime.args[0])) throw new ProductionOwnerError('MANAGED_MCP_RESOURCE_UNAVAILABLE')
     }
     if (this.bootstrap.connectors.kind === 'enabled' && !this.boundaries.connectorTransport) validateConnectorResources(this.bootstrap.paths.resourceRoot)
-    if (this.bootstrap.credentials.mode === 'create' && readdirSync(profileRoot).some(name => !['.21x-profile-lock.sqlite', '.21x-profile-lock.sqlite-journal', '.21x-profile-lock.sqlite-wal', '.21x-profile-lock.sqlite-shm'].includes(name) &&
+    if (this.bootstrap.credentials.mode === 'create' && readdirSync(profileRoot).some(name => !['.21x-profile-lock.sqlite', '.21x-profile-lock.sqlite-journal', '.21x-profile-lock.sqlite-wal', '.21x-profile-lock.sqlite-shm', '.legacy-profile-root'].includes(name) &&
       !isEmptyDescriptorRoot(profileRoot, name, this.bootstrap.paths))) {
       throw new ProductionOwnerError('PROFILE_NOT_EMPTY')
     }
@@ -779,18 +784,41 @@ export class ProductionOwner {
     this.assertStarting()
     this.checkpoint('credentials')
     // Assign even on cancelled initialization: late OS-store completion remains owned.
-    this.storage = await initializeProtectedSecretStorage(this.bootstrap.credentials.store, this.bootstrap.profileId, this.bootstrap.credentials.mode)
+    this.storage = await initializeProtectedSecretStorage(this.bootstrap.credentials.store, this.bootstrap.profileId, this.bootstrap.credentials.mode,
+      // Create mode has already verified the profile holds no data.
+      { adoptExistingKey: true })
     this.assertStarting()
     configureSecretStorage(this.storage)
     this.storageRegistered = true
     this.checkpoint('database-preflight')
-    preflightProfile(join(profileRoot, '21x.db'), this.storage)
+    const legacy = this.bootstrap.legacyImport
+    if (legacy && this.bootstrap.credentials.mode === 'create') {
+      const store = this.bootstrap.credentials.store
+      await importElectronProfile({
+        profileRoot: legacy.profileRoot, destination: join(profileRoot, '21x.db'), storage: this.storage,
+        // No stored password only matters if a value needs it; that value is then
+        // cleared. An unreachable or locked keyring is retried, never cleared.
+        loadSafeStoragePassword: async () => {
+          if (!store.loadLegacySafeStoragePassword) return null
+          try { return await store.loadLegacySafeStoragePassword(legacy.appName) } catch (error) {
+            if ((error as { code?: unknown })?.code === 'KEYSTORE_NO_ENTRY') return null
+            throw new ElectronProfileImportError('ELECTRON_CREDENTIALS_UNAVAILABLE')
+          }
+        }
+      })
+      this.assertStarting()
+    }
+    const { managedTaskMcpId } = preflightProfile(join(profileRoot, '21x.db'), this.storage)
     this.checkpoint('database')
     for (const path of [this.bootstrap.paths.workspaceRoot, this.bootstrap.paths.attachmentRoot, this.bootstrap.paths.reposRoot, this.bootstrap.paths.tempRoot]) mkdirSync(path, { recursive: true })
-    this.databaseRuntime = { paths: { profileRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, attachmentRoot: this.bootstrap.paths.attachmentRoot }, managedTaskMcp: runtime, attachmentDeletion: 'retain' }
+    // A reopened profile refreshes only the managed row it can prove it created;
+    // any other task-management row still fails closed as ambiguous.
+    const managedTaskMcp = !('disabled' in runtime) && managedTaskMcpId ? { ...runtime, existingServer: { policy: 'verified-id' as const, id: managedTaskMcpId } } : runtime
+    this.databaseRuntime = { paths: { profileRoot, workspaceRoot: this.bootstrap.paths.workspaceRoot, attachmentRoot: this.bootstrap.paths.attachmentRoot }, managedTaskMcp, attachmentDeletion: 'retain' }
     this.db = new DatabaseManager(this.databaseRuntime)
     this.db.initialize()
     const db = this.db
+    if (!('disabled' in runtime)) recordManagedTaskMcp(db)
     reconcileProductionRestart(db)
     db.onTaskActivity = (taskId, last_activity_at) => this.emit('task:updated', { taskId, updates: { last_activity_at } })
     this.checkpoint('secret-broker')
@@ -1294,22 +1322,43 @@ function safeStartupCode(error: unknown, stage: string): string {
   if (code === 'ENOSPC' || code === 'EDQUOT' || code === 'SQLITE_FULL') return 'PROFILE_LOW_DISK'
   if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') return 'PROFILE_DATABASE_LOCKED'
   if (code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB') return 'PROFILE_DATABASE_CORRUPT'
-  if (/^(PROFILE_|SECRET_|RESOURCE_|MANAGED_MCP_|CONNECTOR_|AGENT_CLI_|NATIVE_RUNTIME_|AMBIGUOUS_MANAGED_MCP_)[A-Z_]*$/.test(code)) return code
+  if (/^(PROFILE_|SECRET_|RESOURCE_|MANAGED_MCP_|CONNECTOR_|AGENT_CLI_|NATIVE_RUNTIME_|AMBIGUOUS_MANAGED_MCP_|ELECTRON_PROFILE_|ELECTRON_CREDENTIALS_)[A-Z_]*$/.test(code)) return code
   if (stage === 'resources') return 'RESOURCE_UNAVAILABLE'
   if (stage === 'native-readiness') return 'NATIVE_RUNTIME_UNAVAILABLE'
   if (stage === 'credentials') return 'SECRET_STORE_UNAVAILABLE'
   return stage === 'database' || stage === 'database-preflight' ? 'DATABASE_UNAVAILABLE' : 'BOOTSTRAP_FAILED'
 }
 
+
+/** After seeding exactly one managed row, remember it under the profile key. */
+function recordManagedTaskMcp(db: DatabaseManager): void {
+  const rows = db.db.prepare("SELECT id FROM mcp_servers WHERE name = 'task-management'").all() as Array<{ id: string }>
+  if (rows.length !== 1) return
+  const current = db.getSetting(MANAGED_TASK_MCP_MARKER)
+  try { if (current && decryptSettingValue(current) === rows[0].id) return } catch { /* rewrite an unreadable marker */ }
+  db.setSetting(MANAGED_TASK_MCP_MARKER, encryptSettingValue(rows[0].id))
+}
+
+/** The single task-management row whose id matches the profile-key-authenticated marker, if any. */
+function verifiedManagedTaskMcpId(probe: SQLite.Database, tables: Set<string>): string | undefined {
+  if (!tables.has('settings') || !tables.has('mcp_servers')) return undefined
+  const marker = probe.prepare('SELECT value FROM settings WHERE key = ?').get(MANAGED_TASK_MCP_MARKER) as { value: string } | undefined
+  if (!marker?.value) return undefined
+  let id: string
+  try { id = decryptSettingValue(marker.value) } catch { return undefined }
+  const rows = probe.prepare("SELECT id FROM mcp_servers WHERE name = 'task-management'").all() as Array<{ id: string }>
+  return rows.length === 1 && rows[0].id === id ? id : undefined
+}
+
 /** Validate existing ciphertext read-only before migrations/seeding can write. No implicit profile conversion. */
-function preflightProfile(path: string, storage: AuthenticatedSecretStorage): void {
+function preflightProfile(path: string, storage: AuthenticatedSecretStorage): { managedTaskMcpId?: string } {
   for (const file of [path, path + '-wal', path + '-shm']) {
     let stat: ReturnType<typeof lstatSync>
     try { stat = lstatSync(file) }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw new ProductionOwnerError('PROFILE_DATABASE_PATH_INVALID') }
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new ProductionOwnerError('PROFILE_DATABASE_PATH_INVALID')
   }
-  if (!existsSync(path)) return
+  if (!existsSync(path)) return {}
   const probe = new SQLite(realpathSync(path), { readonly: true, fileMustExist: true, timeout: 1000 })
   try {
     const result = probe.pragma('quick_check', { simple: true })
@@ -1341,6 +1390,7 @@ function preflightProfile(path: string, storage: AuthenticatedSecretStorage): vo
       if (!tables.has(table)) continue
       for (const column of columns) for (const row of probe.prepare(`SELECT ${column} AS value FROM ${table} WHERE ${column} IS NOT NULL`).iterate() as Iterable<{ value: Buffer }>) storage.decryptString(row.value)
     }
+    return { managedTaskMcpId: verifiedManagedTaskMcpId(probe, tables) }
   } catch (error) {
     if (error instanceof ProductionOwnerError) throw error
     const code = safeStartupCode(error, 'database-preflight')

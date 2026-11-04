@@ -89,4 +89,24 @@ describe('one-time protected-key bootstrap', () => {
       expect(error).not.toHaveProperty('cause')
     }
   })
+
+  it('adopts a key left by an interrupted first launch only when the caller allows it', async () => {
+    const existing = Buffer.alloc(32, 7)
+    const store = {
+      create: vi.fn(async () => { throw Object.assign(new Error('exists'), { code: 'KEYSTORE_ALREADY_EXISTS' }) }),
+      load: vi.fn(async () => Buffer.from(existing))
+    }
+    await expect(initializeProtectedSecretStorage(store, 'fixture', 'create')).rejects.toMatchObject({ code: 'SECRET_STORE_UNAVAILABLE' })
+    expect(store.load).not.toHaveBeenCalled()
+    const adopted = await initializeProtectedSecretStorage(store, 'fixture', 'create', { adoptExistingKey: true })
+    const reopened = await initializeProtectedSecretStorage(store, 'fixture', 'load')
+    expect(reopened.decryptString(adopted.encryptString('kept'))).toBe('kept')
+    adopted.dispose(); reopened.dispose()
+  })
+
+  it('still refuses other create failures even when adoption is allowed', async () => {
+    const store = { create: vi.fn(async () => { throw Object.assign(new Error('locked'), { code: 'KEYSTORE_NO_ACCESS' }) }), load: vi.fn() }
+    await expect(initializeProtectedSecretStorage(store, 'fixture', 'create', { adoptExistingKey: true })).rejects.toMatchObject({ code: 'SECRET_STORE_UNAVAILABLE' })
+    expect(store.load).not.toHaveBeenCalled()
+  })
 })

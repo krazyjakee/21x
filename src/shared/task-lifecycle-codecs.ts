@@ -8,6 +8,9 @@ export type TaskLifecycleOperation = typeof TASK_LIFECYCLE_OPERATIONS[number]
 export const TASK_LIFECYCLE_EVENTS = ['task:created', 'task:updated', 'task:deleted', 'task:subtasks-reordered', 'tasks:refresh'] as const
 export type TaskLifecycleEvent = typeof TASK_LIFECYCLE_EVENTS[number]
 export const MAX_TASK_LIFECYCLE_BYTES = 900_000
+/** Whole-board reads: a real profile's board exceeds 1 MiB. Leaves frame headroom
+ * under SERVICE_LIMITS.frameBytes (16 MiB) for the envelope. Writes keep the bound above. */
+export const MAX_TASK_LIST_BYTES = 15 * 1024 * 1024
 const fail = (code: 'INVALID_ARGUMENTS' | 'INVALID_RESULT'): never => { throw new ServiceProtocolError(code) }
 type Check = (value: unknown) => boolean
 const text = (max: number): Check => value => typeof value === 'string' && value.length <= max && !value.includes('\0')
@@ -28,7 +31,12 @@ const object = (value: unknown, shape: Shape, required: string[] = []): value is
   hasExactKeys(value, required, Object.keys(shape).filter(key => !required.includes(key))) &&
   Object.entries(value).every(([key, item]) => item === undefined && !required.includes(key) || shape[key](item))
 const attachmentShape: Shape = { id: isDatabaseId, filename: value => named(value) && !/[\\/]/.test(value as string) && !['.', '..'].includes(value as string), size: integer, mime_type: text(128), added_at: date }
-const attachments = list(value => object(value, attachmentShape, Object.keys(attachmentShape)))
+/** Issue links recorded by Captain issue writes keep their URL in `filename`; they are never files. */
+export const ISSUE_LINK_ATTACHMENT_MIME = 'text/x-github-issue'
+const issueLinkShape: Shape = { ...attachmentShape, filename: value => text(2048)(value) && /^https:\/\/github\.com\/[^\s\\]+$/.test(value as string) && !(value as string).split('/').includes('..'),
+  size: value => value === 0, mime_type: value => value === ISSUE_LINK_ATTACHMENT_MIME }
+const attachments = list(value => object(value, attachmentShape, Object.keys(attachmentShape)) ||
+  isRecord(value) && value.mime_type === ISSUE_LINK_ATTACHMENT_MIME && object(value, issueLinkShape, Object.keys(issueLinkShape)))
 /** Full metadata baseline, separate from data persisted by updateTask. Array order
  * and every canonical record field matter; object property insertion order does not. */
 export function taskAttachmentMetadataEqual(left: unknown, right: unknown): boolean {
@@ -37,7 +45,8 @@ export function taskAttachmentMetadataEqual(left: unknown, right: unknown): bool
 }
 const attachmentPrecondition: Check = value => object(value, { attachmentsBaseline: attachments }, ['attachmentsBaseline'])
 const outputShape: Shape = { id: named, name: text(512), type: text(128), multiple: bool, options: list(text(512)), required: bool, value: bounded }
-const outputs = list(value => object(value, outputShape, ['id', 'name', 'type']))
+// Agents record results as {id, value}; name/type exist only on template fields.
+const outputs = list(value => object(value, outputShape, ['id']))
 const recurrenceObject: Shape = {
   type: choice(['daily', 'weekly', 'monthly', 'custom']), interval: value => positive(value) && (value as number) <= 366,
   time: value => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value),
@@ -81,7 +90,9 @@ export function projectTaskLifecycleTask(value: unknown): JsonValue {
   if (!isTaskLifecycleTask(result)) return fail('INVALID_RESULT')
   return result as JsonValue
 }
-const taskList: Check = value => list(isTaskLifecycleTask)(value) && bounded(value)
+// A whole board, not a field: real profiles hold hundreds of tasks. The byte bound governs.
+const listBounded = (value: unknown): value is JsonValue => isJsonValue(value) && new TextEncoder().encode(JSON.stringify(value)).byteLength <= MAX_TASK_LIST_BYTES
+const taskList: Check = value => Array.isArray(value) && value.length <= 100_000 && value.every(isTaskLifecycleTask) && listBounded(value)
 const partialTask: Check = value => object(value, taskShape) && boundedTask(value)
 const actionResultShape: Shape = { success: bool, error: text(4096), taskUpdate: value => object(value, { ...taskShape, ...updateShape }) && bounded(value) }
 const actionResult: Check = value => object(value, actionResultShape, ['success']) && bounded(value)
@@ -126,6 +137,7 @@ function codec<K extends TaskLifecycleOperation>(operation: K): TaskLifecycleCod
     keys.every((_, index) => value[index] === undefined && index >= descriptor.keys.length || descriptor.checks[index](value[index])) &&
     (operation !== 'db:updateTask' || (isRecord(value[1]) && value[1].attachments !== undefined) === (value[2] !== undefined))
   const validateResult = descriptor.result
+  const resultBounded = descriptor.result === taskList ? listBounded : bounded
   return {
     validateArguments,
     encodeArguments(args) {
@@ -147,13 +159,13 @@ function codec<K extends TaskLifecycleOperation>(operation: K): TaskLifecycleCod
     encodeResult(value) {
       if (value === undefined) { if (!validateResult(value)) return fail('INVALID_RESULT'); return { defined: false } }
       const projected = descriptor.project ? descriptor.project(value) : value
-      if (!validateResult(projected) || !bounded(projected)) return fail('INVALID_RESULT')
+      if (!validateResult(projected) || !resultBounded(projected)) return fail('INVALID_RESULT')
       return { defined: true, value: projected }
     },
     decodeResult(value) { if (!validateResult(value)) return fail('INVALID_RESULT'); return value as DesktopCommandMap[K]['result'] },
     validateResult,
     validateWireResult(value) { return isRecord(value) && hasExactKeys(value, ['defined'], ['value']) &&
-      (value.defined === false ? !Object.hasOwn(value, 'value') && validateResult(undefined) : value.defined === true && Object.hasOwn(value, 'value') && validateResult(value.value) && bounded(value.value)) }
+      (value.defined === false ? !Object.hasOwn(value, 'value') && validateResult(undefined) : value.defined === true && Object.hasOwn(value, 'value') && validateResult(value.value) && resultBounded(value.value)) }
   }
 }
 export const TASK_LIFECYCLE_CODECS = Object.fromEntries(TASK_LIFECYCLE_OPERATIONS.map(operation => [operation, codec(operation)])) as { [K in TaskLifecycleOperation]: TaskLifecycleCodec<K> }
