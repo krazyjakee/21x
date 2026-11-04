@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { FIELD_SIZING_CLASS, fitTextarea, resetTextarea } from '@/lib/textarea-autosize'
 import { Paperclip, Plus, ArrowUp, ChevronDown, Settings } from 'lucide-react'
 import { agentApi, voiceApi } from '@/lib/ipc-client'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
@@ -50,9 +51,7 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value)
     if (!e.target.value) clearDictatedText(e.target)
-    const el = e.target
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+    fitTextarea(e.target, 120)
   }, [])
 
   /**
@@ -74,7 +73,7 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
     if (textareaRef.current) {
       textareaRef.current.value = ''
       clearDictatedText(textareaRef.current)
-      textareaRef.current.style.height = 'auto'
+      resetTextarea(textareaRef.current)
     }
   }, [onSendToCaptain])
 
@@ -95,7 +94,7 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
     if (textareaRef.current) {
       textareaRef.current.value = ''
       clearDictatedText(textareaRef.current)
-      textareaRef.current.style.height = 'auto'
+      resetTextarea(textareaRef.current)
     }
   }, [text, onCreateTask])
 
@@ -122,7 +121,7 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
           onKeyDown={handleKeyDown}
           placeholder={`Ask ${captainName} or describe a task...`}
           rows={1}
-          className="w-full bg-transparent text-base text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed max-h-32 min-h-[32px]"
+          className={`w-full bg-transparent text-base text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed max-h-32 min-h-[32px] ${FIELD_SIZING_CLASS}`}
         />
       </div>
 
