@@ -13,6 +13,11 @@ import { estimateTokens } from '../sessions/token-estimator'
  * always cut on turn boundaries, so an assistant tool call is never separated
  * from its results.
  *
+ * Folding has hysteresis: it starts only once the unsummarised turns pass
+ * `foldAtTurns` or `foldAtChars`, then folds down to `keepTurns` and `maxChars`.
+ * Without that gap every turn past the budget costs a model call and rewrites
+ * the summary, one turn at a time.
+ *
  * Turns are never dropped silently. Turns past the budget that no summary
  * covers yet (the fold failed, or has not run) stay verbatim up to
  * PENDING_FOLD_CHAR_FACTOR × maxChars; any left out beyond that are replaced
@@ -20,13 +25,23 @@ import { estimateTokens } from '../sessions/token-estimator'
  */
 
 export interface ContextBudget {
-  /** Newest turns sent verbatim. */
+  /** Newest turns a fold leaves verbatim. */
   keepTurns: number
-  /** Soft character ceiling for the verbatim turns (the newest turn is always kept). */
+  /** Soft character ceiling for what a fold leaves verbatim (the newest turn is always kept). */
   maxChars: number
+  /** Fold once more unsummarised turns than this exist. Defaults to `keepTurns`. */
+  foldAtTurns?: number
+  /** Fold once the unsummarised turns exceed this many characters. Defaults to `maxChars`. */
+  foldAtChars?: number
 }
 
-export const DEFAULT_CONTEXT_BUDGET: ContextBudget = { keepTurns: 8, maxChars: 24_000 }
+/**
+ * Chosen by replaying stored sessions: real turns average about 1,100
+ * characters, so a fold at 8 turns fired long before the character budget
+ * mattered. `foldAtChars` must stay below PENDING_FOLD_CHAR_FACTOR × maxChars,
+ * or turns would be omitted before a fold is due.
+ */
+export const DEFAULT_CONTEXT_BUDGET: ContextBudget = { keepTurns: 8, maxChars: 24_000, foldAtTurns: 24, foldAtChars: 36_000 }
 export const MANAGED_VERBATIM_MAX_TOKENS = 16_000
 export const MANAGED_SUMMARY_MAX_TOKENS = 1_500
 
@@ -155,6 +170,13 @@ function keptTurnCount(turns: CommanderMessage[][], budget: ContextBudget): numb
   return kept
 }
 
+/** Whether the unsummarised turns have grown enough to be worth a fold. */
+function foldDue(turns: CommanderMessage[][], budget: ContextBudget): boolean {
+  if (turns.length > (budget.foldAtTurns ?? budget.keepTurns)) return true
+  const chars = turns.reduce((sum, turn) => sum + turn.reduce((size, m) => size + messageChars(m), 0), 0)
+  return chars > (budget.foldAtChars ?? budget.maxChars)
+}
+
 function reportText(message: CommanderMessage): string {
   const from = message.project_id ? `project ${message.project_id}` : 'a project'
   return `[Report from ${from}]\n${message.content}`
@@ -255,12 +277,12 @@ export interface FoldPlan {
   lastFoldedId: string
 }
 
-/** What to fold so the verbatim part fits the budget again, or null when it already does. */
+/** What to fold so the verbatim part fits the budget again, or null when no fold is due yet. */
 export function planFold(messages: CommanderMessage[], budget: ContextBudget = DEFAULT_CONTEXT_BUDGET): FoldPlan | null {
   const { summary, rest } = unfoldedMessages(messages)
   const turns = splitTurns(rest)
   const kept = keptTurnCount(turns, budget)
-  if (kept >= turns.length) return null
+  if (kept >= turns.length || !foldDue(turns, budget)) return null
   // Catch up a failed fold in bounded oldest-first batches. Never advance
   // correlation_id past turns that were not included in this request.
   const toFold: CommanderMessage[] = []

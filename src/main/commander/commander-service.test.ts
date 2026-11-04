@@ -5,7 +5,7 @@ import type { ChatProvider, ChatProviderEvent, ChatProviderRequest } from '../ch
 import type { DatabaseManager } from '../database'
 import { COMMANDER_ADMIN_TOOLS, CommanderService, cleanGeneratedTitle, fallbackTitle, toolResultTags } from './commander-service'
 import { CommanderStore } from './commander-store'
-import { buildContext, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, splitTurns } from './context'
+import { buildContext, DEFAULT_CONTEXT_BUDGET, MAX_SUMMARY_TRANSCRIPT_CHARS, PENDING_FOLD_CHAR_FACTOR, planFold, splitTurns, type ContextBudget } from './context'
 import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, type CommanderAgents } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
@@ -507,6 +507,56 @@ describe('CommanderService context budget', () => {
     expect(service.foldFailure(small.id)?.error).toBe('summary request failed')
   })
 
+  it('sends every turn verbatim with no summary call until a fold is due, then folds them as one batch', async () => {
+    let n = 0
+    const provider = fakeProvider({ chat: () => `reply ${++n}`, title: () => 'Cadence', summary: () => 'BATCH SUMMARY' })
+    const service = makeService(provider)
+    const session = store.createSession()
+    const summaryCalls = (): number => provider.requests.filter((r) => r.system === COMMANDER_SUMMARY_PROMPT).length
+
+    for (let turn = 1; turn <= 24; turn++) await service.sendUserMessage(session.id, `turn ${turn}`).done
+    expect(summaryCalls()).toBe(0)
+    expect(store.listMessages(session.id).some((m) => m.role === 'summary')).toBe(false)
+    const untouched = chatRequests(provider).at(-1)!
+    expect(untouched.messages[0].content).toBe('turn 1')
+    expect(untouched.messages.filter((m) => m.role === 'user')).toHaveLength(24)
+
+    await service.sendUserMessage(session.id, 'turn 25').done
+    expect(summaryCalls()).toBe(1)
+    const summaries = store.listMessages(session.id).filter((m) => m.role === 'summary')
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0].correlation_id).toBe(store.listMessages(session.id).find((m) => m.content === 'reply 17')!.id)
+
+    await service.sendUserMessage(session.id, 'turn 26').done
+    const folded = chatRequests(provider).at(-1)!
+    expect(folded.system).toContain('BATCH SUMMARY')
+    expect(folded.messages[0].content).toBe('turn 18')
+    expect(folded.messages.filter((m) => m.role === 'user')).toHaveLength(9)
+    expect(folded.messages.some((m) => m.content.includes('omitted'))).toBe(false)
+    expect(summaryCalls()).toBe(1)
+  })
+
+  it('retries a failed batch fold after each turn and keeps every turn stored', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const session = store.createSession('Failing fold')
+    for (let turn = 1; turn <= 25; turn++) {
+      store.appendMessage(session.id, { role: 'user', content: `turn ${turn}` })
+      store.appendMessage(session.id, { role: 'assistant', content: `reply ${turn}` })
+    }
+    const before = store.listMessages(session.id)
+    const failing = makeService(fakeProvider({ summary: () => new Error('private provider detail') }))
+    expect(await failing.foldHistory(session.id)).toBeNull()
+    expect(await failing.foldHistory(session.id)).toBeNull()
+    expect(failing.foldFailure(session.id)).toMatchObject({ error: 'summary request failed', attempts: 2 })
+    expect(store.listMessages(session.id)).toEqual(before)
+
+    const recovered = makeService(fakeProvider({ summary: () => 'recovered' }))
+    const summary = await recovered.foldHistory(session.id)
+    expect(summary?.correlation_id).toBe(before.find((m) => m.content === 'reply 17')!.id)
+    expect(recovered.foldFailure(session.id)).toBeNull()
+    warn.mockRestore()
+  })
+
   it('treats an empty summary as a failed fold', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const service = makeService(fakeProvider({ summary: () => '   ' }), { keepTurns: 1 })
@@ -552,6 +602,69 @@ describe('context helpers', () => {
 
     const plan = planFold(history, { keepTurns: 1, maxChars: 100_000 })!
     expect(plan.toFold.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant', 'report'])
+  })
+
+  describe('fold cadence', () => {
+    /** The rule before hysteresis: no gap between trigger and target, so one turn at a time. */
+    const eager: ContextBudget = { keepTurns: 8, maxChars: 24_000 }
+
+    /** Runs a session through the fold rule the way afterTurn does, one fold per turn at most. */
+    function replay(budget: ContextBudget, turns: number, userChars: number, replyChars: number) {
+      const history: CommanderMessage[] = []
+      let folds = 0
+      const visible: number[] = []
+      for (let turn = 1; turn <= turns; turn++) {
+        history.push(msg('user', 'u'.repeat(userChars)), msg('assistant', 'a'.repeat(replyChars)))
+        const context = buildContext(history, budget)
+        expect(context.droppedTurns).toBe(0)
+        visible.push(context.messages.filter((m) => m.role === 'user').length)
+        const plan = planFold(history, budget)
+        if (plan) {
+          folds++
+          history.push(msg('summary', 'summary', { correlation_id: plan.lastFoldedId }))
+        }
+      }
+      return { folds, visible }
+    }
+
+    it('cuts folds from 52 to 3 for a 60-turn session of typical turns and never shows the model less', () => {
+      const before = replay(eager, 60, 300, 800)
+      const after = replay(DEFAULT_CONTEXT_BUDGET, 60, 300, 800)
+      expect(before.folds).toBe(52)
+      expect(after.folds).toBe(3)
+      after.visible.forEach((turns, index) => expect(turns).toBeGreaterThanOrEqual(before.visible[index]))
+    })
+
+    it('cuts folds from 16 to 5 for tool-heavy turns, where the character trigger decides', () => {
+      const before = replay(eager, 20, 1_000, 5_000)
+      const after = replay(DEFAULT_CONTEXT_BUDGET, 20, 1_000, 5_000)
+      expect(before.folds).toBe(16)
+      expect(after.folds).toBe(5)
+      after.visible.forEach((turns, index) => expect(turns).toBeGreaterThanOrEqual(before.visible[index]))
+    })
+
+    it('folds past either trigger, but never a lone turn or a session under both', () => {
+      const typical = (turns: number): CommanderMessage[] =>
+        Array.from({ length: turns }, () => [msg('user', 'u'.repeat(300)), msg('assistant', 'a'.repeat(800))]).flat()
+      expect(planFold(typical(24))).toBeNull()
+      expect(planFold(typical(25))?.toFold).toHaveLength(17 * 2)
+      expect(planFold([msg('user', 'x'.repeat(200_000))])).toBeNull()
+      const large = [msg('user', 'x'.repeat(20_000)), msg('user', 'y'.repeat(15_000)), msg('user', 'z'.repeat(1_001))]
+      expect(planFold(large.slice(0, 2))).toBeNull()
+      expect(planFold(large)?.toFold.map((m) => m.id)).toEqual([large[0].id])
+    })
+
+    it('keeps the fold trigger inside the ceiling for turns no summary covers', () => {
+      const { foldAtChars, foldAtTurns, keepTurns, maxChars } = DEFAULT_CONTEXT_BUDGET
+      expect(foldAtChars).toBeGreaterThan(maxChars)
+      expect(foldAtChars).toBeLessThan(maxChars * PENDING_FOLD_CHAR_FACTOR)
+      expect(foldAtTurns).toBeGreaterThan(keepTurns)
+    })
+
+    it('keeps the eager rule for a budget that names no fold trigger', () => {
+      const history = [msg('user', 'a'), msg('assistant', 'b'), msg('user', 'c'), msg('assistant', 'd')]
+      expect(planFold(history, { keepTurns: 1, maxChars: 100 })?.toFold).toHaveLength(2)
+    })
   })
 
   it('always keeps the newest turn even when it alone exceeds the character budget', () => {
