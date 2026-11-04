@@ -13,7 +13,7 @@ import {
   VOICE_DEFAULT_ENDPOINT_SILENCE,
   VOICE_DEFAULT_SHORTCUT,
   VOICE_EVENTS,
-  VOICE_MIN_SEGMENT_CHARS,
+  isVoiceNoise,
   VOICE_SETTING_KEYS,
   canTransition,
   type VoiceActionOutcome,
@@ -495,9 +495,10 @@ export class VoiceSessionManagerCore {
   private onSegment(turnId: string, text: string, index: number): void {
     if (turnId !== this.turnId) return
     const words = text.trim()
-    // Very short output is noise, not a sentence. Sending it would be worse
-    // than dropping it, because the renderer submits it straight away.
-    if (words.length < VOICE_MIN_SEGMENT_CHARS) return
+    // Very short output, or only "Mm." / "Hmm.", is noise, not a sentence.
+    // Sending it would be worse than dropping it, because the renderer
+    // submits it straight away.
+    if (isVoiceNoise(words)) return
     this.partial = ''
     this.segmentsSent += 1
     this.options.notify(VOICE_EVENTS.segment, {
@@ -511,8 +512,11 @@ export class VoiceSessionManagerCore {
     this.options.notify(VOICE_EVENTS.partial, { turnId, turnEpoch: this.turnEpoch, text })
   }
 
-  private async onFinal(turnId: string, text: string): Promise<void> {
+  private async onFinal(turnId: string, heard: string): Promise<void> {
     if (turnId !== this.turnId) return
+    // A transcript of only "Mm." is treated as silence, so it is neither
+    // dictated into a message box nor offered to the command parser.
+    const text = isVoiceNoise(heard) ? '' : heard
     const turnEpoch = this.turnEpoch
     this.final = text
     this.partial = ''

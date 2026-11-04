@@ -146,8 +146,12 @@ Guards:
   dictation. It used to be handed to the command rules, which both rejected
   mis-heard words as a bad command and would have let a sentence meant for an
   agent run an action.
-- A segment shorter than two characters is noise and is dropped, because the
-  renderer would send it straight away.
+- A segment shorter than two characters, or made only of hesitation sounds
+  ("Mm.", "Hmm.", "Uh, um."), is noise and is dropped, because the renderer
+  would send it straight away. The recogniser writes breathing and room noise
+  this way. A closing transcript of only those sounds counts as nothing heard,
+  so it is not dictated either. `isVoiceNoise` in `src/shared/voice.ts` owns
+  the rule.
 - A conversation stops after ten minutes of one open turn.
 - Stopping a conversation reports nothing. Every sentence has already left as a
   segment and the recogniser was reset after each one, so the closing transcript

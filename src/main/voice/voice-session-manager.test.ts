@@ -630,6 +630,34 @@ describe('VoiceSessionManager — the conversational loop', () => {
     expect(segments(ctx.notify)).toHaveLength(0)
   })
 
+  // Background noise transcribed as "Mm." was sent to the Captain as a message.
+  it('drops a sentence made only of hesitation sounds', async () => {
+    const ctx = makeReadyManager()
+    const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle
+
+    ctx.worker.emit('segment', turn.turnId, 'Mm.', 1)
+    ctx.worker.emit('segment', turn.turnId, 'Hmm...', 2)
+    ctx.worker.emit('segment', turn.turnId, 'Uh, um.', 3)
+    ctx.worker.emit('segment', turn.turnId, 'Mm, add twenty one X.', 4)
+
+    expect(segments(ctx.notify)).toEqual([
+      { turnId: turn.turnId, turnEpoch: turn.turnEpoch, text: 'Mm, add twenty one X.', index: 4 },
+    ])
+  })
+
+  it('treats a closing "Mm." as nothing heard, not as dictation', async () => {
+    const ctx = makeReadyManager()
+    const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle
+
+    ctx.worker.emit('final', turn.turnId, 'Mm.')
+    await Promise.resolve()
+
+    expect(ctx.notify.mock.calls.some(([channel]) => channel === 'voice:dictate')).toBe(false)
+    expect(outcomes(ctx.notify)).toEqual([
+      expect.objectContaining({ status: 'rejected', reason: 'unrecognized', turnId: turn.turnId }),
+    ])
+  })
+
   it('ignores a sentence from a turn that already ended', async () => {
     const ctx = makeReadyManager()
     await ctx.manager.startTurn('conversation', {})

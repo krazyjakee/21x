@@ -348,6 +348,25 @@ export const VOICE_ENDPOINT_SILENCE_CHOICES = [0.8, 1.2, 2] as const
 /** A sentence shorter than this is treated as noise and is not sent. */
 export const VOICE_MIN_SEGMENT_CHARS = 2
 
+/**
+ * Hesitation sounds. The recogniser writes breathing, a cough or a room hum as
+ * "Mm." or "Hmm.", and a conversation submits every sentence at once, so a
+ * sentence made only of these would reach the agent as a message.
+ */
+const VOICE_FILLER_WORD = /^(?:m+|h+m+|m+h+m+|u+h+|u+m+|u+h+m+|e+r+|e+r+m+|a+h+|e+h+)$/
+
+/**
+ * True when a transcript holds nothing worth sending: too short, or only
+ * hesitation sounds ("Mm.", "Hmm...", "Uh, um."). A sentence that has a real
+ * word anywhere in it is kept whole.
+ */
+export function isVoiceNoise(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed.length < VOICE_MIN_SEGMENT_CHARS) return true
+  const words = trimmed.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  return words.every((word) => VOICE_FILLER_WORD.test(word))
+}
+
 // ── IPC channel names ───────────────────────────────────────
 
 export const VOICE_EVENTS = {
