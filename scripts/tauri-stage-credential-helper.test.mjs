@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, readFile, lstat, symlink, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, lstat, symlink, writeFile, rm } from 'node:fs/promises'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { stageCredentialHelper } from './tauri-stage-credential-helper.mjs'
 
 async function fixture(t) {
-  const projectRoot = await mkdtemp(join(tmpdir(), '21x-credential-helper-'))
+  // The script realpaths projectRoot; tmpdir() can be a link (macOS) or an 8.3 name (Windows).
+  const projectRoot = await realpath(await mkdtemp(join(tmpdir(), '21x-credential-helper-')))
   t.after(() => rm(projectRoot, { recursive: true, force: true }))
   await mkdir(join(projectRoot, 'src-tauri/credentials'), { recursive: true })
   return projectRoot
@@ -77,8 +78,8 @@ test('rejects a linked staged helper or staging directory without replacing it',
 
 test('production hooks prepare native dependencies and helper before sealing resources', async () => {
   const config = JSON.parse(await readFile(new URL('../src-tauri/tauri.production.conf.json', import.meta.url)))
-  for (const command of [config.build.beforeDevCommand, config.build.beforeBuildCommand]) {
-    assert.ok(command.indexOf('pnpm tauri:prepare:native') < command.indexOf('pnpm tauri:prepare:credential-helper'))
-    assert.ok(command.indexOf('pnpm tauri:prepare:credential-helper') < command.indexOf('pnpm tauri:prepare:production'))
-  }
+  const prepare = ['pnpm tauri:prepare:native', 'pnpm tauri:prepare:credential-helper', 'pnpm tauri:prepare:production']
+  // Exact steps: a dropped step or any separator but && (which stops on failure) changes the split.
+  assert.deepEqual(config.build.beforeDevCommand.split(' && '), [...prepare, 'pnpm tauri:production:frontend:dev'])
+  assert.deepEqual(config.build.beforeBuildCommand.split(' && '), [...prepare, 'pnpm tauri:production:frontend:build'])
 })
