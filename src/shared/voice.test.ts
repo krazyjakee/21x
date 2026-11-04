@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   canTransition,
+  isVoiceNoise,
   MOBILE_VOICE_CAPABILITIES,
   VOICE_TRANSITIONS,
   type VoiceState,
@@ -49,5 +50,19 @@ describe('mobile capabilities', () => {
     expect(MOBILE_VOICE_CAPABILITIES.reason).toMatch(/desktop/i)
     expect(MOBILE_VOICE_CAPABILITIES.tts).toBe(false)
     expect(MOBILE_VOICE_CAPABILITIES.wakeWord).toBe(false)
+  })
+})
+
+describe('isVoiceNoise', () => {
+  it('treats hesitation sounds and near-empty text as noise', () => {
+    for (const text of ['', ' ', 'a', 'Mm.', 'mmm', 'Hmm...', 'Mhm.', 'Mm-hmm.', 'Uh, um.', 'Erm.', 'Ah.']) {
+      expect(isVoiceNoise(text), text).toBe(true)
+    }
+  })
+
+  it('keeps any sentence with a real word in it', () => {
+    for (const text of ['Add twenty one X.', 'Mm, add a task.', 'OK', 'No.', 'Yes', 'Hi', 'Me', '42']) {
+      expect(isVoiceNoise(text), text).toBe(false)
+    }
   })
 })

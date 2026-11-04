@@ -96,6 +96,8 @@ export const AGENT_SERVER_START_TIMEOUT_MS = 30_000
 export const AGENT_SESSION_START_TIMEOUT_MS = 60_000
 export const AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS = 1000
 const DELIVERY_CLAIM_MS = 60_000
+/** Sent to a session found idle after a restart cut its run short. */
+const RESTART_CONTINUE_PROMPT = 'The app restarted while you were working on this task. Continue from where you left off. If the task is already finished, say so briefly.'
 
 /** A host must keep its DB/provider/profile lease until exit on this failure. */
 export class AgentShutdownIncompleteError extends Error {
@@ -796,8 +798,19 @@ export class AgentManager extends EventEmitter {
           this.recordRecoveryAudit(task, 'restart_live_reconnect', 'reclaim', 'live_session_reclaimed')
         }
         if (status === 'idle') {
-          this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.ReadyForReview })
-          this.emitSystemNotice(sessionId, stale.id, `recovered-idle-${Date.now()}`, 'The app restarted while this task was marked running. Its session was recovered idle and moved to review; send a message to continue.')
+          // The run was cut off by the restart, not finished: tell the agent to
+          // carry on. Sending marks the task working again; the message goes
+          // through the durable outbox, so another restart replays it.
+          this.emitSystemNotice(sessionId, stale.id, `recovered-idle-${Date.now()}`, 'The app restarted while this task was marked running. Its session was recovered and told to continue.')
+          void this.sendMessage(sessionId, RESTART_CONTINUE_PROMPT, stale.id, stale.agent_id).catch((error) => {
+            const detail = error instanceof Error ? error.message : String(error)
+            console.warn(`[AgentManager] Restart continue failed for task ${stale.id}:`, detail)
+            const latest = this.db.getTask(stale.id)
+            if (latest && latest.status !== TaskStatus.Completed && this.getSessionStatus(sessionId)?.status !== 'working') {
+              this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.ReadyForReview })
+              this.emitSystemNotice(sessionId, stale.id, `recovered-idle-failed-${Date.now()}`, `Could not resume this task automatically: ${detail}. It was moved to review; send a message to continue.`)
+            }
+          })
         }
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error)
