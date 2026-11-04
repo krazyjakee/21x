@@ -98,6 +98,8 @@ export interface ProtectedApplicationKeyStore {
   load(profileId: string): Promise<Buffer>
   /** Must refuse an existing key; never replace one because a store is locked. */
   create(profileId: string, key: Buffer): Promise<void>
+  /** Optional read-only access to an Electron app's Chromium safe-storage password, for import. */
+  loadLegacySafeStoragePassword?(appName: string): Promise<Buffer>
 }
 
 export async function initializeProtectedSecretStorage(

@@ -11,7 +11,7 @@ export const PRODUCTION_OWNER_STAGES = ['new', 'profile-lock', 'resources', 'nat
 export const PRODUCTION_RECOVERY_CODES = ['PROFILE_IN_USE', 'PROFILE_DUPLICATE_OWNER', 'PROFILE_LOCK_INVALID', 'PROFILE_LOCK_LOST',
   'PROFILE_NOT_EMPTY', 'PROFILE_LOW_DISK', 'PROFILE_DATABASE_LOCKED', 'PROFILE_DATABASE_CORRUPT', 'PROFILE_DATABASE_PATH_INVALID',
   'PROFILE_CREDENTIAL_FORMAT_INCOMPATIBLE', 'PROFILE_CREDENTIAL_OR_DATABASE_INVALID', 'DATABASE_UNAVAILABLE',
-  'RESOURCE_UNAVAILABLE', 'MANAGED_MCP_RESOURCE_UNAVAILABLE', 'AMBIGUOUS_MANAGED_MCP_SERVER', 'CONNECTOR_RESOURCES_REQUIRED', 'AGENT_CLI_UNAVAILABLE',
+  'RESOURCE_UNAVAILABLE', 'MANAGED_MCP_RESOURCE_UNAVAILABLE', 'AMBIGUOUS_MANAGED_MCP_SERVER', 'ELECTRON_PROFILE_IN_USE', 'ELECTRON_PROFILE_INVALID', 'ELECTRON_CREDENTIALS_UNAVAILABLE', 'CONNECTOR_RESOURCES_REQUIRED', 'AGENT_CLI_UNAVAILABLE',
   'NATIVE_RUNTIME_UNAVAILABLE', 'SECRET_STORE_UNAVAILABLE', 'OWNER_CLOSING', 'OWNER_DRAIN_BLOCKED', 'OWNER_FENCE_FAILED', 'BOOTSTRAP_FAILED'] as const
 export interface ProductionOwnerState {
   phase: typeof PRODUCTION_OWNER_PHASES[number]
@@ -33,6 +33,8 @@ export interface ProductionLaunchDescriptor {
   buildIdentity: string
   resourceManifestSha256: string
   paths: { profileRoot: string; workspaceRoot: string; attachmentRoot: string; reposRoot: string; resourceRoot: string; tempRoot: string }
+  /** Electron profile to import into a new profile; chosen by trusted native setup only. */
+  legacyProfileRoot?: string
   capabilities: {
     workspaceFiles?: 'host' | 'unsupported'
     workspaceCleanup?: 'host' | 'unsupported'
@@ -60,7 +62,8 @@ const choice = (value: unknown, choices: readonly string[]): boolean => typeof v
 export function isProductionLaunchDescriptor(value: unknown): value is ProductionLaunchDescriptor {
   if (!isRecord(value) || !isRecord(value.capabilities)) return false
   const capabilities = value.capabilities
-  return isRecord(value) && hasExactKeys(value, ['version', 'kind', 'launchId', 'profileId', 'profileIntent', 'buildIdentity', 'resourceManifestSha256', 'paths', 'capabilities']) &&
+  return isRecord(value) && hasExactKeys(value, ['version', 'kind', 'launchId', 'profileId', 'profileIntent', 'buildIdentity', 'resourceManifestSha256', 'paths', 'capabilities'], ['legacyProfileRoot']) &&
+    (value.legacyProfileRoot === undefined || isAbsoluteHostPath(value.legacyProfileRoot) && value.profileIntent === 'create-new') &&
     value.version === 1 && value.kind === 'production-private-launch' && isProductionLaunchId(value.launchId) && typeof value.profileId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value.profileId) &&
     choice(value.profileIntent, ['create-new', 'load-authenticated-copy']) && typeof value.buildIdentity === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value.buildIdentity) && isResourceDigest(value.resourceManifestSha256) &&
     isRecord(value.paths) && hasExactKeys(value.paths, ['profileRoot', 'workspaceRoot', 'attachmentRoot', 'reposRoot', 'resourceRoot', 'tempRoot']) && Object.values(value.paths).every(isAbsoluteHostPath) &&

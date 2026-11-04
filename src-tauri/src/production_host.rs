@@ -178,10 +178,14 @@ fn workspace_cleanup_host(
     #[cfg(target_os = "linux")]
     {
         use twentyonex_engine::production::cleanup_observation::Observer;
-        let observer = Arc::new(Observer::open(
-            &descriptor.paths.profile_root,
-            &descriptor.paths.workspace_root,
-        )?);
+        // The anchor is the directory that holds the workspaces: the profile,
+        // or the Electron profile whose workspaces an imported profile reuses.
+        let anchor = descriptor
+            .paths
+            .workspace_root
+            .parent()
+            .unwrap_or(&descriptor.paths.profile_root);
+        let observer = Arc::new(Observer::open(anchor, &descriptor.paths.workspace_root)?);
         let closing = observer.clone();
         let app = app.clone();
         Ok(Some(ProductionCleanupHost {
@@ -830,6 +834,23 @@ fn tune_webkit_rendering() {
     std::env::set_var("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1");
 }
 const PERSISTENT_PROFILE_ID: &str = "tauri-default";
+/// Records which Electron profile this profile was imported from.
+const LEGACY_MARKER: &str = ".legacy-profile-root";
+/// An Electron 21x profile directory with a database worth importing.
+fn electron_profile(root: &std::path::Path) -> Option<PathBuf> {
+    let metadata = std::fs::symlink_metadata(root).ok()?;
+    let database = std::fs::symlink_metadata(root.join("21x.db")).ok()?;
+    (metadata.is_dir() && !metadata.file_type().is_symlink() && database.is_file())
+        .then(|| std::fs::canonicalize(root).ok())
+        .flatten()
+}
+fn read_legacy_marker(profile_root: &std::path::Path) -> Option<PathBuf> {
+    let bytes = std::fs::read(profile_root.join(LEGACY_MARKER)).ok()?;
+    let path = PathBuf::from(String::from_utf8(bytes).ok()?);
+    (path.is_absolute())
+        .then_some(path)
+        .and_then(|path| electron_profile(&path))
+}
 /// Create a private directory, or accept an existing real directory (never a
 /// symlink), so a profile and its roots survive relaunches.
 fn ensure_private_dir(path: &std::path::Path) -> std::io::Result<()> {
@@ -943,6 +964,30 @@ async fn start(
         Ok(_) => return Err(unavailable("INVALID_ARGUMENTS", "production-profile")),
         Err(_) => ProfileIntent::CreateNew,
     };
+    // A profile imported from the Electron app keeps using that app's
+    // workspaces, repositories and attachments in place: worktrees and stored
+    // paths point there, and 28 GB of workspaces should not be copied.
+    let legacy_root = match read_legacy_marker(&profile_root) {
+        Some(root) => Some(root),
+        None if profile_intent == ProfileIntent::CreateNew => {
+            // Trusted native environment only (tests, unusual installs); never IPC.
+            let candidate = std::env::var_os("TWENTYONEX_ELECTRON_PROFILE_ROOT")
+                .map(PathBuf::from)
+                .or_else(|| app.path().config_dir().ok().map(|dir| dir.join("21x")));
+            let detected = candidate.and_then(|root| electron_profile(&root));
+            if let Some(root) = &detected {
+                std::fs::write(
+                    profile_root.join(LEGACY_MARKER),
+                    root.as_os_str().as_encoded_bytes(),
+                )
+                .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?;
+            }
+            detected
+        }
+        None => None,
+    };
+    let data_root = legacy_root.clone().unwrap_or_else(|| profile_root.clone());
+    let legacy_profile_root = legacy_root.filter(|_| profile_intent == ProfileIntent::CreateNew);
     let descriptor = ProductionDescriptor {
         version: 1,
         kind: "production-private-launch".into(),
@@ -951,10 +996,11 @@ async fn start(
         profile_intent,
         build_identity,
         resource_manifest_sha256: digest,
+        legacy_profile_root,
         paths: ProductionPaths {
-            workspace_root: profile_root.join("workspaces"),
-            attachment_root: profile_root.join("attachments"),
-            repos_root: profile_root.join("repos"),
+            workspace_root: data_root.join("workspaces"),
+            attachment_root: data_root.join("attachments"),
+            repos_root: data_root.join("repos"),
             temp_root: profile_root.join("temp"),
             profile_root,
             resource_root: resources,

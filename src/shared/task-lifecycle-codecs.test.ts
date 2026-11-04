@@ -45,12 +45,23 @@ describe('full task lifecycle codecs', () => {
     expect(codecs['db:updateTask'].encodeResult(undefined)).toEqual({ defined: false })
     expect(codecs['project:moveTask'].encodeResult(null)).toEqual({ defined: true, value: null })
     expect(codecs['db:deleteTask'].encodeResult(false)).toEqual({ defined: true, value: false })
-    expect(codecs['db:getTasks'].validateResult(Array.from({ length: 129 }, () => task))).toBe(false)
-    const big = Array.from({ length: 8 }, () => ({ ...task, description: '界'.repeat(60_000) }))
+    // A whole board is not capped at 128 tasks or 1 MiB (real profiles exceed both).
+    expect(codecs['db:getTasks'].validateResult(Array.from({ length: 400 }, () => task))).toBe(true)
+    const board = Array.from({ length: 8 }, () => ({ ...task, description: '界'.repeat(60_000) }))
+    expect(codecs['db:getTasks'].validateWireResult({ defined: true, value: board })).toBe(true)
+    const big = Array.from({ length: 90 }, () => ({ ...task, description: '界'.repeat(60_000) }))
     expect(() => codecs['db:getTasks'].encodeResult(big)).toThrow('result')
     expect(codecs['db:getTasks'].validateWireResult({ defined: true, value: big })).toBe(false)
     expect(() => codecs['db:getTasks'].decodeResult(big)).toThrow('result')
     expect(() => projectTaskLifecycleTask({ ...task, role: 'arbitrary' })).toThrow('result')
+  })
+
+  it('accepts the shapes real profiles store: issue links and {id, value} outputs', () => {
+    const link = { id: 'link-one', filename: 'https://github.com/org/repo/issues/393', size: 0, mime_type: 'text/x-github-issue', added_at: '2026-09-27T13:53:49.459Z' }
+    expect(() => projectTaskLifecycleTask({ ...task, attachments: [link], output_fields: [{ id: 'pr_url', value: 'https://github.com/org/repo/pull/1' }, { id: 'clean', value: true }] })).not.toThrow()
+    // A link is never a file: anything else with a slash, or a link that could traverse, is refused.
+    for (const attachment of [{ ...link, mime_type: 'text/plain' }, { ...link, size: 3 }, { ...link, filename: 'https://evil.example/x' },
+      { ...link, filename: 'https://github.com/../../etc/passwd' }]) expect(() => projectTaskLifecycleTask({ ...task, attachments: [attachment] })).toThrow('result')
   })
 
   it('encodes a separate finite attachment baseline and leaves field-only signatures unchanged', () => {

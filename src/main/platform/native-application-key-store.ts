@@ -31,7 +31,7 @@ export class NativeApplicationKeyStore implements ProtectedApplicationKeyStore {
     if (!isAbsolute(helperPath) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new NativeApplicationKeyStoreError('KEYSTORE_PROTOCOL_ERROR')
   }
 
-  private request(operation: 'load' | 'create' | 'delete-fixture', profileId: string, key?: Buffer): Promise<{ backend: string; key?: string }> {
+  private request(operation: 'load' | 'create' | 'delete-fixture' | 'load-electron-safe-storage', profileId: string, key?: Buffer): Promise<{ backend: string; key?: string }> {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(profileId) || key && (!Buffer.isBuffer(key) || key.length !== 32)) throw new NativeApplicationKeyStoreError('KEYSTORE_PROTOCOL_ERROR')
     return new Promise((resolve, reject) => {
       const child = spawn(this.helperPath, [], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env: nativeCredentialEnvironment(process.env) })
@@ -80,7 +80,8 @@ export class NativeApplicationKeyStore implements ProtectedApplicationKeyStore {
           if (!response.ok) { finish(typeof response.code === 'string' && SAFE_ERRORS.has(response.code) ? response.code : 'KEYSTORE_PROTOCOL_ERROR'); return }
           if (code !== 0 || typeof response.backend !== 'string' || !BACKENDS.has(response.backend)) { finish('KEYSTORE_PROTOCOL_ERROR'); return }
           if (operation === 'load' && (typeof response.key !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(response.key))) { finish('KEYSTORE_INVALID_DATA'); return }
-          finish(undefined, { backend: response.backend, key: operation === 'load' ? response.key as string : undefined })
+          if (operation === 'load-electron-safe-storage' && (typeof response.key !== 'string' || !/^[A-Za-z0-9+/]{4,1400}={0,2}$/.test(response.key))) { finish('KEYSTORE_INVALID_DATA'); return }
+          finish(undefined, { backend: response.backend, key: operation === 'load' || operation === 'load-electron-safe-storage' ? response.key as string : undefined })
         } catch { finish('KEYSTORE_PROTOCOL_ERROR') }
         finally { raw.fill(0) }
       })
@@ -98,6 +99,12 @@ export class NativeApplicationKeyStore implements ProtectedApplicationKeyStore {
 
   async create(profileId: string, key: Buffer): Promise<void> {
     await this.request('create', profileId, key)
+  }
+
+  /** Read-only: the Chromium safe-storage password an Electron app keeps in the OS store. */
+  async loadLegacySafeStoragePassword(appName: string): Promise<Buffer> {
+    const response = await this.request('load-electron-safe-storage', appName)
+    return Buffer.from(response.key!, 'base64')
   }
 
   /** Proof cleanup only; the native helper independently enforces the t03- prefix. */

@@ -44,7 +44,7 @@ fn own_cgroup() -> Option<String> {
 }
 
 fn start_scope(unit: &str) -> Option<()> {
-    use gtk::{gio, gio::prelude::*, glib};
+    use gtk::{gio, glib};
     let bus = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>).ok()?;
     let parameters = glib::Variant::parse(
         Some(glib::VariantTy::new("(ssa(sv)a(sa(sv)))").ok()?),

@@ -32,6 +32,7 @@ import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-
 import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
+import { ElectronProfileImportError, MANAGED_TASK_MCP_MARKER, importElectronProfile } from './electron-profile-import'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
 import { createHash, randomUUID } from 'node:crypto'
@@ -119,6 +120,8 @@ export interface ProductionOwnerBootstrap {
   profileId: string
   paths: DatabaseRuntimeOptions['paths'] & { reposRoot: string; resourceRoot: string; tempRoot: string }
   credentials: { store: ProtectedApplicationKeyStore; mode: 'load' | 'create' }
+  /** Electron profile whose data seeds a newly created profile (original untouched). */
+  legacyImport?: { profileRoot: string; appName: string }
   managedTaskMcp: DatabaseRuntimeOptions['managedTaskMcp']
   connectors: { kind: 'disabled'; reason: string } | { kind: 'enabled' }
   /** Verified browser resource root; absent artifacts never expose mobile access. */
@@ -772,7 +775,7 @@ export class ProductionOwner {
           !isAbsolute(runtime.args[0]) || !existsSync(runtime.args[0])) throw new ProductionOwnerError('MANAGED_MCP_RESOURCE_UNAVAILABLE')
     }
     if (this.bootstrap.connectors.kind === 'enabled' && !this.boundaries.connectorTransport) validateConnectorResources(this.bootstrap.paths.resourceRoot)
-    if (this.bootstrap.credentials.mode === 'create' && readdirSync(profileRoot).some(name => !['.21x-profile-lock.sqlite', '.21x-profile-lock.sqlite-journal', '.21x-profile-lock.sqlite-wal', '.21x-profile-lock.sqlite-shm'].includes(name) &&
+    if (this.bootstrap.credentials.mode === 'create' && readdirSync(profileRoot).some(name => !['.21x-profile-lock.sqlite', '.21x-profile-lock.sqlite-journal', '.21x-profile-lock.sqlite-wal', '.21x-profile-lock.sqlite-shm', '.legacy-profile-root'].includes(name) &&
       !isEmptyDescriptorRoot(profileRoot, name, this.bootstrap.paths))) {
       throw new ProductionOwnerError('PROFILE_NOT_EMPTY')
     }
@@ -788,6 +791,23 @@ export class ProductionOwner {
     configureSecretStorage(this.storage)
     this.storageRegistered = true
     this.checkpoint('database-preflight')
+    const legacy = this.bootstrap.legacyImport
+    if (legacy && this.bootstrap.credentials.mode === 'create') {
+      const store = this.bootstrap.credentials.store
+      await importElectronProfile({
+        profileRoot: legacy.profileRoot, destination: join(profileRoot, '21x.db'), storage: this.storage,
+        // No stored password only matters if a value needs it; that value is then
+        // cleared. An unreachable or locked keyring is retried, never cleared.
+        loadSafeStoragePassword: async () => {
+          if (!store.loadLegacySafeStoragePassword) return null
+          try { return await store.loadLegacySafeStoragePassword(legacy.appName) } catch (error) {
+            if ((error as { code?: unknown })?.code === 'KEYSTORE_NO_ENTRY') return null
+            throw new ElectronProfileImportError('ELECTRON_CREDENTIALS_UNAVAILABLE')
+          }
+        }
+      })
+      this.assertStarting()
+    }
     const { managedTaskMcpId } = preflightProfile(join(profileRoot, '21x.db'), this.storage)
     this.checkpoint('database')
     for (const path of [this.bootstrap.paths.workspaceRoot, this.bootstrap.paths.attachmentRoot, this.bootstrap.paths.reposRoot, this.bootstrap.paths.tempRoot]) mkdirSync(path, { recursive: true })
@@ -1302,15 +1322,13 @@ function safeStartupCode(error: unknown, stage: string): string {
   if (code === 'ENOSPC' || code === 'EDQUOT' || code === 'SQLITE_FULL') return 'PROFILE_LOW_DISK'
   if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') return 'PROFILE_DATABASE_LOCKED'
   if (code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB') return 'PROFILE_DATABASE_CORRUPT'
-  if (/^(PROFILE_|SECRET_|RESOURCE_|MANAGED_MCP_|CONNECTOR_|AGENT_CLI_|NATIVE_RUNTIME_|AMBIGUOUS_MANAGED_MCP_)[A-Z_]*$/.test(code)) return code
+  if (/^(PROFILE_|SECRET_|RESOURCE_|MANAGED_MCP_|CONNECTOR_|AGENT_CLI_|NATIVE_RUNTIME_|AMBIGUOUS_MANAGED_MCP_|ELECTRON_PROFILE_|ELECTRON_CREDENTIALS_)[A-Z_]*$/.test(code)) return code
   if (stage === 'resources') return 'RESOURCE_UNAVAILABLE'
   if (stage === 'native-readiness') return 'NATIVE_RUNTIME_UNAVAILABLE'
   if (stage === 'credentials') return 'SECRET_STORE_UNAVAILABLE'
   return stage === 'database' || stage === 'database-preflight' ? 'DATABASE_UNAVAILABLE' : 'BOOTSTRAP_FAILED'
 }
 
-/** Authenticated record of the task-management row this service created. */
-const MANAGED_TASK_MCP_MARKER = '__managed_task_mcp_id'
 
 /** After seeding exactly one managed row, remember it under the profile key. */
 function recordManagedTaskMcp(db: DatabaseManager): void {
