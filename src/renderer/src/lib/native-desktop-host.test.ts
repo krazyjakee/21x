@@ -465,7 +465,7 @@ it('hydrates the tray preference as a read but fences mutations and requires the
   f.results.set('app:getMinimizeToTray', { enabled: true, action: 'hide' })
   await expect(desktopApi.app.getMinimizeToTray()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })
-it('binds the 238 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 240 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -474,7 +474,8 @@ it('binds the 238 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(238)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(240)
+  expect(NATIVE_COMMAND_BINDINGS['app:setLoginItemSettings']).toBe('app.setLoginItemSettings')
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
   expect(await desktopApi.env.get('OPENAI_API_KEY')).toBe(PRODUCTION_API_KEY_SET_MARKER)

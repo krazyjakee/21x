@@ -105,7 +105,7 @@
       "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/AppLayout.tsx",
       "kind": "call",
-      "line": 186,
+      "line": 188,
       "path": [
         "app",
         "getVersion"
@@ -117,7 +117,7 @@
       "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/AppLayout.tsx",
       "kind": "call",
-      "line": 197,
+      "line": 201,
       "path": [
         "app",
         "getVersion"
@@ -172,11 +172,23 @@
       "resolution": "literal"
     },
     {
+      "column": 41,
+      "expression": "desktopApi.agentInstaller.detect",
+      "file": "src/renderer/src/components/onboarding/OnboardingWizard.tsx",
+      "kind": "call",
+      "line": 287,
+      "path": [
+        "agentInstaller",
+        "detect"
+      ],
+      "resolution": "literal"
+    },
+    {
       "column": 27,
       "expression": "desktopApi.agentInstaller.detect",
       "file": "src/renderer/src/components/onboarding/OnboardingWizard.tsx",
       "kind": "call",
-      "line": 459,
+      "line": 500,
       "path": [
         "agentInstaller",
         "detect"
@@ -188,7 +200,7 @@
       "expression": "desktopApi.agentInstaller.onProgress",
       "file": "src/renderer/src/components/onboarding/OnboardingWizard.tsx",
       "kind": "call",
-      "line": 494,
+      "line": 535,
       "path": [
         "agentInstaller",
         "onProgress"
@@ -200,7 +212,7 @@
       "expression": "desktopApi.agentInstaller.install",
       "file": "src/renderer/src/components/onboarding/OnboardingWizard.tsx",
       "kind": "call",
-      "line": 509,
+      "line": 550,
       "path": [
         "agentInstaller",
         "install"
@@ -6003,10 +6015,12 @@
     "src/renderer/src/lib/serialize-transcript-debug.ts",
     "src/renderer/src/lib/shared-ipc-listeners.ts",
     "src/renderer/src/lib/snooze-options.ts",
+    "src/renderer/src/lib/startup-failure.ts",
     "src/renderer/src/lib/task-attachment-import.ts",
     "src/renderer/src/lib/task-search.ts",
     "src/renderer/src/lib/tauri-desktop-transport.ts",
     "src/renderer/src/lib/terminal-session.ts",
+    "src/renderer/src/lib/textarea-autosize.ts",
     "src/renderer/src/lib/transcript-pagination.ts",
     "src/renderer/src/lib/ui-remote-control.ts",
     "src/renderer/src/lib/utils.ts",
@@ -6059,6 +6073,7 @@
     "src/service/database-backend.ts",
     "src/service/database-service.ts",
     "src/service/database-stdio.ts",
+    "src/service/electron-profile-import.ts",
     "src/service/feasibility.mjs",
     "src/service/git-provider-backend.ts",
     "src/service/heartbeat-backend.ts",
@@ -6159,6 +6174,7 @@
     "src/shared/native-attachment-drop.ts",
     "src/shared/native-attachment-pick-codecs.ts",
     "src/shared/native-clipboard-codecs.ts",
+    "src/shared/native-login-item-codecs.ts",
     "src/shared/native-notification-codecs.ts",
     "src/shared/native-services-codecs.ts",
     "src/shared/native-window-codecs.ts",
@@ -14481,9 +14497,9 @@
     "src/tauri-production"
   ],
   "summary": {
-    "desktopAPIConsumers": 361,
+    "desktopAPIConsumers": 362,
     "directAPIConsumers": 1,
-    "files": 926,
+    "files": 930,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

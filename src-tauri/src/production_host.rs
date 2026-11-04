@@ -35,6 +35,8 @@ pub(crate) mod native_tray;
 use native_tray::NativeTrayOwner;
 #[path = "native_energy.rs"]
 pub(crate) mod native_energy;
+#[path = "native_login.rs"]
+mod native_login;
 #[cfg(target_os = "linux")]
 #[path = "native_scope.rs"]
 mod native_scope;
@@ -714,6 +716,19 @@ async fn desktop_invoke(
                     return Err(EngineError::new("INVALID_RESULT"));
                 }
                 json!({"defined":true,"value":version})
+            }
+            "app:getLoginItemSettings" | "app:setLoginItemSettings" => {
+                let identifier = app.config().identifier.clone();
+                let name = app.package_info().name.clone();
+                let enable = payload["openAtLogin"].as_bool();
+                let open_at_login = state
+                    .native_work
+                    .run(move || match enable {
+                        Some(enable) => native_login::set(&identifier, &name, enable),
+                        None => native_login::enabled(&identifier),
+                    })
+                    .await?;
+                json!({"defined":true,"value":{"openAtLogin":open_at_login,"openAsHidden":false}})
             }
             "shell:openExternal" => {
                 open_external(

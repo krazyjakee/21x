@@ -11,6 +11,8 @@ pub const OPERATIONS: &[&str] = &[
     "notifications:show",
     "app:getNotificationPermission",
     "app:requestNotificationPermission",
+    "app:getLoginItemSettings",
+    "app:setLoginItemSettings",
 ];
 pub const MAX_URL_BYTES: usize = 8192;
 pub const MAX_NATIVE_WORK: usize = 4;
@@ -98,10 +100,14 @@ pub fn request(operation: &str, value: &Value) -> bool {
                     .is_some_and(|url| external_url(url, false))
         }
         "notifications:show" => notification_payload(value),
+        "app:setLoginItemSettings" => {
+            map.len() == 1 && map.get("openAtLogin").is_some_and(Value::is_boolean)
+        }
         "app:getVersion"
         | "chatImages:readClipboard"
         | "app:getNotificationPermission"
-        | "app:requestNotificationPermission" => map.is_empty(),
+        | "app:requestNotificationPermission"
+        | "app:getLoginItemSettings" => map.is_empty(),
         _ => false,
     }
 }
@@ -289,6 +295,29 @@ mod tests {
                 row["valid"].as_bool().unwrap(),
                 "{operation}"
             );
+        }
+    }
+    #[test]
+    fn login_item_requests_carry_only_a_boolean_and_never_a_path() {
+        assert!(request("app:getLoginItemSettings", &json!({})));
+        assert!(!request(
+            "app:getLoginItemSettings",
+            &json!({"openAtLogin":true})
+        ));
+        assert!(request(
+            "app:setLoginItemSettings",
+            &json!({"openAtLogin":true})
+        ));
+        assert!(request(
+            "app:setLoginItemSettings",
+            &json!({"openAtLogin":false})
+        ));
+        for invalid in [
+            json!({}),
+            json!({"openAtLogin":"yes"}),
+            json!({"openAtLogin":true,"path":"/tmp/x"}),
+        ] {
+            assert!(!request("app:setLoginItemSettings", &invalid));
         }
     }
     #[test]
