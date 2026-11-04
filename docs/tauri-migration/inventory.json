@@ -45,7 +45,7 @@
       "expression": "desktopApi.webUtils.getPathForFile",
       "file": "src/renderer/src/components/agents/transcript/TranscriptComposer.tsx",
       "kind": "call",
-      "line": 204,
+      "line": 228,
       "path": [
         "webUtils",
         "getPathForFile"
@@ -5996,6 +5996,7 @@
     "src/renderer/src/lib/commander-call/presence-level.ts",
     "src/renderer/src/lib/commander-images.ts",
     "src/renderer/src/lib/commander-report-threads.ts",
+    "src/renderer/src/lib/composer-drafts.ts",
     "src/renderer/src/lib/desktop-api.ts",
     "src/renderer/src/lib/desktop-client.ts",
     "src/renderer/src/lib/desktop-features.ts",
@@ -14499,7 +14500,7 @@
   "summary": {
     "desktopAPIConsumers": 362,
     "directAPIConsumers": 1,
-    "files": 930,
+    "files": 931,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

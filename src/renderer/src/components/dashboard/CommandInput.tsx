@@ -5,6 +5,7 @@ import { agentApi, voiceApi } from '@/lib/ipc-client'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { registerComposer, DASHBOARD_COMPOSER_KEY, clearDictatedText } from '@/lib/voice-dictation-target'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
+import { keepComposerDraft, readComposerDraft } from '@/lib/composer-drafts'
 import type { Agent } from '@/types'
 
 /** Names this composer, so a spoken sentence reaches this box and no other. */
@@ -13,10 +14,12 @@ const VOICE_COMPOSER_KEY = DASHBOARD_COMPOSER_KEY
 interface CommandInputProps {
   onSendToCaptain: (message: string) => void
   onCreateTask: (text: string) => void
+  /** Keeps unsent text per project; the box is remounted for each one. */
+  draftKey?: string
 }
 
-export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProps) {
-  const [text, setText] = useState('')
+export function CommandInput({ onSendToCaptain, onCreateTask, draftKey }: CommandInputProps) {
+  const [text, setText] = useState(() => readComposerDraft(draftKey)?.text ?? '')
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
@@ -25,6 +28,14 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
   // The box talks to the current project's Captain (#55); say which.
   const project = useCurrentProject()
   const captainName = project ? `Captain (${project.name})` : 'Captain'
+
+  useEffect(() => {
+    if (!draftKey) return undefined
+    // Held directly: the ref is already detached when this cleanup runs.
+    const field = textareaRef.current
+    if (field?.value) fitTextarea(field, 120)
+    return () => keepComposerDraft(draftKey, { text: field?.value ?? '' })
+  }, [draftKey])
 
   // Load agents on mount
   useEffect(() => {

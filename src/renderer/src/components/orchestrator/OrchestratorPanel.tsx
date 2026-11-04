@@ -7,7 +7,8 @@ import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
 import { agentApi, captainRuntimeApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
-import { useProjectStore } from '@/stores/project-store'
+import { activeProjects, useProjectStore } from '@/stores/project-store'
+import { useUIStore } from '@/stores/ui-store'
 import type { Agent } from '@/types'
 import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
@@ -51,7 +52,8 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   // The drawer talks to the current project's Captain (#55): a task row
   // per project, hidden from every list, whose id is asked for by project.
   // Switching projects switches the id, and with it the conversation shown.
-  // Nothing starts until the id is known.
+  // Nothing starts until the id is known, and switching itself starts nothing:
+  // the transcript hydrates from the durable record with no session at all.
   const project = useCurrentProject()
   const captainTaskId = useCaptainTaskId()
   const mountedRef = useRef(true)
@@ -65,10 +67,21 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     captainViewRef.current = { ...captainViewRef.current }
     return () => { mountedRef.current = false; captainViewRef.current = { ...captainViewRef.current } }
   }, [])
+  /** A late result belongs to its project: it must not land on the Captain shown since. */
+  const showsProject = useCallback((id: string) => mountedRef.current && captainViewRef.current.projectId === id, [])
+  // Set once the app has moved off the project it opened on. The restore of the
+  // saved project at launch arrives with isLoaded, so it is not a move.
+  const leftLaunchProjectRef = useRef(false)
+  useEffect(() => useProjectStore.subscribe((state, previous) => {
+    if (previous.isLoaded && state.currentProjectId !== previous.currentProjectId) leftLaunchProjectRef.current = true
+  }), [])
   const { start, stop, sendMessage, approve } = useAgentSession(captainTaskId ?? undefined)
   const currentSession = useAgentStore((state) => (captainTaskId ? state.sessions.get(captainTaskId) : undefined))
   const resetSession = useAgentStore((state) => state.resetSession)
   const fetchProjects = useProjectStore((state) => state.fetchProjects)
+  const setCurrentProject = useProjectStore((state) => state.setCurrentProject)
+  const projects = useProjectStore((state) => state.projects)
+  const drawerOpen = useUIStore((state) => state.showOrchestrator)
   /** The start in flight and whose it is, shared so a message can wait for it instead of racing. */
   const startingRef = useRef<{ taskId: string; promise: Promise<void> } | null>(null)
   const selectedAgentIdRef = useRef<string | null>(null)
@@ -121,11 +134,10 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   // A failure belongs to the Captain it happened to.
   useEffect(() => {
     setStartFailure(null)
+    setRuntime(null)
+    setRuntimeActivity(null)
     setQueuedCount(captainTaskId ? queuedRef.current.get(captainTaskId)?.length ?? 0 : 0)
-    if (!projectId) {
-      setRuntime(null)
-      return
-    }
+    if (!projectId) return
     let cancelled = false
     void captainRuntimeApi.get(projectId).then((state) => {
       if (cancelled) return
@@ -152,6 +164,11 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     }
     try {
       const next = await captainRuntimeApi.switch(projectId, newAgentId)
+      // Main kept the outcome: the column reads it on returning to this Captain.
+      if (!showsProject(projectId)) {
+        if (mountedRef.current) await fetchProjects()
+        return
+      }
       setRuntime(next)
       if (next.phase === 'healthy') {
         selectedAgentIdRef.current = next.agentId
@@ -164,11 +181,12 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       setSelectedAgentId(restored)
       setStartFailure({ agentId: next.candidateAgentId ?? newAgentId, message: next.errorDetail ?? 'The candidate did not become healthy.' })
     } catch (err) {
+      if (!showsProject(projectId)) return
       selectedAgentIdRef.current = previous
       setSelectedAgentId(previous)
       setStartFailure({ agentId: newAgentId, message: startFailureMessage(err) })
     } finally {
-      setRuntimeActivity(null)
+      if (showsProject(projectId)) setRuntimeActivity(null)
     }
   }
 
@@ -212,7 +230,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           // start() already cleared its "starting" state when it failed; a
           // timeout left it behind.
           useAgentStore.getState().endSession(taskId)
-          if (selectedAgentIdRef.current === agentId) setStartFailure({ agentId, message: startFailureMessage(err) })
+          if (captainViewRef.current.taskId === taskId && selectedAgentIdRef.current === agentId) setStartFailure({ agentId, message: startFailureMessage(err) })
           throw err
         } finally {
           clearTimeout(timer)
@@ -264,12 +282,12 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       while (queue.length > 0) {
         // Taken off before sending, so a second drain cannot send it again.
         const next = queue.shift() as QueuedCaptainMessage
-        setQueuedCount(queue.length)
+        if (captainViewRef.current.taskId === taskId) setQueuedCount(queue.length)
         try {
           await deliver(next)
         } catch (err) {
           queue.unshift(next)
-          setQueuedCount(queue.length)
+          if (captainViewRef.current.taskId === taskId) setQueuedCount(queue.length)
           throw err
         }
       }
@@ -301,8 +319,10 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         // renderer/app restart recovers the same row from SQLite.
         if (!queue.some((entry) => entry.deliveryId === outgoing.deliveryId)) queue.push(outgoing)
         queuedRef.current.set(taskId, queue)
-        setQueuedCount(queue.length)
-        setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: startFailureMessage(err) })
+        if (captainViewRef.current.taskId === taskId) {
+          setQueuedCount(queue.length)
+          setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: startFailureMessage(err) })
+        }
       }
     },
     [captainTaskId, drainQueue, deliver]
@@ -342,30 +362,34 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     if (!projectId) return
     try {
       const next = await captainRuntimeApi.rollback(projectId)
+      if (!showsProject(projectId)) return
       setRuntime(next)
       setStartFailure(next.errorDetail ? { agentId: next.candidateAgentId ?? next.agentId, message: next.errorDetail } : null)
       selectedAgentIdRef.current = next.agentId
       setSelectedAgentId(next.agentId)
       await fetchProjects()
     } catch (error) {
-      setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: startFailureMessage(error) })
+      if (showsProject(projectId)) setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: startFailureMessage(error) })
     }
-  }, [projectId, fetchProjects])
+  }, [projectId, fetchProjects, showsProject])
 
   /**
    * Start the agent in the background, before there is anything to say.
    *
    * The panel is mounted for the whole life of the window, so this runs at
-   * app start, and again for each project the user switches to. It costs one
-   * idle agent process and saves the seconds a user would otherwise wait
-   * after their first sentence — which is most of the delay when talking to
-   * Captain by voice.
+   * app start. It costs one idle agent process and saves the seconds a user
+   * would otherwise wait after their first sentence — which is most of the
+   * delay when talking to Captain by voice.
+   *
+   * It stops for good once the app leaves the project it opened on: looking at
+   * a project must not start its Captain, and a Captain seen without a live
+   * session may be one the user stopped. The first message there starts it.
    *
    * Switched off in Settings → General for anyone who does not want the
    * process. Failure is silent: the first message starts the session as before.
    */
   useEffect(() => {
-    if (!prewarm || !selectedAgentId || !captainTaskId || currentSession?.sessionId || startFailure) return
+    if (leftLaunchProjectRef.current || !prewarm || !selectedAgentId || !captainTaskId || currentSession?.sessionId || startFailure) return
     void ensureSession().then((ok) => (ok ? drainQueue() : undefined)).catch((err: unknown) => {
       console.error('Failed to deliver held Captain messages:', err)
     })
@@ -387,6 +411,9 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   }, [handleSendMessage])
 
   const projectName = project?.name ?? 'Default'
+  // A project choice only when there is one: the current project among at least two.
+  const projectChoices = activeProjects(projects)
+  const canFlip = projectChoices.length > 1 && projectChoices.some((choice) => choice.id === projectId)
   const agentName = (id: string | null): string => agents.find((agent) => agent.id === id)?.name ?? 'the agent'
   const rollbackAgentId =
     startFailure && runtime?.lastGoodAgentId && runtime.lastGoodAgentId !== startFailure.agentId && agents.some((agent) => agent.id === runtime.lastGoodAgentId)
@@ -400,17 +427,37 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-card">
       {/* Header: which project's Captain this is, and the agent it runs on */}
       <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border shrink-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={`The Captain of ${projectName}`}>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground" title={`The Captain of ${projectName}`}>
             <FolderKanban className="size-icon-xs shrink-0" />
-            <span className="truncate font-medium text-foreground/80" data-testid="captain-project">{projectName}</span>
+            {canFlip ? (
+              // The app's current project, not a second selection: the top bar,
+              // the dashboard box and voice all talk to the same Captain as this.
+              // Out of the tab order while the drawer is closed but still mounted.
+              <select
+                value={projectId}
+                onChange={(e) => setCurrentProject(e.target.value)}
+                tabIndex={drawerOpen ? undefined : -1}
+                aria-label="Captain project"
+                data-testid="captain-project"
+                className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/80 bg-background border border-border rounded px-2 py-1 cursor-pointer hover:border-primary/50 focus:border-ring focus:ring-2 focus:ring-ring/20 transition-colors"
+              >
+                {projectChoices.map((choice) => (
+                  <option key={choice.id} value={choice.id}>
+                    {choice.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="truncate font-medium text-foreground/80" data-testid="captain-project">{projectName}</span>
+            )}
           </span>
           {/* The Captain's coding agent. It stays usable the whole time:
               changing it re-warms the session on the freshly picked agent. */}
           <select
             value={selectedAgentId || ''}
             onChange={(e) => handleAgentChange(e.target.value)}
-            className="text-xs bg-background border border-border rounded px-2 py-1 cursor-pointer hover:border-primary/50 transition-colors"
+            className="min-w-0 max-w-[50%] text-xs bg-background border border-border rounded px-2 py-1 cursor-pointer hover:border-primary/50 transition-colors"
             aria-label="Captain agent"
           >
             {agents.map((agent) => (
@@ -461,15 +508,28 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         </div>
       )}
 
-      {/* Chat interface */}
+      {/* Held messages stay with their Captain. Coming back shows them; it does not send them. */}
+      {!startFailure && queuedCount > 0 && (
+        <div role="status" className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground shrink-0">
+          <span>{queuedCount === 1 ? '1 message is' : `${queuedCount} messages are`} waiting for this Captain.</span>
+          <Button size="sm" variant="outline" onClick={() => void retryStart()}>
+            Send now
+          </Button>
+        </div>
+      )}
+
+      {/* Chat interface. One panel per Captain, so nothing typed for one is on
+          screen for the next; with no Captain yet there is nowhere to send. */}
       {selectedAgentId && (
         <AgentTranscriptPanel
+          key={captainTaskId}
+          draftKey={captainTaskId ?? undefined}
           title={`Captain den · ${projectName}`}
           messages={currentSession?.messages || []}
           status={currentSession?.status || SessionStatus.IDLE}
           systemStatus={currentSession?.systemStatus}
           onStop={stop}
-          onSend={handleSendMessage}
+          onSend={captainTaskId ? handleSendMessage : undefined}
           onSaveImages={handleSaveImages}
           className="flex-1 min-h-0"
           sessionId={currentSession?.sessionId}

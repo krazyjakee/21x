@@ -33,6 +33,8 @@ interface AgentTranscriptPanelProps {
   onAddAttachmentPaths?: (filePaths: string[]) => Promise<ComposerAttachment[]>
   /** Stores pasted images (#144); without it the composer refuses them. */
   onSaveImages?: SaveImagesHandler
+  /** Keeps the unsent message per conversation, for a composer that has no task of its own. */
+  draftKey?: string
   className?: string
   /** Transient system status (e.g. 'Compacting conversation history…') */
   systemStatus?: string | null
@@ -54,6 +56,7 @@ export function AgentTranscriptPanel({
   onPickAttachments,
   onAddAttachmentPaths,
   onSaveImages,
+  draftKey,
   className,
   systemStatus,
   sessionId,
@@ -283,6 +286,7 @@ export function AgentTranscriptPanel({
             onAddAttachmentPaths={onAddAttachmentPaths}
             onSaveImages={onSaveImages}
             taskId={taskId}
+            draftKey={draftKey}
             isStarting={isStarting}
           />
         )}

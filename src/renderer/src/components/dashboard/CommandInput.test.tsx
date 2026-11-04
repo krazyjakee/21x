@@ -13,6 +13,7 @@ vi.mock('@/lib/voice-capture', () => ({
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { CommandInput } from './CommandInput'
 import { useVoiceStore } from '@/stores/voice-store'
+import { clearComposerDrafts } from '@/lib/composer-drafts'
 import {
   clearDictationTarget,
   insertAndSubmit,
@@ -110,5 +111,34 @@ describe('CommandInput — dictation', () => {
       'first sentence',
       'second sentence',
     ])
+  })
+})
+
+describe('CommandInput — one project\'s words stay with that project', () => {
+  beforeEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    clearComposerDrafts()
+    voiceReady()
+  })
+
+  it('puts unsent text aside when the project changes and hands it back on return', async () => {
+    const send = vi.fn()
+    // DashboardWorkspace keys the box by project; this is that shape.
+    const box = (project: string) => (
+      <CommandInput key={project} draftKey={`dashboard:${project}`} onSendToCaptain={send} onCreateTask={vi.fn()} />
+    )
+    const field = () => screen.getByRole('textbox') as HTMLTextAreaElement
+    let view!: ReturnType<typeof render>
+    await act(async () => { view = render(box('alpha')) })
+    fireEvent.change(field(), { target: { value: 'half a thought' } })
+
+    await act(async () => { view.rerender(box('beta')) })
+    expect(field().value).toBe('')
+    fireEvent.keyDown(field(), { key: 'Enter' })
+    expect(send).not.toHaveBeenCalled()
+
+    await act(async () => { view.rerender(box('alpha')) })
+    expect(field().value).toBe('half a thought')
   })
 })

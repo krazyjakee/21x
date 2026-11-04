@@ -10,6 +10,7 @@ import { CAPTAIN_COMPOSER_KEY, registerComposer, clearDictatedText } from '@/lib
 import { formatFileSize } from '@/lib/utils'
 import { AttachmentTray } from '@/components/chat/AttachmentTray'
 import { useChatAttachments } from '@/hooks/use-chat-attachments'
+import { keepComposerDraft, readComposerDraft } from '@/lib/composer-drafts'
 import type { ChatImageInput } from '@shared/chat-images'
 import { ATTACHMENT_IMPORT_FAILURE, NATIVE_FILE_DROP_MESSAGE } from '@/lib/task-attachment-import'
 
@@ -39,6 +40,8 @@ interface TranscriptComposerProps {
   /** Without it, pasted images are refused with a message and text pastes as usual. */
   onSaveImages?: SaveImagesHandler
   taskId?: string
+  /** Puts the unsent message aside under this key on unmount and restores it on mount. */
+  draftKey?: string
   isStarting: boolean
 }
 
@@ -53,9 +56,10 @@ function mergeAttachments(current: ComposerAttachment[], added: ComposerAttachme
   return merged
 }
 
-export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentPaths, onSaveImages, taskId, isStarting }: TranscriptComposerProps) {
+export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentPaths, onSaveImages, taskId, draftKey, isStarting }: TranscriptComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const [pendingAttachments, setPendingAttachments] = useState<ComposerAttachment[]>([])
+  const [savedDraft] = useState(() => readComposerDraft(draftKey))
+  const [pendingAttachments, setPendingAttachments] = useState<ComposerAttachment[]>(savedDraft?.attachments ?? [])
   const images = useChatAttachments({ draftKey: taskId, unsupportedReason: onSaveImages ? null : IMAGES_UNSUPPORTED_HERE })
   const [isDragOver, setIsDragOver] = useState(false)
   const sending = useRef(false)
@@ -91,6 +95,22 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     if (!el) return
     fitTextarea(el, 128) // max ~6 lines
   }, [])
+
+  // After the attachment hook's own mount-time clear, which ran first.
+  const restoreImages = images.restore
+  useEffect(() => {
+    if (savedDraft?.images?.length) restoreImages(savedDraft.images)
+  }, [savedDraft, restoreImages])
+
+  const draftParts = useRef({ images: images.attachments, attachments: pendingAttachments })
+  draftParts.current = { images: images.attachments, attachments: pendingAttachments }
+  useEffect(() => {
+    if (!draftKey) return undefined
+    // Held directly: the ref is already detached when this cleanup runs.
+    const field = inputRef.current
+    if (field?.value) fitTextarea(field, 128)
+    return () => keepComposerDraft(draftKey, { text: field?.value ?? '', ...draftParts.current })
+  }, [draftKey])
 
   const handleSend = () => {
     const text = inputRef.current?.value.trim() ?? ''
@@ -129,7 +149,11 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     void Promise.resolve(sent).then(() => {
       if (inputRef.current) clearDictatedText(inputRef.current)
     }).catch((error: unknown) => {
-      if (!mounted.current || activeTask.current !== taskAtSend) return
+      if (!mounted.current || activeTask.current !== taskAtSend) {
+        // The user flipped away mid-send: it goes back to this conversation's draft.
+        if (draftKey) keepComposerDraft(draftKey, { text, images: savedImages.length === 0 ? imagesAtSend : [], attachments: mergeAttachments(attachmentsAtSend, savedImages) })
+        return
+      }
       if (inputRef.current && !inputRef.current.value) inputRef.current.value = text
       setPendingAttachments((current) => mergeAttachments(mergeAttachments(attachmentsAtSend, savedImages), current))
       // Saved files stay reusable after a transport failure; never save the
@@ -252,6 +276,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
         <textarea
           ref={inputRef}
           aria-label="Message the agent"
+          defaultValue={savedDraft?.text}
           rows={1}
           disabled={isStarting || isSending}
           placeholder={isStarting ? 'Starting agent…' : 'Write a message...'}

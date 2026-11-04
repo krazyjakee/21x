@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useUIStore } from '@/stores/ui-store'
+import { useProjectStore } from '@/stores/project-store'
 import { HeroSection } from './HeroSection'
 import { CommandInput } from './CommandInput'
 import { TaskSearch } from './TaskSearch'
@@ -13,6 +14,7 @@ interface DashboardWorkspaceProps {
 export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspaceProps = {}) {
   const openCreateWithPrefill = useUIStore((s) => s.openCreateWithPrefill)
   const setShowOrchestrator = useUIStore((s) => s.setShowOrchestrator)
+  const projectId = useProjectStore((s) => s.currentProjectId)
 
   // Handler: send message to Captain and open the drawer
   const handleSendToCaptain = useCallback((message: string) => {
@@ -44,7 +46,10 @@ export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspacePro
         <HeroSection onSeeFullConversation={handleSeeFullConversation} />
 
         {/* 2. Command Input */}
+        {/* Keyed: text typed for one project's Captain must not be sent to the next. */}
         <CommandInput
+          key={projectId}
+          draftKey={`dashboard:${projectId}`}
           onSendToCaptain={handleSendToCaptain}
           onCreateTask={handleCreateTask}
         />

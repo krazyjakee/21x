@@ -72,19 +72,21 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
  * The transcript is a large tree with its own IPC; this file is about the
  * session. Its send handler is captured so a test can send like a user.
  */
-const composer = vi.hoisted(() => ({ send: null as ((text: string) => void) | null }))
+const composer = vi.hoisted(() => ({ send: null as ((text: string) => void) | null, draftKey: null as string | null }))
 vi.mock('@/components/agents/AgentTranscriptPanel', () => ({
-  AgentTranscriptPanel: ({ onSend }: { onSend?: (text: string) => void }) => {
+  AgentTranscriptPanel: ({ onSend, draftKey }: { onSend?: (text: string) => void; draftKey?: string }) => {
     composer.send = onSend ?? null
+    composer.draftKey = draftKey ?? null
     return null
   },
 }))
 
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { OrchestratorPanel } from './OrchestratorPanel'
-import { useAgentStore } from '@/stores/agent-store'
+import { SessionStatus, useAgentStore } from '@/stores/agent-store'
 import { useCoordinatorStore } from '@/stores/coordinator-store'
 import { useProjectStore } from '@/stores/project-store'
+import { useUIStore } from '@/stores/ui-store'
 import { DEFAULT_PROJECT_ID, type ProjectRecord } from '@shared/projects'
 
 function projectRecord(overrides: Partial<ProjectRecord> & { id: string; name: string }): ProjectRecord {
@@ -136,7 +138,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   useAgentStore.setState({ sessions: new Map() })
   useCoordinatorStore.setState({ captainTaskIds: {} })
-  useProjectStore.setState({ projects: [], currentProjectId: DEFAULT_PROJECT_ID })
+  useProjectStore.setState({ projects: [], currentProjectId: DEFAULT_PROJECT_ID, isLoaded: false })
+  useUIStore.setState({ showOrchestrator: false })
   taskApi.getCoordinatorTaskId.mockImplementation(async (projectId?: string) =>
     projectId === 'proj-b' ? CAPTAIN_B : CAPTAIN)
   projectApi.getAll.mockResolvedValue([])
@@ -147,6 +150,7 @@ beforeEach(() => {
   captainRuntimeApi.retry.mockImplementation(async (projectId: string) => captainRuntimeApi.state(projectId, 'other-agent'))
   captainRuntimeApi.rollback.mockImplementation(async (projectId: string) => captainRuntimeApi.state(projectId, 'default-agent', 'rolled_back'))
   composer.send = null
+  composer.draftKey = null
 })
 
 describe('OrchestratorPanel — warming the session', () => {
@@ -361,7 +365,7 @@ describe('OrchestratorPanel — the current project\'s Captain', () => {
     expect(taskApi.getCoordinatorTaskId).toHaveBeenCalledWith('proj-a')
     // Alpha's Captain agent, not the app default.
     expect(agentSessionApi.start).toHaveBeenCalledWith('other-agent', CAPTAIN, undefined, true)
-    expect(screen.getByTestId('captain-project')).toHaveTextContent('Alpha')
+    expect(screen.getByTestId('captain-project')).toHaveValue('proj-a')
   })
 
   it("falls back to the project's default agent, then the app default", async () => {
@@ -371,11 +375,11 @@ describe('OrchestratorPanel — the current project\'s Captain', () => {
     })
     await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(1))
     expect(agentSessionApi.start).toHaveBeenCalledWith('other-agent', CAPTAIN_B, undefined, true)
-    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('other-agent')
+    expect(screen.getByRole('combobox', { name: 'Captain agent' })).toHaveValue('other-agent')
   })
 
   it('switches to the other project\'s conversation when the project changes', async () => {
-    useProjectStore.setState({ projects: [alpha, beta], currentProjectId: 'proj-a' })
+    useProjectStore.setState({ projects: [alpha, beta], currentProjectId: 'proj-a', isLoaded: true })
     await act(async () => {
       render(<OrchestratorPanel onClose={vi.fn()} />)
     })
@@ -385,17 +389,195 @@ describe('OrchestratorPanel — the current project\'s Captain', () => {
       useProjectStore.getState().setCurrentProject('proj-b')
     })
 
-    // Beta's Captain is asked for, warmed, and shown; Alpha's session is left alone.
-    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(2))
+    // Beta's Captain is asked for and shown, not started; Alpha's session is left alone.
+    await waitFor(() => expect(composer.draftKey).toBe(CAPTAIN_B))
     expect(taskApi.getCoordinatorTaskId).toHaveBeenCalledWith('proj-b')
-    expect(agentSessionApi.start).toHaveBeenLastCalledWith('other-agent', CAPTAIN_B, undefined, true)
+    expect(agentSessionApi.start).toHaveBeenCalledTimes(1)
     expect(agentSessionApi.stop).not.toHaveBeenCalled()
-    expect(screen.getByTestId('captain-project')).toHaveTextContent('Beta')
+    expect(screen.getByTestId('captain-project')).toHaveValue('proj-b')
 
+    // Its first message is what brings it up, in main, addressed to that Captain.
     await act(async () => {
       await (composer.send as (t: string) => Promise<unknown>)('status?')
     })
-    expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'status?', CAPTAIN_B, 'other-agent', undefined, expect.stringMatching(/^captain-drawer:/))
+    expect(agentSessionApi.sendByTaskId).toHaveBeenCalledWith(CAPTAIN_B, 'status?', undefined, expect.stringMatching(/^captain-drawer:/))
+    expect(agentSessionApi.start).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * Flipping is looking. It moves the app's current project and nothing else:
+ * no Captain is started, woken, stopped or sent to, and nothing that belongs to
+ * one Captain turns up on the next.
+ */
+describe('OrchestratorPanel — flipping between projects', () => {
+  const alpha = projectRecord({ id: 'proj-a', name: 'Alpha', captain_agent_id: 'other-agent' })
+  const beta = projectRecord({ id: 'proj-b', name: 'Beta', default_agent_id: 'other-agent' })
+  const archived = projectRecord({ id: 'proj-old', name: 'Old', archived: true })
+
+  function seedProjects(...rows: ProjectRecord[]): void {
+    useProjectStore.setState({ projects: rows, currentProjectId: rows[0].id, isLoaded: true })
+    projectApi.getAll.mockResolvedValue(rows)
+  }
+
+  const projectControl = (): HTMLElement => screen.getByRole('combobox', { name: 'Captain project' })
+
+  async function flipTo(projectId: string, captain: string): Promise<void> {
+    fireEvent.change(projectControl(), { target: { value: projectId } })
+    await waitFor(() => expect(composer.draftKey).toBe(captain))
+  }
+
+  async function warmAlpha(): Promise<void> {
+    seedProjects(alpha, beta)
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(useAgentStore.getState().sessions.get(CAPTAIN)?.sessionId).toBe('session-1'))
+  }
+
+  it('offers every active project by name, under a label', async () => {
+    seedProjects(alpha, beta, archived)
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+
+    expect(projectControl()).toHaveValue('proj-a')
+    expect(within(projectControl()).getAllByRole('option').map((option) => option.textContent)).toEqual(['Alpha', 'Beta'])
+  })
+
+  it('is a tab stop only while the drawer is open', async () => {
+    seedProjects(alpha, beta)
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    expect(projectControl()).toHaveAttribute('tabindex', '-1')
+
+    await act(async () => { useUIStore.setState({ showOrchestrator: true }) })
+    expect(projectControl()).not.toHaveAttribute('tabindex')
+  })
+
+  it('names the only project instead of offering a choice of one', async () => {
+    seedProjects(alpha, archived)
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+
+    expect(screen.queryByRole('combobox', { name: 'Captain project' })).toBeNull()
+    expect(screen.getByTestId('captain-project')).toHaveTextContent('Alpha')
+  })
+
+  it('changes the app\'s current project and starts, stops and sends nothing', async () => {
+    await warmAlpha()
+
+    await flipTo('proj-b', CAPTAIN_B)
+    // Past the warm-up's settle window, so a start would have shown by now.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)) })
+
+    expect(useProjectStore.getState().currentProjectId).toBe('proj-b')
+    expect(settingsApi.set).toHaveBeenCalledWith('current_project_id', 'proj-b')
+    expect(agentSessionApi.start).toHaveBeenCalledTimes(1)
+    expect(agentSessionApi.resume).not.toHaveBeenCalled()
+    expect(agentSessionApi.stop).not.toHaveBeenCalled()
+    expect(agentSessionApi.send).not.toHaveBeenCalled()
+    expect(agentSessionApi.sendByTaskId).not.toHaveBeenCalled()
+  })
+
+  it('leaves a busy Captain working and finds it there on the way back', async () => {
+    await warmAlpha()
+    await act(async () => {
+      useAgentStore.setState((state) => {
+        const sessions = new Map(state.sessions)
+        sessions.set(CAPTAIN, { ...sessions.get(CAPTAIN)!, status: SessionStatus.WORKING })
+        return { sessions }
+      })
+    })
+
+    await flipTo('proj-b', CAPTAIN_B)
+    await flipTo('proj-a', CAPTAIN)
+
+    const session = useAgentStore.getState().sessions.get(CAPTAIN)
+    expect(session?.sessionId).toBe('session-1')
+    expect(session?.status).toBe(SessionStatus.WORKING)
+    expect(agentSessionApi.start).toHaveBeenCalledTimes(1)
+    expect(agentSessionApi.stop).not.toHaveBeenCalled()
+  })
+
+  it('does not restart a Captain whose session ended while the user was away', async () => {
+    await warmAlpha()
+    await flipTo('proj-b', CAPTAIN_B)
+    await act(async () => { useAgentStore.getState().endSession(CAPTAIN) })
+
+    await flipTo('proj-a', CAPTAIN)
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)) })
+
+    expect(agentSessionApi.start).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives the composer to one Captain at a time, with no send while the next is unknown', async () => {
+    await warmAlpha()
+    expect(composer.draftKey).toBe(CAPTAIN)
+
+    let finishLoad!: (id: string) => void
+    taskApi.getCoordinatorTaskId.mockImplementationOnce(() => new Promise((resolve) => { finishLoad = resolve }))
+    fireEvent.change(projectControl(), { target: { value: 'proj-b' } })
+
+    await waitFor(() => expect(composer.draftKey).toBeNull())
+    expect(composer.send).toBeNull()
+    await act(async () => finishLoad(CAPTAIN_B))
+    await waitFor(() => expect(composer.draftKey).toBe(CAPTAIN_B))
+    expect(composer.send).toBeTypeOf('function')
+  })
+
+  it('keeps a held message with its Captain, and sends it only when asked', async () => {
+    seedProjects(alpha, beta)
+    settingsApi.get.mockResolvedValue('false')
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(composer.draftKey).toBe(CAPTAIN))
+    agentSessionApi.sendByTaskId.mockRejectedValueOnce(new Error('Captain unavailable'))
+    await act(async () => { await composer.send?.('hold this') })
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 message is waiting')
+
+    await flipTo('proj-b', CAPTAIN_B)
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(screen.queryByRole('status')).toBeNull()
+
+    await flipTo('proj-a', CAPTAIN)
+    expect(await screen.findByRole('status')).toHaveTextContent('1 message is waiting')
+    expect(agentSessionApi.sendByTaskId).toHaveBeenCalledTimes(1)
+    expect(agentSessionApi.start).not.toHaveBeenCalled()
+
+    await act(async () => { screen.getByRole('button', { name: 'Send now' }).click() })
+    await waitFor(() => expect(agentSessionApi.send).toHaveBeenCalledWith(
+      'session-1', 'hold this', CAPTAIN, 'other-agent', undefined, expect.stringMatching(/^captain-drawer:/)
+    ))
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  })
+
+  it('does not show one Captain\'s failed start on the next', async () => {
+    let fail!: (reason: Error) => void
+    agentSessionApi.start.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject }))
+    seedProjects(alpha, beta)
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(1))
+
+    // Both run on the same agent: the failure has only its Captain to tell it apart.
+    await flipTo('proj-b', CAPTAIN_B)
+    await act(async () => { fail(new Error('No server')); await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not apply a late agent switch to the Captain flipped to', async () => {
+    seedProjects(alpha, beta)
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    const agentControl = screen.getByRole('combobox', { name: 'Captain agent' })
+    await waitFor(() => expect(agentControl).toHaveValue('other-agent'))
+
+    let finish!: (value: ReturnType<typeof captainRuntimeApi.state>) => void
+    captainRuntimeApi.switch.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    fireEvent.change(agentControl, { target: { value: 'default-agent' } })
+    expect(await screen.findByTestId('captain-runtime-state')).toBeInTheDocument()
+
+    await flipTo('proj-b', CAPTAIN_B)
+    await waitFor(() => expect(screen.queryByTestId('captain-runtime-state')).toBeNull())
+
+    await act(async () => { finish(captainRuntimeApi.state('proj-a', 'default-agent', 'failed')); await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('combobox', { name: 'Captain agent' })).toHaveValue('other-agent')
+    expect(useProjectStore.getState().currentProjectId).toBe('proj-b')
   })
 })
 
