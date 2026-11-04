@@ -124,9 +124,14 @@ The preview creates a fresh isolated profile under its separate application
 identifier. It never imports Electron data or selects a profile through IPC.
 After explicit native dependency preparation and credential-helper staging,
 `pnpm tauri:production:dev` or `pnpm tauri:production:build` selects this feature
-and configuration. `TWENTYONEX_PRODUCTION_CGROUP_ROOT` supplies the trusted native
-provisioning path to a real delegated Linux cgroup-v2 directory, not a renderer
-setting. Missing delegation yields an unavailable `engine_status` with a fixed
+and configuration. On Linux the host provisions its own delegation before any
+thread starts: it asks the user's systemd manager (`StartTransientUnit` on the
+session bus) to move the process into a transient `twentyonex-<pid>.scope` with
+`Delegate=yes`, waits until `/proc/self/cgroup` shows the move, and uses that
+scope as the delegated cgroup-v2 root (`src-tauri/src/native_scope.rs`). No
+manual setup is needed. `TWENTYONEX_PRODUCTION_CGROUP_ROOT` still overrides it
+with an explicit native path; no renderer setting can. Without systemd or
+delegation, startup yields an unavailable `engine_status` with a fixed
 startup code/phase before Node, key-store or application-profile initialization.
 The unavailable window remains inspectable; relaunch follows provisioning.
 Windows/macOS containment and installed application acceptance remain open.

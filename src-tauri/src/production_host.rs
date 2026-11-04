@@ -35,6 +35,9 @@ pub(crate) mod native_tray;
 use native_tray::NativeTrayOwner;
 #[path = "native_energy.rs"]
 pub(crate) mod native_energy;
+#[cfg(target_os = "linux")]
+#[path = "native_scope.rs"]
+mod native_scope;
 use native_energy::NativeEnergyOwner;
 #[path = "native_artifact_clipboard.rs"]
 pub(crate) mod native_artifact_clipboard;
@@ -824,14 +827,12 @@ fn production_containment() -> Result<DelegatedCgroup, EngineError> {
     #[cfg(target_os = "linux")]
     {
         // Native provisioning only; no IPC accepts a delegation path.
-        let delegation = std::env::var_os("TWENTYONEX_PRODUCTION_CGROUP_ROOT")
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                unavailable(
-                    "PRODUCTION_CONTAINMENT_UNAVAILABLE",
-                    "production-delegation-missing",
-                )
-            })?;
+        let delegation = native_scope::delegation_root().ok_or_else(|| {
+            unavailable(
+                "PRODUCTION_CONTAINMENT_UNAVAILABLE",
+                "production-delegation-missing",
+            )
+        })?;
         DelegatedCgroup::open(&delegation)
     }
     #[cfg(not(any(target_os = "linux", windows)))]
@@ -1149,6 +1150,9 @@ async fn start(
 }
 
 pub fn run() {
+    // Join a delegated scope while this process is still single-threaded.
+    #[cfg(target_os = "linux")]
+    let _ = native_scope::delegation_root();
     let context = tauri::generate_context!();
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
