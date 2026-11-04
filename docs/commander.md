@@ -248,7 +248,9 @@ stage above Chat; both surfaces use the shared interface scale and readable
 markdown/code typography. Leaving Commander during a call, or pressing PiP,
 shows the in-app floating call. It preserves the original call session; opening
 Project reports or another Chat never retargets its microphone. The floating
-view is part of this window, not an always-on-top OS window.
+view is part of this window, not an always-on-top OS window. The Commander
+speaks only while this window has focus and its session or the floating call is
+showing; anything else stays in Chat (see `docs/voice-tts.md`).
 
 - **Stage:** an abstract presence tile shows an icon and a state word. The user
   tile shows an initial, a real input meter while its owned microphone runs,
@@ -266,8 +268,7 @@ view is part of this window, not an always-on-top OS window.
   user text remains available. Assistant highlighting follows the actual spoken
   sentence from `speechText`; word timing is never invented. The strip shows
   at most two lines, and Read full captions exposes the complete current text.
-  Completed messages remain in Chat. Partials are not live-region announcements
-  and the global voice bubble does not repeat an owned Commander caption.
+  Completed messages remain in Chat. Partials are not live-region announcements.
 - **Toolbar:** mic/mute, the mode/input-device menu, Stop, CC, Chat panel,
   Voice settings, PiP and a separate red End. Left/Right/Home/End
   navigate its buttons; Chat/Actions support arrow keys. Stop and Escape
@@ -489,7 +490,7 @@ controls retain their compatibility contract. The wake word stays out of scope.
   interrupt the current reply, briefly show "Stopped", and leave the call open.
 - **Half-heard words appear once** (#83). While its own conversation turn
   runs, the stage caption strip shows them and the app-level host sets the voice store's
-  `captionOwner`, so the global `VoiceOverlay` leaves its listening bubble out.
+  `captionOwner`.
   PiP is the sole caption surface after navigation or pressing PiP.
   Confirmations and results still appear in the overlay. Ownership follows the
   turn the call host actually opened, never the fact that it is starting: a
