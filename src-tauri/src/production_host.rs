@@ -1061,7 +1061,9 @@ async fn start(
             },
             ui: HostCapability::Host,
             voice: HostCapability::Unsupported,
-            configured_mcp: OptionalCapability::Disabled,
+            // User-configured local and header-authenticated MCP servers.
+            // Browser OAuth for them stays gated by the native OAuth owner.
+            configured_mcp: OptionalCapability::Enabled,
             connectors: OptionalCapability::Disabled,
             managed_task_mcp: OptionalCapability::Enabled,
         },

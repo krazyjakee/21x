@@ -55,7 +55,10 @@ The app-managed task-management MCP and plugin-managed rows cannot be edited or
 deleted through this user domain. Reserved browser/task server names cannot be
 created or probed here. This domain does not register retired host browser tools.
 An authorized user configuration remains storage only while `configuredMcp` is
-disabled. Probes reject before child/network work in that state.
+disabled. Probes reject before child/network work in that state. The production
+host enables `configuredMcp` (2026-11-04): local and header-authenticated remote
+servers run for agents (verified on Linux with a stdio server called by Claude
+Code). Browser OAuth for MCP servers stays gated by the native OAuth owner.
 
 OAuth status and local token revocation use the actual OAuthManager even without
 browser capability. Browser start/manual registration reject before discovery,
