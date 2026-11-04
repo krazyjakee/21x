@@ -114,12 +114,17 @@ export async function buildMcpServers(
   beforeEffect?.()
   const agent = db.getAgent(agentId)
   const mcpEntries = agent?.config?.mcp_servers || []
-  if (host.configuredMcp === 'disabled' && mcpEntries.length) throw new Error('Configured MCP servers are unavailable in this host')
   const result: Record<string, McpServerConfig> = {}
   // Per-agent tool limits travel with each server so adapters can enforce
   // them. resolveDocumentedMcpServers reads them through the same parser, so
   // the tools AGENTS.md lists and the tools the session gets cannot diverge.
   const toolLimits = readServerToolLimits(mcpEntries)
+  // Every seeded agent lists the app-managed task-management server. A host
+  // without user-configured MCP still serves that one when it owns the task API.
+  if (host.configuredMcp === 'disabled' && [...toolLimits.keys()].some(serverId => {
+    const server = db.getMcpServer(serverId)
+    return server && !(server.name === 'task-management' && host.managedTaskMcp.kind === 'server')
+  })) throw new Error('Configured MCP servers are unavailable in this host')
   // startTaskApiServer is fire-and-forget during DB init and may not be done yet.
   if (host.managedTaskMcp.kind === 'server') await host.managedTaskMcp.waitUntilReady()
   // Let the renderer paint before the (synchronous) DB lookups below.
