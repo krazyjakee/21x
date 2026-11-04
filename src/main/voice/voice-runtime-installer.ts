@@ -97,13 +97,29 @@ export async function detectVoiceRuntime(rootDir: string): Promise<VoiceRuntimeS
   }
 }
 
+/**
+ * How to run npm. The Electron app calls the `npm` on PATH; the Tauri host
+ * runs the npm CLI it found with its own bundled Node, so the install works
+ * without a desktop shell's PATH.
+ */
+export interface NpmLauncher {
+  command: string
+  args: string[]
+  env?: NodeJS.ProcessEnv
+}
+
+function systemNpm(): NpmLauncher {
+  return { command: npmCommand(), args: [] }
+}
+
 /** True when npm can be called. The install needs it. */
-export async function isNpmAvailable(signal?: AbortSignal): Promise<boolean> {
+export async function isNpmAvailable(signal?: AbortSignal, npm: NpmLauncher = systemNpm()): Promise<boolean> {
   return new Promise((resolve) => {
     if (signal?.aborted) { resolve(false); return }
-    const child = spawn(npmCommand(), ['--version'], {
-      shell: process.platform === 'win32',
+    const child = spawn(npm.command, [...npm.args, '--version'], {
+      shell: process.platform === 'win32' && npm.args.length === 0,
       windowsHide: true,
+      ...(npm.env ? { env: npm.env } : {}),
     })
     let failed = false
     let escalation: ReturnType<typeof setTimeout> | undefined
@@ -133,7 +149,8 @@ export async function isNpmAvailable(signal?: AbortSignal): Promise<boolean> {
 export async function installVoiceRuntime(
   rootDir: string,
   onProgress: (progress: RuntimeProgress) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  npm: NpmLauncher = systemNpm()
 ): Promise<VoiceRuntimeStatus> {
   onProgress({ stage: 'starting', output: 'Preparing the download…\n', percent: 0 })
 
@@ -143,7 +160,7 @@ export async function installVoiceRuntime(
     throw new Error(unsupported)
   }
 
-  if (!(await isNpmAvailable(signal))) {
+  if (!(await isNpmAvailable(signal, npm))) {
     const message =
       'npm was not found. Install Node.js first — 21x can install it from Settings → General.\n'
     onProgress({ stage: 'error', output: message, percent: 100 })
@@ -163,9 +180,9 @@ export async function installVoiceRuntime(
   await new Promise<void>((resolve, reject) => {
     if (signal?.aborted) { reject(new Error('VOICE_RUNTIME_CANCELLED')); return }
     const child = spawn(
-      npmCommand(),
-      ['install', VOICE_RUNTIME_PACKAGE, '--omit=dev', '--no-audit', '--no-fund', '--loglevel=info'],
-      { cwd: rootDir, shell: process.platform === 'win32', windowsHide: true }
+      npm.command,
+      [...npm.args, 'install', VOICE_RUNTIME_PACKAGE, '--omit=dev', '--no-audit', '--no-fund', '--loglevel=info'],
+      { cwd: rootDir, shell: process.platform === 'win32' && npm.args.length === 0, windowsHide: true, ...(npm.env ? { env: npm.env } : {}) }
     )
 
     // npm gives no percentage, so the bar moves towards 90 and finishes on exit.
@@ -218,12 +235,14 @@ export async function removeVoiceRuntime(rootDir: string): Promise<void> {
 
 export interface VoiceRuntimeOwnerOptions {
   rootDir: string
-  /** The unpinned legacy npm installer is admitted only by the Electron host. */
-  installation: 'unavailable' | 'electron-compatibility'
+  /** `unavailable` refuses installs; the two others install with npm. */
+  installation: 'unavailable' | 'electron-compatibility' | 'portable'
+  /** The npm the `portable` host installs with. Defaults to the `npm` on PATH. */
+  npm?: NpmLauncher
   assertCurrent?: () => void
 }
 
-/** Owns the optional runtime; portable installation is intentionally unavailable. */
+/** Owns the optional runtime: detection, the npm install, and removal. */
 export class VoiceRuntimeOwner {
   private closing = false
   private flights = new Set<Promise<unknown>>()
@@ -295,11 +314,13 @@ export class VoiceRuntimeOwner {
   install(onProgress: (progress: RuntimeProgress) => void): Promise<VoiceRuntimeStatus> {
     this.current()
     if (this.options.installation === 'unavailable') return Promise.reject(new Error('VOICE_RUNTIME_INSTALL_UNAVAILABLE'))
-    return this.own(() => installVoiceRuntime(this.options.rootDir, (progress) => { if (!this.closing) onProgress(progress) }, this.abort.signal))
+    return this.own(() => installVoiceRuntime(this.options.rootDir, (progress) => { if (!this.closing) onProgress(progress) }, this.abort.signal, this.options.npm))
   }
   remove(): Promise<void> {
     return this.own(async () => {
-      if (this.options.installation === 'electron-compatibility') {
+      // The runtime directory is private to 21x and holds nothing but the
+      // npm install, so removing it whole returns exactly what was installed.
+      if (this.options.installation !== 'unavailable') {
         this.current()
         await removeVoiceRuntime(this.options.rootDir)
         return

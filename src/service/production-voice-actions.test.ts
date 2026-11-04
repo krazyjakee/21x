@@ -310,8 +310,10 @@ for (const kind of cases)
             event.operation === 'task:updated' && isRecord(event.payload) && event.payload.taskId === created.id
         )
       ).toHaveLength(1)
+      // The live turn backend owns these public operations now; this owner
+      // stays unregistered, so a bare payload is refused by that codec.
       for (const operation of ['voice:startTurn', 'voice:confirm', 'voice:dismiss'])
-        await expect(f.host.request(operation, {})).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+        await expect(f.host.request(operation, {})).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
     })
     it('keeps fuzzy targets pinned, accepts only offered choices and refuses changed/foreign task scope', async () => {
       const f = await fixture(kind),

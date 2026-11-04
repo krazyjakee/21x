@@ -721,7 +721,7 @@ it('does not clear a replacement kickoff draft after an admitted old native prom
   expect(calls('agentSession:sendByTaskId')).toHaveLength(1)
   expect(calls('agentSession:sendByTaskId')[0][1]?.payload).toMatchObject({ taskId: 'task-1', message: 'Old instruction' })
 })
-it('restores a refused native composer draft without unsupported voice work or a replayed send', async () => {
+it('restores a refused native composer draft without a replayed send', async () => {
   const { TranscriptComposer } = await import('@/components/agents/transcript/TranscriptComposer')
   const raw = held<unknown>(); handlers.set('agentSession:sendByTaskId', () => raw.promise)
   render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1' })} />)
@@ -739,5 +739,7 @@ it('restores a refused native composer draft without unsupported voice work or a
   await act(async () => {})
   expect(input).toHaveValue('Retained composer intent')
   expect(calls('agentSession:sendByTaskId')).toHaveLength(1)
-  expect(calls('voice:answerNotExpected')).toHaveLength(0)
+  // Each typed send attempt drops any spoken-answer expectation, as in
+  // Electron. The housekeeping is idempotent and never replays the send.
+  expect(calls('voice:answerNotExpected')).toHaveLength(2)
 })

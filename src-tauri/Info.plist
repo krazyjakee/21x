@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the macOS bundle by Tauri. WKWebView cannot capture the
+       microphone for voice control without a usage description. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>21x listens only while you use voice control, and recognises speech on this computer.</string>
+</dict>
+</plist>

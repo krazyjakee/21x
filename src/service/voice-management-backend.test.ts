@@ -15,7 +15,7 @@ import { VoiceTtsWorkerClient, type VoiceTtsWorkerHost } from '../main/voice/voi
 import { VoiceSystemVoicesOwner, type VoiceSystemVoicesHost } from '../main/voice/voice-system-voices'
 import { VOICE_SETTING_KEYS } from '../shared/voice'
 import { VOICE_TTS_SETTING_KEYS } from '../shared/voice-tts'
-import { VOICE_MANAGEMENT_CODECS, VOICE_MANAGEMENT_EVENTS, VOICE_MANAGEMENT_OPERATIONS, VOICE_MANAGEMENT_UNAVAILABLE, type VoiceManagementOperation } from '../shared/voice-management-codecs'
+import { VOICE_MANAGEMENT_CODECS, VOICE_MANAGEMENT_EVENTS, VOICE_MANAGEMENT_OPERATIONS, type VoiceManagementOperation } from '../shared/voice-management-codecs'
 import type { DesktopCallerContext } from './transport/desktop-registry'
 import { VoiceManagementBackend } from './voice-management-backend'
 import { VOICE_MODEL_MANIFEST } from '../main/voice/voice-model-manifest'
@@ -61,13 +61,13 @@ describe('actual portable voice management owner with SQLite', () => {
     expect([...VOICE_MANAGEMENT_STT_IDS].sort()).toEqual(VOICE_MODEL_MANIFEST.map(entry => entry.id).sort())
     expect([...VOICE_MANAGEMENT_TTS_IDS].sort()).toEqual(VOICE_TTS_MODEL_MANIFEST.map(entry => entry.id).sort())
   })
-  it('publishes all21 finite command schemas, no capture/native/hosted/audio/action grants', async () => {
+  it('publishes all21 finite management schemas; live turns, audio and hosted speech live elsewhere', async () => {
     expect(Object.keys(backend.operationSchemas(caller))).toEqual([...VOICE_MANAGEMENT_OPERATIONS])
     expect(VOICE_MANAGEMENT_EVENTS).toHaveLength(4)
     for (const operation of ['voice:startTurn', 'voice:confirm', 'voice:getPermission', 'voice:setCustomModelDir', 'voice:setShortcut', 'voice:tts:speak', 'voice:tts:elevenlabs:setKey']) await expect(backend.registry.invoke(operation, {}, caller, new AbortController().signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
     const snapshot = await invoke('voice:getSnapshot')
     expect(snapshot).toMatchObject({ defined: true, value: { enabled: false, state: 'disabled', runtime: { installed: false, modulePath: null } } })
-    expect(await invoke('voice:tts:getSnapshot')).toMatchObject({ defined: true, value: { engine: 'system', speaking: false, status: { state: 'unavailable', message: VOICE_MANAGEMENT_UNAVAILABLE }, elevenlabs: { keySet: false, voices: [], models: [] } } })
+    expect(await invoke('voice:tts:getSnapshot')).toMatchObject({ defined: true, value: { engine: 'system', speaking: false, status: { state: 'unavailable', message: 'Desktop speech audio is unavailable in this host.' }, elevenlabs: { keySet: false, voices: [], models: [] } } })
   })
   it('writes actual STT/TTS settings through the one shared core lease without recursive/nested busy guards', async () => {
     expect(await invoke('voice:setEnabled', [true])).toMatchObject({ defined: true, value: { enabled: true, state: 'permission_needed' } })
@@ -80,9 +80,12 @@ describe('actual portable voice management owner with SQLite', () => {
     expect(db.getSetting(VOICE_TTS_SETTING_KEYS.engine)).toBe('local'); expect(db.getSetting(VOICE_TTS_SETTING_KEYS.speed)).toBe('1.25'); expect(db.getSetting(VOICE_TTS_SETTING_KEYS.maxChars)).toBe('3000')
     expect(db.getSetting(VOICE_TTS_SETTING_KEYS.speakActionResults)).toBe('false'); expect(db.getSetting(VOICE_TTS_SETTING_KEYS.onlyVoiceTurns)).toBe('true')
   })
-  it('refuses unverified runtime installation and unknown/hosted/model paths before effects', async () => {
-    const installer = vi.spyOn(voice, 'installRuntime'), setting = vi.spyOn(db, 'setSetting')
-    await expect(invoke('voice:installRuntime')).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' }); expect(installer).not.toHaveBeenCalled(); expect(setting).not.toHaveBeenCalled()
+  it('runs the runtime install through the owner, and refuses unknown/hosted/model paths before effects', async () => {
+    const installer = vi.spyOn(voice, 'installRuntime').mockResolvedValue({ installed: true, version: '1.12.0', modulePath: '/private/runtime/sherpa-onnx-node', sizeBytes: 1024 })
+    const setting = vi.spyOn(db, 'setSetting')
+    // The host owner decides how to install; the module path never crosses the wire.
+    expect(await invoke('voice:installRuntime')).toEqual({ defined: true, value: { installed: true, version: '1.12.0', modulePath: '__21x_local_voice_runtime__', sizeBytes: 1024 } })
+    expect(installer).toHaveBeenCalledOnce(); expect(setting).not.toHaveBeenCalled()
     await expect(backend.registry.invoke('voice:tts:setEngine', { engine: 'elevenlabs' }, caller, new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
     await expect(backend.registry.invoke('voice:installModel', { id: '../private' }, caller, new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
     await expect(backend.registry.invoke('voice:setEndpointSilence', { milliseconds: 1200 }, caller, new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })

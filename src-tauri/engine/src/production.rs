@@ -151,6 +151,12 @@ fn request_deadline_at(operation: &str, started: Instant) -> Instant {
             "engine.agent.install" | "engine.attachment.download" | "engine.attachment.save"
         ) {
             Duration::from_secs(180)
+        } else if matches!(
+            operation,
+            "voice:installRuntime" | "voice:installModel" | "voice:tts:installModel"
+        ) {
+            // Voice owners bound these downloads with their own 20-minute deadline.
+            Duration::from_secs(21 * 60)
         } else {
             DEADLINE
         }

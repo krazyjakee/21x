@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { VOICE_TTS_ELEVENLABS_EMPTY_STATE } from './voice-tts'
-import { VOICE_MANAGEMENT_CODECS, VOICE_MANAGEMENT_OPERATIONS, VOICE_MANAGEMENT_EVENT_CODECS, VOICE_MANAGEMENT_EVENTS, VOICE_MANAGEMENT_ERROR, VOICE_MANAGEMENT_UNAVAILABLE, VOICE_MANAGEMENT_HOSTED_UNAVAILABLE, VOICE_RUNTIME_MODULE_MARKER } from './voice-management-codecs'
+import { VOICE_MANAGEMENT_CODECS, VOICE_MANAGEMENT_OPERATIONS, VOICE_MANAGEMENT_EVENT_CODECS, VOICE_MANAGEMENT_EVENTS, VOICE_MANAGEMENT_HOSTED_UNAVAILABLE, VOICE_RUNTIME_MODULE_MARKER } from './voice-management-codecs'
 
 const runtime = { installed: true, version: 'fixture-version', modulePath: '/private/profile/runtime/sherpa', sizeBytes: 1024, error: 'private path failure' }
 const sttModel = { id: 'nemo-parakeet-tdt-0.6b-v3', label: 'Fixture', description: 'Description', license: 'MIT', licenseUrl: 'https://example.test/license', languages: ['en'], installed: false, active: true, installing: false, progress: 0, sizeBytes: 100, downloadable: false }
@@ -28,19 +28,19 @@ describe('finite portable voice management codec', () => {
     expect(() => VOICE_MANAGEMENT_CODECS['voice:getRuntime'].decodeArguments({ profileRoot: '/private' })).toThrow()
     expect(() => VOICE_MANAGEMENT_CODECS['voice:setEnabled'].decodeArguments({ enabled: true, caller: { capabilities: ['*'] } })).toThrow()
   })
-  it('projects actual runtime paths/errors and never accepts private-path wire results', () => {
+  it('replaces runtime paths, keeps the messages settings shows, and never accepts private-path wire results', () => {
     const result = VOICE_MANAGEMENT_CODECS['voice:getSnapshot'].encodeResult(snapshot)
-    expect(result).toMatchObject({ defined: true, value: { engine: { message: VOICE_MANAGEMENT_UNAVAILABLE }, runtime: { installed: true, modulePath: VOICE_RUNTIME_MODULE_MARKER, error: VOICE_MANAGEMENT_ERROR } } })
+    expect(result).toMatchObject({ defined: true, value: { engine: { message: 'private runtime path' }, runtime: { installed: true, modulePath: VOICE_RUNTIME_MODULE_MARKER, error: 'private path failure' } } })
     expect(JSON.stringify(result)).not.toContain('/private')
     expect(VOICE_MANAGEMENT_CODECS['voice:getSnapshot'].validateWireResult(result)).toBe(true)
     expect(VOICE_MANAGEMENT_CODECS['voice:getSnapshot'].validateWireResult({ defined: true, value: snapshot })).toBe(false)
     expect(VOICE_MANAGEMENT_CODECS['voice:getRuntime'].encodeResult({ ...runtime, error: undefined })).toEqual({ defined: true, value: { installed: true, version: 'fixture-version', modulePath: VOICE_RUNTIME_MODULE_MARKER, sizeBytes: 1024 } })
     expect(() => VOICE_MANAGEMENT_CODECS['voice:getRuntime'].encodeResult({ ...runtime, secret: 'private' })).toThrow()
   })
-  it('keeps unavailable hosted/audio state truthful without leaking account or model paths', () => {
+  it('keeps hosted speech unavailable without leaking account or model paths', () => {
     const raw = { ...speech, elevenlabs: { ...speech.elevenlabs, keySet: true, disclosureAccepted: true, voices: ['private'], models: ['private'], error: { kind: 'auth', message: 'private credential' }, usage: { used: 100, limit: 1000 } } }
     const result = VOICE_MANAGEMENT_CODECS['voice:tts:getSnapshot'].encodeResult(raw)
-    expect(result).toMatchObject({ defined: true, value: { engine: 'system', status: { state: 'unavailable', message: VOICE_MANAGEMENT_UNAVAILABLE }, elevenlabs: { keySet: false, disclosureAccepted: false, models: [], voices: [], usage: null, error: { kind: 'unknown', message: VOICE_MANAGEMENT_HOSTED_UNAVAILABLE } } } })
+    expect(result).toMatchObject({ defined: true, value: { engine: 'system', status: { state: 'unavailable', message: 'Desktop speech audio is unavailable in this host.' }, elevenlabs: { keySet: false, disclosureAccepted: false, models: [], voices: [], usage: null, error: { kind: 'unknown', message: VOICE_MANAGEMENT_HOSTED_UNAVAILABLE } } } })
     expect(JSON.stringify(result)).not.toContain('private')
     expect(VOICE_MANAGEMENT_CODECS['voice:tts:getSnapshot'].validateWireResult(result)).toBe(true)
     expect(() => VOICE_MANAGEMENT_CODECS['voice:tts:getSnapshot'].encodeResult({ ...speech, engine: 'elevenlabs' })).toThrow()
@@ -51,8 +51,11 @@ describe('finite portable voice management codec', () => {
     const projected = VOICE_MANAGEMENT_EVENT_CODECS['voice:status'].encodePayload(status)
     expect(VOICE_MANAGEMENT_EVENT_CODECS['voice:status'].validatePayload(projected)).toBe(true)
     expect(JSON.stringify(projected)).not.toContain('/private')
-    expect(VOICE_MANAGEMENT_EVENT_CODECS['voice:runtimeProgress'].encodePayload({ stage: 'error', output: 'private process output', percent: 100 })).toEqual({ stage: 'error', output: VOICE_MANAGEMENT_ERROR, percent: 100 })
-    expect(VOICE_MANAGEMENT_EVENT_CODECS['voice:tts:modelProgress'].encodePayload({ model: { ...ttsModel, error: 'private path' } })).toMatchObject({ model: { error: VOICE_MANAGEMENT_ERROR } })
+    // Install output is what the user reads when an install fails; it is
+    // passed through, clipped to a bounded slice.
+    expect(VOICE_MANAGEMENT_EVENT_CODECS['voice:runtimeProgress'].encodePayload({ stage: 'error', output: 'npm ERR! network\n', percent: 100 })).toEqual({ stage: 'error', output: 'npm ERR! network\n', percent: 100 })
+    expect(new TextEncoder().encode((VOICE_MANAGEMENT_EVENT_CODECS['voice:runtimeProgress'].encodePayload({ stage: 'installing', output: 'é'.repeat(20000), percent: 5 }) as { output: string }).output).length).toBeLessThanOrEqual(16384)
+    expect(VOICE_MANAGEMENT_EVENT_CODECS['voice:tts:modelProgress'].encodePayload({ model: { ...ttsModel, error: 'Download failed.' } })).toMatchObject({ model: { error: 'Download failed.' } })
     expect(VOICE_MANAGEMENT_EVENT_CODECS['voice:tts:status'].validatePayload(VOICE_MANAGEMENT_EVENT_CODECS['voice:tts:status'].encodePayload(speech))).toBe(true)
     expect(() => VOICE_MANAGEMENT_CODECS['voice:getSnapshot'].encodeResult({ ...snapshot, partial: 'x'.repeat(65537) })).toThrow()
     expect(() => VOICE_MANAGEMENT_EVENT_CODECS['voice:runtimeProgress'].encodePayload({ stage: 'error', output: '', percent: 101 })).toThrow()

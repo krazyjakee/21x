@@ -71,9 +71,6 @@ export class VoiceManagementBackend {
         if (this.flights.size >= VOICE_MANAGEMENT_LIMITS.requests) throw new ServiceProtocolError('BACKPRESSURE')
         const beforeWrite = (): void => { this.available(signal); if (!this.allowed(caller, access)) throw new ServiceProtocolError('INVALID_REQUEST') }
         beforeWrite()
-        // The installer lacks a verified fixed runtime package manifest. This
-        // explicit refusal must precede leases, npm, downloads or setting writes.
-        if (operation === 'voice:installRuntime') throw new ServiceProtocolError('UNKNOWN_OPERATION')
         const effect = (): Promise<unknown> => this.execute(operation, args as unknown[])
         let raw: unknown
         if (READS.has(operation)) raw = await effect()
@@ -94,6 +91,7 @@ export class VoiceManagementBackend {
       case 'voice:getSnapshot': return voice.snapshot()
       case 'voice:setEnabled': return voice.setEnabled(args[0] as boolean)
       case 'voice:getRuntime': return voice.refreshRuntime()
+      case 'voice:installRuntime': return voice.installRuntime()
       case 'voice:removeRuntime': return voice.removeRuntime()
       case 'voice:installModel': return voice.installModel(args[0] as string)
       case 'voice:removeModel': return voice.removeModel(args[0] as string)

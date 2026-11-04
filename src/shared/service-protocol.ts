@@ -10,7 +10,11 @@ export const SERVICE_LIMITS = {
   requestTimeoutMs: 30_000
 } as const
 /** Long installation work has a finite deadline without widening ordinary calls. */
+/** Voice installs download a runtime or a model of up to 662 MB; their owners
+ * enforce their own 20-minute deadline, so the request must outlast it. */
+export const VOICE_INSTALL_OPERATIONS: readonly string[] = ['voice:installRuntime', 'voice:installModel', 'voice:tts:installModel']
 export function serviceOperationTimeoutMs(operation: string): number {
+  if (VOICE_INSTALL_OPERATIONS.includes(operation)) return 21 * 60_000
   return operation === 'agent-installer:install' || operation === 'engine.agent.install' || operation === 'attachments:pick' || operation === 'attachments:save' || operation === 'engine.attachment.save' || operation === 'attachments:download' || operation === 'engine.attachment.download' || operation === 'host.attachment.download' ? 180_000 : SERVICE_LIMITS.requestTimeoutMs
 }
 

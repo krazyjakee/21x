@@ -1,5 +1,7 @@
-//! No application JavaScript runs with an unowned media API. Permission-request
-//! denial alone must not be treated as revocation of a cached WebView grant.
+//! Media admission for the main window. The application page may capture the
+//! microphone (voice control records 16 kHz audio in the page and sends it to
+//! the local recogniser); camera, screen capture and WebRTC stay off. Startup
+//! still begins on an inert blank page that must report no active capture.
 use super::native_services::NativeWorkOwner;
 #[cfg(target_os = "linux")]
 use tauri::Manager;
@@ -21,6 +23,29 @@ impl StartupNavigation {
     }
     pub fn application(&self) {
         self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// True once the main window has navigated to the trusted application.
+    /// Navigation refuses every other origin, so the page is then ours.
+    pub fn application_loaded(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// The main window's permission policy: the application page may use the
+/// microphone and nothing else. A combined camera+microphone request is
+/// denied whole, because the camera half is.
+pub fn permission(
+    label: &str,
+    kind: &tauri::webview::PermissionKind,
+    navigation: &StartupNavigation,
+) -> tauri::webview::PermissionResponse {
+    if label == "main"
+        && navigation.application_loaded()
+        && matches!(kind, tauri::webview::PermissionKind::Microphone)
+    {
+        tauri::webview::PermissionResponse::Allow
+    } else {
+        tauri::webview::PermissionResponse::Deny
     }
 }
 
@@ -60,11 +85,12 @@ fn current_blank(window: &WebviewWindow, work: &NativeWorkOwner) -> Result<(), E
 }
 
 #[cfg(target_os = "linux")]
-fn deny_before_script(view: &webkit2gtk::WebView) -> Result<(), EngineError> {
+fn prepare_media_before_script(view: &webkit2gtk::WebView) -> Result<(), EngineError> {
     use webkit2gtk::{MediaCaptureState, SettingsExt, WebViewExt};
     // A startup property is not an acknowledgement that an existing stream
     // stopped. Refuse to load the application if this supposedly blank view
-    // already reports any capture. Native voice remains unsupported.
+    // already reports any capture. getUserMedia is enabled for voice; WebRTC
+    // (peer connections) is not needed and stays off.
     if view.microphone_capture_state() != MediaCaptureState::None
         || view.camera_capture_state() != MediaCaptureState::None
         || view.display_capture_state() != MediaCaptureState::None
@@ -75,8 +101,8 @@ fn deny_before_script(view: &webkit2gtk::WebView) -> Result<(), EngineError> {
         .settings()
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
     settings.set_enable_webrtc(false);
-    settings.set_enable_media_stream(false);
-    if settings.enables_webrtc() || settings.enables_media_stream() {
+    settings.set_enable_media_stream(true);
+    if settings.enables_webrtc() || !settings.enables_media_stream() {
         return Err(EngineError::new("INVALID_RESULT"));
     }
     Ok(())
@@ -102,7 +128,7 @@ pub fn load(window: WebviewWindow, work: NativeWorkOwner) -> Result<(), EngineEr
     }
     #[cfg(target_os = "linux")]
     {
-        load_with_prepare(window, work, deny_before_script)
+        load_with_prepare(window, work, prepare_media_before_script)
     }
 }
 
@@ -260,6 +286,28 @@ mod proof {
         assert!(!navigation.allows_blank(&blank));
     }
     #[test]
+    fn only_the_loaded_application_page_may_use_the_microphone() {
+        use tauri::webview::{PermissionKind, PermissionResponse};
+        let navigation = StartupNavigation::default();
+        let allow = |label: &str, kind: PermissionKind, navigation: &StartupNavigation| {
+            matches!(
+                permission(label, &kind, navigation),
+                PermissionResponse::Allow
+            )
+        };
+        // The inert startup page cannot capture.
+        assert!(!allow("main", PermissionKind::Microphone, &navigation));
+        navigation.application();
+        assert!(allow("main", PermissionKind::Microphone, &navigation));
+        assert!(!allow("main", PermissionKind::Camera, &navigation));
+        assert!(!allow("main", PermissionKind::DisplayCapture, &navigation));
+        assert!(!allow(
+            "artifact-viewer",
+            PermissionKind::Microphone,
+            &navigation
+        ));
+    }
+    #[test]
     #[ignore = "requires isolated Xvfb/Wry and WebKit mock capture devices; never uses real microphone"]
     fn real_wry_mock_capture_then_native_denial_before_first_app_script() {
         let mut context = tauri::test::mock_context::<tauri::Wry, _>(Assets);
@@ -323,7 +371,7 @@ mod proof {
         assert!(grants.load(Ordering::SeqCst) > 0);
         webkit(&mut app, &control, |view| {
             assert_eq!(view.microphone_capture_state(), MediaCaptureState::Active);
-            assert!(deny_before_script(view).is_err());
+            assert!(prepare_media_before_script(view).is_err());
             view.set_microphone_capture_state(MediaCaptureState::None);
         });
         until_js(
@@ -392,13 +440,13 @@ mod proof {
         pump(&mut app, || ready.load(Ordering::SeqCst));
         assert_eq!(
             js(&mut app, &window, "JSON.stringify(nativeMediaBoot)"),
-            "{\"gum\":false,\"rtc\":false}"
+            "{\"gum\":true,\"rtc\":false}"
         );
         assert_eq!(main_grants.load(Ordering::SeqCst), 0);
         assert!(ui.completed_document_for_test(&window));
         webkit(&mut app, &window, |view| {
             let settings = view.settings().unwrap();
-            assert!(!settings.enables_media_stream());
+            assert!(settings.enables_media_stream());
             assert!(!settings.enables_webrtc());
             assert_eq!(view.microphone_capture_state(), MediaCaptureState::None);
         });
@@ -444,7 +492,7 @@ mod proof {
         let prepared = Arc::new(AtomicBool::new(false));
         let captured = prepared.clone();
         load_with_prepare(closing.clone(), work.clone(), move |view| {
-            deny_before_script(view)?;
+            prepare_media_before_script(view)?;
             close.close()?;
             captured.store(true, Ordering::SeqCst);
             Ok(())

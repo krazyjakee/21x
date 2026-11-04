@@ -349,12 +349,12 @@ it('uses exact codecs and trusted host metadata; missing binary/file bindings ne
   expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'settings:get', payload: { key: 'theme' }, engineEpoch: 'engine-1' })
   await expect(desktopApi.settings.get('api_key')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   const before = f.invoke.mock.calls.length
-  await expect(desktopApi.voice.pushAudio('turn', new Uint8Array([1, 2]))).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE', capability: 'voice.pushAudio' })
+  await expect(desktopApi.voice.setCustomModelDir('/private/models')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE', capability: 'voice.setCustomModelDir' })
   expect(() => desktopApi.webUtils.getPathForFile(new File([], 'private'))).toThrow('unavailable')
   expect(typeof desktopApi.commander.onEvent).toBe('function'); expect(Reflect.get(desktopApi, 'browser')).toBeUndefined()
   expect(f.host.supports('commander.send')).toBe(true); expect(f.invoke.mock.calls.length).toBe(before)
 })
-it('binds finite voice management while capture, audio and hosted services remain unavailable', async () => {
+it('binds voice management; shortcut, custom model folders and hosted speech remain unavailable', async () => {
   const f = fixture(), snapshot = { enabled: false, state: 'disabled', turnId: null, partial: '', final: '', engine: { state: 'engine_missing', message: VOICE_MANAGEMENT_UNAVAILABLE }, models: [], shortcut: '', runtime: { installed: false, version: null, modulePath: null, sizeBytes: 0 } }
   f.results.set('voice:getSnapshot', snapshot); f.results.set('voice:setEndpointSilence', { success: true })
   await f.host.reconnect()
@@ -367,11 +367,26 @@ it('binds finite voice management while capture, audio and hosted services remai
   const event = { enabled: snapshot.enabled, engine: snapshot.engine, models: snapshot.models, shortcut: snapshot.shortcut, runtime: snapshot.runtime }
   f.emit('voice:status', event)
   expect(status).toHaveBeenCalledWith(event); dispose()
-  expect(f.host.supports('voice.startTurn')).toBe(false); expect(f.host.supports('voice.tts.speak')).toBe(false)
+  expect(f.host.supports('voice.startTurn')).toBe(true); expect(f.host.supports('voice.tts.speak')).toBe(true)
+  expect(f.host.supports('voice.setShortcut')).toBe(false)
   const before = f.invoke.mock.calls.length
   await expect(f.host.api.voice.tts.setEngine('elevenlabs')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
-  await expect(f.host.api.voice.getPermission()).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
+  await expect(f.host.api.voice.setShortcut('Control+K')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE' })
   expect(f.invoke.mock.calls.length).toBe(before)
+})
+it('sends microphone audio as base64 and hands speech chunks to the player as bytes', async () => {
+  const f = fixture()
+  f.results.set('voice:startTurn', { turnId: 'turn_1', turnEpoch: 'epoch_1' })
+  await f.host.reconnect(); f.host.setRehydrator(async () => {}); await f.host.rehydrate()
+  expect(await f.host.api.voice.startTurn('dictation', { selectedTaskId: 'task_1', view: 'tasks', extra: 'dropped' } as never)).toEqual({ turnId: 'turn_1', turnEpoch: 'epoch_1' })
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'voice:startTurn', payload: { mode: 'dictation', context: { selectedTaskId: 'task_1', view: 'tasks' } }, engineEpoch: 'engine-1' })
+  await f.host.api.voice.pushAudio('turn_1', new Uint8Array([1, 2, 3, 4]))
+  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'voice:pushAudio', payload: { turnId: 'turn_1', chunk: 'AQIDBA==' }, engineEpoch: 'engine-1' })
+  const chunk = vi.fn(), dispose = f.host.api.voice.tts.onSpeechChunk(chunk)
+  f.emit('voice:speech:chunk', { speechId: 'speech_1', speechGeneration: 1, index: 0, pcm: 'AQIDBA==', sampleRate: 24000, text: 'Hello.' })
+  expect(chunk).toHaveBeenCalledOnce()
+  expect(chunk.mock.calls[0][0].pcm).toEqual(new Uint8Array([1, 2, 3, 4]))
+  dispose()
 })
 it('keeps workspace reads available during recovery, fences filesystem effects and reports absent native callbacks', async () => {
   const f = fixture(), path = '/workspace/task_fixture/report.md'
@@ -465,7 +480,7 @@ it('hydrates the tray preference as a read but fences mutations and requires the
   f.results.set('app:getMinimizeToTray', { enabled: true, action: 'hide' })
   await expect(desktopApi.app.getMinimizeToTray()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })
-it('binds the 240 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 254 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -474,7 +489,7 @@ it('binds the 240 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(240)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(254)
   expect(NATIVE_COMMAND_BINDINGS['app:setLoginItemSettings']).toBe('app.setLoginItemSettings')
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')

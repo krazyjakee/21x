@@ -1362,6 +1362,7 @@ pub fn run() {
                 (artifact_viewer.clone(), app.handle().clone());
             let (page_viewer, page_app) = (artifact_viewer.clone(), app.handle().clone());
             let media_navigation = native_media::StartupNavigation::default();
+            let permission_navigation = media_navigation.clone();
             let window = tauri::WebviewWindowBuilder::new(app, "main", native_media::initial_url())
                 .title("21x Production Preview")
                 .visible(false)
@@ -1395,7 +1396,9 @@ pub fn run() {
                 })
                 .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                 .on_download(|_, _| false)
-                .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
+                .on_permission_request(move |webview, kind| {
+                    native_media::permission(webview.label(), &kind, &permission_navigation)
+                })
                 .build()?;
             native_window::prepare(&window)
                 .map_err(|_| std::io::Error::other("PRODUCTION_WINDOW_CONTROLS_UNAVAILABLE"))?;

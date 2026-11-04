@@ -59,8 +59,11 @@ export interface VoiceSessionManagerCoreOptions {
   speech: VoiceSpeechService
   permissions: { kind: 'unavailable' } | { kind: 'native'; get: () => MicrophonePermission; request: () => Promise<MicrophonePermission> }
   shortcuts: { kind: 'unavailable' } | { kind: 'native'; register: (key: string, callback: () => void) => boolean; unregister: (key: string) => void }
-  /** Only the Electron compatibility wrapper may admit legacy command actions. */
-  actions: { kind: 'unavailable' } | { kind: 'electron-compatibility' }
+  /**
+   * Spoken task commands. Both hosts run them through VoiceActionService on
+   * the one database and AgentManager, emitting the canonical task events.
+   */
+  actions: { kind: 'unavailable' } | { kind: 'electron-compatibility' } | { kind: 'desktop' }
   assertCurrent?: () => void
   canUseCustomModelDir?: (dir: string) => boolean
 }

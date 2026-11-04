@@ -390,11 +390,15 @@ export class ProductionOwner {
       assertOwners: () => { this.getDatabaseBindingLease(); if (this.services !== services) throw new ProductionOwnerError('SERVICE_OWNER_LOST') } }
   }
 
-  getVoiceBindingLease(): { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech']; assertVoiceOwners(owners: { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech'] }): void } | null {
+  getVoiceBindingLease(): { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech']; commanderVoice(): ReturnType<ProductionVoiceOwner['commanderVoice']>; assertVoiceOwners(owners: { voice: ProductionVoiceOwner['voice']; speech: ProductionVoiceOwner['speech'] }): void } | null {
     this.getDatabaseBindingLease()
     const services = this.services!, owned = services.voice
     if (!owned) return null
-    return { voice: owned.voice, speech: owned.speech, assertVoiceOwners: owners => {
+    return { voice: owned.voice, speech: owned.speech, commanderVoice: () => {
+      this.getDatabaseBindingLease()
+      if (this.services !== services) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
+      return owned.commanderVoice(services.commander, projectId => services.db.getProject(projectId)?.name)
+    }, assertVoiceOwners: owners => {
       this.getDatabaseBindingLease()
       if (this.services !== services || this.services.voice !== owned || owners.voice !== owned.voice || owners.speech !== owned.speech) throw new ProductionOwnerError('SERVICE_OWNER_LOST')
       owned.assertOwners(services.db, services.agents, this.storage!)
@@ -1158,6 +1162,9 @@ export class ProductionOwner {
         this.lock!.assertHeld()
       }, notify: (channel, payload) => this.emit(channel, payload) }) : null
     if (voice) this.register('voice', () => voice.shutdown(), () => voice.close())
+    // Loads the runtime status, the speech engine and, when voice is on, the
+    // recognition model. It never throws: voice must not block start-up.
+    if (voice) void voice.voice.initialize()
     this.services = { ui, cliMcp, cliMcpFiles, taskAttachmentFiles, workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, agentInstallation, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile

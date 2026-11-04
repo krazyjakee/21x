@@ -18,6 +18,7 @@ import { PROJECT_RUNTIME_CODECS } from '@shared/project-runtime-codecs'
 import { GIT_PROVIDER_CODECS, GIT_PROVIDER_OPERATIONS } from '@shared/git-provider-codecs'
 import { WORKSPACE_FILE_CODECS, WORKSPACE_FILE_OPERATIONS } from '@shared/workspace-file-codecs'
 import { VOICE_MANAGEMENT_CODECS, VOICE_MANAGEMENT_EVENT_CODECS } from '@shared/voice-management-codecs'
+import { VOICE_TURN_CODECS, VOICE_TURN_EVENT_CODECS } from '@shared/voice-turn-codecs'
 import { AGENT_INSTALLER_CODECS, AGENT_INSTALLER_EVENT_CODECS, isAgentInstallerProgress } from '@shared/agent-installer-codecs'
 import { ARTIFACT_CODECS } from '@shared/artifact-codecs'
 import { NATIVE_SERVICES_CODECS } from '@shared/native-services-codecs'
@@ -47,8 +48,8 @@ import { DesktopClient, type DesktopClientState } from './desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, getTauriUiDocument, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_WINDOW_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_ATTACHMENT_PICK_CODECS, ...NATIVE_ATTACHMENT_IMAGE_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...NATIVE_LOGIN_ITEM_CODECS, ...TRAY_PREFERENCE_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS, ...PROJECT_CONFIGURATION_CODECS }
-const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS,
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_WINDOW_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_ATTACHMENT_PICK_CODECS, ...NATIVE_ATTACHMENT_IMAGE_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...NATIVE_LOGIN_ITEM_CODECS, ...TRAY_PREFERENCE_CODECS, ...VOICE_MANAGEMENT_CODECS, ...VOICE_TURN_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS, ...PROJECT_CONFIGURATION_CODECS }
+const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...VOICE_TURN_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS,
   ...TASK_FEEDBACK_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
@@ -87,6 +88,12 @@ export const NATIVE_COMMAND_BINDINGS = {
   'voice:tts:installModel': 'voice.tts.installModel',
   'voice:tts:selectModel': 'voice.tts.selectModel',
   'voice:tts:removeModel': 'voice.tts.removeModel',
+  // Live voice: the WebView captures the microphone and plays speech; main
+  // owns every decision. Shortcut registration is not bound yet.
+  'voice:startTurn': 'voice.startTurn', 'voice:pushAudio': 'voice.pushAudio', 'voice:endTurn': 'voice.endTurn', 'voice:cancelTurn': 'voice.cancelTurn',
+  'voice:confirm': 'voice.confirm', 'voice:dismiss': 'voice.dismiss', 'voice:expectAnswer': 'voice.expectAnswer', 'voice:answerNotExpected': 'voice.answerNotExpected',
+  'voice:tts:preview': 'voice.tts.preview', 'voice:tts:speak': 'voice.tts.speak', 'voice:tts:stop': 'voice.tts.stop',
+  'voice:commander:setActive': 'commanderVoice.setActive', 'voice:commander:bargeIn': 'commanderVoice.bargeIn', 'voice:commander:send': 'commanderVoice.send',
 
   'db:getTasks': 'db.getTasks', 'db:getTask': 'db.getTask', 'db:createTask': 'db.createTask', 'db:updateTask': 'db.updateTask', 'db:deleteTask': 'db.deleteTask',
   'project:getAll': 'projects.getAll', 'project:get': 'projects.get', 'project:getDefault': 'projects.getDefault', 'project:create': 'projects.create',
@@ -143,6 +150,9 @@ export const NATIVE_EVENT_BINDINGS = {
   'worktree:progress': 'onWorktreeProgress', 'workspace:cleanup-progress': 'onWorkspaceCleanupProgress',
   'voice:status': 'voice.onStatus', 'voice:runtimeProgress': 'voice.onRuntimeProgress',
   'voice:tts:status': 'voice.tts.onStatus', 'voice:tts:modelProgress': 'voice.tts.onModelProgress',
+  'voice:state': 'voice.onState', 'voice:partial': 'voice.onPartial', 'voice:final': 'voice.onFinal', 'voice:segment': 'voice.onSegment',
+  'voice:outcome': 'voice.onOutcome', 'voice:error': 'voice.onError', 'voice:navigate': 'voice.onNavigate', 'voice:dictate': 'voice.onDictate', 'voice:hotkey': 'voice.onHotkey',
+  'voice:speech:start': 'voice.tts.onSpeechStart', 'voice:speech:chunk': 'voice.tts.onSpeechChunk', 'voice:speech:end': 'voice.tts.onSpeechEnd',
   'task:created': 'onTaskCreated', 'task:updated': 'onTaskUpdated', 'task:deleted': 'onTaskDeleted', 'project:changed': 'projects.onChanged', 'transcript:changed': 'onTranscriptChanged',
   'skills:changed': 'skills.onChanged', 'agent:status': 'onAgentStatus', 'agent:startQueueChanged': 'onAgentStartQueueChanged',
   'project:statusChanged': 'projects.onStatusChanged', 'concurrency:changed': 'concurrency.onChanged', 'tasks:refresh': 'onTasksRefresh',

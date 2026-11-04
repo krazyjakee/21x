@@ -1,4 +1,9 @@
-/** Management only: no capture, actions, audio, host paths or hosted speech. */
+/**
+ * Management only: models, runtime and settings. Live turns and speech audio
+ * are in voice-turn-codecs.ts. Host paths and hosted speech never cross.
+ * Status, error and install-log text is passed through (clipped), because it is
+ * what the settings page shows the user.
+ */
 import type { DesktopCommandMap, DesktopEventMap } from './desktop-operations'
 import type { OptionalResult } from './host-services'
 import { VOICE_TRANSITIONS } from './voice'
@@ -17,6 +22,18 @@ export const VOICE_MANAGEMENT_ERROR = 'Voice management failed. Check the local 
 export const VOICE_MANAGEMENT_UNAVAILABLE = 'Voice capture and audio playback are unavailable in this desktop host.'
 export const VOICE_MANAGEMENT_HOSTED_UNAVAILABLE = 'Hosted speech is unavailable in this desktop host.'
 const fail = (code: 'INVALID_ARGUMENTS' | 'INVALID_RESULT'): never => { throw new ServiceProtocolError(code) }
+/** Longest status or error message shown in settings. */
+const MESSAGE_BYTES = 4096
+/** Longest slice of install output carried by one progress event. */
+const OUTPUT_BYTES = 16384
+/** Shortens `value` to `max` UTF-8 bytes, dropping NUL, without splitting a character. */
+function clip(value: unknown, max: number): string {
+  let out = String(value ?? '').replace(/\0/g, '')
+  if (new TextEncoder().encode(out).length <= max) return out
+  out = new TextDecoder().decode(new TextEncoder().encode(out).slice(0, max))
+  return out.endsWith('\uFFFD') ? out.slice(0, -1) : out
+}
+const message = (v: unknown, max = MESSAGE_BYTES): v is string => typeof v === 'string' && !v.includes('\0') && new TextEncoder().encode(v).length <= max
 const shape = (v: unknown, required: readonly string[], optional: readonly string[] = []): v is Record<string, unknown> => isRecord(v) && hasExactKeys(v, [...required], [...optional])
 const text = (v: unknown, max: number = VOICE_MANAGEMENT_LIMITS.textBytes, multiline = false): v is string => typeof v === 'string' && !(multiline ? /\0/ : /[\u0000-\u001f\u007f]/).test(v) && new TextEncoder().encode(v).length <= max
 const integer = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
@@ -28,24 +45,24 @@ const voiceId = (v: unknown): boolean => v === '' || text(v, 512) && (v.startsWi
 const success = (v: unknown): boolean => shape(v, ['success']) && typeof v.success === 'boolean'
 const runtimeKeys = ['installed', 'version', 'modulePath', 'sizeBytes']
 export function isVoiceManagementRuntime(v: unknown): boolean {
-  return shape(v, runtimeKeys, ['installing', 'progress', 'error']) && typeof v.installed === 'boolean' && (v.version === null || text(v.version, 128)) && (v.modulePath === null || v.modulePath === VOICE_RUNTIME_MODULE_MARKER) && integer(v.sizeBytes) && (v.installing === undefined || typeof v.installing === 'boolean') && (v.progress === undefined || between(v.progress, 0, 1)) && (v.error === undefined || v.error === VOICE_MANAGEMENT_ERROR)
+  return shape(v, runtimeKeys, ['installing', 'progress', 'error']) && typeof v.installed === 'boolean' && (v.version === null || text(v.version, 128)) && (v.modulePath === null || v.modulePath === VOICE_RUNTIME_MODULE_MARKER) && integer(v.sizeBytes) && (v.installing === undefined || typeof v.installing === 'boolean') && (v.progress === undefined || between(v.progress, 0, 1)) && (v.error === undefined || message(v.error))
 }
 function projectRuntime(v: unknown): unknown {
   if (!shape(v, runtimeKeys, ['installing', 'progress', 'error']) || !(v.modulePath === null || text(v.modulePath, 4096))) return fail('INVALID_RESULT')
   if (v.error !== undefined && typeof v.error !== 'string') return fail('INVALID_RESULT')
   const clean = Object.fromEntries(Object.entries(v).filter(([, item]) => item !== undefined))
-  return { ...clean, modulePath: v.modulePath ? VOICE_RUNTIME_MODULE_MARKER : null, ...(v.error === undefined ? {} : { error: VOICE_MANAGEMENT_ERROR }) }
+  return { ...clean, modulePath: v.modulePath ? VOICE_RUNTIME_MODULE_MARKER : null, ...(v.error === undefined ? {} : { error: clip(v.error, MESSAGE_BYTES) }) }
 }
 const modelKeys = ['id', 'label', 'description', 'license', 'licenseUrl', 'languages', 'installed', 'active', 'installing', 'progress', 'sizeBytes', 'downloadable']
 function model(v: unknown, tts = false): boolean {
   return shape(v, tts ? [...modelKeys, 'unpackedBytes', 'speakerCount'] : modelKeys, tts ? ['error'] : ['error', 'kind', 'phase', 'legacy']) && (tts ? ttsId(v.id) : sttId(v.id)) && ['label', 'description', 'license', 'licenseUrl'].every(key => text(v[key], key === 'description' ? 4096 : 1024)) && Array.isArray(v.languages) && v.languages.length <= 64 && v.languages.every(item => text(item, 64)) && ['installed', 'active', 'installing', 'downloadable'].every(key => typeof v[key] === 'boolean') && between(v.progress, 0, 1) && integer(v.sizeBytes) &&
-    (tts ? integer(v.unpackedBytes) && integer(v.speakerCount) && v.speakerCount <= 512 : (v.kind === undefined || ['streaming', 'offline'].includes(v.kind as string)) && (v.phase === undefined || ['downloading', 'verifying'].includes(v.phase as string)) && (v.legacy === undefined || typeof v.legacy === 'boolean')) && (v.error === undefined || v.error === VOICE_MANAGEMENT_ERROR)
+    (tts ? integer(v.unpackedBytes) && integer(v.speakerCount) && v.speakerCount <= 512 : (v.kind === undefined || ['streaming', 'offline'].includes(v.kind as string)) && (v.phase === undefined || ['downloading', 'verifying'].includes(v.phase as string)) && (v.legacy === undefined || typeof v.legacy === 'boolean')) && (v.error === undefined || message(v.error))
 }
 function projectModel(v: unknown, tts = false): unknown {
   if (!isRecord(v)) return fail('INVALID_RESULT')
   if (v.error !== undefined && typeof v.error !== 'string') return fail('INVALID_RESULT')
   const clean = Object.fromEntries(Object.entries(v).filter(([, item]) => item !== undefined))
-  if (clean.error !== undefined) clean.error = VOICE_MANAGEMENT_ERROR
+  if (clean.error !== undefined) clean.error = clip(clean.error, MESSAGE_BYTES)
   if (!model(clean, tts)) return fail('INVALID_RESULT')
   return clean
 }
@@ -59,12 +76,11 @@ function engine(v: unknown, tts = false): boolean {
   if (v.state === 'loading') return shape(v, ['state'])
   if (v.state === 'ready') return tts ? shape(v, ['state', 'engine', 'modelId', 'voiceId', 'sampleRate']) && ['system', 'local'].includes(v.engine as string) && (v.modelId === '' || ttsId(v.modelId)) && voiceId(v.voiceId) && integer(v.sampleRate) && v.sampleRate > 0 && v.sampleRate <= 192000
     : shape(v, ['state', 'modelId', 'engine']) && sttId(v.modelId) && text(v.engine, 128)
-  return shape(v, ['state', 'message']) && (tts ? ['unavailable', 'model_missing', 'error'] : ['engine_missing', 'model_missing', 'error']).includes(v.state as string) && [VOICE_MANAGEMENT_ERROR, VOICE_MANAGEMENT_UNAVAILABLE].includes(v.message as string)
+  return shape(v, ['state', 'message']) && (tts ? ['unavailable', 'model_missing', 'error'] : ['engine_missing', 'model_missing', 'error']).includes(v.state as string) && message(v.message)
 }
 function projectEngine(v: unknown): unknown {
   if (!isRecord(v)) return fail('INVALID_RESULT')
-  const unavailable = v.state !== 'error' || ['Native microphone recognition is unavailable on this host.', 'Desktop speech audio is unavailable in this host.', VOICE_MANAGEMENT_HOSTED_UNAVAILABLE].includes(v.message as string)
-  return v.message === undefined ? v : { ...v, message: unavailable ? VOICE_MANAGEMENT_UNAVAILABLE : VOICE_MANAGEMENT_ERROR }
+  return v.message === undefined ? v : { ...v, message: clip(v.message, MESSAGE_BYTES) }
 }
 const statusKeys = ['enabled', 'engine', 'models', 'shortcut', 'runtime']
 function status(v: unknown, snapshot = false): boolean {
@@ -140,13 +156,13 @@ function codec<K extends VoiceManagementOperation>(operation: K): VoiceManagemen
 export const VOICE_MANAGEMENT_CODECS = Object.fromEntries(VOICE_MANAGEMENT_OPERATIONS.map(op => [op, codec(op)])) as { [K in VoiceManagementOperation]: VoiceManagementCodec<K> }
 type ManagementEvent = typeof VOICE_MANAGEMENT_EVENTS[number]
 function event(event: ManagementEvent) {
-  const valid = (v: unknown): boolean => bounded(v) && (event === 'voice:status' ? status(v) : event === 'voice:tts:status' ? isVoiceManagementTtsSnapshot(v) : event === 'voice:tts:modelProgress' ? shape(v, ['model']) && model(v.model, true) : shape(v, ['stage', 'output', 'percent']) && ['starting', 'installing', 'complete', 'error'].includes(v.stage as string) && v.output === (v.stage === 'error' ? VOICE_MANAGEMENT_ERROR : VOICE_MANAGEMENT_UNAVAILABLE) && between(v.percent, 0, 100))
+  const valid = (v: unknown): boolean => bounded(v) && (event === 'voice:status' ? status(v) : event === 'voice:tts:status' ? isVoiceManagementTtsSnapshot(v) : event === 'voice:tts:modelProgress' ? shape(v, ['model']) && model(v.model, true) : shape(v, ['stage', 'output', 'percent']) && ['starting', 'installing', 'complete', 'error'].includes(v.stage as string) && message(v.output, OUTPUT_BYTES) && between(v.percent, 0, 100))
   const project = (v: unknown): unknown => {
     if (event === 'voice:status') return projectStatus(v)
     if (event === 'voice:tts:status') return projectTts(v)
     if (event === 'voice:tts:modelProgress') { if (!shape(v, ['model'])) return fail('INVALID_RESULT'); return { model: projectModel(v.model, true) } }
     if (!shape(v, ['stage', 'output', 'percent'])) return fail('INVALID_RESULT')
-    return { ...v, output: v.stage === 'error' ? VOICE_MANAGEMENT_ERROR : VOICE_MANAGEMENT_UNAVAILABLE }
+    return { ...v, output: clip(v.output, OUTPUT_BYTES) }
   }
   return { validatePayload: valid, encodePayload(v: unknown): JsonValue { const out = project(v); if (!valid(out)) return fail('INVALID_RESULT'); return out as JsonValue }, decodePayload(v: JsonValue): DesktopEventMap[ManagementEvent] { if (!valid(v)) return fail('INVALID_RESULT'); return v as unknown as DesktopEventMap[ManagementEvent] } }
 }

@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/Switch'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { settingsApi, voiceApi } from '@/lib/ipc-client'
+import { desktopSupports } from '@/lib/desktop-api'
 import { selectVoiceSetupComplete, useVoiceStore } from '@/stores/voice-store'
 import { VoiceRuntimeRow } from '@/components/voice/VoiceRuntimeRow'
 import { AdvancedDisclosure } from '../AdvancedDisclosure'
@@ -427,7 +428,8 @@ export function VoiceSettings() {
               />
             </div>
 
-            <div className="space-y-2 rounded-lg border border-border p-3">
+            {/* Hosts that cannot register a global shortcut hide the control. */}
+            {desktopSupports('voice.setShortcut') && <div className="space-y-2 rounded-lg border border-border p-3">
               <Label htmlFor="voice-shortcut">Global shortcut</Label>
               <p className="text-xs text-muted-foreground">
                 This shortcut starts and stops a turn. Press-and-hold works inside the app window.
@@ -443,11 +445,11 @@ export function VoiceSettings() {
                   Save
                 </Button>
               </div>
-            </div>
+            </div>}
 
             {runtime.installed && (
               <>
-                <div className="space-y-2 rounded-lg border border-border p-3">
+                {desktopSupports('voice.setCustomModelDir') && <div className="space-y-2 rounded-lg border border-border p-3">
                   <Label htmlFor="voice-model-dir">Use another model directory (optional)</Label>
                   <p className="text-xs text-muted-foreground">
                     Only for a model you installed by hand. The directory must hold an encoder, a decoder, a joiner and
@@ -469,7 +471,7 @@ export function VoiceSettings() {
                       Use
                     </Button>
                   </div>
-                </div>
+                </div>}
 
                 <div className="flex items-center justify-between rounded-lg border border-border p-3">
                   <div className="space-y-0.5">

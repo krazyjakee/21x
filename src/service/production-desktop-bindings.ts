@@ -27,6 +27,8 @@ import { ArtifactBackend } from './artifact-backend'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { VoiceManagementBackend } from './voice-management-backend'
 import { VOICE_MANAGEMENT_CODECS, VOICE_MANAGEMENT_EVENT_CODECS } from '../shared/voice-management-codecs'
+import { VOICE_TURN_CODECS, VOICE_TURN_EVENT_CODECS } from '../shared/voice-turn-codecs'
+import { VoiceTurnBackend } from './voice-turn-backend'
 import { MobileBackend, type MobileBackendOptions } from './mobile-backend'
 import { MOBILE_CODECS, MOBILE_EVENT_CODECS } from '../shared/mobile-codecs'
 import { SessionContextBackend } from './session-context-backend'
@@ -105,9 +107,9 @@ export interface ProductionDesktopBindingOptions {
 export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS, ...TRAY_PREFERENCE_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...PROJECT_CONFIGURATION_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...VOICE_TURN_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
-  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...TASK_FEEDBACK_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS }
+  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...TASK_FEEDBACK_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...VOICE_TURN_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS }
 
 /** Validate actual wire payload, including explicit binary envelopes. */
 export function validateProductionEventWire(operation: string, payload: unknown): boolean {
@@ -146,6 +148,7 @@ export class ProductionDesktopBindings {
   private readonly artifacts: ArtifactBackend
   private readonly artifactViewers: ArtifactViewerOwner | null
   private readonly voice: VoiceManagementBackend | null
+  private readonly voiceTurns: VoiceTurnBackend | null
   private readonly gitProviders: GitProviderBackend
   private readonly groups: TaskGroupBackend
   private readonly projectRuntime: ProjectRuntimeBackend
@@ -324,6 +327,9 @@ export class ProductionDesktopBindings {
     const voiceLease = owner.getVoiceBindingLease()
     this.voice = voiceLease ? new VoiceManagementBackend({ ...voiceLease, engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageVoice: dynamicAuthority.canManageGlobalConfiguration }) : null
+    this.voiceTurns = voiceLease ? new VoiceTurnBackend({ voice: voiceLease.voice, commanderVoice: voiceLease.commanderVoice, engineEpoch: this.epoch,
+      assertAvailable: () => { available(); voiceLease.assertVoiceOwners({ voice: voiceLease.voice, speech: voiceLease.speech }) },
+      isTrustedDesktop: dynamicAuthority.isTrustedDesktop }) : null
     this.gitProviders = new GitProviderBackend({ ...owner.getGitProviderBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canManageGitProviders: dynamicAuthority.canManageGlobalConfiguration })
     this.workspaceFiles = new WorkspaceFileBackend({ ...owner.getWorkspaceFileBindingLease(), engineEpoch: this.epoch, assertAvailable: available,
@@ -340,9 +346,9 @@ export class ProductionDesktopBindings {
       isTrustedDesktop: dynamicAuthority.isTrustedDesktop, canPublishUi: dynamicAuthority.isTrustedDesktop,
       canAccessProject: dynamicAuthority.canAccessProject, canAccessTask: dynamicAuthority.canAccessTask, canAccessAgent: dynamicAuthority.canAccessAgent }) : null
     owner.retainCleanup('desktop-bindings', () => {
-      this.closed = true; this.projectConfiguration.shutdown(); this.tray.shutdown(); this.ui?.shutdown(); this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifactViewers?.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
+      this.closed = true; this.projectConfiguration.shutdown(); this.tray.shutdown(); this.ui?.shutdown(); this.cliMcp.shutdown(); this.taskAttachments.shutdown(); this.database.close(); this.lifecycle.shutdown(); this.commander.shutdown(); this.terminals.shutdown(); this.mcp.shutdown(); this.connectors?.shutdown(); this.claudePlugins.shutdown(); this.mobile?.shutdown(); this.agentInstaller.stop(); this.artifactViewers?.stop(); this.artifacts.shutdown(); this.voice?.shutdown(); this.voiceTurns?.shutdown(); this.gitProviders.shutdown(); this.workspaceFiles.shutdown(); this.groups.shutdown(); this.projectRuntime.shutdown(); this.heartbeat.shutdown(); this.worktreeRuntime.shutdown()
       void Promise.all([this.agents.close(), this.tasks.close(), this.settings.close(), this.sources.close(), this.sourcePlugins.close(), this.sessionContext.close()]).catch(() => { /* Registered drain retains raw work. */ })
-    }, () => Promise.all([this.projectConfiguration.close(), this.tray.close(), this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifactViewers?.close(), this.artifacts.close(), this.voice?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close(), this.ui?.close()]).then(() => undefined))
+    }, () => Promise.all([this.projectConfiguration.close(), this.tray.close(), this.agents.close(), this.tasks.close(), this.lifecycle.close(), this.commander.close(), this.settings.close(), this.terminals.close(), this.mcp.close(), this.sources.close(), this.sourcePlugins.close(), this.connectors?.close(), this.sessionContext.close(), this.claudePlugins.close(), this.mobile?.close(), this.agentInstaller.close(), this.artifactViewers?.close(), this.artifacts.close(), this.voice?.close(), this.voiceTurns?.close(), this.gitProviders.close(), this.workspaceFiles.close(), this.groups.close(), this.projectRuntime.close(), this.heartbeat.close(), this.worktreeRuntime.close(), this.cliMcp.close(), this.taskAttachments.close(), this.ui?.close()]).then(() => undefined))
   }
 
   /** Source-only consumer; absent from operationSchemas and desktop dispatch. */
@@ -399,6 +405,7 @@ export class ProductionDesktopBindings {
     if (!validateProductionEventWire(operation, payload)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
     const authority = this.options.authority
     if (Object.hasOwn(VOICE_MANAGEMENT_EVENT_CODECS, operation)) return this.voice && authority.canManageGlobalConfiguration(caller, 'read') ? payload : undefined
+    if (Object.hasOwn(VOICE_TURN_EVENT_CODECS, operation)) return this.voiceTurns?.projectEvent(operation, payload, caller)
     const taskAllowed = (id: unknown): boolean => {
       if (typeof id !== 'string' || !authority.canAccessTask(id, caller, 'read')) return false
       const task = this.services.db.getTask(id)
@@ -478,7 +485,7 @@ export class ProductionDesktopBindings {
     const schemas = { ...this.tray.operationSchemas(caller), ...this.database.operationSchemas(caller), ...this.content.operationSchemas(caller), ...this.projectConfiguration.operationSchemas(caller), ...this.agents.operationSchemas(caller),
       ...this.tasks.operationSchemas(caller), ...this.lifecycle.operationSchemas(caller), ...this.commander.operationSchemas(caller),
       ...this.settings.operationSchemas(caller), ...this.terminals.operationSchemas(caller), ...this.mcp.operationSchemas(caller), ...this.sources.operationSchemas(caller),
-      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller), ...this.heartbeat.operationSchemas(caller), ...this.worktreeRuntime.operationSchemas(caller), ...this.cliMcp.operationSchemas(caller), ...this.taskAttachments.operationSchemas(caller), ...this.ui?.operationSchemas(caller) }
+      ...this.sourcePlugins.operationSchemas(caller), ...this.connectors?.operationSchemas(caller), ...this.sessionContext.operationSchemas(caller), ...this.claudePlugins.operationSchemas(caller), ...this.mobile?.operationSchemas(caller), ...this.agentInstaller.operationSchemas(caller), ...this.artifacts.operationSchemas(caller), ...this.voice?.operationSchemas(caller), ...this.voiceTurns?.operationSchemas(caller), ...this.gitProviders.operationSchemas(caller), ...this.workspaceFiles.operationSchemas(caller), ...this.groups.operationSchemas(caller), ...this.projectRuntime.operationSchemas(caller), ...this.heartbeat.operationSchemas(caller), ...this.worktreeRuntime.operationSchemas(caller), ...this.cliMcp.operationSchemas(caller), ...this.taskAttachments.operationSchemas(caller), ...this.ui?.operationSchemas(caller) }
     return Object.fromEntries(Object.entries(schemas).map(([operation, schema]) => [operation, {
       ...schema, handle: (payload: JsonValue, signal: AbortSignal) => this.invoke(operation, payload, caller, signal)
     }]))
@@ -509,6 +516,10 @@ export class ProductionDesktopBindings {
         if (Object.hasOwn(VOICE_MANAGEMENT_CODECS, operation)) {
           if (!this.voice) throw new ServiceProtocolError('UNKNOWN_OPERATION')
           return await this.voice.registry.invoke(operation, payload, caller, combined.signal)
+        }
+        if (Object.hasOwn(VOICE_TURN_CODECS, operation)) {
+          if (!this.voiceTurns) throw new ServiceProtocolError('UNKNOWN_OPERATION')
+          return await this.voiceTurns.registry.invoke(operation, payload, caller, combined.signal)
         }
         if (Object.hasOwn(MOBILE_CODECS, operation)) {
           if (!this.mobile) throw new ServiceProtocolError('UNKNOWN_OPERATION')

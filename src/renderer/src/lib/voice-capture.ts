@@ -15,35 +15,12 @@
  */
 
 import { VOICE_SAMPLE_RATE } from '@shared/voice'
+// Loaded as a bundled same-origin asset: a strict `script-src 'self'` policy
+// (the Tauri window) refuses a worklet built from a blob URL.
+import workletUrl from './voice-pcm-worklet.js?url'
 
 /** Send about this much audio per IPC message. */
 const BATCH_SAMPLES = VOICE_SAMPLE_RATE / 10
-
-/**
- * Runs inside the audio thread. It only converts float samples to 16-bit and
- * reports a level, so it cannot stall the user interface.
- */
-const WORKLET_SOURCE = `
-class VoicePcmProcessor extends AudioWorkletProcessor {
-  process(inputs) {
-    const channel = inputs[0] && inputs[0][0]
-    if (!channel) return true
-    const samples = new Int16Array(channel.length)
-    let sum = 0
-    for (let i = 0; i < channel.length; i++) {
-      const clamped = Math.max(-1, Math.min(1, channel[i]))
-      samples[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff
-      sum += clamped * clamped
-    }
-    this.port.postMessage(
-      { samples, level: Math.sqrt(sum / channel.length) },
-      [samples.buffer]
-    )
-    return true
-  }
-}
-registerProcessor('voice-pcm', VoicePcmProcessor)
-`
 
 export interface VoiceCaptureHandlers {
   /** One batch of 16-bit little-endian PCM. */
@@ -90,13 +67,7 @@ export class VoiceCapture {
     if (this.ready) return this.ready
     this.ready = (async () => {
       const context = new AudioContext({ sampleRate: VOICE_SAMPLE_RATE })
-      const blob = new Blob([WORKLET_SOURCE], { type: 'application/javascript' })
-      const url = URL.createObjectURL(blob)
-      try {
-        await context.audioWorklet.addModule(url)
-      } finally {
-        URL.revokeObjectURL(url)
-      }
+      await context.audioWorklet.addModule(workletUrl)
       const node = new AudioWorkletNode(context, 'voice-pcm')
       node.port.onmessage = (event: MessageEvent<{ samples: Int16Array; level: number }>) => {
         // Frames that arrive between turns are dropped: no handlers, no audio.

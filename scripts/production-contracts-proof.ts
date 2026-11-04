@@ -8,6 +8,7 @@ import { TASK_GROUP_CODECS } from '../src/shared/task-group-codecs'
 import { PROJECT_RUNTIME_CODECS } from '../src/shared/project-runtime-codecs'
 import { PROJECT_CONFIGURATION_CODECS } from '../src/shared/project-configuration-codecs'
 import { VOICE_MANAGEMENT_CODECS } from '../src/shared/voice-management-codecs'
+import { VOICE_TURN_CODECS } from '../src/shared/voice-turn-codecs'
 import { GIT_PROVIDER_CODECS } from '../src/shared/git-provider-codecs'
 import { WORKSPACE_FILE_CODECS } from '../src/shared/workspace-file-codecs'
 import { AGENT_INSTALLER_CODECS } from '../src/shared/agent-installer-codecs'
@@ -36,7 +37,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS, ...TRAY_PREFERENCE_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...PROJECT_CONFIGURATION_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...VOICE_TURN_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -73,6 +74,12 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'voice:installModel': ['nemo-parakeet-tdt-0.6b-v3'], 'voice:removeModel': ['sherpa-streaming-zipformer-en'], 'voice:removeAllModels': [], 'voice:selectModel': ['nemo-fast-conformer-en-480ms'], 'voice:setEndpointSilence': [1.5],
   'voice:tts:getSnapshot': [], 'voice:tts:setEnabled': [false], 'voice:tts:setEngine': ['local'], 'voice:tts:setVoice': ['local:kitten-nano-en-v0_2:0'], 'voice:tts:setSpeed': [1.25], 'voice:tts:setMaxChars': [1200], 'voice:tts:setSpeakActionResults': [false], 'voice:tts:setOnlyVoiceTurns': [true],
   'voice:tts:installModel': ['kitten-nano-en-v0_2'], 'voice:tts:selectModel': ['kokoro-en-v0_19'], 'voice:tts:removeModel': ['kitten-nano-en-v0_2'],
+  'voice:startTurn': ['dictation', { selectedTaskId: task, view: 'tasks', visibleTaskIds: [task], pendingApproval: { taskId: task, sessionId: 'session_fixture' } }],
+  'voice:pushAudio': ['turn_fixture', new Uint8Array(3200)], 'voice:endTurn': ['turn_fixture'], 'voice:cancelTurn': ['turn_fixture', 'epoch_fixture'],
+  'voice:confirm': ['turn_fixture', { taskId: task }, 'epoch_fixture'], 'voice:dismiss': ['turn_fixture', 'epoch_fixture'],
+  'voice:expectAnswer': ['turn_fixture', task], 'voice:answerNotExpected': [task],
+  'voice:tts:preview': ['system:café'], 'voice:tts:speak': ['Read this aloud 🌱', task], 'voice:tts:stop': [],
+  'voice:commander:setActive': ['session_fixture'], 'voice:commander:bargeIn': ['session_fixture'], 'voice:commander:send': ['session_fixture', 'Spoken Commander turn'],
   'agent-installer:detect': [], 'agent-installer:install': ['opencode'], 'artifacts:scan': [task], 'artifacts:copyFile': [task, 'report.md'], 'artifacts:read': [task, 'artifacts/fixture/report.md'],
   'db:getTasks': [project], 'db:getTask': [task], 'db:createTask': [{ title: 'Fixture task', project_id: project }],
   'db:updateTask': [task, { title: 'Updated fixture', status: 'ready_for_review' }], 'db:deleteTask': [task],
@@ -194,6 +201,11 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   ...['kitten-nano-en-v0_2', 'kokoro-en-v0_19'].map(id => ({ operation: 'voice:tts:selectModel', case: `finite-tts-${id}`, args: [id] })),
   ...['claudeCode', 'opencode', 'codex', 'pi', 'cursor', 'nodejs', 'npm', 'pnpm', 'git', 'gh', 'glab', 'tea', 'rtk'].map(name => ({ operation: 'agent-installer:install', case: `finite-installer-${name}`, args: [name] })),
   { operation: 'voice:setEndpointSilence', case: 'seconds-upper-bound', args: [10] },
+  { operation: 'voice:startTurn', case: 'empty-context', args: ['conversation', {}] },
+  { operation: 'voice:pushAudio', case: 'audio-upper-bound', args: ['turn_fixture', new Uint8Array(64 * 1024)] },
+  { operation: 'voice:cancelTurn', case: 'implicit-turn', args: [] },
+  { operation: 'voice:answerNotExpected', case: 'any-task', args: [] },
+  { operation: 'voice:commander:setActive', case: 'close-voice-mode', args: [null] },
   { operation: 'voice:tts:setSpeed', case: 'speed-lower-bound', args: [0.5] },
   { operation: 'voice:tts:setSpeed', case: 'speed-upper-bound', args: [2] },
   { operation: 'voice:tts:setMaxChars', case: 'characters-upper-bound', args: [6000] },
@@ -292,7 +304,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 229 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 243 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

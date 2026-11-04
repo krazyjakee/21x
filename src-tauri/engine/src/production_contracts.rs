@@ -10,6 +10,8 @@ mod cli_attachments;
 pub(crate) use cli_attachments::{filename as attachment_filename, uuid as attachment_uuid};
 #[path = "production_project_groups.rs"]
 mod project_groups;
+#[path = "production_voice_turns.rs"]
+mod voice_turns;
 #[path = "production_workspace_runtime.rs"]
 mod workspace_runtime;
 
@@ -101,6 +103,20 @@ pub const COMMANDS: &[&str] = &[
     "voice:tts:installModel",
     "voice:tts:selectModel",
     "voice:tts:removeModel",
+    "voice:startTurn",
+    "voice:pushAudio",
+    "voice:endTurn",
+    "voice:cancelTurn",
+    "voice:confirm",
+    "voice:dismiss",
+    "voice:expectAnswer",
+    "voice:answerNotExpected",
+    "voice:tts:preview",
+    "voice:tts:speak",
+    "voice:tts:stop",
+    "voice:commander:setActive",
+    "voice:commander:bargeIn",
+    "voice:commander:send",
     "agent-installer:detect",
     "agent-installer:install",
     "artifacts:scan",
@@ -256,6 +272,18 @@ pub const EVENTS: &[&str] = &[
     "voice:runtimeProgress",
     "voice:tts:status",
     "voice:tts:modelProgress",
+    "voice:state",
+    "voice:partial",
+    "voice:final",
+    "voice:segment",
+    "voice:outcome",
+    "voice:error",
+    "voice:navigate",
+    "voice:dictate",
+    "voice:hotkey",
+    "voice:speech:start",
+    "voice:speech:chunk",
+    "voice:speech:end",
     "mobile:pairing-initiated",
     "mobile:device-connected",
     "task:created",
@@ -2691,9 +2719,6 @@ const VOICE_COMMANDS: &[&str] = &[
     "voice:tts:selectModel",
     "voice:tts:removeModel",
 ];
-const VOICE_ERROR: &str = "Voice management failed. Check the local runtime and model.";
-const VOICE_UNAVAILABLE: &str =
-    "Voice capture and audio playback are unavailable in this desktop host.";
 fn voice_text(value: &Value, max: usize, multiline: bool) -> bool {
     value.as_str().is_some_and(|s| {
         s.len() <= max
@@ -2701,6 +2726,10 @@ fn voice_text(value: &Value, max: usize, multiline: bool) -> bool {
                 .chars()
                 .any(|c| c == '\0' || !multiline && (c <= '\u{001f}' || c == '\u{007f}'))
     })
+}
+/// Status and error text shown in Voice settings. The service clips it.
+fn voice_message(value: &Value) -> bool {
+    voice_text(value, 4096, true)
 }
 fn voice_number(value: &Value, min: f64, max: f64) -> bool {
     value
@@ -2759,7 +2788,7 @@ fn voice_runtime(v: &Value) -> bool {
         && integer(&v["sizeBytes"])
         && v.get("installing").is_none_or(Value::is_boolean)
         && v.get("progress").is_none_or(|x| voice_number(x, 0.0, 1.0))
-        && v.get("error").is_none_or(|x| x == VOICE_ERROR)
+        && v.get("error").is_none_or(voice_message)
 }
 fn voice_model(v: &Value, tts: bool) -> bool {
     let common = [
@@ -2810,7 +2839,7 @@ fn voice_model(v: &Value, tts: bool) -> bool {
             .all(|key| v[key].is_boolean())
         && voice_number(&v["progress"], 0.0, 1.0)
         && integer(&v["sizeBytes"])
-        && v.get("error").is_none_or(|x| x == VOICE_ERROR)
+        && v.get("error").is_none_or(voice_message)
         && if tts {
             integer(&v["unpackedBytes"])
                 && integer(&v["speakerCount"])
@@ -2868,7 +2897,7 @@ fn voice_engine(v: &Value, tts: bool) -> bool {
                 Some("engine_missing" | "model_missing" | "error")
             )
         })
-        && (v["message"] == VOICE_ERROR || v["message"] == VOICE_UNAVAILABLE)
+        && voice_message(&v["message"])
 }
 fn voice_status(v: &Value, snapshot: bool) -> bool {
     let common = ["enabled", "engine", "models", "shortcut", "runtime"];
@@ -3436,6 +3465,9 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
     if project_groups::COMMANDS.contains(&operation) {
         return project_groups::request(operation, value);
     }
+    if voice_turns::COMMANDS.contains(&operation) {
+        return voice_turns::request(operation, value);
+    }
     if WORKSPACE_FILE_COMMANDS.contains(&operation) {
         return if operation == "tasks:getWorkspaceDir" {
             object(value, &["taskId"], &[]) && id(&value["taskId"])
@@ -3605,6 +3637,9 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
     }
     if project_groups::COMMANDS.contains(&operation) {
         return project_groups::result(operation, value);
+    }
+    if voice_turns::COMMANDS.contains(&operation) {
+        return voice_turns::result(operation, value);
     }
     if WORKSPACE_FILE_COMMANDS.contains(&operation) {
         if matches!(operation, "shell:openPath" | "shell:showItemInFolder") {
@@ -3935,6 +3970,9 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
     if workspace_runtime::EVENTS.contains(&operation) {
         return workspace_runtime::event(operation, value);
     }
+    if voice_turns::EVENTS.contains(&operation) {
+        return voice_turns::event(operation, value);
+    }
     if !EVENTS.contains(&operation) || !bounded_bytes(value, 1024 * 1024) {
         return false;
     }
@@ -3972,12 +4010,8 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
                     value["stage"].as_str(),
                     Some("starting" | "installing" | "complete" | "error")
                 )
-                && value["output"]
-                    == if value["stage"] == "error" {
-                        VOICE_ERROR
-                    } else {
-                        VOICE_UNAVAILABLE
-                    }
+                // A slice of npm or download output, clipped by the service.
+                && voice_text(&value["output"], 16384, true)
                 && voice_number(&value["percent"], 0.0, 100.0)
         }
         "mobile:pairing-initiated" => bounded_bytes(value, 64 * 1024) && mobile_pin(value),
@@ -4570,7 +4604,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 34);
+        assert_eq!(EVENTS.len(), 46);
         let requests = [
             ("mobile:getInfo", json!({})),
             (
@@ -5463,7 +5497,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 229);
+        assert_eq!(COMMANDS.len(), 243);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})
@@ -5643,11 +5677,15 @@ mod tests {
         ));
         assert!(!valid_event(
             "voice:runtimeProgress",
-            &json!({"stage":"installing","output":"raw process credential","percent":10})
+            &json!({"stage":"installing","output":{"raw":true},"percent":10})
+        ));
+        assert!(!valid_event(
+            "voice:runtimeProgress",
+            &json!({"stage":"installing","output":"x".repeat(16385),"percent":10})
         ));
         assert!(valid_event(
             "voice:runtimeProgress",
-            &json!({"stage":"error","output":VOICE_ERROR,"percent":100})
+            &json!({"stage":"installing","output":"added 3 packages\n","percent":10})
         ));
     }
     #[test]

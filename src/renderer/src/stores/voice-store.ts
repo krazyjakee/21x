@@ -389,10 +389,12 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
 
   setEnabled: async (enabled) => {
     // Ask for the microphone only after the user switches voice on (design §5.9).
+    // A host without a separate OS gate (the Tauri window asks for the
+    // microphone itself when capture starts) reports `unsupported`.
     if (enabled) {
-      const current = await voiceApi.getPermission()
-      let status = current.status
-      if (status === 'not-determined') status = (await voiceApi.requestPermission()).status
+      const current = desktopSupports('voice.getPermission') ? await voiceApi.getPermission() : { status: 'unsupported' as const }
+      let status: MicrophonePermission = current.status
+      if (status === 'not-determined' && desktopSupports('voice.requestPermission')) status = (await voiceApi.requestPermission()).status
       set({ permission: status })
       if (status === 'denied') {
         set({
@@ -567,7 +569,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   },
 
   requestPermission: async () => {
-    const { status } = await voiceApi.requestPermission()
+    const { status } = desktopSupports('voice.requestPermission') ? await voiceApi.requestPermission() : { status: 'unsupported' as const }
     set({ permission: status })
     return status
   },

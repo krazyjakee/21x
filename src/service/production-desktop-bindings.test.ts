@@ -5,6 +5,7 @@ import { TASK_ATTACHMENT_CODECS } from '../shared/task-attachment-codecs'
 import { AGENT_INSTALLER_CODECS } from '../shared/agent-installer-codecs'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
 import { VOICE_MANAGEMENT_CODECS } from '../shared/voice-management-codecs'
+import { VOICE_TURN_CODECS } from '../shared/voice-turn-codecs'
 import { MOBILE_CODECS } from '../shared/mobile-codecs'
 import { SESSION_CONTEXT_CODECS } from '../shared/session-context-codecs'
 import { CLAUDE_PLUGIN_CODECS } from '../shared/claude-plugin-codecs'
@@ -522,7 +523,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
       await restarted.close()
     } finally { Object.assign(entry, original) }
   })
-  it('borrows actual local voice owners while refusing unbound microphone, playback and hosted effects', async () => {
+  it('borrows actual local voice owners, binds live turns, and refuses unbound shortcut and hosted effects', async () => {
     const f = await fixture(undefined, false, false, true)
     const lease = f.owner.getVoiceBindingLease()!
     expect(lease.voice).toBe(f.services.voice!.voice); expect(lease.speech).toBe(f.services.voice!.speech)
@@ -535,8 +536,13 @@ describe('reviewed bindings attached to the actual production singleton', () => 
     f.options.authority.canManageGlobalConfiguration = () => false
     await expect(f.backend.invoke('voice:setEndpointSilence', VOICE_MANAGEMENT_CODECS['voice:setEndpointSilence'].encodeArguments([2]), f.caller, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     f.options.authority.canManageGlobalConfiguration = grant
-    await expect(f.backend.invoke('voice:installRuntime', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
-    for (const operation of ['voice:startTurn', 'voice:pushAudio', 'voice:confirm', 'voice:setShortcut', 'voice:tts:speak', 'voice:tts:preview', 'voice:tts:elevenlabs:setKey']) {
+    // A live turn reaches the real recognition owner, which answers that
+    // voice is off rather than opening a microphone turn.
+    const started = await f.backend.invoke('voice:startTurn', VOICE_TURN_CODECS['voice:startTurn'].encodeArguments(['dictation', {}]), f.caller, f.signal)
+    expect(started).toEqual({ defined: true, value: { error: 'Voice is switched off.' } })
+    expect(await f.backend.invoke('voice:pushAudio', VOICE_TURN_CODECS['voice:pushAudio'].encodeArguments(['stale_turn', new Uint8Array(320)]), f.caller, f.signal)).toEqual({ defined: false })
+    await expect(f.backend.invoke('voice:startTurn', VOICE_TURN_CODECS['voice:startTurn'].encodeArguments(['dictation', {}]), { ...f.caller, webviewId: 'foreign' }, f.signal)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    for (const operation of ['voice:getPermission', 'voice:setShortcut', 'voice:setCustomModelDir', 'voice:tts:elevenlabs:setKey']) {
       await expect(f.backend.invoke(operation, {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
     }
     await f.owner.close()
