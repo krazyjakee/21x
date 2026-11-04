@@ -268,6 +268,47 @@ function hasCompleteDefaultAgent(): boolean {
   return agents.some((a) => a.is_default && !!a.config.coding_agent && !!a.config.model)
 }
 
+let defaultAgentHealing: Promise<boolean> | null = null
+
+/**
+ * Self-healing default agent: when the default agent has no backend or model
+ * (onboarding skipped, a model list that was empty at setup), fill the gaps
+ * from an installed backend so tasks can start without a trip to settings.
+ * A backend the user chose is kept while it is installed; fields that are
+ * already set are never overwritten. Returns true when it changed the agent.
+ */
+export function ensureDefaultAgentConfigured(
+  toolStatus?: Record<string, ToolStatus> | null
+): Promise<boolean> {
+  defaultAgentHealing ??= (async () => {
+    const store = useAgentStore.getState()
+    await store.fetchAgents()
+    if (hasCompleteDefaultAgent()) return false
+    const status = toolStatus ?? (await desktopApi.agentInstaller.detect().catch(() => null))
+    const available = getAvailableBackends(status)
+    const existing = useAgentStore.getState().agents.find((a) => a.is_default)
+    const chosen = existing?.config.coding_agent as CodingAgentType | undefined
+    const backend = chosen && available.includes(chosen) ? chosen : available[0]
+    // Nothing installed: leave the agent alone; the setup warning explains why.
+    if (!backend) return false
+    const model = (backend === chosen && existing?.config.model) || (await getDefaultModel(backend))
+    if (existing) {
+      await store.updateAgent(existing.id, {
+        name: existing.name || DEFAULT_AGENT_NAME,
+        config: { ...existing.config, coding_agent: backend, model: model || undefined }
+      })
+    } else {
+      await store.createAgent({
+        name: DEFAULT_AGENT_NAME,
+        config: { coding_agent: backend, model: model || undefined },
+        is_default: true
+      })
+    }
+    return true
+  })().catch(() => false).finally(() => { defaultAgentHealing = null })
+  return defaultAgentHealing
+}
+
 /* ─── Git Provider Choice (inline, optional) ─── */
 
 type ProviderChoice = GitProvider | ProviderChoiceValue.NONE
@@ -592,6 +633,8 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
 
   const handleSkip = () => {
     onOpenChange(false)
+    // Skipping the wizard must not leave an agent that cannot start tasks.
+    void ensureDefaultAgentConfigured(toolStatus)
   }
 
   const availableBackends = getAvailableBackends(toolStatus)

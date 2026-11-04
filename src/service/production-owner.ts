@@ -38,7 +38,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { McpProbeService } from '../main/agent-manager/mcp-probe-service'
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync, statSync } from 'node:fs'
-import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DatabaseManager, type DatabaseRuntimeOptions } from '../main/database/manager'
 import { decryptSettingValue, decryptRecordCredential } from '../main/database/serializers'
 import { acquireProfileLock, type ProfileLock } from '../main/platform/profile-lock'
@@ -770,7 +770,8 @@ export class ProductionOwner {
           !isAbsolute(runtime.args[0]) || !existsSync(runtime.args[0])) throw new ProductionOwnerError('MANAGED_MCP_RESOURCE_UNAVAILABLE')
     }
     if (this.bootstrap.connectors.kind === 'enabled' && !this.boundaries.connectorTransport) validateConnectorResources(this.bootstrap.paths.resourceRoot)
-    if (this.bootstrap.credentials.mode === 'create' && readdirSync(profileRoot).some(name => !['.21x-profile-lock.sqlite', '.21x-profile-lock.sqlite-journal', '.21x-profile-lock.sqlite-wal', '.21x-profile-lock.sqlite-shm'].includes(name))) {
+    if (this.bootstrap.credentials.mode === 'create' && readdirSync(profileRoot).some(name => !['.21x-profile-lock.sqlite', '.21x-profile-lock.sqlite-journal', '.21x-profile-lock.sqlite-wal', '.21x-profile-lock.sqlite-shm'].includes(name) &&
+      !isEmptyDescriptorRoot(profileRoot, name, this.bootstrap.paths))) {
       throw new ProductionOwnerError('PROFILE_NOT_EMPTY')
     }
     this.checkpoint('native-readiness')
@@ -1266,6 +1267,19 @@ export class ProductionOwner {
     this.services = null
     this.update('stopped', 'released')
   }
+}
+
+/**
+ * The Linux native host opens its workspace and attachment authorities before
+ * Node starts, which creates those roots inside a new profile. A new profile may
+ * contain only a descriptor-declared root that is a real, empty directory.
+ */
+function isEmptyDescriptorRoot(profileRoot: string, name: string, paths: ProductionOwnerBootstrap['paths']): boolean {
+  const declared = [paths.workspaceRoot, paths.attachmentRoot, paths.reposRoot, paths.tempRoot]
+    .some(root => basename(root) === name && existsSync(dirname(root)) && realpathSync.native(dirname(root)) === profileRoot)
+  if (!declared) return false
+  const path = join(profileRoot, name), info = lstatSync(path)
+  return info.isDirectory() && !info.isSymbolicLink() && readdirSync(path).length === 0
 }
 
 async function bounded<T>(raw: Promise<T>, timeoutMs: number): Promise<T> {

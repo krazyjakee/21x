@@ -3,6 +3,7 @@ import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/re
 import {
   OnboardingWizard,
   shouldShowOnboarding,
+  ensureDefaultAgentConfigured,
   isForceOnboarding,
   pickFreeModel,
   getAvailableBackends,
@@ -374,6 +375,17 @@ describe('OnboardingWizard', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it('still leaves a startable default agent when onboarding is skipped', async () => {
+    mockAgents.getAll.mockResolvedValue([{ id: 'seed', name: 'Default Agent', is_default: true, config: {} }])
+    mockAgents.update.mockResolvedValue({ id: 'seed' })
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(backendCard(CodingAgentType.CLAUDE_CODE)).toHaveAttribute('data-available', 'true'))
+    fireEvent.click(screen.getAllByRole('button', { name: /skip/i })[0])
+    await waitFor(() => expect(mockAgents.update).toHaveBeenCalledWith('seed', expect.objectContaining({
+      config: expect.objectContaining({ coding_agent: CodingAgentType.CLAUDE_CODE, model: 'claude-fable-5-1' })
+    })))
+  })
+
   it('should always show git provider options', async () => {
     render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
     await waitFor(() => {
@@ -388,5 +400,49 @@ describe('OnboardingWizard', () => {
     expect(screen.getAllByText('Anthropic').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Open-source, free models').length).toBeGreaterThan(0)
     expect(screen.getAllByText('OpenAI').length).toBeGreaterThan(0)
+  })
+})
+
+describe('ensureDefaultAgentConfigured', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockAgents.update.mockResolvedValue({ id: 'seed' })
+    mockAgents.create.mockResolvedValue({ id: 'new' })
+    mockAgentConfig.getProviders.mockResolvedValue(null)
+  })
+
+  it('leaves a complete default agent untouched', async () => {
+    mockAgents.getAll.mockResolvedValue([{ id: 'seed', name: 'A', is_default: true, config: { coding_agent: 'codex', model: 'gpt-5' } }])
+    await expect(ensureDefaultAgentConfigured(detection({ claudeCode: { installed: true, version: '1' } }))).resolves.toBe(false)
+    expect(mockAgents.update).not.toHaveBeenCalled()
+  })
+
+  it('keeps an installed backend the user chose and only fills the missing model', async () => {
+    mockAgents.getAll.mockResolvedValue([{ id: 'seed', name: 'A', is_default: true, config: { coding_agent: 'codex', mcp_servers: ['m'] } }])
+    const status = detection({ claudeCode: { installed: true, version: '1' }, codex: { installed: true, version: '1' } })
+    await expect(ensureDefaultAgentConfigured(status)).resolves.toBe(true)
+    expect(mockAgents.update).toHaveBeenCalledWith('seed', expect.objectContaining({
+      config: expect.objectContaining({ coding_agent: 'codex', mcp_servers: ['m'], model: expect.any(String) })
+    }))
+  })
+
+  it('moves to an installed backend when the chosen one is gone', async () => {
+    mockAgents.getAll.mockResolvedValue([{ id: 'seed', name: 'A', is_default: true, config: { coding_agent: 'cursor' } }])
+    await ensureDefaultAgentConfigured(detection({ claudeCode: { installed: true, version: '1' } }))
+    expect(mockAgents.update).toHaveBeenCalledWith('seed', expect.objectContaining({
+      config: expect.objectContaining({ coding_agent: CodingAgentType.CLAUDE_CODE, model: 'claude-fable-5-1' })
+    }))
+  })
+
+  it('creates a default agent when none exists', async () => {
+    mockAgents.getAll.mockResolvedValue([])
+    await ensureDefaultAgentConfigured(detection({ claudeCode: { installed: true, version: '1' } }))
+    expect(mockAgents.create).toHaveBeenCalledWith(expect.objectContaining({ is_default: true }))
+  })
+
+  it('changes nothing when no backend is installed', async () => {
+    mockAgents.getAll.mockResolvedValue([{ id: 'seed', name: 'A', is_default: true, config: {} }])
+    await expect(ensureDefaultAgentConfigured(detection())).resolves.toBe(false)
+    expect(mockAgents.update).not.toHaveBeenCalled(); expect(mockAgents.create).not.toHaveBeenCalled()
   })
 })

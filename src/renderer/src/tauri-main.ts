@@ -1,6 +1,10 @@
 import { installDesktopHost } from './lib/desktop-api'
 import { createNativeDesktopHost } from './lib/native-desktop-host'
-import type { TauriDesktopApi } from './lib/tauri-desktop-transport'
+import { renderStartupFailure } from './lib/startup-failure'
+import { NativeBootstrapUnavailableError, type TauriDesktopApi } from './lib/tauri-desktop-transport'
+
+/** A service that is still starting gets a moment before the window gives up. */
+const RECONNECT_DELAYS_MS = [0, 500, 1500, 3000]
 
 async function bootstrap(): Promise<void> {
   const native = (window as unknown as { __TAURI__?: TauriDesktopApi }).__TAURI__
@@ -9,14 +13,22 @@ async function bootstrap(): Promise<void> {
   const release = installDesktopHost(host)
   window.addEventListener('pagehide', release, { once: true })
   // Trusted native epoch and validated listener precede every production import.
-  await host.reconnect()
+  for (let attempt = 0; ; attempt++) {
+    await new Promise<void>(resolve => setTimeout(resolve, RECONNECT_DELAYS_MS[attempt]))
+    try { await host.reconnect(); break } catch (error) {
+      // A reported startup failure will not change by waiting.
+      if (error instanceof NativeBootstrapUnavailableError || attempt === RECONNECT_DELAYS_MS.length - 1) throw error
+    }
+  }
   await import('./main')
   const { rehydrateProductionDesktop } = await import('./lib/desktop-rehydration')
   host.setRehydrator(rehydrateProductionDesktop)
   // The application stays mounted with a reconnect control when recovery fails.
   try { await host.rehydrate() } catch { /* State owners and connection chrome expose unavailable recovery. */ }
 }
-void bootstrap().catch(() => {
+void bootstrap().catch((error: unknown) => {
   const root = document.getElementById('root')
-  if (root) { root.setAttribute('role', 'alert'); root.textContent = 'The native desktop connection is unavailable. Reload to reconnect.' }
+  if (!root) return
+  const explanation = error instanceof NativeBootstrapUnavailableError ? error.explanation : undefined
+  renderStartupFailure(root, explanation, () => window.location.reload())
 })

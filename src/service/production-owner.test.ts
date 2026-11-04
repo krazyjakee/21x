@@ -162,6 +162,26 @@ describe('actual production application owner', () => {
     expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'resources', code: 'PROFILE_LOW_DISK', owned: false })
     expect(f.store.create).not.toHaveBeenCalled(); expect(f.adapter.initialize).not.toHaveBeenCalled()
   })
+  it('creates a new profile whose empty native workspace and attachment roots already exist inside it', async () => {
+    // The Linux native host opens these authorities before Node starts.
+    const f = await fixture(), profileRoot = f.bootstrap.paths.profileRoot
+    f.bootstrap.paths = { ...f.bootstrap.paths, workspaceRoot: join(profileRoot, 'workspaces'), attachmentRoot: join(profileRoot, 'attachments'),
+      reposRoot: join(profileRoot, 'repos'), tempRoot: join(profileRoot, 'temp') }
+    mkdirSync(f.bootstrap.paths.workspaceRoot, { recursive: true }); mkdirSync(f.bootstrap.paths.attachmentRoot)
+    const services = await f.owner.start()
+    expect(services.db.getProjects().length).toBeGreaterThan(0)
+  })
+  it.each([
+    ['a declared root with contents', (profileRoot: string) => { mkdirSync(join(profileRoot, 'workspaces')); writeFileSync(join(profileRoot, 'workspaces', 'left-over'), 'x') }],
+    ['an undeclared directory', (profileRoot: string) => { mkdirSync(join(profileRoot, 'other')) }],
+    ['a declared root that is a symlink', (profileRoot: string, root: string) => { mkdirSync(join(root, 'elsewhere')); symlinkSync(join(root, 'elsewhere'), join(profileRoot, 'workspaces')) }]
+  ])('still refuses a new profile containing %s', async (_name, seed) => {
+    const f = await fixture(), profileRoot = f.bootstrap.paths.profileRoot
+    f.bootstrap.paths = { ...f.bootstrap.paths, workspaceRoot: join(profileRoot, 'workspaces') }
+    mkdirSync(profileRoot); seed(profileRoot, f.root)
+    await expect(f.owner.start()).rejects.toThrow('PROFILE_NOT_EMPTY')
+    expect(f.store.create).not.toHaveBeenCalled()
+  })
 
   it('classifies actual locked SQLite without migrating or changing its rows and allows a later explicit launch', async () => {
     const f = await fixture(), first = await f.owner.start()

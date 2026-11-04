@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react
 import { Sidebar } from './Sidebar'
 import { TaskWorkspace } from '@/components/tasks/TaskWorkspace'
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas'
-import { OnboardingWizard, shouldShowOnboarding } from '@/components/onboarding/OnboardingWizard'
+import { OnboardingWizard, ensureDefaultAgentConfigured, shouldShowOnboarding } from '@/components/onboarding/OnboardingWizard'
 import { ProgressToastStack } from '@/components/ui/ProgressToastStack'
 import { VoiceOverlay } from '@/components/voice/VoiceOverlay'
 import { useVoiceControl } from '@/hooks/use-voice-control'
@@ -179,16 +179,20 @@ export function AppLayout() {
   const [onboardingOpen, setOnboardingOpen] = useState(false)
 
   // Auto-open onboarding on first launch or major/minor version bumps
+  // Otherwise heal an incomplete default agent so tasks can start right away.
   useEffect(() => {
-    if (!desktopSupports('app.getVersion')) return
+    const heal = () => { void ensureDefaultAgentConfigured() }
+    if (!desktopSupports('app.getVersion')) { heal(); return }
     Promise.all([
       settingsApi.get('setup_completed_version'),
       desktopApi?.app?.getVersion()
     ]).then(([completedVersion, currentVersion]) => {
       if (currentVersion && shouldShowOnboarding(completedVersion, currentVersion)) {
         setOnboardingOpen(true)
+      } else {
+        heal()
       }
-    }).catch(() => { /* Unsupported native setup metadata does not open onboarding. */ })
+    }).catch(heal)
   }, [])
 
   const handleOnboardingChange = (open: boolean) => {

@@ -1,3 +1,4 @@
+import { FIELD_SIZING_CLASS, fitTextarea, resetTextarea } from '@/lib/textarea-autosize'
 import { captureDesktopRead, desktopApi, desktopSupports, getDesktopHost } from '@/lib/desktop-api'
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { FileText, Paperclip, Send, X } from 'lucide-react'
@@ -88,8 +89,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
   const autoResize = useCallback(() => {
     const el = inputRef.current
     if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 128)}px` // max ~6 lines
+    fitTextarea(el, 128) // max ~6 lines
   }, [])
 
   const handleSend = () => {
@@ -120,7 +120,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
       return onSend(value, all.length > 0 ? { attachments: all } : undefined)
     })()
     inputRef.current!.value = ''
-    inputRef.current!.style.height = 'auto'
+    resetTextarea(inputRef.current!)
     setPendingAttachments([])
     images.clear()
     // The composer clears the text before the send resolves, so a rejected
@@ -255,7 +255,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
           rows={1}
           disabled={isStarting || isSending}
           placeholder={isStarting ? 'Starting agent…' : 'Write a message...'}
-          className="flex-1 bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30 resize-none overflow-hidden max-h-32 min-h-[32px] disabled:opacity-60"
+          className={`flex-1 bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30 resize-none overflow-hidden max-h-32 min-h-[32px] disabled:opacity-60 ${FIELD_SIZING_CLASS}`}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
