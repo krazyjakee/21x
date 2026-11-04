@@ -597,6 +597,47 @@ describe('startup self-healing (#148)', () => {
     expect(recoveryEntries).toHaveLength(1)
   })
 
+  it('tells a session recovered idle after a restart to continue instead of moving it to review', async () => {
+    const { db, manager, agentId, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    db.updateTask(task.id, { status: TaskStatus.AgentWorking, session_id: 'persisted-session' })
+    vi.spyOn(manager, 'resumeSession').mockImplementation(async () => {
+      ;(manager as any).sessions.set('persisted-session', {
+        id: 'persisted-session', agentId, taskId: task.id, status: 'idle', createdAt: new Date(),
+        seenMessageIds: new Set(), seenPartIds: new Set(), partContentLengths: new Map(),
+        fallbackAgentIds: [], attemptedAgentIds: new Set()
+      })
+      return 'persisted-session'
+    })
+    const send = vi.spyOn(manager, 'sendMessage').mockResolvedValue({})
+
+    await manager.reconcileStartup()
+    await settle()
+
+    expect(send).toHaveBeenCalledWith('persisted-session', expect.stringContaining('Continue from where you left off'), task.id, agentId)
+    expect(db.getTask(task.id)?.status).not.toBe(TaskStatus.ReadyForReview)
+  })
+
+  it('moves a recovered idle session to review when the continue message cannot be sent', async () => {
+    const { db, manager, agentId, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    db.updateTask(task.id, { status: TaskStatus.AgentWorking, session_id: 'persisted-session' })
+    vi.spyOn(manager, 'resumeSession').mockImplementation(async () => {
+      ;(manager as any).sessions.set('persisted-session', {
+        id: 'persisted-session', agentId, taskId: task.id, status: 'idle', createdAt: new Date(),
+        seenMessageIds: new Set(), seenPartIds: new Set(), partContentLengths: new Map(),
+        fallbackAgentIds: [], attemptedAgentIds: new Set()
+      })
+      return 'persisted-session'
+    })
+    vi.spyOn(manager, 'sendMessage').mockRejectedValue(new Error('backend gone'))
+
+    await manager.reconcileStartup()
+    await settle()
+
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.ReadyForReview)
+  })
+
   it.each(['manual-stop', 'awaiting-approval', 'unsafe', 'destructive', 'irreversible'])(
     'does not retry excluded orphaned work labelled %s',
     async (label) => {
