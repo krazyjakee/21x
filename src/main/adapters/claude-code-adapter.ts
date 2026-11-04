@@ -31,6 +31,7 @@ import { claudeCodePermissionMode } from './permission-mode'
 import { dangerousToolReason } from './tool-safety'
 import { claudeServerPrefix, claudeToolIds, resolveDisallowedToolNames } from '../mcp-tool-limits'
 import { buildShellExports } from './shared/shell-exports'
+import { rewriteWithRtk } from './shared/rtk-session'
 
 type ClaudeSDK = typeof import('@anthropic-ai/claude-agent-sdk')
 type Query = import('@anthropic-ai/claude-agent-sdk').Query
@@ -280,20 +281,27 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
   }
 
   /**
-   * Build PreToolUse hooks for secret injection.
-   * Registers a hook that prepends `export KEY='value'` lines to each Bash command.
-   * The LLM never sees the modified command — only the original tool call and
-   * the output appear in conversation context.
+   * The PreToolUse hook that changes Bash commands: RTK rewriting, then secret
+   * injection. They share one hook because PreToolUse hooks run in parallel and
+   * each returns a whole command, so two hooks would overwrite each other. RTK
+   * must see the command before the `export` lines, which would otherwise put
+   * secret values on its command line.
+   * The LLM never sees the modified command, only the original tool call and
+   * the output.
    */
-  private buildSecretHooks(config: SessionConfig): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
+  private buildBashHooks(config: SessionConfig): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
     const secretEnvVars = config.secretEnvVars
-    if (!secretEnvVars || Object.keys(secretEnvVars).length === 0) {
+    const hasSecrets = !!secretEnvVars && Object.keys(secretEnvVars).length > 0
+    const rtkExecutable = config.rtkExecutable
+    if (!hasSecrets && !rtkExecutable) {
       return undefined
     }
 
-    const exportLines = buildShellExports(secretEnvVars)
+    const exportLines = hasSecrets ? buildShellExports(secretEnvVars) : ''
 
-    console.log(`[ClaudeCodeAdapter] Registering PreToolUse hook for secrets: [${Object.keys(secretEnvVars).join(', ')}]`)
+    if (hasSecrets) {
+      console.log(`[ClaudeCodeAdapter] Registering PreToolUse hook for secrets: [${Object.keys(secretEnvVars).join(', ')}]`)
+    }
 
     const hook: HookCallback = async (input) => {
       const toolInput = ('tool_input' in input ? input.tool_input : undefined) as Record<string, unknown> | undefined
@@ -302,7 +310,11 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       }
 
       const originalCommand = toolInput.command as string
-      const modifiedCommand = exportLines + '\n' + originalCommand
+      const rewrittenCommand = rtkExecutable ? await rewriteWithRtk(rtkExecutable, originalCommand) : originalCommand
+      const modifiedCommand = hasSecrets ? exportLines + '\n' + rewrittenCommand : rewrittenCommand
+      if (modifiedCommand === originalCommand) {
+        return {}
+      }
 
       return {
         hookSpecificOutput: {
@@ -545,7 +557,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.abortController = abortController
 
     // Build options
-    const hooks = mergeHooks(this.buildSecretHooks(config), this.buildMcpToolLimitHooks(config))
+    const hooks = mergeHooks(this.buildBashHooks(config), this.buildMcpToolLimitHooks(config))
     const effort = config.reasoningEffort === 'minimal' ? undefined : config.reasoningEffort
     const claudePermissionMode = claudeCodePermissionMode(config)
 

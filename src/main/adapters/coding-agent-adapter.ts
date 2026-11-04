@@ -102,6 +102,11 @@ export interface SessionConfig {
   secretEnvVars?: Record<string, string>
   /** Whether the OpenCode tillDone runtime plugin should enforce todo completion for this session. */
   tillDone?: boolean
+  /** RTK to rewrite shell commands with. Unset when RTK is off or missing, or
+   *  when this backend has no way to rewrite a command. */
+  rtkExecutable?: string
+  /** The user turned RTK off. Unset while it is on, or when it is not installed. */
+  rtkDisabled?: boolean
 }
 
 export interface SessionStatus {

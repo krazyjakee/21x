@@ -25,9 +25,10 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useSettingsStore, type GitProvider } from '@/stores/settings-store'
 import { CodingAgentType, CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS } from '@/types'
 import { VoiceRuntimeRow } from '@/components/voice/VoiceRuntimeRow'
-import { agentConfigApi } from '@/lib/ipc-client'
+import { agentConfigApi, settingsApi } from '@/lib/ipc-client'
 import { AnthropicLogo, OpenCodeLogo, OpenAILogo, PiLogo } from '@/components/icons/AgentLogos'
 import type { ToolStatus } from '@/types/electron'
+import { isRtkEnabled, RTK_ENABLED_SETTING, RTK_STATE_LABELS, rtkEffectiveState } from '@shared/rtk'
 
 /* ─── Enums & Constants ─── */
 
@@ -417,17 +418,20 @@ function DefaultBackendRow({
 
 function RtkSetupRow({
   status,
+  enabled,
   busy,
   disabled,
   onSetup
 }: {
   status: ToolStatus | undefined
+  enabled: boolean
   busy: boolean
   disabled: boolean
   onSetup: () => void
 }) {
   const installed = status?.installed === true
   const configured = status?.configured === true
+  const state = rtkEffectiveState(enabled, status)
 
   return (
     <div
@@ -438,18 +442,17 @@ function RtkSetupRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="text-xs font-semibold text-foreground">RTK output compression</p>
-          {configured ? (
-            <span className="text-[10px] text-emerald-400 flex items-center gap-0.5">
-              <Check className="size-2.5" /> Configured
-            </span>
-          ) : installed ? (
-            <span className="text-[10px] text-muted-foreground">
-              {status?.version ? `v${status.version}` : 'Installed'}
-            </span>
-          ) : null}
+          <span
+            className={`text-[10px] flex items-center gap-0.5 ${state === 'on' ? 'text-emerald-400' : 'text-muted-foreground'}`}
+            data-testid="rtk-state"
+          >
+            {state === 'on' && <Check className="size-2.5" />}
+            {RTK_STATE_LABELS[state]}
+          </span>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          Reduce noisy shell output before it reaches agent context.
+          On by default once installed: reduces noisy shell output before it reaches agent context.
+          Change it in Settings &rarr; General &rarr; Agent &amp; Tool Setup.
         </p>
       </div>
       <Button
@@ -462,10 +465,8 @@ function RtkSetupRow({
       >
         {busy ? (
           <Loader2 className="size-3 animate-spin" />
-        ) : configured ? (
-          'Reconfigure'
         ) : installed ? (
-          'Configure'
+          configured ? 'Update global hooks' : 'Add global hooks'
         ) : (
           <><Download className="size-3 mr-1" />Install</>
         )}
@@ -488,6 +489,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
   const [detecting, setDetecting] = useState(false)
   const [creating, setCreating] = useState(false)
   const [installing, setInstalling] = useState<string | null>(null)
+  const [rtkEnabled, setRtkEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const { fetchAgents, agents, createAgent, updateAgent } = useAgentStore()
@@ -524,6 +526,8 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
       const gp = useSettingsStore.getState().gitProvider
       if (gp) setProviderChoice(gp)
     })
+
+    settingsApi.get(RTK_ENABLED_SETTING).then(value => setRtkEnabled(isRtkEnabled(value))).catch(() => {})
 
     // Detect tools in background
     void runDetection()
@@ -780,10 +784,11 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
             )
           )}
 
-          {/* ── Optional output compression ── */}
+          {/* ── Output compression ── */}
           {toolStatus && (
             <RtkSetupRow
               status={toolStatus[DetectKey.RTK]}
+              enabled={rtkEnabled}
               busy={installing === DetectKey.RTK}
               disabled={detecting || !!installing}
               onSetup={() => void handleInstall(DetectKey.RTK)}

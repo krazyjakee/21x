@@ -1,7 +1,15 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { assembleSessionConfig, mcpOptionsForTask } from './session-config'
+import { assembleSessionConfig as assemblePortableSessionConfig } from './session-config-core'
+import type { SessionConfigHost } from './host'
 import { buildCaptainSystemPrompt } from '../prompts/captain'
 import type { AgentRecord, DatabaseManager, TaskRecord } from '../database'
+
+// These prompts must not depend on whether the machine running the tests has RTK.
+vi.mock('../adapters/shared/rtk-session', async importOriginal => ({
+  ...await importOriginal<typeof import('../adapters/shared/rtk-session')>(),
+  findRtkExecutable: () => null
+}))
 
 const BACKENDS = ['opencode', 'claude-code', 'codex', 'cursor', 'pi'] as const
 const AGENT_PROMPT = 'You are a careful backend specialist.'
@@ -140,5 +148,75 @@ describe('assembleSessionConfig access', () => {
     const config = configWith({ permission_mode: 'ask', sandbox_mode: 'read-only' })
     expect(config.permissionMode).toBe('allow')
     expect(config.sandboxMode).toBe('danger-full-access')
+  })
+})
+
+describe('assembleSessionConfig RTK', () => {
+  const RTK_PATH = '/opt/bin/rtk'
+  const ordinary = { id: 'task-1', title: 'Fix login', role: 'task', agent_id: 'agent-x' } as unknown as TaskRecord
+  const captain = { id: 'mm-1', title: 'Captain', role: 'captain', agent_id: null } as unknown as TaskRecord
+
+  function rtkConfig(backend: typeof BACKENDS[number], setting: string | null, executable: string | null, task: TaskRecord = ordinary) {
+    const agent = agentFor(backend)
+    const db = { ...EMPTY_DB, getSetting: (key: string) => key === 'rtk_enabled' ? setting : null } as unknown as DatabaseManager
+    const host: SessionConfigHost = {
+      secrets: { kind: 'unsupported' }, configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' },
+      findRtkExecutable: () => executable
+    }
+    return assemblePortableSessionConfig(db, agent, {
+      agentId: agent.id, taskId: task.id, task, workspaceDir: '/tmp/ws', mcpServers: {}, systemPrompt: AGENT_PROMPT
+    }, host)
+  }
+
+  for (const backend of ['claude-code', 'opencode', 'pi'] as const) {
+    it(`rewrites ${backend} commands by default, without an instruction`, () => {
+      const config = rtkConfig(backend, null, RTK_PATH)
+      expect(config.rtkExecutable).toBe(RTK_PATH)
+      expect(config.rtkDisabled).toBeUndefined()
+      expect(config.systemPrompt).toBe(AGENT_PROMPT)
+    })
+  }
+
+  for (const backend of ['codex', 'cursor'] as const) {
+    it(`gives ${backend} an instruction by default, not a rewrite it cannot perform`, () => {
+      const config = rtkConfig(backend, null, RTK_PATH)
+      expect(config.rtkExecutable).toBeUndefined()
+      expect(config.systemPrompt).toContain(AGENT_PROMPT)
+      expect(config.systemPrompt).toContain('Prefix shell commands with `rtk`')
+    })
+  }
+
+  it('reaches Captain sessions the same way as task sessions', () => {
+    expect(rtkConfig('claude-code', null, RTK_PATH, captain).rtkExecutable).toBe(RTK_PATH)
+    expect(rtkConfig('codex', null, RTK_PATH, captain).systemPrompt).toContain('Prefix shell commands with `rtk`')
+  })
+
+  for (const backend of BACKENDS) {
+    it(`honours the opt-out on ${backend}`, () => {
+      const config = rtkConfig(backend, 'false', RTK_PATH)
+      expect(config.rtkExecutable).toBeUndefined()
+      expect(config.rtkDisabled).toBe(true)
+      expect(config.systemPrompt).toContain('RTK is turned off in 21x')
+      expect(config.systemPrompt).not.toContain('Prefix shell commands with `rtk`')
+    })
+
+    it(`leaves ${backend} sessions untouched when RTK is unavailable`, () => {
+      for (const setting of [null, 'true', 'false']) {
+        const config = rtkConfig(backend, setting, null)
+        expect(config.rtkExecutable).toBeUndefined()
+        expect(config.rtkDisabled).toBeUndefined()
+        expect(config.systemPrompt).toBe(AGENT_PROMPT)
+      }
+    })
+  }
+
+  it('leaves sessions untouched on a host that cannot look for RTK', () => {
+    const agent = agentFor('claude-code')
+    const host: SessionConfigHost = { secrets: { kind: 'unsupported' }, configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' } }
+    const config = assemblePortableSessionConfig(EMPTY_DB, agent, {
+      agentId: agent.id, taskId: 'task-1', task: ordinary, workspaceDir: '/tmp/ws', mcpServers: {}, systemPrompt: AGENT_PROMPT
+    }, host)
+    expect(config.rtkExecutable).toBeUndefined()
+    expect(config.systemPrompt).toBe(AGENT_PROMPT)
   })
 })

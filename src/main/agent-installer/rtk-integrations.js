@@ -58,7 +58,8 @@ export function rtkIntegrationFiles(env = process.env, home = homedir()) {
   return [
     { key: 'claudeCode', path: join(claudeDir, 'settings.json'), text: 'rtk hook claude' },
     { key: 'opencode', path: join(home, '.config', 'opencode', 'plugins', 'rtk.ts'), text: 'rtk' },
-    { key: 'codex', path: join(codexDir, 'hooks.json'), text: 'rtk hook codex' },
+    // `rtk init --codex` writes an instruction, not a hook: AGENTS.md includes RTK.md.
+    { key: 'codex', path: join(codexDir, 'AGENTS.md'), text: 'RTK.md' },
     { key: 'cursor', path: join(home, '.cursor', 'hooks.json'), text: 'rtk hook cursor' },
     { key: 'pi', path: join(piDir, 'extensions', 'rtk.ts'), text: 'rtk' }
   ]

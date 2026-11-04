@@ -5,6 +5,7 @@ import { isDatabaseId } from './database-desktop-codecs'
 import { CHAT_PROVIDER_IDS, CHAT_REASONING_EFFORTS, CHAT_SETTING_KEYS } from './chat'
 import { VOICE_SETTING_KEYS } from './voice'
 import { VOICE_TTS_SETTING_KEYS } from './voice-tts'
+import { RTK_ENABLED_SETTING } from './rtk'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from './service-protocol'
 
 export const PRODUCTION_SETTINGS_OPERATIONS = ['settings:get', 'settings:set', 'settings:getAll', 'secrets:getAll', 'secrets:create', 'secrets:update', 'secrets:delete', 'env:get'] as const
@@ -15,7 +16,7 @@ export const PRODUCTION_ENV_KEYS = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CURS
 export type ProductionEnvKey = typeof PRODUCTION_ENV_KEYS[number]
 export const PRODUCTION_SETTINGS_KEYS = [
   'theme', 'sidebar_collapsed', 'github_org', 'git_provider', 'forgejo_login', 'repo_providers', 'current_user_email', 'current_project_id', 'default_agent_id', 'setup_completed_version',
-  'max_concurrent_agent_sessions', 'all_projects_paused', 'captain_prewarm', 'commander_briefing',
+  'max_concurrent_agent_sessions', 'all_projects_paused', 'captain_prewarm', 'commander_briefing', RTK_ENABLED_SETTING,
   'heartbeat_enabled_global', 'heartbeat_default_interval', 'heartbeat_active_hours_start', 'heartbeat_active_hours_end', 'heartbeat_global_instructions',
   'workspace_autocleanup_enabled', 'workspace_autocleanup_days', 'workspace_nodemodules_gc_enabled', 'workspace_nodemodules_gc_days',
   'sessions.ledger', 'sessions.captain_managed', 'sessions.commander_managed', 'sessions.task_managed', 'sessions.rollover', 'sessions.rollover_thresholds',
@@ -47,7 +48,7 @@ function jsonSetting(value: string, check: (data: unknown) => boolean): boolean 
   if (value === '') return true
   try { return check(JSON.parse(value)) } catch { return false }
 }
-const booleanKeys = new Set(['sidebar_collapsed', 'captain_prewarm', 'heartbeat_enabled_global', 'workspace_autocleanup_enabled', 'workspace_nodemodules_gc_enabled', ...voicePreferenceKeys])
+const booleanKeys = new Set(['sidebar_collapsed', 'captain_prewarm', RTK_ENABLED_SETTING, 'heartbeat_enabled_global', 'workspace_autocleanup_enabled', 'workspace_nodemodules_gc_enabled', ...voicePreferenceKeys])
 export function isProductionSettingWrite(key: unknown, value: unknown): boolean {
   if (!isProductionSettingKey(key) || readOnly.has(key) || !text(value, settingProjectId(key) || key === 'canvas_state' || key === 'drawing_state' ? 800_000 : isProductionCredentialKey(key) ? 262_144 : 65_536) || !bounded(value)) return false
   if (isProductionCredentialKey(key)) return true

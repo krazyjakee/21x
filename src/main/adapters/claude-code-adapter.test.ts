@@ -18,12 +18,19 @@ vi.mock('./claude-code-executable', () => ({
   findClaudeExecutable: vi.fn(async () => '/usr/local/bin/claude'),
 }))
 
+// shared/rtk-session.test.ts runs the real rewrite against a real process.
+vi.mock('./shared/rtk-session', () => ({
+  rewriteWithRtk: vi.fn(async (_executable: string, command: string) =>
+    command === 'git status' ? 'rtk git status' : command),
+}))
+
 // Same mocked `query` the adapter resolves through its dynamic import, so tests
 // can inspect exactly what the adapter handed the SDK.
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeCodeAdapter, claudeModelsFromInfo } from './claude-code-adapter'
 import { ClaudeSystemSubtype } from './claude-code-message-converter'
 import { MessagePartType } from './coding-agent-adapter'
+import { rewriteWithRtk } from './shared/rtk-session'
 
 /**
  * Helper: creates an adapter with a pre-populated session so we can test
@@ -1674,5 +1681,47 @@ describe('model listing', () => {
     await expect(adapter.listModels()).resolves.toEqual([{ id: 'claude-haiku-4-5', name: 'Haiku (claude-haiku-4-5)' }])
     expect(queryMock.mock.calls[0][0].options.pathToClaudeCodeExecutable).toBe('/usr/local/bin/claude')
     expect(close).toHaveBeenCalled()
+  })
+})
+
+describe('ClaudeCodeAdapter Bash hook', () => {
+  const RTK = '/opt/bin/rtk'
+  const hooksFor = (extra: Record<string, unknown>): any =>
+    (new ClaudeCodeAdapter() as any).buildBashHooks({ agentId: 'a-1', taskId: 't-1', workspaceDir: '/tmp/ws', ...extra })
+  const run = (hooks: any, command: string): Promise<any> =>
+    hooks.PreToolUse[0].hooks[0]({ tool_input: { command, description: 'kept' } })
+
+  it('registers nothing without RTK or secrets, so commands run as written', () => {
+    expect(hooksFor({})).toBeUndefined()
+  })
+
+  it('rewrites a command RTK has a filter for and keeps the other tool input', async () => {
+    const result = await run(hooksFor({ rtkExecutable: RTK }), 'git status')
+    expect(result.hookSpecificOutput.updatedInput).toEqual({ command: 'rtk git status', description: 'kept' })
+  })
+
+  it('leaves a command RTK has no filter for untouched', async () => {
+    expect(await run(hooksFor({ rtkExecutable: RTK }), 'npm test')).toEqual({})
+  })
+
+  it('combines RTK and secrets in one hook, because parallel hooks overwrite each other', async () => {
+    const hooks = hooksFor({ rtkExecutable: RTK, secretEnvVars: { TOKEN: 'x' } })
+    expect(hooks.PreToolUse).toHaveLength(1)
+    expect(hooks.PreToolUse[0].hooks).toHaveLength(1)
+    const result = await run(hooks, 'git status')
+    expect(result.hookSpecificOutput.updatedInput.command).toBe("export TOKEN='x'\nrtk git status")
+  })
+
+  it('never passes secret values to RTK', async () => {
+    vi.mocked(rewriteWithRtk).mockClear()
+    await run(hooksFor({ rtkExecutable: RTK, secretEnvVars: { TOKEN: 'secret-value' } }), 'git status')
+    expect(vi.mocked(rewriteWithRtk).mock.calls).toEqual([[RTK, 'git status']])
+  })
+
+  it('still injects secrets when RTK is unavailable', async () => {
+    vi.mocked(rewriteWithRtk).mockClear()
+    const result = await run(hooksFor({ secretEnvVars: { TOKEN: 'x' } }), 'git status')
+    expect(result.hookSpecificOutput.updatedInput.command).toBe("export TOKEN='x'\ngit status")
+    expect(rewriteWithRtk).not.toHaveBeenCalled()
   })
 })

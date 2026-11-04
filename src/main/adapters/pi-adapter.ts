@@ -27,6 +27,8 @@ import { MessagePartType, MessageRole, SessionStatusType } from './coding-agent-
 import {
   PI_PERMISSION_EXTENSION_SOURCE,
   PI_PERMISSION_MODE_ENV,
+  PI_RTK_EXECUTABLE_ENV,
+  PI_RTK_EXTENSION_SOURCE,
   buildPiMcpConfigDocument,
   sanitizePiSessionName,
   withProviderNameLimitHint,
@@ -222,13 +224,21 @@ export class PiAdapter implements CodingAgentAdapter {
   }
 
   private installPermissionExtension(): string {
+    return this.installExtension('permissions.ts', PI_PERMISSION_EXTENSION_SOURCE)
+  }
+
+  private installRtkExtension(): string {
+    return this.installExtension('rtk.ts', PI_RTK_EXTENSION_SOURCE)
+  }
+
+  private installExtension(fileName: string, source: string): string {
     const dir = join(homedir(), '.20x', 'pi')
-    const path = join(dir, 'permissions.ts')
+    const path = join(dir, fileName)
     mkdirSync(dir, { recursive: true })
     const current = existsSync(path) ? readFileSync(path, 'utf8') : ''
-    if (current !== PI_PERMISSION_EXTENSION_SOURCE) {
+    if (current !== source) {
       const temporaryPath = `${path}.${process.pid}.tmp`
-      writeFileSync(temporaryPath, PI_PERMISSION_EXTENSION_SOURCE, { mode: 0o600 })
+      writeFileSync(temporaryPath, source, { mode: 0o600 })
       chmodSync(temporaryPath, 0o600)
       renameSync(temporaryPath, path)
     }
@@ -241,6 +251,9 @@ export class PiAdapter implements CodingAgentAdapter {
       ...process.env,
       ...(config.secretEnvVars ?? {}),
       [PI_PERMISSION_MODE_ENV]: config.permissionMode ?? 'ask',
+      // RTK's own global Pi extension honours RTK_DISABLED.
+      ...(config.rtkDisabled ? { RTK_DISABLED: '1' } : {}),
+      ...(config.rtkExecutable ? { [PI_RTK_EXECUTABLE_ENV]: config.rtkExecutable } : {}),
     } as NodeJS.ProcessEnv
     delete env.AI_AGENT
     delete env.PI_CODING_AGENT
@@ -331,6 +344,7 @@ export class PiAdapter implements CodingAgentAdapter {
     const permissionExtension = this.installPermissionExtension()
 
     const args = ['--mode', 'rpc', '--approve', '--name', sanitizePiSessionName(config.taskId), '--extension', permissionExtension]
+    if (config.rtkExecutable) args.push('--extension', this.installRtkExtension())
     if (config.systemPrompt?.trim()) {
       args.push('--append-system-prompt', config.systemPrompt.trim())
     }

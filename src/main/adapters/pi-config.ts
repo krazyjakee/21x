@@ -6,6 +6,7 @@
 import type { SessionConfig } from './coding-agent-adapter'
 
 export const PI_PERMISSION_MODE_ENV = 'TWENTYX_PI_PERMISSION_MODE'
+export const PI_RTK_EXECUTABLE_ENV = 'TWENTYX_PI_RTK_EXECUTABLE'
 
 /**
  * Most model providers cap function/tool `name` at 64 characters. Pi forwards
@@ -147,6 +148,29 @@ export default function permissions(pi: ExtensionAPI) {
       inputSummary(event.input),
     );
     if (!approved) return { block: true, reason: \`\${event.toolName} was declined in 20x.\` };
+  });
+}
+`
+
+/** The rewrite rules of `rewriteWithRtk`, for Pi's extension runtime. */
+export const PI_RTK_EXTENSION_SOURCE = `\
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function rtk(pi: ExtensionAPI) {
+  pi.on("tool_call", async (event, ctx) => {
+    const executable = process.env.${PI_RTK_EXECUTABLE_ENV};
+    if (!executable || event.toolName !== "bash") return;
+    const input = event.input as { command?: unknown };
+    const command = input.command;
+    if (typeof command !== "string" || !command.trim()) return;
+    try {
+      const result = await pi.exec(executable, ["rewrite", "--", command], { timeout: 2000, signal: ctx.signal });
+      if (result.killed || (result.code !== 0 && result.code !== 3)) return;
+      const rewritten = result.stdout.replace(/\\r?\\n$/, "");
+      if (rewritten) input.command = rewritten;
+    } catch {
+      // RTK must never stop a command from running.
+    }
   });
 }
 `
