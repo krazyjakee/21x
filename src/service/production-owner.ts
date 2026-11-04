@@ -32,7 +32,7 @@ import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-
 import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
-import { ElectronProfileImportError, MANAGED_TASK_MCP_MARKER, importElectronProfile } from './electron-profile-import'
+import { ElectronProfileImportError, MANAGED_TASK_MCP_MARKER, holdElectronProfile, importElectronProfile } from './electron-profile-import'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
 import { createHash, randomUUID } from 'node:crypto'
@@ -42,7 +42,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DatabaseManager, type DatabaseRuntimeOptions } from '../main/database/manager'
 import { decryptSettingValue, decryptRecordCredential, encryptSettingValue } from '../main/database/serializers'
-import { acquireProfileLock, type ProfileLock } from '../main/platform/profile-lock'
+import { acquireProfileLock, jointProfileLock, type ProfileLock } from '../main/platform/profile-lock'
 import { initializeProtectedSecretStorage, type AuthenticatedSecretStorage, type ProtectedApplicationKeyStore } from '../main/platform/authenticated-secret-storage'
 import { configureSecretStorage, releaseSecretStorage } from '../main/platform/secret-storage'
 import { AgentManager } from '../main/agent-manager-core'
@@ -120,7 +120,9 @@ export interface ProductionOwnerBootstrap {
   profileId: string
   paths: DatabaseRuntimeOptions['paths'] & { reposRoot: string; resourceRoot: string; tempRoot: string }
   credentials: { store: ProtectedApplicationKeyStore; mode: 'load' | 'create' }
-  /** Electron profile whose data seeds a newly created profile (original untouched). */
+  /** Electron profile this one shares workspaces, repositories and attachments
+   * with. Locked for the whole session; its database seeds a newly created
+   * profile (original untouched). */
   legacyImport?: { profileRoot: string; appName: string }
   managedTaskMcp: DatabaseRuntimeOptions['managedTaskMcp']
   connectors: { kind: 'disabled'; reason: string } | { kind: 'enabled' }
@@ -767,6 +769,10 @@ export class ProductionOwner {
 
   private async initialize(): Promise<void> {
     this.lock = acquireProfileLock(this.bootstrap.paths.profileRoot)
+    // Before anything below can write, and held until release(): the Electron
+    // app refuses to start for as long as this session uses its folders.
+    const legacy = this.bootstrap.legacyImport
+    if (legacy) this.lock = jointProfileLock(this.lock, holdElectronProfile(legacy.profileRoot))
     const profileRoot = this.lock.profileRoot
     this.checkpoint('resources')
     const space = statfsSync(profileRoot)
@@ -795,11 +801,10 @@ export class ProductionOwner {
     configureSecretStorage(this.storage)
     this.storageRegistered = true
     this.checkpoint('database-preflight')
-    const legacy = this.bootstrap.legacyImport
     if (legacy && this.bootstrap.credentials.mode === 'create') {
       const store = this.bootstrap.credentials.store
       await importElectronProfile({
-        profileRoot: legacy.profileRoot, destination: join(profileRoot, '21x.db'), storage: this.storage,
+        profileRoot: legacy.profileRoot, lock: this.lock, destination: join(profileRoot, '21x.db'), storage: this.storage,
         // No stored password only matters if a value needs it; that value is then
         // cleared. An unreachable or locked keyring is retried, never cleared.
         loadSafeStoragePassword: async () => {

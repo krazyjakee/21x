@@ -5,7 +5,8 @@ import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { acquireProfileLock, PROFILE_LOCK_FILE, type ProfileLock } from './profile-lock'
+import { acquireProfileLock, heldByTauri, HOST_CLAIM_TIMEOUT_MS, jointProfileLock, PROFILE_LOCK_FILE, TAURI_HOLDER_FILE, type ProfileLock } from './profile-lock'
+import { holdProfileElsewhere, profileListing, raceForProfile, stopOtherHosts } from '../../../test/helpers/profile-holder'
 
 const require = createRequire(import.meta.url)
 const profiles: string[] = []
@@ -41,6 +42,7 @@ afterEach(async () => {
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null) { const done = closed(child); child.kill('SIGKILL'); await done }
   }
+  await stopOtherHosts()
   for (const guard of guards.splice(0)) guard.release()
   for (const root of profiles.splice(0)) rmSync(root, { recursive: true, force: true })
 })
@@ -123,6 +125,65 @@ describe('real SQLite lifetime profile ownership', () => {
     wal.pragma('journal_mode = WAL')
     wal.close()
     expect(() => acquire(walRoot)).toThrow('PROFILE_LOCK_INVALID')
+  })
+
+  it('writes nothing to the profile when it loses to a live owner', async () => {
+    const root = temporary()
+    writeFileSync(join(root, '21x.db'), 'synthetic')
+    await holdProfileElsewhere(root)
+    const before = profileListing(root)
+    expect(() => acquireProfileLock(root, { tauriHolder: true })).toThrow('PROFILE_IN_USE')
+    expect(profileListing(root)).toEqual(before)
+    expect(heldByTauri(root)).toBe(false)
+  })
+
+  it('lets one of two simultaneous starts win, including on a brand-new profile', async () => {
+    for (let round = 0; round < 5; round++) {
+      const race = await raceForProfile(temporary(), 2, HOST_CLAIM_TIMEOUT_MS)
+      expect(race.winners).toBe(1)
+      await race.finish()
+    }
+  }, 20_000)
+
+  it('announces a Tauri holder only while it holds the lock', () => {
+    const root = temporary()
+    const tauri = acquireProfileLock(root, { tauriHolder: true }); guards.push(tauri)
+    expect(heldByTauri(root)).toBe(true)
+    tauri.release()
+    expect(heldByTauri(root)).toBe(false)
+  })
+
+  it('leaves no note for a host that does not announce itself', () => {
+    const root = temporary()
+    acquire(root)
+    expect(existsSync(join(root, TAURI_HOLDER_FILE))).toBe(false)
+  })
+
+  it('is never blocked by a note a crash left behind, whatever process ID it once belonged to', () => {
+    const root = temporary()
+    writeFileSync(join(root, TAURI_HOLDER_FILE), 'tauri\n')
+    acquire(root).assertHeld()
+  })
+
+  it('replaces a planted note link instead of writing through it', () => {
+    const root = temporary()
+    const target = join(temporary(), 'target')
+    writeFileSync(target, 'untouched')
+    symlinkSync(target, join(root, TAURI_HOLDER_FILE))
+    const tauri = acquireProfileLock(root, { tauriHolder: true }); guards.push(tauri)
+    expect(readFileSync(target, 'utf8')).toBe('untouched')
+    expect(heldByTauri(root)).toBe(true)
+  })
+
+  it('joins two locks into one lease that either can break', () => {
+    const primary = acquire(temporary()), shared = acquire(temporary())
+    const joint = jointProfileLock(primary, shared)
+    expect(joint.profileRoot).toBe(primary.profileRoot)
+    joint.assertHeld()
+    shared.release()
+    expect(() => joint.assertHeld()).toThrow('PROFILE_LOCK_LOST')
+    joint.release()
+    expect(() => primary.assertHeld()).toThrow('PROFILE_LOCK_LOST')
   })
 
   it('rejects invalid/unbounded timeout and nonabsolute roots', () => {

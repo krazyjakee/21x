@@ -1002,7 +1002,6 @@ async fn start(
         None => None,
     };
     let data_root = legacy_root.clone().unwrap_or_else(|| profile_root.clone());
-    let legacy_profile_root = legacy_root.filter(|_| profile_intent == ProfileIntent::CreateNew);
     let descriptor = ProductionDescriptor {
         version: 1,
         kind: "production-private-launch".into(),
@@ -1011,7 +1010,9 @@ async fn start(
         profile_intent,
         build_identity,
         resource_manifest_sha256: digest,
-        legacy_profile_root,
+        // Sent on every launch, not only the import: the service locks this
+        // profile for the whole session, since both apps use its folders.
+        legacy_profile_root: legacy_root,
         paths: ProductionPaths {
             workspace_root: data_root.join("workspaces"),
             attachment_root: data_root.join("attachments"),

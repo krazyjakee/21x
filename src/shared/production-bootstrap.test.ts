@@ -25,6 +25,13 @@ describe('sealed production launch descriptor codecs', () => {
     expect(isProductionOwnerState(value)).toBe(true)
     for (const patch of [{ error: 'secret' }, { path: '/private/profile' }, { phase: 'private' }, { stage: '/secret' }, { code: 'PROFILE_PRIVATE_CANARY' }, { owned: 1 }]) expect(isProductionOwnerState({ ...value, ...patch })).toBe(false)
   })
+  it('carries the shared Electron profile on every launch, not only the import', () => {
+    const value = launchDescriptor()
+    for (const profileIntent of ['create-new', 'load-authenticated-copy'] as const) {
+      expect(isProductionLaunchDescriptor({ ...value, profileIntent, legacyProfileRoot: '/electron-profile' })).toBe(true)
+    }
+    expect(isProductionLaunchDescriptor({ ...value, legacyProfileRoot: 'relative/profile' })).toBe(false)
+  })
   it('requires explicit fresh/copy intent and exact trusted path/capability fields', () => {
     const value = launchDescriptor()
     expect(isProductionLaunchDescriptor(value)).toBe(true)
