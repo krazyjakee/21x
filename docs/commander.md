@@ -430,6 +430,13 @@ right place. The pieces:
   user action in the card, with unread/inbox affordances; they do not create a
   new approval flow. An explicit user question can ask the Commander to explain
   or act on the report. With no provider, reports are still stored and visible.
+- **Acknowledgement** (#114). A request that needs tools gets one short opening
+  sentence before the first tool call, saying what the Commander is about to do,
+  so a typed or spoken request is answered at once. Nothing is written between
+  tool calls, and the single reply after the last tool result does not repeat
+  that sentence. A request that needs no tools gets no opening sentence. In a
+  call the sentence is spoken as soon as the tool starts. In Chat it is stored
+  with its tool calls, and only the final reply goes to the screen reader.
 - **Communication contract** (#173, `REPORT_SUMMARY_RULES` in `prompts.ts`).
   Every normal reply, user-requested report explanation, status/history explanation and spoken
   response names and describes the change, explains its known benefit or

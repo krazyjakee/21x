@@ -30,6 +30,8 @@ export interface StreamingTurn {
   turnId: string
   text: string
   toolCalls: StreamingToolCall[]
+  /** A tool call started since the last text, so the next text is a new message. */
+  textBreak?: boolean
 }
 
 export interface CommanderActionNotice {
@@ -338,9 +340,12 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
           const turn: StreamingTurn = current && current.turnId === turnId ? current : { turnId, text: '', toolCalls: [] }
           let next: StreamingTurn = turn
           if (inner.type === 'text_delta') {
-            next = { ...turn, text: turn.text + inner.text }
+            // Text after a tool call is a new message: the opening sentence and
+            // the final reply must not run together while the turn streams.
+            const separator = turn.textBreak && turn.text ? '\n\n' : ''
+            next = { ...turn, text: turn.text + separator + inner.text, textBreak: false }
           } else if (inner.type === 'tool_call_start') {
-            next = { ...turn, toolCalls: [...turn.toolCalls, { id: inner.id, name: inner.name, input: inner.input }] }
+            next = { ...turn, textBreak: true, toolCalls: [...turn.toolCalls, { id: inner.id, name: inner.name, input: inner.input }] }
           } else if (inner.type === 'tool_call_result') {
             next = {
               ...turn,

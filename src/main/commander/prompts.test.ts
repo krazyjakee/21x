@@ -9,9 +9,12 @@ describe('report summary instructions', () => {
     expect(reportRelayNote('Web')).toContain('The user asked for an explanation')
   })
 
-  it('keeps a single explanation after the last tool result, without narration between calls (#114)', () => {
-    expect(COMMANDER_SYSTEM_PROMPT).toContain('Do not write any text before or between tool calls')
-    expect(COMMANDER_SYSTEM_PROMPT).toContain('Call the tools silently and write one reply after the last tool result')
+  it('acknowledges a tool request once, then keeps one explanation after the last tool result (#114)', () => {
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('start your turn with one short sentence, before the first tool call')
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('A request that needs no tools gets no such sentence')
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('write nothing between tool calls')
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('do not repeat the opening sentence')
+    expect(COMMANDER_SYSTEM_PROMPT).not.toContain('Call the tools silently')
   })
 
   it('covers meaning, impact, outcome, next owner and user action for every work state', () => {

@@ -304,6 +304,14 @@ describe('CommanderWorkspace', () => {
       emit({ type: 'turn_event', sessionId: 's1', turnId: 't-1', event: { type: 'text_delta', text: 'good.' } })
     })
     expect(screen.getByTestId('commander-streaming').textContent).toContain('All good.')
+    // A reply that follows a tool call starts a new paragraph, so an opening
+    // sentence never runs into the final answer while the turn streams.
+    act(() => {
+      emit({ type: 'turn_event', sessionId: 's1', turnId: 't-1', event: { type: 'tool_call_start', id: 'c1', name: 'list_projects', input: {} } })
+      emit({ type: 'turn_event', sessionId: 's1', turnId: 't-1', event: { type: 'text_delta', text: 'Web is ' } })
+      emit({ type: 'turn_event', sessionId: 's1', turnId: 't-1', event: { type: 'text_delta', text: 'done.' } })
+    })
+    expect(useCommanderStore.getState().streaming.s1?.text).toBe('All good.\n\nWeb is done.')
 
     fireEvent.click(screen.getByLabelText('Stop'))
     expect(api.cancel).toHaveBeenCalledWith('s1')
