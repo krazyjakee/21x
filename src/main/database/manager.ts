@@ -13,7 +13,7 @@ import { TaskGroups } from './task-groups'
 import type { CreateTaskGroupData, TaskGroupRecord, TaskGroupProgressState } from '../../shared/task-groups'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
-import { isTranscriptCursor, isTranscriptPageRequest, TRANSCRIPT_PAGE_LIMITS, TRANSCRIPT_PREVIEW_NOTICE, type TranscriptPage, type TranscriptPageRequest } from '../../shared/transcript-page'
+import { isTranscriptCursor, isTranscriptPageRequest, TRANSCRIPT_EVENT_LIMITS, TRANSCRIPT_PAGE_LIMITS, TRANSCRIPT_PREVIEW_NOTICE, type TranscriptPage, type TranscriptPageRequest } from '../../shared/transcript-page'
 import { ServiceProtocolError } from '../../shared/service-protocol'
 import type {
   CreatePullRequestReadinessSnapshot,
@@ -569,7 +569,7 @@ export class DatabaseManager {
   /** Indexed durable event read. Oversized fields never cross SQLite into JS. */
   getTranscriptEventPart(taskId: string, partId: string): { rev: number; part?: TranscriptPartRecord } | undefined {
     if (!this.ensureDbOpen()) throw new ServiceProtocolError('DISCONNECTED')
-    const field = TRANSCRIPT_PAGE_LIMITS.fieldChars
+    const field = TRANSCRIPT_EVENT_LIMITS.fieldChars
     const row = this.prepare(`SELECT rev,
       CASE WHEN length(part_id) <= 512 AND length(role) <= 128 AND COALESCE(length(part_type), 0) <= 128
         AND length(content) <= ${field} AND COALESCE(length(tool), 0) <= ${field} AND COALESCE(length(payload), 0) <= ${field}
@@ -620,7 +620,7 @@ export class DatabaseManager {
         FROM transcript_parts WHERE task_id = ? AND ${key} > ? AND rev <= ? ORDER BY ${key} ASC LIMIT ?`)
         .iterate(taskId, request.after, watermark, limit + 1)
       const parts: TranscriptPartRecord[] = []
-      let bytes = 1024 // Reserve DTO metadata/array punctuation; pipe framing remains below 1 MiB.
+      let bytes = 1024 // Reserve DTO metadata/array punctuation; the page stays below the 16 MiB frame.
       let cursor = request.after
       let hasMore = false
       for (const source of rows) {

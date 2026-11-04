@@ -3,7 +3,12 @@ import { hasExactKeys, isJsonValue, isRecord } from './service-protocol'
 
 /** Read-only display pages. This version is independent of the pipe envelope. */
 export const TRANSCRIPT_PAGE_VERSION = 1 as const
-export const TRANSCRIPT_PAGE_LIMITS = { parts: 64, bytes: 256 * 1024, fieldChars: 8192 } as const
+/** fieldChars matches the Electron display cap (records up to ~2 MB show in full);
+ * pages stay well inside the 16 MiB service frame. */
+export const TRANSCRIPT_PAGE_LIMITS = { parts: 64, bytes: 8 * 1024 * 1024, fieldChars: 2 * 1024 * 1024 } as const
+/** Live update events stay small (the host caps events at 1 MiB); a larger
+ * part is delivered by the page reload the event requests instead. */
+export const TRANSCRIPT_EVENT_LIMITS = { bytes: 256 * 1024, fieldChars: 8192 } as const
 export const TRANSCRIPT_PREVIEW_NOTICE = '\n\n[Large record: a preview is displayed. The full record remains saved.]'
 export interface TranscriptPageRequest {
   version: 1

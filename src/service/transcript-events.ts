@@ -1,7 +1,7 @@
 import type { DatabaseManager } from '../main/database/manager'
 import { encodeDatabaseTranscriptPart, isDatabaseId } from '../shared/database-desktop-codecs'
 import { hasExactKeys, isRecord, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
-import { isTranscriptCursor, TRANSCRIPT_PAGE_LIMITS } from '../shared/transcript-page'
+import { isTranscriptCursor, TRANSCRIPT_EVENT_LIMITS, TRANSCRIPT_PAGE_LIMITS } from '../shared/transcript-page'
 
 /** Owner-only ingress. Wire values come from durable rows, never event contents. */
 export function encodeDurableTranscriptEvent(database: DatabaseManager, source: unknown): JsonValue {
@@ -25,7 +25,7 @@ export function encodeDurableTranscriptEvent(database: DatabaseManager, source: 
     if (reload) continue
     const part = encodeDatabaseTranscriptPart(saved.part)
     bytes += new TextEncoder().encode(JSON.stringify(part)).byteLength + 1
-    if (bytes > TRANSCRIPT_PAGE_LIMITS.bytes) { reload = true; continue }
+    if (bytes > TRANSCRIPT_EVENT_LIMITS.bytes) { reload = true; continue }
     parts.push(part)
   }
   return reload ? { taskId: source.taskId, parts: [], maxRev: current, reloadRequired: true } :

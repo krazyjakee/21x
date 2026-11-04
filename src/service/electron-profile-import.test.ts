@@ -36,7 +36,13 @@ function fixture() {
     CREATE TABLE oauth_tokens (id TEXT PRIMARY KEY, access_token BLOB NOT NULL, refresh_token BLOB);
     CREATE TABLE agents (id TEXT PRIMARY KEY, config TEXT NOT NULL);
     CREATE TABLE mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}', environment TEXT NOT NULL DEFAULT '{}', oauth_metadata TEXT NOT NULL DEFAULT '{}');
-    CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL);`)
+    CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL);
+    CREATE TABLE agent_provider_recovery (task_id TEXT PRIMARY KEY, state TEXT NOT NULL, next_retry_at INTEGER, record TEXT NOT NULL);
+    CREATE TABLE delivery_outbox (id TEXT PRIMARY KEY, state TEXT NOT NULL, last_error TEXT);
+    CREATE TABLE agent_start_queue (id TEXT PRIMARY KEY, state TEXT NOT NULL, last_error TEXT);`)
+  db.prepare('INSERT INTO agent_provider_recovery VALUES (?, ?, NULL, ?)').run('captain', 'accepted', JSON.stringify({ taskId: 'captain', state: 'accepted', prompt: 'old instruction' }))
+  db.prepare('INSERT INTO delivery_outbox VALUES (?, ?, NULL), (?, ?, NULL)').run('d1', 'pending', 'd2', 'acknowledged')
+  db.prepare('INSERT INTO agent_start_queue VALUES (?, ?, NULL), (?, ?, NULL)').run('q1', 'queued', 'q2', 'started')
   db.pragma('journal_mode = WAL')
   db.prepare('INSERT INTO settings VALUES (?, ?)').run('openai_api_key', 'safeStorage:v1:' + osCrypt('sk-openai').toString('base64'))
   db.prepare('INSERT INTO settings VALUES (?, ?)').run('anthropic_api_key', 'plain-anthropic')
@@ -77,6 +83,11 @@ describe('Electron profile import', () => {
       expect(decryptRecordCredential(env.TOKEN)).toBe('mcp-token')
       expect(decryptSettingValue(setting(MANAGED_TASK_MCP_MARKER))).toBe('managed')
       expect(db.prepare('SELECT title FROM tasks').pluck().get()).toBe('Imported task')
+      // Interrupted work is settled, never resumed by itself on first launch.
+      const recovery = db.prepare('SELECT state, record FROM agent_provider_recovery').get() as { state: string; record: string }
+      expect(recovery.state).toBe('cancelled'); expect(JSON.parse(recovery.record).state).toBe('cancelled')
+      expect(db.prepare('SELECT id, state FROM delivery_outbox ORDER BY id').all()).toEqual([{ id: 'd1', state: 'cancelled' }, { id: 'd2', state: 'acknowledged' }])
+      expect(db.prepare('SELECT id, state FROM agent_start_queue ORDER BY id').all()).toEqual([{ id: 'q1', state: 'cancelled' }, { id: 'q2', state: 'started' }])
     } finally { db.close() }
   })
 

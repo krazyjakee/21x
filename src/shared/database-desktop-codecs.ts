@@ -1,3 +1,4 @@
+import { TRANSCRIPT_PAGE_LIMITS } from './transcript-page'
 import type { DesktopCommandMap, DesktopEventMap } from './desktop-operations'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from './service-protocol'
 import type { OptionalResult } from './host-services'
@@ -108,9 +109,11 @@ function encodeProject(value: unknown): JsonValue {
   if (!isDatabaseProject(result)) return fail('INVALID_RESULT')
   return result as JsonValue
 }
+/** A display page's field cap plus room for the preview notice. */
+const TRANSCRIPT_PART_CONTENT_CHARS = TRANSCRIPT_PAGE_LIMITS.fieldChars + 256
 export function isDatabaseTranscriptPart(value: unknown): boolean {
   return object(value, ['taskId', 'partId', 'seq', 'role', 'content', 'createdAt', 'updatedAt', 'rev'], ['partType', 'tool', 'payload']) &&
-    isDatabaseId(value.taskId) && text(value.partId, 512) && !!value.partId && cursor(value.seq) && cursor(value.rev) && text(value.role, 128) && text(value.content) &&
+    isDatabaseId(value.taskId) && text(value.partId, 512) && !!value.partId && cursor(value.seq) && cursor(value.rev) && text(value.role, 128) && text(value.content, TRANSCRIPT_PART_CONTENT_CHARS) &&
     cursor(value.createdAt) && cursor(value.updatedAt) && (value.partType === undefined || text(value.partType, 128)) &&
     (value.tool === undefined || isJsonValue(value.tool)) && (value.payload === undefined || isJsonValue(value.payload))
 }

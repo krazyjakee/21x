@@ -35,7 +35,9 @@ describe('bounded transcript display pages', () => {
   })
 
   it('limits UTF-8 reply bytes independently of the part-count cap', () => {
-    db.upsertTranscriptParts(taskId, Array.from({ length: 64 }, (_, i) => ({ id: `p-${i}`, role: 'assistant', content: '🚀'.repeat(8192) })))
+    // Each part is 1/16 of a page in UTF-8, so 64 parts need several pages.
+    const rocket = '🚀'.repeat(Math.floor(TRANSCRIPT_PAGE_LIMITS.bytes / 16 / 4))
+    db.upsertTranscriptParts(taskId, Array.from({ length: 64 }, (_, i) => ({ id: `p-${i}`, role: 'assistant', content: rocket })))
     let after = 0
     let count = 0
     const watermark = db.getTranscriptMaxRev(taskId)
@@ -52,15 +54,16 @@ describe('bounded transcript display pages', () => {
   })
 
   it('previews oversized fields before loading them into JS without changing durable data', () => {
-    const content = 'x'.repeat(2_000_000)
-    const tool = { name: 'read', status: 'completed', output: 'y'.repeat(1_000_000) }
-    db.upsertTranscriptParts(taskId, [{ id: 'huge', role: 'assistant', content, tool, payload: { note: 'z'.repeat(1_000_000) } }])
+    const over = TRANSCRIPT_PAGE_LIMITS.fieldChars + 1
+    const content = 'x'.repeat(over)
+    const tool = { name: 'read', status: 'completed', output: 'y'.repeat(over) }
+    db.upsertTranscriptParts(taskId, [{ id: 'huge', role: 'assistant', content, tool, payload: { note: 'z'.repeat(over) } }])
     const page = db.getTranscriptPage(taskId, { version: 1, mode: 'snapshot', after: 0 })
     expect(page.parts[0].content).toBe(content.slice(0, TRANSCRIPT_PAGE_LIMITS.fieldChars) + TRANSCRIPT_PREVIEW_NOTICE)
     expect(page.parts[0].tool).toBeUndefined()
     expect(page.parts[0].payload).toBeUndefined()
     expect(isTranscriptPage(page, isDatabaseTranscriptPart)).toBe(true)
-    expect(db.getTranscriptParts(taskId)[0]).toMatchObject({ content, tool, payload: { note: 'z'.repeat(1_000_000) } })
+    expect(db.getTranscriptParts(taskId)[0]).toMatchObject({ content, tool, payload: { note: 'z'.repeat(over) } })
   })
 
   it('recovers rows updated or inserted between snapshot pages from the captured revision watermark', () => {
