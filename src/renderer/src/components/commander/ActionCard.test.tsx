@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CommanderMessage } from '@shared/commander'
+import type { CommanderActionExecution, CommanderMessage } from '@shared/commander'
 
 const mocks = vi.hoisted(() => ({
   undoAction: vi.fn(async () => ({ status: 'undone' }))
@@ -32,46 +32,54 @@ function message(over: Partial<CommanderMessage>): CommanderMessage {
   }
 }
 
-function structuredResult(name = 'archive_project'): CommanderMessage[] {
-  return [
+function structuredResult(name = 'archive_project'): { messages: CommanderMessage[]; actions: CommanderActionExecution[] } {
+  const result = {
+    status: 'ok' as const,
+    result: { id: 'web' },
+    target: { kind: 'project' as const, id: 'web', name: 'Web' },
+    changes: [{ field: 'status', before: 'active', after: 'archived' }]
+  }
+  return {
+    messages: [
     message({ id: 'user', role: 'user', content: 'archive the web project', input_mode: 'voice' }),
     message({
       id: 'assistant', role: 'assistant',
-      tool_calls: [{ id: 'call-1', name, input: { project: 'Web' } }]
+      tool_calls: [{ id: 'call-1', execution_id: 'exec-1', name, input: { project: 'Web' } }]
     }),
     message({
       id: 'result', role: 'tool', tool_call_id: 'call-1', tool_name: name,
-      content: JSON.stringify({
-        status: 'ok', result: { id: 'web' },
-        target: { kind: 'project', id: 'web', name: 'Web' },
-        changes: [{ field: 'status', before: 'active', after: 'archived' }]
-      })
+      content: JSON.stringify(result)
     })
-  ]
+    ],
+    actions: [{
+      execution_id: 'exec-1', session_id: 's1', turn_id: 'turn-1', request_message_id: 'user',
+      provider_call_id: 'call-1', tool_name: name, input: { project: 'Web' }, result,
+      undone_at: null, undo_message_id: null, created_at: 1_700_000_000_002
+    }]
+  }
 }
 
 beforeEach(() => mocks.undoAction.mockClear())
 
 describe('Commander action records', () => {
   it('requires a persisted successful tool result, never assistant claims alone', () => {
-    const [user, assistant, result] = structuredResult()
-    expect(collectCommanderActions([user, assistant])).toEqual([])
-    expect(collectCommanderActions([user, assistant, { ...result, is_error: true }])).toEqual([])
-    expect(collectCommanderActions([user, assistant, result])).toHaveLength(1)
+    const { messages, actions } = structuredResult()
+    expect(collectCommanderActions(messages, [])).toEqual([])
+    expect(collectCommanderActions(messages, actions)).toHaveLength(1)
   })
 
-  it('keeps historical successful results with a label fallback', () => {
-    const [user, assistant, result] = structuredResult('update_project')
-    const legacy = { ...result, content: JSON.stringify({ status: 'ok', result: { id: 'web' } }) }
-    const actions = collectCommanderActions([user, assistant, legacy])
-    expect(actions).toHaveLength(1)
-    expect(actions[0].action).toBeNull()
+  it('rejects ambiguous legacy transcript records without durable execution identity', () => {
+    const { messages } = structuredResult('update_project')
+    expect(collectCommanderActions(messages.map((entry) => entry.role === 'assistant'
+      ? { ...entry, tool_calls: entry.tool_calls?.map(({ execution_id: _, ...call }) => call) ?? null }
+      : entry), [])).toEqual([])
   })
 })
 
 describe('ActionCard', () => {
   it('shows destructive changes, voice attribution, details, Open and direct Undo', async () => {
-    const item = collectCommanderActions(structuredResult())[0]
+    const { messages, actions } = structuredResult()
+    const item = collectCommanderActions(messages, actions)[0]
     render(<ActionCard item={item} />)
 
     expect(screen.getByRole('alert')).toHaveAttribute('aria-live', 'assertive')
@@ -83,12 +91,13 @@ describe('ActionCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tool details' }))
     expect(screen.getByText(/"changes"/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    await waitFor(() => expect(mocks.undoAction).toHaveBeenCalledWith('s1', 'call-1'))
+    await waitFor(() => expect(mocks.undoAction).toHaveBeenCalledWith('s1', 'exec-1'))
     expect(await screen.findByRole('button', { name: 'Undone' })).toBeDisabled()
   })
 
   it('shows the explicit unsupported message for removal/scope actions', () => {
-    const item = collectCommanderActions(structuredResult('remove_skill'))[0]
+    const { messages, actions } = structuredResult('remove_skill')
+    const item = collectCommanderActions(messages, actions)[0]
     render(<ActionCard item={item} />)
     expect(screen.getByText('Can’t be undone here')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()

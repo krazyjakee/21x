@@ -28,3 +28,17 @@ export interface CommanderMessageRow {
   input_mode: string | null
   created_at: number
 }
+
+export interface CommanderActionExecutionRow {
+  execution_id: string
+  session_id: string
+  turn_id: string
+  request_message_id: string
+  provider_call_id: string
+  tool_name: string
+  tool_input: string
+  result_content: string
+  undone_at: number | null
+  undo_message_id: string | null
+  created_at: number
+}

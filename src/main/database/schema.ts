@@ -31,8 +31,10 @@ import { migrateCoordinatorToCaptain } from './captain-migration'
  *          tasks.role, projects.captain_agent_id, the captain_prewarm setting,
  *          projects.settings.captain_wakeups and project_status_journal.source
  *          (migrateCoordinatorToCaptain in captain-migration.ts)
- * 24 → 25: commander_messages.input_mode records typed vs voice user turns
- *          (#86). Versions 18–24 are allocated on main/concurrent branches.
+ * 24 → 25: commander_messages.input_mode records typed vs voice user turns;
+ *          commander_action_executions stores durable mutation identity and
+ *          Undo consumption (#86). Versions 18–24 are allocated on
+ *          main/concurrent branches.
  */
 const SCHEMA_VERSION = 25
 
@@ -386,6 +388,24 @@ export function createTables(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_commander_messages_session_created ON commander_messages(session_id, created_at);
+
+    -- Durable successful mutations. Provider tool-call ids are deliberately
+    -- not keys: providers may reuse them across calls, turns, or sessions.
+    CREATE TABLE IF NOT EXISTS commander_action_executions (
+      execution_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES commander_sessions(id) ON DELETE CASCADE,
+      turn_id TEXT NOT NULL,
+      request_message_id TEXT NOT NULL REFERENCES commander_messages(id) ON DELETE CASCADE,
+      provider_call_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      tool_input TEXT NOT NULL,
+      result_content TEXT NOT NULL,
+      undone_at INTEGER,
+      undo_message_id TEXT REFERENCES commander_messages(id) ON DELETE SET NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_actions_session_created
+      ON commander_action_executions(session_id, created_at);
   `)
 
   // Embedded connector pieces (docs/connectors.md). Timestamps are epoch ms.

@@ -1,8 +1,14 @@
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 import type { ChatToolCall } from '../../shared/chat'
-import { COMMANDER_MESSAGE_ROLES, type CommanderInputMode } from '../../shared/commander'
+import {
+  COMMANDER_MESSAGE_ROLES,
+  type CommanderActionExecution,
+  type CommanderInputMode
+} from '../../shared/commander'
+import { parseCommanderActionResult, type CommanderActionResult } from '../../shared/commander-tools'
 import type {
+  CommanderActionExecutionRow,
   CommanderMessage,
   CommanderMessageRole,
   CommanderMessageRow,
@@ -32,6 +38,17 @@ export interface AppendCommanderMessageInput {
 
 export interface CommanderStoreOptions {
   now?: () => number
+}
+
+export interface AppendCommanderActionExecutionInput {
+  executionId: string
+  sessionId: string
+  turnId: string
+  requestMessageId: string
+  providerCallId: string
+  toolName: string
+  input: Record<string, unknown>
+  result: CommanderActionResult
 }
 
 const MAX_TITLE_CHARS = 120
@@ -79,6 +96,31 @@ function toMessage(row: CommanderMessageRow): CommanderMessage {
     project_id: row.project_id ?? null,
     correlation_id: row.correlation_id ?? null,
     input_mode: row.input_mode === 'voice' || row.input_mode === 'typed' ? row.input_mode : null,
+    created_at: row.created_at
+  }
+}
+
+function toActionExecution(row: CommanderActionExecutionRow): CommanderActionExecution {
+  let input: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(row.tool_input) as unknown
+    input = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    input = {}
+  }
+  const result = parseCommanderActionResult(row.result_content)
+  if (!result) throw new Error(`Commander action ${row.execution_id} has an invalid saved result.`)
+  return {
+    execution_id: row.execution_id,
+    session_id: row.session_id,
+    turn_id: row.turn_id,
+    request_message_id: row.request_message_id,
+    provider_call_id: row.provider_call_id,
+    tool_name: row.tool_name,
+    input,
+    result,
+    undone_at: row.undone_at ?? null,
+    undo_message_id: row.undo_message_id ?? null,
     created_at: row.created_at
   }
 }
@@ -225,6 +267,58 @@ export class CommanderStore {
       .prepare('SELECT * FROM commander_messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC')
       .all(sessionId) as CommanderMessageRow[]
     return rows.map(toMessage)
+  }
+
+  // ── Durable action executions (#86) ──────────────────────
+
+  appendActionExecution(input: AppendCommanderActionExecutionInput): CommanderActionExecution {
+    const ts = this.now()
+    const insert = this.db.transaction(() => {
+      const session = this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(ts, input.sessionId)
+      if (session.changes === 0) throw new Error(`Commander session not found: ${input.sessionId}`)
+      this.db.prepare(`INSERT INTO commander_action_executions
+        (execution_id, session_id, turn_id, request_message_id, provider_call_id, tool_name, tool_input, result_content, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          input.executionId,
+          input.sessionId,
+          input.turnId,
+          input.requestMessageId,
+          input.providerCallId,
+          input.toolName,
+          JSON.stringify(input.input),
+          JSON.stringify(input.result),
+          ts
+        )
+    })
+    insert()
+    return this.getActionExecution(input.executionId)!
+  }
+
+  getActionExecution(executionId: string): CommanderActionExecution | null {
+    const row = this.db.prepare('SELECT * FROM commander_action_executions WHERE execution_id = ?')
+      .get(executionId) as CommanderActionExecutionRow | undefined
+    return row ? toActionExecution(row) : null
+  }
+
+  listActionExecutions(sessionId: string): CommanderActionExecution[] {
+    const rows = this.db.prepare(`SELECT * FROM commander_action_executions
+      WHERE session_id = ? ORDER BY created_at ASC, rowid ASC`)
+      .all(sessionId) as CommanderActionExecutionRow[]
+    return rows.map(toActionExecution)
+  }
+
+  markActionUndone(executionId: string, undoneAt: number, undoMessageId: string): CommanderActionExecution {
+    const changed = this.db.prepare(`UPDATE commander_action_executions
+      SET undone_at = ?, undo_message_id = ? WHERE execution_id = ? AND undone_at IS NULL`)
+      .run(undoneAt, undoMessageId, executionId).changes
+    if (changed !== 1) throw new Error('This action was already undone.')
+    return this.getActionExecution(executionId)!
+  }
+
+  /** Runs synchronous Commander persistence and domain writes on this connection atomically. */
+  transaction<T>(work: () => T): T {
+    return this.db.transaction(work)()
   }
 
   unreadCount(sessionId: string): number {

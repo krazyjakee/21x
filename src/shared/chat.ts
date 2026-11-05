@@ -12,6 +12,8 @@ export interface ChatToolCall {
   id: string
   name: string
   input: Record<string, unknown>
+  /** Main-generated durable identity for one execution. Provider ids may repeat. */
+  execution_id?: string
 }
 
 /**
@@ -39,8 +41,8 @@ export interface ChatUsage {
 /** Events the runtime emits while a turn runs, in order. */
 export type ChatRuntimeEvent =
   | { type: 'text_delta'; text: string }
-  | { type: 'tool_call_start'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_call_result'; id: string; name: string; content: string; isError: boolean }
+  | { type: 'tool_call_start'; id: string; name: string; input: Record<string, unknown>; execution_id?: string }
+  | { type: 'tool_call_result'; id: string; name: string; content: string; isError: boolean; execution_id?: string }
   | { type: 'done'; stopReason: ChatStopReason; messages: ChatMessage[]; usage: ChatUsage }
   | { type: 'error'; message: string }
 

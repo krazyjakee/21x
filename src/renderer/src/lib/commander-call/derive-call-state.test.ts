@@ -73,7 +73,7 @@ describe('deriveCallState state table', () => {
 
 describe('call events and availability', () => {
   const action: CallEvent = {
-    kind: 'action', at: NOW - 1, sessionId: 's1', turnId: 't1', toolCallId: 'c1', toolName: 'update_project'
+    kind: 'action', at: NOW - 1, sessionId: 's1', turnId: 't1', executionId: 'e1', toolCallId: 'c1', toolName: 'update_project'
   }
   const report: CallEvent = {
     kind: 'report', at: NOW - 1, sessionId: 's1', messageId: 'm1', projectId: 'p1'

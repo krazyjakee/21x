@@ -5,6 +5,7 @@ import type { ChatProvider, ChatProviderEvent, ChatProviderRequest } from '../ch
 import type { DatabaseManager } from '../database'
 import { COMMANDER_ADMIN_TOOLS, CommanderService, cleanGeneratedTitle, fallbackTitle, toolResultTags } from './commander-service'
 import { CommanderStore } from './commander-store'
+import { undoCommanderAction } from './commander-undo'
 import { buildContext, planFold, splitTurns } from './context'
 import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, type CommanderAgents } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
@@ -139,6 +140,109 @@ describe('CommanderService turns', () => {
     const session = store.createSession()
     expect(() => service.sendUserMessage(session.id, 'hi')).toThrow('No API key')
     expect(store.listMessages(session.id)).toEqual([])
+  })
+
+  it('persists and announces an authoritative action before the final model reply finishes', async () => {
+    const project = db.createProject({ name: 'Immediate action' })!
+    let call = 0
+    let releaseReply = (): void => {}
+    const replyGate = new Promise<void>((resolve) => { releaseReply = resolve })
+    let signalSecondRequest = (): void => {}
+    const secondRequest = new Promise<void>((resolve) => { signalSecondRequest = resolve })
+    const provider: ChatProvider = {
+      id: 'delayed',
+      model: 'delayed-1',
+      stream() {
+        call++
+        const current = call
+        return (async function* (): AsyncGenerator<ChatProviderEvent> {
+          if (current === 1) {
+            yield { type: 'tool_call', id: 'provider-call-1', name: 'archive_project', input: { project: project.id } }
+            yield { type: 'message_end', stopReason: 'tool_use' }
+            return
+          }
+          signalSecondRequest()
+          await replyGate
+          yield { type: 'text_delta', text: 'Archived.' }
+          yield { type: 'message_end', stopReason: 'end_turn' }
+        })()
+      }
+    }
+    const service = new CommanderService({
+      store,
+      createProvider: () => provider,
+      emit: (event) => events.push(event),
+      getTools: (context) => createCommanderProjectTools({ db, context })
+    })
+    const session = store.createSession('Already named')
+    const turn = service.sendUserMessage(session.id, 'Archive that project')
+
+    await secondRequest
+    const [saved] = store.listActionExecutions(session.id)
+    expect(saved).toMatchObject({
+      session_id: session.id,
+      turn_id: turn.turnId,
+      provider_call_id: 'provider-call-1',
+      tool_name: 'archive_project',
+      request_message_id: turn.message.id,
+      undone_at: null
+    })
+    expect(db.getProject(project.id)?.archived).toBe(true)
+    expect(events).toContainEqual({ type: 'action_completed', sessionId: session.id, action: saved })
+    expect(events.some((event) => event.type === 'turn_event' && event.event.type === 'done')).toBe(false)
+
+    undoCommanderAction({ db, store }, session.id, saved.execution_id)
+    expect(db.getProject(project.id)?.archived).toBe(false)
+
+    releaseReply()
+    await turn.done
+    const assistantCall = store.listMessages(session.id)
+      .flatMap((message) => message.role === 'assistant' ? message.tool_calls ?? [] : [])
+      .find((toolCall) => toolCall.id === 'provider-call-1')
+    expect(assistantCall?.execution_id).toBe(saved.execution_id)
+  })
+
+  it('assigns unique execution identities when a provider reuses a call id in one turn', async () => {
+    const alpha = db.createProject({ name: 'Repeated Alpha' })!
+    const beta = db.createProject({ name: 'Repeated Beta' })!
+    let requestNumber = 0
+    const provider: ChatProvider = {
+      id: 'repeating',
+      model: 'repeating-1',
+      stream() {
+        requestNumber++
+        const current = requestNumber
+        return (async function* (): AsyncGenerator<ChatProviderEvent> {
+          if (current <= 2) {
+            yield {
+              type: 'tool_call', id: 'same-provider-id', name: 'archive_project',
+              input: { project: current === 1 ? alpha.id : beta.id }
+            }
+            yield { type: 'message_end', stopReason: 'tool_use' }
+            return
+          }
+          yield { type: 'text_delta', text: 'Both archived.' }
+          yield { type: 'message_end', stopReason: 'end_turn' }
+        })()
+      }
+    }
+    const service = new CommanderService({
+      store,
+      createProvider: () => provider,
+      emit: (event) => events.push(event),
+      getTools: (context) => createCommanderProjectTools({ db, context })
+    })
+    const session = store.createSession('Repeated ids')
+    await service.sendUserMessage(session.id, 'Archive both').done
+
+    const actions = store.listActionExecutions(session.id)
+    expect(actions).toHaveLength(2)
+    expect(new Set(actions.map((item) => item.execution_id)).size).toBe(2)
+    expect(actions.map((item) => item.provider_call_id)).toEqual(['same-provider-id', 'same-provider-id'])
+    expect(actions.map((item) => item.result.target.id)).toEqual([alpha.id, beta.id])
+    const calls = store.listMessages(session.id)
+      .flatMap((message) => message.role === 'assistant' ? message.tool_calls ?? [] : [])
+    expect(calls.map((item) => item.execution_id)).toEqual(actions.map((item) => item.execution_id))
   })
 
   it('builds a fresh tool registry for each turn with its session and trigger', async () => {

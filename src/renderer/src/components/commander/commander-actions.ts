@@ -1,55 +1,35 @@
 import type { ChatToolCall } from '@shared/chat'
-import type { CommanderMessage } from '@shared/commander'
-import {
-  commanderUndoCallId,
-  isCommanderAdminTool,
-  parseCommanderActionResult,
-  type CommanderActionResult
-} from '@shared/commander-tools'
+import type { CommanderActionExecution, CommanderMessage } from '@shared/commander'
+import type { CommanderActionResult } from '@shared/commander-tools'
 
 export interface CommanderActionItem {
   call: ChatToolCall
-  result: CommanderMessage
+  execution: CommanderActionExecution
   request: CommanderMessage | null
-  action: CommanderActionResult | null
+  action: CommanderActionResult
   undone: boolean
 }
 
-function isLegacySuccess(content: string): boolean {
-  try {
-    const value = JSON.parse(content) as { status?: unknown }
-    return value?.status === 'ok'
-  } catch {
-    return false
-  }
-}
-
 /**
- * Joins model calls to main-process results. A claim in assistant text alone
- * can never produce an action: the persisted, non-error tool result is required.
+ * Builds cards only from main's durable execution records. Legacy messages
+ * with provider ids alone are deliberately rejected: those ids may repeat,
+ * and assistant prose or an ambiguous transcript must never authorize Undo.
  */
-export function collectCommanderActions(messages: CommanderMessage[]): CommanderActionItem[] {
-  const results = new Map<string, CommanderMessage>()
-  const undone = new Set<string>()
-  for (const message of messages) {
-    if (message.role === 'tool' && message.tool_call_id) results.set(message.tool_call_id, message)
-    const undoneCall = commanderUndoCallId(message.correlation_id)
-    if (undoneCall) undone.add(undoneCall)
-  }
-
-  let request: CommanderMessage | null = null
-  const actions: CommanderActionItem[] = []
-  for (const message of messages) {
-    if (message.role === 'user' && !commanderUndoCallId(message.correlation_id)) request = message
-    if (message.role !== 'assistant') continue
-    for (const call of message.tool_calls ?? []) {
-      if (!isCommanderAdminTool(call.name)) continue
-      const toolResult = results.get(call.id)
-      if (!toolResult || toolResult.is_error || toolResult.tool_name !== call.name) continue
-      const action = parseCommanderActionResult(toolResult.content)
-      if (!action && !isLegacySuccess(toolResult.content)) continue
-      actions.push({ call, result: toolResult, request, action, undone: undone.has(call.id) })
-    }
-  }
-  return actions
+export function collectCommanderActions(
+  messages: CommanderMessage[],
+  executions: CommanderActionExecution[]
+): CommanderActionItem[] {
+  const requests = new Map(messages.map((message) => [message.id, message]))
+  return executions.map((execution) => ({
+    execution,
+    call: {
+      id: execution.provider_call_id,
+      execution_id: execution.execution_id,
+      name: execution.tool_name,
+      input: execution.input
+    },
+    request: requests.get(execution.request_message_id) ?? null,
+    action: execution.result,
+    undone: execution.undone_at !== null
+  }))
 }

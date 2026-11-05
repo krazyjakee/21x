@@ -158,7 +158,11 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
   ipcMain.handle('commander:listMessages', (event, payload: { sessionId?: string }) => {
     trusted(event, 'commander:listMessages')
     const sessionId = requireString(payload?.sessionId, 'sessionId')
-    return { messages: store.listMessages(sessionId), activeTurnId: commander.activeTurnId(sessionId) }
+    return {
+      messages: store.listMessages(sessionId),
+      actions: store.listActionExecutions(sessionId),
+      activeTurnId: commander.activeTurnId(sessionId)
+    }
   })
 
   ipcMain.handle('commander:markRead', (event, payload: { sessionId?: string }) => {
@@ -189,18 +193,19 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     return { cancelled: commander.cancel(payload.sessionId) }
   })
 
-  ipcMain.handle('commander:undoAction', (event, payload: { sessionId?: string; toolCallId?: string }) => {
+  ipcMain.handle('commander:undoAction', (event, payload: { sessionId?: string; executionId?: string }) => {
     trusted(event, 'commander:undoAction')
     const sessionId = requireString(payload?.sessionId, 'sessionId')
-    const toolCallId = requireString(payload?.toolCallId, 'toolCallId')
+    const executionId = requireString(payload?.executionId, 'executionId')
     const undone = undoCommanderAction({
       db: deps.db,
       store,
       agents: deps.agentManager,
       onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
       onSkillChanged: (skillId, kind) => broadcastSkillsChanged({ skillId, kind })
-    }, sessionId, toolCallId)
+    }, sessionId, executionId)
     emit({ type: 'messages_appended', sessionId, messages: [undone.note] })
+    emit({ type: 'action_updated', sessionId, action: undone.action })
     const session = store.getSession(sessionId)
     if (session) emit({ type: 'session_updated', session })
     return undone

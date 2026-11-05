@@ -57,7 +57,7 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
-import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { CommanderActionExecution, CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 import type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
@@ -634,13 +634,13 @@ interface ElectronAPI {
     createSession: (payload?: { title?: string }) => Promise<CommanderSession>
     renameSession: (id: string, title: string) => Promise<CommanderSession | null>
     archiveSession: (id: string, archived: boolean) => Promise<CommanderSession | null>
-    listMessages: (sessionId: string) => Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }>
+    listMessages: (sessionId: string) => Promise<{ messages: CommanderMessage[]; actions: CommanderActionExecution[]; activeTurnId: string | null }>
     markRead: (sessionId: string) => Promise<CommanderSession | null>
     /** The session the view shows, or null when the view is closed (#62 report relay). */
     setActiveSession: (sessionId: string | null) => Promise<void>
     send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
     cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
-    undoAction: (sessionId: string, toolCallId: string) => Promise<{ status: 'undone'; toolCallId: string; toolName: string; note: CommanderMessage }>
+    undoAction: (sessionId: string, executionId: string) => Promise<{ status: 'undone'; executionId: string; toolName: string; note: CommanderMessage; action: CommanderActionExecution }>
     onEvent: (callback: (event: CommanderEvent) => void) => () => void
   }
   /** ElevenLabs speech engine (#64). Answers with the speech snapshot; the key never comes back. */

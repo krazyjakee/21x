@@ -1,3 +1,4 @@
+import { createId } from '@paralleldrive/cuid2'
 import type { ChatMessage } from '../../shared/chat'
 import type { CommanderEvent, CommanderInputMode, CommanderMessage, CommanderSession } from '../../shared/commander'
 import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
@@ -7,7 +8,7 @@ import { normalizeTitle, type CommanderStore } from './commander-store'
 import { buildContext, DEFAULT_CONTEXT_BUDGET, planFold, transcriptForSummary, type ContextBudget } from './context'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
-import { COMMANDER_ADMIN_TOOLS } from '../../shared/commander-tools'
+import { COMMANDER_ADMIN_TOOLS, parseCommanderActionResult } from '../../shared/commander-tools'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -86,8 +87,18 @@ export interface DeliverReportResult {
 
 interface TurnStart {
   trigger: 'user' | 'report'
+  /** The real human request that authorized a user-started turn. */
+  requestMessageId?: string
   /** Extra system text for the turn (the relay note of a report-triggered turn). */
   systemNote?: string
+}
+
+interface TurnExecution {
+  executionId: string
+  providerCallId: string
+  name: string
+  input: Record<string, unknown>
+  completed: boolean
 }
 
 const MAX_USER_MESSAGE_CHARS = 100_000
@@ -235,7 +246,7 @@ export class CommanderService {
     // A user turn resets the report-ask budget (#62).
     this.reportAsks.delete(sessionId)
 
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user' })
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', requestMessageId: message.id })
     return { turnId, message, done }
   }
 
@@ -256,11 +267,63 @@ export class CommanderService {
     }
 
     let turnId = ''
+    const executions: TurnExecution[] = []
     const handle = this.runtime.startTurn(
       { provider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls },
       (event) => {
         // `done` is re-emitted after the turn's messages are stored.
         if (event.type === 'done') return
+        if (event.type === 'tool_call_start') {
+          const executionId = createId()
+          executions.push({
+            executionId,
+            providerCallId: event.id,
+            name: event.name,
+            input: event.input,
+            completed: false
+          })
+          this.emit({
+            type: 'turn_event',
+            sessionId,
+            turnId,
+            event: { ...event, execution_id: executionId }
+          })
+          return
+        }
+        if (event.type === 'tool_call_result') {
+          const execution = executions.find((candidate) =>
+            !candidate.completed && candidate.providerCallId === event.id && candidate.name === event.name
+          )
+          if (!execution) {
+            this.emit({ type: 'turn_event', sessionId, turnId, event })
+            return
+          }
+          execution.completed = true
+          const result = !event.isError && COMMANDER_ADMIN_TOOLS.has(event.name)
+            ? parseCommanderActionResult(event.content)
+            : null
+          if (result && start.trigger === 'user' && start.requestMessageId) {
+            const action = this.store.appendActionExecution({
+              executionId: execution.executionId,
+              sessionId,
+              turnId,
+              requestMessageId: start.requestMessageId,
+              providerCallId: event.id,
+              toolName: event.name,
+              input: execution.input,
+              result
+            })
+            this.emit({ type: 'action_completed', sessionId, action })
+            this.emitSession(sessionId)
+          }
+          this.emit({
+            type: 'turn_event',
+            sessionId,
+            turnId,
+            event: { ...event, execution_id: execution.executionId }
+          })
+          return
+        }
         this.emit({ type: 'turn_event', sessionId, turnId, event })
       }
     )
@@ -269,7 +332,7 @@ export class CommanderService {
     this.emit({ type: 'turn_started', sessionId, turnId })
 
     const done = handle.done
-      .then((result) => this.finishTurn(sessionId, context.messages.length, result))
+      .then((result) => this.finishTurn(sessionId, context.messages.length, result, executions))
       .catch((err) => {
         console.error('[Commander] turn bookkeeping failed:', err)
         // The renderer must still leave its streaming state.
@@ -288,11 +351,22 @@ export class CommanderService {
     return { turnId, done }
   }
 
-  private finishTurn(sessionId: string, inputCount: number, result: ChatTurnResult): void {
+  private finishTurn(sessionId: string, inputCount: number, result: ChatTurnResult, executions: TurnExecution[]): void {
     const added = result.messages.slice(inputCount)
     const stored: CommanderMessage[] = []
+    let executionIndex = 0
     for (const m of added) {
-      const persisted = this.persistChatMessage(sessionId, m)
+      let message = m
+      if (m.role === 'assistant' && m.toolCalls?.length) {
+        const calls = m.toolCalls.map((call) => {
+          const execution = executions[executionIndex]
+          if (!execution || execution.providerCallId !== call.id || execution.name !== call.name) return call
+          executionIndex++
+          return { ...call, execution_id: execution.executionId }
+        })
+        message = { ...m, toolCalls: calls }
+      }
+      const persisted = this.persistChatMessage(sessionId, message)
       if (persisted) stored.push(persisted)
     }
     if (stored.length > 0) this.emit({ type: 'messages_appended', sessionId, messages: stored })

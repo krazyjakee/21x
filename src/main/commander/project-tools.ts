@@ -49,7 +49,8 @@ export type ProjectChangeKind = 'created' | 'updated' | 'archived' | 'restored' 
 /** What the tools need from the agent manager. Absent in tests and before start-up; the tools then degrade to "not available". */
 export type CommanderAgents = Pick<
   AgentManager,
-  'getStartQueue' | 'findSessionByTaskId' | 'getSessionStatus' | 'getProjectLimitState' | 'sendMessage' | 'pauseAllProjects' | 'isAllProjectsPaused'
+  'getStartQueue' | 'findSessionByTaskId' | 'getSessionStatus' | 'getProjectLimitState' | 'sendMessage' |
+  'pauseAllProjects' | 'isAllProjectsPaused' | 'recheckStartQueue'
 >
 
 export interface ProjectToolContext {

@@ -22,7 +22,7 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
-import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { CommanderActionExecution, CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
 import type {
   ConnectorBridgeCredentialInput,
   ConnectorBridgeCredentialStatus,
@@ -838,7 +838,7 @@ export const commanderApi = {
   createSession: (title?: string): Promise<CommanderSession> => window.electronAPI.commander.createSession(title ? { title } : undefined),
   renameSession: (id: string, title: string): Promise<CommanderSession | null> => window.electronAPI.commander.renameSession(id, title),
   archiveSession: (id: string, archived: boolean): Promise<CommanderSession | null> => window.electronAPI.commander.archiveSession(id, archived),
-  listMessages: (sessionId: string): Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }> =>
+  listMessages: (sessionId: string): Promise<{ messages: CommanderMessage[]; actions: CommanderActionExecution[]; activeTurnId: string | null }> =>
     window.electronAPI.commander.listMessages(sessionId),
   markRead: (sessionId: string): Promise<CommanderSession | null> => window.electronAPI.commander.markRead(sessionId),
   /** Tells main which session the view shows (#62): a report for it is relayed at once, others only queue as unread. */
@@ -846,7 +846,7 @@ export const commanderApi = {
     typeof window.electronAPI.commander.setActiveSession === 'function' ? window.electronAPI.commander.setActiveSession(sessionId) : Promise.resolve(),
   send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> => window.electronAPI.commander.send(sessionId, text),
   cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
-  undoAction: (sessionId: string, toolCallId: string) => window.electronAPI.commander.undoAction(sessionId, toolCallId),
+  undoAction: (sessionId: string, executionId: string) => window.electronAPI.commander.undoAction(sessionId, executionId),
   onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
 }
 

@@ -15,7 +15,7 @@ docs/database-migrations.md, *The coordinator is the Captain*).
 
 ## Storage
 
-Both tables are created in `createTables()` with `CREATE TABLE IF NOT EXISTS`.
+All three tables are created in `createTables()` with `CREATE TABLE IF NOT EXISTS`.
 Additions to an existing table still use the numbered migration sequence (see
 docs/database-migrations.md). Timestamps are epoch ms.
 
@@ -28,6 +28,12 @@ docs/database-migrations.md). Timestamps are epoch ms.
   `correlation_id`, `input_mode` (`voice | typed`, on user rows), `created_at`.
   Indexed on `(session_id, created_at)`. Rows created before input mode was
   recorded keep `NULL`.
+- `commander_action_executions`: one row per successful mutating tool
+  execution. Its app-generated `execution_id` is globally unique; the provider
+  call id is retained only as transcript metadata because providers may reuse
+  it. The row binds the session, turn, originating human request, tool input,
+  validated result, and optional Undo consumption/audit marker. It is indexed
+  on `(session_id, created_at)` and cascades with its session.
 
 `CommanderStore` (`src/main/commander/commander-store.ts`) handles sessions
 (list, search over titles and message text, create, rename, archive) and
@@ -57,7 +63,11 @@ does the following:
    and the tools from `getTools`, which is called per turn with the session id
    and the trigger (`user` or `report`). A report-started turn gets no admin
    tools (see *Immediate administration*). Events stream on `commander:event`.
-4. Stores the assistant and tool messages. A tool row whose result is a JSON
+4. As soon as a mutating tool completes successfully, validates and persists
+   its authoritative action execution, then emits `action_completed`. This
+   makes its card, destructive announcement, Undo, and call/PiP event available
+   while the model may still be composing its final reply. At turn end it
+   stores the assistant and tool messages. A tool row whose result is a JSON
    object carrying `project_id` / `correlation_id` (an `ask_captain`
    result) is tagged with them, so #62 can match the report to the
    delegation. Then it emits `messages_appended`, then `done`.
@@ -174,9 +184,13 @@ broadcasts `project:changed` (or `skills:changed`).
 The shared mutating-tool vocabulary and severity map live in
 `src/shared/commander-tools.ts`. Archiving and removals are destructive;
 pausing every project and promoting or moving a skill are wide-reaching; the
-remaining mutations are neutral. The renderer creates an action only by
-joining a persisted assistant tool call to its matching successful tool
-result. Assistant prose alone can never create an action record.
+remaining mutations are neutral. Main assigns each actual tool execution a
+globally unique durable `execution_id` and persists its validated successful
+result immediately. Cards, IPC Undo, renderer deduplication, cross-session
+state, and call/PiP events all use that identity. Provider call ids are never
+used as action identity. Legacy transcripts without a durable execution row
+are deliberately ineligible for cards and Undo, because their provider ids
+may be ambiguous. Assistant prose alone can never create an action record.
 
 Actions appear inline as cards and in the side panel's Actions tab.
 Destructive cards use an assertive live-region announcement. A
@@ -188,22 +202,26 @@ Undo has no grace delay and only performs exact reversals. It supports
 archive/restore, pause/resume all projects, and project, repository, resource,
 or skill field updates. Before writing, main verifies that every affected
 field still equals the recorded `after` value. Concurrent changes therefore
-fail instead of being overwritten. Successful Undo appends one hidden
-`undo:<tool-call-id>` note to the session for future model context, making the
-operation idempotent without starting another model turn. Removals and skill
-promotion/moves show “Can’t be undone here”.
+fail instead of being overwritten. The reversal, hidden
+`undo:<execution-id>` model note, and durable consumption marker commit in one
+SQLite transaction; project/skill notifications and queue refreshes happen
+only after that commit. The note explicitly says it is an application event,
+not a user request and not new authorization. A failed or replayed Undo cannot
+leave a reversed-but-consumable action. Removals and skill promotion/moves
+show “Can’t be undone here”.
 
 ## IPC
 
 `src/main/ipc/commander.ts` registers these handlers: `commander:listSessions`,
 `createSession`, `renameSession`, `archiveSession` (which also cancels a running
-turn), `listMessages` (returns `{ messages, activeTurnId }`), `markRead`,
+turn), `listMessages` (returns `{ messages, actions, activeTurnId }`), `markRead`,
 `setActiveSession` (the session the view shows, or null when it closes; see
 Reports), `send`, `cancel`, and `undoAction`. Every handler checks the sender with
 `assertTrustedSender`. It also installs the report bridge (`installCommanderReportBridge`).
 Callers are subscribed to `commander:event`, which carries these events:
 `turn_started`, `turn_event` (runtime events, where `done` carries only the stop
-reason), `messages_appended` and `session_updated`.
+reason), `action_completed`, `action_updated`, `messages_appended` and
+`session_updated`.
 
 It also wires the tool registry to the app: the agent manager, the held-action
 list from `escalation.ts`, the Task API's window notifier for UI commands, and

@@ -16,6 +16,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import type { Agent } from '@/types'
 import { CommanderMessageItem, ToolChip } from './CommanderMessageItem'
+import { ActionCard } from './ActionCard'
 import { collectCommanderActions } from './commander-actions'
 import { commanderUndoCallId } from '@shared/commander-tools'
 
@@ -92,6 +93,7 @@ export function CommanderComposer({ children }: { children: ReactNode }) {
 export function CommanderChatPane() {
   const sessionId = useCommanderStore((s) => s.selectedSessionId)
   const messages = useCommanderStore((s) => (s.selectedSessionId ? s.messages[s.selectedSessionId] : undefined)) ?? EMPTY
+  const actionExecutions = useCommanderStore((s) => (s.selectedSessionId ? s.actions[s.selectedSessionId] : undefined)) ?? []
   const streaming = useCommanderStore((s) => (s.selectedSessionId ? s.streaming[s.selectedSessionId] : undefined))
   const turnError = useCommanderStore((s) => (s.selectedSessionId ? s.turnErrors[s.selectedSessionId] : undefined))
   const send = useCommanderStore((s) => s.send)
@@ -201,8 +203,8 @@ export function CommanderChatPane() {
   }, [messages])
 
   const actions = useMemo(() => {
-    return new Map(collectCommanderActions(messages).map((action) => [action.call.id, action]))
-  }, [messages])
+    return new Map(collectCommanderActions(messages, actionExecutions).map((action) => [action.execution.execution_id, action]))
+  }, [messages, actionExecutions])
 
   const visible = useMemo(() => messages.filter((m) =>
     m.role !== 'tool' && m.role !== 'summary' && !commanderUndoCallId(m.correlation_id)
@@ -266,9 +268,12 @@ export function CommanderChatPane() {
             ) : null}
             {streaming.toolCalls.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {streaming.toolCalls.map((c) => (
-                  <ToolChip key={c.id} name={c.name} input={c.input} result={c.result} isError={c.isError} />
-                ))}
+                {streaming.toolCalls.map((c, index) => {
+                  const action = c.execution_id ? actions.get(c.execution_id) : undefined
+                  return action
+                    ? <ActionCard key={c.execution_id} item={action} />
+                    : <ToolChip key={`${c.execution_id ?? c.id}:${index}`} name={c.name} input={c.input} result={c.result} isError={c.isError} />
+                })}
               </div>
             )}
           </div>

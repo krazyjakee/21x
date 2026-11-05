@@ -62,8 +62,8 @@ export function ActionCard({ item }: { item: CommanderActionItem }) {
   const destructive = severity === 'destructive'
   const wide = severity === 'wide-reaching'
   const undone = item.undone || locallyUndone
-  const undoable = Boolean(item.action) && isCommanderActionUndoable(item.call.name)
-  const target = item.action?.target
+  const undoable = isCommanderActionUndoable(item.call.name)
+  const target = item.action.target
   const canOpen = Boolean(target) && target?.kind !== 'all_projects' && item.call.name !== 'remove_skill'
 
   const openTarget = () => {
@@ -81,7 +81,7 @@ export function ActionCard({ item }: { item: CommanderActionItem }) {
     setUndoing(true)
     setUndoError(null)
     try {
-      await commanderApi.undoAction(item.result.session_id, item.call.id)
+      await commanderApi.undoAction(item.execution.session_id, item.execution.execution_id)
       setLocallyUndone(true)
       void useProjectStore.getState().fetchProjects()
       void useSkillStore.getState().fetchSkills()
@@ -109,10 +109,10 @@ export function ActionCard({ item }: { item: CommanderActionItem }) {
       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         <Icon className={cn('size-3.5', destructive && 'text-destructive', wide && 'text-amber-600 dark:text-amber-400')} aria-hidden="true" />
         <span>Action taken · {severity}</span>
-        <time className="ml-auto normal-case tabular-nums" dateTime={new Date(item.result.created_at).toISOString()}>{formatTime(item.result.created_at)}</time>
+        <time className="ml-auto normal-case tabular-nums" dateTime={new Date(item.execution.created_at).toISOString()}>{formatTime(item.execution.created_at)}</time>
       </div>
       <p className="mt-1 text-sm font-medium text-foreground">{actionTitle(item)}</p>
-      {item.action?.changes.map((change) => (
+      {item.action.changes.map((change) => (
         <div key={change.field} className="mt-1 grid grid-cols-[minmax(4rem,auto)_1fr] gap-2 text-xs">
           <span className="text-muted-foreground">{change.field}</span>
           <span className="min-w-0 break-words text-foreground">
@@ -152,7 +152,7 @@ export function ActionCard({ item }: { item: CommanderActionItem }) {
       {undoError && <p role="alert" className="mt-2 text-xs text-destructive">{undoError}</p>}
       {expanded && (
         <pre id={detailId} className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background/70 p-2 font-mono text-[11px]">
-          {formatToolResult(item.result.content)}
+          {formatToolResult(JSON.stringify(item.execution.result))}
         </pre>
       )}
     </article>

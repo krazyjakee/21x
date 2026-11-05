@@ -142,13 +142,13 @@ export function CommanderMessageItem({ message, toolResults, turnActive = false,
         )}
         {calls.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {calls.map((call) => {
-              const action = actions?.get(call.id)
-              if (action) return <ActionCard key={call.id} item={action} />
+            {calls.map((call, index) => {
+              const action = call.execution_id ? actions?.get(call.execution_id) : undefined
+              if (action) return <ActionCard key={call.execution_id} item={action} />
               const result = toolResults.get(call.id)
               return (
                 <ToolChip
-                  key={call.id}
+                  key={`${call.id}:${index}`}
                   name={call.name}
                   input={call.input}
                   result={result?.content}

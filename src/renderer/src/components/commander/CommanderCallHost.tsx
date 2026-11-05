@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { CallMedia } from '@shared/commander-call'
 import type { CommanderEvent } from '@shared/commander'
-import { isCommanderAdminTool, parseCommanderActionResult } from '@shared/commander-tools'
 import { commanderApi, commanderVoiceApi } from '@/lib/ipc-client'
 import { activityNow } from '@/lib/activity/activity-clock'
 import {
@@ -191,32 +190,17 @@ export function CommanderCallHost() {
   // Action/report events are observations, not new call states. Keep this
   // subscription beside the lifetime owner so navigation cannot miss them.
   useEffect(() => {
-    const tools = new Map<string, string>()
-    const keyOf = (event: Extract<CommanderEvent, { type: 'turn_event' }>, id: string): string =>
-      `${event.sessionId}:${event.turnId}:${id}`
     const onEvent = (event: CommanderEvent): void => {
-      if (event.type === 'turn_event') {
-        const inner = event.event
-        if (inner.type === 'tool_call_start') {
-          tools.set(keyOf(event, inner.id), inner.name)
-        } else if (inner.type === 'tool_call_result') {
-          const key = keyOf(event, inner.id)
-          const toolName = tools.get(key)
-          tools.delete(key)
-          if (toolName && !inner.isError && isCommanderAdminTool(toolName) && parseCommanderActionResult(inner.content)) {
-            recordEvent({
-              kind: 'action',
-              at: activityNow(),
-              sessionId: event.sessionId,
-              turnId: event.turnId,
-              toolCallId: inner.id,
-              toolName
-            })
-          }
-        } else if (inner.type === 'done') {
-          const prefix = `${event.sessionId}:${event.turnId}:`
-          for (const key of tools.keys()) if (key.startsWith(prefix)) tools.delete(key)
-        }
+      if (event.type === 'action_completed') {
+        recordEvent({
+          kind: 'action',
+          at: activityNow(),
+          sessionId: event.sessionId,
+          turnId: event.action.turn_id,
+          executionId: event.action.execution_id,
+          toolCallId: event.action.provider_call_id,
+          toolName: event.action.tool_name
+        })
         return
       }
       if (event.type === 'messages_appended') {

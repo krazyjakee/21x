@@ -85,6 +85,9 @@ export type CallEvent =
       at: number
       sessionId: string
       turnId: string
+      /** Durable main-generated identity used by cards, Undo, and PiP. */
+      executionId: string
+      /** Provider id retained for diagnostics only; it is not unique. */
       toolCallId: string
       toolName: string
     }

@@ -92,6 +92,14 @@ and stay readable. Migration numbers 18–24 were already allocated by main or
 concurrent branches when this stacked change was created, so this branch
 intentionally advances from its version-17 base to 25.
 
+The same feature creates the new `commander_action_executions` table with
+`CREATE TABLE IF NOT EXISTS`. It needs no data backfill: legacy transcripts do
+not have a trustworthy unique execution identity and therefore remain
+intentionally ineligible for Action cards and Undo. `createTables()` runs on
+every startup, including databases already marked version 25, so the table is
+also installed for early builds of this stacked branch that had already
+written the version marker.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

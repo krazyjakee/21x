@@ -126,6 +126,27 @@ describe('DatabaseManager migrations on an existing install', () => {
     after.close()
   })
 
+  it('creates durable Commander action storage even when version 25 was already recorded', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const raw = openRaw()
+    raw.exec('DROP TABLE commander_action_executions')
+    expect(raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'commander_action_executions'").get()).toBeUndefined()
+    expect(raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get()).toEqual({ value: '25' })
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const after = openRaw()
+    expect(after.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'commander_action_executions'").get())
+      .toEqual({ name: 'commander_action_executions' })
+    after.close()
+  })
+
   /**
    * Guards the gate itself. If someone adds an `ALTER TABLE` to
    * `runMigrations()` but leaves `SCHEMA_VERSION` alone, a returning user whose

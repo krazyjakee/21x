@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { CommanderActionExecution, CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
 import { commanderApi } from '@/lib/ipc-client'
 
 /**
@@ -13,6 +13,7 @@ import { commanderApi } from '@/lib/ipc-client'
 
 export interface StreamingToolCall {
   id: string
+  execution_id?: string
   name: string
   input: Record<string, unknown>
   result?: string
@@ -31,6 +32,7 @@ interface CommanderState {
   search: string
   showArchived: boolean
   messages: Record<string, CommanderMessage[]>
+  actions: Record<string, CommanderActionExecution[]>
   streaming: Record<string, StreamingTurn | undefined>
   /** The last turn error per session, cleared by the next send. */
   turnErrors: Record<string, string | undefined>
@@ -76,12 +78,19 @@ function mergeMessages(existing: CommanderMessage[], incoming: CommanderMessage[
   return [...existing, ...added].sort((a, b) => a.created_at - b.created_at)
 }
 
+function mergeActions(existing: CommanderActionExecution[], incoming: CommanderActionExecution[]): CommanderActionExecution[] {
+  const merged = new Map(existing.map((action) => [action.execution_id, action]))
+  for (const action of incoming) merged.set(action.execution_id, action)
+  return [...merged.values()].sort((a, b) => a.created_at - b.created_at)
+}
+
 export const useCommanderStore = create<CommanderState>((set, get) => ({
   sessions: [],
   selectedSessionId: null,
   search: '',
   showArchived: false,
   messages: {},
+  actions: {},
   streaming: {},
   turnErrors: {},
   isLoading: false,
@@ -124,12 +133,13 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
     void Promise.resolve(commanderApi.setActiveSession(id)).catch(() => {})
     if (!id) return
     try {
-      const { messages, activeTurnId } = await commanderApi.listMessages(id)
+      const { messages, actions, activeTurnId } = await commanderApi.listMessages(id)
       set((state) => ({
         // mergeMessages(existing, incoming) drops `incoming` entries whose id is
         // already in `existing`, so the stored fetch dedupes against local state
         // instead of the combined array (which contains each id twice).
         messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], messages) },
+        actions: { ...state.actions, [id]: mergeActions(state.actions[id] ?? [], actions) },
         // Main is the truth about running turns: events may have been missed
         // while the view was closed, so a turn that ended meanwhile is cleared.
         streaming: !activeTurnId
@@ -228,15 +238,42 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
           if (inner.type === 'text_delta') {
             next = { ...turn, text: turn.text + inner.text }
           } else if (inner.type === 'tool_call_start') {
-            next = { ...turn, toolCalls: [...turn.toolCalls, { id: inner.id, name: inner.name, input: inner.input }] }
-          } else if (inner.type === 'tool_call_result') {
             next = {
               ...turn,
-              toolCalls: turn.toolCalls.map((c) => (c.id === inner.id ? { ...c, result: inner.content, isError: inner.isError } : c))
+              toolCalls: [...turn.toolCalls, {
+                id: inner.id,
+                execution_id: inner.execution_id,
+                name: inner.name,
+                input: inner.input
+              }]
+            }
+          } else if (inner.type === 'tool_call_result') {
+            let matched = false
+            next = {
+              ...turn,
+              toolCalls: turn.toolCalls.map((c) => {
+                const same = inner.execution_id
+                  ? c.execution_id === inner.execution_id
+                  : !matched && c.id === inner.id && c.result === undefined
+                if (!same) return c
+                matched = true
+                return { ...c, result: inner.content, isError: inner.isError }
+              })
             }
           }
           return { streaming: { ...state.streaming, [sessionId]: next } }
         })
+        return
+      }
+      case 'action_completed':
+      case 'action_updated': {
+        const { sessionId, action } = event
+        set((state) => ({
+          actions: {
+            ...state.actions,
+            [sessionId]: mergeActions(state.actions[sessionId] ?? [], [action])
+          }
+        }))
         return
       }
       case 'messages_appended': {

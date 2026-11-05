@@ -11,7 +11,10 @@ export function CommanderActionsPane() {
   const messages = useCommanderStore((state) =>
     state.selectedSessionId ? state.messages[state.selectedSessionId] : undefined
   ) ?? EMPTY
-  const actions = useMemo(() => collectCommanderActions(messages).reverse(), [messages])
+  const executions = useCommanderStore((state) =>
+    state.selectedSessionId ? state.actions[state.selectedSessionId] : undefined
+  ) ?? EMPTY
+  const actions = useMemo(() => collectCommanderActions(messages, executions).reverse(), [messages, executions])
 
   if (actions.length === 0) {
     return (
@@ -27,7 +30,7 @@ export function CommanderActionsPane() {
 
   return (
     <div className="flex-1 space-y-3 overflow-y-auto p-3" aria-label="Commander actions">
-      {actions.map((action) => <ActionCard key={action.call.id} item={action} />)}
+      {actions.map((action) => <ActionCard key={action.execution.execution_id} item={action} />)}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { CommanderActionExecution, CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
 
 const mocks = vi.hoisted(() => ({
   commanderApi: {
@@ -61,6 +61,28 @@ function message(over: Partial<CommanderMessage> = {}): CommanderMessage {
   }
 }
 
+function action(over: Partial<CommanderActionExecution> = {}): CommanderActionExecution {
+  return {
+    execution_id: 'exec-1',
+    session_id: 's1',
+    turn_id: 'turn-1',
+    request_message_id: 'u1',
+    provider_call_id: 'c1',
+    tool_name: 'archive_project',
+    input: { project: 'Web' },
+    result: {
+      status: 'ok',
+      result: { id: 'web' },
+      target: { kind: 'project', id: 'web', name: 'Web' },
+      changes: [{ field: 'status', before: 'active', after: 'archived' }]
+    },
+    undone_at: null,
+    undo_message_id: null,
+    created_at: 3,
+    ...over
+  }
+}
+
 let emit: (event: CommanderEvent) => void = () => {}
 
 async function openSessions(): Promise<HTMLElement> {
@@ -93,6 +115,7 @@ beforeEach(() => {
     search: '',
     showArchived: false,
     messages: {},
+    actions: {},
     streaming: {},
     turnErrors: {},
     isLoading: false,
@@ -102,7 +125,7 @@ beforeEach(() => {
     emit = cb
     return () => {}
   })
-  api.listMessages.mockResolvedValue({ messages: [], activeTurnId: null })
+  api.listMessages.mockResolvedValue({ messages: [], actions: [], activeTurnId: null })
   api.markRead.mockImplementation(async (id: string) => session({ id, unread_count: 0 }))
   mocks.settingsApi.getAll.mockResolvedValue({})
   mocks.settingsApi.set.mockResolvedValue(undefined)
@@ -172,11 +195,12 @@ describe('CommanderWorkspace', () => {
     api.listSessions.mockResolvedValue([session()])
     api.listMessages.mockResolvedValue({
       activeTurnId: null,
+      actions: [action()],
       messages: [
         message({ id: 'u1', role: 'user', content: 'archive web', input_mode: 'voice', created_at: 1 }),
         message({
           id: 'a1', role: 'assistant', created_at: 2,
-          tool_calls: [{ id: 'c1', name: 'archive_project', input: { project: 'Web' } }]
+          tool_calls: [{ id: 'c1', execution_id: 'exec-1', name: 'archive_project', input: { project: 'Web' } }]
         }),
         message({
           id: 't1', role: 'tool', tool_call_id: 'c1', tool_name: 'archive_project', created_at: 3,
@@ -194,6 +218,78 @@ describe('CommanderWorkspace', () => {
     expect(screen.getByText('Archived project “Web”')).toBeInTheDocument()
     expect(screen.getByText('Heard: “archive web”')).toBeInTheDocument()
     expect(screen.queryByText('No recent actions')).toBeNull()
+  })
+
+  it('shows an assertive destructive card as soon as the durable action completes', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    api.listMessages.mockResolvedValue({
+      messages: [message({ id: 'u1', role: 'user', content: 'archive web', input_mode: 'voice' })],
+      actions: [],
+      activeTurnId: null
+    })
+    render(<CommanderWorkspace />)
+    await openSession()
+
+    act(() => {
+      emit({ type: 'turn_started', sessionId: 's1', turnId: 'turn-1' })
+      emit({
+        type: 'turn_event',
+        sessionId: 's1',
+        turnId: 'turn-1',
+        event: {
+          type: 'tool_call_start', id: 'same-provider-id', execution_id: 'exec-immediate',
+          name: 'archive_project', input: { project: 'Web' }
+        }
+      })
+      emit({ type: 'action_completed', sessionId: 's1', action: action({
+        execution_id: 'exec-immediate', provider_call_id: 'same-provider-id'
+      }) })
+    })
+
+    const card = screen.getByTestId('commander-action-card')
+    expect(card).toHaveAttribute('role', 'alert')
+    expect(card).toHaveAttribute('aria-live', 'assertive')
+    expect(card).toHaveTextContent('Archived project “Web”')
+    expect(screen.getByText('Heard: “archive web”')).toBeInTheDocument()
+    expect(useCommanderStore.getState().streaming.s1?.turnId).toBe('turn-1')
+    expect(screen.queryByText('Archived.')).toBeNull()
+  })
+
+  it('keeps repeated provider call ids as separate action cards and undo identities', async () => {
+    const resultB: CommanderActionExecution['result'] = {
+      status: 'ok',
+      result: { id: 'api' },
+      target: { kind: 'project', id: 'api', name: 'API' },
+      changes: [{ field: 'status', before: 'active', after: 'archived' }]
+    }
+    api.listSessions.mockResolvedValue([session()])
+    api.listMessages.mockResolvedValue({
+      messages: [
+        message({ id: 'u1', content: 'archive web' }),
+        message({ id: 'u2', content: 'archive api', created_at: 2 })
+      ],
+      actions: [
+        action({ execution_id: 'exec-web', provider_call_id: 'reused-call-id' }),
+        action({
+          execution_id: 'exec-api', provider_call_id: 'reused-call-id', request_message_id: 'u2',
+          input: { project: 'API' }, result: resultB, created_at: 4
+        })
+      ],
+      activeTurnId: null
+    })
+    api.undoAction.mockResolvedValue({ status: 'undone' })
+    render(<CommanderWorkspace />)
+    await openSession()
+    fireEvent.click(screen.getByRole('tab', { name: 'Actions' }))
+
+    const cards = screen.getAllByTestId('commander-action-card')
+    expect(cards).toHaveLength(2)
+    const apiCard = cards.find((card) => within(card).queryByText('Archived project “API”'))!
+    const webCard = cards.find((card) => within(card).queryByText('Archived project “Web”'))!
+    fireEvent.click(within(apiCard).getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(api.undoAction).toHaveBeenCalledWith('s1', 'exec-api'))
+    expect(within(apiCard).getByRole('button', { name: 'Undone' })).toBeDisabled()
+    expect(within(webCard).getByRole('button', { name: 'Undo' })).toBeEnabled()
   })
 
   it('shows a report arrival as a plain project chip without relaying raw report text', async () => {
@@ -260,6 +356,7 @@ describe('CommanderWorkspace', () => {
         message({ id: 't1', role: 'tool', content: 'queued', tool_call_id: 'c1', tool_name: 'ask_project', created_at: 3 }),
         message({ id: 'r1', role: 'report', content: 'Deployed to prod', project_id: 'web', created_at: 4 })
       ],
+      actions: [],
       activeTurnId: null
     })
     render(<CommanderWorkspace />)
@@ -298,6 +395,7 @@ describe('CommanderWorkspace', () => {
     api.listSessions.mockResolvedValue([session()])
     api.listMessages.mockResolvedValue({
       messages: [message({ id: 'u1', content: 'Hi there', created_at: 1 })],
+      actions: [],
       activeTurnId: null
     })
     render(<CommanderWorkspace />)
@@ -316,6 +414,7 @@ describe('CommanderWorkspace', () => {
         message({ id: 'u1', content: 'Hi there', created_at: 1 }),
         message({ id: 'a1', role: 'assistant', content: 'Hello!', created_at: 2 })
       ],
+      actions: [],
       activeTurnId: null
     })
     const drawer = await openSessions()
@@ -405,7 +504,7 @@ describe('CommanderChatPane: a stored tool call spins only while it can still fi
 
   async function openWith(messages: CommanderMessage[], activeTurnId: string | null): Promise<void> {
     api.listSessions.mockResolvedValue([session()])
-    api.listMessages.mockResolvedValue({ messages, activeTurnId })
+    api.listMessages.mockResolvedValue({ messages, actions: [], activeTurnId })
     render(<CommanderWorkspace />)
     await openSession()
     expect(await screen.findByText('Asked web: deploy')).toBeTruthy()

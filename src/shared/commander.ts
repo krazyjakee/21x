@@ -6,6 +6,7 @@
  * main-process CommanderService and the renderer.
  */
 import type { ChatRuntimeEvent, ChatStopReason, ChatToolCall } from './chat'
+import type { CommanderActionResult } from './commander-tools'
 
 /**
  * - `user` / `assistant` / `tool`: the conversation the model sees.
@@ -57,6 +58,24 @@ export interface CommanderMessage {
   created_at: number
 }
 
+/** One successful Commander mutation, persisted as soon as its tool finishes. */
+export interface CommanderActionExecution {
+  /** App-generated identity. Unlike a provider call id, unique across every session and turn. */
+  execution_id: string
+  session_id: string
+  turn_id: string
+  request_message_id: string
+  /** Untrusted provider id retained only for model/tool transcript compatibility. */
+  provider_call_id: string
+  tool_name: string
+  input: Record<string, unknown>
+  result: CommanderActionResult
+  /** Epoch ms. Null until an exact reversal commits. */
+  undone_at: number | null
+  undo_message_id: string | null
+  created_at: number
+}
+
 export interface CommanderListSessionsRequest {
   search?: string
   includeArchived?: boolean
@@ -73,6 +92,10 @@ export type CommanderEvent =
       turnId: string
       event: Exclude<ChatRuntimeEvent, { type: 'done' }> | { type: 'done'; stopReason: ChatStopReason }
     }
+  /** A mutation result became durable; available before the model's final reply. */
+  | { type: 'action_completed'; sessionId: string; action: CommanderActionExecution }
+  /** An exact reversal and its consumption marker committed together. */
+  | { type: 'action_updated'; sessionId: string; action: CommanderActionExecution }
   /** Messages were stored (user, assistant, tool, report, summary). */
   | { type: 'messages_appended'; sessionId: string; messages: CommanderMessage[] }
   /** Title, archive state, unread count or timestamps changed. */
