@@ -4,6 +4,7 @@ import type { ArtifactCopyFileResult } from '../shared/artifacts'
 import type { AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import type { DesktopCallerContext } from './transport/desktop-registry'
 import { ProductionEnergyOwner } from './production-energy-owner'
+import { findRtkExecutable } from '../main/adapters/shared/rtk-session'
 import { isUiLeaseId } from '../shared/ui-desktop-codecs'
 import { PortableAgentInstallationOwner, type PortableAgentInstallationOwnerOptions } from '../main/agent-installer/portable-installation'
 import { resolveProductionNpmCli } from './production-installation-host'
@@ -32,7 +33,7 @@ import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-
 import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
-import { ElectronProfileImportError, MANAGED_TASK_MCP_MARKER, importElectronProfile } from './electron-profile-import'
+import { ELECTRON_SHARED_ROOT_SETTING, ElectronProfileImportError, LEGACY_MARKER_DETACHED, MANAGED_TASK_MCP_MARKER, holdElectronProfile, importElectronProfile, folderPresent, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
 import { createHash, randomUUID } from 'node:crypto'
@@ -42,7 +43,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statfsSync
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DatabaseManager, type DatabaseRuntimeOptions } from '../main/database/manager'
 import { decryptSettingValue, decryptRecordCredential, encryptSettingValue } from '../main/database/serializers'
-import { acquireProfileLock, type ProfileLock } from '../main/platform/profile-lock'
+import { acquireProfileLock, jointProfileLock, type ProfileLock } from '../main/platform/profile-lock'
 import { initializeProtectedSecretStorage, type AuthenticatedSecretStorage, type ProtectedApplicationKeyStore } from '../main/platform/authenticated-secret-storage'
 import { configureSecretStorage, releaseSecretStorage } from '../main/platform/secret-storage'
 import { AgentManager } from '../main/agent-manager-core'
@@ -120,7 +121,9 @@ export interface ProductionOwnerBootstrap {
   profileId: string
   paths: DatabaseRuntimeOptions['paths'] & { reposRoot: string; resourceRoot: string; tempRoot: string }
   credentials: { store: ProtectedApplicationKeyStore; mode: 'load' | 'create' }
-  /** Electron profile whose data seeds a newly created profile (original untouched). */
+  /** Electron profile this one shares workspaces, repositories and attachments
+   * with. Locked for the whole session; its database seeds a newly created
+   * profile (original untouched). */
   legacyImport?: { profileRoot: string; appName: string }
   managedTaskMcp: DatabaseRuntimeOptions['managedTaskMcp']
   connectors: { kind: 'disabled'; reason: string } | { kind: 'enabled' }
@@ -767,6 +770,14 @@ export class ProductionOwner {
 
   private async initialize(): Promise<void> {
     this.lock = acquireProfileLock(this.bootstrap.paths.profileRoot)
+    // Before anything below can write, and held until release(): the Electron
+    // app refuses to start for as long as this session uses its folders.
+    const legacy = this.bootstrap.legacyImport
+    if (legacy) {
+      // Checked first: taking the lock would recreate a folder the user deleted.
+      if (!folderPresent(legacy.profileRoot)) throw new ProductionOwnerError('ELECTRON_FOLDER_MISSING')
+      this.lock = jointProfileLock(this.lock, holdElectronProfile(legacy.profileRoot))
+    }
     const profileRoot = this.lock.profileRoot
     this.checkpoint('resources')
     const space = statfsSync(profileRoot)
@@ -795,11 +806,10 @@ export class ProductionOwner {
     configureSecretStorage(this.storage)
     this.storageRegistered = true
     this.checkpoint('database-preflight')
-    const legacy = this.bootstrap.legacyImport
     if (legacy && this.bootstrap.credentials.mode === 'create') {
       const store = this.bootstrap.credentials.store
       await importElectronProfile({
-        profileRoot: legacy.profileRoot, destination: join(profileRoot, '21x.db'), storage: this.storage,
+        profileRoot: legacy.profileRoot, lock: this.lock, destination: join(profileRoot, '21x.db'), storage: this.storage,
         // No stored password only matters if a value needs it; that value is then
         // cleared. An unreachable or locked keyring is retried, never cleared.
         loadSafeStoragePassword: async () => {
@@ -812,7 +822,8 @@ export class ProductionOwner {
       })
       this.assertStarting()
     }
-    const { managedTaskMcpId } = preflightProfile(join(profileRoot, '21x.db'), this.storage)
+    const { managedTaskMcpId, electronSharedRoot } = preflightProfile(join(profileRoot, '21x.db'), this.storage)
+    if (!legacy && electronSharedRoot !== undefined) refuseLostShare(profileRoot, electronSharedRoot)
     this.checkpoint('database')
     for (const path of [this.bootstrap.paths.workspaceRoot, this.bootstrap.paths.attachmentRoot, this.bootstrap.paths.reposRoot, this.bootstrap.paths.tempRoot]) mkdirSync(path, { recursive: true })
     // A reopened profile refreshes only the managed row it can prove it created;
@@ -822,6 +833,10 @@ export class ProductionOwner {
     this.db = new DatabaseManager(this.databaseRuntime)
     this.db.initialize()
     const db = this.db
+    // Also records a profile imported before this row existed, while its marker
+    // survives. With no share, only a stopped one can still have a row.
+    if (!legacy) db.deleteSetting(ELECTRON_SHARED_ROOT_SETTING)
+    else if (db.getSetting(ELECTRON_SHARED_ROOT_SETTING) !== legacy.profileRoot) db.setSetting(ELECTRON_SHARED_ROOT_SETTING, legacy.profileRoot)
     if (!('disabled' in runtime)) recordManagedTaskMcp(db)
     reconcileProductionRestart(db)
     db.onTaskActivity = (taskId, last_activity_at) => this.emit('task:updated', { taskId, updates: { last_activity_at } })
@@ -880,6 +895,7 @@ export class ProductionOwner {
       ...(energy ? { energy: energy.host } : {}),
       secrets: { kind: 'broker', getPort: () => broker.port, register: (token, agentId, ids) => broker.register(token, agentId, ids),
         unregister: token => broker.unregister(token), writeShellWrapper: () => shellWrapper },
+      findRtkExecutable: () => findRtkExecutable(),
       managedTaskMcp: 'disabled' in runtime ? { kind: 'disabled' } : {
         kind: 'server', waitUntilReady: waitForTaskApiServer,
         buildConfig: options => {
@@ -1096,6 +1112,7 @@ export class ProductionOwner {
       getSpeech: () => native.speech?.get() ?? null, canPlayAudio: () => native.speech?.canPlayAudio() ?? false })
     let scheduledRepositories: ReturnType<ProductionOwner['captureCleanupRepositories']> | null = null
     const cleanup = new WorkspaceCleanupSchedulerCore(db, worktrees, { workspacesRoot: this.bootstrap.paths.workspaceRoot,
+      keepWorkspacesWithoutTask: this.bootstrap.legacyImport !== undefined,
       portablePolicy: { beforeEffect: fileOptions.assertCurrent, signal: this.abort.signal, store: createBoundedWorkspaceCleanupStore(db, fileOptions.assertCurrent),
         assertIdleWorkspace: (id, path) => workspaceProcesses.assertIdleWorkspace(id, path),
         getRepoGroups: id => { if (!scheduledRepositories) throw new Error('WORKSPACE_CLEANUP_SCOPE_CHANGED'); return scheduledRepositories.getRepoGroups(id) },
@@ -1358,7 +1375,23 @@ function verifiedManagedTaskMcpId(probe: SQLite.Database, tables: Set<string>): 
 }
 
 /** Validate existing ciphertext read-only before migrations/seeding can write. No implicit profile conversion. */
-function preflightProfile(path: string, storage: AuthenticatedSecretStorage): { managedTaskMcpId?: string } {
+/**
+ * The database says this profile is shared, but the host sent no folder, so it
+ * must not run: its tasks' files are in a folder no lock now covers. Unless the
+ * user stopped the share, the marker is put back for the next launch to lock. A
+ * marker that already matches is one the host could not use, such as a path from
+ * another system, and restoring it would refuse forever: that is a missing folder,
+ * which the user can stop using.
+ */
+function refuseLostShare(profileRoot: string, electronRoot: string): void {
+  const marker = readLegacyMarker(profileRoot)
+  if (marker === LEGACY_MARKER_DETACHED) return
+  if (marker === electronRoot) throw new ProductionOwnerError('ELECTRON_FOLDER_MISSING')
+  writeLegacyMarker(profileRoot, electronRoot)
+  throw new ProductionOwnerError('ELECTRON_LINK_RESTORED')
+}
+
+function preflightProfile(path: string, storage: AuthenticatedSecretStorage): { managedTaskMcpId?: string; electronSharedRoot?: string } {
   for (const file of [path, path + '-wal', path + '-shm']) {
     let stat: ReturnType<typeof lstatSync>
     try { stat = lstatSync(file) }
@@ -1397,7 +1430,8 @@ function preflightProfile(path: string, storage: AuthenticatedSecretStorage): { 
       if (!tables.has(table)) continue
       for (const column of columns) for (const row of probe.prepare(`SELECT ${column} AS value FROM ${table} WHERE ${column} IS NOT NULL`).iterate() as Iterable<{ value: Buffer }>) storage.decryptString(row.value)
     }
-    return { managedTaskMcpId: verifiedManagedTaskMcpId(probe, tables) }
+    const electronSharedRoot = tables.has('settings') ? probe.prepare('SELECT value FROM settings WHERE key = ?').pluck().get(ELECTRON_SHARED_ROOT_SETTING) as string | undefined : undefined
+    return { managedTaskMcpId: verifiedManagedTaskMcpId(probe, tables), electronSharedRoot }
   } catch (error) {
     if (error instanceof ProductionOwnerError) throw error
     const code = safeStartupCode(error, 'database-preflight')

@@ -94,6 +94,36 @@ it('rejects Drop context during hydration and fences retired event listeners acr
   await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1))
 })
 
+const liveArtifact = { taskId: 'task_fixture', artifact: { id: 'task_fixture:workpiece:notes', taskId: 'task_fixture', type: 'markdown', title: 'Notes', path: 'artifacts/notes/README.md', updatedAt: 1, reloadTrigger: 1 } }
+const liveRecovery = { taskId: 'task_fixture', cause: 'quota', action: 'switch_agent', result: 'failed', error: 'The agent operation failed.' }
+it('binds the live artifact and recovery notices to the desktop API on the shared service channel', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(f.host.supports('onArtifactUpdated')).toBe(true); expect(f.host.supports('onAgentRecoveryStateChanged')).toBe(true)
+  const artifact = vi.fn(), recovery = vi.fn(), before = f.invoke.mock.calls.length
+  const offArtifact = f.host.api.onArtifactUpdated(artifact), offRecovery = f.host.api.onAgentRecoveryStateChanged!(recovery)
+  f.emit('artifact:updated', liveArtifact); f.emit('agent:recoveryStateChanged', liveRecovery)
+  expect(artifact.mock.calls).toEqual([[liveArtifact]]); expect(recovery.mock.calls).toEqual([[liveRecovery]])
+  expect(f.invoke.mock.calls.length).toBe(before)
+  offArtifact(); offRecovery(); f.emit('artifact:updated', liveArtifact); f.emit('agent:recoveryStateChanged', liveRecovery)
+  expect(artifact).toHaveBeenCalledTimes(1); expect(recovery).toHaveBeenCalledTimes(1)
+})
+it.each([
+  ['artifact:updated', { ...liveArtifact, artifact: { ...liveArtifact.artifact, secret: 'private' } }],
+  ['artifact:updated', { ...liveArtifact, artifact: { ...liveArtifact.artifact, path: '/home/private/notes.md' } }],
+  ['artifact:updated', { ...liveArtifact, artifact: { ...liveArtifact.artifact, files: Array.from({ length: 500 }, (_, index) => `${index}-${'a'.repeat(600)}`) } }],
+  ['agent:recoveryStateChanged', { ...liveRecovery, error: 'private provider body' }],
+  ['agent:recoveryStateChanged', { ...liveRecovery, cause: 'Private Text' }]
+] as const)('drops a bad %s and keeps the connection and the next notice', async (operation, payload) => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const artifact = vi.fn(), recovery = vi.fn(); f.host.api.onArtifactUpdated(artifact); f.host.api.onAgentRecoveryStateChanged!(recovery)
+  f.emit(operation, payload)
+  expect(artifact).not.toHaveBeenCalled(); expect(recovery).not.toHaveBeenCalled()
+  expect(f.host.connection.status).toBe('ready')
+  f.emit('artifact:updated', liveArtifact); f.emit('agent:recoveryStateChanged', liveRecovery)
+  expect(artifact).toHaveBeenCalledTimes(1); expect(recovery).toHaveBeenCalledTimes(1)
+  expect(f.host.connection.status).toBe('ready')
+})
+
 const lifecycleNotices = [
   { operation: 'agent:incompatible-session', payload: { taskId: 'task_fixture', agentId: 'agent_fixture', error: PRODUCTION_INCOMPATIBLE_SESSION_ERROR },
     subscribe: (host: NativeDesktopHost, receive: (payload: unknown) => void) => host.api.onAgentIncompatibleSession(receive) },
@@ -480,7 +510,7 @@ it('hydrates the tray preference as a read but fences mutations and requires the
   f.results.set('app:getMinimizeToTray', { enabled: true, action: 'hide' })
   await expect(desktopApi.app.getMinimizeToTray()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })
-it('binds the 254 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the 256 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
@@ -489,7 +519,7 @@ it('binds the 254 finite production commands including settings effects, secret 
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(254)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(256)
   expect(NATIVE_COMMAND_BINDINGS['app:setLoginItemSettings']).toBe('app.setLoginItemSettings')
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
@@ -778,7 +808,7 @@ it('binds Claude marketplace/plugin lifecycle using public projections and user-
   const resources = { skills: [{ id: 'skill:fixture', name: 'Fixture skill', description: 'Public description' }], mcpServers: [{ id: 'mcp:fixture', name: 'Fixture MCP', command: '', args: [] }], agents: [{ id: 'agent:fixture', name: 'Fixture agent', description: '' }], commands: ['commands/fixture.md'] }
   f.results.set('claudePlugin:getMarketplaceSources', [source]); f.results.set('claudePlugin:addMarketplaceSource', source); f.results.set('claudePlugin:removeMarketplaceSource', true)
   f.results.set('claudePlugin:fetchCatalog', catalog); f.results.set('claudePlugin:discoverPlugins', [discovery]); f.results.set('claudePlugin:getInstalledPlugins', [installed])
-  f.results.set('claudePlugin:installPlugin', installed); f.results.set('claudePlugin:uninstallPlugin', true); f.results.set('claudePlugin:enablePlugin', installed); f.results.set('claudePlugin:disablePlugin', { ...installed, enabled: false }); f.results.set('claudePlugin:getPluginResources', resources)
+  f.results.set('claudePlugin:installPlugin', installed); f.results.set('claudePlugin:uninstallPlugin', []); f.results.set('claudePlugin:enablePlugin', installed); f.results.set('claudePlugin:disablePlugin', { ...installed, enabled: false }); f.results.set('claudePlugin:getPluginResources', resources)
   await f.host.reconnect()
   expect(await f.host.api.claudePlugins.getMarketplaceSources()).toEqual([source])
   expect(await f.host.api.claudePlugins.fetchCatalog(source.id)).toEqual(catalog)
@@ -792,7 +822,7 @@ it('binds Claude marketplace/plugin lifecycle using public projections and user-
   expect(await f.host.api.claudePlugins.installPlugin(installed.name, source.id, 'user')).toEqual(installed)
   expect(await f.host.api.claudePlugins.disablePlugin(installed.id)).toMatchObject({ enabled: false })
   expect(await f.host.api.claudePlugins.enablePlugin(installed.id)).toEqual(installed)
-  expect(await f.host.api.claudePlugins.uninstallPlugin(installed.id)).toBe(true)
+  expect(await f.host.api.claudePlugins.uninstallPlugin(installed.id)).toEqual([])
   expect(await f.host.api.claudePlugins.removeMarketplaceSource(source.id)).toBe(true)
   f.results.delete('claudePlugin:enablePlugin'); expect(await f.host.api.claudePlugins.enablePlugin(installed.id)).toBeUndefined()
   f.results.set('claudePlugin:fetchCatalog', null); expect(await f.host.api.claudePlugins.fetchCatalog(source.id)).toBeNull()

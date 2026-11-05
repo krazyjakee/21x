@@ -6,11 +6,10 @@ import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
-import { agentApi, agentSessionApi, captainRuntimeApi, settingsApi } from '@/lib/ipc-client'
+import { agentSessionApi, captainRuntimeApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
 import { activeProjects, useProjectStore } from '@/stores/project-store'
 import { useUIStore } from '@/stores/ui-store'
-import type { Agent } from '@/types'
 import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
 import { returnToComposerDraft } from '@/lib/composer-drafts'
@@ -56,7 +55,7 @@ interface OrchestratorPanelProps {
 }
 
 export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
-  const [agents, setAgents] = useState<Agent[]>([])
+  const agents = useAgentStore((state) => state.agents)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   // The drawer talks to the current project's Captain (#55): a task row
   // per project, hidden from every list, whose id is asked for by project.
@@ -122,19 +121,23 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     }
   }, [])
 
-  // Load agents on mount
   useEffect(() => {
-    agentApi.getAll().then(setAgents)
+    if (useAgentStore.getState().agents.length === 0) void useAgentStore.getState().fetchAgents()
   }, [])
 
   // The project's Captain agent, else its default agent, else the app
-  // default. Re-picked when the project changes; a choice made by hand in the
-  // selector below holds until then.
+  // default. Re-picked when the project changes or the agent in the selector
+  // is deleted; a choice made by hand holds otherwise, whatever else changes
+  // in the agent list.
+  const pickedForRef = useRef<string | null>(null)
   const projectId = project?.id
   const projectCaptainAgentId = project?.captain_agent_id ?? null
   const projectDefaultAgentId = project?.default_agent_id ?? null
   useEffect(() => {
-    if (agents.length === 0) return
+    const pick = `${projectId}|${projectCaptainAgentId}|${projectDefaultAgentId}`
+    const stillListed = agents.some((agent) => agent.id === selectedAgentIdRef.current)
+    if (pickedForRef.current === pick && stillListed) return
+    pickedForRef.current = agents.length > 0 ? pick : null
     setSelectedAgentId(captainAgentIdFor({ captain_agent_id: projectCaptainAgentId, default_agent_id: projectDefaultAgentId }, agents))
   }, [agents, projectId, projectCaptainAgentId, projectDefaultAgentId])
 
@@ -527,6 +530,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
             className="min-w-0 max-w-[50%] text-xs bg-background border border-border rounded px-2 py-1 cursor-pointer hover:border-primary/50 transition-colors"
             aria-label="Captain agent"
           >
+            {agents.length === 0 && <option value="">No agents</option>}
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name}

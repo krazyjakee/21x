@@ -25,6 +25,21 @@ describe('sealed production launch descriptor codecs', () => {
     expect(isProductionOwnerState(value)).toBe(true)
     for (const patch of [{ error: 'secret' }, { path: '/private/profile' }, { phase: 'private' }, { stage: '/secret' }, { code: 'PROFILE_PRIVATE_CANARY' }, { owned: 1 }]) expect(isProductionOwnerState({ ...value, ...patch })).toBe(false)
   })
+  it('carries the shared Electron profile on every launch, not only the import', () => {
+    const value = launchDescriptor()
+    for (const profileIntent of ['create-new', 'load-authenticated-copy'] as const) {
+      expect(isProductionLaunchDescriptor({ ...value, profileIntent, legacyProfileRoot: '/electron-profile' })).toBe(true)
+    }
+    expect(isProductionLaunchDescriptor({ ...value, legacyProfileRoot: 'relative/profile' })).toBe(false)
+  })
+  it('holds the Electron profile path to the rule the Rust host also applies', () => {
+    const value = launchDescriptor()
+    for (const legacyProfileRoot of ['/electron/./profile', '/electron/../profile', '/electron/profile/..', `/${'x'.repeat(4096)}`]) {
+      expect(isProductionLaunchDescriptor({ ...value, legacyProfileRoot })).toBe(false)
+    }
+    // UTF-16 units, not bytes: the Rust check must count the same way.
+    expect(isProductionLaunchDescriptor({ ...value, legacyProfileRoot: `/${'é'.repeat(4095)}` })).toBe(true)
+  })
   it('requires explicit fresh/copy intent and exact trusted path/capability fields', () => {
     const value = launchDescriptor()
     expect(isProductionLaunchDescriptor(value)).toBe(true)

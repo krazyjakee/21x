@@ -126,6 +126,18 @@ export class TaskGroups {
       return this.get(id)!
     })()
   }
+  /** Deleting the execution agent ends its groups. Unlike `dissolve` this runs
+   * whatever status the anchor is left in: its session is already stopped, and
+   * a status that says otherwise is stale and must not refuse the deletion. */
+  retireForAgent(agentId: string): void {
+    const groups = this.db.prepare("SELECT id, execution_task_id FROM task_groups WHERE agent_id=? AND state='active'").all(agentId) as Array<{ id: string; execution_task_id: string }>
+    const now = new Date().toISOString()
+    for (const group of groups) {
+      for (const task of this.members(group.id)) this.leave(group.id, task.id, now)
+      this.db.prepare("UPDATE task_groups SET state='dissolved',updated_at=? WHERE id=?").run(now, group.id)
+      this.db.prepare('UPDATE tasks SET session_id=NULL,updated_at=? WHERE id=?').run(now, group.execution_task_id)
+    }
+  }
   progress(id: string, taskId: string, state: TaskGroupProgressState, message: string): TaskGroupRecord {
     return this.db.transaction(() => {
       const group = this.get(id)

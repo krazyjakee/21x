@@ -3,6 +3,7 @@ import type { TranscriptPage, TranscriptPageRequest } from '@shared/transcript-p
 import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import type { UiCommand } from '@shared/ui-commands'
 import type { CaptainRuntimeState } from '@shared/captain-runtime'
+import type { AgentDeletionImpact, AgentDeletionResult, PluginUninstallResult } from '@shared/agent-deletion'
 import type {
   Task,
   CreateTaskDTO,
@@ -313,7 +314,8 @@ interface ElectronAPI {
     getAll: () => Promise<Agent[]>
     create: (data: CreateAgentDTO) => Promise<Agent>
     update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>
-    delete: (id: string) => Promise<boolean>
+    delete: (id: string) => Promise<AgentDeletionResult>
+    deletionImpact: (id: string, alsoRemoving?: string[]) => Promise<AgentDeletionImpact | null>
     getStartQueue: () => Promise<QueuedAgentStart[]>
     getStartRecoveryState?: (taskId: string) => Promise<QueuedAgentStart | null>
   }
@@ -517,7 +519,7 @@ interface ElectronAPI {
     discoverPlugins: (searchQuery?: string) => Promise<DiscoverablePlugin[]>
     getInstalledPlugins: () => Promise<InstalledPlugin[]>
     installPlugin: (pluginName: string, marketplaceId: string, scope?: string) => Promise<InstalledPlugin>
-    uninstallPlugin: (pluginId: string) => Promise<boolean>
+    uninstallPlugin: (pluginId: string) => Promise<PluginUninstallResult>
     enablePlugin: (pluginId: string) => Promise<InstalledPlugin | undefined>
     disablePlugin: (pluginId: string) => Promise<InstalledPlugin | undefined>
     getPluginResources: (pluginId: string) => Promise<PluginResources>
@@ -599,6 +601,8 @@ interface ElectronAPI {
   onTranscriptChanged: (callback: (event: TranscriptChangedEvent) => void) => () => void
   onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void
   onAgentStartQueueChanged: (callback: (event: AgentStartQueueChangedEvent) => void) => () => void
+  /** Native host only: the Electron preload does not expose this event. */
+  onAgentRecoveryStateChanged?: (callback: (event: import('@shared/desktop-domain-events').AgentRecoveryStateChangedEvent) => void) => () => void
   onAgentIncompatibleSession: (callback: (event: { taskId: string; agentId: string; error: string }) => void) => () => void
   onTaskUpdated: (callback: (event: { taskId: string; updates: Partial<Task> }) => void) => () => void
   onTaskSourceActionFailed: (callback: (event: { taskId: string; taskTitle: string; error: string }) => void) => () => void

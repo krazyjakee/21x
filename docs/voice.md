@@ -151,7 +151,8 @@ Guards:
   would send it straight away. The recogniser writes breathing and room noise
   this way. A closing transcript of only those sounds counts as nothing heard,
   so it is not dictated either. `isVoiceNoise` in `src/shared/voice.ts` owns
-  the rule.
+  the rule. A dropped sentence is also taken off the caption, and on its way to
+  being dropped it does not count as talking over a reply.
 - A segment that only says thanks ("Thank you.", "Thanks a lot!") is not sent
   (`isVoiceThanks`). Faint sounds on an open microphone were sent as "Thank you."
   and spent a model turn. It is a phrase rule because level cannot do this job:
@@ -183,7 +184,11 @@ Commander uses its call stage or in-app floating call instead, and the top bar
 leaves that turn alone. Captions appear once, in the currently visible surface.
 Commander captions default to on at Medium and support Small/Medium/Large,
 with two visible lines and a keyboard-accessible complete-text dialog. Partial
-words are italic and never announced. Only genuinely audible, attributed reply
+words are italic and never announced. In open mic a sent sentence stays on the
+caption upright until its turn ends, then the reply replaces it and stays there
+until the next words. So a sentence never looks unsent after it was answered,
+and a reply that was not heard (a noise stopped it, or the voice failed) can
+still be read during the call. Only genuinely audible, attributed reply
 audio highlights an assistant sentence or drives the output ring; queued or
 suspended audio does not pretend to be speaking.
 

@@ -1,6 +1,6 @@
 import type { JsonValue } from '@shared/service-protocol'
 import { expect, it, vi } from 'vitest'
-import { productionBootstrapMessage, getTauriEngineEpoch, getTauriUiDocument, createTauriDesktopTransport, type TauriDesktopApi } from './tauri-desktop-transport'
+import { NativeBootstrapUnavailableError, productionBootstrapMessage, getTauriEngineEpoch, getTauriUiDocument, createTauriDesktopTransport, type TauriDesktopApi } from './tauri-desktop-transport'
 import { hasTauriNativeDrops, invokeTauriNativeDrop } from './tauri-desktop-transport'
 import { NATIVE_ATTACHMENT_DROP as DROP } from '@shared/native-attachment-drop'
 
@@ -82,6 +82,26 @@ it('unwraps only the exact three current document notices and revokes old listen
   expect(receive).toHaveBeenLastCalledWith(generic)
 })
 
+it('explains a missing or relinked Electron folder, and offers the action only for a missing one', async () => {
+  const status = (code: string, phase: string) => ({ protocolVersion: 1, production: true, available: false, startupFailure: { code, phase } })
+  for (const phase of ['profile-lock', 'database-preflight']) expect(productionBootstrapMessage(status('ELECTRON_FOLDER_MISSING', phase))).toContain('you can stop using it')
+  expect(productionBootstrapMessage(status('ELECTRON_LINK_RESTORED', 'database-preflight'))).toContain('Close 21x and open it again')
+  const failure = async (code: string, phase: string, result: unknown = true) => {
+    const invoke = vi.fn(async (command: string) => command === 'engine_status' ? status(code, phase) : result)
+    const error = await getTauriEngineEpoch({ core: { invoke }, event: { listen: vi.fn() } } as unknown as TauriDesktopApi).catch((caught: unknown) => caught)
+    if (!(error instanceof NativeBootstrapUnavailableError)) throw error
+    return { error, invoke }
+  }
+  const missing = await failure('ELECTRON_FOLDER_MISSING', 'profile-lock', false)
+  expect(await missing.error.stopUsingOldFolder!()).toBe(false)
+  expect(missing.invoke).toHaveBeenCalledWith('stop_using_old_folder')
+  expect(missing.error.reopenRequired).toBe(true)
+  const restored = (await failure('ELECTRON_LINK_RESTORED', 'database-preflight')).error
+  expect(restored.stopUsingOldFolder).toBeUndefined()
+  expect(restored.reopenRequired).toBe(true)
+  expect((await failure('PROFILE_IN_USE', 'profile-lock')).error.reopenRequired).toBe(false)
+})
+
 it('projects only known startup failures into fixed redacted provisioning guidance', () => {
   const status = (code: string, phase: string) => ({ protocolVersion: 1, production: true, available: false, startupFailure: { code, phase, path: '/private/profile', error: 'private credential detail' } })
   expect(productionBootstrapMessage(status('PRODUCTION_CONTAINMENT_UNAVAILABLE', 'production-delegation-missing'))).toBe('21x could not isolate its agents. On Linux this needs a systemd user session: log out and back in, then open 21x again. Changes are paused.')
@@ -90,6 +110,8 @@ it('projects only known startup failures into fixed redacted provisioning guidan
   expect(productionBootstrapMessage(status('INVALID_RESULT', 'production-manifest-digest'))).toContain('resources could not be verified')
   for (const phase of ['production-resources', 'production-manifest-build-digest', 'production-manifest-build-identity']) expect(productionBootstrapMessage(status('INVALID_RESULT', phase))).toContain('resources could not be verified')
   expect(productionBootstrapMessage(status('PROFILE_IN_USE', 'profile-lock'))).toContain('Another desktop service owns this profile')
+  expect(productionBootstrapMessage(status('ELECTRON_PROFILE_IN_USE', 'profile-lock'))).toContain('(the Electron version) is using this profile')
+  expect(productionBootstrapMessage(status('ELECTRON_PROFILE_IN_USE', 'profile-lock'))).toContain('Quit it, then open this app again')
   expect(productionBootstrapMessage(status('SECRET_STORE_UNAVAILABLE', 'credentials'))).toContain('protected credential store is unavailable')
   for (const [code, phase, text] of [
     ['PROFILE_LOW_DISK', 'resources', 'Free space'], ['PROFILE_DATABASE_LOCKED', 'database-preflight', 'database is busy'],

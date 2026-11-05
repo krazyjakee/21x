@@ -645,6 +645,19 @@ describe('VoiceSessionManager — the conversational loop', () => {
     ])
   })
 
+  // No segment follows a dropped sentence, so nothing else clears the renderer.
+  it('takes a dropped sentence off the caption', async () => {
+    const ctx = makeReadyManager()
+    const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle
+
+    ctx.worker.emit('partial', turn.turnId, 'Mm')
+    ctx.worker.emit('segment', turn.turnId, 'Mm.', 1)
+
+    const partials = ctx.notify.mock.calls.filter(([channel]) => channel === 'voice:partial')
+    expect(partials.map(([, event]) => (event as { text: string }).text)).toEqual(['Mm', ''])
+    expect(segments(ctx.notify)).toHaveLength(0)
+  })
+
   // A stray sound on an open microphone reached the Captain as "Thank you."
   it('sends nothing for a sentence that is only thanks, and keeps one that asks for something', async () => {
     const ctx = makeReadyManager()

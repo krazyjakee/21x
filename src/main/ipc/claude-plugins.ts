@@ -1,10 +1,13 @@
 import { ipcMain } from 'electron'
 import type { ClaudePluginManager } from '../claude-plugin-manager'
+import { refusalOf, type AgentDeletionImpact } from '../../shared/agent-deletion'
 import { required, type IpcDeps } from './deps'
 
 /** The Claude plugin marketplace: sources, catalogs and installed plugins. */
-export function registerClaudePluginHandlers({ claudePluginManager }: IpcDeps): void {
+export function registerClaudePluginHandlers({ claudePluginManager, agentManager }: IpcDeps): void {
   const manager = (): ClaudePluginManager => required(claudePluginManager, 'ClaudePluginManager')
+  /** Plugins bring their own agents, so these change the shared agent list. */
+  const agentsChanged = <T,>(result: T): T => { agentManager?.notifyAgentsChanged?.(); return result }
 
   ipcMain.handle('claudePlugin:getMarketplaceSources', () => claudePluginManager?.getMarketplaceSources() ?? [])
 
@@ -21,14 +24,24 @@ export function registerClaudePluginHandlers({ claudePluginManager }: IpcDeps): 
   ipcMain.handle('claudePlugin:getInstalledPlugins', () => claudePluginManager?.getInstalledPlugins() ?? [])
 
   ipcMain.handle('claudePlugin:installPlugin', async (_, pluginName: string, marketplaceId: string, scope?: string) => {
-    return manager().installPlugin(pluginName, marketplaceId, scope)
+    return agentsChanged(await manager().installPlugin(pluginName, marketplaceId, scope))
   })
 
-  ipcMain.handle('claudePlugin:uninstallPlugin', async (_, pluginId: string) => manager().uninstallPlugin(pluginId))
+  // Plugin agents leave through the same owner as any other agent: their work
+  // stops first, and a refused uninstall leaves them all in place.
+  ipcMain.handle('claudePlugin:uninstallPlugin', async (_, pluginId: string) => {
+    const plugins = manager()
+    const uninstall = async (): Promise<AgentDeletionImpact[] | false> => {
+      plugins.assertUninstallable(pluginId)
+      const agentIds = plugins.getPluginResources(pluginId).agents.map((agent) => agent.id)
+      return agentManager.runAgentsDeletion(agentIds, (live) => plugins.uninstallPlugin(pluginId, live))
+    }
+    return agentsChanged(await uninstall().catch(refusalOf))
+  })
 
-  ipcMain.handle('claudePlugin:enablePlugin', (_, pluginId: string) => manager().enablePlugin(pluginId))
+  ipcMain.handle('claudePlugin:enablePlugin', async (_, pluginId: string) => agentsChanged(await manager().enablePlugin(pluginId)))
 
-  ipcMain.handle('claudePlugin:disablePlugin', (_, pluginId: string) => manager().disablePlugin(pluginId))
+  ipcMain.handle('claudePlugin:disablePlugin', async (_, pluginId: string) => agentsChanged(await manager().disablePlugin(pluginId)))
 
   ipcMain.handle('claudePlugin:getPluginResources', (_, pluginId: string) => manager().getPluginResources(pluginId))
 }

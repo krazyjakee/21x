@@ -7,7 +7,8 @@
 | `agent:getAll` | Exact empty request; global read, agent visibility and referenced-project read scope | Reads `DatabaseManager`; projects declared public fields and saved-key markers |
 | `agent:create` | Exact bounded public configuration; global write and configuration reference scope | Transactional database create, real start-queue drain, `tasks:refresh` invalidation |
 | `agent:update` | Exact agent ID and public configuration; global/agent write and every affected project | `AgentManager.runAgentConfigurationMutation`, transactional write, actual backend notification and queue reconciliation |
-| `agent:delete` | Global/agent delete and affected-project authority; active groups preflight before Stop | Actual owned queued/start/live teardown before deletion; retained task/source history; fallback/default references reconciled |
+| `agent:delete` | Global/agent delete and affected-project authority, plus every project and fallback owner the deletion rewrites | Owned queued/start/live teardown only, never another agent's; one transaction (`removeAgent`) dissolves active groups and clears fallback, default, Commander, Captain binding and concurrency references; returns the `AgentDeletionImpact` report |
+| `agent:deletionImpact` | Global/agent read | Read-only preview of the same report, including what would stop |
 | `agentConfig:getProviders` | Optional authorized HTTP(S) server URL and one of five backend types; no client path | Actual read-only manager provider query; bounded public provider/model projection and model cache |
 | `agentConfig:listModels` | One of five exact backend types and backend-query authority | Actual manager model listing; `null` retains missing CLI or unsupported listing semantics |
 

@@ -12,6 +12,7 @@ import { agentConfigApi } from '@/lib/ipc-client'
 import { useMcpStore } from '@/stores/mcp-store'
 import { useSkillStore } from '@/stores/skill-store'
 import { useAgentStore } from '@/stores/agent-store'
+import { useAgentsRemoved } from '@/hooks/use-agents-removed'
 import { SkillSelectorDialog } from '@/components/skills/SkillSelectorDialog'
 import { SecretSelector } from '@/components/secrets/SecretSelector'
 import { CLAUDE_REASONING_EFFORT_VALUES, CODEX_REASONING_EFFORT_VALUES } from '@shared/reasoning-effort'
@@ -82,6 +83,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   const { skills, fetchSkills } = useSkillStore()
   const configuredAgents = useAgentStore((state) => state.agents)
   const fallbackCandidates = configuredAgents.filter((candidate) => candidate.id !== agent?.id)
+  useAgentsRemoved((removed) => setFallbackAgentIds((ids) => ids.filter((id) => !removed.includes(id))))
   const supportsReasoningEffort = codingAgent === CodingAgentType.CLAUDE_CODE || codingAgent === CodingAgentType.CODEX
   const reasoningEffortValues = codingAgent === CodingAgentType.CLAUDE_CODE
     ? CLAUDE_REASONING_EFFORT_VALUES

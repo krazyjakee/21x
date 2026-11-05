@@ -5,6 +5,16 @@
  * modules) so it can be pulled in from every entry point.
  */
 
+/**
+ * A task that will go on producing work with nobody chosen to do it. A recurring
+ * schedule keeps firing even once completed, so its status does not matter; a
+ * self-starting task only counts while it is unfinished.
+ */
+export function taskLacksAgent(task: { agent_id: string | null; status: string; auto_start_agent: boolean; is_recurring: boolean; recurrence_parent_id: string | null }): boolean {
+  if (task.agent_id) return false
+  return (task.is_recurring && !task.recurrence_parent_id) || (task.auto_start_agent && task.status !== 'completed')
+}
+
 /** Shape this helper expects from an agent-like value. */
 export interface AgentConfigLike {
   coding_agent?: string | null

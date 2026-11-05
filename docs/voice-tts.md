@@ -580,6 +580,13 @@ of the turn. An open passage counts as speaking, so an early one held the
 microphone through all of the model's thinking, and a noise then stopped it and
 lost the reply.
 
+A passage can still sit open with nothing sounding, while the model runs a tool
+or the next sentence is made. The gate keeps holding, so 21x cannot transcribe
+itself, but a loud sound then only opens the gate. It stops nothing, because
+nobody is being talked over and the rest of the reply still has to be read. Real
+words stop the reading once they are recognised, and the next audio closes the
+gate again.
+
 ## Barge-in by hand
 
 The moment a voice turn opens, playback stops in the renderer in the same tick

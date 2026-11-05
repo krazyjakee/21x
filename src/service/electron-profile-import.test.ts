@@ -1,14 +1,20 @@
 import { createCipheriv, pbkdf2Sync, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import SQLite from 'better-sqlite3'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
 import { configureSecretStorage, getSecretStorage, releaseSecretStorage, type SecretStorage } from '../main/platform/secret-storage'
 import { decryptRecordCredential, decryptSettingValue } from '../main/database/serializers'
-import { acquireProfileLock } from '../main/platform/profile-lock'
-import { DROPPED_CREDENTIALS_SETTING, MANAGED_TASK_MCP_MARKER, createSafeStorageDecoder, importElectronProfile } from './electron-profile-import'
+import { acquireProfileLock, HOST_CLAIM_TIMEOUT_MS, PROFILE_LOCK_FILE, type ProfileLock } from '../main/platform/profile-lock'
+import { holdProfileElsewhere, profileFreeElsewhere, profileListing, stopOtherHosts } from '../../test/helpers/profile-holder'
+import { DROPPED_CREDENTIALS_SETTING, ELECTRON_SHARED_ROOT_SETTING, MANAGED_TASK_MCP_MARKER, createSafeStorageDecoder, holdElectronProfile, importElectronProfile, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
+
+vi.mock('../main/platform/profile-lock', async importOriginal => {
+  const actual = await importOriginal<typeof import('../main/platform/profile-lock')>()
+  return { ...actual, acquireProfileLock: vi.fn(actual.acquireProfileLock) }
+})
 
 const PASSWORD = Buffer.from('fixture-libsecret-password')
 /** Chromium os_crypt v11 (Linux) ciphertext, as Electron safeStorage writes it. */
@@ -20,7 +26,11 @@ function osCrypt(value: string, password = PASSWORD): Buffer {
 const roots: string[] = []
 let storage: AuthenticatedSecretStorage | undefined
 let previous: SecretStorage | undefined
-afterEach(() => {
+const holds: ProfileLock[] = []
+const hold = (root: string) => { const lock = holdElectronProfile(root); holds.push(lock); return lock }
+afterEach(async () => {
+  await stopOtherHosts()
+  for (const lock of holds.splice(0)) lock.release()
   if (storage) { releaseSecretStorage(storage); storage.dispose(); storage = undefined }
   if (previous) { configureSecretStorage(previous); previous = undefined }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -64,7 +74,7 @@ describe('Electron profile import', () => {
   it('copies the data and re-encrypts every credential class under the new profile key', async () => {
     const f = fixture()
     const before = readFileSync(join(f.electron, '21x.db'))
-    await expect(importElectronProfile({ profileRoot: f.electron, destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => Buffer.from(PASSWORD), platform: 'linux' })).resolves.toBe(true)
+    await expect(importElectronProfile({ profileRoot: f.electron, lock: hold(f.electron), destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => Buffer.from(PASSWORD), platform: 'linux' })).resolves.toBe(true)
     expect(readFileSync(join(f.electron, '21x.db'))).toEqual(before)
     const db = new SQLite(f.destination, { readonly: true })
     try {
@@ -93,7 +103,7 @@ describe('Electron profile import', () => {
 
   it('clears a credential it cannot read instead of failing the whole import', async () => {
     const f = fixture()
-    await importElectronProfile({ profileRoot: f.electron, destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null, platform: 'linux' })
+    await importElectronProfile({ profileRoot: f.electron, lock: hold(f.electron), destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null, platform: 'linux' })
     const db = new SQLite(f.destination, { readonly: true })
     try {
       expect((db.prepare("SELECT value FROM settings WHERE key = 'openai_api_key'").get() as { value: string }).value).toBe('')
@@ -102,20 +112,87 @@ describe('Electron profile import', () => {
     } finally { db.close() }
   })
 
-  it('waits for the Electron app to close and leaves nothing behind', async () => {
+  it('records the share inside the copy, so a published database always carries it', async () => {
     const f = fixture()
-    const lock = acquireProfileLock(f.electron)
+    await importElectronProfile({ profileRoot: f.electron, lock: hold(f.electron), destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null, platform: 'linux' })
+    const db = new SQLite(f.destination, { readonly: true })
     try {
-      await expect(importElectronProfile({ profileRoot: f.electron, destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null }))
-        .rejects.toMatchObject({ code: 'ELECTRON_PROFILE_IN_USE' })
-    } finally { lock.release() }
+      expect((db.prepare('SELECT value FROM settings WHERE key = ?').get(ELECTRON_SHARED_ROOT_SETTING) as { value: string }).value).toBe(f.electron)
+    } finally { db.close() }
+  })
+
+  it('replaces a directory at the marker path, so a restore cannot fail forever', () => {
+    const f = fixture(), profile = join(f.electron, '..', 'profile')
+    mkdirSync(join(profile, '.legacy-profile-root', 'in-the-way'), { recursive: true })
+    expect(readLegacyMarker(profile)).toBeNull()
+    writeLegacyMarker(profile, '/electron/root')
+    expect(readLegacyMarker(profile)).toBe('/electron/root')
+  })
+
+  it('reads the marker back as written, replaces a planted link, and reads a missing one as nothing', () => {
+    const f = fixture(), profile = join(f.electron, '..', 'profile'), target = join(f.electron, 'target')
+    expect(readLegacyMarker(profile)).toBeNull()
+    writeFileSync(target, 'untouched')
+    symlinkSync(target, join(profile, '.legacy-profile-root'))
+    expect(readLegacyMarker(profile)).toBeNull()
+    writeLegacyMarker(profile, '/electron/root')
+    expect(readLegacyMarker(profile)).toBe('/electron/root')
+    expect(readFileSync(target, 'utf8')).toBe('untouched')
+  })
+
+  it('waits the shared claim time for the Electron profile, and announces itself', () => {
+    const f = fixture()
+    vi.mocked(acquireProfileLock).mockClear()
+    hold(f.electron)
+    expect(HOST_CLAIM_TIMEOUT_MS).toBeGreaterThan(0)
+    expect(acquireProfileLock).toHaveBeenCalledWith(f.electron, { timeoutMs: HOST_CLAIM_TIMEOUT_MS, tauriHolder: true })
+  })
+
+  it('refuses while the Electron app runs, writes nothing, and works once it quits', async () => {
+    const f = fixture()
+    const electron = await holdProfileElsewhere(f.electron)
+    const before = profileListing(f.electron)
+    expect(() => hold(f.electron)).toThrow('ELECTRON_PROFILE_IN_USE')
+    expect(profileListing(f.electron)).toEqual(before)
+    expect(existsSync(f.destination)).toBe(false)
+    await electron.quit()
+    hold(f.electron).assertHeld()
+  })
+
+  it('keeps the Electron app out after the import, until the session releases', async () => {
+    const f = fixture()
+    const lock = hold(f.electron)
+    await importElectronProfile({ profileRoot: f.electron, lock, destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null, platform: 'linux' })
+    expect(await profileFreeElsewhere(f.electron)).toBe(false)
+    lock.release()
+    expect(await profileFreeElsewhere(f.electron)).toBe(true)
+  })
+
+  it('does not blame the Electron app when another Tauri session holds the profile', async () => {
+    const f = fixture()
+    await holdProfileElsewhere(f.electron, { tauri: true })
+    expect(() => hold(f.electron)).toThrow(/^PROFILE_IN_USE$/)
+  })
+
+  it('stops the launch on a lock it cannot trust, without blaming the Electron app', () => {
+    const f = fixture()
+    const target = join(f.profile, 'elsewhere'); writeFileSync(target, 'untouched')
+    symlinkSync(target, join(f.electron, PROFILE_LOCK_FILE))
+    expect(() => hold(f.electron)).toThrow('PROFILE_LOCK_INVALID')
+    expect(readFileSync(target, 'utf8')).toBe('untouched')
+  })
+
+  it('never imports without the hold', async () => {
+    const f = fixture()
+    const lock = { assertHeld() { throw new Error('PROFILE_LOCK_LOST') } }
+    await expect(importElectronProfile({ profileRoot: f.electron, lock, destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null })).rejects.toThrow('PROFILE_LOCK_LOST')
     expect(existsSync(f.destination)).toBe(false)
   })
 
   it('reports nothing to import without an Electron database', async () => {
     const f = fixture()
     rmSync(join(f.electron, '21x.db'))
-    await expect(importElectronProfile({ profileRoot: f.electron, destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null })).resolves.toBe(false)
+    await expect(importElectronProfile({ profileRoot: f.electron, lock: hold(f.electron), destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null })).resolves.toBe(false)
   })
 
   it('decodes macOS v10 with the Keychain password and Linux v10 with the fixed one', () => {

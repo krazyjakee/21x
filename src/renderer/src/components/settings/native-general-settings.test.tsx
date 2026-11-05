@@ -49,7 +49,7 @@ it('loads native notification/tray/login preferences and preserves their exact n
   const login = screen.getByRole('switch', { name: 'Launch at startup' })
   await waitFor(() => expect(login).toBeEnabled())
   expect(login).toHaveAttribute('aria-checked', 'false')
-  expect(screen.getByRole('switch', { name: 'Start Captain at launch' })).toBeDisabled()
+  expect(screen.getByRole('switch', { name: 'Start Captain at launch' })).toBeEnabled()
   expect(f.calls('app:getLoginItemSettings')).toHaveLength(1)
   fireEvent.click(login)
   await waitFor(() => expect(login).toHaveAttribute('aria-checked', 'true'))
@@ -59,6 +59,28 @@ it('loads native notification/tray/login preferences and preserves their exact n
   await waitFor(() => expect(tray).toHaveAttribute('aria-checked', 'false'))
   expect(f.calls('app:setMinimizeToTray')).toHaveLength(1)
   expect(f.calls('app:setMinimizeToTray')[0][1]).toMatchObject({ payload: { enabled: false }, uiLease: 'document-1' })
+})
+
+it('saves Start Captain at launch through the settings owner on its exact receipt', async () => {
+  render(<AppPreferencesSection />)
+  const captain = screen.getByRole('switch', { name: 'Start Captain at launch' })
+  await waitFor(() => expect(captain).toBeEnabled())
+  expect(captain).toHaveAttribute('aria-checked', 'false')
+  fireEvent.click(captain)
+  await waitFor(() => expect(captain).toHaveAttribute('aria-checked', 'true'))
+  expect(f.calls('settings:set')).toHaveLength(1)
+  expect(f.calls('settings:set')[0][1]).toMatchObject({ payload: { key: 'captain_prewarm', value: 'true' } })
+})
+
+it('keeps Start Captain at launch unchanged when the settings owner refuses it', async () => {
+  f.handlers.set('settings:set', async () => { throw { code: 'DISCONNECTED' } })
+  render(<AppPreferencesSection />)
+  const captain = screen.getByRole('switch', { name: 'Start Captain at launch' })
+  await waitFor(() => expect(captain).toBeEnabled())
+  fireEvent.click(captain)
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Check its current value before trying again.'))
+  expect(captain).toHaveAttribute('aria-checked', 'false')
+  expect(f.calls('settings:set')).toHaveLength(1)
 })
 
 it('retains useful tray state when another native preference fails and never displays raw diagnostics', async () => {

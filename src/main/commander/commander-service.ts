@@ -27,9 +27,9 @@ import { readCommanderMemory } from '../sessions/memory'
  * `sendUserMessage` stores the user's message, builds the model context from
  * the session (rolling summary + newest turns within a budget), runs one
  * ChatRuntime turn and streams its events, then stores what the model and its
- * tools added. After the turn it names an untitled session and folds turns
- * that no longer fit the budget into the summary, so the next turn starts
- * without waiting on either.
+ * tools added. After the turn it names an untitled session and, once a fold is
+ * due, folds older turns into the summary, so the next turn starts without
+ * waiting on either.
  *
  * Extension points:
  * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
@@ -225,7 +225,9 @@ export class CommanderService {
     this.store = options.store
     this.runtime = options.runtime ?? new ChatRuntime()
     this.chatEngine = new ChatEngine(this.runtime)
-    this.budget = { ...DEFAULT_CONTEXT_BUDGET, ...options.budget }
+    // An override sets its own limits and does not inherit the default fold triggers.
+    const { keepTurns, maxChars } = DEFAULT_CONTEXT_BUDGET
+    this.budget = options.budget ? { keepTurns, maxChars, ...options.budget } : DEFAULT_CONTEXT_BUDGET
     this.observationRunId = options.observationRunId ?? SESSION_PROCESS_RUN_ID
     this.accounting = new TokenAccounting(this.store.database, console.log, this.observationRunId)
     this.managedSessions = new ManagedSessionObserver(this.store.database, this.observationRunId)

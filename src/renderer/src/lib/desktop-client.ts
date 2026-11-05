@@ -13,6 +13,9 @@ export interface DesktopCommandCodec<K extends keyof DesktopCommandMap> {
 export interface DesktopEventCodec<K extends keyof DesktopEventMap> {
   decodePayload: (value: JsonValue) => DesktopEventMap[K]
   validatePayload: (value: unknown) => boolean
+  /** Advisory notice whose readers re-read durable state: a bad payload is
+   * skipped, and its sequence consumed, instead of ending the connection. */
+  dropInvalid?: boolean
 }
 export type DesktopCommandCodecs = { [K in keyof DesktopCommandMap]?: DesktopCommandCodec<K> }
 export type DesktopEventCodecs = { [K in keyof DesktopEventMap]?: DesktopEventCodec<K> }
@@ -194,8 +197,15 @@ export class DesktopClient {
       if (event.sequence <= this.lastSequence) return
       if (event.sequence !== this.lastSequence + 1) throw new ServiceProtocolError('STALE_EPOCH')
     }
-    const payload = codec.decodePayload(event.payload)
-    if (!codec.validatePayload(payload)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    let payload: DesktopEventMap[keyof DesktopEventMap]
+    try {
+      payload = codec.decodePayload(event.payload)
+      if (!codec.validatePayload(payload)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    } catch (error) {
+      if (!codec.dropInvalid) throw error
+      this.lastSequence = event.sequence
+      return
+    }
     this.lastSequence = event.sequence
     for (const listener of [...this.listeners.get(event.operation) ?? []]) safely(() => listener(payload))
   }

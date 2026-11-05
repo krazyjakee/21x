@@ -58,6 +58,7 @@ const mainFiles = [
   'src/main/task-api/task-group-routes.test.ts', 'src/main/mcp-servers/task-management-groups.test.ts',
   'src/main/mcp-servers/task-group-stdio.test.ts', 'src/main/task-groups/service.test.ts',
   'src/main/database/task-groups.test.ts', 'src/main/database/task-groups-migration.test.ts',
+  'src/main/database/agent-deletion.test.ts',
   'src/main/task-mcp-endpoint.test.ts',
   'src/main/mobile-api-server.test.ts',
   'src/main/mobile-api-lifetime.test.ts',

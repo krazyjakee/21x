@@ -4,6 +4,7 @@ import { getSecretBrokerPort, registerSecretSession, unregisterSecretSession, wr
 import { getTaskApiPort, getTaskApiToken, waitForTaskApiServer } from '../task-api-server'
 import { buildTaskMcpUrl } from '../task-mcp-endpoint'
 import { createAdapter, isCodexAppServerAdapter } from './adapter-factory'
+import { findRtkExecutable } from '../adapters/shared/rtk-session'
 import type { AgentManagerHost } from './host'
 
 /** Shipping defaults stay in the Electron wrapper, outside the service graph. */
@@ -28,6 +29,7 @@ export function electronAgentManagerHost(): AgentManagerHost {
       register: registerSecretSession, unregister: unregisterSecretSession,
       writeShellWrapper: writeSecretShellWrapper
     },
+    findRtkExecutable: () => findRtkExecutable(),
     configuredMcp: 'enabled',
     managedTaskMcp: {
       kind: 'server', waitUntilReady: waitForTaskApiServer,

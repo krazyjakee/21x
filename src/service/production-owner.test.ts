@@ -1,14 +1,16 @@
 import { open } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SQLite from 'better-sqlite3'
-import { constants, linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync } from 'node:fs'
+import { constants, cpSync, existsSync, linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProductionOwner, ProductionOwnerBootstrap, ProductionServices } from './production-owner'
 import type { CodingAgentAdapter } from '../main/adapters/coding-agent-adapter'
 import type { ChatProvider, ChatProviderEvent } from '../main/chat/providers/types'
 import type { ProtectedApplicationKeyStore } from '../main/platform/authenticated-secret-storage'
+import { heldByTauri } from '../main/platform/profile-lock'
 import { makeTask } from '../../test/helpers/task-fixtures'
+import { holdProfileElsewhere, profileFreeElsewhere, profileListing, stopOtherHosts } from '../../test/helpers/profile-holder'
 
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs')>()
@@ -32,6 +34,7 @@ beforeEach(async () => {
   ownerModule = await import('./production-owner')
 })
 afterEach(async () => {
+  await stopOtherHosts()
   for (const finish of finishers.splice(0)) finish()
   for (const owner of owners.splice(0)) await owner.close()
   vi.restoreAllMocks()
@@ -171,6 +174,179 @@ describe('actual production application owner', () => {
     const services = await f.owner.start()
     expect(services.db.getProjects().length).toBeGreaterThan(0)
   })
+  describe('sharing the folders of an Electron profile', { timeout: 20_000 }, () => {
+    function electronProfile(f: Awaited<ReturnType<typeof fixture>>, name = 'electron') {
+      const root = join(f.root, name); mkdirSync(root)
+      writeFileSync(join(root, '21x.db'), 'not opened by a refused or reopened launch')
+      return root
+    }
+    /** Every launch after the first: the profile exists, so nothing is imported. */
+    async function reopen(f: Awaited<ReturnType<typeof fixture>>, electron: string) {
+      await f.owner.start(); await f.owner.close()
+      const next = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' }, legacyImport: { profileRoot: electron, appName: '21x' } }, f.boundaries)
+      owners.push(next)
+      await next.start()
+      return next
+    }
+
+    const load = (f: Awaited<ReturnType<typeof fixture>>, electron?: string) => {
+      const next = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' }, ...(electron === undefined ? {} : { legacyImport: { profileRoot: electron, appName: '21x' } }) }, f.boundaries)
+      owners.push(next)
+      return next
+    }
+    const storedShare = (f: Awaited<ReturnType<typeof fixture>>) => {
+      const db = new SQLite(join(f.bootstrap.paths.profileRoot, '21x.db'), { readonly: true })
+      try { return db.prepare('SELECT value FROM settings WHERE key = ?').pluck().get('__electron_shared_root') } finally { db.close() }
+    }
+    const marker = (f: Awaited<ReturnType<typeof fixture>>) => join(f.bootstrap.paths.profileRoot, '.legacy-profile-root')
+    /** A profile that has run shared once, then lost its marker. */
+    async function sharedOnce(f: Awaited<ReturnType<typeof fixture>>, electron: string) {
+      await (await reopen(f, electron)).close()
+      expect(storedShare(f)).toBe(electron)
+    }
+
+    it('stays locked after the Electron database goes', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      rmSync(join(electron, '21x.db'))
+      const session = await reopen(f, electron)
+      expect(session.snapshot().phase).toBe('ready')
+      expect(await profileFreeElsewhere(electron)).toBe(false)
+    })
+
+    it('records the share of a profile imported before the record existed', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await sharedOnce(f, electron)
+    })
+
+    it('refuses without recreating a folder that has gone', async () => {
+      const f = await fixture(), electron = join(f.root, 'deleted')
+      f.bootstrap.legacyImport = { profileRoot: electron, appName: '21x' }
+      await expect(f.owner.start()).rejects.toThrow('ELECTRON_FOLDER_MISSING')
+      expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'profile-lock', code: 'ELECTRON_FOLDER_MISSING', owned: false })
+      expect(existsSync(electron)).toBe(false)
+      expect(f.store.create).not.toHaveBeenCalled()
+      expect(existsSync(join(f.bootstrap.paths.profileRoot, '21x.db'))).toBe(false)
+    })
+
+    it('puts a lost marker back and refuses, so the next launch is the locked one', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await sharedOnce(f, electron)
+      const lost = load(f)
+      await expect(lost.start()).rejects.toThrow('ELECTRON_LINK_RESTORED')
+      expect(lost.recoveryState()).toEqual({ phase: 'failed', stage: 'database-preflight', code: 'ELECTRON_LINK_RESTORED', owned: false })
+      expect(readFileSync(marker(f), 'utf8')).toBe(electron)
+      expect(storedShare(f)).toBe(electron)
+      const next = load(f, readFileSync(marker(f), 'utf8'))
+      await next.start()
+      expect(next.snapshot().phase).toBe('ready')
+      expect(await profileFreeElsewhere(electron)).toBe(false)
+    })
+
+    it('keeps the row in step when the host reports a different folder', async () => {
+      const f = await fixture(), electron = electronProfile(f), moved = electronProfile(f, 'moved')
+      await sharedOnce(f, electron)
+      const next = load(f, moved)
+      await next.start(); await next.close()
+      expect(storedShare(f)).toBe(moved)
+    })
+
+    it('treats a folder moved and linked back as present, and locks the real folder', async () => {
+      const f = await fixture(), electron = electronProfile(f), moved = join(f.root, 'bigger-drive')
+      renameSync(electron, moved); symlinkSync(moved, electron)
+      const session = await reopen(f, electron)
+      expect(session.snapshot().phase).toBe('ready')
+      expect(await profileFreeElsewhere(moved)).toBe(false)
+    })
+
+    it('treats a link to nothing as a missing folder, and does not create its target', async () => {
+      const f = await fixture(), link = join(f.root, 'link'), gone = join(f.root, 'gone')
+      symlinkSync(gone, link)
+      f.bootstrap.legacyImport = { profileRoot: link, appName: '21x' }
+      await expect(f.owner.start()).rejects.toThrow('ELECTRON_FOLDER_MISSING')
+      expect(existsSync(gone)).toBe(false)
+    })
+
+    it('calls a marker the host could not use a missing folder, instead of restoring it forever', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await sharedOnce(f, electron)
+      writeFileSync(marker(f), electron)
+      const unusable = load(f)
+      await expect(unusable.start()).rejects.toThrow('ELECTRON_FOLDER_MISSING')
+      expect(unusable.recoveryState()).toEqual({ phase: 'failed', stage: 'database-preflight', code: 'ELECTRON_FOLDER_MISSING', owned: false })
+    })
+
+    it('runs on its own folders once the user stops using the old folder, and forgets the share', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await sharedOnce(f, electron)
+      writeFileSync(marker(f), 'detached')
+      const stopped = load(f)
+      const services = await stopped.start()
+      expect(stopped.snapshot().phase).toBe('ready')
+      expect(services.db.getProjects().length).toBeGreaterThan(0)
+      await stopped.close()
+      expect(storedShare(f)).toBeUndefined()
+      expect(readFileSync(marker(f), 'utf8')).toBe('detached')
+      expect(heldByTauri(electron)).toBe(false)
+    })
+
+    it('tells cleanup to leave a workspace it has no task for', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      const session = await reopen(f, electron)
+      const path = join(f.bootstrap.paths.workspaceRoot, 'other-app-task')
+      mkdirSync(path); writeFileSync(join(path, 'uncommitted'), 'the only copy')
+      utimesSync(path, new Date('2020-01-01'), new Date('2020-01-01'))
+      expect((await session.run(services => services.cleanup.runNow())).cleaned).toBe(0)
+      expect(readFileSync(join(path, 'uncommitted'), 'utf8')).toBe('the only copy')
+    })
+
+    it('refuses before credentials, migrations or any write while the Electron app runs', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      f.bootstrap.legacyImport = { profileRoot: electron, appName: '21x' }
+      await holdProfileElsewhere(electron)
+      const before = profileListing(electron)
+      await expect(f.owner.start()).rejects.toThrow('ELECTRON_PROFILE_IN_USE')
+      expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'profile-lock', code: 'ELECTRON_PROFILE_IN_USE', owned: false })
+      expect(f.store.create).not.toHaveBeenCalled()
+      expect(existsSync(join(f.bootstrap.paths.profileRoot, '21x.db'))).toBe(false)
+      expect(existsSync(f.bootstrap.paths.workspaceRoot)).toBe(false)
+      expect(profileListing(electron)).toEqual(before)
+    })
+
+    it('holds it for the whole of a later session, then lets the Electron app back in', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      const session = await reopen(f, electron)
+      expect(session.snapshot().phase).toBe('ready')
+      expect(heldByTauri(electron)).toBe(true)
+      expect(await profileFreeElsewhere(electron)).toBe(false)
+      await session.close()
+      expect(heldByTauri(electron)).toBe(false)
+      expect(await profileFreeElsewhere(electron)).toBe(true)
+    })
+
+    it('starts straight after the Electron app crashes: a dead owner holds nothing', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await (await holdProfileElsewhere(electron)).crash()
+      expect((await reopen(f, electron)).snapshot().phase).toBe('ready')
+    })
+
+    it('is not refused by a copy: the running app locks its folder, not the bytes', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await holdProfileElsewhere(electron, { tauri: true })
+      const copy = join(f.root, 'copied')
+      cpSync(electron, copy, { recursive: true })
+      expect((await reopen(f, copy)).snapshot().phase).toBe('ready')
+    })
+
+    it('runs beside the Electron app when its profile shares nothing with it', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await holdProfileElsewhere(electron)
+      const before = profileListing(electron)
+      await f.owner.start()
+      expect(f.owner.snapshot().phase).toBe('ready')
+      expect(profileListing(electron)).toEqual(before)
+    })
+  })
+
   describe('reopening a profile with the app-managed task MCP', () => {
     function managed(f: Awaited<ReturnType<typeof fixture>>) {
       const script = join(f.root, 'task-mcp.mjs'); writeFileSync(script, '')

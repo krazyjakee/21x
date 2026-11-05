@@ -252,6 +252,33 @@ so a human accepts every step whenever they get to it, and the chain does not
 wait for them. Without an opt-in, a chain advances only as a human accepts each
 step — the old behaviour.
 
+## Deleting an agent
+
+Deleting an agent always works, whatever other agents are doing, because it
+touches nothing they share. A runtime edit is different: it refreshes the one
+adapter a backend shares, so it is still refused while another agent uses that
+backend. Deletion refreshes nothing and fences nothing.
+
+The user is told what will stop and confirms (`agent:deletionImpact`). The
+lifecycle owner then stops only that agent's sessions, and `removeAgent` clears
+every reference in one transaction. Its tasks stay on the board with no agent,
+active task groups are dissolved, and the next agent becomes the default. The
+last agent can be deleted too. `agent:delete` returns what happened, or a
+`{ refused }` result naming what is in the way, as a result rather than an
+error because the service transport would mask an error's message.
+
+`removeAgent` trusts that sessions are already stopped, so it refuses an agent
+with live work unless the lifecycle owner holds it. Anything that removes agents
+goes through that owner: `runAgentsDeletion` does this for plugin uninstall.
+Uninstalling a plugin checks its folder before stopping anything, shows the same
+preview, judging its agents as one set, and returns one report per agent, so what
+stopped reaches the receipt and each project's journal.
+
+A task flagged `auto_start_agent` with no agent is triaged by the default agent
+on each run, or does nothing if no agent exists. The board and the task view
+flag that, and any recurring schedule with no agent, including a completed one
+because the scheduler keeps firing it. Losing an agent is never silent.
+
 ## Auto-Triage
 
 When auto-run is enabled and a new task has no `agent_id`, the system automatically triages it using the default agent.

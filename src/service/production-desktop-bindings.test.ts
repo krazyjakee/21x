@@ -583,7 +583,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
 
   it('pairs against the actual mobile HTTP owner and sends a phone start through shared admission', async () => {
     const f = await fixture(undefined, false, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(192)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(194)
     const lease = f.owner.getMobileBindingLease()!
     expect(lease.deps.db).toBe(f.services.db); expect(lease.deps.agentManager).toBe(f.services.agents)
     expect(lease.deps.taskOwners?.automation).toBe(f.services.automation)
@@ -618,7 +618,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('binds connector credentials to the actual runtime and profile key without starting a worker', async () => {
     const f = await fixture(undefined, true)
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(189)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(191)
     const lease = f.owner.getConnectorBindingLease()!
     const ensured = await f.backend.invoke('connectors:ensureInstance', CONNECTOR_CODECS['connectors:ensureInstance'].encodeArguments(['@activepieces/piece-trello']), f.caller, f.signal)
     const id = (ensured as { value: { instanceId: string } }).value.instanceId
@@ -730,7 +730,7 @@ describe('reviewed bindings attached to the actual production singleton', () => 
   })
   it('shares one database across task, content and agent mutations without replacing its lifecycle owner', async () => {
     const f = await fixture(), db = f.services.db
-    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(182)
+    expect(Object.keys(f.backend.operationSchemas(f.caller))).toHaveLength(184)
     const task = await f.backend.invoke('db:createTask', DATABASE_COMMAND_CODECS['db:createTask'].encodeArguments([{ title: 'Shared task' }]), f.caller, f.signal)
     expect(task).toMatchObject({ defined: true, value: { title: 'Shared task' } })
     const skill = await f.backend.invoke('skills:create', CONFIGURATION_COMMAND_CODECS['skills:create'].encodeArguments([{ name: 'Shared skill', description: 'Description', content: 'Instructions' }]), f.caller, f.signal)
@@ -786,6 +786,35 @@ describe('reviewed bindings attached to the actual production singleton', () => 
     expect(() => f.backend.encodeOwnerEvent('agent:status', { sessionId: 'invented', taskId: task.id, agentId: 'invented', status: 'manufactured' })).toThrow()
     expect(fatal).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_RESULT' }))
     await expect(f.backend.invoke('db:getTasks', {}, f.caller, f.signal)).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  })
+  it('publishes live artifact and recovery notices under the task grant and drops bad ones without closing', async () => {
+    const f = await fixture(), task = f.services.db.createTask({ title: 'Live notices' })!
+    const fatal = vi.fn(); f.options.fatal = fatal
+    const artifact = { id: `${task.id}:workpiece:notes`, taskId: task.id, type: 'markdown', title: 'Notes', path: 'artifacts/notes/README.md', url: undefined, updatedAt: 1, reloadTrigger: 1 }
+    const recovery = { taskId: task.id, cause: 'quota', action: 'switch_agent', result: 'failed', error: 'private provider body' }
+    const artifactWire = f.backend.encodePublishableOwnerEvent('artifact:updated', { taskId: task.id, artifact })!
+    const recoveryWire = f.backend.encodePublishableOwnerEvent('agent:recoveryStateChanged', recovery)!
+    expect(JSON.stringify(artifactWire)).not.toContain('url')
+    expect(JSON.stringify(recoveryWire)).not.toContain('private')
+    expect(f.backend.projectOwnerEvent('artifact:updated', artifactWire, f.caller)).toEqual(artifactWire)
+    expect(f.backend.projectOwnerEvent('agent:recoveryStateChanged', recoveryWire, f.caller)).toEqual(recoveryWire)
+    const taskGrant = f.options.authority.canAccessTask, projectGrant = f.options.authority.canAccessProject
+    f.options.authority.canAccessTask = () => false
+    expect(f.backend.projectOwnerEvent('artifact:updated', artifactWire, f.caller)).toBeUndefined()
+    expect(f.backend.projectOwnerEvent('agent:recoveryStateChanged', recoveryWire, f.caller)).toBeUndefined()
+    f.options.authority.canAccessTask = taskGrant; f.options.authority.canAccessProject = () => false
+    expect(f.backend.projectOwnerEvent('artifact:updated', artifactWire, f.caller)).toBeUndefined()
+    f.options.authority.canAccessProject = projectGrant
+    const oversized = Array.from({ length: 500 }, (_, index) => `${index}-${'a'.repeat(600)}`)
+    for (const invalid of [{ ...artifact, secret: 'private' }, { ...artifact, taskId: 'other' }, { ...artifact, path: '/home/private/notes.md' }, { ...artifact, files: oversized }])
+      expect(f.backend.encodePublishableOwnerEvent('artifact:updated', { taskId: task.id, artifact: invalid })).toBeUndefined()
+    expect(f.backend.encodePublishableOwnerEvent('artifact:updated', 'not an object')).toBeUndefined()
+    expect(f.backend.encodePublishableOwnerEvent('agent:recoveryStateChanged', { ...recovery, cause: 'Private Text' })).toBeUndefined()
+    expect(fatal).not.toHaveBeenCalled()
+    await expect(f.backend.invoke('db:getTasks', {}, f.caller, f.signal)).resolves.toMatchObject({ defined: true })
+    // Every other owner event keeps its fatal contract.
+    expect(() => f.backend.encodePublishableOwnerEvent('agent:status', { sessionId: 'invented', taskId: task.id, agentId: 'invented', status: 'manufactured' })).toThrow()
+    expect(fatal).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_RESULT' }))
   })
   it('projects exactly the three finite notices only with existing current task/project/agent/source read grants', async () => {
     const f = await fixture(), agent = f.services.db.createAgent({ name: 'Notice owner', config: { coding_agent: 'pi' } })!

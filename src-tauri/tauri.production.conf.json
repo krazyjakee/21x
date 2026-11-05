@@ -3,8 +3,8 @@
   "productName": "21x Production Preview",
   "identifier": "com.krazyjakee.21x.tauri-production-preview",
   "build": {
-    "beforeDevCommand": "pnpm tauri:prepare:production && pnpm tauri:production:frontend:dev",
-    "beforeBuildCommand": "pnpm tauri:prepare:production && pnpm tauri:production:frontend:build",
+    "beforeDevCommand": "pnpm tauri:prepare:native && pnpm tauri:prepare:credential-helper && pnpm tauri:prepare:production && pnpm tauri:production:frontend:dev",
+    "beforeBuildCommand": "pnpm tauri:prepare:native && pnpm tauri:prepare:credential-helper && pnpm tauri:prepare:production && pnpm tauri:production:frontend:build",
     "frontendDist": "../out/tauri-production-renderer",
     "devUrl": "http://localhost:1421"
   },

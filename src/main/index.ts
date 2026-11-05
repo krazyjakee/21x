@@ -8,7 +8,8 @@ import { is } from '@electron-toolkit/utils'
 import { DatabaseManager } from './database'
 import { configureSecretStorage } from './platform/secret-storage'
 import { electronSecretStorage } from './platform/electron-secret-storage'
-import { acquireProfileLock, type ProfileLock } from './platform/profile-lock'
+import type { ProfileLock } from './platform/profile-lock'
+import { claimElectronProfile } from './platform/electron-profile-claim'
 import { AgentManager } from './agent-manager'
 import { GitHubManager } from './github-manager'
 import { GitLabManager } from './gitlab-manager'
@@ -630,7 +631,18 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-initCrashLogger()
+// First, so that a refused launch writes nothing to the profile: Chromium's own
+// files follow `userData` and `sessionData`, and the crash log follows `userData`.
+const profileClaim = claimElectronProfile(app, APP_NAME)
+
+if (!profileClaim.refused) {
+  initCrashLogger()
+} else if (!profileClaim.contained) {
+  // Nowhere else to point Chromium, so it must not start on this profile. Linux
+  // has no dialog before `ready`, so the message goes to stderr there.
+  dialog.showErrorBox(`${APP_NAME} could not open your profile`, profileClaim.message)
+  app.exit(1)
+}
 
 // NOTE: The app intentionally does NOT expose a --remote-debugging-port.
 // Canvas browser panels are driven by agents through the in-app panel browser
@@ -672,18 +684,14 @@ app.commandLine.appendSwitch('disable-features', [
 installProcessStreamErrorHandlers()
 
 app.whenReady().then(async () => {
-  const requestedProfileRoot = app.getPath('userData')
-  try {
-    profileLock = acquireProfileLock(requestedProfileRoot)
-    app.setPath('userData', profileLock.profileRoot)
-  } catch {
-    dialog.showErrorBox(
-      `${APP_NAME} could not open your profile`,
-      'Another desktop host may already be using this profile, or its profile lock is unavailable. Close the other host and use a supported local profile directory, then try again. Your data was not changed.'
-    )
+  if (profileClaim.refused) {
+    dialog.showErrorBox(`${APP_NAME} could not open your profile`, profileClaim.message)
+    profileClaim.discardScratch()
     app.exit(1)
     return
   }
+  const requestedProfileRoot = profileClaim.requestedRoot
+  profileLock = profileClaim.lock
   configureSecretStorage(electronSecretStorage)
   // Collect MCP server processes that a previous crash or force-quit orphaned.
   // Safe for a second live instance: only parentless processes match here,

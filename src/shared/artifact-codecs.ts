@@ -10,6 +10,7 @@ export const ARTIFACT_LIMITS = { resultBytes: 900_000, copyFileBytes: 64 * 1024 
 const fail = (code: 'INVALID_ARGUMENTS' | 'INVALID_RESULT'): never => { throw new ServiceProtocolError(code) }
 const shape = (v: unknown, keys: string[], optional: string[] = []): v is Record<string, unknown> => isRecord(v) && hasExactKeys(v, keys, optional)
 const text = (v: unknown, max: number): v is string => typeof v === 'string' && new TextDecoder('utf-8', { ignoreBOM: true }).decode(new TextEncoder().encode(v)) === v && !/[\u0000-\u001f\u007f]/.test(v) && new TextEncoder().encode(v).length <= max
+export { text as isArtifactText }
 export const isArtifactRelativePath = (v: unknown): v is string => text(v, ARTIFACT_LIMITS.pathBytes) && !!v && !v.startsWith('/') && !/[\\:]/.test(v) && v.split('/').every(part => !!part && part !== '.' && part !== '..')
 const number = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v) && v >= 0
 const bounded = (v: unknown): boolean => isJsonValue(v) && new TextEncoder().encode(JSON.stringify(v)).length <= ARTIFACT_LIMITS.resultBytes

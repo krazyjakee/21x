@@ -92,7 +92,6 @@ export function AppPreferencesSection() {
   }
 
   const handleCaptainPrewarmChange = async (checked: boolean): Promise<void> => {
-    if (getDesktopHost().kind === 'tauri') return
     await changePreference(() => settingsApi.set(CAPTAIN_PREWARM_SETTING, checked ? 'true' : 'false'), () => setCaptainPrewarm(checked))
   }
 
@@ -128,7 +127,7 @@ export function AppPreferencesSection() {
           description="Bring the agent up in the background so your first message does not wait for it. Costs one idle agent process. Applies at the next launch."
           checked={captainPrewarm}
           onCheckedChange={handleCaptainPrewarmChange}
-          disabled={loading || saving || getDesktopHost().kind === 'tauri'}
+          disabled={loading || saving}
         />
         <PreferenceRow
           id="enable-notifications"

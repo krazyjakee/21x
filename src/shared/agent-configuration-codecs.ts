@@ -4,7 +4,7 @@ import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonVal
 import { isExternalHostUrl, type OptionalResult } from './host-services'
 import { MAX_HARD_CAP } from './concurrency'
 
-export const AGENT_CONFIGURATION_OPERATIONS = ['agent:getAll', 'agent:create', 'agent:update', 'agent:delete', 'agentConfig:getProviders', 'agentConfig:listModels'] as const
+export const AGENT_CONFIGURATION_OPERATIONS = ['agent:getAll', 'agent:create', 'agent:update', 'agent:delete', 'agent:deletionImpact', 'agentConfig:getProviders', 'agentConfig:listModels'] as const
 export type AgentConfigurationOperation = typeof AGENT_CONFIGURATION_OPERATIONS[number]
 export const AGENT_CONFIGURATION_EVENTS = ['tasks:refresh'] as const
 export const AGENT_API_KEY_SET_MARKER = '__21x_api_key_set__'
@@ -83,7 +83,7 @@ function crud<K extends CrudOperation>(operation: K): AgentConfigurationCodec<K>
   }
   const validateResult = (value: unknown): boolean => value === undefined ? operation === 'agent:update' : boundedResult(value) &&
     (operation === 'agent:getAll' ? Array.isArray(value) && value.length <= 128 && value.every(isMaskedAgent)
-      : operation === 'agent:delete' ? typeof value === 'boolean' : isMaskedAgent(value))
+      : operation === 'agent:delete' || operation === 'agent:deletionImpact' ? base.validateResult(value) : isMaskedAgent(value))
   return {
     validateArguments,
     encodeArguments(args) {
@@ -111,7 +111,7 @@ function crud<K extends CrudOperation>(operation: K): AgentConfigurationCodec<K>
     },
     encodeResult(value) {
       if (value === undefined) { if (!validateResult(value)) return fail('INVALID_RESULT'); return { defined: false } }
-      const projected = operation === 'agent:delete' ? value : operation === 'agent:getAll'
+      const projected = operation === 'agent:delete' || operation === 'agent:deletionImpact' ? value : operation === 'agent:getAll'
         ? Array.isArray(value) && value.length <= 128 ? value.map(projectMaskedAgent) : fail('INVALID_RESULT') : projectMaskedAgent(value)
       if (!validateResult(projected) || !isJsonValue(projected)) return fail('INVALID_RESULT')
       return { defined: true, value: projected }
@@ -189,7 +189,7 @@ function modelCodec<K extends Extract<AgentConfigurationOperation, `agentConfig:
   }
 }
 export const AGENT_CONFIGURATION_CODECS = {
-  'agent:getAll': crud('agent:getAll'), 'agent:create': crud('agent:create'), 'agent:update': crud('agent:update'), 'agent:delete': crud('agent:delete'),
+  'agent:getAll': crud('agent:getAll'), 'agent:create': crud('agent:create'), 'agent:update': crud('agent:update'), 'agent:delete': crud('agent:delete'), 'agent:deletionImpact': crud('agent:deletionImpact'),
   'agentConfig:getProviders': modelCodec('agentConfig:getProviders'), 'agentConfig:listModels': modelCodec('agentConfig:listModels')
 }
 export const AGENT_CONFIGURATION_EVENT_CODECS = {
