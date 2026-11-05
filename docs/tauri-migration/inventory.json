@@ -6203,6 +6203,7 @@
     "src/service/oauth-flow-owner.ts",
     "src/service/production-adapters.ts",
     "src/service/production-agent-backend.ts",
+    "src/service/production-crash-log.ts",
     "src/service/production-desktop-bindings.ts",
     "src/service/production-domain-reconciliation.ts",
     "src/service/production-energy-owner.ts",
@@ -14679,7 +14680,7 @@
   "summary": {
     "desktopAPIConsumers": 371,
     "directAPIConsumers": 1,
-    "files": 951,
+    "files": 952,
     "operations": 741,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,

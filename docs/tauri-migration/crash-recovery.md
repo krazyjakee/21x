@@ -54,11 +54,11 @@ The log is `<Tauri profile>/logs/crash.log`, where the profile is `<app local da
 Each entry also has a timestamp in the same format as Electron's log.
 
 - **No secrets.** Environment and arguments are never read. Host entries are built from fixed text, a reason and an exit status. A service error keeps its message only when the message is a bare constant such as `OWNER_CLOSING`; any other message is replaced by its length, because a message can quote a prompt or a token and no filter can recognise them all. This is less detail than Electron's log, which records every message. The stack frames still give the location. A thrown value that is not an Error is recorded by type only.
-- **Bounds.** Each file stops at 1 MiB and rotates once to `crash.log.1`, so at most 2 MiB is kept. A service entry is at most about 10 KiB.
+- **Bounds.** Each file rotates at 1 MiB to a single `crash.log.1`, so about 2 MiB is kept at most. A service entry is at most about 10 KiB.
 - **Permissions.** The folder is 0700 and the files 0600, tightened if they already exist. A symbolic link at the folder or the file, or a hard link at the file, is refused.
 - **Failures.** A write failure is swallowed. Host writes run off the GTK thread.
 - **Refused launches.** The service installs its logger only after it holds both profile locks, and the host opens its log only after the service has started. A launch refused by the lock, or by the single-instance check, writes nothing.
-- **Rotation race.** Both writers can rotate at the same moment. The cost is losing the older rotated entries; neither file can pass its bound.
+- **Rotation race.** The host and the service write without a shared lock. If both rotate at the same moment, the older rotated entries are lost. If both pass the size check together, the file overshoots 1 MiB by one entry, about 10 KiB, and rotates on the next write.
 - **First launch.** A `logs` folder does not count against the "new profile must be empty" check, so a first launch that crashed can start again.
 
 The service logs through `uncaughtExceptionMonitor`, which observes without changing what happens next.
