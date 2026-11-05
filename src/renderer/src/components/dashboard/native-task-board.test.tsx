@@ -137,6 +137,13 @@ it('refreshes read-only recovery state on the current connection without replayi
   render(<Harness />); await waitFor(() => expect(calls('agent:getStartRecoveryState')).toHaveLength(1)); values.set('agent:getStartRecoveryState', queue())
   await act(async () => host.reconnect()); expect(await screen.findByTestId('task-transition-task-1')).toHaveTextContent('queued'); expect(calls('agentSession:startTask')).toHaveLength(0)
 })
+it('re-reads durable recovery on a live notice for a visible task only, without a command replay', async () => {
+  const notify = (taskId: string) => act(() => receiveService?.({ payload: { protocolVersion: 1, kind: 'event', operation: 'agent:recoveryStateChanged', payload: { taskId, cause: 'agent_missing', action: 'terminal_failure', result: 'visible_terminal_failure', error: null }, engineEpoch: 'board-engine', sequence: ++sequence } }))
+  render(<Harness />); await waitFor(() => expect(calls('agent:getStartRecoveryState')).toHaveLength(1))
+  notify('task-foreign'); await act(async () => {}); expect(calls('agent:getStartRecoveryState')).toHaveLength(1)
+  values.set('agent:getStartRecoveryState', queue()); notify('task-1')
+  expect(await screen.findByTestId('task-transition-task-1')).toHaveTextContent('queued'); expect(calls('agentSession:startTask')).toHaveLength(0)
+})
 it.each(['project-return', 'unmount'] as const)('starts no later Source content export after %s during the canonical board write', async mode => {
   canonical = [task({ source_id: 'source-1', external_id: '7', status: TaskStatus.NotStarted })]; tasks.setState({ tasks: canonical })
   const raw = held<unknown>(); handlers.set('db:updateTask', () => raw.promise); const view = render(<Harness />); start(); drop(TaskStatus.ReadyForReview)
