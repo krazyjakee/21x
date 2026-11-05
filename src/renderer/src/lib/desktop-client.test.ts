@@ -82,6 +82,20 @@ describe('desktop connection lifecycle', () => {
     client.dispose()
   })
 
+  it('sends nothing a dead document had in flight when the reloaded document connects', async () => {
+    const dead = fixture()
+    await dead.client.connect('first')
+    vi.mocked(dead.transport.invoke).mockReturnValueOnce(deferred<unknown>().promise)
+    void dead.client.invoke('settings:set', ['key', 'value']).catch(() => {})
+    expect(dead.transport.invoke).toHaveBeenCalledTimes(1)
+    // The pending write lived in the dead heap. A reload starts from an empty client.
+    const reloaded = new DesktopClient({ transport: dead.transport, commands: {}, events: {} })
+    await reloaded.connect('first')
+    expect(dead.transport.invoke).toHaveBeenCalledTimes(1)
+    reloaded.dispose()
+    dead.client.dispose()
+  })
+
   it('keeps registrations independent and detects event gaps so owners can rehydrate', async () => {
     const { client, emit, states, unlisten } = fixture()
     const callback = vi.fn()

@@ -72,6 +72,18 @@ impl DocumentLease {
         }
         Ok(())
     }
+    /// The web process behind this attachment died. Nothing it started can
+    /// finish, and an unfinished load must not make the next one look ambiguous.
+    #[cfg(target_os = "linux")]
+    fn terminated(&mut self, ticket: u64) -> Result<Option<u64>, EngineError> {
+        if self.closed || self.retired || ticket != self.attachment {
+            return Ok(None);
+        }
+        self.advance()?;
+        self.loads.clear();
+        self.ambiguous_load = false;
+        Ok(Some(self.generation))
+    }
     fn started(&mut self, ticket: u64, physical: &str) -> Result<(), EngineError> {
         if !self.attach(ticket, physical) {
             return Ok(());
@@ -440,6 +452,33 @@ impl NativeUiOwner {
         }
         state.document.navigation(captured.ticket)
     }
+    /// Retires the dead document at once, not when a reload runs, and reads no
+    /// Tauri getter, because it runs in a GTK signal handler. None means there is
+    /// no document to recover: the app is closing or the window has gone.
+    #[cfg(target_os = "linux")]
+    pub(super) fn document_terminated(&self, ticket: u64) -> Option<u64> {
+        self.0.lock().ok()?.document.terminated(ticket).ok()?
+    }
+    /// A navigation since the termination has already replaced the document.
+    #[cfg(target_os = "linux")]
+    pub(super) fn assert_terminated_document(
+        &self,
+        ticket: u64,
+        generation: u64,
+    ) -> Result<(), EngineError> {
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        if state.document.closed
+            || state.document.retired
+            || state.document.attachment != ticket
+            || state.document.generation != generation
+        {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        Ok(())
+    }
     pub fn navigation(&self, ticket: u64) -> Result<(), EngineError> {
         self.0
             .lock()
@@ -765,6 +804,81 @@ mod tests {
             document.current("physical-A", "epoch", Some(&next), true),
             Some(next)
         );
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_dead_web_process_revokes_its_document_at_once_and_the_reload_recovers() {
+        let (mut document, ticket) = ready();
+        let old = document.activate("physical-A", "epoch", true).unwrap();
+        let generation = document.terminated(ticket).unwrap().unwrap();
+        assert!(document
+            .current("physical-A", "epoch", Some(&old), true)
+            .is_none());
+        assert!(document.activate("physical-A", "epoch", true).is_none());
+        document.navigation(ticket).unwrap();
+        assert_ne!(document.generation, generation);
+        document.started(ticket, "physical-A").unwrap();
+        document.finished(ticket, "physical-A");
+        let next = document.activate("physical-A", "epoch", true).unwrap();
+        assert_ne!(old, next);
+        assert!(document
+            .current("physical-A", "epoch", Some(&old), true)
+            .is_none());
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_crash_during_a_load_does_not_leave_the_next_load_ambiguous() {
+        let (mut document, ticket) = ready();
+        document.started(ticket, "physical-A").unwrap();
+        document.terminated(ticket).unwrap().unwrap();
+        // A late completion from the dead load grants nothing.
+        document.finished(ticket, "physical-A");
+        assert!(document.activate("physical-A", "epoch", true).is_none());
+        document.started(ticket, "physical-A").unwrap();
+        document.finished(ticket, "physical-A");
+        assert!(document.activate("physical-A", "epoch", true).is_some());
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn termination_does_nothing_when_closing_or_after_the_window_has_gone() {
+        let (mut closed, ticket) = ready();
+        let generation = closed.generation;
+        closed.close();
+        assert_eq!(closed.terminated(ticket).unwrap(), None);
+        assert_eq!(closed.generation, generation);
+
+        let (mut gone, ticket) = ready();
+        gone.destroy(ticket, "physical-A").unwrap();
+        assert_eq!(gone.terminated(ticket).unwrap(), None);
+
+        let (mut foreign, ticket) = ready();
+        assert_eq!(foreign.terminated(ticket + 1).unwrap(), None);
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_pending_recovery_stands_down_once_the_document_has_moved_on() {
+        let owner = NativeUiOwner::default();
+        let ticket = owner.reserve_window().unwrap();
+        {
+            let mut state = owner.0.lock().unwrap();
+            state.document.started(ticket, "physical-A").unwrap();
+            state.document.finished(ticket, "physical-A");
+        }
+        let generation = owner.document_terminated(ticket).unwrap();
+        owner.assert_terminated_document(ticket, generation).unwrap();
+        // The user chose View > Reload during the delay.
+        owner.navigation(ticket).unwrap();
+        assert_eq!(
+            owner
+                .assert_terminated_document(ticket, generation)
+                .unwrap_err()
+                .code,
+            "STALE_EPOCH"
+        );
+        let generation = owner.document_terminated(ticket).unwrap();
+        owner.close().unwrap();
+        assert!(owner.assert_terminated_document(ticket, generation).is_err());
+        assert_eq!(owner.document_terminated(ticket), None);
     }
     #[test]
     fn hidden_untrusted_physical_replacement_and_new_epoch_never_inherit_authority() {

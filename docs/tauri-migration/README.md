@@ -28,6 +28,7 @@ On 2026-10-12 the user approved removing embedded browser features during migrat
 | [Bounded transcript pages](transcript-pages.md) | Versioned read-only pagination, display previews, cursor-race recovery and local wire evidence |
 | [Content configuration integration](configuration-integration.md) | Eighteen content operations through the actual synthetic service/native boundary, conflicts and restart durability |
 | [Standalone portable tests](standalone-tests.md) | Staged Node/SQLite runner, rejected Electron imports and reusable CI evidence |
+| [Crash recovery and crash log](crash-recovery.md) | Linux renderer recovery, the reload limit, no write replay, the crash log's content and bounds, and what is unverified |
 | [Approval and Stop lifetime](approval-lifetime.md) | Raw response/teardown ownership and rejected late state writes after Stop |
 | [Platform minimum review](platform-minimum-review.md) | Pinned component floors, tested builders and required oldest-platform acceptance |
 | [Windows service stdio](windows-service-stdio.md) | Actual startup diagnosis, inherited socket validation, Interrupt and reaper lifetime |

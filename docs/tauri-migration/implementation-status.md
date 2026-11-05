@@ -808,6 +808,8 @@ This continuation addresses #207 live transcript overflow, #210 content configur
 
 The [readiness audit](readiness-audit.md) records the full local recheck (5,101 tests passed / 8 skipped, builds/typecheck passed, lint passed with 165 warnings, 26 subprocess and 21 Rust unit/staged cases). It corrected stale source inventory/review coordinates and added Verify freshness checks. The [retirement plan](electron-retirement.md) inventories eight Electron packages, 47 runtime imports and 368 direct preload references in 34 files, with ordered removal after G0–G4 acceptance. This prepares the work; no production entrypoint, release feed or live profile was switched.
 
+[Crash recovery and crash log](crash-recovery.md): on Linux a dead WebKit web process now gives one reload after about a second, at most once in 60 seconds, and renderer termination, service crashes and unexpected service exit go to a bounded, owner-only `logs/crash.log` in the Tauri profile. Windows and macOS are unchanged. None of it has been compiled or run.
+
 ## Remaining acceptance gates
 
 | Gate | What still prevents acceptance |
