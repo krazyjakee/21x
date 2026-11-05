@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, AudioLines, Brain, Captions, ChevronDown, Circle, Inbox, Loader2, Mic, MicOff, PanelRight, PhoneOff, PictureInPicture2, Settings, Square, Wrench } from 'lucide-react'
+import { AlertTriangle, AudioLines, Brain, Captions, ChevronDown, Circle, Loader2, Mic, MicOff, PanelRight, PhoneOff, PictureInPicture2, Settings, Square, Wrench } from 'lucide-react'
 import type { CallState } from '@shared/commander-call'
 import { Button } from '@/components/ui/Button'
 import { bindPresenceLevel } from '@/lib/commander-call/presence-level'
@@ -7,8 +7,8 @@ import { useCommanderStore } from '@/stores/commander-store'
 import { useUIStore } from '@/stores/ui-store'
 import { SettingsTab } from '@/types'
 import { commanderCallMedia, MICROPHONE_BUSY_MESSAGE } from './CommanderCallHost'
-import { CommanderCaptions, useCommanderCaption } from './CommanderCaptions'
-import { navigateCallToolbar } from './use-call-shortcuts'
+import { CallReportNotice, CommanderCaptions, useCommanderCaption } from './CommanderCaptions'
+import { moveToolbarTabStop, navigateCallToolbar, useToolbarTabStop } from './use-call-shortcuts'
 import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
 import { toolCallLabel } from './tool-call-label'
 import { useCallPresentation } from './use-call-presentation'
@@ -31,7 +31,7 @@ interface StageProps {
 
 /** View only: the app-owned call driver remains the single microphone/speaker owner. */
 export function CommanderStage({ panelOpen, onPanelToggle, compact, onCompactToggle }: StageProps) {
-  const { call, snapshot, selected, presentation, readiness, observation, fresh, microphoneOpen: currentMic } = useCallPresentation()
+  const { call, snapshot, selected, presentation, readiness, observation, fresh, microphoneOpen: currentMic, pushToTalkReady } = useCallPresentation()
   const callSessionTitle = useCommanderStore(s => s.sessions.find(session => session.id === call.sessionId)?.title)
   const streaming = useCommanderStore(s => selected ? s.streaming[selected] : undefined)
   const turnError = useCommanderStore(s => selected ? s.turnErrors[selected] : undefined)
@@ -39,6 +39,10 @@ export function CommanderStage({ panelOpen, onPanelToggle, compact, onCompactTog
   const captionSize = useCommanderCallUiStore(s => s.captionSize)
   const caption = useCommanderCaption(presentation)
   const [menu, setMenu] = useState(false)
+  const menuButton = useRef<HTMLButtonElement>(null)
+  const toolbar = useRef<HTMLDivElement>(null)
+  useToolbarTabStop(toolbar)
+  const closeMenu = () => { setMenu(false); menuButton.current?.focus() }
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [deviceError, setDeviceError] = useState('')
   const [localProblem, setLocalProblem] = useState<string | null>(null)
@@ -94,9 +98,9 @@ export function CommanderStage({ panelOpen, onPanelToggle, compact, onCompactTog
           {!setupGap && readiness && <button className="text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => openSettings()} data-testid="commander-voice-setup">{readiness.label}</button>}
         </div>}
       </div>
-      {call.status !== 'off' && <div className="commander-user-tile" aria-label={currentMic ? 'You, microphone listening' : 'You, microphone muted'}>
+      {call.status !== 'off' && <div className="commander-user-tile" role="group" aria-label={currentMic ? 'You, microphone listening' : pushToTalkReady ? 'You, hold Space to talk' : 'You, microphone muted'}>
         <div className="commander-user-avatar">{currentMic && <LevelRing kind="input" />}<span aria-hidden="true">Y</span></div>
-        <div><p className="text-sm font-medium">You</p><p className="flex items-center gap-1.5 text-xs text-muted-foreground">{currentMic ? <Mic className="size-icon-sm" aria-hidden="true" /> : <MicOff className="size-icon-sm" aria-hidden="true" />}{currentMic ? 'Microphone on' : 'Microphone muted'}</p></div>
+        <div><p className="text-sm font-medium">You</p><p className="flex items-center gap-1.5 text-xs text-muted-foreground">{currentMic || pushToTalkReady ? <Mic className="size-icon-sm" aria-hidden="true" /> : <MicOff className="size-icon-sm" aria-hidden="true" />}{currentMic ? 'Microphone on' : pushToTalkReady ? 'Hold Space to talk' : 'Microphone muted'}</p></div>
       </div>}
     </div>
     {visibleProblem && <div className="commander-stage-alert border-destructive/40 bg-destructive/10 text-destructive">
@@ -108,11 +112,11 @@ export function CommanderStage({ panelOpen, onPanelToggle, compact, onCompactTog
         {selected && snapshot.available && visibleProblem !== MICROPHONE_BUSY_MESSAGE && <Button size="sm" variant="outline" onClick={() => openSettings(/model|key|quota|credit/i.test(visibleProblem))} data-testid="commander-voice-fix">{/model|key|quota|credit/i.test(visibleProblem) ? 'Check model settings' : 'Open voice settings'}</Button>}
       </div>
     </div>}
-    {presentation.event?.kind === 'report' && <p className="commander-stage-notice text-sm"><Inbox className="size-icon-sm" aria-hidden="true" />Report arrived · read it in Chat</p>}
+    <CallReportNotice event={presentation.event} />
     <CommanderCaptions caption={caption} />
-    <div className="commander-toolbar" role="toolbar" aria-label="Commander call controls" onKeyDown={navigateCallToolbar}>
-      <Button size="icon" variant={currentMic ? 'default' : 'secondary'} aria-label={call.muted ? 'Unmute microphone' : 'Mute microphone'} aria-pressed={!call.muted} disabled={call.status !== 'live'} onClick={() => void call.toggleMicrophone()}>{currentMic ? <Mic className="size-icon" /> : <MicOff className="size-icon" />}</Button>
-      <Button size="sm" variant="ghost" aria-label="Microphone mode and input device" aria-expanded={menu} onClick={() => setMenu(value => !value)}><span>{call.micMode === 'push-to-talk' ? 'Push to talk' : 'Open mic'}</span><ChevronDown className="size-icon" /></Button>
+    <div ref={toolbar} className="commander-toolbar" role="toolbar" aria-label="Commander call controls" onKeyDown={navigateCallToolbar} onFocus={moveToolbarTabStop}>
+      <Button size="icon" variant={currentMic ? 'default' : 'secondary'} aria-label={call.muted ? 'Unmute microphone' : 'Mute microphone'} aria-pressed={!call.muted} disabled={call.status !== 'live'} onClick={() => void call.toggleMicrophone()}>{currentMic || pushToTalkReady ? <Mic className="size-icon" /> : <MicOff className="size-icon" />}</Button>
+      <Button ref={menuButton} size="sm" variant="ghost" aria-label="Microphone mode and input device" aria-expanded={menu} onClick={() => setMenu(value => !value)}><span>{call.micMode === 'push-to-talk' ? 'Push to talk' : 'Open mic'}</span><ChevronDown className="size-icon" /></Button>
       <Button size="icon" variant="secondary" aria-label="Stop the reply" disabled={!presentation.controls.stop} onClick={() => call.interrupt('stop')}><Square className="size-icon" /></Button>
       <Button size="icon" variant="ghost" aria-label={captions ? 'Hide captions' : 'Show captions'} aria-pressed={captions} onClick={() => useCommanderCallUiStore.getState().toggleCaptions()}><Captions className="size-icon" /></Button>
       <Button size="icon" variant="ghost" aria-label={panelOpen ? 'Hide Chat panel' : 'Show Chat panel'} aria-pressed={panelOpen} onClick={onPanelToggle}><PanelRight className="size-icon" /></Button>
@@ -120,13 +124,13 @@ export function CommanderStage({ panelOpen, onPanelToggle, compact, onCompactTog
       <Button size="icon" variant="ghost" aria-label={compact ? 'Expand Commander stage' : 'Picture in picture'} aria-pressed={compact} disabled={call.status === 'off'} onClick={onCompactToggle}><PictureInPicture2 className="size-icon" /></Button>
       <Button variant="destructive" aria-label="Turn voice mode off" disabled={call.status === 'off'} onClick={() => call.end()}><PhoneOff className="size-icon" aria-hidden="true" />End</Button>
     </div>
-    {menu && <div className="commander-mic-menu" aria-label="Microphone options">
+    {menu && <div className="commander-mic-menu" role="group" aria-label="Microphone options" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu() } }}>
       <label className="flex flex-col gap-1 text-sm">Microphone mode<select aria-label="Microphone mode" disabled={call.status === 'starting'} value={call.micMode} onChange={event => void call.setMicMode(event.target.value === 'push-to-talk' ? 'push-to-talk' : 'open-mic')}><option value="open-mic">Open mic</option><option value="push-to-talk">Push to talk</option></select></label>
       <label className="flex flex-col gap-1 text-sm">Input device<select aria-label="Microphone input device" disabled={call.status === 'starting'} value={call.inputDeviceId} onChange={event => void call.setInputDevice(event.target.value)}><option value="">System default</option>{devices.filter(device => device.deviceId !== 'default').map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label>
       <label className="flex flex-col gap-1 text-sm">Caption size<select aria-label="Caption size" value={captionSize} onChange={event => useCommanderCallUiStore.getState().setCaptionSize(event.target.value as typeof captionSize)}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
       <p className="text-xs text-muted-foreground">{deviceError || (call.micMode === 'push-to-talk' ? 'Hold Space outside text fields, or hold the Talk button. Release to send.' : 'Pauses send each sentence. Speaking over a reply interrupts it.')}</p>
       {call.micMode === 'push-to-talk' && <Button disabled={call.status !== 'live' || call.muted || call.pttFinishing} aria-label="Hold to talk" aria-pressed={call.pttHeld} onPointerDown={event => { event.currentTarget.setPointerCapture?.(event.pointerId); void call.beginTalk() }} onPointerUp={() => call.finishTalk()} onPointerCancel={() => call.finishTalk()} onKeyDown={event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); void call.beginTalk() } }} onKeyUp={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); call.finishTalk() } }} onBlur={() => call.finishTalk()}>Hold to talk</Button>}
-      <Button size="sm" variant="ghost" onClick={() => setMenu(false)}>Close microphone options</Button>
+      <Button size="sm" variant="ghost" onClick={closeMenu}>Close microphone options</Button>
     </div>}
   </section>
 }

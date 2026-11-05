@@ -1,4 +1,4 @@
-import { useEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
 import { parseCommanderAction } from '@shared/commander-action'
 import { isKeyboardInput } from '@/lib/keyboard-shortcuts'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
@@ -70,6 +70,29 @@ export function useCommanderCallShortcuts(): void {
     window.addEventListener('keydown', down, true); window.addEventListener('keyup', up, true); window.addEventListener('blur', finish)
     return () => { finish(); document.removeEventListener('focusin', focused); document.removeEventListener('visibilitychange', hidden); window.removeEventListener('keydown', down, true); window.removeEventListener('keyup', up, true); window.removeEventListener('blur', finish) }
   }, [])
+}
+
+/**
+ * Makes a toolbar one Tab stop, with the arrow keys moving inside it. Runs after
+ * every render because controls enable and disable with the call's state.
+ */
+export function useToolbarTabStop(toolbar: RefObject<HTMLElement | null>): void {
+  useLayoutEffect(() => {
+    const element = toolbar.current
+    if (!element) return
+    const enabled = [...element.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+    const stop = enabled.find(button => button === document.activeElement) ?? enabled.find(button => button.getAttribute('tabindex') !== '-1')
+    setTabStop(element, stop)
+  })
+}
+
+function setTabStop(toolbar: HTMLElement, stop: EventTarget | undefined): void {
+  for (const button of toolbar.querySelectorAll('button')) button.setAttribute('tabindex', button === stop ? '0' : '-1')
+}
+
+/** Tab returns to the control last used, however focus reached it. */
+export function moveToolbarTabStop(event: ReactFocusEvent<HTMLElement>): void {
+  setTabStop(event.currentTarget, event.target)
 }
 
 export function navigateCallToolbar(event: ReactKeyboardEvent<HTMLElement>): void {
