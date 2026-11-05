@@ -68,8 +68,9 @@ login-at-startup operation no longer prevents notification permission or the tra
 preference from loading. The native host reconnect observer re-reads once for each
 connection generation and discards retired reads. Preference changes wait for the
 actual receipt, show a fixed retry-boundary error on refusal, and do not replay.
-Unmount disposes the observer. Captain prewarm remains unavailable in the native
-preview. The existing notification-off toggle remains local UI state; this slice
+Unmount disposes the observer. Start Captain at launch writes the existing
+`captain_prewarm` setting through the same receipt path, and the Captain panel
+reads it on both hosts at the next launch. The existing notification-off toggle remains local UI state; this slice
 does not introduce a persisted notification opt-out policy.
 
 The always-mounted update dialog and General settings use the existing native
@@ -519,11 +520,17 @@ requires the existing exact request ID and hydrated transcript authority.
 Typed heartbeat/disconnect observations do not trigger AutoRun idle/triage work.
 This change does not establish every delayed AutoRun or send/completion lifetime.
 
-Native Fresh/Restart is explicitly unavailable before Stop, local session
-removal or runtime-field writes. The retained Source task codec refuses renderer
-`session_id` writes, and ordinary `startTask` has a selected-child policy that
-cannot substitute for exact-root Fresh. A finite Source restart owner/contract
-is separate #212 work. Electron retains its existing Fresh behavior.
+Native Fresh/Restart uses the exact `agentSession:start` owner for an ordinary
+task with no live session and no stopped, failed or pending start. That owner
+creates the session and replaces `session_id`, so the renderer writes no runtime
+field; the retained Source task codec refuses renderer `session_id` writes. It
+re-reads the queue row before removing local session state and goes through the
+view-owned action lane, so an uncertain reply waits for review without replay.
+Every other case stays unavailable before Stop, removal or start: exact start
+refuses a user-stopped row and returns a live session, and ordinary `startTask`
+has a selected-child policy that cannot substitute for exact-root Fresh. A finite
+Source restart owner/contract for those cases is separate #212 work. Electron
+retains its existing Fresh behavior.
 
 The regression graph uses actual renderer hooks, stores, typed native codecs and
 workspace controls with controlled native results. It proves local receipt and

@@ -376,7 +376,7 @@
       "expression": "desktopApi.app.requestNotificationPermission",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 102,
+      "line": 101,
       "path": [
         "app",
         "requestNotificationPermission"
@@ -388,7 +388,7 @@
       "expression": "desktopApi.app.setMinimizeToTray",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 107,
+      "line": 106,
       "path": [
         "app",
         "setMinimizeToTray"
@@ -554,7 +554,7 @@
       "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 689,
+      "line": 714,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -566,7 +566,7 @@
       "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 690,
+      "line": 715,
       "path": [
         "shell",
         "openPath"

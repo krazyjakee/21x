@@ -48,6 +48,22 @@ function captureTaskViewScope(current: () => boolean) {
   return { current: () => live && scope.isCurrent() && current(), release: () => { live = false; offProject(); window.removeEventListener('pagehide', withdraw) } }
 }
 
+/**
+ * Why `agentSession:start` cannot give this task a fresh session on the native
+ * host, or null when it can. That is the exact-task owner: it creates a session
+ * and replaces `session_id`, which the native task codec refuses from a renderer.
+ * It refuses a user-stopped start, returns a live session and resumes a Captain,
+ * so those stay out of native Fresh until a restart owner exists.
+ */
+function nativeFreshRefusal(task: Task, recovery: QueuedAgentStart | null, sessionId: string | null): string | null {
+  if (task.role !== 'task') return 'Fresh-session restart is unavailable for this task in this native build.'
+  if (task.status === TaskStatus.Completed) return 'Completed tasks cannot be started.'
+  if (sessionId) return 'Fresh-session restart is unavailable while this session is live in this native build.'
+  if (recovery?.state === 'cancelled' || recovery?.state === 'failed') return 'This session was stopped, so fresh-session restart is unavailable in this native build. Send a message to continue this task.'
+  if (recovery && recovery.state !== 'started' && recovery.state !== 'recovered') return 'This task already has a start in progress.'
+  return null
+}
+
 const EMPTY_ARTIFACTS: Artifact[] = []
 const DEFAULT_ARTIFACT_UI: ArtifactUIState = { open: false, activeTabId: null, railExpanded: false }
 
@@ -634,7 +650,16 @@ function TaskWorkspaceComponent({
   const handleStartFreshSession = useCallback(async () => {
     if (!task?.agent_id) return
     if (getDesktopHost().kind === 'tauri') {
-      dispatchShortcutFeedback('Fresh-session restart is unavailable in this native build.', true)
+      const agentId = task.agent_id
+      await actionReceipt.run(async () => {
+        // Read again: a Stop or live session can be newer than this render.
+        const recovery = await agentApi.getStartRecoveryState(task.id)
+        if (!actionReceipt.current()) throw new Error('Task view was replaced.')
+        const refusal = nativeFreshRefusal(task, recovery, useAgentStore.getState().sessions.get(task.id)?.sessionId ?? null)
+        if (refusal) { dispatchShortcutFeedback(refusal, true); return }
+        removeSession(task.id)
+        await start(agentId, task.id)
+      })
       return
     }
     startingRef.current = true
@@ -653,7 +678,7 @@ function TaskWorkspaceComponent({
     } finally {
       startingRef.current = false
     }
-  }, [task?.agent_id, task?.id, sessionId, start, stop, removeSession, onUpdateTask])
+  }, [task, sessionId, start, stop, removeSession, onUpdateTask, actionReceipt])
 
   const handleEditAgent = useCallback((agentId: string) => setEditingAgentId(agentId), [])
 
@@ -767,7 +792,8 @@ function TaskWorkspaceComponent({
   const triageAgent = !task.agent_id ? (agents.find((a) => a.is_default) || agents[0] || null) : null
   const triageAgentConfigured = isAgentConfigured(triageAgent)
   const canResume = !actionBlocked && !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && !hasMessages
-  const canRestart = getDesktopHost().kind !== 'tauri' && !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && hasMessages
+  const nativeFreshRefused = getDesktopHost().kind === 'tauri' && (actionBlocked || !!nativeFreshRefusal(task, recoveryState, sessionId))
+  const canRestart = !nativeFreshRefused && !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && hasMessages
   const hasPendingRecovery = recoveryState !== null && ['queued', 'retrying', 'claimed', 'starting'].includes(recoveryState.state)
   const canStart = !actionBlocked && !groupHistory && task.agent_id && assignedAgentConfigured && !task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed
@@ -857,7 +883,7 @@ function TaskWorkspaceComponent({
       taskId={task.id}
       agentId={task.agent_id ?? undefined}
       onStop={handleAbort}
-      onRestart={groupHistory || getDesktopHost().kind === 'tauri' ? undefined : handleStartFreshSession}
+      onRestart={groupHistory || nativeFreshRefused ? undefined : handleStartFreshSession}
       onSend={groupHistory ? undefined : handleSend}
       onPickAttachments={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handlePickAttachments}
       onAddAttachmentPaths={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handleAddAttachmentPaths}
