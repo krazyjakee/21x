@@ -22,6 +22,18 @@ describe('pairToolResults', () => {
     expect(pairs.get(toolRunKey('a1', 1))?.id).toBe('r2')
     expect(pairs.has(toolRunKey('a1', 2))).toBe(false)
   })
+  it('never hands a result to an older call a cut-short turn left unanswered', () => {
+    const abandoned = message('a1', { tool_calls: [{ ...call('call_0'), name: 'list_projects' }] }), latest = message('a2', { tool_calls: [call('call_0')] })
+    const pairs = pairToolResults([abandoned, latest, result('r2', 'call_0')])
+    expect(pairs.get(toolRunKey('a2', 0))?.id).toBe('r2')
+    expect(pairs.has(toolRunKey('a1', 0))).toBe(false)
+  })
+  it('keeps order for an id repeated inside one message', () => {
+    const repeated = message('a1', { tool_calls: [call('call_0'), call('call_0')] })
+    const pairs = pairToolResults([repeated, result('r1', 'call_0'), result('r2', 'call_0')])
+    expect(pairs.get(toolRunKey('a1', 0))?.id).toBe('r1')
+    expect(pairs.get(toolRunKey('a1', 1))?.id).toBe('r2')
+  })
   it('ignores a result with no call waiting for it', () => {
     expect(pairToolResults([result('r1', 'gone')]).size).toBe(0)
   })

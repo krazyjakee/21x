@@ -275,7 +275,7 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
             {streaming.toolCalls.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {streaming.toolCalls.map((c, index) => isCommanderAdminTool(c.name) && c.result !== undefined
-                  ? <ActionCard key={`${c.id}:${index}`} call={c} result={liveToolResult(sessionId, streaming.turnId, c)} requestedBy={latestRequest} />
+                  ? <ActionCard key={`${c.id}:${index}`} call={c} result={liveToolResult(sessionId, streaming.turnId, c, index)} requestedBy={latestRequest} />
                   : <ToolChip key={`${c.id}:${index}`} name={c.name} input={c.input} result={c.result} isError={c.isError} />)}
               </div>
             )}

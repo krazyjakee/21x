@@ -298,6 +298,8 @@ app.whenReady().then(async () => {
     assert.notEqual(await js(`${field}.value`), 'native undo')
     await js('document.activeElement.blur()'); await key('M', ['control', 'shift'])
     await wait(`document.querySelector('[data-testid="commander-pip"]')`)
+    await js(`document.querySelector('[data-testid="commander-action-toast"]').style.setProperty('--commander-toast-offset', '5000px')`)
+    assert(await js(`(() => { const r = document.querySelector('[data-testid="commander-action-toast"]').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight })()`), 'a tile taller than the window must not push the toast off screen')
     await key('z', ['control']); await wait('window.fixture.undos.length === 1')
     assert.deepEqual(await js('window.fixture.undos[0]'), { sessionId: 'session-1', actionId: 'exact-undo' })
     assert(await js(`document.querySelector('[data-testid="commander-action-toast"]').textContent.includes('Undone')`))

@@ -255,25 +255,41 @@ describe('CommanderService turns', () => {
     })
   })
 
-  it('keeps an Undo made during the reply behind the action it reversed', async () => {
-    migrateCommanderActions(db.db)
-    const project = db.createProject({ name: 'Web launch' })!
-    const session = store.createSession('Undo during a reply')
-    const provider = fakeProvider({
-      chat: (request) => {
-        const result = request.messages.find((m) => m.role === 'tool')
-        if (!result) return { toolCalls: [{ id: 'a1', name: 'archive_project', input: { project: project.id } }] }
-        // The plain path has stored nothing of this turn yet, exactly as when the user presses Undo.
-        undoCommanderAction({ db, store, sessionId: session.id, actionId: JSON.parse(result.content as string).undoId })
-        return 'Archived it.'
-      }
+  describe('an Undo made during the reply', () => {
+    /** The plain path has stored nothing of this turn yet, exactly as when the user presses Undo. */
+    function turnUndoneMidReply() {
+      migrateCommanderActions(db.db)
+      const project = db.createProject({ name: 'Web launch' })!
+      const session = store.createSession('Undo during a reply')
+      const provider = fakeProvider({
+        chat: (request) => {
+          const result = request.messages.find((m) => m.role === 'tool')
+          if (!result) return { toolCalls: [{ id: 'a1', name: 'archive_project', input: { project: project.id } }] }
+          undoCommanderAction({ db, store, sessionId: session.id, actionId: JSON.parse(result.content as string).undoId })
+          return 'Archived it.'
+        }
+      })
+      const service = new CommanderService({ store, emit: (e) => events.push(e), createProvider: () => provider, getTools: (context) => createCommanderProjectTools({ db, context }) })
+      return { project, session, service }
+    }
+
+    it('stays behind the action it reversed', async () => {
+      const { project, session, service } = turnUndoneMidReply()
+      await service.sendUserMessage(session.id, 'archive the web launch project').done
+      expect(store.listMessages(session.id).map((m) => m.tool_name ?? m.role)).toEqual(['user', 'assistant', 'archive_project', 'assistant', 'undo_action'])
+      expect(db.getProject(project.id)?.archived).toBeFalsy()
     })
-    const service = new CommanderService({ store, emit: (e) => events.push(e), createProvider: () => provider, getTools: (context) => createCommanderProjectTools({ db, context }) })
 
-    await service.sendUserMessage(session.id, 'archive the web launch project').done
-
-    expect(store.listMessages(session.id).map((m) => m.tool_name ?? m.role)).toEqual(['user', 'assistant', 'archive_project', 'assistant', 'undo_action'])
-    expect(db.getProject(project.id)?.archived).toBeFalsy()
+    it('cannot cost the user a reply that is already stored', async () => {
+      const { session, service } = turnUndoneMidReply()
+      vi.spyOn(store, 'moveMessageToEnd').mockImplementation(() => { throw new Error('database is locked') })
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      await service.sendUserMessage(session.id, 'archive the web launch project').done
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('Undo note'), expect.any(Error))
+      expect(events.some((e) => e.type === 'turn_event' && e.event.type === 'error')).toBe(false)
+      expect(events.some((e) => e.type === 'messages_appended' && e.messages.some((m) => m.content === 'Archived it.'))).toBe(true)
+      vi.restoreAllMocks()
+    })
   })
 
   it('hands no message id to the tools for a voice transcript, so it cannot back a merge grant (#137)', async () => {

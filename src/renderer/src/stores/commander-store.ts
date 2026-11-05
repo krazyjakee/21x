@@ -82,8 +82,8 @@ interface CommanderState {
  * when they finish, but the write has already happened, so its card and Undo
  * cannot wait for the rest of the reply.
  */
-export function liveToolResult(sessionId: string, turnId: string, call: StreamingToolCall): CommanderMessage {
-  return { id: `live:${turnId}:${call.id}`, session_id: sessionId, role: 'tool', content: call.result ?? '',
+export function liveToolResult(sessionId: string, turnId: string, call: StreamingToolCall, index: number): CommanderMessage {
+  return { id: `live:${turnId}:${index}:${call.id}`, session_id: sessionId, role: 'tool', content: call.result ?? '',
     is_error: call.isError === true, tool_calls: null, tool_call_id: call.id, tool_name: call.name,
     project_id: null, correlation_id: null, created_at: call.completedAt ?? Date.now() }
 }
@@ -351,6 +351,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
           const turn: StreamingTurn = current && current.turnId === turnId ? current : { turnId, text: '', toolCalls: [] }
           let next: StreamingTurn = turn
           let completed: StreamingToolCall | undefined
+          let completedIndex = -1
           if (inner.type === 'text_delta') {
             next = { ...turn, text: turn.text + inner.text }
           } else if (inner.type === 'tool_call_start') {
@@ -361,12 +362,13 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
             if (waiting >= 0) {
               const done = { ...turn.toolCalls[waiting], result: inner.content, isError: inner.isError, completedAt: Date.now() }
               completed = done
+              completedIndex = waiting
               next = { ...turn, toolCalls: turn.toolCalls.map((c, index) => (index === waiting ? done : c)) }
             }
           }
           const action = completed ? parseCommanderAction(completed.name, completed.result ?? '', completed.isError === true) : null
           const recentAction = action && completed ? {
-            call: completed, result: liveToolResult(sessionId, turnId, completed),
+            call: completed, result: liveToolResult(sessionId, turnId, completed, completedIndex),
             requestedBy: [...(state.messages[sessionId] ?? [])].reverse().find(message => message.role === 'user'), observedAt: activityNow()
           } : state.recentAction
           return { streaming: { ...state.streaming, [sessionId]: next }, recentAction }
@@ -377,7 +379,8 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
         const { sessionId, messages } = event
         const state = get()
         const loaded = state.messages[sessionId]
-        const stored = messages.some((m) => m.tool_name !== 'undo_action' && (m.role === 'assistant' || m.role === 'tool'))
+        // An Undo note or context notice lands mid-turn and is not this turn's output.
+        const stored = messages.some((m) => m.tool_name !== 'undo_action' && m.tool_name !== 'context_notice' && (m.role === 'assistant' || m.role === 'tool'))
         set({
           undoneActions: [...new Set([...state.undoneActions, ...messages.filter(message => message.tool_name === 'undo_action' && message.tool_call_id).map(message => message.tool_call_id!)])],
           unseenReports: { ...state.unseenReports, [sessionId]: [...new Set([...(state.unseenReports[sessionId] ?? []), ...messages.filter(message => message.role === 'report').map(message => message.id)])] },

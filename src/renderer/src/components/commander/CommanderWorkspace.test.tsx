@@ -221,8 +221,29 @@ describe('CommanderWorkspace', () => {
     })
     const card = within(screen.getByTestId('commander-streaming')).getByTestId('commander-action-card')
     expect(within(card).getByRole('button', { name: 'Undo' })).toBeTruthy()
+    // A context notice lands mid-turn; it is not the turn's output, so the card stays.
+    act(() => emit({ type: 'messages_appended', sessionId: 's1', turnId: 't-live-action', messages: [message({ id: 'notice-1', role: 'assistant', tool_name: 'context_notice', content: '[21x context] Earlier turns were omitted.', created_at: 3 })] }))
+    expect(within(screen.getByTestId('commander-streaming')).getByTestId('commander-action-card')).toBeTruthy()
     fireEvent.click(screen.getByRole('tab', { name: 'Actions' }))
     expect(within(screen.getByLabelText('Commander actions')).getByRole('button', { name: 'Undo' })).toBeTruthy()
+  })
+
+  it('keeps two live executions apart when one turn repeats a call id', async () => {
+    const result = (name: string) => JSON.stringify({ status: 'ok', target: { kind: 'project', id: name, name }, changes: [{ field: 'archived', before: false, after: true }], undoId: `undo-${name}` })
+    useCommanderStore.setState({ sessions: [session()], selectedSessionId: 's1', messages: { s1: [] } })
+    render(<CommanderWorkspace />)
+    await waitFor(() => expect(api.markRead).toHaveBeenCalled())
+    const turn = (event: Extract<CommanderEvent, { type: 'turn_event' }>['event']) => emit({ type: 'turn_event', sessionId: 's1', turnId: 't-repeated-id', event })
+    act(() => {
+      emit({ type: 'turn_started', sessionId: 's1', turnId: 't-repeated-id' })
+      for (const name of ['Alpha', 'Beta']) {
+        turn({ type: 'tool_call_start', id: 'call_0', name: 'archive_project', input: {} })
+        turn({ type: 'tool_call_result', id: 'call_0', name: 'archive_project', content: result(name), isError: false })
+      }
+    })
+    fireEvent.click(screen.getByRole('tab', { name: 'Actions' }))
+    const cards = within(screen.getByLabelText('Commander actions')).getAllByTestId('commander-action-card')
+    expect(cards.map(card => card.textContent?.match(/Alpha|Beta/)?.[0]).sort()).toEqual(['Alpha', 'Beta'])
   })
 
   it('keeps two executions apart when a provider reuses a call id', async () => {
