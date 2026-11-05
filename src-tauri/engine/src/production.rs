@@ -609,6 +609,16 @@ fn digest(value: &str) -> bool {
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
+/// The Rust side of `isAbsoluteHostPath`. Counts UTF-16 units as TypeScript does,
+/// so a path the service would accept is never rejected here.
+fn host_path(path: &Path) -> bool {
+    path.is_absolute()
+        && path.to_str().is_some_and(|s| {
+            s.encode_utf16().count() <= 4096
+                && !s.contains('\0')
+                && !s.split(['/', '\\']).any(|part| matches!(part, "." | ".."))
+        })
+}
 fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError> {
     let capabilities = &value.capabilities;
     if value.version != 1
@@ -642,14 +652,11 @@ fn descriptor_bytes(value: &ProductionDescriptor) -> Result<Vec<u8>, EngineError
             &value.paths.temp_root,
         ]
         .iter()
-        .any(|p| {
-            !p.is_absolute()
-                || p.to_str().is_none_or(|s| {
-                    s.len() > 4096
-                        || s.contains('\0')
-                        || s.split(['/', '\\']).any(|part| matches!(part, "." | ".."))
-                })
-        })
+        .any(|path| !host_path(path))
+        || value
+            .legacy_profile_root
+            .as_deref()
+            .is_some_and(|path| !host_path(path))
     {
         return Err(problem("INVALID_ARGUMENTS", "production-descriptor"));
     }
@@ -4316,6 +4323,30 @@ mod tests {
         bad = value;
         bad.paths.workspace_root = PathBuf::from("relative");
         assert!(descriptor_bytes(&bad).is_err());
+    }
+    #[test]
+    fn legacy_profile_root_follows_the_typescript_path_rule() {
+        let root = Temporary::new();
+        let base = root.0.to_str().unwrap();
+        let with = |path: String| {
+            let mut value = descriptor(&root.0);
+            value.legacy_profile_root = Some(PathBuf::from(path));
+            descriptor_bytes(&value)
+        };
+        assert!(descriptor_bytes(&descriptor(&root.0)).is_ok());
+        assert!(with(format!("{base}/electron")).is_ok());
+        for bad in [
+            "relative/profile".to_owned(),
+            format!("{base}/./electron"),
+            format!("{base}/../electron"),
+            format!("{base}/electron/.."),
+        ] {
+            assert!(with(bad).is_err());
+        }
+        // About 8 KiB of UTF-8 at the limit: TypeScript counts UTF-16 units, not bytes.
+        let filler = 4096 - base.encode_utf16().count() - 1;
+        assert!(with(format!("{base}/{}", "é".repeat(filler))).is_ok());
+        assert!(with(format!("{base}/{}", "é".repeat(filler + 1))).is_err());
     }
     fn ui_host() -> ProductionNativeHost {
         ProductionNativeHost {

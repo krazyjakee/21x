@@ -41,9 +41,13 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
 
 - **Electron** claims `userData` at module load, before the crash logger and before
   `ready` ([electron-profile-claim.ts](../../src/main/platform/electron-profile-claim.ts)).
-  A refused launch moves `userData` to a scratch folder first, so Chromium and the
-  crash log stay out of the profile, then shows the message once `ready` allows a
-  dialog, discards the scratch folder and exits with status 1.
+  A refused launch starts no crash log and moves `userData` and `sessionData` to a
+  scratch folder, so Chromium stays out of the profile. It tries the system temp
+  folder, then the app data folder, never one inside the profile. It then shows the
+  message once `ready` allows a dialog, discards the scratch folder and exits with
+  status 1. If no folder works, it exits before `ready` instead, because Chromium
+  must not start on the profile; on Linux that message goes to stderr, since there
+  is no dialog before `ready`.
 - **Tauri** receives `legacyProfileRoot` on every launch that has one, not only the
   import, and takes the lock straight after its own, in the `profile-lock` stage.
   `release()` of the joint lease frees both. A refusal is
@@ -59,8 +63,14 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
 - **Copies are not refused.** The lock belongs to a directory and a running process,
   not to the bytes, so a copied profile, even one copied with its sentinel and note,
   has no owner. A Tauri profile without a usable `.legacy-profile-root` shares
-  nothing and runs beside Electron. A Tauri profile whose marker names a directory
-  with no `21x.db` uses its own folders, so it does not take that lock either.
+  nothing and runs beside Electron.
+- **A shared profile stays shared when the Electron database goes.** Once a Tauri
+  profile has its own database, the marker alone decides, because its stored paths
+  still point into those folders. A new profile is shared only if there is an
+  Electron database to import; a marker left by an interrupted first launch is
+  removed if there is not, so a fresh profile does not look shared.
+- **Still open:** a shared profile whose marker has gone, or whose Electron folder has
+  gone, still runs unlocked on its own folders.
 
 A refused launch writes nothing to the profile, with one limit on Linux: the native
 Tauri host creates missing `workspaces/` and `attachments/` before the service runs,
