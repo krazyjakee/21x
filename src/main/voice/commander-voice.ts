@@ -329,6 +329,13 @@ export class CommanderVoice {
         console.error('[voice] could not open the Commander passage:', err)
         return false
       })
+      .then((opened) => {
+        if (!opened || !turn.dead) return opened
+        // Cancelled while the voice was preparing, so barge-in found no passage
+        // to stop. Left open, it would hold the microphone for a dead turn.
+        if (this.options.speech.streamingTaskId === turn.key) this.options.speech.stop('cancelled')
+        return false
+      })
     void turn.began.then((opened) => {
       if (!opened || turn.dead) return
       this.options.speech.pushStreamingAnswer(turn.key, turn.parts, final)

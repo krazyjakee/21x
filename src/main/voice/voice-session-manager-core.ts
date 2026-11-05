@@ -14,7 +14,7 @@ import {
   VOICE_DEFAULT_SHORTCUT,
   VOICE_EVENTS,
   isVoiceNoise,
-  isVoiceThanks,
+  isVoiceDropped,
   VOICE_SETTING_KEYS,
   canTransition,
   type VoiceActionOutcome,
@@ -500,7 +500,7 @@ export class VoiceSessionManagerCore {
     // sentence. Sending it would be worse than dropping it, because the
     // renderer submits it straight away. No segment follows, so the words on the
     // caption are taken off here or they would sit there until the next sentence.
-    if (isVoiceNoise(words) || isVoiceThanks(words)) {
+    if (isVoiceDropped(words)) {
       if (this.partial) this.onPartial(turnId, '')
       return
     }

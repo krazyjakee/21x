@@ -151,8 +151,8 @@ Guards:
   would send it straight away. The recogniser writes breathing and room noise
   this way. A closing transcript of only those sounds counts as nothing heard,
   so it is not dictated either. `isVoiceNoise` in `src/shared/voice.ts` owns
-  the rule. A dropped sentence is also taken off the caption, and in a Commander
-  call a hesitation sound does not count as talking over a reply.
+  the rule. A dropped sentence is also taken off the caption, and on its way to
+  being dropped it does not count as talking over a reply.
 - A segment that only says thanks ("Thank you.", "Thanks a lot!") is not sent
   (`isVoiceThanks`). Faint sounds on an open microphone were sent as "Thank you."
   and spent a model turn. It is a phrase rule because level cannot do this job:

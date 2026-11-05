@@ -6,7 +6,7 @@ import { voicePlayback } from '@/lib/voice-playback'
 import { isAutomaticSpeech, speechInFocus, SPEECH_FOCUS_CHECK_MS } from '@/lib/voice-speech-focus'
 import { BargeInGate } from '@/lib/voice-barge-in'
 import { clearActiveComposer } from '@/lib/voice-dictation-target'
-import { VOICE_SETTING_KEYS, type VoiceErrorEvent, type VoiceStateEvent } from '@shared/voice'
+import { isVoiceDropped, VOICE_SETTING_KEYS, type VoiceErrorEvent, type VoiceStateEvent } from '@shared/voice'
 import type { VoiceTtsEngineId, VoiceTtsSnapshot } from '@shared/voice-tts'
 import type {
   MicrophonePermission,
@@ -318,6 +318,12 @@ function followSpeechFocus(owner: string | undefined): void {
 
 const bargeInGate = new BargeInGate({
   onBargeIn: () => {
+    // A passage can stay open with nothing sounding, while the agent runs a tool
+    // or the next sentence is made. Nobody is being talked over, and stopping
+    // would lose the rest of the answer to a cough. The held audio still goes to
+    // the recogniser, so real words stop the reading once they are recognised,
+    // and the next audio closes the gate again.
+    if (!voicePlayback.hasQueuedAudio) return
     // Stop in this tick, before the round trip to main: the user is already
     // speaking and every further word of the answer is talking over them.
     console.info('[voice] barge-in: the user is talking, stopping', {
@@ -753,7 +759,7 @@ if (hasVoiceBridge()) {
     // over them, so it stops. This is a net under barge-in, not a substitute
     // for it: the gate is what keeps 20x's own voice out of the recogniser,
     // and it fires 300 ms earlier than the first recognised word.
-    if (event.text.trim() && voicePlayback.isPlaying) {
+    if (!isVoiceDropped(event.text) && voicePlayback.isPlaying) {
       console.warn(
         '[voice] words recognised while reading — stopping. The gate did not fire:',
         JSON.stringify({ holding: bargeInGate.isHolding, threshold: bargeInGate.threshold })
@@ -931,6 +937,9 @@ if (hasTtsBridge()) {
     const owner = speechOwnerOf(event)
     if (!owner) return
     if (sameSpeechOwner(stoppedSpeech, owner) || sameSpeechOwner(closedSpeech, owner)) return
+    // A sentence of an open passage brings no `speechStart` of its own, so this
+    // is what closes a gate that opened during the pause before it.
+    bargeInGate.setSpeaking(true)
     voicePlayback.play(owner.speechId, event.pcm, event.sampleRate, owner.speechGeneration)
   })
 

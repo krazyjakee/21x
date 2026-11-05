@@ -108,6 +108,19 @@ describe('the caption after a spoken sentence', () => {
     expect(caption()).not.toHaveTextContent('Where are we at?')
   })
 
+  it('clears a sentence whose turn ended before the send reply arrived', async () => {
+    await liveCall()
+    let release: (value: { turnId: string }) => void = () => {}
+    mocks.send.mockImplementationOnce(() => new Promise<{ turnId: string }>(resolve => { release = resolve }))
+    await say('Where are we at?')
+
+    done('fast-turn')
+    expect(caption()).toHaveTextContent('Where are we at?')
+
+    await act(async () => release({ turnId: 'fast-turn' }))
+    expect(caption()).not.toHaveTextContent('Where are we at?')
+  })
+
   it('gives way to the words being spoken now', async () => {
     await liveCall()
     await say('Where are we at?')
@@ -125,13 +138,13 @@ describe('sounds while a reply is being prepared', () => {
     act(() => useCommanderActivityStore.setState({ sessions: { s1: { sessionId: 's1', turnId: 'reply-turn', phase: 'thinking', openTools: [], hasText: false, observedAt: activityNow() } } }))
   }
 
-  it('does not cancel the reply for a hesitation sound', async () => {
+  it.each(['Mm.', 'Thank you.'])('does not cancel the reply for %s', async (partial) => {
     await liveCall()
     await say('Where are we at?')
     mocks.bargeIn.mockClear()
     replyRunning()
 
-    act(() => useVoiceStore.setState({ partial: 'Mm.' }))
+    act(() => useVoiceStore.setState({ partial }))
 
     expect(mocks.bargeIn).not.toHaveBeenCalled()
   })

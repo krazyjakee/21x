@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { CallMedia } from '@shared/commander-call'
 import type { CommanderEvent } from '@shared/commander'
 import { isCommanderAdminTool } from '@shared/commander-tools'
-import { isVoiceNoise } from '@shared/voice'
+import { isVoiceDropped } from '@shared/voice'
 import { commanderApi, commanderVoiceApi, voiceApi } from '@/lib/ipc-client'
 import { activityNow } from '@/lib/activity/activity-clock'
 import {
@@ -69,6 +69,9 @@ let activeMicrophoneTurnEpoch: string | null = null
 // The turn answering the last spoken sentence. Main finishes a cancelled turn
 // while the next sentence is on its way, and that reply must not replace it.
 let spokenTurnId: string | null = null
+// The last turn to end since that sentence left. One that fails at once can end
+// before the send reply names it.
+let finishedTurnId: string | null = null
 
 function ownedMicrophone() {
   const call = useCommanderCallStore.getState()
@@ -268,8 +271,11 @@ export function CommanderCallHost() {
       bargeIn: (activeSessionId) => commanderVoiceApi.bargeIn(activeSessionId),
       send: async (activeSessionId, text) => {
         spokenTurnId = null
+        finishedTurnId = null
         const sent = await commanderVoiceApi.send(activeSessionId, text)
-        spokenTurnId = sent?.turnId ?? null
+        const turnId = sent?.turnId ?? null
+        if (turnId && turnId === finishedTurnId) useCommanderCallStore.getState().replyWritten(activeSessionId, '')
+        else spokenTurnId = turnId
         return sent
       }
     })
@@ -316,6 +322,7 @@ export function CommanderCallHost() {
         } else if (inner.type === 'done') {
           const prefix = `${event.sessionId}:${event.turnId}:`
           for (const key of tools.keys()) if (key.startsWith(prefix)) tools.delete(key)
+          finishedTurnId = event.turnId
           if (event.turnId === spokenTurnId) {
             spokenTurnId = null
             useCommanderCallStore.getState().replyWritten(event.sessionId, '')
@@ -362,10 +369,11 @@ export function CommanderCallHost() {
   // Voice barge-in stops in the same tick. A turn preparing text/tools counts
   // too: the user's new words supersede that reply before the sentence ends.
   const replyActive = speaking || !!turn && !turn.unavailable && turn.known !== false && activityNow() - turn.observedAt < 15_000 && ['thinking', 'working', 'tool'].includes(turn.phase)
-  // A hesitation sound is not the user talking: its segment will be dropped, so
-  // cancelling on it would lose the reply with nothing sent in its place.
+  // A hesitation sound or a stray "Thank you." is not the user talking: its
+  // segment will be dropped, so cancelling on it would lose the reply with
+  // nothing sent in its place.
   useEffect(() => {
-    if (status !== 'live' || voiceTurnId !== callTurnId || isVoiceNoise(partial) || !replyActive || replyInterrupted) return
+    if (status !== 'live' || voiceTurnId !== callTurnId || isVoiceDropped(partial) || !replyActive || replyInterrupted) return
     interrupt('barge_in')
   }, [status, voiceTurnId, callTurnId, partial, replyActive, replyInterrupted, interrupt])
 

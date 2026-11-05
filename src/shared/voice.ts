@@ -381,6 +381,14 @@ export function isVoiceThanks(text: string): boolean {
   return VOICE_THANKS.test(words.join(' '))
 }
 
+/**
+ * True when a conversation does not send this sentence. Words like these on the
+ * way to a dropped sentence are not the user talking over a reply either.
+ */
+export function isVoiceDropped(text: string): boolean {
+  return isVoiceNoise(text) || isVoiceThanks(text)
+}
+
 // ── IPC channel names ───────────────────────────────────────
 
 export const VOICE_EVENTS = {
