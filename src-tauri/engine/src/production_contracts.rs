@@ -3980,6 +3980,55 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
             .is_some_and(|items| items.len() <= 128 && items.iter().all(secret_metadata)),
         "secrets:create" | "secrets:update" => secret_metadata(result),
         "secrets:delete" => result.is_boolean(),
+        _ => result.is_object() || result.is_null(),
+    }
+}
+fn transcript_page_request(value: &Value) -> bool {
+    object(
+        value,
+        &["version", "mode", "after"],
+        &["watermark", "limit"],
+    ) && value["version"] == 1
+        && matches!(value["mode"].as_str(), Some("snapshot" | "delta"))
+        && integer(&value["after"])
+        && value.get("watermark").is_none_or(integer)
+        && value
+            .get("limit")
+            .is_none_or(|limit| limit.as_u64().is_some_and(|n| n >= 1 && n <= 64))
+        && (value["mode"] != "delta"
+            || value.get("watermark").is_none()
+            || value["after"].as_u64() <= value["watermark"].as_u64())
+}
+fn task_feedback_title(value: &Value) -> bool {
+    value.as_str().is_some_and(|title| {
+        title.len() <= 512
+            && !title.contains('\0')
+            // Match JavaScript trim(), not Rust Unicode White_Space: BOM is
+            // trimmed by JS while NEL is not. Preserve the actual title bytes.
+            && title.chars().any(|c| !matches!(c,
+                '\u{0009}'..='\u{000d}' | ' ' | '\u{00a0}' | '\u{1680}'
+                | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}'
+                | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+            ))
+    })
+}
+pub fn valid_event(operation: &str, value: &Value) -> bool {
+    if operation == agent_installer::EVENT {
+        return agent_installer::progress(value);
+    }
+    if operation == "ui:command" {
+        return crate::production_ui_contracts::command(value);
+    }
+    if workspace_runtime::EVENTS.contains(&operation) {
+        return workspace_runtime::event(operation, value);
+    }
+    if voice_turns::EVENTS.contains(&operation) {
+        return voice_turns::event(operation, value);
+    }
+    if !EVENTS.contains(&operation) || !bounded_bytes(value, 1024 * 1024) {
+        return false;
+    }
+    match operation {
         "agent:incompatible-session" => {
             object(value, &["taskId", "agentId", "error"], &[])
                 && bounded_bytes(value, 2048)

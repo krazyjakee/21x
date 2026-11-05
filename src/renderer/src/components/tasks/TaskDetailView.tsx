@@ -60,7 +60,6 @@ interface TaskDetailViewProps {
   parentTask?: Task | null
   onUpdateNextSubtaskIds?: (taskIds: string[]) => void | Promise<void>
   onNavigateToTask?: (taskId: string) => void
-  /** When provided, each subtask shows an action to open it as a separate window/panel. */
   onAddSubtask?: (title: string) => void | Promise<void>
   onReorderSubtasks?: (orderedIds: string[]) => void | Promise<void>
   /** Presentation-only mode used by the task workspace redesign. */

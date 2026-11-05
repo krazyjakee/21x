@@ -337,8 +337,8 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
 
 Call shortcuts apply while Commander is open or a call survives elsewhere.
 Mod means Cmd on macOS and Ctrl elsewhere. Dialogs retain their keys. Mic and
-Undo do not intercept text inputs, contenteditable editors or terminals; native
-text Undo continues there. Mod+5 and palette navigation remain available.
+Undo do not intercept text inputs or contenteditable editors; native text Undo
+continues there. Mod+4 and palette navigation remain available.
 
 | Shortcut | Behavior |
 | --- | --- |

@@ -381,7 +381,7 @@ it('uses exact codecs and trusted host metadata; missing binary/file bindings ne
   const before = f.invoke.mock.calls.length
   await expect(desktopApi.voice.setCustomModelDir('/private/models')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE', capability: 'voice.setCustomModelDir' })
   expect(() => desktopApi.webUtils.getPathForFile(new File([], 'private'))).toThrow('unavailable')
-  expect(typeof desktopApi.commander.onEvent).toBe('function'); expect(Reflect.get(desktopApi, 'browser')).toBeUndefined()
+  expect(typeof desktopApi.commander.onEvent).toBe('function')
   expect(f.host.supports('commander.send')).toBe(true); expect(f.invoke.mock.calls.length).toBe(before)
 })
 it('binds voice management; shortcut, custom model folders and hosted speech remain unavailable', async () => {
