@@ -189,8 +189,8 @@ describe('actual production application owner', () => {
       return next
     }
 
-    const load = (f: Awaited<ReturnType<typeof fixture>>) => {
-      const next = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, f.boundaries)
+    const load = (f: Awaited<ReturnType<typeof fixture>>, electron?: string) => {
+      const next = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' }, ...(electron === undefined ? {} : { legacyImport: { profileRoot: electron, appName: '21x' } }) }, f.boundaries)
       owners.push(next)
       return next
     }
@@ -236,6 +236,34 @@ describe('actual production application owner', () => {
       expect(lost.recoveryState()).toEqual({ phase: 'failed', stage: 'database-preflight', code: 'ELECTRON_LINK_RESTORED', owned: false })
       expect(readFileSync(marker(f), 'utf8')).toBe(electron)
       expect(storedShare(f)).toBe(electron)
+      const next = load(f, readFileSync(marker(f), 'utf8'))
+      await next.start()
+      expect(next.snapshot().phase).toBe('ready')
+      expect(await profileFreeElsewhere(electron)).toBe(false)
+    })
+
+    it('keeps the row in step when the host reports a different folder', async () => {
+      const f = await fixture(), electron = electronProfile(f), moved = electronProfile(f, 'moved')
+      await sharedOnce(f, electron)
+      const next = load(f, moved)
+      await next.start(); await next.close()
+      expect(storedShare(f)).toBe(moved)
+    })
+
+    it('treats a folder moved and linked back as present, and locks the real folder', async () => {
+      const f = await fixture(), electron = electronProfile(f), moved = join(f.root, 'bigger-drive')
+      renameSync(electron, moved); symlinkSync(moved, electron)
+      const session = await reopen(f, electron)
+      expect(session.snapshot().phase).toBe('ready')
+      expect(await profileFreeElsewhere(moved)).toBe(false)
+    })
+
+    it('treats a link to nothing as a missing folder, and does not create its target', async () => {
+      const f = await fixture(), link = join(f.root, 'link'), gone = join(f.root, 'gone')
+      symlinkSync(gone, link)
+      f.bootstrap.legacyImport = { profileRoot: link, appName: '21x' }
+      await expect(f.owner.start()).rejects.toThrow('ELECTRON_FOLDER_MISSING')
+      expect(existsSync(gone)).toBe(false)
     })
 
     it('calls a marker the host could not use a missing folder, instead of restoring it forever', async () => {

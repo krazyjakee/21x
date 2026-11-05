@@ -10,7 +10,7 @@
  * attachments in place, so `holdElectronProfile` keeps the lock for every Tauri
  * session, not only the import: the two apps must never run on them together.
  * The share is recorded twice: `.legacy-profile-root` for the native host, which
- * cannot read SQLite, and a settings row that travels with the stored paths.
+ * cannot read SQLite, and a settings row that travels with the database.
  *
  * Electron `safeStorage` values use Chromium's os_crypt scheme: a `v10`/`v11`
  * prefix, then AES-128-CBC with a PBKDF2-SHA1 key ("saltysalt") derived from
@@ -18,7 +18,7 @@
  * macOS) or, for Linux v10, the fixed "peanuts" password.
  */
 import { createDecipheriv, pbkdf2Sync } from 'node:crypto'
-import { existsSync, fsyncSync, lstatSync, openSync, closeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, fsyncSync, lstatSync, openSync, closeSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import SQLite from 'better-sqlite3'
 import { acquireProfileLock, heldByTauri, HOST_CLAIM_TIMEOUT_MS, ProfileLockError, type ProfileLock } from '../main/platform/profile-lock'
@@ -40,7 +40,7 @@ export const MANAGED_TASK_MCP_MARKER = '__managed_task_mcp_id'
 const IMPORT_SETTLED = 'Imported from the previous 21x app; not resumed automatically'
 /** How many legacy credentials could not be read and were cleared for re-entry. */
 export const DROPPED_CREDENTIALS_SETTING = '__electron_import_cleared_credentials'
-/** The Electron folder this profile's stored paths point into. */
+/** The Electron folder this profile's workspaces, repositories and attachments live in. */
 export const ELECTRON_SHARED_ROOT_SETTING = '__electron_shared_root'
 const LEGACY_MARKER_FILE = '.legacy-profile-root'
 /** Written by the native host when the user stops using the old folder. Not a path, so the host reads it as no share. */
@@ -87,8 +87,13 @@ export function createSafeStorageDecoder(password: Buffer | null, platform: Node
   }
 }
 
-export function realDirectory(path: string): boolean {
+function realDirectory(path: string): boolean {
   try { const info = lstatSync(path); return info.isDirectory() && !info.isSymbolicLink() } catch { return false }
+}
+
+/** Follows links: a folder moved elsewhere and linked back has not gone. */
+export function folderPresent(path: string): boolean {
+  try { return statSync(path).isDirectory() } catch { return false }
 }
 
 export function readLegacyMarker(profileRoot: string): string | null {
@@ -99,7 +104,7 @@ export function readLegacyMarker(profileRoot: string): string | null {
 export function writeLegacyMarker(profileRoot: string, electronRoot: string): void {
   const path = join(profileRoot, LEGACY_MARKER_FILE)
   // Removed first, so a planted link is replaced rather than followed.
-  rmSync(path, { force: true })
+  rmSync(path, { force: true, recursive: true })
   writeFileSync(path, electronRoot, { flag: 'wx', mode: 0o600 })
 }
 

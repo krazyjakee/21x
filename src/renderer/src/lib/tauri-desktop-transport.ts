@@ -44,13 +44,11 @@ export async function invokeTauriNativeDrop(native: TauriDesktopApi, operation: 
 /** Fixed product wording only; native diagnostics, paths and credentials are
  * never part of the renderer's bootstrap failure. */
 export class NativeBootstrapUnavailableError extends ServiceProtocolError {
-  /** `stopUsingOldFolder` resolves to whether it changed anything; false means the folder came back. */
-  constructor(readonly explanation: string, readonly stopUsingOldFolder?: () => Promise<boolean>) { super('DISCONNECTED'); this.name = 'NativeBootstrapUnavailableError' }
+  /** `stopUsingOldFolder` resolves to whether it changed anything; false means the folder came back.
+   * `reopenRequired` means a page reload cannot help, because the service starts once per launch. */
+  constructor(readonly explanation: string, readonly stopUsingOldFolder?: () => Promise<boolean>, readonly reopenRequired = false) { super('DISCONNECTED'); this.name = 'NativeBootstrapUnavailableError' }
 }
-/** Whether this failure is the one the old-folder action answers. */
-export function isElectronFolderMissing(value: unknown): boolean {
-  return isRecord(value) && isRecord(value.startupFailure) && value.startupFailure.code === 'ELECTRON_FOLDER_MISSING'
-}
+const startupFailureCode = (value: unknown): unknown => isRecord(value) && isRecord(value.startupFailure) ? value.startupFailure.code : undefined
 export function productionBootstrapMessage(value: unknown): string | null {
   if (!isRecord(value) || value.protocolVersion !== 1 || value.production !== true || value.available !== false || !isRecord(value.startupFailure)) return null
   const { code, phase } = value.startupFailure
@@ -144,7 +142,10 @@ export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<stri
   catch (error) { throw nativeError(error) }
   if (bootstrapGenerations.get(native) !== generation) throw new ServiceProtocolError('STALE_EPOCH')
   const failure = productionBootstrapMessage(status)
-  if (failure) throw new NativeBootstrapUnavailableError(failure, isElectronFolderMissing(status) ? () => native.core.invoke<boolean>('stop_using_old_folder') : undefined)
+  if (failure) {
+    const code = startupFailureCode(status), folderMissing = code === 'ELECTRON_FOLDER_MISSING'
+    throw new NativeBootstrapUnavailableError(failure, folderMissing ? () => native.core.invoke<boolean>('stop_using_old_folder') : undefined, folderMissing || code === 'ELECTRON_LINK_RESTORED')
+  }
   if (!isRecord(status) || status.available !== true || status.protocolVersion !== 1 ||
     typeof status.engineEpoch !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(status.engineEpoch)) {
     throw new ServiceProtocolError('DISCONNECTED')

@@ -30,5 +30,5 @@ void bootstrap().catch((error: unknown) => {
   const root = document.getElementById('root')
   if (!root) return
   const startup = error instanceof NativeBootstrapUnavailableError ? error : undefined
-  renderStartupFailure(root, startup?.explanation, () => window.location.reload(), startup?.stopUsingOldFolder)
+  renderStartupFailure(root, startup?.explanation, startup?.reopenRequired ? null : () => window.location.reload(), startup?.stopUsingOldFolder)
 })

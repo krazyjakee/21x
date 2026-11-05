@@ -95,7 +95,11 @@ it('explains a missing or relinked Electron folder, and offers the action only f
   const missing = await failure('ELECTRON_FOLDER_MISSING', 'profile-lock', false)
   expect(await missing.error.stopUsingOldFolder!()).toBe(false)
   expect(missing.invoke).toHaveBeenCalledWith('stop_using_old_folder')
-  expect((await failure('ELECTRON_LINK_RESTORED', 'database-preflight')).error.stopUsingOldFolder).toBeUndefined()
+  expect(missing.error.reopenRequired).toBe(true)
+  const restored = (await failure('ELECTRON_LINK_RESTORED', 'database-preflight')).error
+  expect(restored.stopUsingOldFolder).toBeUndefined()
+  expect(restored.reopenRequired).toBe(true)
+  expect((await failure('PROFILE_IN_USE', 'profile-lock')).error.reopenRequired).toBe(false)
 })
 
 it('projects only known startup failures into fixed redacted provisioning guidance', () => {

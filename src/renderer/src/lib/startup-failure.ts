@@ -7,13 +7,13 @@
 const DEFAULT_TITLE = '21x couldn’t start'
 const DEFAULT_BODY = 'Its background service did not answer. Try again; if it still fails, close 21x and open it again.'
 
-const STOP_CONFIRM = 'Your tasks stay in 21x, and from now on it keeps its work in its own folders. Anything that was in the old folder stays gone, and 21x will not go back to that folder if it reappears. Stop using it?'
+const STOP_CONFIRM = 'If the old folder is on a drive that isn’t connected, reconnect it and reopen 21x instead. Otherwise: your tasks stay, but their workspaces, repositories and attachments will be empty. 21x will use its own folders from now on and will not go back to the old one, even if it reappears. 21x and the previous app will also stop preventing each other from running. Stop using it?'
 const STOP_DONE = 'Done. Close 21x and open it again.'
 const STOP_FOLDER_BACK = 'The old folder is back, so nothing was changed. Close 21x and open it again.'
 const STOP_FAILED = 'That did not work, and nothing was changed. Close 21x, open it again and try once more.'
 
 /** Asks once more first: a folder on a disconnected drive looks deleted too. */
-function stopUsingOldFolderControl(body: HTMLElement, retry: HTMLElement, stop: () => Promise<boolean>): HTMLButtonElement {
+function stopUsingOldFolderControl(body: HTMLElement, stop: () => Promise<boolean>): HTMLButtonElement {
   const control = document.createElement('button')
   control.type = 'button'
   control.textContent = 'Stop using the old folder'
@@ -31,13 +31,13 @@ function stopUsingOldFolderControl(body: HTMLElement, retry: HTMLElement, stop: 
     }
     control.disabled = true
     void stop().then(changed => { body.textContent = changed ? STOP_DONE : STOP_FOLDER_BACK }, () => { body.textContent = STOP_FAILED })
-      .finally(() => { control.remove(); retry.remove() })
+      .finally(() => control.remove())
   })
   return control
 }
 
-/** Replace the root with a readable failure screen and a Try again control. */
-export function renderStartupFailure(root: HTMLElement, explanation: string | undefined, retry: () => void, stopUsingOldFolder?: () => Promise<boolean>): void {
+/** Replace the root with a readable failure screen. With no `retry`, reloading cannot help, so there is no Try again control. */
+export function renderStartupFailure(root: HTMLElement, explanation: string | undefined, retry: (() => void) | null, stopUsingOldFolder?: () => Promise<boolean>): void {
   const copy = { title: DEFAULT_TITLE, body: explanation || DEFAULT_BODY }
   root.replaceChildren()
   root.setAttribute('role', 'alert')
@@ -60,8 +60,11 @@ export function renderStartupFailure(root: HTMLElement, explanation: string | un
     alignSelf: 'flex-start', marginTop: '8px', padding: '8px 16px', border: '0', borderRadius: '8px',
     background: '#2563eb', color: '#fff', fontSize: '14px', cursor: 'pointer'
   })
-  button.addEventListener('click', retry, { once: true })
-  panel.append(title, body, button)
-  if (stopUsingOldFolder) panel.append(stopUsingOldFolderControl(body, button, stopUsingOldFolder))
+  panel.append(title, body)
+  if (retry) {
+    button.addEventListener('click', retry, { once: true })
+    panel.append(button)
+  }
+  if (stopUsingOldFolder) panel.append(stopUsingOldFolderControl(body, stopUsingOldFolder))
   root.append(panel)
 }

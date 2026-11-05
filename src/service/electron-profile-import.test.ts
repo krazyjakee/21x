@@ -121,6 +121,14 @@ describe('Electron profile import', () => {
     } finally { db.close() }
   })
 
+  it('replaces a directory at the marker path, so a restore cannot fail forever', () => {
+    const f = fixture(), profile = join(f.electron, '..', 'profile')
+    mkdirSync(join(profile, '.legacy-profile-root', 'in-the-way'), { recursive: true })
+    expect(readLegacyMarker(profile)).toBeNull()
+    writeLegacyMarker(profile, '/electron/root')
+    expect(readLegacyMarker(profile)).toBe('/electron/root')
+  })
+
   it('reads the marker back as written, replaces a planted link, and reads a missing one as nothing', () => {
     const f = fixture(), profile = join(f.electron, '..', 'profile'), target = join(f.electron, 'target')
     expect(readLegacyMarker(profile)).toBeNull()

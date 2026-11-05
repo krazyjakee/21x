@@ -32,7 +32,7 @@ import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-
 import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
-import { ELECTRON_SHARED_ROOT_SETTING, ElectronProfileImportError, LEGACY_MARKER_DETACHED, MANAGED_TASK_MCP_MARKER, holdElectronProfile, importElectronProfile, readLegacyMarker, realDirectory, writeLegacyMarker } from './electron-profile-import'
+import { ELECTRON_SHARED_ROOT_SETTING, ElectronProfileImportError, LEGACY_MARKER_DETACHED, MANAGED_TASK_MCP_MARKER, holdElectronProfile, importElectronProfile, folderPresent, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
 import { createHash, randomUUID } from 'node:crypto'
@@ -774,7 +774,7 @@ export class ProductionOwner {
     const legacy = this.bootstrap.legacyImport
     if (legacy) {
       // Checked first: taking the lock would recreate a folder the user deleted.
-      if (!realDirectory(legacy.profileRoot)) throw new ProductionOwnerError('ELECTRON_FOLDER_MISSING')
+      if (!folderPresent(legacy.profileRoot)) throw new ProductionOwnerError('ELECTRON_FOLDER_MISSING')
       this.lock = jointProfileLock(this.lock, holdElectronProfile(legacy.profileRoot))
     }
     const profileRoot = this.lock.profileRoot
@@ -1375,7 +1375,7 @@ function verifiedManagedTaskMcpId(probe: SQLite.Database, tables: Set<string>): 
 /** Validate existing ciphertext read-only before migrations/seeding can write. No implicit profile conversion. */
 /**
  * The database says this profile is shared, but the host sent no folder, so it
- * must not run: its stored paths point somewhere no lock now covers. Unless the
+ * must not run: its tasks' files are in a folder no lock now covers. Unless the
  * user stopped the share, the marker is put back for the next launch to lock. A
  * marker that already matches is one the host could not use, such as a path from
  * another system, and restoring it would refuse forever: that is a missing folder,

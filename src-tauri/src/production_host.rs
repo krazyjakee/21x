@@ -879,21 +879,25 @@ const LEGACY_DETACHED: &str = "detached";
 enum Sharing {
     Unshared,
     Shared(PathBuf),
-    /// The stored paths point into a folder that is not there. Sent to the
-    /// service, which refuses, so the user can answer it.
+    /// Its tasks' files belong in a folder that is not there. Sent to the service,
+    /// which refuses, so the user can answer it.
     FolderMissing(PathBuf),
 }
-/// The real directory of an Electron profile, whatever it still holds.
+/// Where a shared Electron profile really is, whatever it still holds. A link
+/// counts: a folder moved elsewhere and linked back has not gone, and the lock is
+/// taken on the real path, so both apps still meet on the same file.
 fn electron_root(root: &std::path::Path) -> Option<PathBuf> {
-    let metadata = std::fs::symlink_metadata(root).ok()?;
-    (metadata.is_dir() && !metadata.file_type().is_symlink())
-        .then(|| std::fs::canonicalize(root).ok())
-        .flatten()
+    std::fs::canonicalize(root)
+        .ok()
+        .filter(|path| path.is_dir())
 }
 /// An Electron 21x profile directory with a database worth importing.
 fn electron_profile(root: &std::path::Path) -> Option<PathBuf> {
+    let metadata = std::fs::symlink_metadata(root).ok()?;
     let database = std::fs::symlink_metadata(root.join("21x.db")).ok()?;
-    database.is_file().then(|| electron_root(root)).flatten()
+    (metadata.is_dir() && !metadata.file_type().is_symlink() && database.is_file())
+        .then(|| std::fs::canonicalize(root).ok())
+        .flatten()
 }
 fn read_legacy_marker(profile_root: &std::path::Path) -> Option<PathBuf> {
     let bytes = std::fs::read(profile_root.join(LEGACY_MARKER)).ok()?;
@@ -938,9 +942,18 @@ fn shared_electron_root(
     }
     Ok(detected.map_or(Sharing::Unshared, Sharing::Shared))
 }
+fn write_detached(path: &std::path::Path) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(LEGACY_DETACHED.as_bytes())?;
+    file.sync_all()
+}
 /// Returns false, changing nothing, if the folder has come back since the
-/// refusal. A partial write is not a stopped share, so the worst it costs is
-/// the refusal again.
+/// refusal. Written to the side and renamed, so a failed write leaves the marker
+/// exactly as it was, and a link at the marker is replaced, not followed.
 fn detach_legacy_marker(profile_root: &std::path::Path) -> std::io::Result<bool> {
     if read_legacy_marker(profile_root)
         .as_deref()
@@ -949,8 +962,15 @@ fn detach_legacy_marker(profile_root: &std::path::Path) -> std::io::Result<bool>
     {
         return Ok(false);
     }
-    std::fs::write(profile_root.join(LEGACY_MARKER), LEGACY_DETACHED)?;
-    Ok(true)
+    let staged = profile_root.join(format!("{LEGACY_MARKER}.detaching"));
+    // Only a crash at this step can have left one.
+    let _ = std::fs::remove_file(&staged);
+    let outcome = write_detached(&staged)
+        .and_then(|()| std::fs::rename(&staged, profile_root.join(LEGACY_MARKER)));
+    if outcome.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    outcome.map(|()| true)
 }
 /// Create a private directory, or accept an existing real directory (never a
 /// symlink), so a profile and its roots survive relaunches.
@@ -1807,6 +1827,72 @@ mod tests {
             shared_electron_root(&f.profile, false, || None).unwrap(),
             Sharing::Unshared
         );
+        assert!(!f.profile.join(format!("{LEGACY_MARKER}.detaching")).exists());
+    }
+
+    #[test]
+    fn a_failed_stop_leaves_the_marker_exactly_as_it_was() {
+        let f = SharingFixture::new("stop-failed");
+        f.mark();
+        std::fs::remove_dir_all(&f.electron).unwrap();
+        let blocked = f.profile.join(format!("{LEGACY_MARKER}.detaching"));
+        std::fs::create_dir_all(blocked.join("in-the-way")).unwrap();
+        assert!(detach_legacy_marker(&f.profile).is_err());
+        assert_eq!(read_legacy_marker(&f.profile).as_ref(), Some(&f.electron));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_replaces_a_link_at_the_marker_instead_of_following_it() {
+        let f = SharingFixture::new("stop-link");
+        let target = f.base.join("target");
+        std::fs::write(&target, "untouched").unwrap();
+        std::os::unix::fs::symlink(&target, f.marker()).unwrap();
+        assert!(detach_legacy_marker(&f.profile).unwrap());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "untouched");
+        assert!(!std::fs::symlink_metadata(f.marker())
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_moved_and_linked_back_is_present() {
+        let f = SharingFixture::new("linked");
+        let moved = f.base.join("bigger-drive");
+        std::fs::rename(&f.electron, &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, &f.electron).unwrap();
+        f.mark();
+        assert_eq!(
+            shared_electron_root(&f.profile, false, || None).unwrap(),
+            Sharing::Shared(std::fs::canonicalize(&moved).unwrap())
+        );
+        assert!(!detach_legacy_marker(&f.profile).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_nothing_is_a_missing_folder() {
+        let f = SharingFixture::new("dangling");
+        f.mark();
+        std::fs::remove_dir_all(&f.electron).unwrap();
+        std::os::unix::fs::symlink(f.base.join("gone"), &f.electron).unwrap();
+        assert_eq!(
+            shared_electron_root(&f.profile, false, || None).unwrap(),
+            Sharing::FolderMissing(f.electron.clone())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_first_import_still_needs_a_real_folder() {
+        let f = SharingFixture::new("import-link");
+        f.electron_database();
+        let link = f.base.join("link");
+        std::os::unix::fs::symlink(&f.electron, &link).unwrap();
+        let shared = shared_electron_root(&f.profile, true, || Some(link)).unwrap();
+        assert_eq!(shared, Sharing::Unshared);
     }
 
     #[test]
