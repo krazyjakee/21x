@@ -33,6 +33,9 @@ describe('production settings and secret codecs', () => {
       expect(isProductionSettingWrite(key, value)).toBe(false)
     }
     expect(isProductionSettingWrite('heartbeat_active_hours_start', '')).toBe(true)
+    expect(isProductionSettingWrite('rtk_enabled', 'false')).toBe(true)
+    expect(isProductionSettingWrite('rtk_enabled', 'true')).toBe(true)
+    expect(isProductionSettingWrite('rtk_enabled', 'off')).toBe(false)
     expect(isProductionSettingWrite('chat_agent_id', '')).toBe(true)
     expect(isProductionSettingWrite('sessions.rollover_thresholds', '{"contextRatio":0.7,"compactions":2}')).toBe(true)
     expect(isProductionSettingWrite('current_user_email', 'fake@example.test')).toBe(false)

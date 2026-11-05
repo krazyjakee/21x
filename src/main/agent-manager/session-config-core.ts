@@ -9,6 +9,8 @@ import { withCaptainSystemPrompt, type CaptainPromptOptions } from '../prompts/c
 import { captainPromptOptions } from './captain-context'
 import { knownBackendModels, orderedSkillIds, resolveSkillModel } from './skill-model'
 import { taskProjectId } from './project-repos'
+import { isRtkEnabled, RTK_ENABLED_SETTING } from '../../shared/rtk'
+import { applyRtkSessionPolicy } from '../adapters/shared/rtk-session'
 
 export interface McpServerOptions {
   ensureTaskManagement?: boolean
@@ -303,6 +305,14 @@ export function assembleSessionConfig(
       config.systemPrompt = (config.systemPrompt || '') + buildSecretsSystemPrompt(secretRecords)
     }
   }
+
+  applyRtkSessionPolicy(
+    config,
+    agent.config?.coding_agent,
+    isRtkEnabled(db.getSetting(RTK_ENABLED_SETTING)),
+    host.findRtkExecutable?.() ?? null,
+    (secretIds?.length ?? 0) > 0 || Object.values(agent.config?.api_keys ?? {}).some(Boolean)
+  )
 
   return config
 }

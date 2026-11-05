@@ -34,6 +34,7 @@ interface AppServerAdapterPrivate {
     authMethod?: 'subscription' | 'api_key'
     apiKeys?: { openai?: string }
     secretEnvVars?: Record<string, string>
+    rtkEnv?: Record<string, string>
   }): {
     env: NodeJS.ProcessEnv
     usesApiKey: boolean
@@ -1254,6 +1255,12 @@ describe('CodexAppServerAdapter', () => {
       method: 'item/completed',
       params: { item: { type: 'user_message', text: 'hello' } }
     })
+  })
+
+  it('passes the session limits on RTK to the Codex process', () => {
+    const adapter = adapterPrivate(new CodexAppServerAdapter())
+    const { env } = adapter.buildEnvironment({ authMethod: 'subscription', rtkEnv: { RTK_DB_PATH: '/dev/null' } })
+    expect(env.RTK_DB_PATH).toBe('/dev/null')
   })
 
   it('strips ambient OpenAI keys for subscription auth and preserves explicit API-key mode', () => {

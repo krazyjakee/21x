@@ -801,7 +801,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     usesApiKey: boolean
     summary: string
   } {
-    const env: NodeJS.ProcessEnv = { ...process.env, ...config.secretEnvVars }
+    const env: NodeJS.ProcessEnv = { ...process.env, ...config.secretEnvVars, ...config.rtkEnv }
     return { env, ...applyCodexAuthEnv(env, config) }
   }
 

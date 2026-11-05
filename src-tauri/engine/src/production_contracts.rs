@@ -4186,6 +4186,7 @@ const SETTINGS: &[&str] = &[
     "all_projects_paused",
     "captain_prewarm",
     "commander_briefing",
+    "rtk_enabled",
     "heartbeat_enabled_global",
     "heartbeat_default_interval",
     "heartbeat_active_hours_start",

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import { getNodejsAssetName } from './nodejs.js'
 import { selectGhMacAsset, selectRtkAsset } from './cli-tools.js'
-import { getRtkInitPlans } from './rtk-integrations.js'
 
 describe('getNodejsAssetName', () => {
   it('uses the universal macOS pkg name without an arch suffix', () => {
@@ -69,24 +68,5 @@ describe('selectRtkAsset', () => {
 
   it('returns null on unsupported platforms', () => {
     expect(selectRtkAsset(release, 'win32', 'x64')).toBeNull()
-  })
-})
-
-describe('RTK backend setup', () => {
-  it('uses each installed backend native integration and skips missing agents', () => {
-    const plans = getRtkInitPlans({
-      claudeCode: { installed: true },
-      opencode: { installed: false },
-      codex: { installed: true },
-      cursor: { installed: true },
-      pi: { installed: true, supported: false }
-    })
-
-    expect(plans.map((plan) => plan.key)).toEqual(['claudeCode', 'codex', 'cursor'])
-    expect(plans.find((plan) => plan.key === 'claudeCode')?.args).toContain('--auto-patch')
-    expect(plans.find((plan) => plan.key === 'codex')?.args).not.toContain('--auto-patch')
-    expect(plans.find((plan) => plan.key === 'cursor')?.args).toEqual(
-      expect.arrayContaining(['--agent', 'cursor'])
-    )
   })
 })

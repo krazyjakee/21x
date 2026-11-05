@@ -90,13 +90,13 @@ describe.skipIf(process.platform === 'win32')('real portable CLI detection owner
 
   it('reads genuine RTK markers asynchronously with size/symlink bounds and writes no integration config', async () => {
     fixtures()
-    const paths = ['.claude/settings.json', '.config/opencode/plugins/rtk.ts', '.codex/hooks.json', '.cursor/hooks.json', '.pi/agent/extensions/rtk.ts']
-    const content = ['rtk hook claude', 'rtk', 'rtk hook codex', 'rtk hook cursor', 'rtk']
+    const paths = ['.claude/settings.json', '.config/opencode/plugins/rtk.ts', '.codex/AGENTS.md', '.cursor/hooks.json', '.pi/agent/extensions/rtk.ts']
+    const content = ['rtk hook claude', 'rtk', '@RTK.md', 'rtk hook cursor', 'rtk']
     for (let index = 0; index < paths.length; index++) {
       const file = join(root, paths[index]); mkdirSync(join(file, '..'), { recursive: true }); writeFileSync(file, content[index])
     }
     expect((await call()).rtk).toMatchObject({ configured: true, integrations: { claudeCode: true, opencode: true, codex: true, cursor: true, pi: true } })
-    writeFileSync(join(root, '.codex/hooks.json'), 'rtk hook codex' + 'x'.repeat(262144))
+    writeFileSync(join(root, '.codex/AGENTS.md'), '@RTK.md' + 'x'.repeat(262144))
     const cursor = join(root, '.cursor/hooks.json'); rmSync(cursor); symlinkSync(join(root, '.claude/settings.json'), cursor)
     expect((await call()).rtk).toMatchObject({ configured: false, integrations: { codex: false, cursor: false } })
     expect(readFileSync(join(root, '.claude/settings.json'), 'utf8')).toBe(content[0])
@@ -104,7 +104,7 @@ describe.skipIf(process.platform === 'win32')('real portable CLI detection owner
 
   it('refuses a parent/file identity swap around an actual opened integration descriptor', async () => {
     program('rtk', "console.log('0.49.0')"); program('codex', "console.log('0.4.1')")
-    const directory = join(root, '.codex'), path = join(directory, 'hooks.json'); mkdirSync(directory); writeFileSync(path, 'rtk hook codex')
+    const directory = join(root, '.codex'), path = join(directory, 'AGENTS.md'); mkdirSync(directory); writeFileSync(path, '@RTK.md')
     const original = (await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')).open; let swapped = false
     vi.spyOn(filesystem, 'open').mockImplementation(async (...args: Parameters<typeof original>) => {
       const descriptor = await original(...args)
@@ -112,7 +112,7 @@ describe.skipIf(process.platform === 'win32')('real portable CLI detection owner
       return descriptor
     })
     expect((await call()).rtk).toMatchObject({ configured: false, integrations: { codex: false } })
-    expect(swapped).toBe(true); expect(readFileSync(join(directory + '-original', 'hooks.json'), 'utf8')).toBe('rtk hook codex')
+    expect(swapped).toBe(true); expect(readFileSync(join(directory + '-original', 'AGENTS.md'), 'utf8')).toBe('@RTK.md')
     expect(owner.inflightCount).toBe(0)
   }, 20000)
 

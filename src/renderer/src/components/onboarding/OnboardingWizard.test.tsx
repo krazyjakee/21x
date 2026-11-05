@@ -327,7 +327,7 @@ describe('OnboardingWizard', () => {
     expect(mockAgents.create).not.toHaveBeenCalled()
   })
 
-  it('offers optional RTK installation and backend configuration', async () => {
+  it('shows the effective RTK state and installs RTK', async () => {
     mockAgentInstaller.install.mockResolvedValueOnce({
       success: true,
       error: null,
@@ -340,12 +340,47 @@ describe('OnboardingWizard', () => {
 
     const rows = await screen.findAllByTestId('rtk-setup')
     expect(rows[rows.length - 1]).toHaveTextContent('RTK output compression')
-    fireEvent.click(screen.getAllByRole('button', { name: /set up rtk/i })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /install rtk/i })[0])
 
     await waitFor(() => {
       expect(mockAgentInstaller.install).toHaveBeenCalledWith('rtk')
-      expect(screen.getAllByTestId('rtk-setup').at(-1)).toHaveTextContent('Configured')
+      expect(screen.getAllByTestId('rtk-state').at(-1)).toHaveTextContent('On')
     })
+    expect(screen.getAllByTestId('rtk-setup').at(-1)).toHaveTextContent('Settings')
+  })
+
+  it('offers no global hooks once RTK is installed', async () => {
+    mockAgentInstaller.detect.mockResolvedValue(detection({
+      claudeCode: { installed: true, version: '1.0.0' },
+      rtk: { installed: true, version: '0.49.0', configured: false }
+    }))
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+
+    await screen.findAllByTestId('rtk-setup')
+    expect(screen.queryByRole('button', { name: /rtk/i })).toBeNull()
+    expect(screen.queryByText(/global hooks/i)).toBeNull()
+  })
+
+  it('reports RTK as not installed instead of implying it is running', async () => {
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+
+    await screen.findAllByTestId('rtk-setup')
+    expect(screen.getAllByTestId('rtk-state').at(-1)).toHaveTextContent('Not installed')
+  })
+
+  it('shows the opt-out from Settings', async () => {
+    const original = mockSettings.get.getMockImplementation()
+    mockSettings.get.mockImplementation(async (key: string) => key === 'rtk_enabled' ? 'false' : null)
+    mockAgentInstaller.detect.mockResolvedValue(detection({
+      rtk: { installed: true, version: '0.49.0', configured: false }
+    }))
+    try {
+      render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+
+      await waitFor(() => expect(screen.getAllByTestId('rtk-state').at(-1)).toHaveTextContent('Off'))
+    } finally {
+      mockSettings.get.mockImplementation(original ?? (async () => null))
+    }
   })
 
   it('re-running detection reflects newly installed and removed backends', async () => {

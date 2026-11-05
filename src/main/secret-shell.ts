@@ -30,7 +30,7 @@ _real_shell="\${_20X_REAL_SHELL:-/bin/bash}"
 if [ -n "\$_20X_SB_PORT" ] && [ -n "\$_20X_SB_TOKEN" ]; then
   # Keep the response in memory: a shared temp file would be readable by other
   # users and would race between concurrent agent sessions.
-  _20x_secrets=\$(curl -sf --max-time 5 "http://127.0.0.1:\${_20X_SB_PORT}/secrets/export?token=\${_20X_SB_TOKEN}" 2>/dev/null)
+  _20x_secrets=\$(curl -q --noproxy '*' -sf --max-time 5 "http://127.0.0.1:\${_20X_SB_PORT}/secrets/export?token=\${_20X_SB_TOKEN}" 2>/dev/null)
   _20x_curl_exit=\$?
 
   # Command arguments are not logged; they can contain secrets.

@@ -5379,7 +5379,6 @@
     "src/main/agent-installer/portable-detection.ts",
     "src/main/agent-installer/portable-installation.ts",
     "src/main/agent-installer/rtk-integrations.js",
-    "src/main/agent-installer/rtk.js",
     "src/main/agent-manager-core.ts",
     "src/main/agent-manager.ts",
     "src/main/agent-manager/activity-observations.ts",

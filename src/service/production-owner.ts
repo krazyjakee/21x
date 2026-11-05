@@ -4,6 +4,7 @@ import type { ArtifactCopyFileResult } from '../shared/artifacts'
 import type { AttachmentPathReceipt } from '../shared/attachment-native-callbacks'
 import type { DesktopCallerContext } from './transport/desktop-registry'
 import { ProductionEnergyOwner } from './production-energy-owner'
+import { findRtkExecutable } from '../main/adapters/shared/rtk-session'
 import { isUiLeaseId } from '../shared/ui-desktop-codecs'
 import { PortableAgentInstallationOwner, type PortableAgentInstallationOwnerOptions } from '../main/agent-installer/portable-installation'
 import { resolveProductionNpmCli } from './production-installation-host'
@@ -894,6 +895,7 @@ export class ProductionOwner {
       ...(energy ? { energy: energy.host } : {}),
       secrets: { kind: 'broker', getPort: () => broker.port, register: (token, agentId, ids) => broker.register(token, agentId, ids),
         unregister: token => broker.unregister(token), writeShellWrapper: () => shellWrapper },
+      findRtkExecutable: () => findRtkExecutable(),
       managedTaskMcp: 'disabled' in runtime ? { kind: 'disabled' } : {
         kind: 'server', waitUntilReady: waitForTaskApiServer,
         buildConfig: options => {

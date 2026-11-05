@@ -37,6 +37,8 @@ export type AgentSecrets = { kind: 'unsupported' } | {
 
 export interface SessionConfigHost {
   secrets: AgentSecrets
+  /** Absolute path of RTK. A host without it runs sessions as if RTK were absent. */
+  findRtkExecutable?(): string | null
   configuredMcp: 'enabled' | 'disabled'
   managedTaskMcp: { kind: 'disabled' } | {
     kind: 'server'

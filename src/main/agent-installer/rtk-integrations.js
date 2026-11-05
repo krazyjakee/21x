@@ -2,38 +2,6 @@ import { constants, openSync, fstatSync, readSync, closeSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
-/** RTK integrations supported by the coding-agent backends in 21x. */
-export const RTK_INTEGRATIONS = {
-  claudeCode: {
-    label: 'Claude Code',
-    args: ['init', '--global', '--auto-patch', '--no-trust-filters']
-  },
-  opencode: {
-    label: 'OpenCode',
-    args: ['init', '--global', '--opencode', '--auto-patch', '--no-trust-filters']
-  },
-  codex: {
-    label: 'Codex',
-    // RTK rejects patch-mode flags for Codex. This mode is non-interactive.
-    args: ['init', '--global', '--codex']
-  },
-  cursor: {
-    label: 'Cursor',
-    args: ['init', '--global', '--agent', 'cursor', '--auto-patch', '--no-trust-filters']
-  },
-  pi: {
-    label: 'Pi',
-    args: ['init', '--global', '--agent', 'pi', '--auto-patch']
-  }
-}
-
-/** Return setup commands only for coding agents that are currently installed. */
-export function getRtkInitPlans(status) {
-  return Object.entries(RTK_INTEGRATIONS)
-    .filter(([key]) => status?.[key]?.installed && status[key]?.supported !== false)
-    .map(([key, value]) => ({ key, ...value }))
-}
-
 function fileContains(path, text) {
   let descriptor
   let bytes
@@ -58,7 +26,8 @@ export function rtkIntegrationFiles(env = process.env, home = homedir()) {
   return [
     { key: 'claudeCode', path: join(claudeDir, 'settings.json'), text: 'rtk hook claude' },
     { key: 'opencode', path: join(home, '.config', 'opencode', 'plugins', 'rtk.ts'), text: 'rtk' },
-    { key: 'codex', path: join(codexDir, 'hooks.json'), text: 'rtk hook codex' },
+    // `rtk init --codex` writes an instruction, not a hook: AGENTS.md includes RTK.md.
+    { key: 'codex', path: join(codexDir, 'AGENTS.md'), text: 'RTK.md' },
     { key: 'cursor', path: join(home, '.cursor', 'hooks.json'), text: 'rtk hook cursor' },
     { key: 'pi', path: join(piDir, 'extensions', 'rtk.ts'), text: 'rtk' }
   ]

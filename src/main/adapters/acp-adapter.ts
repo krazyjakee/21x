@@ -209,7 +209,8 @@ export class AcpAdapter implements CodingAgentAdapter {
       ...process.env,
       ...this.agentConfig.env,
       ...(config.apiKeys?.anthropic ? { ANTHROPIC_API_KEY: config.apiKeys.anthropic } : {}),
-      ...config.secretEnvVars
+      ...config.secretEnvVars,
+      ...config.rtkEnv
     }
 
     // Auth is decided LAST so it is authoritative over injected secrets.

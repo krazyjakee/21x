@@ -3,7 +3,7 @@ import { nodeWorkerRuntime } from '../node-worker-runtime'
 import { EventEmitter } from 'events'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { delimiter, join } from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
@@ -16,6 +16,8 @@ vi.mock('child_process', () => ({
 
 import { PiAdapter } from './pi-adapter'
 import {
+  PI_RTK_EXECUTABLE_ENV,
+  PI_RTK_EXTENSION_SOURCE,
   buildPiMcpConfigDocument,
   sanitizePiMcpServerName,
   sanitizePiSessionName,
@@ -129,6 +131,56 @@ describe('PiAdapter', () => {
       expect.anything(),
       { type: 'set_model', provider: 'anthropic', modelId: 'model-one' },
     )
+  })
+
+  describe('RTK', () => {
+    async function spawnWith(rtk: Record<string, unknown>) {
+      spawnMock.mockReturnValue(fakeProcess())
+      const adapter = new PiAdapter()
+      vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue(PI_EXECUTABLE)
+      vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
+      vi.spyOn(adapter as any, 'buildMcpConfig').mockReturnValue(undefined)
+      vi.spyOn(adapter as any, 'installPermissionExtension').mockReturnValue('/tmp/20x-permissions.ts')
+      const installRtk = vi.spyOn(adapter as any, 'installRtkExtension').mockReturnValue('/tmp/20x-rtk.ts')
+      vi.spyOn(adapter as any, 'attachProcess').mockImplementation(() => undefined)
+      vi.spyOn(adapter as any, 'command').mockResolvedValue({ type: 'response', command: 'get_state', success: true, data: {} })
+      await adapter.createSession({ agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/workspace', ...rtk })
+      const [, args, options] = spawnMock.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }]
+      return { args, env: options.env, installRtk }
+    }
+
+    it('loads the rewrite extension and points it at RTK', async () => {
+      const { args, env } = await spawnWith({ rtkExecutable: '/opt/bin/rtk' })
+      expect(args).toContain('/tmp/20x-rtk.ts')
+      expect(env[PI_RTK_EXECUTABLE_ENV]).toBe('/opt/bin/rtk')
+      expect(env.RTK_DISABLED).toBeUndefined()
+    })
+
+    it('puts RTK on the session PATH, because rewritten commands use a bare rtk', async () => {
+      const { env } = await spawnWith({ rtkExecutable: '/opt/rtk-only/rtk' })
+      expect(env.PATH?.split(delimiter)).toContain('/opt/rtk-only')
+    })
+
+    it('adds nothing when RTK is unavailable', async () => {
+      const { args, env, installRtk } = await spawnWith({})
+      expect(args).not.toContain('/tmp/20x-rtk.ts')
+      expect(installRtk).not.toHaveBeenCalled()
+      expect(env[PI_RTK_EXECUTABLE_ENV]).toBeUndefined()
+      expect(env.RTK_DISABLED).toBeUndefined()
+    })
+
+    it('passes the session limits on to a global RTK extension', async () => {
+      const { args, env } = await spawnWith({ rtkEnv: { RTK_DISABLED: '1', RTK_DB_PATH: '/dev/null' } })
+      expect(args).not.toContain('/tmp/20x-rtk.ts')
+      expect(env.RTK_DISABLED).toBe('1')
+      expect(env.RTK_DB_PATH).toBe('/dev/null')
+    })
+
+    it('delegates to rtk rewrite, accepts only its rewritten exit codes and skips PATH assignments', () => {
+      expect(PI_RTK_EXTENSION_SOURCE).toContain('["rewrite", "--", command]')
+      expect(PI_RTK_EXTENSION_SOURCE).toContain('result.code !== 0 && result.code !== 3')
+      expect(PI_RTK_EXTENSION_SOURCE).toContain('PATH_ASSIGNMENT.test(command)')
+    })
   })
 
   it('surfaces Pi stderr output in the error when the process exits before the first response', async () => {
