@@ -524,13 +524,29 @@ Native Fresh/Restart uses the exact `agentSession:start` owner for an ordinary
 task with no live session and no stopped, failed or pending start. That owner
 creates the session and replaces `session_id`, so the renderer writes no runtime
 field; the retained Source task codec refuses renderer `session_id` writes. It
-re-reads the queue row before removing local session state and goes through the
-view-owned action lane, so an uncertain reply waits for review without replay.
-Every other case stays unavailable before Stop, removal or start: exact start
-refuses a user-stopped row and returns a live session, and ordinary `startTask`
-has a selected-child policy that cannot substitute for exact-root Fresh. A finite
-Source restart owner/contract for those cases is separate #212 work. Electron
-retains its existing Fresh behavior.
+re-reads the task and the queue row before removing local session state, so a task
+completed, reassigned or deleted after render keeps its transcript, and it goes
+through the view-owned action lane, so an uncertain reply waits for review without
+replay. Every other case stays unavailable before Stop, removal or start: exact
+start refuses a user-stopped row and returns a live session, and ordinary
+`startTask` has a selected-child policy that cannot substitute for exact-root Fresh.
+A finite Source restart owner/contract for those cases is separate #212 work.
+Electron retains its existing Fresh behavior.
+
+The canvas transcript's Restart uses the same owner and refusals
+(`src/renderer/src/lib/native-fresh-session.ts`), on Tauri only. It has one
+difference from the task view: it does not watch the queue row, so it can still
+show Restart for a stopped, failed or pending start, and then refuses with a message
+when pressed, before any effect. Its action lane belongs to the panel, so a panel
+held for review, or one that outlived a reconnect, offers no Restart until it is
+reopened.
+
+Resume is not offered while a start is queued, retrying, claimed or starting, and
+the run shortcut does not resume then, on either host. Native Fresh writes no
+`session_id`, so a queued Fresh leaves the old one in place, and resuming it could
+start a second session when the queue drains. The guard reads the queue state the
+view last received, so a reply still on its way is not covered; Resume itself does
+not re-read the row.
 
 The regression graph uses actual renderer hooks, stores, typed native codecs and
 workspace controls with controlled native results. It proves local receipt and

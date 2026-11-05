@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
+import { AGENT_EVENT_CODECS, AGENT_RECOVERY_ERROR } from '../shared/agent-desktop-codecs'
+import { PRODUCTION_AGENT_EVENT_CODECS } from '../shared/production-agent-events'
 import { AgentManager } from './agent-manager-core'
 import type { AgentManagerHost } from './agent-manager/host'
 import { classifyProviderFailure, PROVIDER_MAX_RETRIES, providerFailureError } from './agent-manager/provider-failure'
@@ -81,6 +83,53 @@ function fixture(captain = false) {
 }
 
 describe('active-turn provider recovery', () => {
+  const recoveryNotices = (h: ReturnType<typeof fixture>) => h.events.mock.calls
+    .filter(([channel]) => channel === 'agent:recoveryStateChanged')
+    .map(([, payload]) => payload as Record<string, unknown>)
+  const PRIVATE_FAILURE = 'Service unavailable (503) for key sk-private-canary'
+
+  it('announces a provider retry with a tokenised cause and keeps the message where it is shown', async () => {
+    const h = fixture()
+    await h.seed()
+    const journal = vi.spyOn(h.db, 'appendProjectStatusJournal')
+    await h.internal.tryProviderRecovery('thread', h.session, { ...classifyProviderFailure(PRIVATE_FAILURE, 'turn_failed'), intentId: h.row().intentId })
+
+    const [notice] = recoveryNotices(h)
+    expect(notice).toMatchObject({ taskId: h.task.id, cause: 'provider_failure', action: 'provider_retry', error: null })
+    expect(JSON.stringify(notice)).not.toContain('sk-private-canary')
+    expect(AGENT_EVENT_CODECS['agent:recoveryStateChanged'].validatePayload(notice)).toBe(true)
+    expect(PRODUCTION_AGENT_EVENT_CODECS['agent:recoveryStateChanged'].encodePayload(notice)).toEqual(notice)
+    // The retry budget and the journal keep reading the message itself.
+    expect(h.row()).toMatchObject({ state: 'retrying', cause: PRIVATE_FAILURE })
+    expect(journal.mock.calls.at(-1)?.[1]).toMatchObject({ decisions: expect.arrayContaining([`cause=${PRIVATE_FAILURE}`]) })
+    expect(h.events.mock.calls.some((call) => JSON.stringify(call).includes(`Retrying… ${PRIVATE_FAILURE}`))).toBe(true)
+  })
+
+  it('announces a terminal provider failure with a tokenised cause and the fixed error text', async () => {
+    const h = fixture()
+    await h.seed()
+    const journal = vi.spyOn(h.db, 'appendProjectStatusJournal')
+    h.internal.failProviderRecovery(h.row(), PRIVATE_FAILURE)
+
+    const [notice] = recoveryNotices(h)
+    expect(notice).toMatchObject({ taskId: h.task.id, cause: 'provider_failure', action: 'terminal_failure', result: 'review_required' })
+    const wire = PRODUCTION_AGENT_EVENT_CODECS['agent:recoveryStateChanged'].encodePayload(notice)
+    expect(wire).toEqual({ taskId: h.task.id, cause: 'provider_failure', action: 'terminal_failure', result: 'review_required', error: AGENT_RECOVERY_ERROR })
+    expect(AGENT_EVENT_CODECS['agent:recoveryStateChanged'].validatePayload(wire)).toBe(true)
+    expect(JSON.stringify(wire)).not.toContain('sk-private-canary')
+    // Persisted recovery data is what it was: the row's token and the full message.
+    expect(h.row()).toMatchObject({ state: 'failed', cause: PRIVATE_FAILURE })
+    expect(h.internal.startQueue.get(h.task.id)).toMatchObject({ recoveryCause: 'provider_recovery_terminal', recoveryResult: 'review_required', lastError: PRIVATE_FAILURE })
+    expect(journal.mock.calls.at(-1)?.[1]).toMatchObject({ blockers: [PRIVATE_FAILURE], decisions: expect.arrayContaining([`cause=${PRIVATE_FAILURE}`]) })
+  })
+
+  it('leaves an exclusion token as the notice cause', async () => {
+    const h = fixture()
+    await h.seed()
+    h.internal.failProviderRecovery(h.row(), 'task_completed', 'review_required', true)
+    expect(recoveryNotices(h)[0]).toMatchObject({ cause: 'task_completed', action: 'terminal_failure' })
+  })
+
   it('automatically recovers an injected Codex failed capacity turn in the same thread', async () => {
     const h = fixture()
     await h.seed()

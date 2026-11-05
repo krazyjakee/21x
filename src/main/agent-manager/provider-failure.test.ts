@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { classifyProviderFailure, PROVIDER_RETRY_MAX_MS, providerRetryDelay } from './provider-failure'
+import { isAgentRecoveryToken } from '../../shared/agent-desktop-codecs'
+import { classifyProviderFailure, PROVIDER_RETRY_MAX_MS, providerRetryDelay, recoveryEventCause } from './provider-failure'
 
 describe('shared provider policy', () => {
   it.each([
@@ -27,5 +28,23 @@ describe('shared provider policy', () => {
     })
     expect(providerRetryDelay('intent', 50)).toBeLessThanOrEqual(PROVIDER_RETRY_MAX_MS)
     expect(providerRetryDelay('different-intent', 1)).not.toBe(delays[0])
+  })
+})
+
+describe('recovery notice cause', () => {
+  it.each(['manual_stop', 'queued', 'unsafe_side_effect_unknown', 'a-b_9'])('keeps the token %s', (cause) => {
+    expect(recoveryEventCause(cause)).toBe(cause)
+  })
+
+  it.each([
+    ['a provider message', 'Selected model is at capacity (serverOverloaded)'],
+    ['a capitalised word', 'Overloaded'],
+    ['an empty cause', ''],
+    ['a cause over the length limit', 'a'.repeat(129)],
+    ['a token with a line break', 'quota\nprivate']
+  ])('replaces %s with a cause the codec accepts', (_name, cause) => {
+    const token = recoveryEventCause(cause)
+    expect(token).toBe('provider_failure')
+    expect(isAgentRecoveryToken(token)).toBe(true)
   })
 })

@@ -102,11 +102,11 @@ const statusPayload = (value: unknown): boolean => object(value, ['sessionId', '
   (!Object.hasOwn(value, 'activityOutcome') || isAgentActivityOutcome(value.activityOutcome) && Object.hasOwn(value, 'epoch')
     && !Object.hasOwn(value, 'heartbeat') && (value.activityOutcome === 'failed' ? value.status === 'error' : value.status === 'idle'))
 const projectInvalidation = (value: unknown): boolean => object(value, ['projectId']) && isDatabaseId(value.projectId)
-const token = (value: unknown): boolean => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,127}$/.test(value)
+export const isAgentRecoveryToken = (value: unknown): boolean => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,127}$/.test(value)
 const recoveryPayload = (value: unknown): boolean => object(value, ['taskId', 'cause', 'action', 'result', 'error']) && isDatabaseId(value.taskId) &&
-  [value.cause, value.action, value.result].every(token) && (value.error === null || value.error === AGENT_RECOVERY_ERROR)
+  [value.cause, value.action, value.result].every(isAgentRecoveryToken) && (value.error === null || value.error === AGENT_RECOVERY_ERROR)
 export const AGENT_QUEUE_FIELDS = ['id', 'taskId', 'projectId', 'agentId', 'reason', 'queuedAt', 'position', 'priority', 'state', 'retryCount', 'nextRetryAt', 'generation', 'dependencyReason', 'recoveryCause', 'recoveryAction', 'recoveryResult', 'lastError'] as const
-const nullableToken = (value: unknown): boolean => value === null || token(value)
+const nullableToken = (value: unknown): boolean => value === null || isAgentRecoveryToken(value)
 const nonnegative = (value: unknown): boolean => Number.isSafeInteger(value) && (value as number) >= 0
 const queueEntry = (value: unknown): boolean => object(value, [...AGENT_QUEUE_FIELDS]) &&
   [value.id, value.taskId, value.projectId, value.agentId].every(isDatabaseId) && queueReasons.includes(value.reason as string) &&
