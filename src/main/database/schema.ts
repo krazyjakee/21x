@@ -1,3 +1,4 @@
+import { dropReviewAgentReferences } from './pr-review-agent-references'
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../../shared/constants'
@@ -80,7 +81,7 @@ import { createTaskGroupTables, migrateTaskGroups } from './task-groups-migratio
  * 35 → 36: durable planned session handoff steps (#103).
  * 36 → 37: shared task-group execution anchors and retained membership/progress (#192).
  */
-const SCHEMA_VERSION = 38
+const SCHEMA_VERSION = 39
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -1132,6 +1133,7 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v37: retained group membership and one counted execution task.
   migrateTaskGroups(db)
+  dropReviewAgentReferences(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
@@ -1164,8 +1166,8 @@ function createPullRequestReadinessTables(db: Database.Database): void {
       base_sha TEXT NOT NULL,
       implementation_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
       review_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-      implementation_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
-      reviewer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      implementation_agent_id TEXT NOT NULL,
+      reviewer_agent_id TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_pr_review_handoffs_exact
@@ -1180,8 +1182,8 @@ function createPullRequestReadinessTables(db: Database.Database): void {
       base_sha TEXT NOT NULL,
       implementation_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
       review_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-      implementation_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
-      reviewer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      implementation_agent_id TEXT NOT NULL,
+      reviewer_agent_id TEXT NOT NULL,
       handoff_id TEXT NOT NULL REFERENCES pr_review_handoffs(id) ON DELETE RESTRICT,
       verdict TEXT NOT NULL CHECK (verdict IN ('CLEAN', 'CHANGES_REQUIRED')),
       summary TEXT NOT NULL DEFAULT '',

@@ -67,9 +67,9 @@ class FakeCommander {
   activeTurnId(sessionId: string): string | null {
     return this.running.get(sessionId) ?? null
   }
-  sendUserMessage(sessionId: string, text: string): { turnId: string; message: CommanderMessage } {
+  sendUserMessage(sessionId: string, text: string): { turnId: string; message: CommanderMessage; done: Promise<void> } {
     this.sent.push({ sessionId, text })
-    return { turnId: 'next', message: report(sessionId, text) }
+    return { turnId: 'next', message: report(sessionId, text), done: Promise.resolve() }
   }
 }
 
@@ -187,11 +187,10 @@ describe('speaking the reply as it streams', () => {
 
     start(commander, 's1', 't1')
     await flush()
-    expect(worker.spoken[0]).toMatchObject({ sentences: [], open: true })
-
     delta(commander, 's1', 't1', 'The web project is green. ')
     delta(commander, 's1', 't1', 'Two tasks are wai')
     await flush()
+    expect(worker.spoken[0]).toMatchObject({ sentences: [], open: true })
     expect(worker.appended).toEqual(['The web project is green.'])
 
     delta(commander, 's1', 't1', 'ting on review')
@@ -203,6 +202,45 @@ describe('speaking the reply as it streams', () => {
     await flush()
     expect(worker.appended).toEqual(['The web project is green.', 'Two tasks are waiting on review'])
     expect(worker.finished).toEqual([worker.spoken[0].speechId])
+  })
+
+  it('opens no passage while the model is only thinking', async () => {
+    const { worker, speech, commander, voice, events } = setup()
+    await speech.prepare()
+    voice.setActiveSession('s1')
+
+    start(commander, 's1', 't1')
+    await flush()
+    expect(worker.spoken).toEqual([])
+    expect(speech.streamingTaskId).toBeNull()
+    expect(events.filter((event) => event.channel === VOICE_TTS_EVENTS.speechStart)).toEqual([])
+  })
+
+  it('still speaks a reply after something stopped speech during the thinking', async () => {
+    const { worker, speech, commander, voice } = setup()
+    await speech.prepare()
+    voice.setActiveSession('s1')
+
+    start(commander, 's1', 't1')
+    await flush()
+    // A sound the barge-in gate took for speech, or the microphone reopening.
+    speech.interrupt()
+    delta(commander, 's1', 't1', 'I asked the Captain. ')
+    await flush()
+    done(commander, 's1', 't1')
+    await flush()
+    expect(worker.appended).toEqual(['I asked the Captain.'])
+  })
+
+  it('opens nothing for a turn that writes no reply', async () => {
+    const { worker, speech, commander, voice } = setup()
+    await speech.prepare()
+    voice.setActiveSession('s1')
+
+    start(commander, 's1', 't1')
+    done(commander, 's1', 't1')
+    await flush()
+    expect(worker.spoken).toEqual([])
   })
 
   it('releases the closing sentence of a message when a tool call follows it', async () => {
@@ -363,6 +401,13 @@ describe('barge-in', () => {
     await voice.send('s1', 'Stop, do the other thing')
     expect(commander.cancelled).toEqual(['s1'])
     expect(commander.sent).toEqual([{ sessionId: 's1', text: 'Stop, do the other thing' }])
+  })
+
+  it('resolves a send with a reply that can cross IPC', async () => {
+    const { voice } = setup()
+    const result = await voice.send('s1', 'Hello')
+    expect(Object.keys(result).sort()).toEqual(['message', 'turnId'])
+    expect(() => structuredClone(result)).not.toThrow()
   })
 
   it('closing voice mode stops the reading', async () => {

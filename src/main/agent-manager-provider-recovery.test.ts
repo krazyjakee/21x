@@ -261,6 +261,28 @@ describe('active-turn provider recovery', () => {
     expect(h.adapter.sendPrompt).toHaveBeenCalledTimes(3)
   })
 
+  it('adds no error of its own when a running tool rules out a retry of a failure already shown', async () => {
+    const h = fixture()
+    await h.seed()
+    vi.mocked(h.db.getTranscriptParts).mockReturnValue([{ partType: 'tool', tool: { name: 'write_file', status: 'running' } }] as never)
+    await h.failTurn()
+    expect(h.row().state).toBe('failed')
+    const shown = h.events.mock.calls.filter(([channel]) => channel === 'agent:output').map(([, payload]) => (payload as any).data?.content)
+    expect(shown).toEqual(['Selected model is at capacity (serverOverloaded)'])
+  })
+
+  it('explains a retry that was promised and then ruled out, in words', async () => {
+    const h = fixture()
+    await h.seed()
+    await h.failTurn()
+    expect(h.row().state).toBe('retrying')
+    vi.mocked(h.db.getTranscriptParts).mockReturnValue([{ partType: 'tool', tool: { name: 'write_file', status: 'running' } }] as never)
+    await h.retry()
+    const shown = h.events.mock.calls.filter(([channel]) => channel === 'agent:output').map(([, payload]) => String((payload as any).data?.content))
+    expect(shown.at(-1)).toMatch(/^Stopped retrying: a tool was still running/)
+    expect(shown.join('\n')).not.toContain('unsafe_side_effect_unknown')
+  })
+
   it('does not recover a previous accepted intent from a rejected config RPC', async () => {
     const h = fixture()
     await h.seed()
