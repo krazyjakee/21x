@@ -32,6 +32,7 @@ const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => 
 const calls = (operation: string) => invoke.mock.calls.filter(([, args]) => args?.operation === operation)
 let host: ReturnType<typeof import('@/lib/native-desktop-host').createNativeDesktopHost>, release: () => void
 let Workspace: typeof import('./TaskWorkspace').TaskWorkspace
+let Canvas: typeof import('../canvas/TranscriptPanelContent').TranscriptPanelContent
 let agents: typeof import('@/stores/agent-store').useAgentStore
 let tasks: typeof import('@/stores/task-store').useTaskStore
 const legacy = window.electronAPI
@@ -43,6 +44,7 @@ beforeAll(async () => {
   release = (await import('@/lib/desktop-api')).installDesktopHost(host)
   host.setRehydrator(async () => {}); await host.reconnect()
   Workspace = (await import('./TaskWorkspace')).TaskWorkspace
+  Canvas = (await import('../canvas/TranscriptPanelContent')).TranscriptPanelContent
   tasks = (await import('@/stores/task-store')).useTaskStore
   agents = (await import('@/stores/agent-store')).useAgentStore
 })
@@ -551,10 +553,14 @@ const finishedSession = (sessionId: string | null = null) => act(() => {
 })
 const queueRow = (state: string) => ({ id: 'queue-1', taskId: 'task-1', projectId: 'default', agentId: 'agent-1', reason: 'agent_limit', queuedAt: '2026-10-13T12:00:00.000Z', position: ['cancelled', 'failed', 'started', 'recovered'].includes(state) ? 0 : 1, priority: null, state, retryCount: 0, nextRetryAt: null, generation: 1, dependencyReason: null, recoveryCause: null, recoveryAction: null, recoveryResult: null, lastError: null })
 const retainedTask = (extra: Partial<Task> = {}) => makeTask({ agent_id: 'agent-1', session_id: 'retained-session', ...extra })
+/** A retained task that the owner also returns, which is what native Fresh re-reads. */
+const storedTask = (extra: Partial<Task> = {}) => { const task = retainedTask(extra); values.set('db:getTask', task); return task }
+const completed = { status: 'completed' } as Partial<Task>
+const retained = () => agents.getState().sessions.get('task-1')?.messages[0]?.content
 it('starts one native Fresh through the exact start owner without Stop or a runtime-field write', async () => {
   values.set('agent:getStartRecoveryState', null); values.set('agentSession:start', { sessionId: 'fresh-session' })
   const update = vi.fn(async () => {})
-  render(<Workspace {...props} onUpdateTask={update} agents={[configuredAgent()]} task={retainedTask()} />)
+  render(<Workspace {...props} onUpdateTask={update} agents={[configuredAgent()]} task={storedTask()} />)
   await act(async () => {})
   finishedSession()
   const controls = restartControls()
@@ -570,7 +576,7 @@ it.each(['cancelled', 'failed'])('offers no native Fresh after a %s start and th
   const { dispatchTaskShortcut, onShortcutFeedback, TaskShortcutAction } = await import('@/lib/keyboard-shortcuts')
   values.set('agent:getStartRecoveryState', queueRow(state))
   const feedback = vi.fn(), off = onShortcutFeedback(feedback), update = vi.fn(async () => {})
-  render(<Workspace {...props} onUpdateTask={update} agents={[configuredAgent()]} task={retainedTask()} />)
+  render(<Workspace {...props} onUpdateTask={update} agents={[configuredAgent()]} task={storedTask()} />)
   await act(async () => {})
   finishedSession()
   await waitFor(() => expect(restartControls()).toHaveLength(0))
@@ -583,7 +589,7 @@ it.each(['cancelled', 'failed'])('offers no native Fresh after a %s start and th
 it('uses the newest queue read, so a Stop after render cannot clear the transcript', async () => {
   const { dispatchTaskShortcut, TaskShortcutAction } = await import('@/lib/keyboard-shortcuts')
   values.set('agent:getStartRecoveryState', null)
-  render(<Workspace {...props} agents={[configuredAgent()]} task={retainedTask()} />)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={storedTask()} />)
   await act(async () => {})
   finishedSession()
   await waitFor(() => expect(restartControls().length).toBeGreaterThan(0))
@@ -596,7 +602,7 @@ it('uses the newest queue read, so a Stop after render cannot clear the transcri
 })
 it('withholds the native transcript Restart from a live session and refuses a stale handler before any effect', async () => {
   values.set('agent:getStartRecoveryState', null)
-  render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={retainedTask()} />)
+  render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={storedTask()} />)
   await act(async () => {})
   finishedSession()
   await waitFor(() => expect(transcript.restart).toEqual(expect.any(Function)))
@@ -611,7 +617,7 @@ it('withholds the native transcript Restart from a live session and refuses a st
 })
 it('holds a refused native Fresh for review without replay or a runtime-field write', async () => {
   values.set('agent:getStartRecoveryState', null); handlers.set('agentSession:start', async () => undefined)
-  render(<Workspace {...props} agents={[configuredAgent()]} task={retainedTask()} />)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={storedTask()} />)
   await act(async () => {})
   finishedSession()
   fireEvent.click(restartControls()[0])
@@ -626,6 +632,154 @@ it.each([[{ status: 'completed' }], [{ role: 'captain' }], [{ role: 'task_group'
   finishedSession()
   await act(async () => {})
   expect(restartControls()).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
+})
+it('refuses the RUN shortcut on a Completed task, where the header has no Restart to withhold', async () => {
+  const { dispatchTaskShortcut, onShortcutFeedback, TaskShortcutAction } = await import('@/lib/keyboard-shortcuts')
+  values.set('agent:getStartRecoveryState', null)
+  const feedback = vi.fn(), off = onShortcutFeedback(feedback)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={storedTask(completed)} />)
+  await act(async () => {})
+  finishedSession()
+  act(() => dispatchTaskShortcut({ action: TaskShortcutAction.RUN, taskId: 'task-1' }))
+  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: 'Completed tasks cannot be started.' })))
+  expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
+  expect(retained()).toBe('Retained transcript')
+  off()
+})
+it('re-reads the task, so one completed after render keeps its transcript', async () => {
+  const { onShortcutFeedback } = await import('@/lib/keyboard-shortcuts')
+  values.set('agent:getStartRecoveryState', null)
+  const feedback = vi.fn(), off = onShortcutFeedback(feedback)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={storedTask()} />)
+  await act(async () => {})
+  finishedSession()
+  const control = restartControls()[0]
+  values.set('db:getTask', retainedTask(completed))
+  fireEvent.click(control)
+  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: 'Completed tasks cannot be started.' })))
+  expect(calls('agentSession:start')).toHaveLength(0)
+  expect(retained()).toBe('Retained transcript'); expect(screen.queryByRole('alert')).toBeNull()
+  off()
+})
+it('refuses native Fresh before any effect when the task has gone since render', async () => {
+  const { onShortcutFeedback } = await import('@/lib/keyboard-shortcuts')
+  values.set('agent:getStartRecoveryState', null)
+  const feedback = vi.fn(), off = onShortcutFeedback(feedback)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={storedTask()} />)
+  await act(async () => {})
+  finishedSession()
+  const control = restartControls()[0]
+  values.delete('db:getTask')
+  fireEvent.click(control)
+  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: 'This task no longer has an assigned agent.' })))
+  expect(calls('agentSession:start')).toHaveLength(0); expect(retained()).toBe('Retained transcript')
+  off()
+})
+it('starts native Fresh on the agent the task has now, not the one it had at render', async () => {
+  values.set('agent:getStartRecoveryState', null); values.set('agentSession:start', { sessionId: 'fresh-session' })
+  render(<Workspace {...props} agents={[configuredAgent(), configuredAgent('agent-2')]} task={storedTask()} />)
+  await act(async () => {})
+  finishedSession()
+  const control = restartControls()[0]
+  values.set('db:getTask', retainedTask({ agent_id: 'agent-2' }))
+  fireEvent.click(control)
+  await waitFor(() => expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('fresh-session'))
+  expect(calls('agentSession:start')[0][1]).toMatchObject({ payload: { agentId: 'agent-2', taskId: 'task-1' } })
+})
+it.each(['queued', 'retrying', 'claimed', 'starting'])('offers no Resume during a %s start and the shortcut does nothing', async state => {
+  const { dispatchTaskShortcut, TaskShortcutAction } = await import('@/lib/keyboard-shortcuts')
+  values.set('agent:getStartRecoveryState', queueRow(state))
+  render(<Workspace {...props} agents={[configuredAgent()]} task={retainedTask()} />)
+  await screen.findByTestId('task-recovery-state')
+  expect(screen.queryAllByRole('button', { name: /^(Resume|Resume Session)$/ })).toHaveLength(0)
+  act(() => dispatchTaskShortcut({ action: TaskShortcutAction.RUN, taskId: 'task-1' }))
+  await act(async () => {})
+  expect(calls('agentSession:resume')).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
+})
+it('offers Resume again once a pending start has settled', async () => {
+  values.set('agent:getStartRecoveryState', queueRow('started'))
+  render(<Workspace {...props} agents={[configuredAgent()]} task={retainedTask()} />)
+  await waitFor(() => expect(calls('agent:getStartRecoveryState').length).toBeGreaterThan(0))
+  await act(async () => {})
+  expect(screen.getAllByRole('button', { name: /^(Resume|Resume Session)$/ }).length).toBeGreaterThan(0)
+})
+const renderCanvas = async (task: Task) => {
+  tasks.setState({ tasks: [task], selectedTaskId: null })
+  render(<Canvas taskId="task-1" />)
+  await act(async () => {})
+  finishedSession()
+  await waitFor(() => expect(transcript.restart).toEqual(expect.any(Function)))
+  return transcript.restart!
+}
+const canvasFeedback = async () => {
+  const { onShortcutFeedback } = await import('@/lib/keyboard-shortcuts')
+  const feedback = vi.fn()
+  return { feedback, off: onShortcutFeedback(feedback) }
+}
+it('restarts on the canvas through the native Fresh owner, without Stop or a runtime-field write', async () => {
+  values.set('agent:getStartRecoveryState', null); values.set('agentSession:start', { sessionId: 'fresh-session' })
+  const restart = await renderCanvas(storedTask())
+  act(() => { restart(); restart() })
+  await waitFor(() => expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('fresh-session'))
+  expect(calls('agentSession:start')).toHaveLength(1)
+  expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:stopByTaskId')).toHaveLength(0)
+  expect(calls('db:updateTask')).toHaveLength(0)
+})
+it.each([
+  ['cancelled', 'Send a message'],
+  ['failed', 'Send a message'],
+  ['queued', 'already has a start in progress']
+])('refuses a canvas Restart after a %s start and keeps the transcript', async (state, message) => {
+  const { feedback, off } = await canvasFeedback()
+  values.set('agent:getStartRecoveryState', queueRow(state))
+  const restart = await renderCanvas(storedTask())
+  await act(async () => { restart() })
+  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining(message) })))
+  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('agentSession:stop')).toHaveLength(0)
+  expect(retained()).toBe('Retained transcript')
+  off()
+})
+it('withholds a canvas Restart from a live session and refuses a stale handler before any effect', async () => {
+  const { feedback, off } = await canvasFeedback()
+  values.set('agent:getStartRecoveryState', null)
+  const stale = await renderCanvas(storedTask())
+  finishedSession('live-session')
+  await waitFor(() => expect(transcript.restart).toBeUndefined())
+  await act(async () => { stale() })
+  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('while this session is live') })))
+  expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:stopByTaskId')).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
+  expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('live-session'); expect(retained()).toBe('Retained transcript')
+  off()
+})
+it.each([[completed], [{ role: 'captain' }], [{ role: 'task_group' }]] as Array<[Partial<Task>]>)('withholds a canvas Restart on %j', async extra => {
+  values.set('agent:getStartRecoveryState', null)
+  tasks.setState({ tasks: [storedTask(extra)], selectedTaskId: null })
+  render(<Canvas taskId="task-1" />)
+  await act(async () => {})
+  finishedSession()
+  await act(async () => {})
+  expect(transcript.restart).toBeUndefined(); expect(calls('agentSession:start')).toHaveLength(0)
+})
+it('keeps the canvas transcript of a task completed after render', async () => {
+  const { feedback, off } = await canvasFeedback()
+  values.set('agent:getStartRecoveryState', null)
+  const restart = await renderCanvas(storedTask())
+  values.set('db:getTask', retainedTask(completed))
+  await act(async () => { restart() })
+  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: 'Completed tasks cannot be started.' })))
+  expect(calls('agentSession:start')).toHaveLength(0); expect(retained()).toBe('Retained transcript')
+  off()
+})
+it('reports an unconfirmed canvas Restart once and holds it for review without replay', async () => {
+  const { feedback, off } = await canvasFeedback()
+  values.set('agent:getStartRecoveryState', null); handlers.set('agentSession:start', async () => undefined)
+  const restart = await renderCanvas(storedTask())
+  await act(async () => { restart() })
+  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('could not be confirmed') })))
+  await act(async () => { restart() })
+  expect(calls('agentSession:start')).toHaveLength(1); expect(feedback).toHaveBeenCalledTimes(1)
+  expect(calls('db:updateTask')).toHaveLength(0)
+  off()
 })
 it('keeps native incompatible-session Fresh UI unavailable', async () => {
   const { IncompatibleSessionDialog } = await import('./IncompatibleSessionDialog')

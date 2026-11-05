@@ -14,6 +14,7 @@ interface TaskShortcutRouterOptions {
   artifacts: Artifact[]
   activeArtifactTabId: string | null
   workspaceBodyRef: RefObject<HTMLDivElement | null>
+  hasPendingRecovery: boolean
   onComplete: () => Promise<void>
   onStartSession: () => Promise<void>
   onResumeSession: () => Promise<void>
@@ -29,6 +30,7 @@ export function useTaskShortcutRouter({
   artifacts,
   activeArtifactTabId,
   workspaceBodyRef,
+  hasPendingRecovery,
   onComplete,
   onStartSession,
   onResumeSession,
@@ -51,13 +53,14 @@ export function useTaskShortcutRouter({
     if (task.agent_id && isAgentConfigured(assignedAgent) && !task.session_id && !sessionId && idle && task.status !== TaskStatus.Completed) {
       void onStartSession()
     } else if (task.agent_id && task.session_id && !sessionId && idle && !hasMessages) {
-      void onResumeSession()
+      // A pending start owns this task; resuming beside it could start a second session.
+      if (!hasPendingRecovery) void onResumeSession()
     } else if (task.agent_id && task.session_id && !sessionId && idle && hasMessages) {
       void onStartFreshSession()
     } else if (!task.agent_id && triageAgent && isAgentConfigured(triageAgent) && idle && task.status !== TaskStatus.Completed && task.status !== TaskStatus.Triaging) {
       void onTriage()
     }
-  }, [agents, onResumeSession, onStartFreshSession, onStartSession, onTriage, task])
+  }, [agents, hasPendingRecovery, onResumeSession, onStartFreshSession, onStartSession, onTriage, task])
 
   useEffect(() => onTaskShortcut(({ action, taskId }) => {
     if (!task || task.id !== taskId) return

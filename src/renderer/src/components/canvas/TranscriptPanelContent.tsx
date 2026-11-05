@@ -1,11 +1,15 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentSession } from '@/hooks/use-agent-session'
+import { useTaskEditReceipt } from '@/hooks/use-task-edit-receipt'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useTaskStore } from '@/stores/task-store'
 import { Bot } from 'lucide-react'
 import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
+import { getDesktopHost } from '@/lib/desktop-api'
+import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
+import { nativeFreshRefusal, startNativeFresh } from '@/lib/native-fresh-session'
 
 interface TranscriptPanelContentProps {
   taskId: string
@@ -24,6 +28,7 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
   const removeSession = useAgentStore((s) => s.removeSession)
   const task = useTaskStore((s) => s.tasks.find((t) => t.id === taskId))
   const submittedQuestionIdsRef = useRef(new Set<string>())
+  const actionReceipt = useTaskEditReceipt(taskId)
 
   const messages = session?.messages ?? []
   const status = session?.status ?? SessionStatus.IDLE
@@ -36,6 +41,19 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
   const handleRestart = useCallback(async () => {
     const agentId = task?.agent_id
     if (!agentId) return
+    if (getDesktopHost().kind === 'tauri') {
+      // The task view's owner and refusals. This panel has no review banner, so
+      // an unconfirmed start is reported here before the lane holds it for review.
+      await actionReceipt.run(async () => {
+        try {
+          await startNativeFresh(taskId, { current: actionReceipt.current, removeSession, start })
+        } catch (err) {
+          dispatchShortcutFeedback('Restart could not be confirmed. Reopen this task and review its current session before trying again.', true)
+          throw err
+        }
+      })
+      return
+    }
     try {
       if (session?.sessionId) {
         await stop()
@@ -45,7 +63,7 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
     } catch (err) {
       console.error('Failed to restart session:', err)
     }
-  }, [task?.agent_id, session?.sessionId, stop, removeSession, taskId, start])
+  }, [task?.agent_id, session?.sessionId, stop, removeSession, taskId, start, actionReceipt])
 
   const ensureChatSession = useCallback(async (): Promise<string | null> => {
     if (!task?.agent_id) return null
@@ -56,6 +74,9 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
   }, [resume, start, task?.agent_id, task?.session_id, taskId])
 
   const handleSaveImages = useMemo(() => taskImageSaver(taskId), [taskId])
+  // What this render already knows. The queue row is read when Restart is pressed.
+  const nativeFreshRefused = getDesktopHost().kind === 'tauri' &&
+    (actionReceipt.blocked || (!!task && !!nativeFreshRefusal(task, null, session?.sessionId ?? null)))
 
   const handleSend = useCallback(
     async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
@@ -120,7 +141,7 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
       status={status}
       systemStatus={systemStatus}
       onStop={handleStop}
-      onRestart={handleRestart}
+      onRestart={nativeFreshRefused ? undefined : handleRestart}
       onSend={handleSend}
       onSaveImages={handleSaveImages}
       className="h-full select-text"

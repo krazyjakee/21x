@@ -49,7 +49,7 @@ import { CaptainRuntimeStore } from './sessions/runtime-store'
 import { DeliveryStore, type DeliveryRecord, type DeliveryState } from './sessions/delivery-store'
 import { DurableStartQueueStore, type DurableQueuedStartInfo } from './sessions/start-queue-store'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
-import { classifyProviderFailure, PROVIDER_CONTINUATION, PROVIDER_MAX_RETRIES, type ProviderFailure } from './agent-manager/provider-failure'
+import { classifyProviderFailure, PROVIDER_CONTINUATION, PROVIDER_MAX_RETRIES, recoveryEventCause, type ProviderFailure } from './agent-manager/provider-failure'
 import { ProviderRecoveryStore, type ProviderRecovery } from './sessions/provider-recovery-store'
 import { CompactionNormalizer } from './sessions/compaction'
 import { ManagedSessionObserver } from './sessions/managed-session'
@@ -5769,7 +5769,7 @@ export class AgentManager extends EventEmitter {
     } catch (auditError) {
       console.warn(`[AgentManager] Could not append recovery audit for task ${task.id}:`, auditError)
     }
-    this.sendToRenderer('agent:recoveryStateChanged', { taskId: task.id, cause, action, result, error: error ?? null })
+    this.sendToRenderer('agent:recoveryStateChanged', { taskId: task.id, cause: recoveryEventCause(cause), action, result, error: error ?? null })
     this.sendToRenderer('project:statusChanged', { projectId: taskProjectId(task) })
   }
 
