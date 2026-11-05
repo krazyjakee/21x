@@ -304,7 +304,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 243 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 244 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

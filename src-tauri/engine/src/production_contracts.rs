@@ -5501,7 +5501,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 243);
+        assert_eq!(COMMANDS.len(), 244);
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})
