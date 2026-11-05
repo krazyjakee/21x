@@ -69,8 +69,29 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
   still point into those folders. A new profile is shared only if there is an
   Electron database to import; a marker left by an interrupted first launch is
   removed if there is not, so a fresh profile does not look shared.
-- **Still open:** a shared profile whose marker has gone, or whose Electron folder has
-  gone, still runs unlocked on its own folders.
+- **A lost marker comes back.** The share is also held in a settings row,
+  `__electron_shared_root`, written in the import copy and added on the next launch
+  to profiles imported before it existed. The native host cannot read SQLite, so if
+  the marker has gone it sends no folder, and the service finds the row, puts the
+  marker back and refuses with `ELECTRON_LINK_RESTORED`. The next launch is locked. A
+  profile that lost its marker before it ever ran with this record cannot be told
+  from an unshared one, and still runs unlocked.
+- **A missing folder is refused, not recreated.** If the marker names a folder that
+  is not a real directory, the host uses the profile's own folders and still sends
+  that path, and the service refuses with `ELECTRON_FOLDER_MISSING` before taking the
+  lock, because the lock would recreate the folder. The same refusal covers a marker
+  the host cannot use, such as a path from another system, which it recognises
+  because the marker already equals the row. So a copied profile gets the same way
+  forward.
+- **Two ways forward from that refusal:** put the folder back and reopen, or choose
+  **Stop using the old folder** on the failure screen, which asks once more first.
+  The service has already stopped, so that action is a native command,
+  `stop_using_old_folder`, which takes no arguments, runs only after this refusal, and
+  does nothing if the folder has come back. It writes `detached` to the marker. On the
+  next launch the host reads that as no share, and the service deletes the row and
+  runs on the profile's own folders. Every task stays; files that were in the old
+  folder stay gone, and the two apps no longer exclude each other. The folder is not
+  taken back if it reappears.
 
 A refused launch writes nothing to the profile, with one limit on Linux: the native
 Tauri host creates missing `workspaces/` and `attachments/` before the service runs,

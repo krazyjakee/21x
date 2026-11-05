@@ -189,6 +189,78 @@ describe('actual production application owner', () => {
       return next
     }
 
+    const load = (f: Awaited<ReturnType<typeof fixture>>) => {
+      const next = new f.ProductionOwner({ ...f.bootstrap, credentials: { ...f.bootstrap.credentials, mode: 'load' } }, f.boundaries)
+      owners.push(next)
+      return next
+    }
+    const storedShare = (f: Awaited<ReturnType<typeof fixture>>) => {
+      const db = new SQLite(join(f.bootstrap.paths.profileRoot, '21x.db'), { readonly: true })
+      try { return db.prepare('SELECT value FROM settings WHERE key = ?').pluck().get('__electron_shared_root') } finally { db.close() }
+    }
+    const marker = (f: Awaited<ReturnType<typeof fixture>>) => join(f.bootstrap.paths.profileRoot, '.legacy-profile-root')
+    /** A profile that has run shared once, then lost its marker. */
+    async function sharedOnce(f: Awaited<ReturnType<typeof fixture>>, electron: string) {
+      await (await reopen(f, electron)).close()
+      expect(storedShare(f)).toBe(electron)
+    }
+
+    it('stays locked after the Electron database goes', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      rmSync(join(electron, '21x.db'))
+      const session = await reopen(f, electron)
+      expect(session.snapshot().phase).toBe('ready')
+      expect(await profileFreeElsewhere(electron)).toBe(false)
+    })
+
+    it('records the share of a profile imported before the record existed', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await sharedOnce(f, electron)
+    })
+
+    it('refuses without recreating a folder that has gone', async () => {
+      const f = await fixture(), electron = join(f.root, 'deleted')
+      f.bootstrap.legacyImport = { profileRoot: electron, appName: '21x' }
+      await expect(f.owner.start()).rejects.toThrow('ELECTRON_FOLDER_MISSING')
+      expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'profile-lock', code: 'ELECTRON_FOLDER_MISSING', owned: false })
+      expect(existsSync(electron)).toBe(false)
+      expect(f.store.create).not.toHaveBeenCalled()
+      expect(existsSync(join(f.bootstrap.paths.profileRoot, '21x.db'))).toBe(false)
+    })
+
+    it('puts a lost marker back and refuses, so the next launch is the locked one', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await sharedOnce(f, electron)
+      const lost = load(f)
+      await expect(lost.start()).rejects.toThrow('ELECTRON_LINK_RESTORED')
+      expect(lost.recoveryState()).toEqual({ phase: 'failed', stage: 'database-preflight', code: 'ELECTRON_LINK_RESTORED', owned: false })
+      expect(readFileSync(marker(f), 'utf8')).toBe(electron)
+      expect(storedShare(f)).toBe(electron)
+    })
+
+    it('calls a marker the host could not use a missing folder, instead of restoring it forever', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await sharedOnce(f, electron)
+      writeFileSync(marker(f), electron)
+      const unusable = load(f)
+      await expect(unusable.start()).rejects.toThrow('ELECTRON_FOLDER_MISSING')
+      expect(unusable.recoveryState()).toEqual({ phase: 'failed', stage: 'database-preflight', code: 'ELECTRON_FOLDER_MISSING', owned: false })
+    })
+
+    it('runs on its own folders once the user stops using the old folder, and forgets the share', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      await sharedOnce(f, electron)
+      writeFileSync(marker(f), 'detached')
+      const stopped = load(f)
+      const services = await stopped.start()
+      expect(stopped.snapshot().phase).toBe('ready')
+      expect(services.db.getProjects().length).toBeGreaterThan(0)
+      await stopped.close()
+      expect(storedShare(f)).toBeUndefined()
+      expect(readFileSync(marker(f), 'utf8')).toBe('detached')
+      expect(heldByTauri(electron)).toBe(false)
+    })
+
     it('refuses before credentials, migrations or any write while the Electron app runs', async () => {
       const f = await fixture(), electron = electronProfile(f)
       f.bootstrap.legacyImport = { profileRoot: electron, appName: '21x' }

@@ -32,7 +32,7 @@ import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-
 import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
-import { ElectronProfileImportError, MANAGED_TASK_MCP_MARKER, holdElectronProfile, importElectronProfile } from './electron-profile-import'
+import { ELECTRON_SHARED_ROOT_SETTING, ElectronProfileImportError, LEGACY_MARKER_DETACHED, MANAGED_TASK_MCP_MARKER, holdElectronProfile, importElectronProfile, readLegacyMarker, realDirectory, writeLegacyMarker } from './electron-profile-import'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
 import { createHash, randomUUID } from 'node:crypto'
@@ -772,7 +772,11 @@ export class ProductionOwner {
     // Before anything below can write, and held until release(): the Electron
     // app refuses to start for as long as this session uses its folders.
     const legacy = this.bootstrap.legacyImport
-    if (legacy) this.lock = jointProfileLock(this.lock, holdElectronProfile(legacy.profileRoot))
+    if (legacy) {
+      // Checked first: taking the lock would recreate a folder the user deleted.
+      if (!realDirectory(legacy.profileRoot)) throw new ProductionOwnerError('ELECTRON_FOLDER_MISSING')
+      this.lock = jointProfileLock(this.lock, holdElectronProfile(legacy.profileRoot))
+    }
     const profileRoot = this.lock.profileRoot
     this.checkpoint('resources')
     const space = statfsSync(profileRoot)
@@ -817,7 +821,8 @@ export class ProductionOwner {
       })
       this.assertStarting()
     }
-    const { managedTaskMcpId } = preflightProfile(join(profileRoot, '21x.db'), this.storage)
+    const { managedTaskMcpId, electronSharedRoot } = preflightProfile(join(profileRoot, '21x.db'), this.storage)
+    if (!legacy && electronSharedRoot !== undefined) refuseLostShare(profileRoot, electronSharedRoot)
     this.checkpoint('database')
     for (const path of [this.bootstrap.paths.workspaceRoot, this.bootstrap.paths.attachmentRoot, this.bootstrap.paths.reposRoot, this.bootstrap.paths.tempRoot]) mkdirSync(path, { recursive: true })
     // A reopened profile refreshes only the managed row it can prove it created;
@@ -827,6 +832,10 @@ export class ProductionOwner {
     this.db = new DatabaseManager(this.databaseRuntime)
     this.db.initialize()
     const db = this.db
+    // Also records a profile imported before this row existed, while its marker
+    // survives. With no share, only a stopped one can still have a row.
+    if (!legacy) db.deleteSetting(ELECTRON_SHARED_ROOT_SETTING)
+    else if (db.getSetting(ELECTRON_SHARED_ROOT_SETTING) !== legacy.profileRoot) db.setSetting(ELECTRON_SHARED_ROOT_SETTING, legacy.profileRoot)
     if (!('disabled' in runtime)) recordManagedTaskMcp(db)
     reconcileProductionRestart(db)
     db.onTaskActivity = (taskId, last_activity_at) => this.emit('task:updated', { taskId, updates: { last_activity_at } })
@@ -1363,7 +1372,23 @@ function verifiedManagedTaskMcpId(probe: SQLite.Database, tables: Set<string>): 
 }
 
 /** Validate existing ciphertext read-only before migrations/seeding can write. No implicit profile conversion. */
-function preflightProfile(path: string, storage: AuthenticatedSecretStorage): { managedTaskMcpId?: string } {
+/**
+ * The database says this profile is shared, but the host sent no folder, so it
+ * must not run: its stored paths point somewhere no lock now covers. Unless the
+ * user stopped the share, the marker is put back for the next launch to lock. A
+ * marker that already matches is one the host could not use, such as a path from
+ * another system, and restoring it would refuse forever: that is a missing folder,
+ * which the user can stop using.
+ */
+function refuseLostShare(profileRoot: string, electronRoot: string): void {
+  const marker = readLegacyMarker(profileRoot)
+  if (marker === LEGACY_MARKER_DETACHED) return
+  if (marker === electronRoot) throw new ProductionOwnerError('ELECTRON_FOLDER_MISSING')
+  writeLegacyMarker(profileRoot, electronRoot)
+  throw new ProductionOwnerError('ELECTRON_LINK_RESTORED')
+}
+
+function preflightProfile(path: string, storage: AuthenticatedSecretStorage): { managedTaskMcpId?: string; electronSharedRoot?: string } {
   for (const file of [path, path + '-wal', path + '-shm']) {
     let stat: ReturnType<typeof lstatSync>
     try { stat = lstatSync(file) }
@@ -1402,7 +1427,8 @@ function preflightProfile(path: string, storage: AuthenticatedSecretStorage): { 
       if (!tables.has(table)) continue
       for (const column of columns) for (const row of probe.prepare(`SELECT ${column} AS value FROM ${table} WHERE ${column} IS NOT NULL`).iterate() as Iterable<{ value: Buffer }>) storage.decryptString(row.value)
     }
-    return { managedTaskMcpId: verifiedManagedTaskMcpId(probe, tables) }
+    const electronSharedRoot = tables.has('settings') ? probe.prepare('SELECT value FROM settings WHERE key = ?').pluck().get(ELECTRON_SHARED_ROOT_SETTING) as string | undefined : undefined
+    return { managedTaskMcpId: verifiedManagedTaskMcpId(probe, tables), electronSharedRoot }
   } catch (error) {
     if (error instanceof ProductionOwnerError) throw error
     const code = safeStartupCode(error, 'database-preflight')

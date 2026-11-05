@@ -15,6 +15,44 @@ describe('renderStartupFailure', () => {
     expect(retry).toHaveBeenCalledOnce()
   })
 
+  const stopButton = (root: HTMLElement) => [...root.querySelectorAll('button')].find(button => button.textContent !== 'Try again')!
+  const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() }
+
+  it('offers the old-folder action only when one is given', () => {
+    const root = document.createElement('div')
+    renderStartupFailure(root, 'Explanation', vi.fn())
+    expect(root.querySelectorAll('button')).toHaveLength(1)
+  })
+
+  it('states what stopping costs before doing it, then tells the user to reopen', async () => {
+    const root = document.createElement('div'), stop = vi.fn(async () => true)
+    renderStartupFailure(root, 'The folder is missing.', vi.fn(), stop)
+    stopButton(root).click()
+    expect(stop).not.toHaveBeenCalled()
+    expect(root.textContent).toContain('Your tasks stay in 21x')
+    expect(root.textContent).toContain('stays gone')
+    stopButton(root).click()
+    expect(stop).toHaveBeenCalledOnce()
+    await settle()
+    expect(root.textContent).toContain('Done. Close 21x and open it again.')
+    expect(root.querySelectorAll('button')).toHaveLength(0)
+  })
+
+  it('says so when the folder came back, and when the action fails', async () => {
+    for (const [stop, text] of [
+      [async () => false, 'nothing was changed'],
+      [async () => { throw new Error('private detail') }, 'That did not work']
+    ] as const) {
+      const root = document.createElement('div')
+      renderStartupFailure(root, 'The folder is missing.', vi.fn(), stop)
+      stopButton(root).click()
+      stopButton(root).click()
+      await settle()
+      expect(root.textContent).toContain(text)
+      expect(root.textContent).not.toContain('private detail')
+    }
+  })
+
   it('falls back to generic guidance when the service never answered', () => {
     const root = document.createElement('div')
     renderStartupFailure(root, undefined, vi.fn())

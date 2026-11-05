@@ -29,6 +29,6 @@ async function bootstrap(): Promise<void> {
 void bootstrap().catch((error: unknown) => {
   const root = document.getElementById('root')
   if (!root) return
-  const explanation = error instanceof NativeBootstrapUnavailableError ? error.explanation : undefined
-  renderStartupFailure(root, explanation, () => window.location.reload())
+  const startup = error instanceof NativeBootstrapUnavailableError ? error : undefined
+  renderStartupFailure(root, startup?.explanation, () => window.location.reload(), startup?.stopUsingOldFolder)
 })

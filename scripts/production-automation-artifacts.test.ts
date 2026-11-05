@@ -16,7 +16,7 @@ describe('production artifact diagnostic detection', () => {
     const cargo = readFileSync('src-tauri/Cargo.toml', 'utf8')
     const handlers = [...host.matchAll(/\.invoke_handler\(tauri::generate_handler!\[([^\]]+)\]\)/g)]
     expect(handlers).toHaveLength(1)
-    expect(handlers[0][1].split(',').map(name => name.trim()).filter(Boolean).sort()).toEqual(['desktop_invoke', 'engine_status'])
+    expect(handlers[0][1].split(',').map(name => name.trim()).filter(Boolean).sort()).toEqual(['desktop_invoke', 'engine_status', 'stop_using_old_folder'])
     expect(main).toMatch(/#\[cfg\(all\(feature = "production-service", feature = "synthetic-desktop"\)\)\]\s*compile_error!\(/)
     expect(main).toMatch(/#\[cfg\(feature = "production-service"\)\]\s*fn main\(\)\s*\{\s*production_host::run\(\);\s*\}/)
     expect(cargo).not.toMatch(/tauri-plugin-(?:wdio|webdriver)|wdio-webdriver/)

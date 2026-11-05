@@ -3,5 +3,5 @@
   "description": "Only the bundled main screen may call restricted engine/experimental desktop commands and listen to targeted events.",
   "local": true,
   "webviews": ["main"],
-  "permissions": ["allow-engine-invoke", "allow-engine-status", "allow-desktop-invoke", "core:event:allow-listen", "core:event:allow-unlisten"]
+  "permissions": ["allow-engine-invoke", "allow-engine-status", "allow-desktop-invoke", "allow-stop-using-old-folder", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

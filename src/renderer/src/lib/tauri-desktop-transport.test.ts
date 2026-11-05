@@ -1,6 +1,6 @@
 import type { JsonValue } from '@shared/service-protocol'
 import { expect, it, vi } from 'vitest'
-import { productionBootstrapMessage, getTauriEngineEpoch, getTauriUiDocument, createTauriDesktopTransport, type TauriDesktopApi } from './tauri-desktop-transport'
+import { NativeBootstrapUnavailableError, productionBootstrapMessage, getTauriEngineEpoch, getTauriUiDocument, createTauriDesktopTransport, type TauriDesktopApi } from './tauri-desktop-transport'
 import { hasTauriNativeDrops, invokeTauriNativeDrop } from './tauri-desktop-transport'
 import { NATIVE_ATTACHMENT_DROP as DROP } from '@shared/native-attachment-drop'
 
@@ -80,6 +80,22 @@ it('unwraps only the exact three current document notices and revokes old listen
   const generic = { ...frame, operation: 'tasks:refresh', payload: {} }
   listeners[1]({ payload: generic })
   expect(receive).toHaveBeenLastCalledWith(generic)
+})
+
+it('explains a missing or relinked Electron folder, and offers the action only for a missing one', async () => {
+  const status = (code: string, phase: string) => ({ protocolVersion: 1, production: true, available: false, startupFailure: { code, phase } })
+  for (const phase of ['profile-lock', 'database-preflight']) expect(productionBootstrapMessage(status('ELECTRON_FOLDER_MISSING', phase))).toContain('you can stop using it')
+  expect(productionBootstrapMessage(status('ELECTRON_LINK_RESTORED', 'database-preflight'))).toContain('Close 21x and open it again')
+  const failure = async (code: string, phase: string, result: unknown = true) => {
+    const invoke = vi.fn(async (command: string) => command === 'engine_status' ? status(code, phase) : result)
+    const error = await getTauriEngineEpoch({ core: { invoke }, event: { listen: vi.fn() } } as unknown as TauriDesktopApi).catch((caught: unknown) => caught)
+    if (!(error instanceof NativeBootstrapUnavailableError)) throw error
+    return { error, invoke }
+  }
+  const missing = await failure('ELECTRON_FOLDER_MISSING', 'profile-lock', false)
+  expect(await missing.error.stopUsingOldFolder!()).toBe(false)
+  expect(missing.invoke).toHaveBeenCalledWith('stop_using_old_folder')
+  expect((await failure('ELECTRON_LINK_RESTORED', 'database-preflight')).error.stopUsingOldFolder).toBeUndefined()
 })
 
 it('projects only known startup failures into fixed redacted provisioning guidance', () => {

@@ -9,7 +9,7 @@ import { configureSecretStorage, getSecretStorage, releaseSecretStorage, type Se
 import { decryptRecordCredential, decryptSettingValue } from '../main/database/serializers'
 import { acquireProfileLock, HOST_CLAIM_TIMEOUT_MS, PROFILE_LOCK_FILE, type ProfileLock } from '../main/platform/profile-lock'
 import { holdProfileElsewhere, profileFreeElsewhere, profileListing, stopOtherHosts } from '../../test/helpers/profile-holder'
-import { DROPPED_CREDENTIALS_SETTING, MANAGED_TASK_MCP_MARKER, createSafeStorageDecoder, holdElectronProfile, importElectronProfile } from './electron-profile-import'
+import { DROPPED_CREDENTIALS_SETTING, ELECTRON_SHARED_ROOT_SETTING, MANAGED_TASK_MCP_MARKER, createSafeStorageDecoder, holdElectronProfile, importElectronProfile, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
 
 vi.mock('../main/platform/profile-lock', async importOriginal => {
   const actual = await importOriginal<typeof import('../main/platform/profile-lock')>()
@@ -110,6 +110,26 @@ describe('Electron profile import', () => {
       expect((db.prepare('SELECT value FROM settings WHERE key = ?').get(DROPPED_CREDENTIALS_SETTING) as { value: string }).value).toBe('3')
       expect(db.prepare('SELECT title FROM tasks').pluck().get()).toBe('Imported task')
     } finally { db.close() }
+  })
+
+  it('records the share inside the copy, so a published database always carries it', async () => {
+    const f = fixture()
+    await importElectronProfile({ profileRoot: f.electron, lock: hold(f.electron), destination: f.destination, storage: f.storage, loadSafeStoragePassword: async () => null, platform: 'linux' })
+    const db = new SQLite(f.destination, { readonly: true })
+    try {
+      expect((db.prepare('SELECT value FROM settings WHERE key = ?').get(ELECTRON_SHARED_ROOT_SETTING) as { value: string }).value).toBe(f.electron)
+    } finally { db.close() }
+  })
+
+  it('reads the marker back as written, replaces a planted link, and reads a missing one as nothing', () => {
+    const f = fixture(), profile = join(f.electron, '..', 'profile'), target = join(f.electron, 'target')
+    expect(readLegacyMarker(profile)).toBeNull()
+    writeFileSync(target, 'untouched')
+    symlinkSync(target, join(profile, '.legacy-profile-root'))
+    expect(readLegacyMarker(profile)).toBeNull()
+    writeLegacyMarker(profile, '/electron/root')
+    expect(readLegacyMarker(profile)).toBe('/electron/root')
+    expect(readFileSync(target, 'utf8')).toBe('untouched')
   })
 
   it('waits the shared claim time for the Electron profile, and announces itself', () => {
