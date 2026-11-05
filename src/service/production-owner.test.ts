@@ -1,7 +1,7 @@
 import { open } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SQLite from 'better-sqlite3'
-import { constants, cpSync, existsSync, linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync } from 'node:fs'
+import { constants, cpSync, existsSync, linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProductionOwner, ProductionOwnerBootstrap, ProductionServices } from './production-owner'
@@ -259,6 +259,16 @@ describe('actual production application owner', () => {
       expect(storedShare(f)).toBeUndefined()
       expect(readFileSync(marker(f), 'utf8')).toBe('detached')
       expect(heldByTauri(electron)).toBe(false)
+    })
+
+    it('tells cleanup to leave a workspace it has no task for', async () => {
+      const f = await fixture(), electron = electronProfile(f)
+      const session = await reopen(f, electron)
+      const path = join(f.bootstrap.paths.workspaceRoot, 'other-app-task')
+      mkdirSync(path); writeFileSync(join(path, 'uncommitted'), 'the only copy')
+      utimesSync(path, new Date('2020-01-01'), new Date('2020-01-01'))
+      expect((await session.run(services => services.cleanup.runNow())).cleaned).toBe(0)
+      expect(readFileSync(join(path, 'uncommitted'), 'utf8')).toBe('the only copy')
     })
 
     it('refuses before credentials, migrations or any write while the Electron app runs', async () => {

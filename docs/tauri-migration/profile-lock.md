@@ -46,8 +46,8 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
   folder, then the app data folder, never one inside the profile. It then shows the
   message once `ready` allows a dialog, discards the scratch folder and exits with
   status 1. If no folder works, it exits before `ready` instead, because Chromium
-  must not start on the profile; on Linux that message goes to stderr, since there
-  is no dialog before `ready`.
+  must not start on the profile. On Linux that message goes to stderr, since there
+  is no dialog before `ready`, so a launch from the desktop shows nothing at all.
 - **Tauri** receives `legacyProfileRoot` on every launch that has one, not only the
   import, and takes the lock straight after its own, in the `profile-lock` stage.
   `release()` of the joint lease frees both. A refusal is
@@ -65,10 +65,21 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
   has no owner. A Tauri profile without a usable `.legacy-profile-root` shares
   nothing and runs beside Electron.
 - **A shared profile stays shared when the Electron database goes.** Once a Tauri
-  profile has its own database, the marker alone decides, because its stored paths
-  still point into those folders. A new profile is shared only if there is an
-  Electron database to import; a marker left by an interrupted first launch is
-  removed if there is not, so a fresh profile does not look shared.
+  profile has its own database, the marker alone decides, because the workspaces,
+  repositories and attachments of its tasks live in those folders. A new profile is
+  shared only if there is an Electron database to import; a marker left by an
+  interrupted first launch is removed if there is not, so a fresh profile does not
+  look shared.
+- **A stale marker from an earlier build reads as shared.** Such a build could leave a
+  marker on a profile that then made its own database, and the two cannot be told
+  apart. On that profile `workspaces/`, `attachments/` and `repos/` switch to the
+  Electron folder, its own folders stop being used, and Electron is locked out while
+  it runs.
+- **Cleanup leaves unknown workspaces alone.** That is why, while a profile is shared,
+  neither manual Run cleanup nor a scheduled pass touches a workspace with no matching
+  task, not even its `node_modules`. It may be the other app's work, and removal
+  cannot be undone. This also protects tasks created in Electron after the import,
+  which the Tauri database cannot see.
 - **A lost marker comes back.** The share is also held in a settings row,
   `__electron_shared_root`, written in the import copy and added on the next launch
   to profiles imported before it existed. The native host cannot read SQLite, so if
@@ -92,6 +103,10 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
   runs on the profile's own folders. Every task stays; files that were in the old
   folder stay gone, and the two apps no longer exclude each other. The folder is not
   taken back if it reappears.
+- **Still open, Electron's own cleanup:** Electron cannot tell that the folders are
+  shared, so it treats a workspace of a Tauri-created task as an orphan once it is
+  past the retention period. Its Run cleanup, or a scheduled pass with auto-cleanup
+  on, can remove it. Closing this needs a lasting record in the Electron profile.
 
 A refused launch writes nothing to the profile, with one limit on Linux: the native
 Tauri host creates missing `workspaces/` and `attachments/` before the service runs,
