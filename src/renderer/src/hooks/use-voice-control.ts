@@ -17,6 +17,7 @@ import {
 } from '@/lib/voice-dictation-target'
 import type { VoiceUiContext } from '@shared/voice'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { isEditorOutsideCommander } from '@/lib/keyboard-shortcuts'
 
 /**
  * Connects voice control to the application shell. Mount it once.
@@ -78,16 +79,23 @@ export function useVoiceControl(): void {
     const offHotkey = voiceApi.onHotkey(({ action }) => {
       if (action !== 'toggle') return
       const call = useCommanderCallStore.getState()
-      if (call.status !== 'off') {
+      if (call.status === 'starting') return
+      const voice = useVoiceStore.getState()
+      // A microphone another surface opened keeps the shortcut, as it would with no call.
+      const foreignTurn = !!voice.turnId && voice.turnId !== call.turnId && !call.micOpening
+      if (call.status === 'live' && !foreignTurn) {
         // The app-owned call retains its original Commander session, even
         // while another workspace or report inbox is selected.
-        if (call.status === 'live') {
-          if (call.micMode === 'push-to-talk') {
-            if (call.pttHeld || call.pttFinishing) call.finishTalk()
-            else if (!call.muted) void call.beginTalk()
-            else void call.toggleMicrophone()
-          } else void call.toggleMicrophone()
+        if (call.micMode === 'push-to-talk' && (call.pttHeld || call.pttFinishing)) {
+          call.finishTalk()
+          return
         }
+        // The same boundaries as the in-app shortcuts. Focus only counts while
+        // this window has it: the shortcut also fires from other applications.
+        const focused = document.hasFocus() ? document.activeElement : null
+        if (voice.confirmation || document.querySelector('[role="dialog"], [role="alertdialog"]') || isEditorOutsideCommander(focused)) return
+        if (call.micMode === 'push-to-talk' && !call.muted) void call.beginTalk()
+        else void call.toggleMicrophone()
         return
       }
       // The shortcut talks to Captain, exactly like the microphone in the

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { cleanup, render, screen, act } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, act } from '@testing-library/react'
 import { VoiceOverlay } from './VoiceOverlay'
 import { useVoiceStore } from '@/stores/voice-store'
+import { __resetCommanderCall, useCommanderCallStore } from '@/stores/commander-call-store'
 import type { VoiceIntentProposal } from '@shared/voice'
 
 const CREATE_PROPOSAL: VoiceIntentProposal = {
@@ -73,6 +74,16 @@ describe('VoiceOverlay', () => {
   it('shows nothing while the session is idle', () => {
     const { container } = render(<VoiceOverlay />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('dismisses a confirmation on Escape during a muted Commander call', () => {
+    const dismiss = vi.fn(async () => undefined)
+    reset({ confirmation: { turnId: 'turn-1', proposal: CREATE_PROPOSAL, reason: 'policy' }, dismiss: dismiss as never })
+    useCommanderCallStore.setState({ status: 'live', sessionId: 's1', turnId: null, muted: true })
+    render(<VoiceOverlay />)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(dismiss).toHaveBeenCalledOnce()
+    __resetCommanderCall()
   })
 
   it('asks for a confirmation before the action runs', async () => {

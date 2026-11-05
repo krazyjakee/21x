@@ -46,8 +46,9 @@ export function VoiceOverlay() {
       if (event.key !== 'Escape') return
       // The app-level Commander host owns Escape for a live call. Letting this
       // generic overlay cancel the same microphone turns a normal Stop into a
-      // false media-loss error.
-      if (commanderOwnsVoice) return
+      // false media-loss error. A confirmation is never the call's: the host
+      // leaves it alone, so Escape has to dismiss it here.
+      if (commanderOwnsVoice && !confirmation) return
       if (confirmation) void dismiss()
       else if (state === 'listening') void cancel()
       // Escape also stops speech. It is the one key a user reaches for when

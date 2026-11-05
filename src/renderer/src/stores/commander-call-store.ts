@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CallEvent, CallMediaEvent } from '@shared/commander-call'
 import { activityNow } from '@/lib/activity/activity-clock'
+import { readCallChoice, readCallText, rememberCallChoice } from '@/lib/commander-call/call-preferences'
 
 /**
  * The Commander call's lifetime (#84, epic #82 decision D5).
@@ -18,6 +19,7 @@ import { activityNow } from '@/lib/activity/activity-clock'
  */
 
 export type CommanderMicMode = 'open-mic' | 'push-to-talk'
+const MIC_MODES: readonly CommanderMicMode[] = ['open-mic', 'push-to-talk']
 export type CallStatus = 'off' | 'starting' | 'live'
 
 /** Private composer used by the app-level host for pause-delimited sentences. */
@@ -211,14 +213,16 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
 
   return {
     ...OFF,
-    micMode: 'open-mic', muted: false, inputDeviceId: '',
+    micMode: readCallChoice('mic-mode', MIC_MODES, 'open-mic'), muted: false, inputDeviceId: readCallText('input-device'),
     setMicMode: async (mode) => {
       if (get().status === 'starting' || mode === get().micMode) return
+      rememberCallChoice('mic-mode', mode)
       suspendMicrophone(); set({ micMode: mode, muted: false, replyCaption: '' })
       if (mode === 'open-mic') await resumeMicrophone()
     },
     setInputDevice: async (id) => {
       if (get().status === 'starting' || id === get().inputDeviceId) return
+      rememberCallChoice('input-device', id)
       suspendMicrophone(); set({ inputDeviceId: id })
       if (get().micMode === 'open-mic' && !get().muted) await resumeMicrophone()
     },
@@ -230,7 +234,13 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
     },
     beginTalk: async () => {
       const current = get()
-      if (current.status !== 'live' || current.micMode !== 'push-to-talk' || current.muted || current.pttHeld || current.pttFinishing) return
+      if (current.status !== 'live' || current.micMode !== 'push-to-talk' || current.muted || current.pttHeld) return
+      if (current.pttFinishing) {
+        // Released before the microphone opened: nothing was captured, so this
+        // press carries on with the same turn instead of being dropped.
+        if (current.micOpening) set({ pttHeld: true, pttFinishing: false })
+        return
+      }
       set({ pttHeld: true, pttDraft: '', userCaption: '' })
       if (driver?.isReplyActive?.()) get().interrupt('barge_in')
       else { driver?.stopPlayback(); if (current.sessionId) void driver?.bargeIn(current.sessionId).catch(() => {}) }
