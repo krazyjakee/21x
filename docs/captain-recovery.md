@@ -101,6 +101,10 @@ running Captain writes the user part before the backend has accepted anything.
 | `cancelled` | Returns the words and attachments to the composer. This is how Stop gives them back. |
 | anything else | Keeps it, and main keeps retrying. |
 
+A `failed` row stopped for provider review stays shut. Delivery is unknown there,
+so sending it again under the same key reports that failure and sends nothing;
+the person inspects the conversation and writes a new message.
+
 Only the user-facing send surfaces reopen a row. `sendMessage` does not, because
 internal senders replay their own stable keys and a failed wake must stay failed.
 

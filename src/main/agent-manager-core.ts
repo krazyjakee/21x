@@ -101,6 +101,8 @@ export const AGENT_SERVER_START_TIMEOUT_MS = 30_000
 export const AGENT_SESSION_START_TIMEOUT_MS = 60_000
 export const AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS = 1000
 const DELIVERY_CLAIM_MS = 60_000
+/** Ends `last_error` on a row stopped at an unknown delivery. It can never be sent again. */
+const DELIVERY_NEEDS_REVIEW = '; provider recovery requires review before any new delivery.'
 /** Sent to a session found idle after a restart cut its run short. */
 const RESTART_CONTINUE_PROMPT = 'The app restarted while you were working on this task. Continue from where you left off. If the task is already finished, say so briefly.'
 
@@ -5960,7 +5962,9 @@ export class AgentManager extends EventEmitter {
   reopenGaveUpDelivery(deliveryId: string | undefined): void {
     if (!deliveryId || !this.db.db || typeof this.db.db.prepare !== 'function') return
     const record = this.deliveries.getByKey(deliveryId)
-    if (record?.kind === 'agent_message' && record.state === 'failed') this.deliveries.reopen(record.id)
+    // Stopped for review is not gave up: the backend may have the message, so
+    // this row stays shut for the same reason as `timed_out`.
+    if (record?.kind === 'agent_message' && record.state === 'failed' && !record.lastError?.endsWith(DELIVERY_NEEDS_REVIEW)) this.deliveries.reopen(record.id)
   }
 
   /**
@@ -6136,7 +6140,7 @@ export class AgentManager extends EventEmitter {
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-timeout-${claimed.id}`,
           `${detail}. Backend acceptance is unknown; inspect the conversation before retrying.`)
       } else if (claimed.taskId && this.providerRecoveries.get(claimed.taskId)?.state === 'failed') {
-        this.deliveries.terminal(claimed.id, 'failed', `${detail}; provider recovery requires review before any new delivery.`)
+        this.deliveries.terminal(claimed.id, 'failed', `${detail}${DELIVERY_NEEDS_REVIEW}`)
       } else if (claimed.attemptCount >= 5) {
         this.deliveries.terminal(claimed.id, 'failed', detail)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-failed-${claimed.id}`,
