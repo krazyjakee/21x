@@ -90,6 +90,8 @@ it('projects only known startup failures into fixed redacted provisioning guidan
   expect(productionBootstrapMessage(status('INVALID_RESULT', 'production-manifest-digest'))).toContain('resources could not be verified')
   for (const phase of ['production-resources', 'production-manifest-build-digest', 'production-manifest-build-identity']) expect(productionBootstrapMessage(status('INVALID_RESULT', phase))).toContain('resources could not be verified')
   expect(productionBootstrapMessage(status('PROFILE_IN_USE', 'profile-lock'))).toContain('Another desktop service owns this profile')
+  expect(productionBootstrapMessage(status('ELECTRON_PROFILE_IN_USE', 'profile-lock'))).toContain('(the Electron version) is using this profile')
+  expect(productionBootstrapMessage(status('ELECTRON_PROFILE_IN_USE', 'profile-lock'))).toContain('Quit it, then open this app again')
   expect(productionBootstrapMessage(status('SECRET_STORE_UNAVAILABLE', 'credentials'))).toContain('protected credential store is unavailable')
   for (const [code, phase, text] of [
     ['PROFILE_LOW_DISK', 'resources', 'Free space'], ['PROFILE_DATABASE_LOCKED', 'database-preflight', 'database is busy'],

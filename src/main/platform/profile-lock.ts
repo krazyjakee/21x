@@ -1,8 +1,12 @@
 import Database from 'better-sqlite3'
-import { lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs'
+import { lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 
 export const PROFILE_LOCK_FILE = '.21x-profile-lock.sqlite'
+/** Present only while the Tauri app runs on an Electron profile. See `heldByTauri`. */
+export const TAURI_HOLDER_FILE = '.21x-tauri-holder'
+/** Long enough for two simultaneous hosts to settle on one winner, not both fail. */
+export const HOST_CLAIM_TIMEOUT_MS = 250
 export type ProfileLockErrorCode = 'PROFILE_IN_USE' | 'PROFILE_DUPLICATE_OWNER' | 'PROFILE_LOCK_INVALID' | 'PROFILE_LOCK_LOST' | 'PROFILE_LOW_DISK'
 export class ProfileLockError extends Error {
   constructor(readonly code: ProfileLockErrorCode) {
@@ -41,12 +45,49 @@ function regularUnaliasedFile(path: string, absentAllowed = false): void {
 }
 
 /**
+ * Tells the Electron app which app it lost to, so its refusal can name it. The
+ * SQLite lock alone decides ownership: this note is read only after a real
+ * PROFILE_IN_USE, so one left behind by a crash can neither block a start nor
+ * make a live process look dead, and no process ID is ever consulted. It is
+ * separate from the sentinel because closing a second descriptor on the sentinel
+ * would drop this process's POSIX lock.
+ */
+export function heldByTauri(profileRoot: string): boolean {
+  try { return lstatSync(join(profileRoot, TAURI_HOLDER_FILE)).isFile() } catch { return false }
+}
+
+/** Only an owner may call this. Failing costs a precise message, never safety. */
+export function clearTauriHolder(profileRoot: string): void {
+  try { rmSync(join(profileRoot, TAURI_HOLDER_FILE), { force: true }) } catch { /* the lock still protects the profile */ }
+}
+
+function markTauriHolder(profileRoot: string): void {
+  // Removed first, so a planted link is replaced rather than followed.
+  clearTauriHolder(profileRoot)
+  try { writeFileSync(join(profileRoot, TAURI_HOLDER_FILE), 'tauri\n', { flag: 'wx', mode: 0o600 }) } catch { /* as above */ }
+}
+
+/**
+ * One lease over a profile and the second profile it shares data with. Callers
+ * keep using the primary profile's paths; losing either lock loses the lease.
+ */
+export function jointProfileLock(primary: ProfileLock, shared: ProfileLock): ProfileLock {
+  return Object.freeze({
+    profileRoot: primary.profileRoot,
+    assertHeld() { primary.assertHeld(); shared.assertHeld() },
+    // A failed release keeps the primary too, so the caller still owns both.
+    release() { shared.release(); primary.release() }
+  })
+}
+
+/**
  * Cooperative lifetime ownership using SQLite's existing OS-backed VFS locks.
  * Only local filesystems with correct SQLite locking are supported. Retain the
  * sentinel permanently: unlinking/replacing it would create two lock domains.
  * No application database or credential provider is opened by this function.
+ * `tauriHolder` is for a Tauri session that runs on an Electron profile.
  */
-export function acquireProfileLock(profileRoot: string, options: { timeoutMs?: number } = {}): ProfileLock {
+export function acquireProfileLock(profileRoot: string, options: { timeoutMs?: number; tauriHolder?: boolean } = {}): ProfileLock {
   const timeoutMs = options.timeoutMs ?? 0
   if (!isAbsolute(profileRoot) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 1000) fail('PROFILE_LOCK_INVALID')
   let connection: Database.Database | undefined
@@ -68,6 +109,7 @@ export function acquireProfileLock(profileRoot: string, options: { timeoutMs?: n
     // Never accept a WAL sentinel: BEGIN EXCLUSIVE in WAL allows other readers.
     if (connection.pragma('journal_mode', { simple: true }) !== 'delete') fail('PROFILE_LOCK_INVALID')
     connection.exec('BEGIN EXCLUSIVE')
+    if (options.tauriHolder) markTauriHolder(canonical)
     const ownedConnection = connection
     const heldOwnerKey = ownerKey
     let released = false
@@ -82,6 +124,8 @@ export function acquireProfileLock(profileRoot: string, options: { timeoutMs?: n
       },
       release() {
         if (released) return
+        // Still the owner here, so this cannot remove a later owner's note.
+        if (options.tauriHolder) clearTauriHolder(canonical)
         // close rolls back the empty transaction and releases the kernel lock.
         // Keep registration on failure, so a second owner cannot bypass it.
         try { ownedConnection.close() } catch { fail('PROFILE_LOCK_LOST') }

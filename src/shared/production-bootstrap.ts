@@ -33,7 +33,8 @@ export interface ProductionLaunchDescriptor {
   buildIdentity: string
   resourceManifestSha256: string
   paths: { profileRoot: string; workspaceRoot: string; attachmentRoot: string; reposRoot: string; resourceRoot: string; tempRoot: string }
-  /** Electron profile to import into a new profile; chosen by trusted native setup only. */
+  /** Electron profile this one shares data with, on every launch: imported into a
+   * new profile, and locked for each session. Chosen by trusted native setup only. */
   legacyProfileRoot?: string
   capabilities: {
     workspaceFiles?: 'host' | 'unsupported'
@@ -63,7 +64,7 @@ export function isProductionLaunchDescriptor(value: unknown): value is Productio
   if (!isRecord(value) || !isRecord(value.capabilities)) return false
   const capabilities = value.capabilities
   return isRecord(value) && hasExactKeys(value, ['version', 'kind', 'launchId', 'profileId', 'profileIntent', 'buildIdentity', 'resourceManifestSha256', 'paths', 'capabilities'], ['legacyProfileRoot']) &&
-    (value.legacyProfileRoot === undefined || isAbsoluteHostPath(value.legacyProfileRoot) && value.profileIntent === 'create-new') &&
+    (value.legacyProfileRoot === undefined || isAbsoluteHostPath(value.legacyProfileRoot)) &&
     value.version === 1 && value.kind === 'production-private-launch' && isProductionLaunchId(value.launchId) && typeof value.profileId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(value.profileId) &&
     choice(value.profileIntent, ['create-new', 'load-authenticated-copy']) && typeof value.buildIdentity === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value.buildIdentity) && isResourceDigest(value.resourceManifestSha256) &&
     isRecord(value.paths) && hasExactKeys(value.paths, ['profileRoot', 'workspaceRoot', 'attachmentRoot', 'reposRoot', 'resourceRoot', 'tempRoot']) && Object.values(value.paths).every(isAbsoluteHostPath) &&

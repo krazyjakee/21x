@@ -6,6 +6,10 @@
  * one rename. A failure leaves no database behind, so the next launch simply
  * tries again, and the Electron app keeps working on its original data.
  *
+ * An imported profile still shares that profile's workspaces, repositories and
+ * attachments in place, so `holdElectronProfile` keeps the lock for every Tauri
+ * session, not only the import: the two apps must never run on them together.
+ *
  * Electron `safeStorage` values use Chromium's os_crypt scheme: a `v10`/`v11`
  * prefix, then AES-128-CBC with a PBKDF2-SHA1 key ("saltysalt") derived from
  * the password the app keeps in the OS credential store (v11 on Linux, v10 on
@@ -15,7 +19,7 @@ import { createDecipheriv, pbkdf2Sync } from 'node:crypto'
 import { existsSync, fsyncSync, lstatSync, openSync, closeSync, renameSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import SQLite from 'better-sqlite3'
-import { acquireProfileLock } from '../main/platform/profile-lock'
+import { acquireProfileLock, heldByTauri, HOST_CLAIM_TIMEOUT_MS, ProfileLockError, type ProfileLock } from '../main/platform/profile-lock'
 import type { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
 import { encryptRecordCredential, encryptSettingValue } from '../main/database/serializers'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
@@ -38,6 +42,8 @@ export const DROPPED_CREDENTIALS_SETTING = '__electron_import_cleared_credential
 export interface ElectronImportOptions {
   /** Electron userData directory chosen by trusted native setup. */
   profileRoot: string
+  /** The caller's hold on `profileRoot`, from `holdElectronProfile`. */
+  lock: Pick<ProfileLock, 'assertHeld'>
   /** Destination database path inside the new, locked, empty profile. */
   destination: string
   /** Already configured as the process secret storage for the destination profile. */
@@ -78,6 +84,18 @@ function realDirectory(path: string): boolean {
   try { const info = lstatSync(path); return info.isDirectory() && !info.isSymbolicLink() } catch { return false }
 }
 
+/**
+ * Claims the Electron profile for the whole session of a profile that shares its
+ * data. Only a live owner means "quit the other app": any other lock failure
+ * keeps its own code, and still stops the launch.
+ */
+export function holdElectronProfile(profileRoot: string): ProfileLock {
+  try { return acquireProfileLock(profileRoot, { timeoutMs: HOST_CLAIM_TIMEOUT_MS, tauriHolder: true }) } catch (error) {
+    if (error instanceof ProfileLockError && error.code === 'PROFILE_IN_USE' && !heldByTauri(profileRoot)) throw new ElectronProfileImportError('ELECTRON_PROFILE_IN_USE')
+    throw error
+  }
+}
+
 /** Copy, convert and publish. Returns false when there is nothing to import. */
 export async function importElectronProfile(options: ElectronImportOptions): Promise<boolean> {
   const source = join(options.profileRoot, '21x.db')
@@ -86,12 +104,9 @@ export async function importElectronProfile(options: ElectronImportOptions): Pro
   const staging = `${options.destination}.import`
   rmSync(staging, { force: true })
   rmSync(`${staging}-journal`, { force: true })
-  let lock: ReturnType<typeof acquireProfileLock>
-  try { lock = acquireProfileLock(options.profileRoot) } catch { throw new ElectronProfileImportError('ELECTRON_PROFILE_IN_USE') }
-  try {
-    const original = new SQLite(source, { readonly: true, fileMustExist: true, timeout: 5000 })
-    try { await original.backup(staging) } catch { throw new ElectronProfileImportError('ELECTRON_PROFILE_INVALID') } finally { original.close() }
-  } finally { lock.release() }
+  options.lock.assertHeld()
+  const original = new SQLite(source, { readonly: true, fileMustExist: true, timeout: 5000 })
+  try { await original.backup(staging) } catch { throw new ElectronProfileImportError('ELECTRON_PROFILE_INVALID') } finally { original.close() }
   try {
     const password = await options.loadSafeStoragePassword()
     let dropped = 0

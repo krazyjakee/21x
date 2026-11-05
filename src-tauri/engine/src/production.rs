@@ -237,7 +237,8 @@ pub struct ProductionDescriptor {
     pub resource_manifest_sha256: String,
     pub paths: ProductionPaths,
     pub capabilities: ProductionCapabilities,
-    /// Electron profile to import into a new profile, chosen by trusted native setup.
+    /// Electron profile this one shares data with, on every launch: imported into
+    /// a new profile and locked for each session. Chosen by trusted native setup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legacy_profile_root: Option<PathBuf>,
 }
