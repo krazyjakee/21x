@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const MAX_FRAME = 1_048_576
+const MAX_FRAME = 16 * 1024 * 1024
 const eventNames = new Set(['task:created', 'task:updated', 'task:deleted', 'project:changed', 'transcript:changed', 'skills:changed'])
 const errorCodes = new Set(['INVALID_FRAME', 'FRAME_TOO_LARGE', 'UNSUPPORTED_VERSION', 'STALE_EPOCH', 'INVALID_REQUEST', 'UNKNOWN_OPERATION', 'INVALID_ARGUMENTS', 'INVALID_RESULT', 'SKILL_VERSION_CONFLICT', 'INTERNAL_ERROR', 'BACKPRESSURE', 'TIMEOUT', 'CANCELLED', 'DISCONNECTED'])
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
