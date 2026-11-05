@@ -902,6 +902,11 @@ struct Inner {
     queue_bytes: Arc<Semaphore>,
     callback_slots: Arc<Semaphore>,
     callback_work: AtomicU64,
+    /// Set when this host asks the service to stop. Any other end is unexpected.
+    #[cfg(target_os = "linux")]
+    stop_requested: AtomicBool,
+    #[cfg(target_os = "linux")]
+    unexpected_end: Mutex<Option<String>>,
     #[cfg(test)]
     cancellation_budget: Duration,
     stop: watch::Sender<bool>,
@@ -2480,6 +2485,8 @@ impl ProductionEngine {
         }
     }
     pub async fn shutdown(&self) -> Result<(), EngineError> {
+        #[cfg(target_os = "linux")]
+        self.0.stop_requested.store(true, Ordering::SeqCst);
         self.0.stopping.store(true, Ordering::SeqCst);
         if !self.0.closed.load(Ordering::SeqCst) {
             self.request("engine.shutdown", json!({})).await?;
@@ -2491,6 +2498,16 @@ impl ProductionEngine {
             ));
         }
         self.wait_exited().await
+    }
+    /// Resolves once the service has been reaped, with its exit status when
+    /// nothing here asked it to stop. A failed start has no engine to ask.
+    #[cfg(target_os = "linux")]
+    pub async fn unexpected_end(&self) -> Option<String> {
+        let mut exited = self.0.exited.clone();
+        while !*exited.borrow() {
+            exited.changed().await.ok()?;
+        }
+        self.0.unexpected_end.lock().ok()?.take()
     }
     /// Trusted application-exit escalation only. Kills the bound scope, never
     /// fabricates a service drain ACK or authorizes an arbitrary process.
@@ -3165,6 +3182,8 @@ mod linux {
                 queue_bytes: Arc::new(Semaphore::new(64 * 1024 * 1024)),
                 callback_slots: Arc::new(Semaphore::new(128)),
                 callback_work: AtomicU64::new(0),
+                stop_requested: AtomicBool::new(false),
+                unexpected_end: Mutex::new(None),
                 #[cfg(test)]
                 cancellation_budget: DEADLINE,
                 stop,
@@ -3181,6 +3200,7 @@ mod linux {
                     }
                     tokio::select! {_=stop_rx.changed()=>break,_=tokio::time::sleep(Duration::from_millis(25))=>{}}
                 }
+                let unexpected = !supervise.0.stop_requested.load(Ordering::SeqCst);
                 supervise.0.ready.store(false, Ordering::SeqCst);
                 supervise.0.stopping.store(true, Ordering::SeqCst);
                 let viewer_retirement = supervise
@@ -3202,7 +3222,13 @@ mod linux {
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-                let reaped = child.wait().await.is_ok();
+                let status = child.wait().await;
+                if let (true, Ok(status)) = (unexpected, &status) {
+                    if let Ok(mut end) = supervise.0.unexpected_end.lock() {
+                        *end = Some(status.to_string());
+                    }
+                }
+                let reaped = status.is_ok();
                 supervise.join_viewer_retirement(viewer_retirement).await;
                 if reaped {
                     let _ = exited_tx.send(true);
@@ -3490,6 +3516,8 @@ mod tests {
                     queue_bytes: Arc::new(Semaphore::new(64 * 1024 * 1024)),
                     callback_slots: Arc::new(Semaphore::new(128)),
                     callback_work: AtomicU64::new(0),
+                    stop_requested: AtomicBool::new(false),
+                    unexpected_end: Mutex::new(None),
                     cancellation_budget: Duration::from_millis(20),
                     stop,
                     exited,
@@ -3538,6 +3566,34 @@ mod tests {
                     .unwrap()
                     .unwrap();
             }
+        }
+        #[tokio::test]
+        async fn an_unrequested_service_end_is_reported_once_after_the_reap() {
+            let mut fixture = Fixture::new(ui_host());
+            *fixture.engine.0.unexpected_end.lock().unwrap() = Some("signal: 9 (SIGKILL)".into());
+            let engine = fixture.engine.clone();
+            let waiting = tokio::spawn(async move { engine.unexpected_end().await });
+            tokio::task::yield_now().await;
+            assert!(!waiting.is_finished());
+            fixture._exited.send(true).unwrap();
+            assert_eq!(
+                timeout(Duration::from_secs(2), waiting)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .as_deref(),
+                Some("signal: 9 (SIGKILL)")
+            );
+            assert_eq!(fixture.engine.unexpected_end().await, None);
+            fixture.reap().await;
+        }
+        #[tokio::test]
+        async fn a_host_shutdown_marks_the_end_of_the_service_as_requested() {
+            let mut fixture = Fixture::new(ui_host());
+            assert!(!fixture.engine.0.stop_requested.load(Ordering::SeqCst));
+            let _ = timeout(Duration::from_millis(50), fixture.engine.shutdown()).await;
+            assert!(fixture.engine.0.stop_requested.load(Ordering::SeqCst));
+            fixture.reap().await;
         }
         #[tokio::test]
         async fn private_selection_group_cleanup_joins_exact_receipt_during_stopping_without_read_admission(

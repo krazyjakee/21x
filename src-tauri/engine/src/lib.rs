@@ -31,6 +31,8 @@ pub mod production_artifact_viewer;
 pub mod production_attachment_files;
 #[cfg(feature = "production-service")]
 pub mod production_attachment_selection;
+#[cfg(all(feature = "production-service", target_os = "linux"))]
+pub mod production_crash;
 #[cfg(feature = "production-service")]
 pub mod production_files;
 #[cfg(feature = "production-service")]

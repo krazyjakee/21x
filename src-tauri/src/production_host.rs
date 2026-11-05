@@ -11,6 +11,8 @@ use std::{
 };
 use tauri::{Emitter, EventTarget, Manager, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
+#[cfg(target_os = "linux")]
+use twentyonex_engine::production_crash::CrashLog;
 use twentyonex_engine::{
     production::{
         DelegatedCgroup, HostCapability, OptionalCapability, ProductionAttachmentHost,
@@ -990,6 +992,22 @@ fn ensure_private_dir(path: &std::path::Path) -> std::io::Result<()> {
         Err(error) => Err(error),
     }
 }
+/// Reached only after the service took the profile lock, so a refused launch
+/// writes nothing. Always the Tauri profile, whatever folders it shares.
+#[cfg(target_os = "linux")]
+fn open_crash_log(app: &tauri::AppHandle, engine: &ProductionEngine) -> Option<CrashLog> {
+    let base = app.path().app_local_data_dir().ok()?;
+    let log = CrashLog::new(&std::fs::canonicalize(base).ok()?.join("profile"));
+    let (writer, version) = (log.clone(), app.package_info().version.to_string());
+    tauri::async_runtime::spawn_blocking(move || writer.session_started(&version));
+    let (service, writer) = (engine.clone(), log.clone());
+    tauri::async_runtime::spawn(async move {
+        if let Some(status) = service.unexpected_end().await {
+            tauri::async_runtime::spawn_blocking(move || writer.service_ended(&status));
+        }
+    });
+    Some(log)
+}
 fn production_containment() -> Result<DelegatedCgroup, EngineError> {
     #[cfg(windows)]
     {
@@ -1427,6 +1445,11 @@ pub fn run() {
                 }
                 Err(_) => None,
             };
+            #[cfg(target_os = "linux")]
+            let crash_log = started
+                .as_ref()
+                .ok()
+                .and_then(|engine| open_crash_log(app.handle(), engine));
             let window_owner =
                 NativeWindowOwner::new(native_work.clone(), started.as_ref().ok().cloned());
             let state = match started {
@@ -1538,6 +1561,22 @@ pub fn run() {
                 // Geometry/menu platform failures must not turn a usable
                 // trusted window into a blank startup failure.
                 eprintln!("PRODUCTION_WINDOW_CONTROLS_UNAVAILABLE");
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let (retire_drops, retire_viewer, retire_app) =
+                    (drops.clone(), artifact_viewer.clone(), app.handle().clone());
+                let retire: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                    retire_drops.retire_document();
+                    retire_viewer.stop_document(&retire_app);
+                });
+                if window_owner
+                    .watch_renderer(&window, ui.clone(), ticket, crash_log, retire)
+                    .is_err()
+                {
+                    // A usable window stays usable; it only loses crash recovery.
+                    eprintln!("PRODUCTION_RENDERER_WATCH_UNAVAILABLE");
+                }
             }
             window.show()?;
             native_media::load(

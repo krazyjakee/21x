@@ -4,6 +4,10 @@ use super::{native_services::NativeWorkOwner, production_ui::NativeUiOwner};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, WebviewWindow};
+#[cfg(target_os = "linux")]
+use twentyonex_engine::production_crash::{
+    CrashLog, Recovery, RecoveryLimit, Termination, RELOAD_DELAY,
+};
 use twentyonex_engine::{
     production::{HostFuture, ProductionEngine},
     production_window::{self as policy, Action, MonitorArea, WindowState, Zoom},
@@ -233,6 +237,111 @@ impl NativeWindowOwner {
         install_linux_keyboard(window, self.clone(), ui)?;
         Ok(())
     }
+    /// A dead web process has no page to report it, so this is the only signal
+    /// that one has gone. `retire` ends what the document owned, as a navigation
+    /// does. The handler reads no Tauri getter and only starts the reload.
+    #[cfg(target_os = "linux")]
+    pub fn watch_renderer(
+        &self,
+        window: &WebviewWindow,
+        ui: NativeUiOwner,
+        ticket: u64,
+        log: Option<CrashLog>,
+        retire: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<(), EngineError> {
+        let (owner, captured) = (self.clone(), window.clone());
+        window
+            .with_webview(move |webview| {
+                use webkit2gtk::{WebProcessTerminationReason, WebViewExt};
+                let limit = std::cell::RefCell::new(RecoveryLimit::default());
+                webview
+                    .inner()
+                    .connect_web_process_terminated(move |_, reason| {
+                        let termination = match reason {
+                            WebProcessTerminationReason::Crashed => Termination::Crashed,
+                            WebProcessTerminationReason::ExceededMemoryLimit => {
+                                Termination::ExceededMemoryLimit
+                            }
+                            WebProcessTerminationReason::TerminatedByApi => {
+                                Termination::RequestedByApp
+                            }
+                            _ => Termination::Unknown,
+                        };
+                        if owner.assert_active().is_err() {
+                            return;
+                        }
+                        let Some(generation) = ui.document_terminated(ticket) else {
+                            return;
+                        };
+                        retire();
+                        let recovery = limit
+                            .borrow_mut()
+                            .decide(termination, std::time::Instant::now());
+                        record(&log, move |log| {
+                            log.renderer_terminated(termination, recovery)
+                        });
+                        if recovery == Recovery::Reload {
+                            owner.reload_terminated(
+                                captured.clone(),
+                                ui.clone(),
+                                ticket,
+                                generation,
+                                log.clone(),
+                            );
+                        }
+                    });
+            })
+            .map_err(|_| EngineError::new("DISCONNECTED"))
+    }
+    /// The reload half of Action::Reload, without its focus rule: a crash does not
+    /// wait for the user. navigation_current invalidates before dispatch, and only
+    /// the WebView reloads, so nothing the dead document sent can be sent again.
+    #[cfg(target_os = "linux")]
+    fn reload_terminated(
+        &self,
+        window: WebviewWindow,
+        ui: NativeUiOwner,
+        ticket: u64,
+        generation: u64,
+        log: Option<CrashLog>,
+    ) {
+        let owner = self.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(RELOAD_DELAY).await;
+            // A hidden window gets no document lease, so a page loaded now would
+            // stay without one. Reload when the window is shown again.
+            while matches!(window.is_visible(), Ok(false)) && owner.assert_active().is_ok() {
+                tokio::time::sleep(RELOAD_DELAY).await;
+            }
+            let app = window.app_handle().clone();
+            let work = owner.0.work.clone();
+            let outcome = work
+                .run(move || {
+                    let (send, done) = std::sync::mpsc::channel::<Result<(), EngineError>>();
+                    app.run_on_main_thread(move || {
+                        let result: Result<(), EngineError> = (|| {
+                            owner.assert_active()?;
+                            ui.assert_terminated_document(ticket, generation)?;
+                            ui.navigation_current(&window)?;
+                            window
+                                .reload()
+                                .map_err(|_| EngineError::new("INTERNAL_ERROR"))
+                        })();
+                        let _ = send.send(result);
+                    })
+                    .map_err(|_| EngineError::new("DISCONNECTED"))?;
+                    done.recv().map_err(|_| EngineError::new("DISCONNECTED"))?
+                })
+                .await;
+            // Stale or disconnected means a newer document or a quit, not a fault.
+            if let Err(error) = outcome {
+                let code = error.code;
+                if !matches!(code, "STALE_EPOCH" | "DISCONNECTED") {
+                    record(&log, move |log| log.renderer_reload_failed(code));
+                }
+            }
+        });
+    }
     fn assert_active(&self) -> Result<(), EngineError> {
         self.0.work.assert_open()?;
         if self
@@ -382,6 +491,14 @@ impl NativeWindowOwner {
                 })
                 .await;
         });
+    }
+}
+
+/// File work stays off the GTK thread, and a failed write ends here.
+#[cfg(target_os = "linux")]
+fn record(log: &Option<CrashLog>, write: impl FnOnce(&CrashLog) + Send + 'static) {
+    if let Some(log) = log.clone() {
+        tauri::async_runtime::spawn_blocking(move || write(&log));
     }
 }
 

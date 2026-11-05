@@ -174,6 +174,12 @@ describe('actual production application owner', () => {
     const services = await f.owner.start()
     expect(services.db.getProjects().length).toBeGreaterThan(0)
   })
+  it('starts a new profile that holds only the crash log of an interrupted first launch', async () => {
+    const f = await fixture(), logs = join(f.bootstrap.paths.profileRoot, 'logs')
+    mkdirSync(logs, { recursive: true }); writeFileSync(join(logs, 'crash.log'), 'left by a first launch that never finished')
+    const services = await f.owner.start()
+    expect(services.db.getProjects().length).toBeGreaterThan(0)
+  })
   describe('sharing the folders of an Electron profile', { timeout: 20_000 }, () => {
     function electronProfile(f: Awaited<ReturnType<typeof fixture>>, name = 'electron') {
       const root = join(f.root, name); mkdirSync(root)
@@ -303,11 +309,13 @@ describe('actual production application owner', () => {
       const f = await fixture(), electron = electronProfile(f)
       f.bootstrap.legacyImport = { profileRoot: electron, appName: '21x' }
       await holdProfileElsewhere(electron)
-      const before = profileListing(electron)
+      const before = profileListing(electron), monitors = process.listenerCount('uncaughtExceptionMonitor')
       await expect(f.owner.start()).rejects.toThrow('ELECTRON_PROFILE_IN_USE')
       expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'profile-lock', code: 'ELECTRON_PROFILE_IN_USE', owned: false })
       expect(f.store.create).not.toHaveBeenCalled()
       expect(existsSync(join(f.bootstrap.paths.profileRoot, '21x.db'))).toBe(false)
+      expect(existsSync(join(f.bootstrap.paths.profileRoot, 'logs'))).toBe(false)
+      expect(process.listenerCount('uncaughtExceptionMonitor')).toBe(monitors)
       expect(existsSync(f.bootstrap.paths.workspaceRoot)).toBe(false)
       expect(profileListing(electron)).toEqual(before)
     })
@@ -327,6 +335,18 @@ describe('actual production application owner', () => {
       const f = await fixture(), electron = electronProfile(f)
       await (await holdProfileElsewhere(electron)).crash()
       expect((await reopen(f, electron)).snapshot().phase).toBe('ready')
+    })
+
+    it.runIf(process.platform === 'linux')('logs a crash in the Tauri profile and never in the Electron folders it shares', async () => {
+      const f = await fixture(), electron = electronProfile(f), monitors = process.listenerCount('uncaughtExceptionMonitor')
+      const session = await reopen(f, electron)
+      expect(process.listenerCount('uncaughtExceptionMonitor')).toBe(monitors + 1)
+      const before = profileListing(electron)
+      process.emit('uncaughtExceptionMonitor', new Error('SYNTHETIC_CRASH'), 'uncaughtException')
+      expect(readFileSync(join(f.bootstrap.paths.profileRoot, 'logs', 'crash.log'), 'utf8')).toContain('Message: SYNTHETIC_CRASH')
+      expect(profileListing(electron)).toEqual(before)
+      await session.close()
+      expect(process.listenerCount('uncaughtExceptionMonitor')).toBe(monitors)
     })
 
     it('is not refused by a copy: the running app locks its folder, not the bytes', async () => {

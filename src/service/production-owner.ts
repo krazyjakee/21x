@@ -44,6 +44,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } fro
 import { DatabaseManager, type DatabaseRuntimeOptions } from '../main/database/manager'
 import { decryptSettingValue, decryptRecordCredential, encryptSettingValue } from '../main/database/serializers'
 import { acquireProfileLock, jointProfileLock, type ProfileLock } from '../main/platform/profile-lock'
+import { installProductionCrashLog } from './production-crash-log'
 import { initializeProtectedSecretStorage, type AuthenticatedSecretStorage, type ProtectedApplicationKeyStore } from '../main/platform/authenticated-secret-storage'
 import { configureSecretStorage, releaseSecretStorage } from '../main/platform/secret-storage'
 import { AgentManager } from '../main/agent-manager-core'
@@ -256,6 +257,7 @@ export class ProductionOwner {
   private connectorRuntime: ConnectorRuntime | null = null
   private connectorService: ConnectorBridgeService | null = null
   private removeReportBridge: (() => void) | null = null
+  private removeCrashLog: (() => void) | null = null
   private apiOwned = false
   private voiceActions: { authority: VoiceActionAuthority; owner: ProductionVoiceActionOwner } | null = null
   private readonly stopOwners: Array<() => void> = []
@@ -779,6 +781,9 @@ export class ProductionOwner {
       this.lock = jointProfileLock(this.lock, holdElectronProfile(legacy.profileRoot))
     }
     const profileRoot = this.lock.profileRoot
+    // After both locks: a refused launch has thrown above and logs nothing. This
+    // is always the Tauri profile, whatever folders it shares with Electron.
+    this.removeCrashLog = installProductionCrashLog(profileRoot)
     this.checkpoint('resources')
     const space = statfsSync(profileRoot)
     if (Number(space.bavail) * Number(space.bsize) < 8 * 1024 * 1024) throw new ProductionOwnerError('PROFILE_LOW_DISK')
@@ -790,7 +795,7 @@ export class ProductionOwner {
           !isAbsolute(runtime.args[0]) || !existsSync(runtime.args[0])) throw new ProductionOwnerError('MANAGED_MCP_RESOURCE_UNAVAILABLE')
     }
     if (this.bootstrap.connectors.kind === 'enabled' && !this.boundaries.connectorTransport) validateConnectorResources(this.bootstrap.paths.resourceRoot)
-    if (this.bootstrap.credentials.mode === 'create' && readdirSync(profileRoot).some(name => !['.21x-profile-lock.sqlite', '.21x-profile-lock.sqlite-journal', '.21x-profile-lock.sqlite-wal', '.21x-profile-lock.sqlite-shm', '.legacy-profile-root'].includes(name) &&
+    if (this.bootstrap.credentials.mode === 'create' && readdirSync(profileRoot).some(name => !['.21x-profile-lock.sqlite', '.21x-profile-lock.sqlite-journal', '.21x-profile-lock.sqlite-wal', '.21x-profile-lock.sqlite-shm', '.legacy-profile-root', 'logs'].includes(name) &&
       !isEmptyDescriptorRoot(profileRoot, name, this.bootstrap.paths))) {
       throw new ProductionOwnerError('PROFILE_NOT_EMPTY')
     }
@@ -1315,6 +1320,7 @@ export class ProductionOwner {
       this.storage.dispose(); this.storage = null
     }
     this.lock?.release(); this.lock = null
+    this.removeCrashLog?.(); this.removeCrashLog = null
     delete processRegistry[registryKey]
     this.services = null
     this.update('stopped', 'released')
