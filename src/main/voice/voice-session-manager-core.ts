@@ -14,6 +14,7 @@ import {
   VOICE_DEFAULT_SHORTCUT,
   VOICE_EVENTS,
   isVoiceNoise,
+  isVoiceThanks,
   VOICE_SETTING_KEYS,
   canTransition,
   type VoiceActionOutcome,
@@ -495,10 +496,10 @@ export class VoiceSessionManagerCore {
   private onSegment(turnId: string, text: string, index: number): void {
     if (turnId !== this.turnId) return
     const words = text.trim()
-    // Very short output, or only "Mm." / "Hmm.", is noise, not a sentence.
-    // Sending it would be worse than dropping it, because the renderer
-    // submits it straight away.
-    if (isVoiceNoise(words)) return
+    // Very short output, or only "Mm." / "Hmm." / "Thank you.", is noise, not a
+    // sentence. Sending it would be worse than dropping it, because the
+    // renderer submits it straight away.
+    if (isVoiceNoise(words) || isVoiceThanks(words)) return
     this.partial = ''
     this.segmentsSent += 1
     this.options.notify(VOICE_EVENTS.segment, {

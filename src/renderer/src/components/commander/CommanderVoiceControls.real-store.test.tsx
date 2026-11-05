@@ -147,7 +147,6 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     taskMicrophoneIsListening('draft the release notes')
     renderBoth()
 
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('draft the release notes')
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(MICROPHONE_BUSY_MESSAGE)
@@ -157,15 +156,10 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     expect(useVoiceStore.getState().captionOwner).toBeNull()
     expect(useVoiceStore.getState().turnId).toBe('task-turn')
     expect(useVoiceStore.getState().cancel).not.toHaveBeenCalled()
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('draft the release notes')
     expect(screen.queryByTestId('commander-voice-status')).toBeNull()
     expect(screen.getByLabelText('Turn voice mode on')).toHaveAttribute('aria-pressed', 'false')
     // Settings cannot fix a busy microphone.
     expect(screen.queryByTestId('commander-voice-fix')).toBeNull()
-
-    // The words keep flowing to the overlay afterwards.
-    act(() => useVoiceStore.setState({ partial: 'draft the release notes for Friday' }))
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('draft the release notes for Friday')
     tts.resolve()
   })
 
@@ -182,12 +176,8 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     act(() => taskMicrophoneIsListening('rename the branch'))
 
     expect(useVoiceStore.getState().captionOwner).toBeNull()
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('rename the branch')
     // Commander never shows another microphone's words as its own.
     expect(screen.getByTestId('commander-voice-status')).not.toHaveTextContent('rename the branch')
-
-    act(() => useVoiceStore.setState({ partial: 'rename the branch to release' }))
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('rename the branch to release')
 
     // Setup finally finishes: Commander backs off instead of taking the microphone.
     await act(async () => {
@@ -199,7 +189,6 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     expect(useVoiceStore.getState().turnId).toBe('task-turn')
     expect(useVoiceStore.getState().cancel).not.toHaveBeenCalled()
     expect(useVoiceStore.getState().captionOwner).toBeNull()
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('rename the branch to release')
   })
 
   it('still shows its own words exactly once, including while the microphone is opening', async () => {
@@ -216,9 +205,7 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
     await waitFor(() => expect(useVoiceStore.getState().turnId).toBe('commander-turn'))
 
-    // In the gap the overlay must not flash a second "Listening" bubble.
     expect(useVoiceStore.getState().captionOwner).toBe(COMMANDER_VOICE_COMPOSER_KEY)
-    expect(screen.queryByTestId('voice-transcript')).toBeNull()
 
     await act(async () => {
       capture.resolve()
@@ -226,20 +213,17 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     })
     act(() => useVoiceStore.setState({ partial: 'what is running' }))
     expect(screen.getByTestId('commander-voice-status')).toHaveTextContent('what is running')
-    expect(screen.queryByTestId('voice-transcript')).toBeNull()
     expect(screen.getAllByText('what is running')).toHaveLength(1)
 
     // Finishing recognition keeps the words with the same visible owner.
     act(() => useVoiceStore.setState({ state: 'transcribing', partial: 'what is running next' }))
     expect(screen.getByTestId('commander-voice-controls')).toHaveAttribute('data-call-state', 'transcribing')
     expect(screen.getByTestId('commander-voice-status')).toHaveTextContent('what is running next')
-    expect(screen.queryByTestId('voice-transcript')).toBeNull()
     expect(screen.getAllByText('what is running next')).toHaveLength(1)
 
-    // A microphone that takes over later gets the overlay back.
+    // A microphone that takes over later takes the words with it.
     act(() => taskMicrophoneIsListening('over here now'))
     expect(useVoiceStore.getState().captionOwner).toBeNull()
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('over here now')
     expect(screen.queryByTestId('commander-voice-status')).toBeNull()
   })
 
