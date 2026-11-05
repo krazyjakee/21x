@@ -127,6 +127,13 @@ describe('deleting an agent', () => {
     expect(h.db.getTask(open.id)?.agent_id).toBe(h.doomed.id)
   })
 
+  it('journals a project linked only by a completed recurring schedule, which still fires', () => {
+    const h = fixture()
+    h.task('Nightly', { is_recurring: true, recurrence_pattern: '0 3 * * *', status: TaskStatus.Completed })
+    h.db.removeAgent(h.doomed.id)
+    expect(h.db.db.prepare('SELECT 1 FROM project_status_journal WHERE project_id = ?').get(h.project.id)).toBeDefined()
+  })
+
   it('journals a project whose only task falls past the list shown to the user', () => {
     const h = fixture(); for (let index = 0; index < 25; index++) h.task(`Task ${index}`)
     const late = h.db.createProject({ name: 'Late' })!

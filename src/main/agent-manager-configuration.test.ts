@@ -215,6 +215,23 @@ describe('actual AgentManager configuration ownership', () => {
     })
     expect(removed).toBe(true); expect(h.adapter.destroySession).toHaveBeenCalledTimes(2)
   })
+  it('gives the removal what each agent had running, so it reaches the report and journal', async () => {
+    const h = fixture(), second = h.db.createAgent({ name: 'Second', config: { coding_agent: 'codex', model: 'other' } })!
+    h.db.updateTask(h.tasks[1].id, { agent_id: second.id })
+    await h.manager.startTask(h.tasks[0].id); await h.manager.startTask(h.tasks[1].id)
+    const reports = await h.manager.runAgentsDeletion([h.agent.id, second.id], live => [h.agent.id, second.id].map(id => h.db.removeAgent(id, live.get(id))))
+    expect(reports).toMatchObject([{ running: { total: 1, items: [{ id: h.tasks[0].id }] } }, { running: { total: 1, items: [{ id: h.tasks[1].id }] } }])
+    const row = h.db.db.prepare('SELECT decisions FROM project_status_journal WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(h.project.id) as { decisions: string }
+    expect(row.decisions).toContain('1 running session')
+  })
+  it('counts every agent\'s stopped session when a later step fails', async () => {
+    const h = fixture(), second = h.db.createAgent({ name: 'Second', config: { coding_agent: 'codex', model: 'other' } })!
+    h.db.updateTask(h.tasks[1].id, { agent_id: second.id })
+    await h.manager.startTask(h.tasks[0].id); await h.manager.startTask(h.tasks[1].id)
+    await expect(h.manager.runAgentsDeletion([h.agent.id, second.id], () => { throw new Error('tree refused') }))
+      .rejects.toThrow('the change could not be saved (tree refused). Already done: 2 sessions stopped.')
+    expect(h.db.getAgent(h.agent.id)).toBeDefined(); expect(h.db.getAgent(second.id)).toBeDefined()
+  })
   it('leaves every plugin agent in place when the removal fails', async () => {
     const h = fixture(), second = h.db.createAgent({ name: 'Second', config: { coding_agent: 'codex', model: 'other' } })!
     await expect(h.manager.runAgentsDeletion([h.agent.id, second.id], () => { throw new Error('tree refused') })).rejects.toThrow('tree refused')

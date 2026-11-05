@@ -130,8 +130,9 @@ function clearAgentReferences(manager: DatabaseManager, agentId: string, impact:
 
 /** Read before the row goes: the impact's lists are capped for display. */
 function affectedProjectIds(manager: DatabaseManager, agentId: string, live: AgentLiveWork, impact: AgentDeletionImpact): Set<string> {
-  const assigned = manager.db.prepare("SELECT DISTINCT project_id AS id FROM tasks WHERE agent_id = ? AND role = 'task' AND status <> ? AND project_id IS NOT NULL")
-    .all(agentId, TaskStatus.Completed) as Array<{ id: string }>
+  // A completed schedule still fires, so it still counts as affected.
+  const assigned = manager.db.prepare(`SELECT DISTINCT project_id AS id FROM tasks WHERE agent_id = ? AND role = 'task' AND project_id IS NOT NULL
+    AND (status <> ? OR (is_recurring = 1 AND recurrence_parent_id IS NULL))`).all(agentId, TaskStatus.Completed) as Array<{ id: string }>
   const projectIds = new Set(assigned.map(row => row.id))
   for (const id of [...live.running, ...live.queued]) { const task = manager.getTask(id); if (task?.project_id) projectIds.add(task.project_id) }
   for (const project of agentProjects(manager)) {

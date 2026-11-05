@@ -61,7 +61,7 @@ import type { SessionObservation } from './sessions/event-inbox'
 import { modelContextWindow } from './sessions/model-windows'
 import { CaptainRollover, captainRolloverSeed } from './sessions/captain-rollover'
 import type { HandoffRecord, HandoffTurn } from './sessions/handoff'
-import { AgentDeletionRefused, agentDeletionRefusalText, captainSessionAgentKey, NO_AGENT_LIVE_WORK, type AgentDeletionImpact, type AgentLiveWork } from '../shared/agent-deletion'
+import { AgentDeletionRefused, captainSessionAgentKey, NO_AGENT_LIVE_WORK, type AgentDeletionImpact, type AgentLiveWork } from '../shared/agent-deletion'
 import { ServiceProtocolError } from '../shared/service-protocol'
 
 // Default OpenCode server URL (matches database default)
@@ -1438,7 +1438,7 @@ export class AgentManager extends EventEmitter {
         const taskIds = deleting ? this.agentDeletionTaskIds(agentId) : this.agentOwnedTaskIds(agentId)
         const live = this.agentLiveWork(taskIds)
         let stopped = 0, withdrawn = 0
-        const refusal = (cause: string): AgentDeletionRefused => new AgentDeletionRefused(agentDeletionRefusalText(cause, stopped, withdrawn))
+        const refusal = (cause: string): AgentDeletionRefused => new AgentDeletionRefused(`The agent was not deleted because ${cause}.`, stopped, withdrawn)
         if ([...taskIds].some(taskId => this.taskGroupMutations.has(taskId) || this.taskLifecycleMutations.has(taskId))) throw new Error('Wait for task-group review or membership changes to finish before changing this agent.')
         if (disruptive) {
           for (const taskId of taskIds) this.cancelQueuedStart(taskId)
@@ -1460,7 +1460,8 @@ export class AgentManager extends EventEmitter {
         catch (error) {
           // A protocol or scope error is the caller's own outcome; the transport
           // would blank anything else on Tauri, so name it here for both hosts.
-          if (!deleting || error instanceof AgentDeletionRefused || error instanceof ServiceProtocolError || error instanceof TaskGroupRequestScopeError) throw error
+          if (error instanceof AgentDeletionRefused) throw error.after(stopped, withdrawn)
+          if (!deleting || error instanceof ServiceProtocolError || error instanceof TaskGroupRequestScopeError) throw error
           throw refusal(`the change could not be saved (${error instanceof Error ? error.message : String(error)})`)
         }
         if (disruptive) {
@@ -1502,10 +1503,15 @@ export class AgentManager extends EventEmitter {
   }
 
   /** Holds every named agent through its own stop, then runs one mutation that
-   * removes them together. A failure leaves all of them in place. */
-  runAgentsDeletion<T>(agentIds: readonly string[], mutation: () => T | Promise<T>): Promise<T> {
+   * removes them together, given what each had running. A failure leaves all of
+   * them in place, though their stopped work stays stopped. */
+  runAgentsDeletion<T>(agentIds: readonly string[], mutation: (live: ReadonlyMap<string, AgentLiveWork>) => T | Promise<T>, gathered = new Map<string, AgentLiveWork>()): Promise<T> {
     const [first, ...rest] = agentIds
-    return first ? this.runAgentConfigurationMutation(first, 'delete', () => this.runAgentsDeletion(rest, mutation)) : Promise.resolve().then(mutation)
+    if (!first) return Promise.resolve().then(() => mutation(gathered))
+    return this.runAgentConfigurationMutation(first, 'delete', live => {
+      gathered.set(first, live)
+      return this.runAgentsDeletion(rest, mutation, gathered)
+    })
   }
 
   /** The database's check on `removeAgent`. Holding the fence means Stop has run
@@ -1526,6 +1532,11 @@ export class AgentManager extends EventEmitter {
   private agentLiveWork(taskIds: ReadonlySet<string>): AgentLiveWork {
     const running = [...taskIds].filter(id => !!this.findSessionByTaskId(id) || this.sessionStarts.has(id) || this.admittedStarts.has(id))
     return { running, queued: [...taskIds].filter(id => !running.includes(id)) }
+  }
+
+  /** Read before an owner that stops work itself, which cannot report it afterwards. */
+  getAgentLiveWork(agentId: string): AgentLiveWork {
+    return this.agentLiveWork(this.agentDeletionTaskIds(agentId))
   }
 
   /** What deleting this agent would do right now, for the user to confirm. */

@@ -1,3 +1,4 @@
+import { refusalOf } from '../shared/agent-deletion'
 import type { DatabaseManager } from '../main/database/manager'
 import { ClaudePluginManager } from '../main/claude-plugin-manager'
 import type { AgentManager } from '../main/agent-manager-core'
@@ -254,7 +255,9 @@ export class ClaudePluginBackend {
     })
     this.bind('claudePlugin:uninstallPlugin', ([id], caller) => this.pluginAllowed(id, caller, 'delete') && this.uninstallAllowed(id, caller), ([id], caller, signal) => {
       const plugin = this.plugin(id)!
-      return this.mutation(plugin.name, caller, signal, () => this.pluginAllowed(id, caller, 'delete') && this.uninstallAllowed(id, caller), beforeEffect => { beforeEffect(); return manager.uninstallPlugin(id) })
+      // This owner stops the work before the effect runs, so read it first.
+      const live = new Map(pluginAgents(this.options.database, plugin.name).map(agent => [agent.id, this.options.agents.getAgentLiveWork(agent.id)]))
+      return this.mutation(plugin.name, caller, signal, () => this.pluginAllowed(id, caller, 'delete') && this.uninstallAllowed(id, caller), beforeEffect => { beforeEffect(); return manager.uninstallPlugin(id, live) }).catch(refusalOf)
     })
     for (const operation of ['claudePlugin:enablePlugin', 'claudePlugin:disablePlugin'] as const) this.bind(operation, ([id], caller) => this.pluginAllowed(id, caller, 'write'), ([id], caller, signal) => {
       const plugin = this.plugin(id)!

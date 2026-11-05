@@ -46,9 +46,23 @@ export interface AgentDeletionImpact {
  */
 export interface AgentDeletionRefusal { refused: string }
 export type AgentDeletionResult = AgentDeletionImpact | AgentDeletionRefusal | false
+/** One report per agent the plugin owned; empty when it owned none. */
+export type PluginUninstallResult = AgentDeletionImpact[] | AgentDeletionRefusal | false
 
-/** Thrown by the lifecycle owner; each host turns it into an AgentDeletionRefusal. */
-export class AgentDeletionRefused extends Error {}
+/**
+ * Thrown by the lifecycle owner; each host turns it into an AgentDeletionRefusal.
+ * It carries what had already happened, because a stop does not roll back: when
+ * one uninstall covers several agents, each layer adds its own count on the way out.
+ */
+export class AgentDeletionRefused extends Error {
+  constructor(readonly sentence: string, readonly stopped = 0, readonly withdrawn = 0) {
+    const done = [stopped ? `${plural(stopped, 'session')} stopped` : '', withdrawn ? `${plural(withdrawn, 'queued start')} withdrawn` : ''].filter(Boolean)
+    super(done.length ? `${sentence} Already done: ${done.join(', ')}.` : sentence)
+  }
+  after(stopped: number, withdrawn: number): AgentDeletionRefused {
+    return new AgentDeletionRefused(this.sentence, this.stopped + stopped, this.withdrawn + withdrawn)
+  }
+}
 
 export const AGENT_DELETION_REFUSAL_LIMIT = 2048
 
@@ -61,11 +75,8 @@ export const refusalOf = (error: unknown): AgentDeletionRefusal => {
 export const isAgentDeletionRefusal = (value: unknown): value is AgentDeletionRefusal =>
   !!value && typeof value === 'object' && typeof (value as AgentDeletionRefusal).refused === 'string'
 
-/** A refusal after some work already stopped has to say so; that does not roll back. */
-export function agentDeletionRefusalText(cause: string, stopped: number, withdrawn: number): string {
-  const done = [stopped ? plural(stopped, 'session') + ' stopped' : '', withdrawn ? plural(withdrawn, 'queued start') + ' withdrawn' : ''].filter(Boolean)
-  return `The agent was not deleted because ${cause}.${done.length ? ` Already done: ${done.join(', ')}.` : ''}`
-}
+export const isPluginUninstallResult = (value: unknown): value is PluginUninstallResult => value === false || isAgentDeletionRefusal(value)
+  || Array.isArray(value) && value.length <= 128 && value.every(isAgentDeletionImpact)
 
 /** Task ids held by the agent's lifecycle owners at the moment of deletion. */
 export interface AgentLiveWork { running: string[]; queued: string[] }

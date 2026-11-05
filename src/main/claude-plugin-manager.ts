@@ -8,6 +8,7 @@
 import { isAbsolute, join } from 'path'
 import { existsSync, lstatSync, rmSync } from 'fs'
 import { inspectPluginTree } from './claude-plugins/containment'
+import type { AgentDeletionImpact, AgentLiveWork } from '../shared/agent-deletion'
 
 import type {
   DatabaseManager,
@@ -353,7 +354,8 @@ export class ClaudePluginManager {
     }
   }
 
-  async uninstallPlugin(pluginId: string): Promise<boolean> {
+  /** `live` is what the lifecycle owner stopped, so reports and journals can say so. */
+  async uninstallPlugin(pluginId: string, live?: ReadonlyMap<string, AgentLiveWork>): Promise<AgentDeletionImpact[] | false> {
     this.assertOpen()
     const plugin = this.db.getInstalledPlugin(pluginId)
     if (!plugin) return false
@@ -367,8 +369,9 @@ export class ClaudePluginManager {
       directoryPresent = false
     }
     if (directoryPresent) inspectPluginTree(pluginDir)
+    let reports: AgentDeletionImpact[] = []
     const removed = this.db.db.transaction(() => {
-      removePluginResources(this.db, plugin.name)
+      reports = removePluginResources(this.db, plugin.name, live)
       return this.db.deleteInstalledPlugin(pluginId)
     })()
     if (existsSync(pluginDir)) {
@@ -379,7 +382,7 @@ export class ClaudePluginManager {
       }
     }
 
-    return removed
+    return removed ? reports : false
   }
 
   private assertUnambiguousResources(name: string): void {

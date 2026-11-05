@@ -1,3 +1,4 @@
+import { isPluginUninstallResult } from './agent-deletion'
 import type { DesktopCommandMap } from './desktop-operations'
 import type { OptionalResult } from './host-services'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from './service-protocol'
@@ -149,7 +150,7 @@ const descriptors: Record<ClaudePluginOperation, Descriptor> = {
   'claudePlugin:discoverPlugins': { keys: [], optional: ['searchQuery'], args: args => args.length <= 1 && (args[0] === undefined || pluginText(args[0], 256)), result: value => array(value, discovery, CLAUDE_PLUGIN_LIMITS.entries), project: value => Array.isArray(value) && value.length <= CLAUDE_PLUGIN_LIMITS.entries ? value.map(publicDiscovery) : fail('INVALID_RESULT') },
   'claudePlugin:getInstalledPlugins': { keys: [], args: args => !args.length, result: value => array(value, installed), project: value => Array.isArray(value) && value.length <= CLAUDE_PLUGIN_LIMITS.rows ? value.map(projectInstalled) : fail('INVALID_RESULT') },
   'claudePlugin:installPlugin': { keys: ['pluginName', 'marketplaceId'], optional: ['scope'], args: args => args.length >= 2 && args.length <= 3 && pluginName(args[0]) && pluginId(args[1]) && (args[2] === undefined || args[2] === 'user'), result: installed, project: projectInstalled },
-  'claudePlugin:uninstallPlugin': { keys: ['pluginId'], args: idArgs, result: value => typeof value === 'boolean' },
+  'claudePlugin:uninstallPlugin': { keys: ['pluginId'], args: idArgs, result: isPluginUninstallResult },
   'claudePlugin:enablePlugin': { keys: ['pluginId'], args: idArgs, result: value => value === undefined || installed(value), project: value => value === undefined ? undefined : projectInstalled(value) },
   'claudePlugin:disablePlugin': { keys: ['pluginId'], args: idArgs, result: value => value === undefined || installed(value), project: value => value === undefined ? undefined : projectInstalled(value) },
   'claudePlugin:getPluginResources': { keys: ['pluginId'], args: idArgs, result: value => unchanged(value, projectPluginResources), project: projectPluginResources }

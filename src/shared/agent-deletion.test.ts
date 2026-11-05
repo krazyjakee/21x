@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AGENT_DELETION_REFUSAL_LIMIT, AgentDeletionRefused, agentDeletionRefusalText, describeAgentDeletion, isAgentDeletionImpact, isAgentDeletionRefusal, refusalOf, type AgentDeletionImpact } from './agent-deletion'
+import { AGENT_DELETION_REFUSAL_LIMIT, AgentDeletionRefused, describeAgentDeletion, isPluginUninstallResult, isAgentDeletionImpact, isAgentDeletionRefusal, refusalOf, type AgentDeletionImpact } from './agent-deletion'
 
 const empty = { total: 0, items: [] }
 const impact = (fields: Partial<AgentDeletionImpact> = {}): AgentDeletionImpact => ({
@@ -44,8 +44,19 @@ describe('agent deletion wire shapes', () => {
     expect(isAgentDeletionRefusal({ refused: 'x'.repeat(3000) })).toBe(true)
   })
   it('says what had already stopped, and says nothing when nothing had', () => {
-    expect(agentDeletionRefusalText('the app is shutting down', 0, 0)).toBe('The agent was not deleted because the app is shutting down.')
-    expect(agentDeletionRefusalText('the app is shutting down', 1, 2)).toBe('The agent was not deleted because the app is shutting down. Already done: 1 session stopped, 2 queued starts withdrawn.')
+    expect(new AgentDeletionRefused('Not deleted.').message).toBe('Not deleted.')
+    expect(new AgentDeletionRefused('Not deleted.', 1, 2).message).toBe('Not deleted. Already done: 1 session stopped, 2 queued starts withdrawn.')
+  })
+  it('adds up what each layer stopped without repeating the sentence', () => {
+    expect(new AgentDeletionRefused('Not deleted.', 1, 0).after(2, 1).message).toBe('Not deleted. Already done: 3 sessions stopped, 1 queued start withdrawn.')
+  })
+  it('carries an uninstall report, a refusal or false, and nothing else', () => {
+    expect(isPluginUninstallResult([impact()])).toBe(true)
+    expect(isPluginUninstallResult([])).toBe(true)
+    expect(isPluginUninstallResult(false)).toBe(true)
+    expect(isPluginUninstallResult({ refused: 'named' })).toBe(true)
+    expect(isPluginUninstallResult(true)).toBe(false)
+    expect(isPluginUninstallResult([{ agent_id: 'partial' }])).toBe(false)
   })
   it('turns only a named refusal into a result, so real failures still surface', () => {
     expect(refusalOf(new AgentDeletionRefused('named'))).toEqual({ refused: 'named' })

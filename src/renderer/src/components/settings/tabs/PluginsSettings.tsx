@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { SettingsSection } from '../SettingsSection'
 import { usePluginMarketplaceStore } from '@/stores/plugin-marketplace-store'
+import { PluginUninstallDialog } from '../forms/PluginUninstallDialog'
 import { claudePluginApi } from '@/lib/ipc-client'
 import type { DiscoverablePlugin, InstalledPlugin, PluginResources } from '@/types'
 
@@ -25,7 +26,6 @@ export function PluginsSettings() {
     removeMarketplaceSource,
     refreshMarketplace,
     installPlugin,
-    uninstallPlugin,
     enablePlugin,
     disablePlugin,
     setSearchQuery
@@ -34,6 +34,7 @@ export function PluginsSettings() {
   const [activeTab, setActiveTab] = useState<'installed' | 'discover' | 'marketplaces'>('installed')
   const [showAddMarketplace, setShowAddMarketplace] = useState(false)
   const [newMarketplace, setNewMarketplace] = useState({ name: '', source_url: '', source_type: 'github' })
+  const [uninstalling, setUninstalling] = useState<{ id: string; name: string } | null>(null)
 
   // Load data on mount
   useEffect(() => {
@@ -143,7 +144,7 @@ export function PluginsSettings() {
                 <InstalledPluginCard
                   key={plugin.id}
                   plugin={plugin}
-                  onUninstall={() => uninstallPlugin(plugin.id)}
+                  onUninstall={() => setUninstalling({ id: plugin.id, name: plugin.name })}
                   onEnable={() => enablePlugin(plugin.id)}
                   onDisable={() => disablePlugin(plugin.id)}
                 />
@@ -187,7 +188,7 @@ export function PluginsSettings() {
                   plugin={plugin}
                   isInstalling={isInstalling === plugin.name}
                   onInstall={() => installPlugin(plugin.name, plugin.marketplace_id)}
-                  onUninstall={() => plugin.installed_plugin_id && uninstallPlugin(plugin.installed_plugin_id)}
+                  onUninstall={() => plugin.installed_plugin_id && setUninstalling({ id: plugin.installed_plugin_id, name: plugin.name })}
                 />
               ))
             )}
@@ -274,6 +275,7 @@ export function PluginsSettings() {
           </div>
         )}
       </SettingsSection>
+      {uninstalling && <PluginUninstallDialog key={uninstalling.id} plugin={uninstalling} onClose={() => setUninstalling(null)} />}
     </div>
   )
 }
@@ -291,7 +293,6 @@ function InstalledPluginCard({
   onEnable: () => void
   onDisable: () => void
 }) {
-  const [confirmUninstall, setConfirmUninstall] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [resources, setResources] = useState<PluginResources | null>(null)
   const [loadingResources, setLoadingResources] = useState(false)
@@ -367,20 +368,9 @@ function InstalledPluginCard({
               <Power className="h-3.5 w-3.5" />
             </Button>
           )}
-          {confirmUninstall ? (
-            <div className="flex items-center gap-1">
-              <Button variant="destructive" size="sm" onClick={() => { onUninstall(); setConfirmUninstall(false) }}>
-                Remove
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setConfirmUninstall(false)}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button variant="ghost" size="icon" onClick={() => setConfirmUninstall(true)} title="Uninstall plugin">
-              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-            </Button>
-          )}
+          <Button variant="ghost" size="icon" onClick={onUninstall} title="Uninstall plugin">
+            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+          </Button>
         </div>
       </div>
 

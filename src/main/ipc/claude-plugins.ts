@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import type { ClaudePluginManager } from '../claude-plugin-manager'
+import { refusalOf } from '../../shared/agent-deletion'
 import { required, type IpcDeps } from './deps'
 
 /** The Claude plugin marketplace: sources, catalogs and installed plugins. */
@@ -30,7 +31,7 @@ export function registerClaudePluginHandlers({ claudePluginManager, agentManager
   // stops first, and a refused uninstall leaves them all in place.
   ipcMain.handle('claudePlugin:uninstallPlugin', async (_, pluginId: string) => {
     const plugins = manager(), agentIds = plugins.getPluginResources(pluginId).agents.map((agent) => agent.id)
-    return agentsChanged(await agentManager.runAgentsDeletion(agentIds, () => plugins.uninstallPlugin(pluginId)))
+    return agentsChanged(await agentManager.runAgentsDeletion(agentIds, (live) => plugins.uninstallPlugin(pluginId, live)).catch(refusalOf))
   })
 
   ipcMain.handle('claudePlugin:enablePlugin', async (_, pluginId: string) => agentsChanged(await manager().enablePlugin(pluginId)))

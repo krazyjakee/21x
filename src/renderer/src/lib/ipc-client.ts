@@ -1,4 +1,4 @@
-import type { AgentDeletionImpact, AgentDeletionResult } from '@shared/agent-deletion'
+import type { AgentDeletionImpact, AgentDeletionResult, PluginUninstallResult } from '@shared/agent-deletion'
 import type { DesktopApi } from '@shared/desktop-api'
 import { desktopApi, desktopSupports, electronBrowserApi } from '@/lib/desktop-api'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
@@ -723,7 +723,7 @@ export const claudePluginApi = {
     return desktopApi.claudePlugins.installPlugin(pluginName, marketplaceId, scope)
   },
 
-  uninstallPlugin: (pluginId: string): Promise<boolean> => {
+  uninstallPlugin: (pluginId: string): Promise<PluginUninstallResult> => {
     return desktopApi.claudePlugins.uninstallPlugin(pluginId)
   },
 

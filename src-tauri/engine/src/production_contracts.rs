@@ -1053,8 +1053,10 @@ fn claude_result(operation: &str, value: &Value) -> bool {
             .as_array()
             .is_some_and(|items| items.len() <= 128 && items.iter().all(claude_market_row)),
         "claudePlugin:addMarketplaceSource" => claude_market_row(value),
-        "claudePlugin:removeMarketplaceSource" | "claudePlugin:uninstallPlugin" => {
-            value.is_boolean()
+        "claudePlugin:removeMarketplaceSource" => value.is_boolean(),
+        // The field-level contract is isPluginUninstallResult, on the service.
+        "claudePlugin:uninstallPlugin" => {
+            value.as_bool() == Some(false) || value.is_array() || value.is_object()
         }
         "claudePlugin:fetchCatalog" => claude_catalog(value),
         "claudePlugin:discoverPlugins" => value
