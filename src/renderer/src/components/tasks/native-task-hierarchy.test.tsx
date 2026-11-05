@@ -8,9 +8,9 @@ import type { SendHandler } from '@/components/agents/transcript/TranscriptCompo
 import type { TaskSession } from '@/stores/agent-store'
 import { SessionStatus } from '@shared/constants'
 const drag = vi.hoisted(() => ({ end: undefined as ((event: DragEndEvent) => void) | undefined }))
-const transcript = vi.hoisted(() => ({ send: undefined as SendHandler | undefined }))
+const transcript = vi.hoisted(() => ({ send: undefined as SendHandler | undefined, restart: undefined as (() => void) | undefined }))
 vi.mock('@dnd-kit/core', async original => ({ ...await original<typeof import('@dnd-kit/core')>(), DndContext: (props: { children: ReactNode; onDragEnd?: (event: DragEndEvent) => void }) => { drag.end = props.onDragEnd; return props.children } }))
-vi.mock('@/components/agents/AgentTranscriptPanel', () => ({ AgentTranscriptPanel: ({ onSend }: { onSend?: SendHandler }) => { transcript.send = onSend; return null } }))
+vi.mock('@/components/agents/AgentTranscriptPanel', () => ({ AgentTranscriptPanel: ({ onSend, onRestart }: { onSend?: SendHandler; onRestart?: () => void }) => { transcript.send = onSend; transcript.restart = onRestart; return null } }))
 function held<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(done => { resolve = done }), resolve } }
 const makeTask = (extra: Partial<Task> = {}): Task => ({
   id: 'task-1', title: 'Synthetic task', description: '', type: 'general', role: 'task', priority: 'medium', status: 'not_started', assignee: '',
@@ -47,7 +47,7 @@ beforeAll(async () => {
   agents = (await import('@/stores/agent-store')).useAgentStore
 })
 beforeEach(async () => {
-  values.clear(); handlers.clear(); invoke.mockClear(); drag.end = undefined; transcript.send = undefined
+  values.clear(); handlers.clear(); invoke.mockClear(); drag.end = undefined; transcript.send = undefined; transcript.restart = undefined
   values.set('skills:getAll', []); values.set('settings:get', null); values.set('tasks:getWorkspaceDir', '/synthetic'); values.set('artifacts:scan', []); values.set('agent:getAll', []); values.set('db:getTasks', [])
   handlers.set('db:updateTask', async payload => makeTask({ ...(payload.data as Partial<Task>), id: String(payload.id) }))
   handlers.set('agentSession:getTranscriptPage', async payload => { const page = payload.page as { mode: string; after: number }; return { version: 1, taskId: payload.taskId, mode: page.mode, after: page.after, parts: [], cursor: page.after, watermark: page.after, hasMore: false } })
@@ -545,20 +545,87 @@ it('does not unassign a retired task after its old Stop acknowledgement', async 
   await act(async () => { stop.resolve({ success: true }) })
   expect(assign).not.toHaveBeenCalled(); expect(screen.queryByRole('alert')).toBeNull()
 })
-it('refuses a native Fresh shortcut before Stop, session removal or runtime-field writes', async () => {
+const restartControls = () => screen.queryAllByRole('button', { name: /^restart( session| group)?$/i })
+const finishedSession = (sessionId: string | null = null) => act(() => {
+  agents.setState({ sessions: new Map([['task-1', { taskId: 'task-1', agentId: 'agent-1', sessionId, status: 'idle', messages: [{ id: 'retained-message', role: 'assistant', content: 'Retained transcript', timestamp: new Date() }] }]]) } as Parameters<typeof agents.setState>[0])
+})
+const queueRow = (state: string) => ({ id: 'queue-1', taskId: 'task-1', projectId: 'default', agentId: 'agent-1', reason: 'agent_limit', queuedAt: '2026-10-13T12:00:00.000Z', position: ['cancelled', 'failed', 'started', 'recovered'].includes(state) ? 0 : 1, priority: null, state, retryCount: 0, nextRetryAt: null, generation: 1, dependencyReason: null, recoveryCause: null, recoveryAction: null, recoveryResult: null, lastError: null })
+const retainedTask = (extra: Partial<Task> = {}) => makeTask({ agent_id: 'agent-1', session_id: 'retained-session', ...extra })
+it('starts one native Fresh through the exact start owner without Stop or a runtime-field write', async () => {
+  values.set('agent:getStartRecoveryState', null); values.set('agentSession:start', { sessionId: 'fresh-session' })
+  const update = vi.fn(async () => {})
+  render(<Workspace {...props} onUpdateTask={update} agents={[configuredAgent()]} task={retainedTask()} />)
+  await act(async () => {})
+  finishedSession()
+  const controls = restartControls()
+  act(() => { fireEvent.click(controls[0]); fireEvent.click(controls.at(-1)!) })
+  await waitFor(() => expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('fresh-session'))
+  expect(calls('agentSession:start')).toHaveLength(1)
+  expect(calls('agentSession:start')[0][1]).toMatchObject({ payload: { agentId: 'agent-1', taskId: 'task-1' } })
+  expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:stopByTaskId')).toHaveLength(0)
+  expect(update).not.toHaveBeenCalled(); expect(calls('db:updateTask')).toHaveLength(0)
+  expect(agents.getState().sessions.get('task-1')?.messages).toEqual([])
+})
+it.each(['cancelled', 'failed'])('offers no native Fresh after a %s start and the shortcut keeps the session', async state => {
   const { dispatchTaskShortcut, onShortcutFeedback, TaskShortcutAction } = await import('@/lib/keyboard-shortcuts')
-  const feedback = vi.fn(), off = onShortcutFeedback(feedback), update = vi.fn(async (id: string, data: Record<string, unknown>) => { await tasks.getState().updateTask(id, data) })
-  render(<Workspace {...props} onUpdateTask={update} agents={[configuredAgent()]} task={makeTask({ agent_id: 'agent-1', session_id: 'retained-session' })} />)
+  values.set('agent:getStartRecoveryState', queueRow(state))
+  const feedback = vi.fn(), off = onShortcutFeedback(feedback), update = vi.fn(async () => {})
+  render(<Workspace {...props} onUpdateTask={update} agents={[configuredAgent()]} task={retainedTask()} />)
   await act(async () => {})
-  act(() => {
-    agents.setState({ sessions: new Map([['task-1', { taskId: 'task-1', agentId: 'agent-1', sessionId: null, status: 'idle', messages: [{ id: 'retained-message', role: 'assistant', content: 'Retained transcript', timestamp: new Date() }] }]]) } as Parameters<typeof agents.setState>[0])
-    dispatchTaskShortcut({ action: TaskShortcutAction.RUN, taskId: 'task-1' })
-  })
-  await act(async () => {})
+  finishedSession()
+  await waitFor(() => expect(restartControls()).toHaveLength(0))
+  act(() => dispatchTaskShortcut({ action: TaskShortcutAction.RUN, taskId: 'task-1' }))
+  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('Send a message') })))
   expect(update).not.toHaveBeenCalled(); expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
   expect(agents.getState().sessions.get('task-1')?.messages[0].content).toBe('Retained transcript')
-  expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('unavailable') }))
   off()
+})
+it('uses the newest queue read, so a Stop after render cannot clear the transcript', async () => {
+  const { dispatchTaskShortcut, TaskShortcutAction } = await import('@/lib/keyboard-shortcuts')
+  values.set('agent:getStartRecoveryState', null)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={retainedTask()} />)
+  await act(async () => {})
+  finishedSession()
+  await waitFor(() => expect(restartControls().length).toBeGreaterThan(0))
+  values.set('agent:getStartRecoveryState', queueRow('cancelled'))
+  act(() => dispatchTaskShortcut({ action: TaskShortcutAction.RUN, taskId: 'task-1' }))
+  await waitFor(() => expect(calls('agent:getStartRecoveryState').length).toBeGreaterThan(1))
+  await act(async () => {})
+  expect(calls('agentSession:start')).toHaveLength(0)
+  expect(agents.getState().sessions.get('task-1')?.messages[0].content).toBe('Retained transcript')
+})
+it('withholds the native transcript Restart from a live session and refuses a stale handler before any effect', async () => {
+  values.set('agent:getStartRecoveryState', null)
+  render(<Workspace {...props} panelLayout="transcript-only" agents={[configuredAgent()]} task={retainedTask()} />)
+  await act(async () => {})
+  finishedSession()
+  await waitFor(() => expect(transcript.restart).toEqual(expect.any(Function)))
+  const stale = transcript.restart!
+  finishedSession('live-session')
+  await waitFor(() => expect(transcript.restart).toBeUndefined())
+  await act(async () => { stale() })
+  await waitFor(() => expect(calls('agent:getStartRecoveryState').length).toBeGreaterThan(1))
+  await act(async () => {})
+  expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
+  expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('live-session')
+})
+it('holds a refused native Fresh for review without replay or a runtime-field write', async () => {
+  values.set('agent:getStartRecoveryState', null); handlers.set('agentSession:start', async () => undefined)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={retainedTask()} />)
+  await act(async () => {})
+  finishedSession()
+  fireEvent.click(restartControls()[0])
+  await screen.findByRole('alert')
+  expect(restartControls()).toHaveLength(0)
+  expect(calls('agentSession:start')).toHaveLength(1); expect(calls('db:updateTask')).toHaveLength(0)
+})
+it.each([[{ status: 'completed' }], [{ role: 'captain' }], [{ role: 'task_group' }]] as Array<[Partial<Task>]>)('offers no native Fresh on %j', async extra => {
+  values.set('agent:getStartRecoveryState', null)
+  render(<Workspace {...props} agents={[configuredAgent()]} task={retainedTask(extra)} />)
+  await act(async () => {})
+  finishedSession()
+  await act(async () => {})
+  expect(restartControls()).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
 })
 it('keeps native incompatible-session Fresh UI unavailable', async () => {
   const { IncompatibleSessionDialog } = await import('./IncompatibleSessionDialog')
