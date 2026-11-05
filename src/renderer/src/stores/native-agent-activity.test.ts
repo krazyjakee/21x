@@ -193,7 +193,8 @@ it('keeps failed native agent recovery fenced and clears its error only after a 
   f.handlers.set('agent:getAll', async () => [agent()])
   await f.host.rehydrate()
   expect(f.host.hydrationPending).toBe(false)
-  expect(f.useAgentStore.getState()).toMatchObject({ agents: [agent()], error: null, isLoading: false })
+  // Recovery ends by announcing tasks:refresh, which starts one more list read.
+  await vi.waitFor(() => expect(f.useAgentStore.getState()).toMatchObject({ agents: [agent()], error: null, isLoading: false }))
 })
 it('retires pending agent snapshots with the document listener cohort', async () => {
   const pending = held<unknown>(); f.handlers.set('agent:getAll', () => pending.promise)
