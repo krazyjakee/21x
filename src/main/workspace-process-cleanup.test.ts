@@ -299,6 +299,38 @@ describe('an active task is an absolute veto', () => {
   })
 })
 
+describe('an orphan adopted by the session instead of pid 1', () => {
+  const adopted = (manager: string, state: { status?: string; exists: boolean } = { status: 'completed', exists: true }, orphansIgnoreTaskState = false) => ({
+    rows: parseProcessTable([' 10 77 20x-main', ` 77 1 ${manager}`, ' 500 77 ' + TSX_WATCH].join('\n')),
+    cwdRows: cwds([[500, WS('task_A', '/repo')]]),
+    workspacesRoot: ROOT,
+    ownPid: 10,
+    workspaceState: () => state,
+    orphansIgnoreTaskState
+  })
+
+  it('collects one left behind on a systemd desktop, though systemd is our own ancestor', () => {
+    const leaked = selectLeakedWorkspaceRoots(adopted('/usr/lib/systemd/systemd --user'))
+    expect(leaked.map((entry) => entry.pid)).toEqual([500])
+    expect(leaked[0].reason).toContain('orphaned (ppid 77)')
+  })
+
+  it('never signals the session manager itself', () => {
+    expect(selectLeakedWorkspacePids(adopted('/usr/lib/systemd/systemd --user'))).toEqual([500])
+  })
+
+  it('treats it as parentless at boot, like pid 1', () => {
+    const leaked = selectLeakedWorkspaceRoots(adopted('/lib/systemd/systemd --user', { status: 'agent_working', exists: true }, true))
+    expect(leaked[0].reason).toContain('parentless at startup')
+  })
+
+  it('leaves the child of any other ancestor alone, because that parent is alive and owns it', () => {
+    expect(selectLeakedWorkspaceRoots(adopted('/bin/bash'))).toEqual([])
+    expect(selectLeakedWorkspaceRoots(adopted('/usr/lib/systemd/systemd-logind'))).toEqual([])
+    expect(selectLeakedWorkspaceRoots(adopted('vim notes-about-systemd --user'))).toEqual([])
+  })
+})
+
 describe('selectLeakedWorkspacePids', () => {
   it('takes the whole tree, because the descendants hold the descriptors', () => {
     // Measured shape: a 49-fd orphaned `node` whose `firefox` child held 449 more.

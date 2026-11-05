@@ -20,13 +20,15 @@
  *   2. that workspace belongs to a task that is not being worked on, or to no
  *      task at all, or to a directory that has already been removed, and
  *   3. the process is either a descendant of THIS 20x instance (so no other
- *      instance can be using it) or has already lost its parent (ppid 1).
+ *      instance can be using it) or has already lost its parent: `ppid 1`, or
+ *      adopted by `systemd --user`, which is where a Linux desktop session
+ *      sends an orphan instead of pid 1.
  *
  * Rule 3 is copied from `selectKillableMcpPids` for the same reason: two 20x
  * instances on one machine (a packaged app and a dev build) are normal, and
  * quitting one must not kill the live children of the other.
  *
- * ONE CONSEQUENCE, STATED SO IT IS NOT A SURPRISE: some processes are `ppid 1`
+ * ONE CONSEQUENCE, STATED SO IT IS NOT A SURPRISE: some processes are parentless
  * BY DESIGN, `screen -dm` and `tmux` among them. One started inside a task
  * workspace whose task has finished is selected. That is intended and follows
  * from a policy that already exists — 20x deletes those directories on a
@@ -116,6 +118,21 @@ export function collectAncestorPids(rows: ProcessRow[], pid: number): Set<number
   return ancestors
 }
 
+/**
+ * The per-user service manager, which registers as a child subreaper. In a
+ * systemd desktop session it adopts every orphan of that session, so the parent
+ * a leaked process ends up with is this and not pid 1. Matched on the command
+ * and never on "one of our ancestors": a shell above us is a live owner of its
+ * children, and only this process adopts ones that nobody owns.
+ */
+const SESSION_SUBREAPER = /(?:^|\/)systemd --user(?:\s|$)/
+
+/** Whether a process has lost its parent: pid 1, or the session's subreaper. */
+function parentlessPids(rows: readonly ProcessRow[]): Set<number> {
+  const subreapers = new Set(rows.filter((row) => SESSION_SUBREAPER.test(row.command)).map((row) => row.pid))
+  return new Set(rows.filter((row) => row.ppid === 1 || subreapers.has(row.ppid)).map((row) => row.pid))
+}
+
 /** The pids that must never be signalled: this process and everything above it. */
 function protectedPids(rows: ProcessRow[], ownPid: number): Set<number> {
   const guarded = collectAncestorPids(rows, ownPid)
@@ -197,9 +214,10 @@ export type LeakSelection = {
    * then on, and the headline case — "20x is force-quit" — is the one case the
    * sweep could never collect.
    *
-   * Sound only at boot, and only for `ppid 1`: this instance has no descendants
-   * yet, so no agent of ours can own the process; and another live instance's
-   * agent children are parented to that instance, not to launchd. Our own
+   * Sound only at boot, and only for a parentless process: this instance has no
+   * descendants yet, so no agent of ours can own the process; and another live
+   * instance's agent children are parented to that instance, not to launchd or
+   * the session's subreaper. Our own
    * descendants are still judged on task state, so a live session is safe.
    */
   orphansIgnoreTaskState?: boolean
@@ -216,6 +234,7 @@ export function selectLeakedWorkspaceRoots(input: LeakSelection): LeakedProcess[
   const { rows, cwdRows, workspacesRoot, ownPid, workspaceState } = input
   const guarded = protectedPids(rows, ownPid)
   const ourDescendants = collectDescendantPids(rows, ownPid)
+  const parentless = parentlessPids(rows)
   const cwdByPid = new Map(cwdRows.map((row) => [row.pid, row.cwd]))
 
   const leaked: LeakedProcess[] = []
@@ -224,7 +243,7 @@ export function selectLeakedWorkspaceRoots(input: LeakSelection): LeakedProcess[
 
     // Scope: only what this instance owns, or what has already lost its owner.
     const ours = ourDescendants.has(row.pid)
-    if (!ours && row.ppid !== 1) continue
+    if (!ours && !parentless.has(row.pid)) continue
 
     const cwd = cwdByPid.get(row.pid)
     if (!cwd) continue
@@ -246,7 +265,7 @@ export function selectLeakedWorkspaceRoots(input: LeakSelection): LeakedProcess[
     else reason = `task ${state.status}`
     if (!reason) continue
 
-    leaked.push({ pid: row.pid, workspaceId, reason: `${reason}, ${ours ? 'our descendant' : 'orphaned (ppid 1)'}`, command: row.command })
+    leaked.push({ pid: row.pid, workspaceId, reason: `${reason}, ${ours ? 'our descendant' : `orphaned (ppid ${row.ppid})`}`, command: row.command })
   }
   return leaked
 }

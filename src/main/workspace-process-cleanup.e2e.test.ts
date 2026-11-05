@@ -16,7 +16,6 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  collectAncestorPids,
   readProcessSnapshot,
   selectLeakedWorkspacePids,
   selectPidsRootedInWorkspaces,
@@ -194,18 +193,17 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
     const before = await readProcessSnapshot()
     const orphan = before.rows.find((row) => row.pid === watcherPid)
     expect(orphan, 'the watcher is still in the process table').toBeDefined()
-    // Its launcher is dead, so its parent must now be either init or a
-    // subreaper — and a subreaper is by definition one of OUR ancestors. Any
-    // third answer would mean it is still owned by a live process, and the
-    // whole premise of the test would be wrong.
+    // Its launcher is dead, so its parent must now be either init or the
+    // session's subreaper. Any third answer would mean it is still owned by a
+    // live process, and the whole premise of the test would be wrong.
+    const adopter = before.rows.find((row) => row.pid === orphan!.ppid)
     const reparentedToInit = orphan!.ppid === 1
-    const adopters = collectAncestorPids(before.rows, process.pid)
-    expect(reparentedToInit || adopters.has(orphan!.ppid) || orphan!.ppid === process.pid, `unexpected new parent ${orphan!.ppid}`).toBe(true)
+    expect(reparentedToInit || /systemd --user/.test(adopter?.command ?? ''), `unexpected new parent ${orphan!.ppid}: ${adopter?.command}`).toBe(true)
 
-    // macOS and an ordinary Linux session reparent to pid 1, which is the case
-    // the sweep is built for. A Linux host with a subreaper in the session
-    // hands the child to that instead, and it is then caught by the descendant
-    // branch. Both are asserted; which one applies is the host's business.
+    // macOS reparents to pid 1. A systemd desktop session hands the child to
+    // `systemd --user` instead, which is an ancestor of this test and so does
+    // not make the watcher a descendant of it: the sweep has to recognise that
+    // parent. Both are asserted; which one applies is the host's business.
     console.log(`watcher ${watcherPid} reparented to ppid ${orphan!.ppid}`)
 
     // The boot sweep, as `app.whenReady` runs it.
@@ -217,7 +215,7 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
     // AFTER: selected as an orphan, and gone.
     const leak = swept.find((entry) => entry.pid === watcherPid)
     expect(leak, 'selected by the sweep').toBeDefined()
-    expect(leak!.reason).toContain(reparentedToInit ? 'orphaned (ppid 1)' : 'our descendant')
+    expect(leak!.reason).toContain(`orphaned (ppid ${orphan!.ppid})`)
     await settle()
     expect(alive(watcherPid), 'the watcher is gone after the boot sweep').toBe(false)
     expect((await readProcessSnapshot()).rows.some((row) => row.pid === watcherPid)).toBe(false)
