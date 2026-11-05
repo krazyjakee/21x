@@ -1,0 +1,28 @@
+const {app,BrowserWindow,session}=require('electron')
+const fs=require('node:fs'),assert=require('node:assert/strict')
+app.setPath('userData','/tmp/review169-browser-profile')
+app.commandLine.appendSwitch('disable-gpu')
+const pause=ms=>new Promise(r=>setTimeout(r,ms))
+app.whenReady().then(async()=>{
+ session.defaultSession.webRequest.onBeforeRequest((d,cb)=>cb({cancel:!d.url.startsWith('http://127.0.0.1:5219')&&!d.url.startsWith('devtools:')}))
+ const win=new BrowserWindow({width:1200,height:900,show:true,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}})
+ const wc=win.webContents,js=s=>wc.executeJavaScript(s)
+ wc.on('console-message',(_e,...a)=>console.log('renderer',...a))
+ await win.loadURL('http://127.0.0.1:5219')
+ for(let i=0;i<100;i++){if(await js('!!window.review'))break;await pause(100)}
+ assert(await js('!!window.review'),'fixture loaded');await js("review.ui.setState({sidebarView:'commander',activeModal:null})");await pause(250);win.focus();wc.focus()
+ const result={}
+ const key=async(k)=>{wc.sendInputEvent({type:'keyDown',keyCode:k});wc.sendInputEvent({type:'keyUp',keyCode:k});await pause(80)}
+ await js(`document.querySelector('[aria-label="Microphone options"]').focus()`)
+ await key('Space')
+ result.keyboardSummary=await js(`({open:document.querySelector('details').open,pttStarts:review.starts})`)
+ await js(`document.querySelector('[aria-label="Microphone options"]').click()`);await pause(100)
+ result.menu=await js(`(()=>{const d=document.querySelector('details'),p=d.lastElementChild,b=p.getBoundingClientRect(),t=document.querySelector('[role="toolbar"]'),r=t.getBoundingClientRect(),hit=document.elementFromPoint(b.left+20,b.top+20);return{open:d.open,popup:{top:b.top,bottom:b.bottom,left:b.left},toolbar:{top:r.top,bottom:r.bottom},overflowX:getComputedStyle(t).overflowX,overflowY:getComputedStyle(t).overflowY,hitInsidePopup:p.contains(hit),hit:hit?.outerHTML.slice(0,160)}})()`)
+ fs.writeFileSync('/tmp/review169-menu.png',(await wc.capturePage()).toPNG())
+ await js(`document.querySelector('[aria-label="End Commander call"]').focus()`);await key('Space')
+ result.keyboardEnd=await js(`({callStatus:review.call.getState().status,pttStarts:review.starts})`)
+ await js(`document.querySelector('[aria-label="End Commander call"]').focus()`);await key('Enter')
+ result.enterEnd=await js(`review.call.getState().status`); await js(`document.querySelector('[aria-label="End Commander call"]').click()`);await pause(100);result.clickEnd=await js(`review.call.getState().status`)
+ fs.writeFileSync('/tmp/review169-browser.json',JSON.stringify(result,null,2))
+ console.log('RESULT '+JSON.stringify(result));app.quit()
+}).catch(e=>{console.error(e);app.exit(1)})
