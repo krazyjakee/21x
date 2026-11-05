@@ -299,6 +299,14 @@ describe('useAgentStore', () => {
       expect(useAgentStore.getState().sessions.get('task-1')!.pendingSend).toBe(true)
     })
 
+    it('beginSend makes the row a first message has no row for, or "starting" never shows', () => {
+      useAgentStore.getState().beginSend('task-first')
+
+      expect(useAgentStore.getState().sessions.get('task-first')).toMatchObject({
+        sessionId: null, status: SessionStatus.IDLE, pendingSend: true, messages: []
+      })
+    })
+
     it('an interim IDLE status during resume does NOT clear pendingSend', () => {
       useAgentStore.getState().beginSend('task-1')
       statusCallback!({ sessionId: 'sess-1', agentId: 'agent-1', taskId: 'task-1', status: SessionStatus.IDLE })

@@ -82,6 +82,24 @@ A failed initial prompt transport can have accepted the prompt before reporting
 an error. Such an attempt stops with `prompt_delivery_unconfirmed`, preserving
 an auditable user decision instead of automatically replaying unknown effects.
 
+## Messages held in the Captain column
+
+A message that fails to send is already saved. The `delivery_outbox` row stays
+`pending`, and a 30-second sweep retries it with no click, starting the Captain
+if it has to, for up to five attempts. So the column must not promise that a
+held message waits for the user. It says main retries on its own, and it drops
+the message from its list when the outbox row's user part reaches the
+transcript, which is the only sign the renderer gets.
+
+The row goes terminal `failed` after five attempts. A person sending it again
+(Send now, Retry, or the next message, which sends older ones first) reopens it
+with a full set of attempts. Only the user-facing send surfaces do this.
+`sendMessage` does not, because internal senders replay their own stable keys
+and a failed wake must stay failed. `timed_out` stays shut, because the backend
+may have accepted it, and `cancelled` stays shut as a Stop boundary. Stop hands
+held words back to the composer. A timed-out message stays listed, and it no
+longer blocks the messages behind it.
+
 ## Active provider recovery (#172, schema v33)
 
 `agent_provider_recovery` gives an active turn a durable intent ID, generation,

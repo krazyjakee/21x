@@ -319,6 +319,7 @@ export class ProductionAgentBackend {
         const inputTask = taskId ?? manager.getSession(id)?.taskId
         if (!inputTask || !this.sendAllowed(id, taskId, agentId, attachments, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
         const key = this.deliveryId(inputTask, message, attachments, nonce, caller)
+        manager.reopenGaveUpDelivery(key)
         const result = await manager.sendMessage(id, message, taskId, agentId, attachments, key)
         this.verifySendResult(result, inputTask, key, caller)
         return { success: true, ...result }
@@ -326,6 +327,7 @@ export class ProductionAgentBackend {
     this.bind('agentSession:sendByTaskId', ([taskId, _message, attachments], caller) => this.sendAllowed('', taskId, undefined, attachments, caller), async ([taskId, message, attachments, nonce], caller) => {
       if (!this.sendAllowed('', taskId, undefined, attachments, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
       const key = this.deliveryId(taskId, message, attachments, nonce, caller)
+      manager.reopenGaveUpDelivery(key)
       const result = await manager.sendByTaskId(taskId, message, attachments, key)
       this.verifySendResult(result, taskId, key, caller)
       return { success: true, ...result }

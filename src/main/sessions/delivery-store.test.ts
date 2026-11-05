@@ -72,6 +72,22 @@ describe('DeliveryStore', () => {
     expect(store.getByKey('collision')?.payload).toBe('first')
   })
 
+  it('reopens a row that ran out of attempts with a full new set, and no other', () => {
+    const { db } = createTestDb()
+    const store = new DeliveryStore(db)
+    const failed = store.enqueue({ idempotencyKey: 'gave-up', kind: 'agent_message', payload: '{}' }).record
+    store.claim(failed.id, 'owner', 1_000)
+    store.terminal(failed.id, 'failed', 'five attempts')
+
+    expect(store.reopen(failed.id)).toMatchObject({ state: 'pending', attemptCount: 0, lastError: null })
+
+    for (const state of ['timed_out', 'cancelled'] as const) {
+      const shut = store.enqueue({ idempotencyKey: state, kind: 'agent_message', payload: '{}' }).record
+      store.terminal(shut.id, state, 'stays shut')
+      expect(store.reopen(shut.id)).toMatchObject({ state, lastError: 'stays shut' })
+    }
+  })
+
   it('retains pre-Stop rows as cancelled while leaving later rows enqueueable', () => {
     const { db } = createTestDb()
     const store = new DeliveryStore(db)

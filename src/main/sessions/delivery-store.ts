@@ -203,6 +203,19 @@ export class DeliveryStore {
     return result.changes ? this.get(id) : null
   }
 
+  /**
+   * Gives a row that ran out of attempts a full new set. Only for a person
+   * asking for it again: `timed_out` and `cancelled` stay shut, because the
+   * first may have been accepted and the second is a Stop boundary.
+   */
+  reopen(id: string): DeliveryRecord | null {
+    this.source.db.prepare(`
+      UPDATE delivery_outbox SET state = 'pending', attempt_count = 0, last_error = NULL, updated_at = ?
+      WHERE id = ? AND state = 'failed'
+    `).run(this.now(), id)
+    return this.get(id)
+  }
+
   terminal(id: string, state: 'failed' | 'timed_out' | 'cancelled', error: string): DeliveryRecord | null {
     this.source.db.prepare(`
       UPDATE delivery_outbox SET state = ?, claim_owner = NULL, claim_expires_at = NULL,

@@ -141,4 +141,16 @@ describe('CommandInput — one project\'s words stay with that project', () => {
     await act(async () => { view.rerender(box('alpha')) })
     expect(field().value).toBe('half a thought')
   })
+
+  it('keeps the text when the message could not be taken', async () => {
+    const send = vi.fn(() => false)
+    await act(async () => { render(<CommandInput onSendToCaptain={send} onCreateTask={vi.fn()} />) })
+    const field = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(field, { target: { value: 'not lost' } })
+
+    fireEvent.keyDown(field, { key: 'Enter' })
+
+    expect(send).toHaveBeenCalledWith('not lost')
+    expect(field.value).toBe('not lost')
+  })
 })

@@ -24,6 +24,8 @@ interface ProjectState {
   currentProjectId: string
   isLoaded: boolean
   error: string | null
+  /** The app has moved off the project it opened on. Set once and never cleared. */
+  leftLaunchProject: boolean
 
   /** Loads the projects and restores the persisted selection (Default when it is gone or archived). */
   init: () => Promise<void>
@@ -62,6 +64,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   currentProjectId: DEFAULT_PROJECT_ID,
   isLoaded: false,
   error: null,
+  leftLaunchProject: false,
 
   init: async () => {
     await rehydrateProjectDesktopState().catch(() => {})
@@ -148,6 +151,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   }
 }))
+
+// Here rather than in a view: the Captain panel is lazy, and must not miss a move
+// made before it mounts. The saved project arrives with isLoaded, so it is not one.
+useProjectStore.subscribe((state, previous) => {
+  if (previous.isLoaded && !state.leftLaunchProject && state.currentProjectId !== previous.currentProjectId) {
+    useProjectStore.setState({ leftLaunchProject: true })
+  }
+})
 
 const projectSnapshot = createDesktopSnapshotReader({
   read: async () => {

@@ -12,7 +12,8 @@ import type { Agent } from '@/types'
 const VOICE_COMPOSER_KEY = DASHBOARD_COMPOSER_KEY
 
 interface CommandInputProps {
-  onSendToCaptain: (message: string) => void
+  /** Returns false when it could not take the message, which then stays in the box. */
+  onSendToCaptain: (message: string) => boolean | void
   onCreateTask: (text: string) => void
   /** Keeps unsent text per project; the box is remounted for each one. */
   draftKey?: string
@@ -79,7 +80,7 @@ export function CommandInput({ onSendToCaptain, onCreateTask, draftKey }: Comman
     // expectation straight after this, so the conversation loop is unaffected;
     // a typed one does not, and its reply stays silent.
     void voiceApi.answerNotExpected()
-    onSendToCaptain(trimmed)
+    if (onSendToCaptain(trimmed) === false) return
     setText('')
     if (textareaRef.current) {
       textareaRef.current.value = ''

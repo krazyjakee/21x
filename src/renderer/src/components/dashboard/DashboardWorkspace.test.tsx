@@ -6,6 +6,7 @@ import { DashboardWorkspace } from './DashboardWorkspace'
 import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useProjectStore } from '@/stores/project-store'
+import { useCoordinatorStore } from '@/stores/coordinator-store'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import { agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
@@ -461,6 +462,42 @@ describe('DashboardWorkspace', () => {
     expect(input).toHaveValue('')
   })
 
+})
+
+describe('DashboardWorkspace — the box while the Captain id loads', () => {
+  const box = () => screen.getByPlaceholderText(/^Ask Captain/) as HTMLTextAreaElement
+  const prefilled = vi.fn()
+
+  beforeEach(() => {
+    prefilled.mockClear()
+    window.addEventListener('captain-prefill', prefilled)
+  })
+  afterEach(() => {
+    window.removeEventListener('captain-prefill', prefilled)
+    useCoordinatorStore.setState({ captainTaskIds: {} })
+  })
+
+  it('keeps the message in the box when there is no Captain to give it to', async () => {
+    useCoordinatorStore.setState({ captainTaskIds: {} })
+    render(<DashboardWorkspace />)
+    fireEvent.change(box(), { target: { value: 'not yet' } })
+
+    fireEvent.keyDown(box(), { key: 'Enter' })
+
+    expect(box().value).toBe('not yet')
+    expect(prefilled).not.toHaveBeenCalled()
+  })
+
+  it('sends and clears once the Captain is known', async () => {
+    useCoordinatorStore.setState({ captainTaskIds: { [DEFAULT_PROJECT_ID]: 'captain-row' } })
+    render(<DashboardWorkspace />)
+    fireEvent.change(box(), { target: { value: 'go ahead' } })
+
+    fireEvent.keyDown(box(), { key: 'Enter' })
+
+    expect(box().value).toBe('')
+    expect(prefilled).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('DashboardWorkspace — readability', () => {

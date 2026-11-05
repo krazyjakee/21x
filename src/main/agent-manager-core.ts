@@ -5854,6 +5854,18 @@ export class AgentManager extends EventEmitter {
    * Tries to find a live in-memory session first, then falls back to
    * sendMessage's built-in resume/create logic.
    */
+  /**
+   * For the user-facing send surfaces only. A person sending a held message
+   * again is a new request, so a delivery that used up its bounded retries gets
+   * another set. It is not in `sendMessage` because internal senders replay
+   * their own stable keys there, and a failed wake must stay failed.
+   */
+  reopenGaveUpDelivery(deliveryId: string | undefined): void {
+    if (!deliveryId || !this.db.db || typeof this.db.db.prepare !== 'function') return
+    const record = this.deliveries.getByKey(deliveryId)
+    if (record?.kind === 'agent_message' && record.state === 'failed') this.deliveries.reopen(record.id)
+  }
+
   async sendByTaskId(
     taskId: string,
     message: string,

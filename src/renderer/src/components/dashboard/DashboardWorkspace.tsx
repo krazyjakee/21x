@@ -1,6 +1,8 @@
 import { useCallback } from 'react'
 import { useUIStore } from '@/stores/ui-store'
-import { useProjectStore } from '@/stores/project-store'
+import { getCurrentProjectId, useProjectStore } from '@/stores/project-store'
+import { getCaptainTaskId, useCoordinatorStore } from '@/stores/coordinator-store'
+import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import { HeroSection } from './HeroSection'
 import { CommandInput } from './CommandInput'
 import { TaskSearch } from './TaskSearch'
@@ -17,11 +19,18 @@ export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspacePro
   const projectId = useProjectStore((s) => s.currentProjectId)
 
   // Handler: send message to Captain and open the drawer
-  const handleSendToCaptain = useCallback((message: string) => {
+  const handleSendToCaptain = useCallback((message: string): boolean => {
+    // Nowhere to deliver it yet. A load that failed is not retried on its own, so ask again.
+    if (!getCaptainTaskId()) {
+      void useCoordinatorStore.getState().load(getCurrentProjectId())
+      dispatchShortcutFeedback('This project’s Captain is not ready yet. Your message is still in the box.', true)
+      return false
+    }
     // Open the orchestrator panel — the panel itself handles sending messages
     setShowOrchestrator(true)
     // We dispatch a custom event so the OrchestratorPanel can pick up the message
     window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message } }))
+    return true
   }, [setShowOrchestrator])
 
   // Handler: create task from command input text

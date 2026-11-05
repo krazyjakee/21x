@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { X, FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
-import { useAgentStore, SessionStatus } from '@/stores/agent-store'
+import { useAgentStore, SessionStatus, type AgentMessage } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
 import { agentApi, captainRuntimeApi, settingsApi } from '@/lib/ipc-client'
@@ -13,6 +13,10 @@ import { useUIStore } from '@/stores/ui-store'
 import type { Agent } from '@/types'
 import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
+import { keepComposerDraft, readComposerDraft } from '@/lib/composer-drafts'
+import { dispatchShortcutFeedback, insertIntoComposer } from '@/lib/keyboard-shortcuts'
+import { CAPTAIN_COMPOSER_KEY } from '@/lib/voice-dictation-target'
+import { CaptainProjectSelect } from './CaptainProjectSelect'
 import type { CaptainRuntimeState } from '@shared/captain-runtime'
 
 /** Start the agent at app start, so the first sentence does not wait for it. */
@@ -35,6 +39,25 @@ interface QueuedCaptainMessage {
   message: string
   deliveryId: string
   options?: { attachments?: ComposerAttachment[] }
+  sentAt: number
+}
+
+/**
+ * The held messages that have reached their Captain since.
+ *
+ * Main saved each of these before the send failed and retries it on its own
+ * timer. Nothing tells the panel when one lands, except the message itself
+ * appearing in the transcript as the user part of its outbox row.
+ */
+function deliveredHeldMessages(held: QueuedCaptainMessage[], messages: AgentMessage[]): QueuedCaptainMessage[] {
+  const parts = messages.filter((message) => message.role === 'user' && message.id.startsWith('delivery-'))
+  const matched = new Set<string>()
+  return held.filter((entry) => {
+    const part = parts.find((candidate) => !matched.has(candidate.id) && candidate.timestamp.getTime() >= entry.sentAt &&
+      (candidate.content === entry.message || candidate.content.startsWith(`${entry.message}\n\nAttached to this message:`)))
+    if (part) matched.add(part.id)
+    return !!part
+  })
 }
 
 interface OrchestratorPanelProps {
@@ -64,18 +87,13 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   }, [])
   /** A late result belongs to its project: it must not land on the Captain shown since. */
   const showsProject = useCallback((id: string) => mountedRef.current && captainViewRef.current.projectId === id, [])
-  // Set once the app has moved off the project it opened on. The restore of the
-  // saved project at launch arrives with isLoaded, so it is not a move.
-  const leftLaunchProjectRef = useRef(false)
-  useEffect(() => useProjectStore.subscribe((state, previous) => {
-    if (previous.isLoaded && state.currentProjectId !== previous.currentProjectId) leftLaunchProjectRef.current = true
-  }), [])
   const { start, stop, sendMessage, approve } = useAgentSession(captainTaskId ?? undefined)
   const currentSession = useAgentStore((state) => (captainTaskId ? state.sessions.get(captainTaskId) : undefined))
   const resetSession = useAgentStore((state) => state.resetSession)
   const fetchProjects = useProjectStore((state) => state.fetchProjects)
   const setCurrentProject = useProjectStore((state) => state.setCurrentProject)
   const projects = useProjectStore((state) => state.projects)
+  const projectsLoaded = useProjectStore((state) => state.isLoaded)
   const drawerOpen = useUIStore((state) => state.showOrchestrator)
   /** The start in flight and whose it is, shared so a message can wait for it instead of racing. */
   const startingRef = useRef<{ taskId: string; promise: Promise<void> } | null>(null)
@@ -87,10 +105,12 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const [startFailure, setStartFailure] = useState<StartFailure | null>(null)
   /**
    * Messages sent while the Captain could not be started, per Captain row.
-   * Each is delivered once, in order, when a start succeeds.
+   * These are what the panel knows about: main owns delivery, keeps retrying
+   * them on its own, and a successful start or Send now also pushes them.
    */
   const queuedRef = useRef(new Map<string, QueuedCaptainMessage[]>())
-  const drainingRef = useRef(false)
+  /** The drain in flight for each Captain, so one Captain's slow start holds up only itself. */
+  const drainsRef = useRef(new Map<string, Promise<void>>())
   const [queuedCount, setQueuedCount] = useState(0)
 
   // Read the preference before warming anything: a user who switched this off
@@ -169,6 +189,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         selectedAgentIdRef.current = next.agentId
         setSelectedAgentId(next.agentId)
         await fetchProjects()
+        if (showsProject(projectId)) void deliverHeld().catch((err: unknown) => console.error('Failed to deliver held Captain messages:', err))
         return
       }
       const restored = next.lastGoodAgentId ?? previous
@@ -266,45 +287,100 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     [captainTaskId, sendMessage, approve]
   )
 
-  /** Sends what was held while the Captain was down, oldest first, each once. */
-  const drainQueue = useCallback(async () => {
+  const showHeldCount = useCallback((taskId: string) => {
+    if (captainViewRef.current.taskId === taskId) setQueuedCount(queuedRef.current.get(taskId)?.length ?? 0)
+  }, [])
+
+  /**
+   * Sends what is held for this Captain, oldest first. A message that fails
+   * stays held and the rest still go, so one main has given up on cannot block
+   * those behind it. A second call joins the drain already running.
+   */
+  const drainQueue = useCallback((): Promise<void> => {
     const taskId = captainTaskId
-    if (!taskId || drainingRef.current) return
+    if (!taskId) return Promise.resolve()
+    const running = drainsRef.current.get(taskId)
+    if (running) return running
     const queue = queuedRef.current.get(taskId)
-    if (!queue?.length) return
-    drainingRef.current = true
-    try {
-      while (queue.length > 0) {
-        // Taken off before sending, so a second drain cannot send it again.
-        const next = queue.shift() as QueuedCaptainMessage
-        if (captainViewRef.current.taskId === taskId) setQueuedCount(queue.length)
+    if (!queue?.length) return Promise.resolve()
+    const drain = (async () => {
+      const failures: unknown[] = []
+      for (const next of [...queue]) {
+        // Main may have delivered it while an earlier one was going out.
+        if (!queue.includes(next)) continue
         try {
           await deliver(next)
+          if (queue.includes(next)) queue.splice(queue.indexOf(next), 1)
+          showHeldCount(taskId)
         } catch (err) {
-          queue.unshift(next)
-          if (captainViewRef.current.taskId === taskId) setQueuedCount(queue.length)
-          throw err
+          failures.push(err)
         }
       }
-    } finally {
-      drainingRef.current = false
+      if (failures.length > 0) throw failures[0]
+    })().finally(() => {
+      drainsRef.current.delete(taskId)
+    })
+    drainsRef.current.set(taskId, drain)
+    return drain
+  }, [captainTaskId, deliver, showHeldCount])
+
+  /** After the user brought a Captain up by hand: what warming does at launch, for what it holds. */
+  const deliverHeld = useCallback(async () => {
+    if (!captainTaskId || !queuedRef.current.get(captainTaskId)?.length) return
+    if (await ensureSession()) await drainQueue()
+  }, [captainTaskId, ensureSession, drainQueue])
+
+  // Main's own retry landed: this Captain is no longer holding that message.
+  const captainMessages = currentSession?.messages
+  useEffect(() => {
+    const queue = captainTaskId ? queuedRef.current.get(captainTaskId) : undefined
+    if (!queue?.length || !captainMessages?.length) return
+    const delivered = deliveredHeldMessages(queue, captainMessages)
+    if (delivered.length === 0) return
+    for (const entry of delivered) queue.splice(queue.indexOf(entry), 1)
+    setQueuedCount(queue.length)
+    if (queue.length === 0) setStartFailure(null)
+  }, [captainTaskId, captainMessages])
+
+  // Stop cancels undelivered messages in main, so nothing held here can go any
+  // more. The words go back in the box instead of staying on a dead button.
+  const handleStop = useCallback(async () => {
+    const taskId = captainTaskId
+    await stop()
+    const held = taskId ? queuedRef.current.get(taskId) : undefined
+    if (!taskId || !held?.length) return
+    const words = held.splice(0).map((entry) => entry.message).join('\n\n')
+    showHeldCount(taskId)
+    const field = captainViewRef.current.taskId === taskId
+      ? document.querySelector<HTMLTextAreaElement>(`[data-voice-composer="${CAPTAIN_COMPOSER_KEY}"] textarea`)
+      : null
+    if (field) {
+      insertIntoComposer(field, words)
+      return
     }
-  }, [captainTaskId, deliver])
+    const draft = readComposerDraft(taskId)
+    keepComposerDraft(taskId, { ...draft, text: draft?.text ? `${draft.text}\n\n${words}` : words })
+  }, [captainTaskId, stop, showHeldCount])
 
   // Send message - the session is usually warm already, so this just sends.
-  // When the Captain cannot be started the message is held, not dropped, and
-  // goes out after a successful retry or switch.
+  // When the Captain cannot be started the message is held, not dropped. Main
+  // keeps retrying it, and a successful retry or switch sends it at once.
   const handleSendMessage = useCallback(
     async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
       const outgoing: QueuedCaptainMessage = {
         message,
         deliveryId: `captain-drawer:${crypto.randomUUID()}`,
-        options
+        options,
+        sentAt: Date.now()
       }
       const taskId = captainTaskId
-      if (!taskId) return
+      if (!taskId) {
+        dispatchShortcutFeedback('Could not send the message — this project’s Captain is not ready yet', true)
+        return
+      }
       try {
-        // A failing older retry must not prevent main from owning this message.
+        // Older held messages go first. A failing one must not prevent main
+        // from owning this message.
         await drainQueue().catch(() => {})
         await deliver(outgoing)
       } catch (err) {
@@ -338,6 +414,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           selectedAgentIdRef.current = next.agentId
           setSelectedAgentId(next.agentId)
           await fetchProjects()
+          if (ownsView()) await deliverHeld()
           return
         }
         setStartFailure({ agentId: next.candidateAgentId ?? runtime.candidateAgentId, message: next.errorDetail ?? 'Retry failed.' })
@@ -351,7 +428,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     } finally {
       if (ownsView()) setRuntimeActivity(null)
     }
-  }, [projectId, runtime, fetchProjects, ensureSession, drainQueue])
+  }, [projectId, runtime, fetchProjects, ensureSession, drainQueue, deliverHeld])
 
   const rollbackSwitch = useCallback(async () => {
     if (!projectId) return
@@ -363,10 +440,11 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       selectedAgentIdRef.current = next.agentId
       setSelectedAgentId(next.agentId)
       await fetchProjects()
+      if (showsProject(projectId)) await deliverHeld()
     } catch (error) {
       if (showsProject(projectId)) setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: ipcErrorReason(error) })
     }
-  }, [projectId, fetchProjects, showsProject])
+  }, [projectId, fetchProjects, showsProject, deliverHeld])
 
   /**
    * Start the agent in the background, before there is anything to say.
@@ -376,19 +454,19 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
    * would otherwise wait after their first sentence — which is most of the
    * delay when talking to Captain by voice.
    *
-   * It stops for good once the app leaves the project it opened on: looking at
-   * a project must not start its Captain, and a Captain seen without a live
-   * session may be one the user stopped. The first message there starts it.
+   * It waits for the saved project, so launch does not warm Default on the way,
+   * and stops for good once the app leaves the project it opened on: looking at
+   * a project must not start its Captain. The first message there starts it.
    *
    * Switched off in Settings → General for anyone who does not want the
    * process. Failure is silent: the first message starts the session as before.
    */
   useEffect(() => {
-    if (leftLaunchProjectRef.current || !prewarm || !selectedAgentId || !captainTaskId || currentSession?.sessionId || startFailure) return
+    if (!projectsLoaded || useProjectStore.getState().leftLaunchProject || !prewarm || !selectedAgentId || !captainTaskId || currentSession?.sessionId || startFailure) return
     void ensureSession().then((ok) => (ok ? drainQueue() : undefined)).catch((err: unknown) => {
       console.error('Failed to deliver held Captain messages:', err)
     })
-  }, [prewarm, selectedAgentId, captainTaskId, currentSession?.sessionId, startFailure, ensureSession, drainQueue])
+  }, [projectsLoaded, prewarm, selectedAgentId, captainTaskId, currentSession?.sessionId, startFailure, ensureSession, drainQueue])
 
   // Listen for pre-fill messages from the dashboard command input
   useEffect(() => {
@@ -425,24 +503,10 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground" title={`The Captain of ${projectName}`}>
             <FolderKanban className="size-icon-xs shrink-0" />
-            {canFlip ? (
+            {canFlip && projectId ? (
               // The app's current project, not a second selection: the top bar,
               // the dashboard box and voice all talk to the same Captain as this.
-              // Out of the tab order while the drawer is closed but still mounted.
-              <select
-                value={projectId}
-                onChange={(e) => setCurrentProject(e.target.value)}
-                tabIndex={drawerOpen ? undefined : -1}
-                aria-label="Captain project"
-                data-testid="captain-project"
-                className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/80 bg-background border border-border rounded px-2 py-1 cursor-pointer hover:border-primary/50 focus:border-ring focus:ring-2 focus:ring-ring/20 transition-colors"
-              >
-                {projectChoices.map((choice) => (
-                  <option key={choice.id} value={choice.id}>
-                    {choice.name}
-                  </option>
-                ))}
-              </select>
+              <CaptainProjectSelect projects={projectChoices} currentId={projectId} onChoose={setCurrentProject} tabbable={drawerOpen} />
             ) : (
               <span className="truncate font-medium text-foreground/80" data-testid="captain-project">{projectName}</span>
             )}
@@ -487,7 +551,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           </p>
           {queuedCount > 0 && (
             <p className="text-muted-foreground">
-              {queuedCount === 1 ? '1 message is' : `${queuedCount} messages are`} waiting and will be sent once the Captain is up.
+              {queuedCount === 1 ? '1 message is' : `${queuedCount} messages are`} waiting. 21x retries on its own, and Retry tries now.
             </p>
           )}
           <div className="flex gap-2">
@@ -503,10 +567,11 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         </div>
       )}
 
-      {/* Held messages stay with their Captain. Coming back shows them; it does not send them. */}
+      {/* Held messages stay with their Captain. Main retries them on its own, so
+          this says that rather than promising they wait for the button. */}
       {!startFailure && queuedCount > 0 && (
         <div role="status" className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground shrink-0">
-          <span>{queuedCount === 1 ? '1 message is' : `${queuedCount} messages are`} waiting for this Captain.</span>
+          <span>{queuedCount === 1 ? '1 message is' : `${queuedCount} messages are`} waiting. 21x retries on its own.</span>
           <Button size="sm" variant="outline" onClick={() => void retryStart()}>
             Send now
           </Button>
@@ -523,7 +588,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           messages={currentSession?.messages || []}
           status={currentSession?.status || SessionStatus.IDLE}
           systemStatus={currentSession?.systemStatus}
-          onStop={stop}
+          onStop={() => void handleStop()}
           onSend={captainTaskId ? handleSendMessage : undefined}
           onSaveImages={handleSaveImages}
           className="flex-1 min-h-0"
