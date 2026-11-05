@@ -197,6 +197,7 @@ pub const COMMANDS: &[&str] = &[
     "agent:create",
     "agent:update",
     "agent:delete",
+    "agent:deletionImpact",
     "agentConfig:getProviders",
     "agentConfig:listModels",
     "agentSession:start",
@@ -1053,8 +1054,10 @@ fn claude_result(operation: &str, value: &Value) -> bool {
             .as_array()
             .is_some_and(|items| items.len() <= 128 && items.iter().all(claude_market_row)),
         "claudePlugin:addMarketplaceSource" => claude_market_row(value),
-        "claudePlugin:removeMarketplaceSource" | "claudePlugin:uninstallPlugin" => {
-            value.is_boolean()
+        "claudePlugin:removeMarketplaceSource" => value.is_boolean(),
+        // The field-level contract is isPluginUninstallResult, on the service.
+        "claudePlugin:uninstallPlugin" => {
+            value.as_bool() == Some(false) || value.is_array() || value.is_object()
         }
         "claudePlugin:fetchCatalog" => claude_catalog(value),
         "claudePlugin:discoverPlugins" => value
@@ -1934,6 +1937,7 @@ fn fields(operation: &str) -> Option<(&'static [&'static str], &'static [&'stati
         | "projectRepo:remove"
         | "projectResource:remove"
         | "commander:getImage" => (&["id"], &[]),
+        "agent:deletionImpact" => (&["id"], &["alsoRemoving"]),
         "db:createTask" | "project:create" | "skills:create" | "agent:create" => (&["data"], &[]),
         "db:updateTask" => (&["id", "data"], &["precondition"]),
         "project:update"
@@ -3623,7 +3627,7 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
                 text(item, 512) && item.as_str().is_some_and(|s| !s.trim().is_empty())
             }
             "approved" | "archived" | "includeArchived" | "skipInitialPrompt" => item.is_boolean(),
-            "orderedIds" => ids(item),
+            "orderedIds" | "alsoRemoving" => ids(item),
             "images" => images(item),
             "data" => data_fields(operation, item),
             "precondition" if operation == "db:updateTask" => true,
@@ -3876,10 +3880,12 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
     match operation {
         "db:deleteTask"
         | "db:reorderSubtasks"
-        | "agent:delete"
         | "skills:delete"
         | "projectRepo:remove"
         | "projectResource:remove" => result.is_boolean(),
+        // The field-level contract is isAgentDeletionImpact, on the service.
+        "agent:delete" => result.as_bool() == Some(false) || result.is_object(),
+        "agent:deletionImpact" => result.is_null() || result.is_object(),
         "agentSession:abort" | "agentSession:stop" | "agentSession:approve" => {
             object(result, &["success"], &[]) && result["success"].is_boolean()
         }
@@ -5646,7 +5652,11 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 243);
+        assert_eq!(COMMANDS.len(), 244);
+        assert!(valid_request(
+            "agent:deletionImpact",
+            &json!({"id":"agent_one","alsoRemoving":["agent_two"]})
+        ));
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

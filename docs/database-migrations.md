@@ -325,3 +325,12 @@ without deleting its anchor, shared transcript or membership/progress history.
 The manager commits anchor lifecycle changes and unfinished member mirroring
 together, preserving completed members. Progress reports never authorize source
 completion or user review.
+
+## Agent deletion and retained ids
+
+Four kinds of row keep an id after its agent is gone, on purpose: PR review
+records (see v39 above), dissolved `task_groups`, `concurrency_audit`, and
+finished `agent_start_queue` rows. They are history, and nothing resolves them
+back to an agent. Every live reference is cleared by `removeAgent` in
+`src/main/database/agent-deletion.ts`, the one path that deletes an agent row.
+Add any new reference to an agent there.

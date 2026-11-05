@@ -88,6 +88,9 @@ interface TaskState {
 }
 
 export const useTaskStore = create<TaskState>((set, get) => {
+  // Deleting an agent unassigns its tasks without a task:updated for each.
+  onEvent('tasks:refresh', () => { void get().fetchTasks() })
+
   onEvent('task:updated', (payload) => {
     const { taskId, updates } = payload as { taskId: string; updates: Partial<Task> }
     const found = get().tasks.some((t) => t.id === taskId)

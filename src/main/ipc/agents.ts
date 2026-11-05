@@ -6,6 +6,7 @@ import { ipcMain } from 'electron'
 import type { CreateAgentData, UpdateAgentData } from '../database'
 import type { IpcDeps } from './deps'
 import { flattenProviderModels, rememberBackendModels } from '../agent-manager/skill-model'
+import { isAgentDeletionRefusal, refusalOf } from '../../shared/agent-deletion'
 
 type MessageAttachment = { id: string; filename: string; size: number; mime_type: string }
 
@@ -14,12 +15,20 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   ipcMain.handle('agent:create', (_, data: CreateAgentData) => {
     const created = db.createAgent(data)
     agentManager.drainStartQueue()
+    agentManager.notifyAgentsChanged()
     return created
   })
-  ipcMain.handle('agent:update', (_, id: string, data: UpdateAgentData) =>
-    agentManager.runAgentConfigurationMutation(id, 'update', () => db.updateAgent(id, data), data))
-  ipcMain.handle('agent:delete', (_, id: string) =>
-    agentManager.runAgentConfigurationMutation(id, 'delete', () => db.deleteAgent(id)))
+  ipcMain.handle('agent:update', async (_, id: string, data: UpdateAgentData) => {
+    const updated = await agentManager.runAgentConfigurationMutation(id, 'update', () => db.updateAgent(id, data), data)
+    agentManager.notifyAgentsChanged()
+    return updated
+  })
+  ipcMain.handle('agent:delete', async (_, id: string) => {
+    const report = await agentManager.runAgentConfigurationMutation(id, 'delete', live => db.removeAgent(id, live)).catch(refusalOf)
+    if (report && !isAgentDeletionRefusal(report)) agentManager.notifyAgentsChanged()
+    return report
+  })
+  ipcMain.handle('agent:deletionImpact', (_, id: string, alsoRemoving?: string[]) => agentManager.getAgentDeletionImpact(id, alsoRemoving))
 
   // A deferred start is committed to the durable queue before this reply;
   // empty sessionId means there is no live session yet.

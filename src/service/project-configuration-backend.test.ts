@@ -509,7 +509,7 @@ for (const kind of cases) describe(`actual ${kind} production project configurat
     const deletion = f.command('agent:delete', [created.id])
     await vi.waitFor(() => expect(f.adapter.destroySession).toHaveBeenCalled())
     expect(f.db.getAgent(created.id)).toBeDefined()
-    gate.resolve(); expect(await deletion).toBe(true)
+    gate.resolve(); expect(await deletion).toMatchObject({ agent_id: created.id })
     expect(f.manager.getSession(refreshedSession)).toBeUndefined(); expect(f.db.getAgent(created.id)).toBeUndefined()
   })
   it('delivers project skill create/update/deletion to a project-only reader with the unchanged event DTO', async () => {
@@ -652,7 +652,7 @@ for (const kind of cases) describe(`actual ${kind} production project configurat
     notify.resolve(); await update
     expect(f.manager.getSession(sessionId)).toBeUndefined()
     expect((await f.command('agent:getAll', []) as AgentRecord[]).find(row => row.id === agent.id)?.config.model).toBe('changed-model')
-    expect(await f.command('agent:delete', [agent.id])).toBe(true)
+    expect(await f.command('agent:delete', [agent.id])).toMatchObject({ agent_id: agent.id })
     expect(f.db.getTask(task.id)?.agent_id).toBeNull()
   })
   it('retains accepted configuration on notification refusal and requires explicit successful refresh before another start', async () => {

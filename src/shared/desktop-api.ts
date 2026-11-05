@@ -6,6 +6,7 @@ import type { TranscriptPartRecord } from "./transcript/types";
 import type { TranscriptPage, TranscriptPageRequest } from "./transcript-page";
 import type { UiCommand } from "./ui-commands";
 import type { CaptainRuntimeState } from "./captain-runtime";
+import type { AgentDeletionImpact, AgentDeletionResult, PluginUninstallResult } from "./agent-deletion";
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources, HeartbeatLog } from "../renderer/src/types/index";
 import type { PullRequestDetails } from "./artifacts";
 import type { ArtifactApi } from "./artifacts";
@@ -257,7 +258,8 @@ export interface DesktopApi {
         getAll: () => Promise<Agent[]>;
         create: (data: CreateAgentDTO) => Promise<Agent>;
         update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>;
-        delete: (id: string) => Promise<boolean>;
+        delete: (id: string) => Promise<AgentDeletionResult>;
+        deletionImpact: (id: string, alsoRemoving?: string[]) => Promise<AgentDeletionImpact | null>;
         getStartQueue: () => Promise<QueuedAgentStart[]>;
         getStartRecoveryState?: (taskId: string) => Promise<QueuedAgentStart | null>;
     };
@@ -561,7 +563,7 @@ export interface DesktopApi {
         discoverPlugins: (searchQuery?: string) => Promise<DiscoverablePlugin[]>;
         getInstalledPlugins: () => Promise<InstalledPlugin[]>;
         installPlugin: (pluginName: string, marketplaceId: string, scope?: string) => Promise<InstalledPlugin>;
-        uninstallPlugin: (pluginId: string) => Promise<boolean>;
+        uninstallPlugin: (pluginId: string) => Promise<PluginUninstallResult>;
         enablePlugin: (pluginId: string) => Promise<InstalledPlugin | undefined>;
         disablePlugin: (pluginId: string) => Promise<InstalledPlugin | undefined>;
         getPluginResources: (pluginId: string) => Promise<PluginResources>;

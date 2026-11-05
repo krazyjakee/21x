@@ -98,7 +98,7 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'projectResource:list': [project], 'projectResource:add': [project, { label: 'Fixture notes', url: null, notes: 'Context' }],
   'projectResource:update': ['resource_fixture', { label: 'Updated notes' }], 'projectResource:remove': ['resource_fixture'], 'projectResource:reorder': [project, ['resource_fixture']],
   'agent:getAll': [], 'agent:create': [{ name: 'Fixture agent', server_url: 'http://localhost:4096', config: { coding_agent: 'pi', model: 'fixture', max_parallel_sessions: 2 } }],
-  'agent:update': [agent, { config: { coding_agent: 'codex', permission_mode: 'ask', sandbox_mode: 'workspace-write' } }], 'agent:delete': [agent],
+  'agent:update': [agent, { config: { coding_agent: 'codex', permission_mode: 'ask', sandbox_mode: 'workspace-write' } }], 'agent:delete': [agent], 'agent:deletionImpact': [agent],
   'agentConfig:getProviders': ['http://localhost:4096', 'opencode'], 'agentConfig:listModels': ['pi'],
   'agentSession:start': [agent, task, undefined, true], 'agentSession:startTask': [task], 'agentSession:resume': [agent, task, session],
   'agentSession:send': [session, 'Fixture continuation', task, agent, [], 'delivery_fixture_one'],
@@ -304,7 +304,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 243 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 244 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

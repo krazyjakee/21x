@@ -6,6 +6,7 @@
 
 import { join, basename, relative } from 'path'
 import { readPluginTree, validateManifestPaths, PluginSourceError } from './containment'
+import type { AgentDeletionImpact, AgentLiveWork } from '../../shared/agent-deletion'
 
 import type { DatabaseManager, InstalledPluginRecord, ClaudePluginManifest, CreateSkillData, CreateMcpServerData, CreateAgentData } from '../database'
 
@@ -214,8 +215,9 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
 
 }
 
-export function removePluginResources(db: DatabaseManager, pluginName: string): void {
+export function removePluginResources(db: DatabaseManager, pluginName: string, live?: ReadonlyMap<string, AgentLiveWork>): AgentDeletionImpact[] {
   for (const skill of pluginSkills(db, pluginName)) db.deleteSkill(skill.id)
   for (const server of pluginMcpServers(db, pluginName)) db.deleteMcpServer(server.id)
-  for (const agent of pluginAgents(db, pluginName)) db.deleteAgent(agent.id)
+  const agents = pluginAgents(db, pluginName), ids = agents.map(agent => agent.id)
+  return agents.flatMap(agent => db.removeAgent(agent.id, live?.get(agent.id), ids) || [])
 }

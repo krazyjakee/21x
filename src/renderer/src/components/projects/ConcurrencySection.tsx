@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Switch } from '@/components/ui/Switch'
 import { concurrencyApi } from '@/lib/ipc-client'
+import { desktopApi } from '@/lib/desktop-api'
 import { formatRelativeDate } from '@shared/date-format'
 import type { AgentConcurrencyState, ConcurrencyAuditEntry, ProjectConcurrencyState } from '@shared/concurrency'
 
@@ -52,6 +53,10 @@ export function ConcurrencySection({ projectId }: ConcurrencySectionProps) {
       if (event.projectId === projectId) reload()
     })
   }, [projectId, reload])
+
+  // This list comes from the service, not the agent store: an agent's own
+  // change is not a concurrency event, so follow the shared agent change event.
+  useEffect(() => desktopApi.onTasksRefresh?.(reload), [reload])
 
   const apply = async (call: Promise<{ success: true } | { error: string }>) => {
     try {

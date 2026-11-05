@@ -10,6 +10,7 @@ import type {
 } from '../shared/projects'
 import type { CaptainMemory } from '../shared/captain-memory'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
+import type { AgentDeletionImpact, AgentDeletionResult, PluginUninstallResult } from '../shared/agent-deletion'
 import type { TranscriptPage, TranscriptPageRequest } from '../shared/transcript-page'
 import type { RolloverPolicy, SessionContextScope, SessionContextSnapshot } from '../shared/session-context'
 import type { CreateTaskGroupData, TaskGroupRecord, TaskGroupReviewData, TaskGroupReviewResult, TaskGroupSnapshot } from '../shared/task-groups'
@@ -111,7 +112,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('agent:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:update', id, data),
-    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id),
+    delete: (id: string): Promise<AgentDeletionResult> => ipcRenderer.invoke('agent:delete', id),
+    deletionImpact: (id: string, alsoRemoving?: string[]): Promise<AgentDeletionImpact | null> => ipcRenderer.invoke('agent:deletionImpact', id, alsoRemoving),
     getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue'),
     getStartRecoveryState: (taskId: string): Promise<unknown> => ipcRenderer.invoke('agent:getStartRecoveryState', taskId)
   },
@@ -451,7 +453,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('claudePlugin:getInstalledPlugins'),
     installPlugin: (pluginName: string, marketplaceId: string, scope?: string): Promise<unknown> =>
       ipcRenderer.invoke('claudePlugin:installPlugin', pluginName, marketplaceId, scope),
-    uninstallPlugin: (pluginId: string): Promise<boolean> =>
+    uninstallPlugin: (pluginId: string): Promise<PluginUninstallResult> =>
       ipcRenderer.invoke('claudePlugin:uninstallPlugin', pluginId),
     enablePlugin: (pluginId: string): Promise<unknown> =>
       ipcRenderer.invoke('claudePlugin:enablePlugin', pluginId),

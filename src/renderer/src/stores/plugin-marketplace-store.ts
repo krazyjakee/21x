@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { MarketplaceSource, InstalledPlugin, DiscoverablePlugin } from '@/types'
 import { claudePluginApi } from '@/lib/ipc-client'
+import { ipcErrorReason } from '@/lib/ipc-error'
+import { isAgentDeletionRefusal, type PluginUninstallResult } from '@shared/agent-deletion'
 
 interface PluginMarketplaceState {
   marketplaceSources: MarketplaceSource[]
@@ -21,7 +23,7 @@ interface PluginMarketplaceState {
   removeMarketplaceSource: (id: string) => Promise<boolean>
   refreshMarketplace: (sourceId: string) => Promise<void>
   installPlugin: (pluginName: string, marketplaceId: string, scope?: string) => Promise<InstalledPlugin | null>
-  uninstallPlugin: (pluginId: string) => Promise<boolean>
+  uninstallPlugin: (pluginId: string) => Promise<PluginUninstallResult>
   enablePlugin: (pluginId: string) => Promise<void>
   disablePlugin: (pluginId: string) => Promise<void>
   setSearchQuery: (query: string) => void
@@ -147,8 +149,8 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceState>((set, ge
 
   uninstallPlugin: async (pluginId) => {
     try {
-      const success = await claudePluginApi.uninstallPlugin(pluginId)
-      if (success) {
+      const result = await claudePluginApi.uninstallPlugin(pluginId)
+      if (result && !isAgentDeletionRefusal(result)) {
         set((state) => ({
           installedPlugins: state.installedPlugins.filter((p) => p.id !== pluginId),
           discoverablePlugins: state.discoverablePlugins.map((p) =>
@@ -158,10 +160,10 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceState>((set, ge
           )
         }))
       }
-      return success
+      return result
     } catch (err) {
       set({ error: String(err) })
-      return false
+      return { refused: ipcErrorReason(err) }
     }
   },
 

@@ -255,7 +255,8 @@ Features:
 | `agent:getAll` | renderer -> main | — | `Agent[]` |
 | `agent:create` | renderer -> main | `CreateAgentData` | `Agent` |
 | `agent:update` | renderer -> main | `id, UpdateAgentData` | `Agent` |
-| `agent:delete` | renderer -> main | `id` | `boolean` |
+| `agent:delete` | renderer -> main | `id` | `AgentDeletionImpact`, `{ refused }` naming what is in the way, or `false` when already gone |
+| `agent:deletionImpact` | renderer -> main | `id` | `AgentDeletionImpact \| null`: what deleting would stop and unassign |
 
 ### Agent Sessions
 

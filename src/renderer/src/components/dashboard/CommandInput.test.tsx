@@ -13,6 +13,8 @@ vi.mock('@/lib/voice-capture', () => ({
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { CommandInput } from './CommandInput'
 import { useVoiceStore } from '@/stores/voice-store'
+import { useAgentStore } from '@/stores/agent-store'
+import type { Agent } from '@/types'
 import {
   clearDictationTarget,
   insertAndSubmit,
@@ -110,5 +112,28 @@ describe('CommandInput — dictation', () => {
       'first sentence',
       'second sentence',
     ])
+  })
+})
+
+describe('CommandInput — agent selector', () => {
+  const agent = (id: string, name: string, is_default = false) => ({ id, name, is_default }) as Agent
+  beforeEach(() => { cleanup(); useAgentStore.setState({ agents: [] }) })
+
+  it('follows the shared list: a rename shows at once and a deleted choice falls back', async () => {
+    useAgentStore.setState({ agents: [agent('a', 'Astra', true), agent('b', 'Fable')] })
+    await act(async () => { render(<CommandInput onSendToCaptain={vi.fn()} onCreateTask={vi.fn()} />) })
+    fireEvent.click(screen.getByTitle('Choose agent'))
+    fireEvent.click(screen.getByRole('button', { name: 'Fable' }))
+    act(() => useAgentStore.setState({ agents: [agent('a', 'Astra', true), agent('b', 'Fable 2')] }))
+    expect(screen.getByTitle('Choose agent').textContent).toContain('Fable 2')
+    act(() => useAgentStore.setState({ agents: [agent('a', 'Astra', true)] }))
+    expect(screen.getByTitle('Choose agent').textContent).toContain('Astra')
+  })
+
+  it('says so when no agent remains, instead of keeping the deleted name', async () => {
+    useAgentStore.setState({ agents: [agent('a', 'Astra', true)] })
+    await act(async () => { render(<CommandInput onSendToCaptain={vi.fn()} onCreateTask={vi.fn()} />) })
+    act(() => useAgentStore.setState({ agents: [] }))
+    expect(screen.getByTitle('Choose agent').textContent).toContain('No agents')
   })
 })

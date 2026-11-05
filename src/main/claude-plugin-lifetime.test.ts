@@ -126,6 +126,7 @@ describe('portable plugin manager lifetime', () => {
     if (!skill) throw new Error('Expected the shared fixture skill to be created')
     const dir = join(root, 'fixture-plugin'); mkdirSync(dir); writeFileSync(join(dir, 'legacy.txt'), 'preserve')
     await expect(owner.uninstallPlugin(a.id)).rejects.toThrow('manual reconciliation')
+    expect(() => owner.assertUninstallable(a.id)).toThrow('Nothing was stopped')
     expect(() => owner.getPluginResources(b.id)).toThrow('manual reconciliation')
     expect(source.db.getInstalledPlugins().map(plugin => plugin.id).sort()).toEqual([a.id, b.id].sort())
     expect(source.db.getSkills().map(record => record.id)).toEqual([skill.id])

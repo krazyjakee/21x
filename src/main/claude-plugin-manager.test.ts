@@ -258,7 +258,7 @@ describe('ClaudePluginManager: Install / Uninstall', () => {
     const installed = await manager.installPlugin('cool-plugin', marketplaceId)
     expect(manager.getInstalledPlugins()).toHaveLength(1)
     const result = await manager.uninstallPlugin(installed.id)
-    expect(result).toBe(true)
+    expect(Array.isArray(result)).toBe(true)
     expect(manager.getInstalledPlugins()).toHaveLength(0)
   })
 

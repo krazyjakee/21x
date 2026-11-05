@@ -9,6 +9,7 @@ import {
   parseRepoInput,
   saveProjectDraft,
   validateProjectDraft,
+  withoutAgents,
   type ProjectDraft,
   type RepoDraft
 } from './project-editor'
@@ -185,5 +186,17 @@ describe('moveItem', () => {
     expect(moveItem([1, 2, 3], 0, 1)).toEqual([2, 1, 3])
     expect(moveItem([1, 2, 3], 2, -1)).toEqual([1, 3, 2])
     expect(moveItem([1, 2, 3], 0, -1)).toEqual([1, 2, 3])
+  })
+})
+
+describe('withoutAgents', () => {
+  it('drops a deleted agent from an open draft so saving cannot write it back', () => {
+    const draft = { ...emptyProjectDraft(), default_agent_id: 'gone', captain_agent_id: 'kept',
+      settings: { limits: { keep: 1 }, concurrency: { captain_control: false, levels: { gone: 2, kept: 3 }, pinned: { gone: 1 } } } }
+    expect(withoutAgents(draft, ['gone'])).toMatchObject({ default_agent_id: null, captain_agent_id: 'kept',
+      settings: { limits: { keep: 1 }, concurrency: { captain_control: false, levels: { kept: 3 }, pinned: {} } } })
+  })
+  it('adds no concurrency block to a draft that had none', () => {
+    expect(withoutAgents(emptyProjectDraft(), ['gone']).settings).toEqual({})
   })
 })
