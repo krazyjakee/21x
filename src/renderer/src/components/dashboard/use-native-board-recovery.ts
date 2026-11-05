@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { captureDesktopRead, getDesktopHost } from '@/lib/desktop-api'
+import { captureDesktopRead, desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import { agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { useProjectStore } from '@/stores/project-store'
 import type { TaskBoardTransitionPhase } from './task-board-transition'
@@ -15,8 +15,8 @@ export function useNativeBoardRecovery(projectId: string, visibleTaskIds: string
     const host = getDesktopHost()
     let live = true, revision = 0, busy = false, requested = false
     let scope = captureDesktopRead()
-    let offQueue = () => {}, offConnection = () => {}, offProject = () => {}
-    const release = () => { offQueue(); offConnection(); offProject(); window.removeEventListener('pagehide', retire) }
+    let offQueue = () => {}, offRecovery = () => {}, offConnection = () => {}, offProject = () => {}
+    const release = () => { offQueue(); offRecovery(); offConnection(); offProject(); window.removeEventListener('pagehide', retire) }
     const retire = () => { live = false; revision++; release() }
     const current = () => live && scope.isCurrent() && useProjectStore.getState().currentProjectId === projectId
     const phase = (state: string): TaskBoardTransitionPhase | undefined => state === 'failed' ? 'failed' : state === 'claimed' || state === 'starting' ? 'starting' : state === 'queued' || state === 'retrying' ? 'queued' : undefined
@@ -61,6 +61,12 @@ export function useNativeBoardRecovery(projectId: string, visibleTaskIds: string
         for (const row of event.queue) if (allowed.has(row.taskId) && row.projectId === projectId) { const value = phase(row.state); if (value) next[row.taskId] = value }
         return next
       })
+      request()
+    }) ?? (() => {})
+    // A notice only requests a durable re-read; its fields never become state.
+    offRecovery = desktopApi.onAgentRecoveryStateChanged?.(event => {
+      if (!current() || !allowed.has(event.taskId)) return
+      revision++
       request()
     }) ?? (() => {})
     offConnection = host.subscribeConnection(() => {

@@ -192,6 +192,33 @@ describe('TaskWorkspace – durable recovery visibility', () => {
     expect(await screen.findByTestId('task-recovery-state')).toHaveTextContent('Queued #2')
     expect(useAgentStore.getState().sessions.get('task-1')).toBeUndefined()
   })
+
+  it('re-reads recovery on a live notice for this task when the host offers one', async () => {
+    const read = window.electronAPI.agents.getStartRecoveryState as ReturnType<typeof vi.fn>
+    let notify: (event: { taskId: string }) => void = () => {}
+    const off = vi.fn()
+    api.onAgentRecoveryStateChanged = (listener: typeof notify) => { notify = listener; return off }
+    try {
+      const view = renderWorkspace(makeRendererTask())
+      await waitFor(() => expect(read).toHaveBeenCalled())
+      read.mockClear()
+      act(() => notify({ taskId: 'task-other' }))
+      expect(read).not.toHaveBeenCalled()
+      read.mockResolvedValue({
+        id: 'queue-1', taskId: 'task-1', projectId: 'default', agentId: 'agent-1',
+        reason: 'global_limit', queuedAt: '2026-01-01T00:00:00.000Z', position: 3,
+        priority: 'medium', state: 'queued', retryCount: 0, nextRetryAt: null,
+        generation: 1, dependencyReason: null, recoveryCause: null,
+        recoveryAction: null, recoveryResult: null, lastError: null
+      })
+      act(() => notify({ taskId: 'task-1' }))
+      expect(await screen.findByTestId('task-recovery-state')).toHaveTextContent('Queued #3')
+      view.unmount()
+      expect(off).toHaveBeenCalledOnce()
+    } finally {
+      delete api.onAgentRecoveryStateChanged
+    }
+  })
 })
 
 describe('clampTranscriptWidth', () => {

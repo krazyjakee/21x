@@ -733,6 +733,8 @@ export interface DesktopApi {
     onTranscriptChanged: (callback: (event: TranscriptChangedEvent) => void) => () => void;
     onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void;
     onAgentStartQueueChanged: (callback: (event: AgentStartQueueChangedEvent) => void) => () => void;
+    /** Native host only: the Electron preload does not expose this event. */
+    onAgentRecoveryStateChanged?: (callback: (event: import("./desktop-domain-events").AgentRecoveryStateChangedEvent) => void) => () => void;
     onAgentIncompatibleSession: (callback: (event: {
         taskId: string;
         agentId: string;

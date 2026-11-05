@@ -52,6 +52,8 @@ export const PRODUCTION_AGENT_EVENT_CODECS = {
   },
   'agent:recoveryStateChanged': {
     ...AGENT_EVENT_CODECS['agent:recoveryStateChanged'],
+    // Advisory: readers re-read the durable queue row, so a bad payload is skipped.
+    dropInvalid: true,
     encodePayload(value: unknown): JsonValue {
       if (!isRecord(value) || !hasExactKeys(value, ['taskId', 'cause', 'action', 'result', 'error']) || value.error !== null && typeof value.error !== 'string')
         throw new ServiceProtocolError('INVALID_ARGUMENTS')

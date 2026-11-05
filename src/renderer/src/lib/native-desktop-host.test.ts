@@ -94,6 +94,36 @@ it('rejects Drop context during hydration and fences retired event listeners acr
   await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1))
 })
 
+const liveArtifact = { taskId: 'task_fixture', artifact: { id: 'task_fixture:workpiece:notes', taskId: 'task_fixture', type: 'markdown', title: 'Notes', path: 'artifacts/notes/README.md', updatedAt: 1, reloadTrigger: 1 } }
+const liveRecovery = { taskId: 'task_fixture', cause: 'quota', action: 'switch_agent', result: 'failed', error: 'The agent operation failed.' }
+it('binds the live artifact and recovery notices to the desktop API on the shared service channel', async () => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  expect(f.host.supports('onArtifactUpdated')).toBe(true); expect(f.host.supports('onAgentRecoveryStateChanged')).toBe(true)
+  const artifact = vi.fn(), recovery = vi.fn(), before = f.invoke.mock.calls.length
+  const offArtifact = f.host.api.onArtifactUpdated(artifact), offRecovery = f.host.api.onAgentRecoveryStateChanged!(recovery)
+  f.emit('artifact:updated', liveArtifact); f.emit('agent:recoveryStateChanged', liveRecovery)
+  expect(artifact.mock.calls).toEqual([[liveArtifact]]); expect(recovery.mock.calls).toEqual([[liveRecovery]])
+  expect(f.invoke.mock.calls.length).toBe(before)
+  offArtifact(); offRecovery(); f.emit('artifact:updated', liveArtifact); f.emit('agent:recoveryStateChanged', liveRecovery)
+  expect(artifact).toHaveBeenCalledTimes(1); expect(recovery).toHaveBeenCalledTimes(1)
+})
+it.each([
+  ['artifact:updated', { ...liveArtifact, artifact: { ...liveArtifact.artifact, secret: 'private' } }],
+  ['artifact:updated', { ...liveArtifact, artifact: { ...liveArtifact.artifact, path: '/home/private/notes.md' } }],
+  ['artifact:updated', { ...liveArtifact, artifact: { ...liveArtifact.artifact, files: Array.from({ length: 500 }, (_, index) => `${index}-${'a'.repeat(600)}`) } }],
+  ['agent:recoveryStateChanged', { ...liveRecovery, error: 'private provider body' }],
+  ['agent:recoveryStateChanged', { ...liveRecovery, cause: 'Private Text' }]
+] as const)('drops a bad %s and keeps the connection and the next notice', async (operation, payload) => {
+  const f = fixture(); f.host.setRehydrator(async () => {}); await f.host.reconnect()
+  const artifact = vi.fn(), recovery = vi.fn(); f.host.api.onArtifactUpdated(artifact); f.host.api.onAgentRecoveryStateChanged!(recovery)
+  f.emit(operation, payload)
+  expect(artifact).not.toHaveBeenCalled(); expect(recovery).not.toHaveBeenCalled()
+  expect(f.host.connection.status).toBe('ready')
+  f.emit('artifact:updated', liveArtifact); f.emit('agent:recoveryStateChanged', liveRecovery)
+  expect(artifact).toHaveBeenCalledTimes(1); expect(recovery).toHaveBeenCalledTimes(1)
+  expect(f.host.connection.status).toBe('ready')
+})
+
 const lifecycleNotices = [
   { operation: 'agent:incompatible-session', payload: { taskId: 'task_fixture', agentId: 'agent_fixture', error: PRODUCTION_INCOMPATIBLE_SESSION_ERROR },
     subscribe: (host: NativeDesktopHost, receive: (payload: unknown) => void) => host.api.onAgentIncompatibleSession(receive) },
