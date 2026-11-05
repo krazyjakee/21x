@@ -190,9 +190,12 @@ function TaskWorkspaceComponent({
     }
     refresh()
     const unsubscribe = onAgentStartQueueChanged(refresh)
+    const taskId = task.id
+    const unsubscribeRecovery = desktopApi.onAgentRecoveryStateChanged?.(event => { if (event.taskId === taskId) refresh() })
     return () => {
       live = false
       unsubscribe?.()
+      unsubscribeRecovery?.()
     }
   }, [task?.id])
 

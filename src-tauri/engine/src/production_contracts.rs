@@ -303,6 +303,7 @@ pub const EVENTS: &[&str] = &[
     "project:statusChanged",
     "concurrency:changed",
     "agent:recoveryStateChanged",
+    "artifact:updated",
     "commander:event",
     "chat:event",
     "terminal:data",
@@ -2565,6 +2566,71 @@ fn artifact_entry(value: &Value) -> bool {
             })
         })
 }
+/// Never stricter than the TypeScript encoder, which drops a bad notice before
+/// it takes a sequence number: a rejection here ends the service connection.
+fn artifact_event(value: &Value, task_id: &Value) -> bool {
+    let unique_files = |files: &Value| {
+        files.as_array().is_some_and(|rows| {
+            rows.len() <= 500
+                && rows.iter().all(artifact_path)
+                && rows
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    == rows.len()
+        })
+    };
+    let target = if value["type"] == "pr" {
+        value.get("path").is_none() && value.get("url").is_some_and(artifact_public_url)
+    } else {
+        value.get("url").is_none() && value.get("path").is_none_or(artifact_path)
+    };
+    object(
+        value,
+        &["id", "taskId", "type", "title", "updatedAt", "reloadTrigger"],
+        &["path", "url", "workpieceKey", "files"],
+    ) && value["taskId"] == *task_id
+        && artifact_label(&value["id"], 8192)
+        && matches!(
+            value["type"].as_str(),
+            Some("markdown" | "html" | "image" | "file" | "pr")
+        )
+        && artifact_label(&value["title"], 512)
+        && value["title"] != ""
+        && value["updatedAt"]
+            .as_f64()
+            .is_some_and(|n| n.is_finite() && n >= 0.0)
+        && integer(&value["reloadTrigger"])
+        && target
+        && value
+            .get("workpieceKey")
+            .is_none_or(|key| artifact_label(key, 2048) && key != "")
+        && value.get("files").is_none_or(unique_files)
+}
+fn artifact_public_url(value: &Value) -> bool {
+    value.as_str().is_some_and(|url| {
+        url.len() <= 2048
+            && url
+                .strip_prefix("https://")
+                .or_else(|| url.strip_prefix("http://"))
+                .is_some_and(|rest| {
+                    !rest.is_empty()
+                        && rest.bytes().all(|c| {
+                            c.is_ascii_graphic() && !matches!(c, b'@' | b'\\' | b'?' | b'#')
+                        })
+                })
+    })
+}
+fn recovery_token(value: &Value) -> bool {
+    value.as_str().is_some_and(|token| {
+        (1..=128).contains(&token.len())
+            && token.starts_with(|c: char| c.is_ascii_lowercase())
+            && token
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'-'))
+    })
+}
 fn artifact_content(value: &Value) -> bool {
     if value.is_null() {
         return true;
@@ -4073,6 +4139,16 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
                 &["taskId", "cause", "action", "result", "error"],
                 &[],
             ) && id(&value["taskId"])
+                && ["cause", "action", "result"]
+                    .iter()
+                    .all(|key| recovery_token(&value[*key]))
+                && (value["error"].is_null() || value["error"] == "The agent operation failed.")
+        }
+        "artifact:updated" => {
+            bounded_bytes(value, 256 * 1024)
+                && object(value, &["taskId", "artifact"], &[])
+                && id(&value["taskId"])
+                && artifact_event(&value["artifact"], &value["taskId"])
         }
         "chat:event" => {
             object(value, &["turnId", "event"], &[])
@@ -4295,6 +4371,79 @@ fn commander_event(value: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn artifact_notice_matches_typescript_wire_samples_and_refuses_private_or_oversized_values() {
+        let file = json!({"taskId":"task_fixture","artifact":{"id":"task_fixture:workpiece:notes","taskId":"task_fixture","type":"markdown","title":"Notes 雪","path":"artifacts/notes/README.md","files":["artifacts/notes/README.md"],"workpieceKey":"notes","updatedAt":1730000000123.5_f64,"reloadTrigger":1730000000123_u64}});
+        let pull = json!({"taskId":"task_fixture","artifact":{"id":"task_fixture:pr:1","taskId":"task_fixture","type":"pr","title":"Pull request #1","url":"https://github.com/acme/app/pull/1","updatedAt":1730000000123_u64,"reloadTrigger":0}});
+        assert!(EVENTS.contains(&"artifact:updated"));
+        assert!(valid_event("artifact:updated", &file));
+        assert!(valid_event("artifact:updated", &pull));
+        let mut pathless = file.clone();
+        pathless["artifact"].as_object_mut().unwrap().remove("path");
+        assert!(valid_event("artifact:updated", &pathless));
+        for (key, bad) in [
+            ("secret", json!("private")),
+            ("taskId", json!("task_other")),
+            ("type", json!("script")),
+            ("title", json!("")),
+            ("path", json!("/home/private/secret.md")),
+            ("path", json!("../secret.md")),
+            ("url", json!("https://github.com/acme/app/pull/1")),
+            ("updatedAt", json!(-1)),
+            ("reloadTrigger", json!(1.5)),
+            ("files", json!(["a.md", "a.md"])),
+            ("workpieceKey", json!("")),
+        ] {
+            let mut foreign = file.clone();
+            foreign["artifact"][key] = bad;
+            assert!(!valid_event("artifact:updated", &foreign), "{key}");
+        }
+        for url in [
+            "https://x-access-token:ghp_private@github.com/acme/app/pull/1",
+            "https://github.com/acme/app/pull/1?token=private",
+            "https://github.com/acme/app/pull/1#private",
+            "https://github.com\\@foreign.example/pull/1",
+            "file:///etc/passwd",
+            "https://",
+        ] {
+            let mut private = pull.clone();
+            private["artifact"]["url"] = json!(url);
+            assert!(!valid_event("artifact:updated", &private), "{url}");
+        }
+        let mut mixed = pull.clone();
+        mixed["artifact"]["path"] = json!("notes.md");
+        assert!(!valid_event("artifact:updated", &mixed));
+        let mut outer = file.clone();
+        outer["sessionId"] = json!("private");
+        assert!(!valid_event("artifact:updated", &outer));
+        let mut oversized = file.clone();
+        oversized["artifact"]["files"] = json!((0..500)
+            .map(|index| format!("{index}-{}", "a".repeat(600)))
+            .collect::<Vec<_>>());
+        assert!(!valid_event("artifact:updated", &oversized));
+    }
+
+    #[test]
+    fn recovery_notice_carries_only_tokens_and_the_fixed_failure_text() {
+        let sample = json!({"taskId":"task_fixture","cause":"quota","action":"switch_agent","result":"queued_at_position_2","error":null});
+        assert!(valid_event("agent:recoveryStateChanged", &sample));
+        let mut failed = sample.clone();
+        failed["error"] = json!("The agent operation failed.");
+        assert!(valid_event("agent:recoveryStateChanged", &failed));
+        for (key, bad) in [
+            ("error", json!("backend credential=private /profile")),
+            ("cause", json!("Private Text")),
+            ("action", json!("")),
+            ("result", json!("a".repeat(129))),
+            ("taskId", json!("../task")),
+            ("rawError", json!("private")),
+        ] {
+            let mut foreign = sample.clone();
+            foreign[key] = bad;
+            assert!(!valid_event("agent:recoveryStateChanged", &foreign), "{key}");
+        }
+    }
 
     #[test]
     fn exact_failure_and_checkpoint_notices_match_agreed_typescript_wire_samples() {
@@ -4604,7 +4753,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 46);
+        assert_eq!(EVENTS.len(), 47);
         let requests = [
             ("mobile:getInfo", json!({})),
             (

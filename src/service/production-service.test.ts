@@ -27,6 +27,7 @@ import { PRODUCTION_COMMAND_CODECS, PRODUCTION_EVENT_CODECS, validateProductionE
 import { PRODUCTION_HOST_SCHEMAS, isProductionOwnerState, type ProductionLaunchDescriptor } from '../shared/production-bootstrap'
 import { ServicePeer, type OperationSchema } from './transport/peer'
 import { hasExactKeys, isBootstrapResult, isRecord, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
+import { AGENT_RECOVERY_ERROR } from '../shared/agent-desktop-codecs'
 import type { CodingAgentAdapter } from '../main/adapters/coding-agent-adapter'
 import type { ChatProvider, ChatProviderEvent } from '../main/chat/providers/types'
 import { makeTask } from '../../test/helpers/task-fixtures'
@@ -921,6 +922,24 @@ describe('private native notification bridge around actual production ownership'
     await expect(f.service.peer.request('host.notification.status', { title: 'Agent finished', body: 'A task is ready for review' })).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
     expect(f.notificationCalls).toEqual([]); expect(f.service.getReadyServices()).not.toBeNull()
     for (const operation of ['host.notification.show', 'host.notification.status']) expect(Object.hasOwn(PRODUCTION_COMMAND_CODECS, operation)).toBe(false)
+  })
+  it('carries live artifact and recovery notices over the peer and drops a bad one while it stays connected', async () => {
+    const f = fixture(); await f.initialize()
+    const services = f.service.getReadyServices()!, task = services.db.createTask({ title: 'Live notices' })!
+    const publisher = services.agents as unknown as { broadcast(channel: string, payload: unknown): void }
+    const artifact = { id: `${task.id}:pr:1`, taskId: task.id, type: 'pr', title: 'Pull request #1', url: 'https://github.com/acme/app/pull/1', updatedAt: 1, reloadTrigger: 0 }
+    publisher.broadcast('artifact:updated', { taskId: task.id, artifact: { ...artifact, url: 'https://x-access-token:private@github.com/acme/app/pull/1' } })
+    publisher.broadcast('artifact:updated', { taskId: task.id, artifact })
+    publisher.broadcast('agent:recoveryStateChanged', { taskId: task.id, cause: 'quota', action: 'switch_agent', result: 'failed', error: 'private provider body' })
+    await vi.waitFor(() => expect(f.wireEvents.some(event => event.operation === 'agent:recoveryStateChanged')).toBe(true))
+    const notices = f.wireEvents.filter(event => event.operation === 'artifact:updated' || event.operation === 'agent:recoveryStateChanged')
+    expect(notices).toEqual([
+      { operation: 'artifact:updated', payload: { taskId: task.id, artifact } },
+      { operation: 'agent:recoveryStateChanged', payload: { taskId: task.id, cause: 'quota', action: 'switch_agent', result: 'failed', error: AGENT_RECOVERY_ERROR } }
+    ])
+    expect(JSON.stringify(notices)).not.toContain('private')
+    expect(f.service.getReadyServices()).not.toBeNull()
+    await expect(f.host.request('engine.ping', {})).resolves.toMatchObject({ engineEpoch: f.service.owner.snapshot().epoch })
   })
   it('routes actual Manager status through the independent callback and preserves its captured descriptor scope', async () => {
     const f = fixture(false, false, false, false, false, false, true); await f.initialize()

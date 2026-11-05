@@ -28,4 +28,12 @@ describe('production queue event projection', () => {
     expect(codec.decodePayload(codec.encodePayload(source))).toEqual({ ...source, error: AGENT_RECOVERY_ERROR })
     expect(() => codec.encodePayload({ ...source, authority: 'all_tasks' })).toThrow()
   })
+  it('marks the recovery notice droppable and refuses private or malformed values', () => {
+    const codec = PRODUCTION_AGENT_EVENT_CODECS['agent:recoveryStateChanged']
+    const source = { taskId: 'task-id', cause: 'quota', action: 'switch_agent', result: 'failed', error: null }
+    expect(codec.dropInvalid).toBe(true)
+    for (const invalid of [{ ...source, cause: 'Private Text' }, { ...source, result: 'a'.repeat(129) }, { ...source, taskId: '../foreign' }, { ...source, error: 7 }]) expect(() => codec.encodePayload(invalid)).toThrow()
+    expect(codec.validatePayload({ ...source, error: 'private provider body' })).toBe(false)
+    expect(codec.validatePayload({ ...source, error: AGENT_RECOVERY_ERROR })).toBe(true)
+  })
 })

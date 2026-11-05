@@ -8,7 +8,7 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
-function fixture() {
+function fixture(dropInvalid = false) {
   let receive: (event: unknown) => void = () => {}
   const unlisten = vi.fn()
   const transport: DesktopTransport = {
@@ -24,7 +24,7 @@ function fixture() {
     'db:getTask': { encodeArguments: args => args, decodeResult: value => value as Task | undefined,
       validateResult: value => value === undefined }
   }, events: {
-    'task:deleted': { decodePayload: value => value as { taskId: string }, validatePayload: value => isRecord(value) && typeof value.taskId === 'string' }
+    'task:deleted': { dropInvalid, decodePayload: value => value as { taskId: string }, validatePayload: value => isRecord(value) && typeof value.taskId === 'string' }
   } })
   return { client, transport, states, unlisten, emit: (event: unknown) => receive(event) }
 }
@@ -35,6 +35,24 @@ const event = (sequence: number, payload = 'task-1', engineEpoch = 'first'): Ser
 afterEach(() => vi.useRealTimers())
 
 describe('desktop connection lifecycle', () => {
+  it('skips an invalid droppable notice, consumes its sequence and stays connected', async () => {
+    const { client, emit } = fixture(true)
+    await client.connect('first')
+    const listener = vi.fn(); client.subscribe('task:deleted', listener)
+    emit(event(1)); emit({ ...event(2), payload: { taskId: 7 } }); emit(event(3, 'task-3'))
+    expect(listener.mock.calls).toEqual([[{ taskId: 'task-1' }], [{ taskId: 'task-3' }]])
+    expect(client.connection.status).toBe('ready')
+    client.dispose()
+  })
+
+  it('keeps an invalid event fatal unless its codec opts in', async () => {
+    const { client, emit } = fixture()
+    await client.connect('first')
+    emit({ ...event(1), payload: { taskId: 7 } })
+    expect(client.connection).toMatchObject({ status: 'disconnected', reason: 'INVALID_ARGUMENTS' })
+    client.dispose()
+  })
+
   it('preserves explicit undefined and null results and rejects missing codecs or retired operations', async () => {
     const { client, transport } = fixture()
     await client.connect('first')

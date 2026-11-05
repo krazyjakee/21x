@@ -595,6 +595,8 @@ interface ElectronAPI {
   onTranscriptChanged: (callback: (event: TranscriptChangedEvent) => void) => () => void
   onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void
   onAgentStartQueueChanged: (callback: (event: AgentStartQueueChangedEvent) => void) => () => void
+  /** Native host only: the Electron preload does not expose this event. */
+  onAgentRecoveryStateChanged?: (callback: (event: import('@shared/desktop-domain-events').AgentRecoveryStateChangedEvent) => void) => () => void
   onAgentIncompatibleSession: (callback: (event: { taskId: string; agentId: string; error: string }) => void) => () => void
   onTaskUpdated: (callback: (event: { taskId: string; updates: Partial<Task> }) => void) => () => void
   onTaskSourceActionFailed: (callback: (event: { taskId: string; taskTitle: string; error: string }) => void) => () => void

@@ -230,7 +230,8 @@ export class ProductionService {
       emitOwnerEvent: (operation, payload) => {
         if (!Object.hasOwn(PRODUCTION_EVENT_CODECS, operation)) { construction.unbridgedOwnerEvent(operation, payload); return }
         if (!this.initialized || this.closing || !this.bindings) return // durable hydration follows trusted initialize
-        this.publishScoped(operation, this.bindings.encodeOwnerEvent(operation, payload))
+        const encoded = this.bindings.encodePublishableOwnerEvent(operation, payload)
+        if (encoded !== undefined) this.publishScoped(operation, encoded)
       }
     }
     const bootstrap = construction.constructBootstrap(callbacks)

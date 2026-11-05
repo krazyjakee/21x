@@ -25,6 +25,7 @@ import { WorkspaceFileBackend } from './workspace-file-backend'
 import { AGENT_INSTALLER_CODECS, AGENT_INSTALLER_EVENT_CODECS } from '../shared/agent-installer-codecs'
 import { ArtifactBackend } from './artifact-backend'
 import { ARTIFACT_CODECS } from '../shared/artifact-codecs'
+import { ARTIFACT_EVENT_CODECS } from '../shared/artifact-event-codecs'
 import { VoiceManagementBackend } from './voice-management-backend'
 import { VOICE_MANAGEMENT_CODECS, VOICE_MANAGEMENT_EVENT_CODECS } from '../shared/voice-management-codecs'
 import { VOICE_TURN_CODECS, VOICE_TURN_EVENT_CODECS } from '../shared/voice-turn-codecs'
@@ -109,7 +110,7 @@ export const PRODUCTION_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS, ...TRAY_P
   ...PROJECT_CONFIGURATION_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
   ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...CONNECTOR_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...VOICE_TURN_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 export const PRODUCTION_EVENT_CODECS = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS,
-  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...TASK_FEEDBACK_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...VOICE_TURN_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS }
+  ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...TASK_FEEDBACK_EVENT_CODECS, ...ARTIFACT_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...VOICE_TURN_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS }
 
 /** Validate actual wire payload, including explicit binary envelopes. */
 export function validateProductionEventWire(operation: string, payload: unknown): boolean {
@@ -397,6 +398,15 @@ export class ProductionDesktopBindings {
       this.options.fatal(error)
       throw error
     }
+  }
+
+  /** Same encoding, except that an advisory notice failing its codec returns
+   * undefined. It is dropped before it takes a sequence number, so the transport
+   * and the renderer's contiguous sequence check never see it. */
+  encodePublishableOwnerEvent(operation: string, payload: unknown): JsonValue | undefined {
+    const codec = this.hasOwnerEvent(operation) ? PRODUCTION_EVENT_CODECS[operation as keyof typeof PRODUCTION_EVENT_CODECS] : undefined
+    if (this.closed || !codec || !('dropInvalid' in codec) || !('encodePayload' in codec)) return this.encodeOwnerEvent(operation, payload)
+    try { return codec.encodePayload(payload as never) } catch { return undefined }
   }
 
   /** Event delivery is a read grant separate from command permission. */
