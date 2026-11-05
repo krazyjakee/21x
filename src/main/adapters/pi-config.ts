@@ -4,7 +4,7 @@
  */
 
 import type { SessionConfig } from './coding-agent-adapter'
-import { PATH_ASSIGNMENT, RTK_INVOCATION } from './shared/rtk-session'
+import { IS_RTK_REWRITE_SOURCE, PATH_ASSIGNMENT } from './shared/rtk-session'
 
 export const PI_PERMISSION_MODE_ENV = 'TWENTYX_PI_PERMISSION_MODE'
 export const PI_RTK_EXECUTABLE_ENV = 'TWENTYX_PI_RTK_EXECUTABLE'
@@ -160,7 +160,7 @@ export default function permissions(pi: ExtensionAPI) {
  */
 export const PI_RTK_EXTENSION_SOURCE = `\
 const PATH_ASSIGNMENT = ${String(PATH_ASSIGNMENT)};
-const RTK_INVOCATION = ${String(RTK_INVOCATION)};
+${IS_RTK_REWRITE_SOURCE}
 
 export default function rtk(pi) {
   pi.on("tool_call", async (event, ctx) => {
@@ -172,7 +172,7 @@ export default function rtk(pi) {
       const result = await pi.exec(executable, ["rewrite", "--", command], { timeout: 2000, signal: ctx.signal });
       if (result.killed || (result.code !== 0 && result.code !== 3)) return;
       const rewritten = result.stdout.replace(/\\r?\\n$/, "");
-      if (RTK_INVOCATION.test(rewritten)) event.input.command = rewritten;
+      if (isRtkRewrite(command, rewritten)) event.input.command = rewritten;
     } catch {
       // RTK must never stop a command from running.
     }

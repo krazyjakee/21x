@@ -2,11 +2,10 @@ import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import { promisify } from 'util'
 import { detectInstalledAgents, getPiCommandCandidates } from './detect.js'
-import { fail, spawnInstall, streamProcess } from './installer-utils.js'
+import { fail, finish, spawnInstall, streamProcess } from './installer-utils.js'
 import { installNodejs } from './nodejs.js'
 import { installGit } from './git.js'
 import { installCliTool } from './cli-tools.js'
-import { configureRtk } from './rtk.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -121,16 +120,12 @@ export async function installAgent(agentName, onProgress) {
   }
   if (agentName === 'gh' || agentName === 'glab') return installCliTool(agentName, onProgress)
   if (agentName === 'rtk') {
+    // The binary only. Sessions use RTK without any global setup, and RTK's global
+    // hooks run before permission checks, so they can get denied commands past deny
+    // rules. They are the user's choice to add, in a terminal. See docs/rtk.md.
     const current = await detectInstalledAgents()
-    if (!current.rtk?.installed) {
-      const installed = await installCliTool('rtk', (progress) => onProgress({
-        ...progress,
-        stage: progress.stage === 'error' ? 'error' : 'installing',
-        percent: Math.min(65, Math.round(progress.percent * 0.65))
-      }))
-      if (!installed.success) return installed
-    }
-    return configureRtk(onProgress)
+    if (current.rtk?.installed) return finish(onProgress, { success: true, error: null }, 'RTK is already installed.\n')
+    return installCliTool('rtk', onProgress)
   }
   if (Object.hasOwn(STANDALONE_AGENTS, agentName)) return installStandaloneAgent(agentName, STANDALONE_AGENTS[agentName], onProgress)
   if (agentName === 'pi') return installPi(onProgress)

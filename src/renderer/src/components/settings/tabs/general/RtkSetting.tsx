@@ -125,8 +125,7 @@ export function RtkSetting({ setupOpen }: { setupOpen: boolean }) {
       {!detecting && state === 'unavailable' && detection && (
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
-            RTK is not installed, so commands run unchanged. Installing it also adds RTK&apos;s global
-            hooks for your coding agents, which apply in your terminal too.
+            RTK is not installed, so commands run unchanged. Installing it adds no global hooks.
           </p>
           <Button size="sm" variant="outline" onClick={() => void handleInstall()} disabled={installing}>
             {installing ? <Loader2 className="size-3 animate-spin" /> : <><Download className="size-3 mr-1" />Install</>}
@@ -149,12 +148,18 @@ export function RtkSetting({ setupOpen }: { setupOpen: boolean }) {
         </ul>
       )}
 
-      {globalHooks.length > 0 && (
+      {globalHooks.length > 0 ? (
         <p className="text-xs text-amber-400" data-testid="rtk-global-hooks">
           A global RTK hook also rewrites commands for {globalHooks.map(backend => backend.label).join(', ')}, even
           with this switch off. It runs before the permission check, so it can get a denied command past a
-          rule, for example <code>timeout 5 git push</code>. 21x cannot change that hook. To remove it, run{' '}
-          <code>rtk init -g --uninstall</code> in a terminal, which also removes it outside 21x.
+          rule, for example <code>timeout 5 git push</code>. 21x cannot change that hook. To remove all of
+          them, run <code>rtk init -g --uninstall</code> in a terminal, which also removes them outside 21x.
+        </p>
+      ) : rtk?.installed && (
+        <p className="text-xs text-muted-foreground" data-testid="rtk-hooks-opt-in">
+          21x does not need RTK&apos;s global hooks and does not install them. They can get denied commands past
+          deny rules, because they run before the permission check. To compress commands in a terminal
+          anyway, run <code>rtk init -g</code> yourself.
         </p>
       )}
 

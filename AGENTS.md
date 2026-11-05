@@ -448,7 +448,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - **Encryption**: Values encrypted with Electron `safeStorage` at rest
 - **Secret Broker**: An HTTP server on `localhost` that serves secrets to the agent's shell process
 - **Wrapper script**: `secret-shell.sh` intercepts bash commands to inject env vars
-- **Claude Code path**: `CLAUDE_ENV_FILE` names a script the CLI sources before each Bash command, which fetches secrets from the broker (`syncSecretEnvFile` in `claude-code-adapter.ts`). It holds a session token, never a value. A `PreToolUse` rewrite would lose them to a global hook
+- **Claude Code path**: `CLAUDE_ENV_FILE` names a script the CLI sources before each Bash command, which fetches secrets from the broker (`syncSecretEnvFile` in `claude-code-adapter.ts`). It holds a session token, never a value, and another agent running as the same user can read it while the session is live. A `PreToolUse` rewrite would lose them to a global hook
 - **System prompt awareness**: Agents are told which secrets are available (name/description only — never the value)
 
 ### Task API Server

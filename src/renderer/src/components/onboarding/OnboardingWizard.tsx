@@ -421,16 +421,14 @@ function RtkSetupRow({
   enabled,
   busy,
   disabled,
-  onSetup
+  onInstall
 }: {
   status: ToolStatus | undefined
   enabled: boolean
   busy: boolean
   disabled: boolean
-  onSetup: () => void
+  onInstall: () => void
 }) {
-  const installed = status?.installed === true
-  const configured = status?.configured === true
   const state = rtkEffectiveState(enabled, status)
 
   return (
@@ -455,22 +453,18 @@ function RtkSetupRow({
           Change it in Settings &rarr; General &rarr; Agent &amp; Tool Setup.
         </p>
       </div>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-7 px-2.5 text-[11px]"
-        disabled={disabled}
-        onClick={onSetup}
-        aria-label="Set up RTK"
-      >
-        {busy ? (
-          <Loader2 className="size-3 animate-spin" />
-        ) : installed ? (
-          configured ? 'Update global hooks' : 'Add global hooks'
-        ) : (
-          <><Download className="size-3 mr-1" />Install</>
-        )}
-      </Button>
+      {status?.installed !== true && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2.5 text-[11px]"
+          disabled={disabled}
+          onClick={onInstall}
+          aria-label="Install RTK"
+        >
+          {busy ? <Loader2 className="size-3 animate-spin" /> : <><Download className="size-3 mr-1" />Install</>}
+        </Button>
+      )}
     </div>
   )
 }
@@ -791,7 +785,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
               enabled={rtkEnabled}
               busy={installing === DetectKey.RTK}
               disabled={detecting || !!installing}
-              onSetup={() => void handleInstall(DetectKey.RTK)}
+              onInstall={() => void handleInstall(DetectKey.RTK)}
             />
           )}
 

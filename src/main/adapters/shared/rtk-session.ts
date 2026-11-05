@@ -14,8 +14,23 @@ const REWRITTEN_EXIT_CODES = new Set<unknown>([0, 3])
  * `rtk` after it (`PATH=/usr/bin rtk git status`), which that PATH cannot find.
  */
 export const PATH_ASSIGNMENT = /(^|[\s;&|(])PATH\+?=/
-/** A real rewrite runs rtk. Anything else came from a different program called rtk. */
-export const RTK_INVOCATION = /(^|[\s;&|(])rtk\s/
+const RTK_INVOCATION = /(^|[\s;&|(])rtk\s/
+
+/**
+ * True for what `rtk rewrite` produces: a command that runs rtk, and starts either
+ * with rtk or as the original did. Text such as `Usage: rtk [OPTIONS]` from a
+ * different program called rtk must not run as a command.
+ */
+export function isRtkRewrite(original: string, rewritten: string): boolean {
+  const firstWord = (command: string) => command.trim().split(/\s+/)[0]
+  return RTK_INVOCATION.test(rewritten) && ['rtk', firstWord(original)].includes(firstWord(rewritten))
+}
+
+/** `isRtkRewrite` as standalone source, for the code generated for OpenCode and Pi. */
+export const IS_RTK_REWRITE_SOURCE = `function isRtkRewrite(original, rewritten) {
+  var firstWord = function(command) { return command.trim().split(/\\s+/)[0]; };
+  return ${String(RTK_INVOCATION)}.test(rewritten) && ["rtk", firstWord(original)].includes(firstWord(rewritten));
+}`
 
 /**
  * Stops RTK storing anything for a session, including from a global hook or an
@@ -108,7 +123,7 @@ export function rewriteWithRtk(executable: string, command: string, cwd: string)
       execFile(executable, ['rewrite', '--', command], { cwd, timeout: REWRITE_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
         const exitCode = error ? error.code : 0
         const rewritten = stdout.replace(/\r?\n$/, '')
-        resolve(REWRITTEN_EXIT_CODES.has(exitCode) && RTK_INVOCATION.test(rewritten) ? rewritten : command)
+        resolve(REWRITTEN_EXIT_CODES.has(exitCode) && isRtkRewrite(command, rewritten) ? rewritten : command)
       })
     } catch {
       resolve(command)

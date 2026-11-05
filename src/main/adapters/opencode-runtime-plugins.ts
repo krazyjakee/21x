@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, wri
 import { join } from 'path'
 import type { SessionConfig } from './coding-agent-adapter'
 import { buildShellExports } from './shared/shell-exports'
-import { PATH_ASSIGNMENT, RTK_INVOCATION } from './shared/rtk-session'
+import { IS_RTK_REWRITE_SOURCE, PATH_ASSIGNMENT } from './shared/rtk-session'
 
 interface TillDoneConfig {
   defaultEnabled: boolean
@@ -250,7 +250,7 @@ function buildRtkPluginCode(rtkExecutable: string, workspaceDir: string): string
     'var RTK_PATH = ' + JSON.stringify(rtkExecutable) + ';',
     'var WORKSPACE_DIR = ' + JSON.stringify(workspaceDir) + ';',
     'var PATH_ASSIGNMENT = ' + String(PATH_ASSIGNMENT) + ';',
-    'var RTK_INVOCATION = ' + String(RTK_INVOCATION) + ';',
+    IS_RTK_REWRITE_SOURCE,
     'var RTK_RESOLVES = (process.env.PATH || "").split(delimiter).includes(dirname(RTK_PATH));',
     '',
     'function hasNoDenyRules(client) {',
@@ -268,7 +268,7 @@ function buildRtkPluginCode(rtkExecutable: string, workspaceDir: string): string
     '    execFile(RTK_PATH, ["rewrite", "--", command], { cwd: WORKSPACE_DIR, timeout: 2000, windowsHide: true }, function(error, stdout) {',
     '      var code = error ? error.code : 0;',
     '      var rewritten = String(stdout || "").replace(/\\r?\\n$/, "");',
-    '      resolve((code === 0 || code === 3) && RTK_INVOCATION.test(rewritten) ? rewritten : command);',
+    '      resolve((code === 0 || code === 3) && isRtkRewrite(command, rewritten) ? rewritten : command);',
     '    });',
     '  });',
     '}',

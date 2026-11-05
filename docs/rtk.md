@@ -8,7 +8,8 @@ Setup → RTK output compression**, which shows the state in effect:
 
 - **On**: RTK is installed and sessions without secrets use it.
 - **Not installed**: the preference is on, but commands run unchanged. The row
-  offers to install RTK. 21x never installs it without being asked.
+  offers to install RTK, which adds no global hooks. 21x never installs it without
+  being asked.
 - **Unsupported version**: the `rtk` found is older than 0.23.0, the first
   release with `rtk rewrite`, or is a different program. Commands run unchanged.
 - **Off**: the user opted out. This is stored as `rtk_enabled = false`. An unset
@@ -47,9 +48,9 @@ and it decides what can be filtered. It leaves these alone:
 - shapes that need raw output, such as `git log | wc -l` or `ls > out.txt`
 
 21x also leaves alone any command that assigns `PATH`, because the bare `rtk`
-that `rtk rewrite` emits might not resolve under that PATH, and any output from
-`rtk rewrite` that does not run `rtk`, which means a different program has the
-same name.
+that `rtk rewrite` emits might not resolve under that PATH. It ignores output from
+`rtk rewrite` that does not look like a rewrite of the command, which means a
+different program has the same name.
 
 If RTK cannot be run, or `rtk rewrite` fails or takes over 2 seconds, the original
 command runs. The rewritten output is not always byte-identical to the original,
@@ -86,12 +87,10 @@ push` and `timeout 5 git push`, and it does not read managed settings.
 the outcome: sessions run in `allow` mode, where a request is approved anyway
 unless it is dangerous. On Claude Code they are checked before the rewrite.
 
-**A user's global hook is outside this.** `rtk hook claude` rewrites in
-`PreToolUse`, before the CLI's permission check, so with it installed `timeout 5
-git push` runs past a rule on `git push`, in 21x sessions as anywhere else. This
-is RTK's behaviour and predates 21x's default. Settings warns when a global hook
-is present. The fix is `rtk init -g --uninstall`, which also removes it outside
-21x.
+**A global hook is outside this.** `rtk hook claude` rewrites in `PreToolUse`,
+before the CLI's permission check, so with it installed `timeout 5 git push` runs
+past a rule on `git push`, in 21x sessions as anywhere else. This is why 21x does
+not install global hooks. See [Global hooks](#global-hooks).
 
 ## Sessions with secrets
 
@@ -132,14 +131,33 @@ secrets can still pass them to RTK, as any use of RTK would.
 ## How Claude Code receives secrets
 
 `CLAUDE_ENV_FILE` names a script the CLI sources before each Bash command. It
-fetches the session's secrets from the secret broker with `curl`. The file holds a
-session token and never a secret value, so a crash leaves nothing usable: the
-token dies with the session and with the app.
+fetches the session's secrets from the secret broker with `curl` and exports them.
 
-This needs Claude Code 2.0.60 or newer: older versions ignore the file, so a
-session with secrets refuses to start rather than run with empty variables. If
-the version cannot be read, it starts and logs a warning. Without a running broker
-secrets are not injected, which is also logged.
+- The files hold a session token, never a secret value, so a crash leaves nothing
+  usable: the token is revoked when the session ends and dies with the app. The
+  files themselves stay in the temporary directory after a crash, harmlessly.
+- The token is in a curl config file, so it does not appear in process arguments.
+- `curl` ignores proxy settings and `~/.curlrc`, so the request reaches only the
+  broker's loopback port.
+- The response is parsed as `NAME=base64` lines and never evaluated, so whatever
+  answers on that port can set a variable but cannot run a command.
+
+**Another agent running as the same user can read a live session's token file**
+and fetch that session's secrets, because agents run without a sandbox. A token
+cannot prevent this. The same is true of `/proc/<pid>/environ` on backends that
+keep secrets in the environment. Only the session's own file and token are
+affected, and only while it runs.
+
+Secrets are fetched for each Bash command, from the main process. If the fetch
+fails the command still runs, with empty variables, and prints a line to stderr.
+A value ending in a newline loses it. If the app dies while a CLI survives, another
+process could bind the port and set variables for that CLI's later commands.
+
+This needs Claude Code 2.0.60 or newer, because older versions ignore the file,
+and `curl` and `base64` on PATH. A session with secrets refuses to start without
+them, rather than run with empty variables. If the version cannot be read, it
+starts and logs a warning. Without a running broker secrets are not injected, which
+is also logged.
 
 Secrets used to be added to each command by a `PreToolUse` hook. When a global RTK
 hook also returned a command, the CLI used the global one and the secrets were
@@ -147,30 +165,38 @@ lost, on every call tested with Claude Code 2.1.317. They are not passed in the
 CLI's environment because a secret named `ANTHROPIC_API_KEY` would change how it
 authenticates.
 
-## Global setup
+## Global hooks
 
-Setup is separate from the preference, and sessions do not need it. **Install**
-in Settings, and **Install** or **Add global hooks** in the setup dialog, run
-RTK's global setup for each installed backend:
+Sessions do not need RTK's global setup, and 21x does not run it. **Install** in
+Settings and in the setup dialog puts the RTK binary in place and nothing else.
 
-| Backend | What RTK writes |
-| --- | --- |
-| Claude Code | `PreToolUse` hook, plus `RTK.md` included from `CLAUDE.md` |
-| OpenCode | `tool.execute.before` plugin |
-| Pi | `tool_call` extension |
-| Codex | `RTK.md` included from `AGENTS.md`, which is an instruction, not a hook |
-| Cursor | `preToolUse` hook |
+Global hooks are a separate choice, made in a terminal:
 
-These files belong to the user and also apply in a terminal. When 21x runs setup
-it disables RTK telemetry; users can make their own telemetry choice later with
-the RTK CLI.
+| Backend | Add | Remove | What RTK writes |
+| --- | --- | --- | --- |
+| Claude Code | `rtk init -g` | `rtk init -g --uninstall` | `PreToolUse` hook, `RTK.md` included from `CLAUDE.md` |
+| OpenCode | `rtk init -g --opencode` | `rtk init -g --uninstall` | `tool.execute.before` plugin |
+| Cursor | `rtk init -g --agent cursor` | `rtk init -g --agent cursor --uninstall` | `preToolUse` hook |
+| Codex | `rtk init -g --codex` | `rtk init -g --codex --uninstall` | `RTK.md` included from `AGENTS.md`, an instruction and not a hook |
+| Pi | `rtk init -g --agent pi` | `rtk init -g --agent pi --uninstall` | `tool_call` extension |
 
-Claude Code sessions load these files because 21x leaves the SDK's
-`settingSources` unset, which means all sources. The global hook can return
-`permissionDecision: "allow"`, which skips 21x's dangerous-command check. That
-comes from RTK's hook and only applies to users who installed it. Codex reads
-`AGENTS.md` only with a subscription login: API-key sessions use a temporary
-`CODEX_HOME`, so the session prompt is what reaches them.
+**The hooks can get denied commands past deny rules.** They run before the
+backend's permission check, so on Claude Code `FOO=1 git push`, `timeout 5 git
+push` and similar forms run despite a rule on `git push`. With the hook installed,
+6 of 8 such forms ran on Claude Code 2.1.317, and none ran without it. Earlier
+versions of 21x installed these hooks from the Install button. Settings warns when
+a Claude Code, OpenCode or Cursor hook is present.
+
+Tested with RTK 0.49.0: `rtk init -g --uninstall` removes the Claude Code, OpenCode
+and Cursor entries together and keeps unrelated hooks. It leaves Codex and Pi in
+place, and it deletes `CLAUDE.md` if nothing else is in it. `--opencode --uninstall`
+removes the same three, so OpenCode alone cannot be removed that way.
+
+Claude Code sessions load global hooks because 21x leaves the SDK's `settingSources`
+unset, which means all sources. The hook can also return `permissionDecision:
+"allow"`, which skips 21x's dangerous-command check. Codex reads `AGENTS.md` only
+with a subscription login: API-key sessions use a temporary `CODEX_HOME`, so the
+session prompt is what reaches them.
 
 ## Limits of the opt-out
 
@@ -179,6 +205,6 @@ remove the user's global setup:
 
 - **Claude Code, OpenCode, Cursor**: a global hook keeps rewriting commands.
   `RTK_DISABLED=1` in the environment does not stop `rtk hook claude` or
-  `rtk rewrite`. See [Deny rules](#deny-rules) for what that hook can do.
+  `rtk rewrite`. See [Global hooks](#global-hooks) for what that hook can do.
 - **Pi**: RTK's global extension honours `RTK_DISABLED`, which 21x sets.
 - **Codex**: the session prompt asks the agent to ignore the global instruction.

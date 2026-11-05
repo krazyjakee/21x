@@ -12,6 +12,7 @@ case "$3" in
   "ls -la") echo "rtk ls -la"; exit 0 ;;
   "broken") echo "not a command"; exit 2 ;;
   "unrelated") echo "Rust Type Kit: nothing to do"; exit 0 ;;
+  "usage") echo "Usage: rtk [OPTIONS] <COMMAND>"; exit 0 ;;
   *) exit 1 ;;
 esac
 `
@@ -75,6 +76,7 @@ describe.skipIf(process.platform === 'win32')('Pi RTK extension', () => {
 
   it('never runs the output of a different program called rtk', async () => {
     expect(await run('unrelated')).toBe('unrelated')
+    expect(await run('usage')).toBe('usage')
   })
 
   it('leaves a command alone when it sets its own PATH', async () => {

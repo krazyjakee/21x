@@ -12,6 +12,7 @@ case "$3" in
   "broken") echo "not a command"; exit 2 ;;
   "where") echo "rtk where $(pwd)"; exit 0 ;;
   "unrelated") echo "Rust Type Kit: nothing to do"; exit 0 ;;
+  "usage") echo "Usage: rtk [OPTIONS] <COMMAND>"; exit 0 ;;
   *) exit 1 ;;
 esac
 `
@@ -115,6 +116,7 @@ describe.skipIf(process.platform === 'win32')('OpenCode RTK plugin', () => {
 
     it('never runs the output of a different program called rtk', async () => {
       expect(await runPlugin(plugin, 'bash', 'unrelated')).toBe('unrelated')
+      expect(await runPlugin(plugin, 'bash', 'usage')).toBe('usage')
     })
 
     // OpenCode checks permission rules after this hook, so a rewrite would bypass them.

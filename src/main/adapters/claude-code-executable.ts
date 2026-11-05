@@ -106,8 +106,21 @@ async function readClaudeVersion(executable: string): Promise<string | null> {
   }
 }
 
+/** False only when a shell ran and did not find them. Null when no shell could run. */
+async function hasSecretTools(): Promise<boolean | null> {
+  try {
+    await execFileAsync('sh', ['-c', 'command -v curl && command -v base64'], { timeout: 10_000, windowsHide: true })
+    return true
+  } catch (error) {
+    return typeof (error as { code?: unknown }).code === 'number' ? false : null
+  }
+}
+
 /** Refuses to start a session whose secrets would silently come through empty. */
 export async function assertClaudeSupportsSecrets(executable: string): Promise<void> {
+  const tools = await hasSecretTools()
+  if (tools === false) throw new Error('This agent has secrets, which need curl and base64 on PATH. Install them and try again.')
+  if (tools === null) console.warn('[ClaudeCodeAdapter] Could not check for curl and base64, which secrets need.')
   const version = await readClaudeVersion(executable)
   if (version === null) {
     console.warn(`[ClaudeCodeAdapter] Could not read the Claude Code version. Secrets need ${MINIMUM_CLAUDE_VERSION_FOR_SECRETS} or newer.`)

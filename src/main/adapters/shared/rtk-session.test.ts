@@ -3,7 +3,7 @@ import { devNull, tmpdir } from 'os'
 import { delimiter, join, resolve } from 'path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { SessionConfig } from '../coding-agent-adapter'
-import { applyRtkSessionPolicy, findRtkExecutable, PATH_ASSIGNMENT, rewriteWithRtk, rtkProcessEnv } from './rtk-session'
+import { applyRtkSessionPolicy, findRtkExecutable, isRtkRewrite, PATH_ASSIGNMENT, rewriteWithRtk, rtkProcessEnv } from './rtk-session'
 
 /** Follows the real `rtk rewrite` exit codes, recorded from RTK 0.49.0. */
 const FAKE_RTK = `#!/bin/sh
@@ -16,6 +16,8 @@ case "$3" in
   "slow") exec sleep 10 ;;
   "where") echo "rtk where $(pwd)"; exit 0 ;;
   "unrelated") echo "Rust Type Kit: nothing to do"; exit 0 ;;
+  "usage") echo "Usage: rtk [OPTIONS] <COMMAND>"; exit 0 ;;
+  "complaint") echo "error: unknown command rtk rewrite"; exit 3 ;;
   *) exit 1 ;;
 esac
 `
@@ -59,7 +61,7 @@ describe.skipIf(process.platform === 'win32')('RTK session support', () => {
     })
 
     it('never runs the output of a different program called rtk', async () => {
-      expect(await rewrite('unrelated')).toBe('unrelated')
+      for (const command of ['unrelated', 'usage', 'complaint']) expect(await rewrite(command)).toBe(command)
     })
 
     it('keeps the command when RTK hangs', async () => {
@@ -132,6 +134,28 @@ describe.skipIf(process.platform === 'win32')('RTK session support', () => {
       writeFileSync(join(directory, 'rtk'), 'data')
       expect(findRtkExecutable({ PATH: directory }, 'linux', '/nonexistent')).toBeNull()
     })
+  })
+})
+
+describe('isRtkRewrite', () => {
+  it.each([
+    ['git status', 'rtk git status'],
+    ['cat a.txt', 'rtk read a.txt'],
+    ['FOO=1 git status', 'FOO=1 rtk git status'],
+    ['timeout 5 git status', 'timeout 5 rtk git status'],
+    ['cd x && git diff', 'cd x && rtk git diff'],
+    ['git diff | grep foo', 'git diff | rtk grep foo'],
+  ])('accepts a rewrite of %s', (original, rewritten) => {
+    expect(isRtkRewrite(original, rewritten)).toBe(true)
+  })
+
+  it.each([
+    ['git status', 'Usage: rtk [OPTIONS] <COMMAND>'],
+    ['git status', 'error: unknown command rtk rewrite'],
+    ['git status', 'nothing to do'],
+    ['git status', 'git status'],
+  ])('rejects %s becoming %s', (original, rewritten) => {
+    expect(isRtkRewrite(original, rewritten)).toBe(false)
   })
 })
 

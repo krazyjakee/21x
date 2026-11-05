@@ -340,13 +340,25 @@ describe('OnboardingWizard', () => {
 
     const rows = await screen.findAllByTestId('rtk-setup')
     expect(rows[rows.length - 1]).toHaveTextContent('RTK output compression')
-    fireEvent.click(screen.getAllByRole('button', { name: /set up rtk/i })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /install rtk/i })[0])
 
     await waitFor(() => {
       expect(mockAgentInstaller.install).toHaveBeenCalledWith('rtk')
       expect(screen.getAllByTestId('rtk-state').at(-1)).toHaveTextContent('On')
     })
     expect(screen.getAllByTestId('rtk-setup').at(-1)).toHaveTextContent('Settings')
+  })
+
+  it('offers no global hooks once RTK is installed', async () => {
+    mockAgentInstaller.detect.mockResolvedValue(detection({
+      claudeCode: { installed: true, version: '1.0.0' },
+      rtk: { installed: true, version: '0.49.0', configured: false }
+    }))
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+
+    await screen.findAllByTestId('rtk-setup')
+    expect(screen.queryByRole('button', { name: /rtk/i })).toBeNull()
+    expect(screen.queryByText(/global hooks/i)).toBeNull()
   })
 
   it('reports RTK as not installed instead of implying it is running', async () => {

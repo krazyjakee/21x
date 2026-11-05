@@ -64,6 +64,19 @@ async function fixture() {
 }
 
 describe('Captain rollover binding and pending continuity', () => {
+  it('revokes the secret token when a triage session finishes', async () => {
+    const h = await fixture()
+    const unregister = vi.fn()
+    h.host.secrets = { kind: 'broker', getPort: () => 1234, register: () => {}, unregister, writeShellWrapper: () => '/tmp/fixture' }
+    h.session.isTriageSession = true
+    h.session.secretSessionToken = 'triage-token'
+    h.session.status = 'working'
+
+    await h.internal.transitionToIdle(h.backendId, h.session)
+
+    expect(unregister).toHaveBeenCalledWith('triage-token')
+  })
+
   it('creates and durably binds one native generation without an automatic model turn, then acknowledges seed on the next accepted intent', async () => {
     const h = await fixture()
     await h.internal.maybeRolloverCaptain(h.backendId, h.session)

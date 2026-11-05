@@ -147,10 +147,28 @@ describe('RtkSetting', () => {
     expect(screen.getByTestId('rtk-global-hooks')).toHaveTextContent('it can get a denied command past a rule')
   })
 
-  it('does not warn without a global hook', async () => {
+  it('does not warn without a global hook, and states the cost of adding one', async () => {
     await renderLoaded()
 
     expect(screen.queryByTestId('rtk-global-hooks')).toBeNull()
+    const optIn = screen.getByTestId('rtk-hooks-opt-in')
+    expect(optIn).toHaveTextContent('They can get denied commands past deny rules')
+    expect(optIn).toHaveTextContent('rtk init -g')
+    expect(screen.queryByRole('button', { name: /hook/i })).toBeNull()
+  })
+
+  it('reports On without any global hook, because sessions do not need one', async () => {
+    mockInstaller.detect.mockResolvedValue(detection({ installed: true, configured: false, integrations: {} }))
+    await renderLoaded()
+
+    expect(screen.getByTestId('rtk-effective-state')).toHaveTextContent('On')
+  })
+
+  it('says that installing adds no global hooks', async () => {
+    mockInstaller.detect.mockResolvedValue(detection({ installed: false, version: null }))
+    await renderLoaded()
+
+    expect(screen.getByTestId('rtk-setting')).toHaveTextContent('Installing it adds no global hooks')
   })
 
   it('still offers the preference when detection fails', async () => {

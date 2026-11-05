@@ -1205,6 +1205,12 @@ export class AgentManager extends EventEmitter {
    * Sets up a secret broker session for an agent, registering its secrets.
    * Returns the token, or undefined if no secrets are configured.
    */
+  private releaseSecretSession(sessionId: string, session: AgentSession): void {
+    if (!session.secretSessionToken) return
+    if (this.host.secrets.kind === 'broker') this.host.secrets.unregister(session.secretSessionToken)
+    console.log(`[AgentManager] Unregistered secret session for ${sessionId}`)
+  }
+
   private setupSecretSession(agentId: string): string | undefined {
     const agent = this.db.getAgent(agentId)
     const secretIds = agent?.config?.secret_ids
@@ -4732,6 +4738,7 @@ export class AgentManager extends EventEmitter {
       // Release through the adapter first: otherwise the agent CLI process and
       // its task-management MCP child stay alive with no handle left to stop them.
       await this.releaseAdapterSession(sessionId, 'triage_completed')
+      this.releaseSecretSession(sessionId, session)
       this.sessions.delete(sessionId)
       this.schedulePowerSaveBlockerUpdate()
       console.log(`[SessionTracker] DESTROYED session=${sessionId} task=${session.taskId} reason=triage_completed`)
@@ -5250,10 +5257,7 @@ export class AgentManager extends EventEmitter {
       await this.managedEngine(session)!.finishTurn(session.taskId, sessionId, intentId, resetTaskStatus ? 'cancelled' : 'interrupted')
     }
 
-    if (session.secretSessionToken) {
-      if (this.host.secrets.kind === 'broker') this.host.secrets.unregister(session.secretSessionToken)
-      console.log(`[AgentManager] Unregistered secret session for ${sessionId}`)
-    }
+    this.releaseSecretSession(sessionId, session)
 
     // Eagerly clear dedup structures to free memory immediately (don't wait for GC)
     session.seenMessageIds.clear()
