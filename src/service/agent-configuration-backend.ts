@@ -239,7 +239,7 @@ export class AgentConfigurationBackend {
         }).catch(refusalOf)
       } finally { if (accepted) this.committed() }
     })
-    this.bind('agent:deletionImpact', ([id], caller) => this.agentAllowed(id, caller, 'read'), ([id]) => manager.getAgentDeletionImpact(id))
+    this.bind('agent:deletionImpact', ([id, alsoRemoving], caller) => [id, ...alsoRemoving ?? []].every(agent => this.agentAllowed(agent, caller, 'read')), ([id, alsoRemoving]) => manager.getAgentDeletionImpact(id, alsoRemoving))
     this.bind('agentConfig:getProviders', ([url, type], caller) => this.backendRequest(url, type, caller) !== null, async ([url, type], caller, signal) => {
       const target = this.backendTarget(url, type, caller)
       if (!target) throw new ServiceProtocolError('INVALID_REQUEST')

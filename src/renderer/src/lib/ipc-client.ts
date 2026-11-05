@@ -169,8 +169,8 @@ export const agentApi = {
     return desktopApi.agents.delete(id)
   },
 
-  deletionImpact: (id: string): Promise<AgentDeletionImpact | null> => {
-    return desktopApi.agents.deletionImpact(id)
+  deletionImpact: (id: string, alsoRemoving?: string[]): Promise<AgentDeletionImpact | null> => {
+    return desktopApi.agents.deletionImpact(id, alsoRemoving)
   },
 
   /** Durable starts waiting on capacity, dependencies or retry deadlines. */

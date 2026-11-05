@@ -778,7 +778,7 @@ it('binds Claude marketplace/plugin lifecycle using public projections and user-
   const resources = { skills: [{ id: 'skill:fixture', name: 'Fixture skill', description: 'Public description' }], mcpServers: [{ id: 'mcp:fixture', name: 'Fixture MCP', command: '', args: [] }], agents: [{ id: 'agent:fixture', name: 'Fixture agent', description: '' }], commands: ['commands/fixture.md'] }
   f.results.set('claudePlugin:getMarketplaceSources', [source]); f.results.set('claudePlugin:addMarketplaceSource', source); f.results.set('claudePlugin:removeMarketplaceSource', true)
   f.results.set('claudePlugin:fetchCatalog', catalog); f.results.set('claudePlugin:discoverPlugins', [discovery]); f.results.set('claudePlugin:getInstalledPlugins', [installed])
-  f.results.set('claudePlugin:installPlugin', installed); f.results.set('claudePlugin:uninstallPlugin', true); f.results.set('claudePlugin:enablePlugin', installed); f.results.set('claudePlugin:disablePlugin', { ...installed, enabled: false }); f.results.set('claudePlugin:getPluginResources', resources)
+  f.results.set('claudePlugin:installPlugin', installed); f.results.set('claudePlugin:uninstallPlugin', []); f.results.set('claudePlugin:enablePlugin', installed); f.results.set('claudePlugin:disablePlugin', { ...installed, enabled: false }); f.results.set('claudePlugin:getPluginResources', resources)
   await f.host.reconnect()
   expect(await f.host.api.claudePlugins.getMarketplaceSources()).toEqual([source])
   expect(await f.host.api.claudePlugins.fetchCatalog(source.id)).toEqual(catalog)
@@ -792,7 +792,7 @@ it('binds Claude marketplace/plugin lifecycle using public projections and user-
   expect(await f.host.api.claudePlugins.installPlugin(installed.name, source.id, 'user')).toEqual(installed)
   expect(await f.host.api.claudePlugins.disablePlugin(installed.id)).toMatchObject({ enabled: false })
   expect(await f.host.api.claudePlugins.enablePlugin(installed.id)).toEqual(installed)
-  expect(await f.host.api.claudePlugins.uninstallPlugin(installed.id)).toBe(true)
+  expect(await f.host.api.claudePlugins.uninstallPlugin(installed.id)).toEqual([])
   expect(await f.host.api.claudePlugins.removeMarketplaceSource(source.id)).toBe(true)
   f.results.delete('claudePlugin:enablePlugin'); expect(await f.host.api.claudePlugins.enablePlugin(installed.id)).toBeUndefined()
   f.results.set('claudePlugin:fetchCatalog', null); expect(await f.host.api.claudePlugins.fetchCatalog(source.id)).toBeNull()

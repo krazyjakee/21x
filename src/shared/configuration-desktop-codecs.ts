@@ -189,7 +189,12 @@ const descriptors: Record<ConfigurationDesktopOperation, Descriptor> = {
   'agent:create': { ...createArgs(agentCreateShape), validateResult: agentResult, encodeResult: projectPublicAgent },
   'agent:update': { ...updateArgs(agentUpdateShape), validateResult: optionalResult(agentResult), encodeResult: projectPublicAgent },
   'agent:delete': { ...idArgs, validateResult: value => value === false || isAgentDeletionImpact(value) || isAgentDeletionRefusal(value) },
-  'agent:deletionImpact': { ...idArgs, validateResult: value => value === null || isAgentDeletionImpact(value) },
+  'agent:deletionImpact': {
+    validateArgs: value => Array.isArray(value) && value.length >= 1 && value.length <= 2 && isDatabaseId(value[0]) && (value[1] === undefined || uniqueIds(value[1])),
+    encodeArgs: args => { const value: Record<string, JsonValue> = { id: args[0] as string }; if (args[1] !== undefined) value.alsoRemoving = args[1] as string[]; return value },
+    decodeArgs: value => { if (!isRecord(value) || !hasExactKeys(value, ['id'], ['alsoRemoving']) || !isDatabaseId(value.id) || value.alsoRemoving !== undefined && !uniqueIds(value.alsoRemoving)) return fail('INVALID_ARGUMENTS'); return value.alsoRemoving === undefined ? [value.id] : [value.id, value.alsoRemoving] },
+    validateResult: value => value === null || isAgentDeletionImpact(value)
+  },
   'skills:getAll': { ...noArgs, validateResult: list(skillResult), encodeResult: value => projectList(value, projectPublicSkill) },
   'skills:create': { ...createArgs(skillInputFields), validateResult: skillResult, encodeResult: projectPublicSkill },
   'skills:update': { ...updateArgs(skillUpdateShape), validateResult: optionalResult(skillResult), encodeResult: projectPublicSkill },

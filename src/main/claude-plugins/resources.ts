@@ -218,5 +218,6 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
 export function removePluginResources(db: DatabaseManager, pluginName: string, live?: ReadonlyMap<string, AgentLiveWork>): AgentDeletionImpact[] {
   for (const skill of pluginSkills(db, pluginName)) db.deleteSkill(skill.id)
   for (const server of pluginMcpServers(db, pluginName)) db.deleteMcpServer(server.id)
-  return pluginAgents(db, pluginName).flatMap(agent => db.removeAgent(agent.id, live?.get(agent.id)) || [])
+  const agents = pluginAgents(db, pluginName), ids = agents.map(agent => agent.id)
+  return agents.flatMap(agent => db.removeAgent(agent.id, live?.get(agent.id), ids) || [])
 }

@@ -27,7 +27,7 @@ describe('agent deletion wording', () => {
   })
   it('states both default outcomes and the last agent plainly', () => {
     expect(describeAgentDeletion(impact({ was_default: true, replacement_default: { id: 'next', name: 'Astra' } })).changes).toEqual(['“Astra” becomes the default agent.'])
-    expect(describeAgentDeletion(impact({ was_default: true, last_agent: true })).changes).toEqual(['There will be no default agent.', 'This is your last agent. Nothing can run until you add another.'])
+    expect(describeAgentDeletion(impact({ was_default: true, last_agent: true })).changes).toEqual(['There will be no default agent.', 'No agents will be left. Nothing can run until you add another.'])
   })
 })
 

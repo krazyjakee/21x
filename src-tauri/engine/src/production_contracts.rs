@@ -1933,10 +1933,10 @@ fn fields(operation: &str) -> Option<(&'static [&'static str], &'static [&'stati
         | "project:get"
         | "skills:delete"
         | "agent:delete"
-        | "agent:deletionImpact"
         | "projectRepo:remove"
         | "projectResource:remove"
         | "commander:getImage" => (&["id"], &[]),
+        "agent:deletionImpact" => (&["id"], &["alsoRemoving"]),
         "db:createTask" | "project:create" | "skills:create" | "agent:create" => (&["data"], &[]),
         "db:updateTask" => (&["id", "data"], &["precondition"]),
         "project:update"
@@ -3561,7 +3561,7 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
                 text(item, 512) && item.as_str().is_some_and(|s| !s.trim().is_empty())
             }
             "approved" | "archived" | "includeArchived" | "skipInitialPrompt" => item.is_boolean(),
-            "orderedIds" => ids(item),
+            "orderedIds" | "alsoRemoving" => ids(item),
             "images" => images(item),
             "data" => data_fields(operation, item),
             "precondition" if operation == "db:updateTask" => true,
@@ -5504,6 +5504,10 @@ mod tests {
     #[test]
     fn production_names_and_scopes_are_finite() {
         assert_eq!(COMMANDS.len(), 244);
+        assert!(valid_request(
+            "agent:deletionImpact",
+            &json!({"id":"agent_one","alsoRemoving":["agent_two"]})
+        ));
         assert!(valid_request(
             "agentSession:approve",
             &json!({"sessionId":"s","approved":false,"requestId":"native/request","responseType":"question"})

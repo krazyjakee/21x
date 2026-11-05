@@ -107,6 +107,19 @@ describe('deleting an agent', () => {
     expect(h.db.getAgents()).toEqual([]); expect(h.db.getTask(open.id)?.agent_id).toBeNull()
   })
 
+  it('judges agents leaving together as one set, so no default passes to one that is also going', () => {
+    const h = fixture(); const stays = h.db.createAgent({ name: 'Stays' })!; const both = [h.doomed.id, h.kept.id]
+    expect(h.db.getAgentDeletionImpact(h.doomed.id, undefined, both)).toMatchObject({ replacement_default: { id: stays.id }, last_agent: false, fallback_agents: { total: 0 } })
+    h.db.removeAgent(h.doomed.id, undefined, both); h.db.removeAgent(h.kept.id, undefined, both)
+    expect(h.db.getAgent(stays.id)?.is_default).toBe(true)
+  })
+
+  it('warns that no agents remain when the set is all of them', () => {
+    const h = fixture(); const both = [h.doomed.id, h.kept.id]
+    expect(h.db.getAgentDeletionImpact(h.kept.id, undefined, both)).toMatchObject({ last_agent: true })
+    expect(h.db.getAgentDeletionImpact(h.doomed.id, undefined, both)).toMatchObject({ last_agent: true, replacement_default: null })
+  })
+
   it('deletes an agent that signed a PR review and keeps the review record, which still blocks a merge', () => {
     const h = fixture(); const work = h.task('Work'); const review = h.task('Review'); h.db.updateTask(work.id, { agent_id: h.kept.id })
     const handoff = h.db.createPullRequestReviewHandoff({ project_id: h.project.id, repo: 'owner/repo', pr_number: 1, head_sha: 'a'.repeat(40), base_sha: 'b'.repeat(40),

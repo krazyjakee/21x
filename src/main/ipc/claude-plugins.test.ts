@@ -6,7 +6,7 @@ vi.mock('electron', () => ({ ipcMain: { handle: (name: string, handler: (...args
 import { registerClaudePluginHandlers } from './claude-plugins'
 import { AgentDeletionRefused } from '../../shared/agent-deletion'
 
-const plugins = { getPluginResources: vi.fn(), uninstallPlugin: vi.fn() }
+const plugins = { assertUninstallable: vi.fn(), getPluginResources: vi.fn(), uninstallPlugin: vi.fn() }
 const agentManager = { runAgentsDeletion: vi.fn(), notifyAgentsChanged: vi.fn() }
 beforeEach(() => {
   vi.resetAllMocks(); handlers.clear()
@@ -29,6 +29,12 @@ it('answers a named refusal as a result, so both hosts show the same words', asy
   agentManager.runAgentsDeletion.mockRejectedValue(new AgentDeletionRefused('Not deleted.', 2, 0))
   expect(await handlers.get('claudePlugin:uninstallPlugin')!({}, 'plugin')).toEqual({ refused: 'Not deleted. Already done: 2 sessions stopped.' })
   expect(plugins.uninstallPlugin).not.toHaveBeenCalled()
+})
+
+it('checks the plugin folder before any work stops, and says why it will not go', async () => {
+  plugins.assertUninstallable.mockImplementation(() => { throw new AgentDeletionRefused('The plugin was not removed because its files need attention (linked). Nothing was stopped.') })
+  expect(await handlers.get('claudePlugin:uninstallPlugin')!({}, 'plugin')).toEqual({ refused: expect.stringContaining('Nothing was stopped') })
+  expect(agentManager.runAgentsDeletion).not.toHaveBeenCalled()
 })
 
 it('does not touch the plugin or publish anything when the owner fails', async () => {

@@ -28,7 +28,7 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     if (report && !isAgentDeletionRefusal(report)) agentManager.notifyAgentsChanged()
     return report
   })
-  ipcMain.handle('agent:deletionImpact', (_, id: string) => agentManager.getAgentDeletionImpact(id))
+  ipcMain.handle('agent:deletionImpact', (_, id: string, alsoRemoving?: string[]) => agentManager.getAgentDeletionImpact(id, alsoRemoving))
 
   // A deferred start is committed to the durable queue before this reply;
   // empty sessionId means there is no live session yet.

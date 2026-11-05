@@ -312,7 +312,7 @@ interface ElectronAPI {
     create: (data: CreateAgentDTO) => Promise<Agent>
     update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>
     delete: (id: string) => Promise<AgentDeletionResult>
-    deletionImpact: (id: string) => Promise<AgentDeletionImpact | null>
+    deletionImpact: (id: string, alsoRemoving?: string[]) => Promise<AgentDeletionImpact | null>
     getStartQueue: () => Promise<QueuedAgentStart[]>
     getStartRecoveryState?: (taskId: string) => Promise<QueuedAgentStart | null>
   }

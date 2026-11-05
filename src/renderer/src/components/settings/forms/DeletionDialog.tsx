@@ -9,7 +9,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from '@/components/ui/AlertDialog'
-import { describeAgentDeletion, isAgentDeletionRefusal, type AgentDeletionImpact, type PluginUninstallResult } from '@shared/agent-deletion'
+import { ipcErrorReason } from '@/lib/ipc-error'
+import { describeAgentDeletion, isAgentDeletionRefusal, NO_AGENTS_LEFT, type AgentDeletionImpact, type PluginUninstallResult } from '@shared/agent-deletion'
 
 type Phase = 'loading' | 'confirm' | 'deleting' | 'done'
 
@@ -31,10 +32,10 @@ function Lines({ title, lines }: { title: string; lines: string[] }) {
 function describeAll(impacts: AgentDeletionImpact[]): { stops: string[]; changes: string[] } {
   const named = impacts.map((impact) => {
     const lines = describeAgentDeletion(impact)
-    const prefix = (line: string) => (impacts.length > 1 ? `${impact.agent_name}: ${line}` : line)
+    const prefix = (line: string) => (impacts.length > 1 && line !== NO_AGENTS_LEFT ? `${impact.agent_name}: ${line}` : line)
     return { stops: lines.stops.map(prefix), changes: lines.changes.map(prefix) }
   })
-  return { stops: named.flatMap((lines) => lines.stops), changes: named.flatMap((lines) => lines.changes) }
+  return { stops: named.flatMap((lines) => lines.stops), changes: [...new Set(named.flatMap((lines) => lines.changes))] }
 }
 
 export interface DeletionDialogProps {
@@ -72,9 +73,10 @@ export function DeletionDialog(props: DeletionDialogProps) {
     return () => { mounted.current = false }
   }, [])
 
-  const unreadable = useCallback(() => {
+  const unreadable = useCallback((error: unknown) => {
+    if (!mounted.current) return
     setImpacts(null)
-    setProblem('What this would stop could not be read, so nothing was deleted. Try again.')
+    setProblem(`What this would stop could not be read (${ipcErrorReason(error)}), so nothing was deleted. Try again.`)
     setPhase('confirm')
   }, [])
 
@@ -86,7 +88,7 @@ export function DeletionDialog(props: DeletionDialogProps) {
       if (!next) { latest.current.onClose(); return }
       setImpacts(next)
       setPhase('confirm')
-    }).catch(() => { if (mounted.current) unreadable() })
+    }).catch(unreadable)
   }, [unreadable])
 
   useEffect(() => { load() }, [load, subjectId])
@@ -95,9 +97,8 @@ export function DeletionDialog(props: DeletionDialogProps) {
     setPhase('deleting')
     setProblem(null)
     // The list may be minutes old. New work must be seen before it is stopped.
-    const current = await latest.current.readImpacts().catch(() => undefined)
-    if (!mounted.current) return
-    if (current === undefined) { unreadable(); return }
+    const current = await latest.current.readImpacts().catch((error: unknown) => { unreadable(error); return undefined })
+    if (!mounted.current || current === undefined) return
     if (current === null) { latest.current.onClose(); return }
     if (workOf(current) !== workOf(shown)) {
       setImpacts(current)

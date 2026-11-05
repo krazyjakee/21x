@@ -270,8 +270,9 @@ error because the service transport would mask an error's message.
 `removeAgent` trusts that sessions are already stopped, so it refuses an agent
 with live work unless the lifecycle owner holds it. Anything that removes agents
 goes through that owner: `runAgentsDeletion` does this for plugin uninstall.
-Uninstalling a plugin shows the same preview first, and returns one report per
-agent, so what stopped reaches the receipt and each project's journal.
+Uninstalling a plugin checks its folder before stopping anything, shows the same
+preview, judging its agents as one set, and returns one report per agent, so what
+stopped reaches the receipt and each project's journal.
 
 A task flagged `auto_start_agent` with no agent is triaged by the default agent
 on each run, or does nothing if no agent exists. The board and the task view

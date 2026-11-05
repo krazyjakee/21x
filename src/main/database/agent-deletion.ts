@@ -38,14 +38,15 @@ export function agentDeletionProjectIds(manager: DatabaseManager, agentId: strin
 }
 
 /** The agent that takes over as app default, or null when none remains. */
-function replacementDefault(manager: DatabaseManager, agentId: string): { id: string; name: string } | null {
-  const others = manager.getAgents().filter(agent => agent.id !== agentId)
+function replacementDefault(manager: DatabaseManager, agentId: string, alsoRemoving: readonly string[]): { id: string; name: string } | null {
+  const others = manager.getAgents().filter(agent => agent.id !== agentId && !alsoRemoving.includes(agent.id))
   const configured = manager.getSetting('default_agent_id')
   const next = others.find(agent => agent.id === configured) ?? others.find(agent => agent.is_default) ?? others[0]
   return next ? { id: next.id, name: next.name } : null
 }
 
-export function readAgentDeletionImpact(manager: DatabaseManager, agentId: string, live: AgentLiveWork = NO_AGENT_LIVE_WORK): AgentDeletionImpact | null {
+/** `alsoRemoving` names agents leaving together, as a plugin's do: they count as gone already. */
+export function readAgentDeletionImpact(manager: DatabaseManager, agentId: string, live: AgentLiveWork = NO_AGENT_LIVE_WORK, alsoRemoving: readonly string[] = []): AgentDeletionImpact | null {
   const agent = manager.getAgent(agentId)
   if (!agent) return null
   const db = manager.db
@@ -58,7 +59,7 @@ export function readAgentDeletionImpact(manager: DatabaseManager, agentId: strin
     const known = (id: string | null) => id && agents.some(row => row.id === id) ? id : null
     return (known(project.captain_agent_id) ?? known(project.default_agent_id) ?? agents.find(row => row.is_default)?.id ?? agents[0]?.id) === agentId
   }
-  const others = agents.filter(row => row.id !== agentId)
+  const others = agents.filter(row => row.id !== agentId && !alsoRemoving.includes(row.id))
   const wasDefault = agent.is_default || manager.getSetting('default_agent_id') === agentId
   return {
     agent_id: agent.id,
@@ -79,7 +80,7 @@ export function readAgentDeletionImpact(manager: DatabaseManager, agentId: strin
     concurrency_projects: toList(projects.filter(project => holdsConcurrency(project.settings, agentId)).map(named)),
     commander_cleared: manager.getSetting(CHAT_SETTING_KEYS.agentId) === agentId,
     was_default: wasDefault,
-    replacement_default: wasDefault ? replacementDefault(manager, agentId) : null,
+    replacement_default: wasDefault ? replacementDefault(manager, agentId, alsoRemoving) : null,
     last_agent: others.length === 0
   }
 }
@@ -160,10 +161,10 @@ function journalAgentDeletion(manager: DatabaseManager, impact: AgentDeletionImp
  * concurrency feed and PR review records keep the id on purpose: they are
  * history of what happened, and nothing resolves them back to an agent.
  */
-export function removeAgent(manager: DatabaseManager, agentId: string, live: AgentLiveWork = NO_AGENT_LIVE_WORK): AgentDeletionImpact | false {
+export function removeAgent(manager: DatabaseManager, agentId: string, live: AgentLiveWork = NO_AGENT_LIVE_WORK, alsoRemoving: readonly string[] = []): AgentDeletionImpact | false {
   manager.agentRemovalGuard?.(agentId)
   return manager.db.transaction((): AgentDeletionImpact | false => {
-    const impact = readAgentDeletionImpact(manager, agentId, live)
+    const impact = readAgentDeletionImpact(manager, agentId, live, alsoRemoving)
     if (!impact) return false
     const projectIds = affectedProjectIds(manager, agentId, live, impact)
     releaseAgentWork(manager, agentId)

@@ -46,6 +46,8 @@ describe('agent configuration public codecs', () => {
     expect(codecs['agent:deletionImpact'].encodeResult(null)).toEqual({ defined: true, value: null })
     expect(() => codecs['agent:deletionImpact'].encodeResult({ refused: 'not a preview' })).toThrow('result')
     expect(codecs['agent:deletionImpact'].validateArguments(['agent'])).toBe(true)
+    expect(codecs['agent:deletionImpact'].decodeArguments(codecs['agent:deletionImpact'].encodeArguments(['one', ['one', 'two']]))).toEqual(['one', ['one', 'two']])
+    expect(codecs['agent:deletionImpact'].validateArguments(['one', ['two', 'two']])).toBe(false)
   })
   it('projects only public provider/model fields and bounds the complete result', () => {
     const result = codecs['agentConfig:getProviders'].encodeResult({ providers: [{ id: 'provider', name: 'Provider', apiKey: 'private-key',

@@ -1118,12 +1118,12 @@ export class DatabaseManager {
     return this.removeAgent(id) !== false
   }
 
-  removeAgent(id: string, live?: AgentLiveWork): AgentDeletionImpact | false {
-    return removeAgent(this, id, live)
+  removeAgent(id: string, live?: AgentLiveWork, alsoRemoving?: readonly string[]): AgentDeletionImpact | false {
+    return removeAgent(this, id, live, alsoRemoving)
   }
 
-  getAgentDeletionImpact(id: string, live?: AgentLiveWork): AgentDeletionImpact | null {
-    return readAgentDeletionImpact(this, id, live)
+  getAgentDeletionImpact(id: string, live?: AgentLiveWork, alsoRemoving?: readonly string[]): AgentDeletionImpact | null {
+    return readAgentDeletionImpact(this, id, live, alsoRemoving)
   }
 
   /** Task groups cannot outlive their execution agent; see TaskGroups.retireForAgent. */

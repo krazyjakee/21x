@@ -113,7 +113,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:update', id, data),
     delete: (id: string): Promise<AgentDeletionResult> => ipcRenderer.invoke('agent:delete', id),
-    deletionImpact: (id: string): Promise<AgentDeletionImpact | null> => ipcRenderer.invoke('agent:deletionImpact', id),
+    deletionImpact: (id: string, alsoRemoving?: string[]): Promise<AgentDeletionImpact | null> => ipcRenderer.invoke('agent:deletionImpact', id, alsoRemoving),
     getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue'),
     getStartRecoveryState: (taskId: string): Promise<unknown> => ipcRenderer.invoke('agent:getStartRecoveryState', taskId)
   },

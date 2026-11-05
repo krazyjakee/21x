@@ -1400,10 +1400,10 @@ export class AgentManager extends EventEmitter {
     // Brief fences settle by themselves; waiting here means the user's delete
     // succeeds instead of asking them to retry what the app can sequence.
     for (const deadline = Date.now() + AGENT_DELETE_WAIT_MS; deleting;) {
-      if (this.shuttingDown) throw new AgentDeletionRefused('The agent was not deleted because the app is shutting down.')
+      if (this.shuttingDown) throw new AgentDeletionRefused('Nothing was deleted because the app is shutting down.')
       const blocker = this.agentDeletionBlocker(agentId)
       if (!blocker) break
-      if (Date.now() >= deadline) throw new AgentDeletionRefused(`The agent was not deleted because ${blocker}. Try again when it has finished.`)
+      if (Date.now() >= deadline) throw new AgentDeletionRefused(`Nothing was deleted because ${blocker}. Try again when it has finished.`)
       await new Promise(resolve => setTimeout(resolve, AGENT_DELETE_POLL_MS))
       this.taskGroupRequests.assertCurrent()
     }
@@ -1438,7 +1438,7 @@ export class AgentManager extends EventEmitter {
         const taskIds = deleting ? this.agentDeletionTaskIds(agentId) : this.agentOwnedTaskIds(agentId)
         const live = this.agentLiveWork(taskIds)
         let stopped = 0, withdrawn = 0
-        const refusal = (cause: string): AgentDeletionRefused => new AgentDeletionRefused(`The agent was not deleted because ${cause}.`, stopped, withdrawn)
+        const refusal = (cause: string): AgentDeletionRefused => new AgentDeletionRefused(`Nothing was deleted because ${cause}.`, stopped, withdrawn)
         if ([...taskIds].some(taskId => this.taskGroupMutations.has(taskId) || this.taskLifecycleMutations.has(taskId))) throw new Error('Wait for task-group review or membership changes to finish before changing this agent.')
         if (disruptive) {
           for (const taskId of taskIds) this.cancelQueuedStart(taskId)
@@ -1519,7 +1519,7 @@ export class AgentManager extends EventEmitter {
   private assertAgentRemovable(agentId: string): void {
     if (this.agentConfigurationMutations.has(agentId)) return
     const [taskId] = this.agentDeletionTaskIds(agentId)
-    if (taskId) throw new AgentDeletionRefused(`The agent was not deleted because “${this.db.getTask(taskId)?.title ?? taskId}” is still running on it.`)
+    if (taskId) throw new AgentDeletionRefused(`Nothing was deleted because “${this.db.getTask(taskId)?.title ?? taskId}” is still running on it.`)
   }
 
   /** A provider recovery would otherwise redeliver to the agent after it is gone. */
@@ -1534,14 +1534,15 @@ export class AgentManager extends EventEmitter {
     return { running, queued: [...taskIds].filter(id => !running.includes(id)) }
   }
 
-  /** Read before an owner that stops work itself, which cannot report it afterwards. */
+  /** Read before the credential owner stops work, which cannot report it
+   * afterwards. It leaves recoveries alone, so they are not counted here. */
   getAgentLiveWork(agentId: string): AgentLiveWork {
-    return this.agentLiveWork(this.agentDeletionTaskIds(agentId))
+    return this.agentLiveWork(this.agentOwnedTaskIds(agentId))
   }
 
   /** What deleting this agent would do right now, for the user to confirm. */
-  getAgentDeletionImpact(agentId: string): AgentDeletionImpact | null {
-    return this.db.getAgentDeletionImpact(agentId, this.agentLiveWork(this.agentDeletionTaskIds(agentId)))
+  getAgentDeletionImpact(agentId: string, alsoRemoving: readonly string[] = []): AgentDeletionImpact | null {
+    return this.db.getAgentDeletionImpact(agentId, this.agentLiveWork(this.agentDeletionTaskIds(agentId)), alsoRemoving)
   }
 
   /** The agent table changed: every agent list on every surface refreshes from

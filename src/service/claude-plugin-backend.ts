@@ -253,11 +253,14 @@ export class ClaudePluginBackend {
         return manager.installPlugin(name, marketplace, scope, { signal, beforeRequest: address => { beforeEffect(); if (!this.options.canUsePluginAddress(address, caller)) throw new ServiceProtocolError('INVALID_REQUEST') }, beforeDownload: (entry, source, root) => { beforeEffect(); if (JSON.stringify({ entry, marketplace: source, ...(root === undefined ? {} : { pluginRoot: root }) }) !== selected) throw new ServiceProtocolError('INVALID_REQUEST') }, beforePublish: validatePlan, beforeMaterialize: validatePlan })
       }))
     })
-    this.bind('claudePlugin:uninstallPlugin', ([id], caller) => this.pluginAllowed(id, caller, 'delete') && this.uninstallAllowed(id, caller), ([id], caller, signal) => {
+    this.bind('claudePlugin:uninstallPlugin', ([id], caller) => this.pluginAllowed(id, caller, 'delete') && this.uninstallAllowed(id, caller), async ([id], caller, signal) => {
       const plugin = this.plugin(id)!
-      // This owner stops the work before the effect runs, so read it first.
-      const live = new Map(pluginAgents(this.options.database, plugin.name).map(agent => [agent.id, this.options.agents.getAgentLiveWork(agent.id)]))
-      return this.mutation(plugin.name, caller, signal, () => this.pluginAllowed(id, caller, 'delete') && this.uninstallAllowed(id, caller), beforeEffect => { beforeEffect(); return manager.uninstallPlugin(id, live) }).catch(refusalOf)
+      try {
+        manager.assertUninstallable(id)
+        // This owner stops the work before the effect runs, so read it first.
+        const live = new Map(pluginAgents(this.options.database, plugin.name).map(agent => [agent.id, this.options.agents.getAgentLiveWork(agent.id)]))
+        return await this.mutation(plugin.name, caller, signal, () => this.pluginAllowed(id, caller, 'delete') && this.uninstallAllowed(id, caller), beforeEffect => { beforeEffect(); return manager.uninstallPlugin(id, live) })
+      } catch (error) { return refusalOf(error) }
     })
     for (const operation of ['claudePlugin:enablePlugin', 'claudePlugin:disablePlugin'] as const) this.bind(operation, ([id], caller) => this.pluginAllowed(id, caller, 'write'), ([id], caller, signal) => {
       const plugin = this.plugin(id)!

@@ -82,6 +82,9 @@ export const isPluginUninstallResult = (value: unknown): value is PluginUninstal
 export interface AgentLiveWork { running: string[]; queued: string[] }
 export const NO_AGENT_LIVE_WORK: AgentLiveWork = { running: [], queued: [] }
 
+/** True of the whole set rather than one agent, so it is only said once. */
+export const NO_AGENTS_LEFT = 'No agents will be left. Nothing can run until you add another.'
+
 export const AGENT_DELETION_LIST_LIMIT = 20
 export const AGENT_DELETION_TITLE_LIMIT = 200
 
@@ -137,6 +140,6 @@ export function describeAgentDeletion(impact: AgentDeletionImpact): { stops: str
       ? `“${impact.replacement_default.name}” becomes the default agent.`
       : 'There will be no default agent.')
   }
-  if (impact.last_agent) changes.push('This is your last agent. Nothing can run until you add another.')
+  if (impact.last_agent) changes.push(NO_AGENTS_LEFT)
   return { stops, changes }
 }

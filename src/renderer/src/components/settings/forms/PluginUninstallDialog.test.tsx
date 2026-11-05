@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { PluginUninstallDialog } from './PluginUninstallDialog'
 import { agentApi, claudePluginApi } from '@/lib/ipc-client'
-import type { AgentDeletionImpact } from '@shared/agent-deletion'
+import { NO_AGENTS_LEFT, type AgentDeletionImpact } from '@shared/agent-deletion'
 import type { PluginResources } from '@/types'
 
 const empty = { total: 0, items: [] }
@@ -36,6 +36,20 @@ describe('PluginUninstallDialog', () => {
     vi.spyOn(agentApi, 'deletionImpact').mockImplementation(async (id) => impact(id, id === 'B' ? { running } : {}))
     render(<PluginUninstallDialog plugin={plugin} onClose={vi.fn()} />)
     expect(await screen.findByText(/^B: 1 running session/)).toBeTruthy()
+  })
+
+  it('asks the service to judge the plugin\'s agents as one set, and warns about losing them all once', async () => {
+    owns('A', 'B')
+    const read = vi.spyOn(agentApi, 'deletionImpact').mockImplementation(async (id) => impact(id, { last_agent: true }))
+    render(<PluginUninstallDialog plugin={plugin} onClose={vi.fn()} />)
+    expect(await screen.findAllByText(NO_AGENTS_LEFT)).toHaveLength(1)
+    expect(read).toHaveBeenCalledWith('A', ['A', 'B']); expect(read).toHaveBeenCalledWith('B', ['A', 'B'])
+  })
+
+  it('shows the cause when the plugin cannot be read, instead of looping on Try again', async () => {
+    vi.spyOn(claudePluginApi, 'getPluginResources').mockRejectedValue(new Error('Historical plugin directory/resource collision requires manual reconciliation'))
+    render(<PluginUninstallDialog plugin={plugin} onClose={vi.fn()} />)
+    expect((await screen.findByRole('alert')).textContent).toContain('manual reconciliation')
   })
 
   it('never promises that other agents are safe', async () => {

@@ -8,7 +8,7 @@
 import { isAbsolute, join } from 'path'
 import { existsSync, lstatSync, rmSync } from 'fs'
 import { inspectPluginTree } from './claude-plugins/containment'
-import type { AgentDeletionImpact, AgentLiveWork } from '../shared/agent-deletion'
+import { AgentDeletionRefused, type AgentDeletionImpact, type AgentLiveWork } from '../shared/agent-deletion'
 
 import type {
   DatabaseManager,
@@ -360,15 +360,7 @@ export class ClaudePluginManager {
     const plugin = this.db.getInstalledPlugin(pluginId)
     if (!plugin) return false
 
-    const pluginDir = this.pluginPath(plugin.name)
-    this.assertUnambiguousResources(plugin.name)
-    // Existing linked/ambiguous trees are never treated as owned uninstall data.
-    let directoryPresent = true
-    try { lstatSync(pluginDir) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      directoryPresent = false
-    }
-    if (directoryPresent) inspectPluginTree(pluginDir)
+    const pluginDir = this.inspectForUninstall(plugin.name)
     let reports: AgentDeletionImpact[] = []
     const removed = this.db.db.transaction(() => {
       reports = removePluginResources(this.db, plugin.name, live)
@@ -383,6 +375,30 @@ export class ClaudePluginManager {
     }
 
     return removed ? reports : false
+  }
+
+  /** Call before stopping any work: a stop cannot be undone, and these checks
+   * need nothing stopped, so a plugin that will fail must fail first. */
+  assertUninstallable(pluginId: string): void {
+    this.assertOpen()
+    const plugin = this.db.getInstalledPlugin(pluginId)
+    if (!plugin) return
+    try { this.inspectForUninstall(plugin.name) } catch (error) {
+      throw new AgentDeletionRefused(`The plugin was not removed because its files need attention (${error instanceof Error ? error.message : String(error)}). Nothing was stopped.`)
+    }
+  }
+
+  private inspectForUninstall(name: string): string {
+    const pluginDir = this.pluginPath(name)
+    this.assertUnambiguousResources(name)
+    // Existing linked/ambiguous trees are never treated as owned uninstall data.
+    let directoryPresent = true
+    try { lstatSync(pluginDir) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      directoryPresent = false
+    }
+    if (directoryPresent) inspectPluginTree(pluginDir)
+    return pluginDir
   }
 
   private assertUnambiguousResources(name: string): void {

@@ -21,7 +21,8 @@ export function PluginUninstallDialog({ plugin, onClose }: { plugin: { id: strin
       stopLabel="Stop and remove"
       readImpacts={async () => {
         const { agents } = await claudePluginApi.getPluginResources(plugin.id)
-        const impacts = await Promise.all(agents.map((agent) => agentApi.deletionImpact(agent.id)))
+        const ids = agents.map((agent) => agent.id)
+        const impacts = await Promise.all(ids.map((id) => agentApi.deletionImpact(id, ids)))
         return impacts.filter((impact): impact is AgentDeletionImpact => !!impact)
       }}
       remove={() => uninstallPlugin(plugin.id)}
