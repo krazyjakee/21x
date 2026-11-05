@@ -114,6 +114,20 @@ describe('AgentTranscriptPanel error display', () => {
   })
 })
 
+describe('AgentTranscriptPanel speech focus', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('names its task, which is how spoken replies know it is on screen', () => {
+    const { container } = render(
+      <AgentTranscriptPanel taskId="task-1" messages={[]} status={SessionStatus.IDLE} onStop={() => undefined} />
+    )
+    expect(container.querySelector('[data-transcript-task="task-1"]')).not.toBeNull()
+  })
+})
+
 describe('AgentTranscriptPanel message layout', () => {
   afterEach(() => {
     cleanup()

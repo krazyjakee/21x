@@ -29,7 +29,49 @@ const request = {
   toolChoice: 'auto' as const
 }
 
+const prose = (text: string) => ({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hm' }, { type: 'text', text }] } })
+const outOfTurns = { type: 'result', subtype: 'error_max_turns', is_error: true, errors: ['Reached maximum number of turns (4)'] }
+
+function queryOf(...messages: Array<{ type: string; [key: string]: unknown }>) {
+  return vi.fn((_input: { prompt: string | AsyncIterable<unknown>; options: Record<string, unknown> }) => ({
+    async *[Symbol.asyncIterator]() { yield* messages },
+    close: vi.fn()
+  }))
+}
+
 describe('ClaudeCodeSubscriptionChatProvider', () => {
+  // A reply in prose makes Claude Code spend a turn asking for the structured
+  // form. With one turn allowed, a good answer became "Reached maximum number
+  // of turns (1)". No tools are offered, so spare turns can only do that.
+  it('leaves Claude Code the turns to ask again for a reply written in prose', async () => {
+    const query = fakeQuery({ type: 'result', subtype: 'success', is_error: false, structured_output: { response: 'Yes.', tool_calls: [] } })
+    const provider = new ClaudeCodeSubscriptionChatProvider({ model: 'claude-saved', query, findExecutable: async () => '/usr/bin/claude' })
+    await drain(provider.stream(request, new AbortController().signal))
+    const options = query.mock.calls[0]![0].options
+    expect(options.maxTurns).toBeGreaterThan(1)
+    expect(options.tools).toEqual([])
+  })
+
+  it('shows the reply it did write when the turns still run out', async () => {
+    const query = queryOf(prose('Captains cannot rename a project.'), prose('The Commander can.'), outOfTurns)
+    const provider = new ClaudeCodeSubscriptionChatProvider({ model: 'claude-saved', query, findExecutable: async () => '/usr/bin/claude' })
+    await expect(drain(provider.stream(request, new AbortController().signal))).resolves.toEqual([
+      { type: 'text_delta', text: 'The Commander can.' },
+      { type: 'message_end', stopReason: 'end_turn' }
+    ])
+  })
+
+  it('still reports the failure when nothing was written', async () => {
+    const provider = new ClaudeCodeSubscriptionChatProvider({ model: 'claude-saved', query: queryOf(outOfTurns), findExecutable: async () => '/usr/bin/claude' })
+    await expect(drain(provider.stream(request, new AbortController().signal))).rejects.toThrow('Reached maximum number of turns')
+  })
+
+  it('never passes off a real failure as a reply', async () => {
+    const failed = { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Overloaded'] }
+    const provider = new ClaudeCodeSubscriptionChatProvider({ model: 'claude-saved', query: queryOf(prose('Partial thought'), failed), findExecutable: async () => '/usr/bin/claude' })
+    await expect(drain(provider.stream(request, new AbortController().signal))).rejects.toThrow('Overloaded')
+  })
+
   it('uses the authenticated Claude CLI and returns a structured answer', async () => {
     const query = fakeQuery({
       type: 'result',

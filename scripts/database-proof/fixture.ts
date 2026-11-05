@@ -42,7 +42,7 @@ export function runDatabaseFixture(directory: string) {
     options.managedTaskMcp.command = join(directory, 'mutated-executable')
     manager.initialize()
     const db = manager
-    assert.equal(db.getSetting('__schema_version'), '38')
+    assert.equal(db.getSetting('__schema_version'), '39')
     assert.equal(db.db.pragma('journal_mode', { simple: true }), 'wal')
     assert.equal(db.db.pragma('foreign_keys', { simple: true }), 1)
     assert.equal(db.db.pragma('busy_timeout', { simple: true }), 5000)

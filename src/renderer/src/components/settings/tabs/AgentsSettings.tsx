@@ -1,3 +1,4 @@
+import { ipcErrorReason } from '@/lib/ipc-error'
 import { useState, useEffect } from 'react'
 import { Plus, Loader2, Wifi, WifiOff, RefreshCw, Edit3, Trash2, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -26,6 +27,7 @@ export function AgentsSettings() {
   const { agents, fetchAgents, createAgent, updateAgent, deleteAgent } = useAgentStore()
   const [connections, setConnections] = useState<Map<string, ConnectionInfo>>(new Map())
   const [agentDialog, setAgentDialog] = useState<AgentDialogState>({ open: false })
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchAgents()
@@ -108,9 +110,12 @@ export function AgentsSettings() {
   }
 
   const handleDeleteAgent = async (id: string) => {
-    if (confirm('Are you sure you want to delete this agent?')) {
-      await deleteAgent(id)
-    }
+    if (!confirm('Are you sure you want to delete this agent?')) return
+    setDeleteError(null)
+    useAgentStore.setState({ error: null })
+    if (await deleteAgent(id)) return
+    const reason = useAgentStore.getState().error
+    setDeleteError(reason ? ipcErrorReason(reason) : 'Could not delete this agent.')
   }
 
   return (
@@ -119,6 +124,7 @@ export function AgentsSettings() {
         title="Coding Agents"
         description="Manage AI coding agents for task execution"
       >
+        {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
             {agents.length} agent{agents.length !== 1 ? 's' : ''} configured
@@ -223,6 +229,7 @@ export function AgentsSettings() {
                           onClick={() => handleDeleteAgent(agent.id)}
                           className="text-destructive hover:text-destructive"
                           title="Delete"
+                          aria-label={`Delete ${agent.name}`}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
