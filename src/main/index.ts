@@ -631,11 +631,18 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-// First, so that a refused launch writes nothing to the profile: the crash log
-// below and Chromium's own files both follow `userData`.
+// First, so that a refused launch writes nothing to the profile: Chromium's own
+// files follow `userData` and `sessionData`, and the crash log follows `userData`.
 const profileClaim = claimElectronProfile(app, APP_NAME)
 
-initCrashLogger()
+if (!profileClaim.refused) {
+  initCrashLogger()
+} else if (!profileClaim.contained) {
+  // Nowhere else to point Chromium, so it must not start on this profile. Linux
+  // has no dialog before `ready`, so the message goes to stderr there.
+  dialog.showErrorBox(`${APP_NAME} could not open your profile`, profileClaim.message)
+  app.exit(1)
+}
 
 // NOTE: The app intentionally does NOT expose a --remote-debugging-port.
 // Canvas browser panels are driven by agents through the in-app panel browser

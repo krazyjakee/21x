@@ -82,6 +82,45 @@ describe('strict portable cleanup policy', () => {
     expect(result).toEqual({ cleaned: 1, errors: [], nodeModulesCleaned: 0 }); expect(observed).toHaveBeenCalledTimes(2)
     expect(existsSync(path)).toBe(false); expect(db.getTask('absent-fixture')).toBeUndefined(); expect(ambient.terminateProcesses).not.toHaveBeenCalled()
   })
+  describe('workspaces with no task, in folders shared with another app', () => {
+    const authority = { assertIdleWorkspace: async () => {}, runMutation: async <T>(_ids: string[], effect: () => Promise<T>) => effect() }
+    function otherAppsWork() {
+      const path = join(root, 'workspaces', 'other-app-task'); mkdirSync(path); writeFileSync(join(path, 'uncommitted'), 'the only copy')
+      utimesSync(path, new Date('2020-01-01'), new Date('2020-01-01'))
+      return path
+    }
+    async function sharedOwner() {
+      await owner.close()
+      owner = new WorkspaceCleanupSchedulerCore(db, worktrees, { workspacesRoot: join(root, 'workspaces'), listWorkspaceDirs: () => [], portablePolicy: { ...controls, ...authority }, keepWorkspacesWithoutTask: true, emit: vi.fn() }, ambient)
+    }
+
+    it('would be removed if the folders were not shared, which is why they need protecting', async () => {
+      const path = otherAppsWork()
+      expect(await owner.runNow({ ...controls, ...authority })).toEqual({ cleaned: 1, errors: [], nodeModulesCleaned: 0 })
+      expect(existsSync(path)).toBe(false)
+    })
+    it('survives a manual Run cleanup, and so do its dependencies', async () => {
+      const path = otherAppsWork(), dependencies = join(path, 'node_modules'); mkdirSync(dependencies); utimesSync(dependencies, new Date('2020-01-01'), new Date('2020-01-01')); utimesSync(path, new Date('2020-01-01'), new Date('2020-01-01'))
+      db.setSetting('workspace_nodemodules_gc_enabled', 'true')
+      await sharedOwner()
+      expect(await owner.runNow({ ...controls, ...authority })).toEqual({ cleaned: 0, errors: [], nodeModulesCleaned: 0 })
+      expect(readFileSync(join(path, 'uncommitted'), 'utf8')).toBe('the only copy'); expect(existsSync(dependencies)).toBe(true)
+    })
+    it('survives a scheduled pass with auto-cleanup on', async () => {
+      const path = otherAppsWork()
+      db.setSetting('workspace_autocleanup_enabled', 'true')
+      await sharedOwner()
+      vi.useFakeTimers(); owner.start(); await vi.advanceTimersByTimeAsync(120000); owner.stop()
+      expect(db.getSetting('workspace_autocleanup_last_run')).toBeDefined()
+      expect(readFileSync(join(path, 'uncommitted'), 'utf8')).toBe('the only copy')
+    })
+    it('still removes the workspace of a completed task this profile does know', async () => {
+      const value = oldTask()
+      await sharedOwner()
+      expect(await owner.runNow({ ...controls, ...authority })).toEqual({ cleaned: 1, errors: [], nodeModulesCleaned: 0 })
+      expect(existsSync(value.path)).toBe(false)
+    })
+  })
   it('refuses orphan row reappearance after an accepted observation and preserves bytes', async () => {
     const value = oldTask()
     const read = db.db.prepare<[string], Record<string, unknown>>('SELECT * FROM tasks WHERE id=?')

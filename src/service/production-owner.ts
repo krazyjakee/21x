@@ -1101,6 +1101,7 @@ export class ProductionOwner {
       getSpeech: () => native.speech?.get() ?? null, canPlayAudio: () => native.speech?.canPlayAudio() ?? false })
     let scheduledRepositories: ReturnType<ProductionOwner['captureCleanupRepositories']> | null = null
     const cleanup = new WorkspaceCleanupSchedulerCore(db, worktrees, { workspacesRoot: this.bootstrap.paths.workspaceRoot,
+      keepWorkspacesWithoutTask: this.bootstrap.legacyImport !== undefined,
       portablePolicy: { beforeEffect: fileOptions.assertCurrent, signal: this.abort.signal, store: createBoundedWorkspaceCleanupStore(db, fileOptions.assertCurrent),
         assertIdleWorkspace: (id, path) => workspaceProcesses.assertIdleWorkspace(id, path),
         getRepoGroups: id => { if (!scheduledRepositories) throw new Error('WORKSPACE_CLEANUP_SCOPE_CHANGED'); return scheduledRepositories.getRepoGroups(id) },

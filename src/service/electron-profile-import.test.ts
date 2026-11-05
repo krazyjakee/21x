@@ -3,13 +3,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import SQLite from 'better-sqlite3'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
 import { configureSecretStorage, getSecretStorage, releaseSecretStorage, type SecretStorage } from '../main/platform/secret-storage'
 import { decryptRecordCredential, decryptSettingValue } from '../main/database/serializers'
-import { PROFILE_LOCK_FILE, type ProfileLock } from '../main/platform/profile-lock'
+import { acquireProfileLock, HOST_CLAIM_TIMEOUT_MS, PROFILE_LOCK_FILE, type ProfileLock } from '../main/platform/profile-lock'
 import { holdProfileElsewhere, profileFreeElsewhere, profileListing, stopOtherHosts } from '../../test/helpers/profile-holder'
 import { DROPPED_CREDENTIALS_SETTING, MANAGED_TASK_MCP_MARKER, createSafeStorageDecoder, holdElectronProfile, importElectronProfile } from './electron-profile-import'
+
+vi.mock('../main/platform/profile-lock', async importOriginal => {
+  const actual = await importOriginal<typeof import('../main/platform/profile-lock')>()
+  return { ...actual, acquireProfileLock: vi.fn(actual.acquireProfileLock) }
+})
 
 const PASSWORD = Buffer.from('fixture-libsecret-password')
 /** Chromium os_crypt v11 (Linux) ciphertext, as Electron safeStorage writes it. */
@@ -105,6 +110,14 @@ describe('Electron profile import', () => {
       expect((db.prepare('SELECT value FROM settings WHERE key = ?').get(DROPPED_CREDENTIALS_SETTING) as { value: string }).value).toBe('3')
       expect(db.prepare('SELECT title FROM tasks').pluck().get()).toBe('Imported task')
     } finally { db.close() }
+  })
+
+  it('waits the shared claim time for the Electron profile, and announces itself', () => {
+    const f = fixture()
+    vi.mocked(acquireProfileLock).mockClear()
+    hold(f.electron)
+    expect(HOST_CLAIM_TIMEOUT_MS).toBeGreaterThan(0)
+    expect(acquireProfileLock).toHaveBeenCalledWith(f.electron, { timeoutMs: HOST_CLAIM_TIMEOUT_MS, tauriHolder: true })
   })
 
   it('refuses while the Electron app runs, writes nothing, and works once it quits', async () => {

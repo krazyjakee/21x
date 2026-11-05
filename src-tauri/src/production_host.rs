@@ -851,20 +851,54 @@ fn tune_webkit_rendering() {
 const PERSISTENT_PROFILE_ID: &str = "tauri-default";
 /// Records which Electron profile this profile was imported from.
 const LEGACY_MARKER: &str = ".legacy-profile-root";
-/// An Electron 21x profile directory with a database worth importing.
-fn electron_profile(root: &std::path::Path) -> Option<PathBuf> {
+/// The real directory of an Electron profile, whatever it still holds.
+fn electron_root(root: &std::path::Path) -> Option<PathBuf> {
     let metadata = std::fs::symlink_metadata(root).ok()?;
-    let database = std::fs::symlink_metadata(root.join("21x.db")).ok()?;
-    (metadata.is_dir() && !metadata.file_type().is_symlink() && database.is_file())
+    (metadata.is_dir() && !metadata.file_type().is_symlink())
         .then(|| std::fs::canonicalize(root).ok())
         .flatten()
+}
+/// An Electron 21x profile directory with a database worth importing.
+fn electron_profile(root: &std::path::Path) -> Option<PathBuf> {
+    let database = std::fs::symlink_metadata(root.join("21x.db")).ok()?;
+    database.is_file().then(|| electron_root(root)).flatten()
 }
 fn read_legacy_marker(profile_root: &std::path::Path) -> Option<PathBuf> {
     let bytes = std::fs::read(profile_root.join(LEGACY_MARKER)).ok()?;
     let path = PathBuf::from(String::from_utf8(bytes).ok()?);
-    (path.is_absolute())
-        .then_some(path)
-        .and_then(|path| electron_profile(&path))
+    path.is_absolute().then_some(path)
+}
+/// The Electron profile this one shares folders with, which the service locks
+/// for the whole session. A profile that already has a database stays shared
+/// whatever has become of the Electron database, because the workspaces,
+/// repositories and attachments of its tasks live in those folders. A new one is
+/// shared only if there is a database to import, so a marker left by an
+/// interrupted first launch cannot make a fresh profile look shared on its next
+/// launch. An earlier build could leave such a marker on a profile that went on to
+/// make its own database. That reads as shared, which is why cleanup never removes
+/// a workspace with no task while a profile is shared.
+fn shared_electron_root(
+    profile_root: &std::path::Path,
+    creating: bool,
+    candidate: impl FnOnce() -> Option<PathBuf>,
+) -> std::io::Result<Option<PathBuf>> {
+    let marked = read_legacy_marker(profile_root);
+    if !creating {
+        return Ok(marked.as_deref().and_then(electron_root));
+    }
+    if let Some(root) = marked.as_deref().and_then(electron_profile) {
+        return Ok(Some(root));
+    }
+    let detected = candidate().and_then(|root| electron_profile(&root));
+    let marker = profile_root.join(LEGACY_MARKER);
+    match &detected {
+        Some(root) => std::fs::write(marker, root.as_os_str().as_encoded_bytes())?,
+        None => match std::fs::remove_file(marker) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        },
+    }
+    Ok(detected)
 }
 /// Create a private directory, or accept an existing real directory (never a
 /// symlink), so a profile and its roots survive relaunches.
@@ -982,25 +1016,17 @@ async fn start(
     // A profile imported from the Electron app keeps using that app's
     // workspaces, repositories and attachments in place: worktrees and stored
     // paths point there, and 28 GB of workspaces should not be copied.
-    let legacy_root = match read_legacy_marker(&profile_root) {
-        Some(root) => Some(root),
-        None if profile_intent == ProfileIntent::CreateNew => {
+    let legacy_root = shared_electron_root(
+        &profile_root,
+        profile_intent == ProfileIntent::CreateNew,
+        || {
             // Trusted native environment only (tests, unusual installs); never IPC.
-            let candidate = std::env::var_os("TWENTYONEX_ELECTRON_PROFILE_ROOT")
+            std::env::var_os("TWENTYONEX_ELECTRON_PROFILE_ROOT")
                 .map(PathBuf::from)
-                .or_else(|| app.path().config_dir().ok().map(|dir| dir.join("21x")));
-            let detected = candidate.and_then(|root| electron_profile(&root));
-            if let Some(root) = &detected {
-                std::fs::write(
-                    profile_root.join(LEGACY_MARKER),
-                    root.as_os_str().as_encoded_bytes(),
-                )
-                .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?;
-            }
-            detected
-        }
-        None => None,
-    };
+                .or_else(|| app.path().config_dir().ok().map(|dir| dir.join("21x")))
+        },
+    )
+    .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?;
     let data_root = legacy_root.clone().unwrap_or_else(|| profile_root.clone());
     let descriptor = ProductionDescriptor {
         version: 1,
@@ -1591,6 +1617,96 @@ mod tests {
         assert!(document_notice_frame(&checkpoint, "engine_fixture", "document:fixture").is_err());
         assert!(!is_document_notice("agent:status"));
         assert!(!is_document_notice("tasks:refresh"));
+    }
+
+    struct SharingFixture {
+        base: PathBuf,
+        profile: PathBuf,
+        electron: PathBuf,
+    }
+    impl SharingFixture {
+        fn new(name: &str) -> Self {
+            let base = std::env::temp_dir().join(format!(
+                "21x-sharing-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let (profile, electron) = (base.join("profile"), base.join("electron"));
+            std::fs::create_dir_all(&profile).unwrap();
+            std::fs::create_dir_all(&electron).unwrap();
+            let electron = std::fs::canonicalize(electron).unwrap();
+            Self {
+                base,
+                profile,
+                electron,
+            }
+        }
+        fn electron_database(&self) {
+            std::fs::write(self.electron.join("21x.db"), "synthetic").unwrap();
+        }
+        fn marker(&self) -> PathBuf {
+            self.profile.join(LEGACY_MARKER)
+        }
+        fn mark(&self) {
+            std::fs::write(self.marker(), self.electron.as_os_str().as_encoded_bytes()).unwrap();
+        }
+    }
+    impl Drop for SharingFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    #[test]
+    fn a_first_launch_shares_a_profile_with_a_database_and_records_it() {
+        let f = SharingFixture::new("first");
+        f.electron_database();
+        let shared = shared_electron_root(&f.profile, true, || Some(f.electron.clone())).unwrap();
+        assert_eq!(shared.as_ref(), Some(&f.electron));
+        assert_eq!(read_legacy_marker(&f.profile).as_ref(), Some(&f.electron));
+    }
+
+    #[test]
+    fn an_interrupted_first_launch_retries_the_import() {
+        let f = SharingFixture::new("retry");
+        f.electron_database();
+        f.mark();
+        let shared = shared_electron_root(&f.profile, true, || None).unwrap();
+        assert_eq!(shared.as_ref(), Some(&f.electron));
+    }
+
+    #[test]
+    fn a_shared_profile_stays_shared_after_the_electron_database_goes() {
+        let f = SharingFixture::new("database-gone");
+        f.mark();
+        let shared = shared_electron_root(&f.profile, false, || panic!("not a first launch"));
+        assert_eq!(shared.unwrap().as_ref(), Some(&f.electron));
+    }
+
+    #[test]
+    fn a_stale_marker_does_not_make_a_fresh_profile_look_shared() {
+        let f = SharingFixture::new("stale");
+        f.mark();
+        assert_eq!(
+            shared_electron_root(&f.profile, true, || None).unwrap(),
+            None
+        );
+        assert!(!f.marker().exists());
+        assert_eq!(
+            shared_electron_root(&f.profile, false, || None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_fresh_profile_with_no_electron_profile_shares_nothing() {
+        let f = SharingFixture::new("fresh");
+        let shared = shared_electron_root(&f.profile, true, || Some(f.electron.clone())).unwrap();
+        assert_eq!(shared, None);
+        assert!(!f.marker().exists());
     }
 
     #[test]

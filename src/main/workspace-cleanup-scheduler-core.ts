@@ -45,6 +45,9 @@ export interface WorkspaceCleanupHost {
   /** Captured native/service policy; scheduled passes cannot fall back to the
    * legacy ambient process observer when this explicit policy is selected. */
   portablePolicy?: WorkspaceCleanupRequestControls
+  /** These folders are shared with another app, whose tasks this database cannot
+   * see, so a workspace with no task here may be its work, and the only copy. */
+  keepWorkspacesWithoutTask?: boolean
 }
 
 export interface WorkspaceCleanupRequestControls {
@@ -363,6 +366,7 @@ export class WorkspaceCleanupSchedulerCore {
         // Only literal workspace IDs can borrow the existing native/task lease.
         // Unknown directory names and protected coordinator/group roots stay put.
         if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(entry.name)) continue
+        if (!task && this.host.keepWorkspacesWithoutTask) continue
         if (task && (task.role !== 'task' || task.group_id)) continue
         if (task && task.status !== TaskStatus.NotStarted && task.status !== TaskStatus.ReadyForReview && task.status !== TaskStatus.Completed) continue
         const updatedAt = task ? new Date(task.updated_at).getTime() : undefined
