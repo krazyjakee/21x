@@ -1866,7 +1866,10 @@ mod tests {
             shared_electron_root(&f.profile, false, || None).unwrap(),
             Sharing::Unshared
         );
-        assert!(!f.profile.join(format!("{LEGACY_MARKER}.detaching")).exists());
+        assert!(!f
+            .profile
+            .join(format!("{LEGACY_MARKER}.detaching"))
+            .exists());
     }
 
     #[test]

@@ -2594,7 +2594,14 @@ fn artifact_event(value: &Value, task_id: &Value) -> bool {
     };
     object(
         value,
-        &["id", "taskId", "type", "title", "updatedAt", "reloadTrigger"],
+        &[
+            "id",
+            "taskId",
+            "type",
+            "title",
+            "updatedAt",
+            "reloadTrigger",
+        ],
         &["path", "url", "workpieceKey", "files"],
     ) && value["taskId"] == *task_id
         && artifact_label(&value["id"], 8192)
@@ -4465,7 +4472,10 @@ mod tests {
         ] {
             let mut foreign = sample.clone();
             foreign[key] = bad;
-            assert!(!valid_event("agent:recoveryStateChanged", &foreign), "{key}");
+            assert!(
+                !valid_event("agent:recoveryStateChanged", &foreign),
+                "{key}"
+            );
         }
     }
 

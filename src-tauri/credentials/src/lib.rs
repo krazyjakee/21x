@@ -101,14 +101,18 @@ pub fn load_electron_safe_storage(app: &str) -> Result<Zeroizing<Vec<u8>>, &'sta
     {
         use dbus_secret_service::{EncryptionType, SecretService};
         use std::collections::HashMap;
-        let service = SecretService::connect(EncryptionType::Dh).map_err(|_| "KEYSTORE_NO_ACCESS")?;
+        let service =
+            SecretService::connect(EncryptionType::Dh).map_err(|_| "KEYSTORE_NO_ACCESS")?;
         // Chromium writes the v2 schema; older builds used the unversioned one.
         for schema in [
             "chrome_libsecret_os_crypt_password_v2",
             "chrome_libsecret_os_crypt_password",
         ] {
             let found = service
-                .search_items(HashMap::from([("xdg:schema", schema), ("application", app)]))
+                .search_items(HashMap::from([
+                    ("xdg:schema", schema),
+                    ("application", app),
+                ]))
                 .map_err(|_| "KEYSTORE_NO_ACCESS")?;
             let item = match (found.unlocked.first(), found.locked.first()) {
                 (Some(item), _) => item,

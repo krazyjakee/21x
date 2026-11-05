@@ -865,7 +865,9 @@ mod tests {
             state.document.finished(ticket, "physical-A");
         }
         let generation = owner.document_terminated(ticket).unwrap();
-        owner.assert_terminated_document(ticket, generation).unwrap();
+        owner
+            .assert_terminated_document(ticket, generation)
+            .unwrap();
         // The user chose View > Reload during the delay.
         owner.navigation(ticket).unwrap();
         assert_eq!(
@@ -877,7 +879,9 @@ mod tests {
         );
         let generation = owner.document_terminated(ticket).unwrap();
         owner.close().unwrap();
-        assert!(owner.assert_terminated_document(ticket, generation).is_err());
+        assert!(owner
+            .assert_terminated_document(ticket, generation)
+            .is_err());
         assert_eq!(owner.document_terminated(ticket), None);
     }
     #[test]
