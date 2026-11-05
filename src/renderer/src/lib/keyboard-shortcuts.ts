@@ -111,6 +111,15 @@ export function isKeyboardInput(target: EventTarget | null): boolean {
     || !!target.closest('[contenteditable="true"], .xterm')
 }
 
+/**
+ * Any editor or terminal other than the Commander's own composer. Those keep
+ * their keys during a call (Ctrl+Shift+C is copy in a terminal); the composer
+ * belongs to the call, so its shortcuts still work there.
+ */
+export function isEditorOutsideCommander(target: EventTarget | null): boolean {
+  return isKeyboardInput(target) && !(target instanceof HTMLElement && target.closest('[data-testid="commander-composer"]'))
+}
+
 export function isGlobalShortcutBlocked(event: KeyboardEvent): boolean {
   return event.defaultPrevented
     || event.metaKey

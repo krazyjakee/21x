@@ -290,6 +290,9 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
   final tail arrives, then one complete request is sent. Mode/device changes
   and mute cancel unfinished capture instead of sending it accidentally. The
   input-device selector passes the chosen device to the shared capture owner.
+  Pressing again while the microphone is still opening carries on with that
+  turn. Held Space never scrolls or presses what has focus, even after the
+  recogniser has finished.
 - **Output ring:** the visible speaking tile reads the real shared Web Audio
   analyser directly each frame, without frame-rate store writes. It pauses
   offscreen or in a hidden document and detaches when speech stops or the tile
@@ -343,9 +346,19 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
   uses fixed ring-opacity steps.
 
 Call shortcuts apply while Commander is open or a call survives elsewhere.
-Mod means Cmd on macOS and Ctrl elsewhere. Dialogs retain their keys. Mic and
-Undo do not intercept text inputs, contenteditable editors or terminals; native
-text Undo continues there. Mod+5 and palette navigation remain available.
+Mod means Cmd on macOS and Ctrl elsewhere. Dialogs and IME composition retain
+their keys. No call shortcut intercepts an editor or terminal outside the
+Commander composer, so a task field keeps Escape and a terminal keeps
+Ctrl+Shift+C. Inside the composer, Escape, captions, panel, full view and End
+still work; Mic and Undo do not, so native text Undo continues there. Mod+D
+leaves a microphone another surface opened alone. Mod+5 and palette navigation
+remain available.
+
+Microphone mode, input device, captions on/off, caption size and the floating
+corner are remembered between runs in this window's local storage. Device ids
+are opaque handles, never labels or audio. An invalid value falls back to the
+default; a saved device that is unplugged shows as unavailable in the menu with
+a capture error that says to choose another.
 
 | Shortcut | Behavior |
 | --- | --- |
@@ -362,7 +375,11 @@ text Undo continues there. Mod+5 and palette navigation remain available.
 The configurable global voice shortcut mutes/unmutes an open mic. In PTT mode
 it starts an utterance on one press and finishes it on the next; held Space
 continues to be the local press/release control. During call setup it waits
-without claiming Captain or opening another capture.
+without claiming Captain or opening another capture. It follows the same
+boundaries as the in-app shortcuts: a pending confirmation, an open dialog or
+focus in another editor makes it wait, though it can still finish a held PTT
+sentence. Focus only counts while this window has it. If another surface owns
+the microphone, the shortcut stays with that surface, as it would with no call.
 
 The view lives in `components/commander/`; `commander-store.ts` owns durable
 session projections and drafts, `commander-call-store.ts` owns call/microphone
@@ -500,8 +517,9 @@ controls retain their compatibility contract. The wake word stays out of scope.
   deleting chat. It also aborts setup in progress: a late TTS, turn or
   `getUserMedia` completion is cancelled and cannot reclaim the microphone or
   active session. Leaving the view does none of those things. Escape belongs to
-  the call while it is live (the global voice overlay defers); Escape and Stop
-  interrupt the current reply, briefly show "Stopped", and leave the call open.
+  the call while it is live (the global voice overlay defers, except to dismiss
+  its own confirmation); Escape and Stop interrupt the current reply, briefly
+  show "Stopped", and leave the call open. A held Escape is one Stop.
 - **Half-heard words appear once** (#83). While its own conversation turn
   runs, the stage caption strip shows them and the app-level host sets the voice store's
   `captionOwner`.

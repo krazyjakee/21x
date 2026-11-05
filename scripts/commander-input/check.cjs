@@ -38,6 +38,8 @@ app.whenReady().then(async () => {
   const failures = []
   const check = async (name, test) => {
     win.setContentSize(1200, 900); wc.setZoomFactor(1)
+    // Call choices now survive a reload, so one step's mode must not leak into the next.
+    await wc.session.clearStorageData({ storages: ['localstorage'] })
     await win.loadURL(url)
     win.focus()
     await wait(`${field} && !document.querySelector('[aria-label="Commander model"]').disabled && document.querySelector('[aria-label="Turn voice mode on"]')`)

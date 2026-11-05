@@ -223,6 +223,8 @@ export class VoiceCapture {
 }
 
 function describe(err: unknown): string {
+  // A saved input device that has since been unplugged. Chromium's error is not always a DOMException.
+  if ((err as { name?: unknown } | null)?.name === 'OverconstrainedError') return 'The selected microphone is not connected.'
   if (err instanceof DOMException) {
     if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
       return 'Microphone access was refused.'

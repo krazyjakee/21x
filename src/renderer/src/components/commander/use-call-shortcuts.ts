@@ -1,11 +1,12 @@
 import { useEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { parseCommanderAction } from '@shared/commander-action'
-import { isKeyboardInput } from '@/lib/keyboard-shortcuts'
-import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { isEditorOutsideCommander, isKeyboardInput } from '@/lib/keyboard-shortcuts'
+import { isForeignVoiceTurn, useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
 import { pairToolResults, toolRunKey } from '@/lib/commander-tool-runs'
 import { useCommanderStore } from '@/stores/commander-store'
 import { useUIStore } from '@/stores/ui-store'
+import { useVoiceStore } from '@/stores/voice-store'
 
 export function undoLatestCommanderAction(): void {
   const state = useCommanderStore.getState()
@@ -35,17 +36,22 @@ export function useCommanderCallShortcuts(): void {
       const call = useCommanderCallStore.getState()
       const ui = useCommanderCallUiStore.getState()
       const view = useUIStore.getState().sidebarView
-      if (event.defaultPrevented || event.altKey || event.repeat || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      const space = event.code === 'Space' || event.key === ' '
+      // Space repeats for as long as it is held, even after the recogniser has
+      // finished; left alone, each repeat would scroll or press what has focus.
+      if (held && space && event.repeat) { event.preventDefault(); event.stopImmediatePropagation(); return }
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.repeat || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
       const key = event.key.toLowerCase()
       const typing = isKeyboardInput(event.target)
       const hasCall = call.status !== 'off' || !!call.error
-      if ((event.metaKey || event.ctrlKey) && (hasCall || view === 'commander')) {
+      const foreignMicrophone = isForeignVoiceTurn(useVoiceStore.getState().turnId, call)
+      if ((event.metaKey || event.ctrlKey) && (hasCall || view === 'commander') && !isEditorOutsideCommander(event.target)) {
         const toggleSurface = () => {
           if (!hasCall) return
           if (ui.pipRequested || view !== 'commander') ui.expand(); else ui.showPip()
         }
         let handled = true
-        if (key === 'd' && !event.shiftKey && !typing && call.status === 'live') void call.toggleMicrophone()
+        if (key === 'd' && !event.shiftKey && !typing && !foreignMicrophone && call.status === 'live') void call.toggleMicrophone()
         else if (key === 'c' && event.shiftKey) ui.toggleCaptions()
         else if (key === '\\' && !event.shiftKey) ui.togglePanel()
         else if (key === 'm' && event.shiftKey && hasCall) toggleSurface()
@@ -54,7 +60,7 @@ export function useCommanderCallShortcuts(): void {
         else handled = false
         if (handled) { event.preventDefault(); event.stopImmediatePropagation(); return }
       }
-      if (event.code !== 'Space' && event.key !== ' ') return
+      if (!space) return
       if (call.status !== 'live' || call.micMode !== 'push-to-talk' || call.muted || event.metaKey || event.ctrlKey || event.shiftKey || typing
         || (event.target instanceof HTMLElement && event.target.closest('button, a, summary, [role="menu"]'))) return
       event.preventDefault(); event.stopImmediatePropagation(); held = true; void call.beginTalk()
