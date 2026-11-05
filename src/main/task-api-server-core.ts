@@ -117,8 +117,8 @@ export function startTaskApiServer(db: DatabaseManager, host: TaskApiHost = {}):
 
       res.setHeader('Content-Type', 'application/json')
       const params = parseJsonBody(body)
-      // Only route names and sizes are logged: bodies can carry typed
-      // passwords (browser_type) and other sensitive content.
+      // Only route names and sizes are logged: bodies can carry sensitive
+      // content.
       console.log(`[TaskApiServer] → ${route} (${body.length} bytes)`)
       const resultStr = JSON.stringify(await handleRoute(db, route, params, undefined, host))
       console.log(`[TaskApiServer] ← ${route} 200 (${resultStr.length} bytes)`)

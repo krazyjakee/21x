@@ -4644,7 +4644,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 47);
+        assert_eq!(EVENTS.len(), 45);
         let requests = [
             ("mobile:getInfo", json!({})),
             (

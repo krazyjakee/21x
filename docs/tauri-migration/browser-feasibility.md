@@ -1,5 +1,7 @@
 # Retired browser feasibility work
 
+Superseded: browser features are now removed from both hosts and saved data is no longer kept dormant. See [Canvas, browser and terminal removal](canvas-browser-retirement.md).
+
 The user approved removing browser features during migration on 2026-10-12. T02 is cancelled; D5 is accepted as removal; T11 covers removal and saved-data compatibility. Browser parity no longer blocks G0/G1.
 
 The previous capability matrix and policy implementation were preparatory work in [#198](https://github.com/krazyjakee/21x/issues/198), not native browser parity. The unused migration-only policy, authority and 44 tests have been removed. The [historical report](https://github.com/krazyjakee/21x/tree/8f9b187/docs/tauri-migration) and implementation remain available in Git history; historical test evidence is retained in [implementation status](implementation-status.md).

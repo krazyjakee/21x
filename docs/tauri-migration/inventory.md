@@ -34,7 +34,7 @@ and column; repeated identical references are deduplicated.
 
 Package identity, declared dependency ranges, packaging resource patterns,
 platform targets, and the AST-derived database schema version accompany the
-references. The native dependency list identifies the known SQLite/PTY addons
+references. The native dependency list identifies the known SQLite addon
 rebuilt by the repository script; it does not verify installed binaries, ABI
 compatibility, or discover every transitive native dependency.
 

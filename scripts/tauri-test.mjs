@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-let failureMessage = 'Standalone Tauri tests require the pinned staged Node and SQLite. Run pnpm tauri:prepare:native; use --service-proofs only after tauri:prepare:database and --owner-proofs with the staged node-pty package.'
+let failureMessage = 'Standalone Tauri tests require the pinned staged Node and SQLite. Run pnpm tauri:prepare:native; use --service-proofs only after tauri:prepare:database and --owner-proofs with the staged service.'
 try {
   const pins = JSON.parse(readFileSync(join(root, 'scripts/tauri-runtime.json'), 'utf8'))
   const node = realpathSync(join(root, 'src-tauri/resources/node', process.platform === 'win32' ? 'node.exe' : 'node'))

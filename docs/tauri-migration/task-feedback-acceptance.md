@@ -109,7 +109,7 @@ All new engineer-authored scenarios are **UNRUN** until the primary freezes the
 combined service/native/page/proof inputs and validates them. Suggested command:
 
 ```sh
-rtk pnpm test:tauri -- --terminal-proofs src/service/production-task-feedback-acceptance.test.ts --reporter=default --reporter=json
+rtk pnpm test:tauri -- --owner-proofs src/service/production-task-feedback-acceptance.test.ts --reporter=default --reporter=json
 ```
 
 Keep the `PRODUCTION_TASK_FEEDBACK_REPORT` console receipt as well as JSON, exact

@@ -1,6 +1,6 @@
 # Commander chat sessions
 
-The Commander is a fast conversational model with no canvas. The user talks to
+The Commander is a fast conversational model. The user talks to
 it in persisted chat sessions; it delegates work to each project's Captain
 and keeps their reports available as quiet updates. It never does the project work itself, and it has
 no tool that could: its registry (#61, #73) holds delegation, status reads

@@ -518,7 +518,7 @@ it('binds the finite production commands including settings effects and secret m
   f.results.set('env:get', PRODUCTION_API_KEY_SET_MARKER)
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(256)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(250)
   expect(NATIVE_COMMAND_BINDINGS['app:setLoginItemSettings']).toBe('app.setLoginItemSettings')
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')

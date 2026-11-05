@@ -254,9 +254,8 @@ up — a red frame then would be a lie about an open microphone.
 
 ### Where dictated words go
 
-The transcript panel is mounted many times at once — the task workspace, each
-canvas panel, and the Captain drawer. So there is exactly **one** active
-composer, and the microphone button that started the turn names it.
+The transcript panel is mounted more than once — the task workspace and the
+Captain drawer. So there is exactly **one** active composer, and the microphone button that started the turn names it.
 
 A composer is addressed by a stable **key**, never by an element reference.
 Each mount registers under that key (`data-voice-composer="<taskId>"`), and the
@@ -273,7 +272,7 @@ names no composer, so the words are inserted nowhere.
 
 ### Where the microphone button appears
 
-- the agent message box in a task (task workspace, canvas panel, Captain);
+- the agent message box in a task (task workspace, Captain);
 - the **Dashboard** command box, where each sentence goes to Captain;
 - the **top bar**, beside the Captain button, reachable from every view.
 
@@ -352,7 +351,7 @@ its own.
 | `get_session_status` | "is it still working?" — the live session state |
 | `list_pending_approvals` | "what needs me?" |
 | `get_recent_activity` | "what happened while I was away?" |
-| `get_ui_state` | "what am I looking at?" — the open view, the selected task, the open dialog, the canvas panels |
+| `get_ui_state` | "what am I looking at?" — the open view, the selected task, the open dialog |
 
 **Acting**
 
@@ -366,11 +365,8 @@ its own.
 
 | Tool | Does |
 |---|---|
-| `navigate` | Shows a view: dashboard, tasks, canvas, skills, settings (with a tab) |
+| `navigate` | Shows a view: dashboard, tasks, skills, settings (with a tab) |
 | `open_task` | Opens a task where the user already is — see below |
-| `move_task_panel` | Moves the canvas panel of a task to a canvas coordinate |
-| `close_task_panel` | Removes the canvas panel; the task is untouched |
-| `set_canvas_view` | `fit_all`, `reset`, or a zoom between 0.1 and 3 |
 | `open_artifact` | Shows an artifact of a task in the artifact panel |
 
 Two of these deserve their reason written down:
@@ -391,17 +387,16 @@ stop in conversation before it calls them.
 
 `delete_task` was proposed and deliberately left out.
 
-### One task, three ways to open it
+### One task, two ways to open it
 
 `open_task` follows the screen instead of asking the user to name a surface:
 
 | The user is on | "open the login task" gives them |
 |---|---|
-| the canvas | the panel, centred — added first when it is not there |
 | the dashboard | the preview dialog, so they keep the board |
 | anywhere else | the full task view |
 
-`where` overrides it (`workspace`, `canvas`, `modal`), and the reply says which
+`where` overrides it (`workspace`, `modal`), and the reply says which
 one happened, so the agent can describe it.
 
 ### How a command reaches the window
@@ -425,14 +420,6 @@ Four rules hold this together:
    only place that knows how a view is assembled.
 4. **The result is published past the throttle.** The next tool call sees the
    screen this command produced, not the one before it.
-
-Sizing the canvas is the renderer's job: `fit_all` and centring need the
-container rect, which only the canvas component has. So a viewport change is
-left in the store as an intent and the canvas carries it out with its own rect.
-
-`get_ui_state` publishes the canvas — the viewport and up to 50 panels with
-their coordinates — so an agent can move a panel without guessing at the
-coordinate space.
 
 ### Testing the microphone
 

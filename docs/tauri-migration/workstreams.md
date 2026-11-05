@@ -11,7 +11,7 @@ One coordinator maintains the integration branch and shared contracts. Parallel 
 | Coordinator | Migration docs, decision register, final assembly in `src/main/index.ts`, interface review and merge queue | Inventory, contract acceptance, integrated gates, retirement audit | Shared-file changes require coordination; every feature gets a distinct task owner |
 | Runtime | Proposed `src/service/`, native host lifecycle/supervision modules, `node-worker-runtime.ts`, resource manifest design | Bundled Node service, bootstrap, shutdown/crash recovery, native ABI proof | Native host modules are separate from security/update modules; release owns packaging configuration |
 | Bridge | Proposed shared desktop/host types, service dispatcher, Electron compatibility adapter, event sinks, `src/main/ipc/` domain extraction | Versioned transport and complete command/event mappings | Native IPC logic is handed to feature owners; freeze types before dependent feature edits |
-| Renderer | `src/renderer/`, desktop Vite configuration | Bridge adoption, listener lifetimes, UI readiness/recovery, retained canvas layout | Owns browser retirement with Data/Bridge; feature tests agreed before editing shared stores |
+| Renderer | `src/renderer/`, desktop Vite configuration | Bridge adoption, listener lifetimes, UI readiness/recovery | Owns browser retirement with Data/Bridge; feature tests agreed before editing shared stores |
 | Data | `src/main/database*`, serializers, credentials, compatible paths/identity import, native credential module | Safe profile/secret transition, one-writer lock, backup/recovery | Schema edits are serialized; native secret interfaces reviewed with runtime/bridge |
 | Integrations | Adapters and agent-manager helpers, connectors, OAuth, CLI/MCP, PTYs, voice, mobile/task APIs | Worker and integration parity under standalone Node | Bridge owns handler registration/extraction; existing terminal/voice handler logic stays with this role |
 | Release | `package.json`, lockfiles, CI, packaging/release scripts, `src-tauri` manifests and native updater module | Reproducible target artifacts, installer transition, update policy | Single lockfile/config writer; runtime supplies resource/runtime requirements |
@@ -158,6 +158,8 @@ Deliver: transitional Electron importer/exporter if required, Tauri import path,
 Owner: renderer + bridge + data. Dependencies: T06/T08/T10. Replaces the former browser parity card following the user decision of 2026-10-12.
 
 Remove browser and arbitrary website panel creation, embedded browsing, browser automation/recording controls, browser IPC/HTTP/MCP registrations, broker/recording startup and browser-specific Chrome authentication/cookie import from the Tauri target. Keep external URL opening and integration OAuth. Remove browser hints from agent prompts and exclude browser operations from the reviewed bridge map.
+
+Superseded on 2026-11-05: Canvas, browser and terminal features are removed from both hosts and saved layouts are dropped. See [Canvas, browser and terminal removal](canvas-browser-retirement.md). The original plan follows.
 
 Keep saved `browser`/`webpage` panel IDs, titles, URLs, layout and task edges as inert metadata/placeholders, with no automatic URL loading. Repeated canvas saves retain dormant records. Preserve recording files unchanged in profile copies/backups; do not run the old recording service during import or delete data implicitly.
 

@@ -19,7 +19,7 @@ current document; Node does not also broadcast a generic UI event.
 The owner refreshes the native lease before publication, every cached-state
 read and every delivery, then again after delivery. Missing or changed leases
 clear the published cache. Older asynchronous lease responses cannot restore
-an earlier document. Task API commands derived from a published canvas carry
+an earlier document. Task API commands derived from a published screen carry
 the trusted observed lease internally, so a reload cannot redirect those
 premises into a replacement document. No accepted or uncertain command is
 automatically replayed.
@@ -29,9 +29,8 @@ read grants. Root supplies separate immutable system callbacks for state
 reads and command delivery. Reference checks select bounded scalar SQLite
 fields before materialization; they do not deserialize task descriptions,
 agent credentials or project configuration. Current-project visible tasks
-and canvas task panels must belong to that project. Selected and previewed
+must belong to that project. Selected and previewed
 tasks also require their actual current project and assigned-agent grants.
-Panel IDs remain UI identifiers, never inferred agent aliases.
 
 Production task API routes use the registered owner and real native
 acknowledgement instead of the Electron notifier. Supplied signed task scopes

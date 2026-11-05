@@ -106,8 +106,8 @@ export function getNextNudgeMessage(): string {
 export function isKeyboardInput(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   return target.isContentEditable
-    || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName)
-    || !!target.closest('[contenteditable="true"], .xterm')
+    || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+    || !!target.closest('[contenteditable="true"]')
 }
 
 export function isGlobalShortcutBlocked(event: KeyboardEvent): boolean {

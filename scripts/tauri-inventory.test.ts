@@ -193,7 +193,7 @@ describe('Tauri source inventory AST scanner', () => {
       { file: 'src/main/a.ts', source: `import type { WebContents } from 'electron'` }
     ]
     const first = createInventory({ sources, packageJson: { name: '21x', dependencies: { 'better-sqlite3': '^13' }, build: { directories: { output: 'dist', buildResources: 'resources' } } } })
-    const second = createInventory({ sources: [sources[2], sources[0], sources[1], sources[0]], packageJson: { build: { directories: { buildResources: 'resources', output: 'dist' } }, dependencies: { 'better-sqlite3': '^13', 'node-pty': '^1' }, name: '21x' } })
+    const second = createInventory({ sources: [sources[2], sources[0], sources[1], sources[0]], packageJson: { build: { directories: { buildResources: 'resources', output: 'dist' } }, dependencies: { 'better-sqlite3': '^13' }, name: '21x' } })
     expect(serializeInventory(first)).toBe(serializeInventory(second))
     expect(first.database.schemaVersion).toBe(32)
     expect(first.nativeDependencies.map((item: { name: string }) => item.name)).toEqual(['better-sqlite3'])
