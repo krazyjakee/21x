@@ -367,6 +367,20 @@ export function isVoiceNoise(text: string): boolean {
   return words.every((word) => VOICE_FILLER_WORD.test(word))
 }
 
+/**
+ * Thanks and nothing else. On an open microphone a faint sound comes back as a
+ * clean "Thank you.", and no level can tell it from a real short word. It would
+ * cost a model turn and gives the agent nothing to do, so a conversation does
+ * not send it. Dictation keeps it: there the user chose to speak.
+ */
+const VOICE_THANKS = /^(?:(?:thank you|thanks)(?: (?:so|very) much| a lot)? ?)+$/
+
+/** True when a spoken sentence only says thanks: "Thank you.", "Uh, thanks a lot!" */
+export function isVoiceThanks(text: string): boolean {
+  const words = text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word && !VOICE_FILLER_WORD.test(word))
+  return VOICE_THANKS.test(words.join(' '))
+}
+
 // ── IPC channel names ───────────────────────────────────────
 
 export const VOICE_EVENTS = {

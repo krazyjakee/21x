@@ -339,6 +339,9 @@ Only these six reasons produce speech, and each has its own condition:
 | the speak button on a message | always |
 | a reply or report in Commander voice mode | always: opening voice mode was the request |
 
+Whichever reason applies, a reply is also read only while its owner is in focus
+(see [Only what you are looking at speaks](#only-what-you-are-looking-at-speaks)).
+
 A code block, a table, a file path, a link, a heading mark and every other piece
 of Markdown punctuation are removed before anything is spoken. A code block is
 named — “A code block of 12 lines is in the message.” — rather than read.
@@ -548,6 +551,29 @@ sent to, so the right answer is spoken. The Captain drawer sends on its own
 behalf and can name no task, so the next answer to arrive within ninety seconds
 is taken as the reply — armed only by the user having just spoken, and consumed
 once.
+
+## Only what you are looking at speaks
+
+A reply from a Captain, an agent or a Commander is read only while this window
+has focus and its conversation is on screen. `speechInFocus` in
+`src/renderer/src/lib/voice-speech-focus.ts` owns the rule:
+
+| Owner | On screen means |
+|---|---|
+| a Commander call | its session is showing, or the floating call is, which it is on any other screen |
+| a Captain | its drawer is open, or the dashboard, where its command box is, is showing |
+| any task | a transcript panel for that task has a size on screen |
+
+A reply that starts out of focus is stopped before any of it is heard. One that
+loses focus part-way is stopped within `SPEECH_FOCUS_CHECK_MS`. Either way the
+rest stays in the chat and is not read when focus returns; the next reply is read
+normally. Only `agent_answer` and `conversation` speech is checked, so a speak
+button, the voice sample and "read the last answer" work anywhere.
+
+The renderer enforces this because it is the only side that knows what is on
+screen, and it stops the passage with the same `voice:tts:stop` as barge-in, so
+it works the same on every host. The sentence already sent to the voice is
+generated and discarded, which ElevenLabs still counts as characters used.
 
 The Commander opens its passage at the first words of a reply, not at the start
 of the turn. An open passage counts as speaking, so an early one held the

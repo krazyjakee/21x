@@ -15,6 +15,7 @@ import { CAPTAIN_COMPOSER_KEY, TopBarVoiceButton } from './TopBarVoiceButton'
 import { VoiceMicButton } from './VoiceMicButton'
 import { useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
+import { useCommanderCallStore } from '@/stores/commander-call-store'
 import {
   clearDictationTarget,
   insertAndSubmit,
@@ -245,6 +246,45 @@ describe('TopBarVoiceButton', () => {
     const otherMic = within(screen.getByTestId('other')).getByTestId('voice-mic-button')
     expect(otherMic).toHaveAttribute('aria-pressed', 'false')
     expect(otherMic).toBeDisabled()
+  })
+
+  // Nothing else on screen says the microphone is on once the box that started
+  // it has gone: the user navigated away and it kept hearing the room.
+  describe('a turn that belongs to another box', () => {
+    const openTurn = (over: Record<string, unknown> = {}): void => {
+      act(() => useVoiceStore.setState({ turnId: 'task-turn', state: 'listening', ...over }))
+    }
+
+    it('lights the top-bar microphone, which says it will stop', async () => {
+      await act(async () => { render(<TopBarVoiceButton />) })
+      openTurn()
+      const mic = screen.getByTestId('voice-mic-button')
+      expect(mic).toHaveAttribute('aria-pressed', 'true')
+      expect(mic).toHaveAttribute('aria-label', 'Stop listening')
+      expect(mic).toHaveAttribute('title', 'Click to stop')
+      expect(mic).not.toBeDisabled()
+    })
+
+    it('stops that turn from the top bar', async () => {
+      const endTurn = vi.fn(async () => undefined)
+      useVoiceStore.setState({ endTurn: endTurn as never })
+      await act(async () => { render(<TopBarVoiceButton />) })
+      openTurn()
+      fireEvent.click(screen.getByTestId('voice-mic-button'))
+      expect(endTurn).toHaveBeenCalledTimes(1)
+    })
+
+    it('leaves a live Commander call to its own controls', async () => {
+      const endTurn = vi.fn(async () => undefined)
+      useVoiceStore.setState({ endTurn: endTurn as never })
+      useCommanderCallStore.setState({ status: 'live', turnId: 'call-turn' })
+      await act(async () => { render(<TopBarVoiceButton />) })
+      openTurn({ turnId: 'call-turn' })
+      const mic = screen.getByTestId('voice-mic-button')
+      expect(mic).toHaveAttribute('aria-pressed', 'false')
+      expect(mic).toBeDisabled()
+      useCommanderCallStore.setState({ status: 'off', turnId: null })
+    })
   })
 
   it('stands out by colour, and never by size', async () => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Mic, Square, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { selectVoiceReady, useVoiceStore } from '@/stores/voice-store'
 import {
   clearActiveComposer,
@@ -41,6 +42,12 @@ interface VoiceMicButtonProps {
    * the same control, asking to be used.
    */
   emphasis?: 'quiet' | 'strong'
+  /**
+   * Shows and stops every open turn, not only this button's. The button that
+   * started a turn leaves the screen with its box, and the microphone must never
+   * be on with nothing saying so. A Commander call keeps its own controls.
+   */
+  followsEveryTurn?: boolean
   className?: string
   title?: string
 }
@@ -61,6 +68,7 @@ export function VoiceMicButton({
   composerKey,
   onBeforeStart,
   emphasis = 'quiet',
+  followsEveryTurn = false,
   className = '',
   title,
 }: VoiceMicButtonProps) {
@@ -94,7 +102,8 @@ export function VoiceMicButton({
    * where the click happened.
    */
   const ownsByComposer = Boolean(turnId && myKey && getActiveComposer() === myKey)
-  const mine = owns.current || ownsByComposer
+  const callTurnId = useCommanderCallStore((s) => (s.status === 'off' ? null : s.turnId))
+  const mine = owns.current || ownsByComposer || (followsEveryTurn && turnId !== null && turnId !== callTurnId)
 
   const listening = mine && turnId !== null && state === 'listening'
 
@@ -167,11 +176,11 @@ export function VoiceMicButton({
       onClick={toggle}
       className={`h-[32px] w-[32px] shrink-0 rounded-lg ${accent} ${className}`}
       title={
-        title ??
+        listening
+          ? 'Click to stop'
+          : title ??
         (engineState === 'loading'
           ? 'Loading the speech model…'
-          : listening
-          ? 'Click to stop'
           : mode === 'command'
             ? 'Click to speak a command'
             : conversational && onSubmit

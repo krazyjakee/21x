@@ -20,6 +20,7 @@
  * passage is keyed by `commander:<sessionId>` in place of a task id.
  *
  * Nothing here decides which engine speaks. The service does, from settings.
+ * Nor whether the session is in focus: the renderer stops the passage if not.
  */
 
 import type { CommanderEvent, CommanderMessage } from '../../shared/commander'

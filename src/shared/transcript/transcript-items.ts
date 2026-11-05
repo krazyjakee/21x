@@ -1,12 +1,27 @@
 import type { AgentMessage, AgentTodo } from './types'
+import { isCaptainWakeUp } from './machine-message'
 import { isCompactActivityMessage } from './tool-format'
 
 export type TranscriptItem =
   | { type: 'message'; key: string; message: AgentMessage }
   | { type: 'activity'; key: string; messages: AgentMessage[] }
 
+// Runs on every streamed delta, and a Captain's transcript holds hundreds of
+// wake-ups. Message objects are identity-stable, so each is parsed once.
+const wakeUpCache = new WeakMap<AgentMessage, boolean>()
+
+function isHiddenWakeUp(message: AgentMessage): boolean {
+  let hidden = wakeUpCache.get(message)
+  if (hidden === undefined) {
+    hidden = isCaptainWakeUp(message)
+    wakeUpCache.set(message, hidden)
+  }
+  return hidden
+}
+
 /** Groups consecutive tool/reasoning messages into single activity rows. */
-export function buildTranscriptItems(messages: AgentMessage[]): TranscriptItem[] {
+export function buildTranscriptItems(allMessages: AgentMessage[]): TranscriptItem[] {
+  const messages = allMessages.filter((message) => !isHiddenWakeUp(message))
   const items: TranscriptItem[] = []
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]

@@ -658,6 +658,29 @@ describe('VoiceSessionManager — the conversational loop', () => {
     expect(segments(ctx.notify)).toHaveLength(0)
   })
 
+  // A stray sound on an open microphone reached the Captain as "Thank you."
+  it('sends nothing for a sentence that is only thanks, and keeps one that asks for something', async () => {
+    const ctx = makeReadyManager()
+    const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle
+
+    ctx.worker.emit('segment', turn.turnId, 'Thank you.', 1)
+    ctx.worker.emit('segment', turn.turnId, 'Thank you, now fix the build.', 2)
+
+    expect(segments(ctx.notify)).toEqual([
+      { turnId: turn.turnId, turnEpoch: turn.turnEpoch, text: 'Thank you, now fix the build.', index: 2 },
+    ])
+  })
+
+  it('still writes "Thank you." into a box when it was dictated on purpose', async () => {
+    const ctx = makeReadyManager()
+    const turn = (await ctx.manager.startTurn('dictation', {})) as VoiceTurnHandle
+
+    ctx.worker.emit('final', turn.turnId, 'Thank you.')
+    await Promise.resolve()
+
+    expect(ctx.notify.mock.calls.some(([channel]) => channel === 'voice:dictate')).toBe(true)
+  })
+
   it('treats a closing "Mm." as nothing heard, not as dictation', async () => {
     const ctx = makeReadyManager()
     const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle

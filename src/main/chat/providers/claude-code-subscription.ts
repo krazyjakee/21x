@@ -33,9 +33,20 @@ interface SdkUsage {
   output_tokens?: number
 }
 
+/**
+ * Turns one structured reply may take. With no tools on offer the only use of a
+ * second one is Claude Code asking again when the model answered in prose, and
+ * refusing it turned a good answer into "Reached maximum number of turns (1)".
+ */
+const STRUCTURED_REPLY_TURNS = 4
+
+/** The turns ran out on the format of the reply, not on anything going wrong. */
+const OUT_OF_TURNS = new Set(['error_max_turns', 'error_max_structured_output_retries'])
+
 interface SdkResult {
   type: string
   subtype?: string
+  message?: { content?: Array<{ type?: string; text?: string }> }
   is_error?: boolean
   result?: string
   structured_output?: unknown
@@ -204,7 +215,7 @@ export class ClaudeCodeSubscriptionChatProvider implements ChatProvider {
         abortController,
         tools: [],
         permissionMode: 'dontAsk',
-        maxTurns: 1,
+        maxTurns: STRUCTURED_REPLY_TURNS,
         persistSession: false,
         outputFormat: { type: 'json_schema', schema: OUTPUT_SCHEMA },
         env
@@ -220,12 +231,24 @@ export class ClaudeCodeSubscriptionChatProvider implements ChatProvider {
         : await defaultQuery({ prompt, options })
 
       let terminal: SdkResult | null = null
+      let lastProse = ''
       for await (const message of iterator) {
         if (signal.aborted) throw new ChatAbortError()
         if (message.type === 'result') terminal = message
+        if (message.type === 'assistant') {
+          const text = (message.message?.content ?? []).flatMap((block) => (block.type === 'text' && block.text ? [block.text] : [])).join('')
+          if (text.trim()) lastProse = text
+        }
       }
       if (!terminal) throw new Error('Claude Code ended without a response.')
       if (terminal.subtype !== 'success' || terminal.is_error) {
+        // The user asked a question and the answer exists. Show it.
+        if (lastProse && OUT_OF_TURNS.has(terminal.subtype ?? '')) {
+          yield { type: 'text_delta', text: lastProse }
+          const usage = usageOf(terminal)
+          yield { type: 'message_end', stopReason: 'end_turn', ...(usage ? { usage } : {}) }
+          return
+        }
         throw new Error(terminal.errors?.join('\n') || terminal.result || 'Claude Code could not answer the Commander turn.')
       }
 

@@ -20,7 +20,7 @@ feasibility for 20x desktop"). Section numbers below refer to that document.
 - A separate speech worker process with the local runtime.
 - Live partial text and one final transcript for each turn.
 - A closed set of task commands, each with a validation and a confirmation step.
-- A voice surface in the app: audio state, transcript bubble, confirmation card.
+- A voice surface in the app: microphone buttons, confirmation card, outcomes.
 - Voice settings: enable, permission state, model download (Parakeet v3),
   legacy-model clean-up, global shortcut.
 
@@ -46,7 +46,7 @@ It still uses local speech recognition and has no wake word.
 ```text
 renderer
   getUserMedia + AudioWorklet -> 16 kHz mono 16-bit PCM
-  mic button, transcript bubble, confirmation card
+  mic button, confirmation card
         │  voice:* IPC, about 100 ms of audio per message
         ▼
 main process
@@ -153,6 +153,13 @@ Guards:
   so it is not dictated either. `isVoiceNoise` in `src/shared/voice.ts` owns
   the rule. A dropped sentence is also taken off the caption, and in a Commander
   call a hesitation sound does not count as talking over a reply.
+- A segment that only says thanks ("Thank you.", "Thanks a lot!") is not sent
+  (`isVoiceThanks`). Faint sounds on an open microphone were sent as "Thank you."
+  and spent a model turn. It is a phrase rule because level cannot do this job:
+  run through Parakeet, breathing, hum and clicks transcribed to nothing, and
+  breathing held a loud level for longer than a quiet "No." does, so a stricter
+  gate would lose real words and catch none of this. Dictation keeps the phrase,
+  and a sentence that goes on to ask for something is sent whole.
 - A conversation stops after ten minutes of one open turn.
 - Stopping a conversation reports nothing. Every sentence has already left as a
   segment and the recogniser was reset after each one, so the closing transcript
@@ -161,16 +168,20 @@ Guards:
 - **Settings → Voice → Keep talking** switches the loop off; the words are then
   written into the box for you to send yourself.
 
-### The listening bubble
+### Showing that the microphone is on
 
-Task and Captain dictation keep the bottom listening bubble: its halo follows
-input level, its word says Listening or Writing the words, and its cross ends
-the turn while retaining the heard text. Escape cancels that turn. It shows
-current words only; sent sentences remain in the transcript.
+There is no listening bubble: it sat over the composers it was meant to help
+with. The microphone button is the indicator. It lights up, pulses with the
+input level, and a second click ends the turn and keeps the heard text. Escape
+cancels the turn from anywhere. Half-heard words are not shown for task and
+Captain dictation; a sentence appears when it lands in the box or is sent.
 
-Commander uses its call stage or in-app floating call instead. Captions appear
-once, in the currently visible surface, and its owned capture suppresses the
-ordinary bubble. Other microphone contexts retain their own bubble and controls.
+The button that opened a turn leaves the screen with its box, so the top-bar
+microphone follows every turn (`followsEveryTurn`): it lights up for all of them
+and stops any of them. The microphone can never be on with nothing saying so.
+
+Commander uses its call stage or in-app floating call instead, and the top bar
+leaves that turn alone. Captions appear once, in the currently visible surface.
 Commander captions default to on at Medium and support Small/Medium/Large,
 with two visible lines and a keyboard-accessible complete-text dialog. Partial
 words are italic and never announced. In open mic a sent sentence stays on the

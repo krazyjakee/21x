@@ -3,6 +3,7 @@
  * `waiting_approval` is a session state and is never written to the task
  * record, so a task blocked on the user looks exactly like one that is running.
  */
+import { SYSTEM_MESSAGE_MARKER } from '../../shared/system-authority'
 import type { DatabaseManager } from '../database'
 import { describeQueueReason } from '../project-limits'
 import { agentController, notifyRenderer, transcriptProvider } from './state'
@@ -119,6 +120,11 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
     case '/send_message': {
       if (!params.task_id) return { error: 'task_id is required' }
       if (!params.text || !String(params.text).trim()) return { error: 'text is required' }
+      // Wake-ups are left out of the transcript, so this format is reserved for
+      // the app: an agent using it could reach a Captain without the user seeing.
+      if (String(params.text).includes(SYSTEM_MESSAGE_MARKER)) {
+        return { error: 'That format is reserved for automated system messages. Send the text in your own words.', reason: 'reserved_format' }
+      }
       if (!agentController) return { error: 'Agent controller not available' }
       const taskId = String(params.task_id)
       const target = db.getTask(taskId)
