@@ -10,6 +10,7 @@ import { SessionStatus } from '@shared/constants'
 import type { AgentMessage, TranscriptPartRecord } from '@shared/transcript/types'
 import { applyPartsToProjection, createProjection, projectMessages, type TranscriptProjection } from '@shared/transcript/projection'
 import { useArtifactStore } from './artifact-store'
+import { isAgentDeletionRefusal, type AgentDeletionResult } from '@shared/agent-deletion'
 import { isAgentStatusHeartbeat } from '@shared/activity'
 import { recordAgentStatus } from '@/lib/activity/session-activity-adapter'
 
@@ -98,7 +99,7 @@ interface AgentState {
   fetchAgents: () => Promise<void>
   createAgent: (data: CreateAgentDTO) => Promise<Agent | null>
   updateAgent: (id: string, data: UpdateAgentDTO) => Promise<Agent | null>
-  deleteAgent: (id: string) => Promise<boolean>
+  deleteAgent: (id: string) => Promise<AgentDeletionResult>
 
   initSession: (taskId: string, sessionId: string, agentId: string) => void
   /** Mark a task as "starting" after the user sends, until a turn is confirmed. */
@@ -311,7 +312,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
       // Safety-net reconcile at end of each turn — catches any missed delta.
       if (event.status === SessionStatus.IDLE || getDesktopHost().kind === 'tauri' && event.status === SessionStatus.WAITING_APPROVAL) void reconcileDelta(session.taskId)
     })
-    return () => { active = false; offTranscript?.(); offStatus?.() }
+    // The one change event behind every agent list: both hosts publish it after
+    // an agent is created, changed or deleted, whoever did it. Every other
+    // surface reads this store, so nothing else has to listen.
+    const offAgents = desktopApi.onTasksRefresh?.(() => {
+      if (!active) return
+      agentSnapshot.invalidate()
+      void agentSnapshot.refresh().catch(() => {})
+    })
+    return () => { active = false; offTranscript?.(); offStatus?.(); offAgents?.() }
   }
 
   const clearPendingSend = (taskId: string, owner?: object): void => {
@@ -341,7 +350,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
       try {
         const agent = await agentApi.create(data)
         agentSnapshot.invalidate()
-        set((state) => ({ agents: [...state.agents, agent] }))
+        // The change event can land before this reply, so the agent may be here already.
+        set((state) => ({ agents: [...state.agents.filter((a) => a.id !== agent.id), agent] }))
         return agent
       } catch (err) {
         set({ error: String(err) })
@@ -365,15 +375,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
     deleteAgent: async (id) => {
       try {
-        const success = await agentApi.delete(id)
-        if (success) {
+        const result = await agentApi.delete(id)
+        if (result && !isAgentDeletionRefusal(result)) {
           agentSnapshot.invalidate()
           set((state) => ({ agents: state.agents.filter((a) => a.id !== id) }))
+          refreshProjectsAfterRemoval()
         }
-        return success
+        return result
       } catch (err) {
         set({ error: String(err) })
-        return false
+        return { refused: String(err instanceof Error ? err.message : err).replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '') }
       }
     },
 
@@ -499,10 +510,22 @@ export const useAgentStore = create<AgentState>((set, get) => {
   }
 })
 
+/** Deleting an agent clears it from projects with no project event of its own. */
+function refreshProjectsAfterRemoval(): void {
+  void import('./project-store').then(({ useProjectStore }) => useProjectStore.getState().fetchProjects()).catch(() => {})
+}
+
 const agentSnapshot = createDesktopSnapshotReader({
   read: () => agentApi.getAll(),
   start: () => useAgentStore.setState({ isLoading: true, error: null }),
-  apply: agents => useAgentStore.setState({ agents, isLoading: false, error: null }),
+  apply: agents => {
+    const previous = useAgentStore.getState().agents
+    // The event also covers task changes. An unchanged list keeps its identity
+    // so that does not re-render every selector or reset a hand-made choice.
+    const unchanged = JSON.stringify(previous) === JSON.stringify(agents)
+    useAgentStore.setState({ ...(unchanged ? {} : { agents }), isLoading: false, error: null })
+    if (previous.some(agent => !agents.some(next => next.id === agent.id))) refreshProjectsAfterRemoval()
+  },
   fail: error => useAgentStore.setState({ error: String(error), isLoading: false })
 })
 

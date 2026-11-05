@@ -1,5 +1,6 @@
 import { Settings2, AlertCircle } from 'lucide-react'
 import { isAgentConfigured, getAgentConfigIssue } from '@shared/agent-utils'
+import { TaskStatus } from '@shared/constants'
 import type { Task, Agent } from '@/types'
 
 /**
@@ -11,6 +12,21 @@ export function AgentConfigWarning({ task, agents, onEditAgent }: { task: Task; 
   const assignedAgent = task.agent_id ? agents.find((a) => a.id === task.agent_id) : null
   const triageAgent = !task.agent_id ? (agents.find((a) => a.is_default) || agents[0] || null) : null
   const targetAgent = assignedAgent || triageAgent
+  if (!task.agent_id && task.auto_start_agent && task.status !== TaskStatus.Completed) {
+    return (
+      <div
+        data-testid="agent-auto-start-warning"
+        className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300"
+      >
+        <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+        <p className="leading-snug">
+          {triageAgent
+            ? `This task starts itself but has no chosen agent, so "${triageAgent.name}" will triage each run. Choose an agent to decide who runs it.`
+            : 'This task starts itself but no agent exists to run it. Add an agent, then choose it here.'}
+        </p>
+      </div>
+    )
+  }
   if (!targetAgent) return null
   if (isAgentConfigured(targetAgent)) return null
 

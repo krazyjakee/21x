@@ -138,6 +138,61 @@ describe('actual AgentManager configuration ownership', () => {
     expect(h.adapter.destroySession).toHaveBeenCalledOnce(); expect(h.adapter.createSession).toHaveBeenCalledOnce()
     expect(h.db.getTask(h.tasks[1].id)?.agent_id).toBeNull(); expect(h.db.getAgent(h.agent.id)).toBeUndefined()
   })
+  it('deletes an agent while another agent works on the same backend, leaving that work untouched', async () => {
+    const h = fixture(), other = h.db.createAgent({ name: 'Other', config: { coding_agent: 'codex', model: 'other-model' } })!
+    h.db.updateTask(h.tasks[1].id, { agent_id: other.id }); await h.manager.startTask(h.tasks[1].id)
+    const running = h.manager.findSessionByTaskId(h.tasks[1].id)!
+    const report = await h.manager.runAgentConfigurationMutation(h.agent.id, 'delete', live => h.db.removeAgent(h.agent.id, live))
+    expect(report).toMatchObject({ agent_id: h.agent.id }); expect(h.db.getAgent(h.agent.id)).toBeUndefined()
+    expect(h.adapter.destroySession).not.toHaveBeenCalled(); expect(h.adapter.notifyConfigChanged).not.toHaveBeenCalled()
+    expect(h.manager.findSessionByTaskId(h.tasks[1].id)?.sessionId).toBe(running.sessionId)
+  })
+  it('stops only the deleted agent\'s sessions and reports them, and starts for other agents are not fenced meanwhile', async () => {
+    const h = fixture(), other = h.db.createAgent({ name: 'Other', config: { coding_agent: 'codex', model: 'other-model' } })!
+    await h.manager.startTask(h.tasks[0].id)
+    const third = h.db.createTask({ title: 'Third', project_id: h.project.id })!; h.db.updateTask(third.id, { agent_id: other.id })
+    const entered = deferred(), stopped = deferred()
+    h.adapter.destroySession.mockImplementationOnce(async () => { entered.resolve(); await stopped.promise })
+    const deletion = h.manager.runAgentConfigurationMutation(h.agent.id, 'delete', live => h.db.removeAgent(h.agent.id, live))
+    await entered.promise
+    await h.manager.startTask(third.id)
+    expect(h.manager.findSessionByTaskId(third.id)?.session.agentId).toBe(other.id)
+    stopped.resolve()
+    expect(await deletion).toMatchObject({ running: { total: 1, items: [{ id: h.tasks[0].id, title: 'First' }] } })
+    expect(h.adapter.destroySession).toHaveBeenCalledOnce()
+    expect(h.manager.findSessionByTaskId(third.id)?.session.agentId).toBe(other.id)
+  })
+  it('previews what deletion would stop without stopping it', async () => {
+    const h = fixture(); await h.manager.startTask(h.tasks[0].id); await h.manager.startTask(h.tasks[1].id)
+    expect(h.manager.getAgentDeletionImpact(h.agent.id)).toMatchObject({ running: { total: 1 }, queued: { total: 1 } })
+    expect(h.manager.findSessionByTaskId(h.tasks[0].id)).toBeDefined(); expect(h.adapter.destroySession).not.toHaveBeenCalled()
+    expect(h.manager.getAgentDeletionImpact('missing')).toBeNull()
+  })
+  it('waits for a brief task change instead of refusing, then deletes', async () => {
+    const h = fixture(), held = deferred()
+    const change = h.manager.runTaskLifecycleMutation([h.tasks[0].id], () => held.promise)
+    const deletion = h.manager.runAgentConfigurationMutation(h.agent.id, 'delete', live => h.db.removeAgent(h.agent.id, live))
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(h.db.getAgent(h.agent.id)).toBeDefined()
+    held.resolve(); await change; await vi.advanceTimersByTimeAsync(200)
+    expect(await deletion).toMatchObject({ agent_id: h.agent.id })
+  })
+  it('names the task in the way once the wait runs out, and changes nothing', async () => {
+    const h = fixture(), held = deferred()
+    const change = h.manager.runTaskLifecycleMutation([h.tasks[0].id], () => held.promise)
+    const deletion = h.manager.runAgentConfigurationMutation(h.agent.id, 'delete', () => { throw new Error('must not run') })
+    const refused = expect(deletion).rejects.toThrow('“First” is still being changed')
+    await vi.advanceTimersByTimeAsync(10_500); await refused
+    expect(h.db.getAgent(h.agent.id)).toBeDefined(); held.resolve(); await change
+  })
+  it('names the task whose backend would not confirm Stop, and keeps the agent', async () => {
+    const h = fixture(); await h.manager.startTask(h.tasks[0].id)
+    h.adapter.destroySession.mockRejectedValueOnce(new Error('Fixture teardown refused'))
+    const mutation = vi.fn(() => h.db.removeAgent(h.agent.id))
+    await expect(h.manager.runAgentConfigurationMutation(h.agent.id, 'delete', mutation)).rejects.toThrow('“First” did not confirm it stopped (Fixture teardown refused)')
+    expect(mutation).not.toHaveBeenCalled(); expect(h.db.getAgent(h.agent.id)).toBeDefined()
+    expect(h.manager.findSessionByTaskId(h.tasks[0].id)?.sessionId).toBe('configuration-one')
+  })
   it('protects an unrelated agent using the same cached backend before side effects', async () => {
     const h = fixture(), other = h.db.createAgent({ name: 'Other', config: { coding_agent: 'codex', model: 'other-model' } })!
     h.db.updateTask(h.tasks[1].id, { agent_id: other.id }); await h.manager.startTask(h.tasks[1].id)

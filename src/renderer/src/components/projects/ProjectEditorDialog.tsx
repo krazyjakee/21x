@@ -34,8 +34,10 @@ import {
   type ProjectDraft,
   type ProjectDraftOriginal,
   type RepoDraft,
-  type ResourceDraft
+  type ResourceDraft,
+  withoutAgents
 } from '@/lib/project-editor'
+import { useAgentsRemoved } from '@/hooks/use-agents-removed'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import type { CaptainMemory } from '@shared/captain-memory'
 import type { ProjectStatusJournalEntry } from '@shared/project-status'
@@ -217,6 +219,8 @@ export function ProjectEditorDialog() {
     return () => { cancelled = true }
     // Drafts reload on explicit editor replacement, never a canonical event.
   }, [target, viewRevision])
+
+  useAgentsRemoved((removed) => setDraft((current) => withoutAgents(current, removed)))
 
   const effectiveProvider = (draft.git_provider || globalProvider || 'github') as GitProviderId
   const effectiveOrg = draft.git_org ?? globalOrg ?? ''

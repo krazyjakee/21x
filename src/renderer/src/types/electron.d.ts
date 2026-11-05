@@ -3,6 +3,7 @@ import type { TranscriptPage, TranscriptPageRequest } from '@shared/transcript-p
 import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import type { UiCommand } from '@shared/ui-commands'
 import type { CaptainRuntimeState } from '@shared/captain-runtime'
+import type { AgentDeletionImpact, AgentDeletionResult } from '@shared/agent-deletion'
 import type {
   Task,
   CreateTaskDTO,
@@ -310,7 +311,8 @@ interface ElectronAPI {
     getAll: () => Promise<Agent[]>
     create: (data: CreateAgentDTO) => Promise<Agent>
     update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>
-    delete: (id: string) => Promise<boolean>
+    delete: (id: string) => Promise<AgentDeletionResult>
+    deletionImpact: (id: string) => Promise<AgentDeletionImpact | null>
     getStartQueue: () => Promise<QueuedAgentStart[]>
     getStartRecoveryState?: (taskId: string) => Promise<QueuedAgentStart | null>
   }

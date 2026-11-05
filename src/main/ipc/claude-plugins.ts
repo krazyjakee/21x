@@ -3,8 +3,10 @@ import type { ClaudePluginManager } from '../claude-plugin-manager'
 import { required, type IpcDeps } from './deps'
 
 /** The Claude plugin marketplace: sources, catalogs and installed plugins. */
-export function registerClaudePluginHandlers({ claudePluginManager }: IpcDeps): void {
+export function registerClaudePluginHandlers({ claudePluginManager, agentManager }: IpcDeps): void {
   const manager = (): ClaudePluginManager => required(claudePluginManager, 'ClaudePluginManager')
+  /** Plugins bring their own agents, so these change the shared agent list. */
+  const agentsChanged = <T,>(result: T): T => { agentManager?.notifyAgentsChanged?.(); return result }
 
   ipcMain.handle('claudePlugin:getMarketplaceSources', () => claudePluginManager?.getMarketplaceSources() ?? [])
 
@@ -21,14 +23,14 @@ export function registerClaudePluginHandlers({ claudePluginManager }: IpcDeps): 
   ipcMain.handle('claudePlugin:getInstalledPlugins', () => claudePluginManager?.getInstalledPlugins() ?? [])
 
   ipcMain.handle('claudePlugin:installPlugin', async (_, pluginName: string, marketplaceId: string, scope?: string) => {
-    return manager().installPlugin(pluginName, marketplaceId, scope)
+    return agentsChanged(await manager().installPlugin(pluginName, marketplaceId, scope))
   })
 
-  ipcMain.handle('claudePlugin:uninstallPlugin', async (_, pluginId: string) => manager().uninstallPlugin(pluginId))
+  ipcMain.handle('claudePlugin:uninstallPlugin', async (_, pluginId: string) => agentsChanged(await manager().uninstallPlugin(pluginId)))
 
-  ipcMain.handle('claudePlugin:enablePlugin', (_, pluginId: string) => manager().enablePlugin(pluginId))
+  ipcMain.handle('claudePlugin:enablePlugin', async (_, pluginId: string) => agentsChanged(await manager().enablePlugin(pluginId)))
 
-  ipcMain.handle('claudePlugin:disablePlugin', (_, pluginId: string) => manager().disablePlugin(pluginId))
+  ipcMain.handle('claudePlugin:disablePlugin', async (_, pluginId: string) => agentsChanged(await manager().disablePlugin(pluginId)))
 
   ipcMain.handle('claudePlugin:getPluginResources', (_, pluginId: string) => manager().getPluginResources(pluginId))
 }

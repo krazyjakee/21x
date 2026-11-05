@@ -72,6 +72,39 @@ describe('useAgentStore', () => {
       expect(useAgentStore.getState().agents[0].name).toBe('New')
     })
 
+    it('follows the one change event, without needing the view to reopen', async () => {
+      const onRefresh = firstCb<() => void>(mockElectronAPI.onTasksRefresh)!
+      useAgentStore.setState({ agents: [{ id: 'a1', name: 'Old' } as unknown as Agent] })
+      ;(mockElectronAPI.agents.getAll as unknown as Mock).mockResolvedValue([{ id: 'a1', name: 'New' }, { id: 'a2', name: 'Added' }])
+      onRefresh()
+      await vi.waitFor(() => expect(useAgentStore.getState().agents.map(agent => agent.name)).toEqual(['New', 'Added']))
+    })
+
+    it('keeps the same list when the event changed nothing, so selectors do not reset', async () => {
+      const onRefresh = firstCb<() => void>(mockElectronAPI.onTasksRefresh)!
+      const agents = [{ id: 'a1', name: 'Same' } as unknown as Agent]
+      useAgentStore.setState({ agents })
+      ;(mockElectronAPI.agents.getAll as unknown as Mock).mockResolvedValue([{ id: 'a1', name: 'Same' }])
+      onRefresh()
+      await vi.waitFor(() => expect(useAgentStore.getState().isLoading).toBe(false))
+      expect(useAgentStore.getState().agents).toBe(agents)
+    })
+
+    it('does not list an agent twice when the event lands before the create reply', async () => {
+      const agent = { id: 'a2', name: 'Added' } as unknown as Agent
+      useAgentStore.setState({ agents: [agent] })
+      ;(mockElectronAPI.agents.create as unknown as Mock).mockResolvedValue(agent)
+      await useAgentStore.getState().createAgent({} as CreateAgentDTO)
+      expect(useAgentStore.getState().agents).toEqual([agent])
+    })
+
+    it('returns a refusal and keeps the agent listed', async () => {
+      useAgentStore.setState({ agents: [{ id: 'a1', name: 'X' } as unknown as Agent] })
+      ;(mockElectronAPI.agents.delete as unknown as Mock).mockResolvedValue({ refused: 'named' })
+      expect(await useAgentStore.getState().deleteAgent('a1')).toEqual({ refused: 'named' })
+      expect(useAgentStore.getState().agents).toHaveLength(1)
+    })
+
     it('deleteAgent removes from list', async () => {
       useAgentStore.setState({ agents: [{ id: 'a1', name: 'X' } as unknown as Agent] })
       ;(mockElectronAPI.agents.delete as unknown as Mock).mockResolvedValue(true)

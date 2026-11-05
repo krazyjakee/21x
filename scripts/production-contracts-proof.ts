@@ -98,7 +98,7 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'projectResource:list': [project], 'projectResource:add': [project, { label: 'Fixture notes', url: null, notes: 'Context' }],
   'projectResource:update': ['resource_fixture', { label: 'Updated notes' }], 'projectResource:remove': ['resource_fixture'], 'projectResource:reorder': [project, ['resource_fixture']],
   'agent:getAll': [], 'agent:create': [{ name: 'Fixture agent', server_url: 'http://localhost:4096', config: { coding_agent: 'pi', model: 'fixture', max_parallel_sessions: 2 } }],
-  'agent:update': [agent, { config: { coding_agent: 'codex', permission_mode: 'ask', sandbox_mode: 'workspace-write' } }], 'agent:delete': [agent],
+  'agent:update': [agent, { config: { coding_agent: 'codex', permission_mode: 'ask', sandbox_mode: 'workspace-write' } }], 'agent:delete': [agent], 'agent:deletionImpact': [agent],
   'agentConfig:getProviders': ['http://localhost:4096', 'opencode'], 'agentConfig:listModels': ['pi'],
   'agentSession:start': [agent, task, undefined, true], 'agentSession:startTask': [task], 'agentSession:resume': [agent, task, session],
   'agentSession:send': [session, 'Fixture continuation', task, agent, [], 'delivery_fixture_one'],

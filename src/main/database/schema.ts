@@ -15,6 +15,7 @@ import { createManagedSessionTables } from './managed-session-migration'
 import { createCommanderActionTables, migrateCommanderActions } from './commander-actions-migration'
 import { createSessionHandoffTable } from './session-handoff-migration'
 import { createTaskGroupTables, migrateTaskGroups } from './task-groups-migration'
+import { migrateReviewAgentHistory } from './review-agent-history-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -79,8 +80,11 @@ import { createTaskGroupTables, migrateTaskGroups } from './task-groups-migratio
  * 34 → 35: Commander input mode and executed action snapshots / exact Undo (#86).
  * 35 → 36: durable planned session handoff steps (#103).
  * 36 → 37: shared task-group execution anchors and retained membership/progress (#192).
+ * 38 → 39: PR review records keep the agent ids they were signed with as plain
+ *          history, so reviewing a PR no longer makes an agent undeletable
+ *          (migrateReviewAgentHistory in review-agent-history-migration.ts).
  */
-const SCHEMA_VERSION = 38
+const SCHEMA_VERSION = 39
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -1133,6 +1137,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v37: retained group membership and one counted execution task.
   migrateTaskGroups(db)
 
+  // Migration v39: an agent can be deleted after it has reviewed a PR.
+  migrateReviewAgentHistory(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -1164,8 +1171,8 @@ function createPullRequestReadinessTables(db: Database.Database): void {
       base_sha TEXT NOT NULL,
       implementation_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
       review_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-      implementation_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
-      reviewer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      implementation_agent_id TEXT NOT NULL,
+      reviewer_agent_id TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_pr_review_handoffs_exact
@@ -1180,8 +1187,8 @@ function createPullRequestReadinessTables(db: Database.Database): void {
       base_sha TEXT NOT NULL,
       implementation_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
       review_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-      implementation_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
-      reviewer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      implementation_agent_id TEXT NOT NULL,
+      reviewer_agent_id TEXT NOT NULL,
       handoff_id TEXT NOT NULL REFERENCES pr_review_handoffs(id) ON DELETE RESTRICT,
       verdict TEXT NOT NULL CHECK (verdict IN ('CLEAN', 'CHANGES_REQUIRED')),
       summary TEXT NOT NULL DEFAULT '',

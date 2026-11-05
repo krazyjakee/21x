@@ -282,6 +282,16 @@ function TaskCardContent({ task, agent, transitionPhase, showActivity = true }: 
               </span>
             )
           })()}
+          {!task.agent_id && task.auto_start_agent && task.status !== TaskStatus.Completed && (
+            <span
+              data-testid="task-no-agent-warning"
+              title="This task starts itself but has no chosen agent"
+              className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 shrink-0"
+            >
+              <AlertCircle className="size-icon-xs" />
+              No agent
+            </span>
+          )}
           {task.assignee && (
             <AssigneeAvatar name={task.assignee} />
           )}

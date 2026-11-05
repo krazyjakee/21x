@@ -2,6 +2,7 @@ import { captureDesktopRead } from './desktop-api'
 import { projectApi } from '@/lib/ipc-client'
 import { useProjectStore } from '@/stores/project-store'
 import type { ProjectRecord, ProjectRepoRecord, ProjectResourceRecord } from '@shared/projects'
+import { concurrencyFromSettings } from '@shared/concurrency'
 
 /**
  * The project editor works on a draft and writes it in one go on save:
@@ -59,6 +60,23 @@ let draftKeySeq = 0
 export function newDraftKey(): string {
   draftKeySeq += 1
   return `draft-${draftKeySeq}`
+}
+
+/**
+ * Drops agents that were deleted while the editor was open. The draft is only
+ * replaced by an explicit reload, so without this it would keep showing them
+ * and saving would write their ids straight back.
+ */
+export function withoutAgents(draft: ProjectDraft, removed: readonly string[]): ProjectDraft {
+  const concurrency = concurrencyFromSettings(draft.settings)
+  for (const id of removed) { delete concurrency.levels[id]; delete concurrency.pinned[id] }
+  const clear = (id: string | null): string | null => id && removed.includes(id) ? null : id
+  return {
+    ...draft,
+    default_agent_id: clear(draft.default_agent_id),
+    captain_agent_id: clear(draft.captain_agent_id),
+    settings: draft.settings?.concurrency === undefined ? draft.settings : { ...draft.settings, concurrency }
+  }
 }
 
 export function emptyProjectDraft(): ProjectDraft {

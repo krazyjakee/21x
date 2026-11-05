@@ -143,6 +143,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
   // ── WebSocket event subscriptions ──
 
   // Transcript content: the ONLY writer of messages. Idempotent delta apply.
+  // The desktop's one agent change event; see the desktop agent store.
+  onEvent('tasks:refresh', () => { void get().fetchAgents() })
+
   onEvent('transcript:changed', (payload) => {
     const event = payload as { taskId?: string; parts?: TranscriptPartRecord[]; maxRev?: number }
     if (!event?.taskId) return

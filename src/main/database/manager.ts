@@ -10,6 +10,8 @@ import { ensureProjectCaptain, seedDefaultAgent, seedCaptainTasks, seedTaskManag
 import { seedOrchestratorSkill } from './captain-migration'
 import { userTaskRoleFilter } from './task-roles'
 import { TaskGroups } from './task-groups'
+import { readAgentDeletionImpact, removeAgent } from './agent-deletion'
+import type { AgentDeletionImpact, AgentLiveWork } from '../../shared/agent-deletion'
 import type { CreateTaskGroupData, TaskGroupRecord, TaskGroupProgressState } from '../../shared/task-groups'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
@@ -1107,11 +1109,22 @@ export class DatabaseManager {
     return this.getAgent(id)
   }
 
+  /** See `removeAgent`: the single path, so no caller can leave a reference behind. */
   deleteAgent(id: string): boolean {
-    if (this.prepare("SELECT 1 FROM task_groups WHERE agent_id=? AND state='active' LIMIT 1").get(id))
-      throw new Error('Switch or dissolve active task groups before deleting their execution agent.')
-    const result = this.prepare('DELETE FROM agents WHERE id = ?').run(id)
-    return result.changes > 0
+    return this.removeAgent(id) !== false
+  }
+
+  removeAgent(id: string, live?: AgentLiveWork): AgentDeletionImpact | false {
+    return removeAgent(this, id, live)
+  }
+
+  getAgentDeletionImpact(id: string, live?: AgentLiveWork): AgentDeletionImpact | null {
+    return readAgentDeletionImpact(this, id, live)
+  }
+
+  /** Task groups cannot outlive their execution agent; see TaskGroups.retireForAgent. */
+  retireTaskGroupsOfAgent(agentId: string): void {
+    new TaskGroups(this).retireForAgent(agentId)
   }
 
   // ── MCP Server CRUD ────────────────────────────────────────

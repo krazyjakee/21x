@@ -144,7 +144,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     expect(after.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'merge_grant%'").all()).toEqual([])
     const settings = after.prepare("SELECT settings FROM projects WHERE id = 'default'").get() as { settings: string }
     expect(JSON.parse(settings.settings)).toEqual({ limits: { paused: true } })
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('38')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('39')
     after.close()
   })
 
@@ -190,7 +190,52 @@ describe('DatabaseManager migrations on an existing install', () => {
     const columns = (after.pragma('table_info(pr_review_attestations)') as { name: string }[]).map((column) => column.name)
     expect(tables).toContain('pr_review_handoffs')
     expect(columns).toContain('handoff_id')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('38')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('39')
+    after.close()
+  })
+
+  it('frees agents from PR review records in a database from schema version 38, keeping the records', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    const reviewer = first.createAgent({ name: 'Reviewer' })!
+    const implementer = first.createAgent({ name: 'Implementer' })!
+    const project = first.createProject({ name: 'Reviewed' })!
+    const implementation = first.createTask({ title: 'Work', project_id: project.id })!
+    const review = first.createTask({ title: 'Review', project_id: project.id })!
+    first.close?.()
+
+    const raw = openRaw()
+    raw.pragma('foreign_keys = OFF')
+    for (const table of ['pr_review_handoffs', 'pr_review_attestations']) {
+      const { sql } = raw.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(table) as { sql: string }
+      raw.exec(`DROP TABLE ${table}`)
+      raw.exec(sql
+        .replace('implementation_agent_id TEXT NOT NULL', 'implementation_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT')
+        .replace('reviewer_agent_id TEXT NOT NULL', 'reviewer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT'))
+    }
+    raw.exec('CREATE INDEX idx_pr_review_handoffs_exact ON pr_review_handoffs(project_id, repo, pr_number, head_sha, base_sha, created_at DESC)')
+    raw.prepare(`INSERT INTO pr_review_handoffs (id, project_id, repo, pr_number, head_sha, base_sha, implementation_task_id, review_task_id,
+      implementation_agent_id, reviewer_agent_id, created_at) VALUES ('handoff', ?, 'acme/app', 7, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(project.id, 'a'.repeat(40), 'b'.repeat(40), implementation.id, review.id, implementer.id, reviewer.id, new Date().toISOString())
+    raw.prepare(`INSERT INTO pr_review_attestations (id, project_id, repo, pr_number, head_sha, base_sha, implementation_task_id, review_task_id,
+      implementation_agent_id, reviewer_agent_id, handoff_id, verdict, summary, created_at) VALUES ('blocking', ?, 'acme/app', 7, ?, ?, ?, ?, ?, ?, 'handoff', 'CHANGES_REQUIRED', '', ?)`)
+      .run(project.id, 'a'.repeat(40), 'b'.repeat(40), implementation.id, review.id, implementer.id, reviewer.id, new Date().toISOString())
+    raw.pragma('foreign_keys = ON')
+    expect(() => raw.prepare('DELETE FROM agents WHERE id = ?').run(reviewer.id)).toThrow(/FOREIGN KEY/)
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('38')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    expect(second.deleteAgent(reviewer.id)).toBe(true)
+    second.close?.()
+
+    const after = openRaw()
+    expect(after.prepare('SELECT verdict, reviewer_agent_id FROM pr_review_attestations WHERE id = ?').get('blocking'))
+      .toEqual({ verdict: 'CHANGES_REQUIRED', reviewer_agent_id: reviewer.id })
+    expect((after.pragma('foreign_key_list(pr_review_attestations)') as { table: string }[]).map(key => key.table)).not.toContain('agents')
+    expect(after.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_pr_review_handoffs_exact'").get()).toBeDefined()
+    expect(after.pragma('foreign_key_check')).toEqual([])
     after.close()
   })
 
@@ -210,7 +255,7 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const after = openRaw()
     expect(taskColumns(after)).toContain('mcp_scope_nonce')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('38')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('39')
     after.close()
   })
 
@@ -252,7 +297,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('38')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('39')
     after.close()
   })
 
@@ -299,7 +344,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('38')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('39')
     after.close()
   })
 

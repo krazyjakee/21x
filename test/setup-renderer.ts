@@ -57,6 +57,7 @@ const mockElectronAPI = {
     create: vi.fn().mockResolvedValue({}),
     update: vi.fn().mockResolvedValue({}),
     delete: vi.fn().mockResolvedValue(true),
+    deletionImpact: vi.fn().mockResolvedValue(null),
     getStartQueue: vi.fn().mockResolvedValue([]),
     getStartRecoveryState: vi.fn().mockResolvedValue(null)
   },

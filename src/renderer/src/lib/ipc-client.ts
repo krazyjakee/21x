@@ -1,3 +1,4 @@
+import type { AgentDeletionImpact, AgentDeletionResult } from '@shared/agent-deletion'
 import type { DesktopApi } from '@shared/desktop-api'
 import { desktopApi, desktopSupports, electronBrowserApi } from '@/lib/desktop-api'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
@@ -164,8 +165,12 @@ export const agentApi = {
     return desktopApi.agents.update(id, data)
   },
 
-  delete: (id: string): Promise<boolean> => {
+  delete: (id: string): Promise<AgentDeletionResult> => {
     return desktopApi.agents.delete(id)
+  },
+
+  deletionImpact: (id: string): Promise<AgentDeletionImpact | null> => {
+    return desktopApi.agents.deletionImpact(id)
   },
 
   /** Durable starts waiting on capacity, dependencies or retry deadlines. */

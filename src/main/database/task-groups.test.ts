@@ -137,7 +137,6 @@ describe('task group database ownership', () => {
 
   it('rejects owned definition changes and validates project, repo, assignment and excluded task forms', () => {
     const h = fixture(3), group = h.create()
-    expect(() => h.db.deleteAgent(h.agent.id)).toThrow('Switch or dissolve active task groups')
     h.db.updateTask(group.execution_task_id, { status: TaskStatus.AgentWorking })
     expect(() => h.db.removeTaskFromGroup(group.id, h.tasks[0].id)).toThrow('Stop the task group')
     expect(() => h.db.dissolveTaskGroup(group.id)).toThrow('Stop the task group')

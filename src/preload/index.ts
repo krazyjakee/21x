@@ -10,6 +10,7 @@ import type {
 } from '../shared/projects'
 import type { CaptainMemory } from '../shared/captain-memory'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
+import type { AgentDeletionImpact, AgentDeletionResult } from '../shared/agent-deletion'
 import type { TranscriptPage, TranscriptPageRequest } from '../shared/transcript-page'
 import type { RolloverPolicy, SessionContextScope, SessionContextSnapshot } from '../shared/session-context'
 import type { CreateTaskGroupData, TaskGroupRecord, TaskGroupReviewData, TaskGroupReviewResult, TaskGroupSnapshot } from '../shared/task-groups'
@@ -111,7 +112,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('agent:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:update', id, data),
-    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id),
+    delete: (id: string): Promise<AgentDeletionResult> => ipcRenderer.invoke('agent:delete', id),
+    deletionImpact: (id: string): Promise<AgentDeletionImpact | null> => ipcRenderer.invoke('agent:deletionImpact', id),
     getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue'),
     getStartRecoveryState: (taskId: string): Promise<unknown> => ipcRenderer.invoke('agent:getStartRecoveryState', taskId)
   },

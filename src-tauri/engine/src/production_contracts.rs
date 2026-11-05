@@ -197,6 +197,7 @@ pub const COMMANDS: &[&str] = &[
     "agent:create",
     "agent:update",
     "agent:delete",
+    "agent:deletionImpact",
     "agentConfig:getProviders",
     "agentConfig:listModels",
     "agentSession:start",
@@ -1930,6 +1931,7 @@ fn fields(operation: &str) -> Option<(&'static [&'static str], &'static [&'stati
         | "project:get"
         | "skills:delete"
         | "agent:delete"
+        | "agent:deletionImpact"
         | "projectRepo:remove"
         | "projectResource:remove"
         | "commander:getImage" => (&["id"], &[]),
@@ -3810,10 +3812,12 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
     match operation {
         "db:deleteTask"
         | "db:reorderSubtasks"
-        | "agent:delete"
         | "skills:delete"
         | "projectRepo:remove"
         | "projectResource:remove" => result.is_boolean(),
+        // The field-level contract is isAgentDeletionImpact, on the service.
+        "agent:delete" => result.as_bool() == Some(false) || result.is_object(),
+        "agent:deletionImpact" => result.is_null() || result.is_object(),
         "agentSession:abort" | "agentSession:stop" | "agentSession:approve" => {
             object(result, &["success"], &[]) && result["success"].is_boolean()
         }

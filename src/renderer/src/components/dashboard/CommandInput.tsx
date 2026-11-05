@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { FIELD_SIZING_CLASS, fitTextarea, resetTextarea } from '@/lib/textarea-autosize'
 import { Paperclip, Plus, ArrowUp, ChevronDown, Settings } from 'lucide-react'
-import { agentApi, voiceApi } from '@/lib/ipc-client'
+import { voiceApi } from '@/lib/ipc-client'
+import { useAgentStore } from '@/stores/agent-store'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { registerComposer, DASHBOARD_COMPOSER_KEY, clearDictatedText } from '@/lib/voice-dictation-target'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
-import type { Agent } from '@/types'
 
 /** Names this composer, so a spoken sentence reaches this box and no other. */
 const VOICE_COMPOSER_KEY = DASHBOARD_COMPOSER_KEY
@@ -17,8 +17,8 @@ interface CommandInputProps {
 
 export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProps) {
   const [text, setText] = useState('')
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const agents = useAgentStore((state) => state.agents)
+  const [chosenAgentId, setChosenAgentId] = useState<string | null>(null)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -26,13 +26,8 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
   const project = useCurrentProject()
   const captainName = project ? `Captain (${project.name})` : 'Captain'
 
-  // Load agents on mount
   useEffect(() => {
-    agentApi.getAll().then((allAgents) => {
-      setAgents(allAgents)
-      const defaultAgent = allAgents.find((a) => a.is_default) || allAgents[0]
-      if (defaultAgent) setSelectedAgentId(defaultAgent.id)
-    })
+    if (useAgentStore.getState().agents.length === 0) void useAgentStore.getState().fetchAgents()
   }, [])
 
   // Close dropdown when clicking outside
@@ -105,7 +100,8 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
     }
   }, [handleSend])
 
-  const selectedAgent = agents.find((a) => a.id === selectedAgentId)
+  // A choice holds only while its agent exists, then the default takes over.
+  const selectedAgent = agents.find((a) => a.id === chosenAgentId) ?? agents.find((a) => a.is_default) ?? agents[0]
 
   return (
     <div
@@ -136,21 +132,22 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
             className="flex h-8 items-center gap-1.5 px-2.5 rounded-md text-sm text-foreground/70 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
             <Settings className="size-icon-sm" />
-            <span className="max-w-[120px] truncate">{selectedAgent?.name || 'Select agent'}</span>
+            <span className="max-w-[120px] truncate">{selectedAgent?.name || 'No agents'}</span>
             <ChevronDown className="size-icon-xs" />
           </button>
 
           {showAgentDropdown && (
             <div className="absolute bottom-full left-0 mb-1 w-48 rounded-lg border border-border bg-popover shadow-lg py-1 z-50">
+              {agents.length === 0 && <p className="px-3 py-2 text-sm text-muted-foreground">No agents yet</p>}
               {agents.map((agent) => (
                 <button
                   key={agent.id}
                   onClick={() => {
-                    setSelectedAgentId(agent.id)
+                    setChosenAgentId(agent.id)
                     setShowAgentDropdown(false)
                   }}
                   className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${
-                    agent.id === selectedAgentId
+                    agent.id === selectedAgent?.id
                       ? 'bg-primary/10 text-primary'
                       : 'text-foreground hover:bg-accent'
                   }`}

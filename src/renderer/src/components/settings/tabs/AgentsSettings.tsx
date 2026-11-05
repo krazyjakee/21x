@@ -3,8 +3,10 @@ import { Plus, Loader2, Wifi, WifiOff, RefreshCw, Edit3, Trash2, Terminal } from
 import { Button } from '@/components/ui/Button'
 import { SettingsSection } from '../SettingsSection'
 import { AgentFormDialog } from '../forms/AgentFormDialog'
+import { AgentDeleteDialog } from '../forms/AgentDeleteDialog'
 import { OpenCodeLogo, AnthropicLogo, OpenAILogo, PiLogo } from '@/components/icons/AgentLogos'
 import { useAgentStore } from '@/stores/agent-store'
+import { useAgentsRemoved } from '@/hooks/use-agents-removed'
 import { agentConfigApi } from '@/lib/ipc-client'
 import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS, CodingAgentType } from '@/types'
 import type { Agent, CreateAgentDTO, UpdateAgentDTO } from '@/types'
@@ -23,9 +25,13 @@ interface AgentDialogState {
 }
 
 export function AgentsSettings() {
-  const { agents, fetchAgents, createAgent, updateAgent, deleteAgent } = useAgentStore()
+  const { agents, fetchAgents, createAgent, updateAgent } = useAgentStore()
   const [connections, setConnections] = useState<Map<string, ConnectionInfo>>(new Map())
   const [agentDialog, setAgentDialog] = useState<AgentDialogState>({ open: false })
+  const [deleting, setDeleting] = useState<Agent | null>(null)
+
+  // An agent can go while its form is open, so the form cannot save over nothing.
+  useAgentsRemoved((removed) => setAgentDialog((dialog) => (dialog.agent && removed.includes(dialog.agent.id) ? { open: false } : dialog)))
 
   useEffect(() => {
     fetchAgents()
@@ -104,12 +110,6 @@ export function AgentsSettings() {
     if (agentDialog.agent) {
       await updateAgent(agentDialog.agent.id, data as UpdateAgentDTO)
       setAgentDialog({ open: false })
-    }
-  }
-
-  const handleDeleteAgent = async (id: string) => {
-    if (confirm('Are you sure you want to delete this agent?')) {
-      await deleteAgent(id)
     }
   }
 
@@ -216,17 +216,15 @@ export function AgentsSettings() {
                       >
                         <Edit3 className="h-3.5 w-3.5" />
                       </Button>
-                      {!agent.is_default && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDeleteAgent(agent.id)}
-                          className="text-destructive hover:text-destructive"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setDeleting(agent)}
+                        className="text-destructive hover:text-destructive"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </div>
                   {connection.status !== 'idle' && (
@@ -282,6 +280,7 @@ export function AgentsSettings() {
         onClose={() => setAgentDialog({ open: false })}
         onSubmit={agentDialog.agent ? handleUpdateAgent : handleCreateAgent}
       />
+      {deleting && <AgentDeleteDialog key={deleting.id} agent={deleting} onClose={() => setDeleting(null)} />}
     </>
   )
 }

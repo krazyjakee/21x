@@ -1,3 +1,4 @@
+import { isAgentDeletionImpact, isAgentDeletionRefusal } from './agent-deletion'
 import type { DesktopCommandMap, DesktopEventMap } from './desktop-operations'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from './service-protocol'
 import type { OptionalResult } from './host-services'
@@ -30,7 +31,7 @@ export const CONFIGURATION_EVENT_CODECS = {
 } as const
 
 export const CONFIGURATION_DESKTOP_OPERATIONS = [
-  'agent:getAll', 'agent:create', 'agent:update', 'agent:delete',
+  'agent:getAll', 'agent:create', 'agent:update', 'agent:delete', 'agent:deletionImpact',
   'skills:getAll', 'skills:create', 'skills:update', 'skills:delete', 'skills:setProject',
   'project:update', 'project:archive', 'project:reorder',
   'projectRepo:list', 'projectRepo:add', 'projectRepo:update', 'projectRepo:remove', 'projectRepo:reorder',
@@ -187,7 +188,8 @@ const descriptors: Record<ConfigurationDesktopOperation, Descriptor> = {
   'agent:getAll': { ...noArgs, validateResult: list(agentResult), encodeResult: value => projectList(value, projectPublicAgent) },
   'agent:create': { ...createArgs(agentCreateShape), validateResult: agentResult, encodeResult: projectPublicAgent },
   'agent:update': { ...updateArgs(agentUpdateShape), validateResult: optionalResult(agentResult), encodeResult: projectPublicAgent },
-  'agent:delete': { ...idArgs, validateResult: boolean },
+  'agent:delete': { ...idArgs, validateResult: value => value === false || isAgentDeletionImpact(value) || isAgentDeletionRefusal(value) },
+  'agent:deletionImpact': { ...idArgs, validateResult: value => value === null || isAgentDeletionImpact(value) },
   'skills:getAll': { ...noArgs, validateResult: list(skillResult), encodeResult: value => projectList(value, projectPublicSkill) },
   'skills:create': { ...createArgs(skillInputFields), validateResult: skillResult, encodeResult: projectPublicSkill },
   'skills:update': { ...updateArgs(skillUpdateShape), validateResult: optionalResult(skillResult), encodeResult: projectPublicSkill },

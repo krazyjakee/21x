@@ -3,6 +3,8 @@ import type { DatabaseManager } from '../main/database/manager'
 import type { CreateAgentData, UpdateAgentData, AgentConfigRecord } from '../main/database/types'
 import type { AgentManager } from '../main/agent-manager-core'
 import { DEFAULT_SERVER_URL } from '../main/adapters/opencode-server'
+import { agentDeletionProjectIds } from '../main/database/agent-deletion'
+import { refusalOf } from '../shared/agent-deletion'
 import { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
 import { getSecretStorage } from '../main/platform/secret-storage'
 import { flattenProviderModels, rememberBackendModels } from '../main/agent-manager/skill-model'
@@ -121,7 +123,8 @@ export class AgentConfigurationBackend {
   private deletionAllowed(id: string, caller: DesktopCallerContext): boolean {
     const db = this.options.database
     if (!this.agentAllowed(id, caller, 'delete')) return false
-    if (db.db.prepare("SELECT 1 FROM task_groups WHERE agent_id=? AND state='active' LIMIT 1").get(id)) return false
+    // Deletion rewrites these too, so the caller needs authority over each.
+    if (!agentDeletionProjectIds(db, id).every(project => this.options.canAccessProject(project, caller, 'write'))) return false
     return db.getAgents().filter(agent => agent.config.fallback_agent_ids?.includes(id)).every(agent => this.agentAllowed(agent.id, caller, 'write'))
   }
   private backendTarget(serverUrl: string | undefined, backend: string | undefined, caller: DesktopCallerContext): { backend: AgentConfigurationBackendType; url: string } | null {
@@ -224,24 +227,19 @@ export class AgentConfigurationBackend {
       if (!db.getAgent(id)) return false
       let accepted = false
       try {
-        return await manager.runAgentConfigurationMutation(id, 'delete', () => {
+        return await manager.runAgentConfigurationMutation(id, 'delete', live => {
           const result = db.db.transaction(() => {
             this.available()
             if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
             if (!this.deletionAllowed(id, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
-            const deleted = db.deleteAgent(id)
-            if (deleted) {
-              for (const agent of db.getAgents()) if (agent.config.fallback_agent_ids?.includes(id)) db.updateAgent(agent.id, { config: {
-                ...agent.config, fallback_agent_ids: agent.config.fallback_agent_ids.filter(fallback => fallback !== id) } })
-              if (db.getSetting('default_agent_id') === id) db.setSetting('default_agent_id', '')
-            }
-            return deleted
+            return db.removeAgent(id, live)
           })()
-          accepted = result
+          accepted = result !== false
           return result
-        })
+        }).catch(refusalOf)
       } finally { if (accepted) this.committed() }
     })
+    this.bind('agent:deletionImpact', ([id], caller) => this.agentAllowed(id, caller, 'read'), ([id]) => manager.getAgentDeletionImpact(id))
     this.bind('agentConfig:getProviders', ([url, type], caller) => this.backendRequest(url, type, caller) !== null, async ([url, type], caller, signal) => {
       const target = this.backendTarget(url, type, caller)
       if (!target) throw new ServiceProtocolError('INVALID_REQUEST')

@@ -7,6 +7,7 @@ export interface DesktopCommandMap {
   "agent-installer:install": { apiArguments: Parameters<NonNullable<DesktopApi["agentInstaller"]["install"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agentInstaller"]["install"]>>> }
   "agent:create": { apiArguments: Parameters<NonNullable<DesktopApi["agents"]["create"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agents"]["create"]>>> }
   "agent:delete": { apiArguments: Parameters<NonNullable<DesktopApi["agents"]["delete"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agents"]["delete"]>>> }
+  "agent:deletionImpact": { apiArguments: Parameters<NonNullable<DesktopApi["agents"]["deletionImpact"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agents"]["deletionImpact"]>>> }
   "agent:getAll": { apiArguments: Parameters<NonNullable<DesktopApi["agents"]["getAll"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agents"]["getAll"]>>> }
   "agent:getStartQueue": { apiArguments: Parameters<NonNullable<DesktopApi["agents"]["getStartQueue"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agents"]["getStartQueue"]>>> }
   "agent:getStartRecoveryState": { apiArguments: Parameters<NonNullable<DesktopApi["agents"]["getStartRecoveryState"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["agents"]["getStartRecoveryState"]>>> }
@@ -337,6 +338,7 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "event/agent-installer:progress": {"name":"agent-installer:progress","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
   "command/agent:create": {"name":"agent:create","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agent:delete": {"name":"agent:delete","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/agent:deletionImpact": {"name":"agent:deletionImpact","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agent:getAll": {"name":"agent:getAll","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agent:getStartQueue": {"name":"agent:getStartQueue","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/agent:getStartRecoveryState": {"name":"agent:getStartRecoveryState","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},

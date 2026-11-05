@@ -34,6 +34,19 @@ describe('agent configuration public codecs', () => {
     expect(() => codecs['agentConfig:getProviders'].decodeArguments({ backendType: 'opencode', directory: '/tmp' })).toThrow('arguments')
     expect(codecs['agent:create'].validateArguments([{ name: 'Agent', config: { concurrency_cap: 11 } }])).toBe(false)
   })
+  it('carries a deletion report, a refusal or false across the wire, and nothing else', () => {
+    const empty = { total: 0, items: [] }
+    const report = { agent_id: 'agent', agent_name: 'Fable', running: empty, queued: empty, unassigned_tasks: empty, recurring_tasks: empty, recurring_auto_start: 0,
+      dissolved_groups: empty, fallback_agents: empty, captain_projects: empty, default_projects: empty, concurrency_projects: empty,
+      commander_cleared: false, was_default: false, replacement_default: null, last_agent: false }
+    for (const value of [report, false, { refused: 'The agent was not deleted because the app is shutting down.' }])
+      expect(codecs['agent:delete'].encodeResult(value)).toEqual({ defined: true, value })
+    expect(() => codecs['agent:delete'].encodeResult(true)).toThrow('result')
+    expect(() => codecs['agent:delete'].encodeResult({ agent_id: 'agent' })).toThrow('result')
+    expect(codecs['agent:deletionImpact'].encodeResult(null)).toEqual({ defined: true, value: null })
+    expect(() => codecs['agent:deletionImpact'].encodeResult({ refused: 'not a preview' })).toThrow('result')
+    expect(codecs['agent:deletionImpact'].validateArguments(['agent'])).toBe(true)
+  })
   it('projects only public provider/model fields and bounds the complete result', () => {
     const result = codecs['agentConfig:getProviders'].encodeResult({ providers: [{ id: 'provider', name: 'Provider', apiKey: 'private-key',
       models: { model: { name: 'Model', api_key: 'private-key', sdkPath: '/private/path' } } }], default: { provider: 'model', api_key: 'private-key' } })

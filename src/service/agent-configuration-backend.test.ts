@@ -1,3 +1,4 @@
+import type { AgentDeletionImpact } from '../shared/agent-deletion'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { rmSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -125,8 +126,30 @@ describe('actual owner agent configuration bindings', () => {
     const tasks = [1, 2].map(index => db.createTask({ title: `Grouped ${index}` })!.id)
     db.createTaskGroup({ title: 'Active definition', task_ids: tasks, agent_id: agent.id })
     const before = adapter.destroySession.mock.calls.length
-    await expect(call('agent:delete', [agent.id])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(await call('agent:delete', [agent.id])).toMatchObject({ agent_id: agent.id, dissolved_groups: { total: 1 } })
     expect(adapter.destroySession.mock.calls).toHaveLength(before)
+    expect(db.getAgent(agent.id)).toBeUndefined()
+    for (const id of tasks) expect(db.getTask(id)).toMatchObject({ agent_id: null, group_id: null })
+  })
+
+  it('previews deletion read-only and refuses a project the caller cannot rewrite before anything stops', async () => {
+    const agent = db.createAgent({ name: 'Previewed', config: { coding_agent: 'opencode' } })!
+    const owned = await live(agent.id, 'Previewed task')
+    expect(await call('agent:deletionImpact', [agent.id])).toMatchObject({ agent_id: agent.id, running: { total: 1, items: [{ id: owned.task.id, title: 'Previewed task' }] } })
+    expect(manager.getSession(owned.sessionId)).toBeDefined()
+    const project = db.createProject({ name: 'Holds a pin' })!
+    db.updateProject(project.id, { settings: { concurrency: { pinned: { [agent.id]: 2 } } } })
+    options.canAccessProject = (id: string) => id !== project.id
+    await expect(call('agent:delete', [agent.id])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(manager.getSession(owned.sessionId)).toBeDefined(); expect(db.getAgent(agent.id)).toBeDefined()
+    options.canAccessProject = () => true
+  })
+
+  it('delivers a named refusal as a result, because the transport would mask a thrown message', async () => {
+    const agent = db.createAgent({ name: 'Refused', config: { coding_agent: 'opencode' } })!
+    await live(agent.id, 'Stubborn task')
+    adapter.destroySession.mockRejectedValueOnce(new Error('Backend refused'))
+    expect(await call('agent:delete', [agent.id])).toEqual({ refused: expect.stringContaining('“Stubborn task” did not confirm it stopped') })
     expect(db.getAgent(agent.id)).toBeDefined()
   })
 
@@ -211,12 +234,13 @@ describe('actual owner agent configuration bindings', () => {
     expect((await manager.requestSession(agent.id, queued.id)).status).toBe('queued')
     const fallback = db.createAgent({ name: 'Fallback reference', config: { coding_agent: 'codex', fallback_agent_ids: [agent.id] } })!
     db.setSetting('default_agent_id', agent.id)
-    expect(await call('agent:delete', [agent.id])).toBe(true)
+    const report = await call('agent:delete', [agent.id]) as unknown as AgentDeletionImpact
+    expect(report).toMatchObject({ agent_id: agent.id, running: { total: 1 }, queued: { total: 1 }, fallback_agents: { total: 1 } })
     expect(db.getAgent(agent.id)).toBeUndefined()
     expect(manager.getSession(active.sessionId)).toBeUndefined()
     expect(manager.getStartQueue().some(row => row.agentId === agent.id)).toBe(false)
     expect(db.getAgent(fallback.id)?.config.fallback_agent_ids).toEqual([])
-    expect(db.getSetting('default_agent_id')).toBe('')
+    expect(db.getSetting('default_agent_id')).toBe(report.replacement_default?.id ?? '')
     expect(adapter.destroySession).toHaveBeenCalledWith(active.sessionId, expect.any(Object))
     expect(events).toEqual([{ operation: 'tasks:refresh', payload: {} }])
   })
