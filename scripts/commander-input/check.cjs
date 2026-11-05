@@ -185,7 +185,8 @@ app.whenReady().then(async () => {
     for (let i = 0; i < 10; i++) { await key('Tab'); assert(await js(`!!document.activeElement.closest('[role="dialog"]')`)) }
     await key('Escape')
     await wait(`!document.querySelector('[role="dialog"]')`)
-    assert.equal(await js('document.activeElement.ariaLabel'), 'Open Commander sessions')
+    // Radix returns focus on a timer after the dialog has left the DOM.
+    await wait(`document.activeElement.ariaLabel === 'Open Commander sessions'`)
     assert.equal(await js(`${field}.value`), 'retained draft')
   })
   await check('PTT Space preserves text entry and completes once on release or focus change', async () => {
