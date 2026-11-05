@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { AlertTriangle, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { selectVoiceReady, useVoiceStore } from '@/stores/voice-store'
-import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { isForeignVoiceTurn, useCommanderCallStore } from '@/stores/commander-call-store'
 import type { VoiceCandidate } from '@shared/voice'
 
 const RESULT_VISIBLE_MS = 6000
@@ -37,8 +37,9 @@ export function VoiceOverlay() {
   const stopSpeaking = useVoiceStore((s) => s.stopSpeaking)
   const commanderCallLive = useCommanderCallStore((s) => s.status !== 'off')
   const commanderTurnId = useCommanderCallStore(s => s.turnId)
+  const commanderMicOpening = useCommanderCallStore(s => s.micOpening)
   const voiceTurnId = useVoiceStore(s => s.turnId)
-  const commanderOwnsVoice = commanderCallLive && (!voiceTurnId || voiceTurnId === commanderTurnId)
+  const commanderOwnsVoice = commanderCallLive && !isForeignVoiceTurn(voiceTurnId, { turnId: commanderTurnId, micOpening: commanderMicOpening })
 
   // Escape cancels the current turn or the open confirmation.
   useEffect(() => {

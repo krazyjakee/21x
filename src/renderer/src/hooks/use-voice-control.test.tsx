@@ -214,6 +214,17 @@ describe('the global shortcut', () => {
       expect(finishTalk).toHaveBeenCalledOnce()
       useCommanderCallStore.setState({ finishTalk: original })
     })
+    it('does not mistake a just-finished push-to-talk turn for another surface', async () => {
+      const real = useCommanderCallStore.getState().beginTalk
+      const beginTalk = vi.fn(async () => {})
+      useCommanderCallStore.setState({ micMode: 'push-to-talk', turnId: 'ptt', pttFinishing: true, beginTalk })
+      useCommanderCallStore.getState().microphoneFinished('')
+      useVoiceStore.setState({ turnId: 'ptt' })
+      await fire()
+      expect(toggleTurn).not.toHaveBeenCalled()
+      expect(beginTalk).toHaveBeenCalledOnce()
+      useCommanderCallStore.setState({ beginTalk: real })
+    })
     it('stays with a microphone another surface owns', async () => {
       useVoiceStore.setState({ turnId: 'captain-turn' })
       await fire()

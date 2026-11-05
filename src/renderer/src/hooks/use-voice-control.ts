@@ -16,7 +16,7 @@ import {
   taskIdOfComposer
 } from '@/lib/voice-dictation-target'
 import type { VoiceUiContext } from '@shared/voice'
-import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { isForeignVoiceTurn, useCommanderCallStore } from '@/stores/commander-call-store'
 import { isEditorOutsideCommander } from '@/lib/keyboard-shortcuts'
 
 /**
@@ -82,7 +82,7 @@ export function useVoiceControl(): void {
       if (call.status === 'starting') return
       const voice = useVoiceStore.getState()
       // A microphone another surface opened keeps the shortcut, as it would with no call.
-      const foreignTurn = !!voice.turnId && voice.turnId !== call.turnId && !call.micOpening
+      const foreignTurn = isForeignVoiceTurn(voice.turnId, call)
       if (call.status === 'live' && !foreignTurn) {
         // The app-owned call retains its original Commander session, even
         // while another workspace or report inbox is selected.

@@ -1,7 +1,9 @@
 /**
  * Call choices kept between runs. Device ids are opaque per-origin handles, never
- * labels or audio. A stored value that is no longer valid falls back quietly: the
- * choice was a convenience and must not stop a call from starting.
+ * labels or audio. A stored mode, size or corner that is no longer valid falls back
+ * quietly. A saved device cannot be checked here: if it has been unplugged, capture
+ * fails with a message saying to choose another, because moving to a different
+ * microphone without saying so would be worse.
  */
 const PREFIX = 'commander-call:'
 

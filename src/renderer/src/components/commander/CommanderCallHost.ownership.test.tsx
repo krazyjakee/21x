@@ -84,6 +84,13 @@ describe('Independent PR 164 adversarial review', () => {
     expect(fireEvent.keyDown(window, { key: 'Escape', isComposing: true })).toBe(true)
     expect(mocks.bargeIn).not.toHaveBeenCalled()
   })
+  it('counts its own turn as its own while the microphone is still opening', async () => {
+    view(); await start()
+    act(() => useCommanderCallStore.setState({ turnId: null, micOpening: true }))
+    expect(fireEvent.keyDown(window, { key: 'Escape' })).toBe(false)
+    expect(mocks.bargeIn).toHaveBeenCalledOnce()
+    expect(useVoiceStore.getState().cancel).not.toHaveBeenCalled()
+  })
   it('treats a held Escape as one Stop', async () => {
     view(); await start()
     fireEvent.keyDown(window, { key: 'Escape' })

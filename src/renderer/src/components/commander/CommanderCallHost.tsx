@@ -27,6 +27,7 @@ import {
   bindCommanderCallDriver,
   COMMANDER_VOICE_COMPOSER_KEY,
   emitCallMediaEvent,
+  isForeignVoiceTurn,
   onCallMediaEvent,
   useCommanderCallStore
 } from '@/stores/commander-call-store'
@@ -398,8 +399,7 @@ export function CommanderCallHost() {
     const onKeyDown = (event: KeyboardEvent): void => {
       // Escape first cancels an IME composition, and another editor's Escape is its own.
       if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || isEditorOutsideCommander(event.target) || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
-      const voiceTurn = useVoiceStore.getState().turnId
-      if (voiceTurn && voiceTurn !== useCommanderCallStore.getState().turnId) return
+      if (isForeignVoiceTurn(useVoiceStore.getState().turnId, useCommanderCallStore.getState())) return
       event.preventDefault()
       event.stopImmediatePropagation()
       // Claimed but not repeated: a held key is one Stop.

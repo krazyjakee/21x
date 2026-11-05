@@ -112,7 +112,18 @@ let mediaSignal: AbortSignal | null = null
 let microphoneController: AbortController | null = null
 let microphoneGeneration = 0
 const finishedMicrophones = new WeakSet<AbortSignal>()
+/** The push-to-talk turn just handed in. Main still reports it until its outcome arrives. */
+let releasedTurnId: string | null = null
 const listeners = new Map<CallMediaEvent, Set<() => void>>()
+
+/**
+ * True when the open voice turn belongs to another surface. The turn id alone
+ * cannot say: main publishes the call's own turn before the call has recorded
+ * it, and keeps reporting a finished push-to-talk turn for a moment afterwards.
+ */
+export function isForeignVoiceTurn(voiceTurnId: string | null, call: Pick<CommanderCallState, 'turnId' | 'micOpening'>): boolean {
+  return !!voiceTurnId && voiceTurnId !== call.turnId && voiceTurnId !== releasedTurnId && !call.micOpening
+}
 
 /** Binds the media driver. Returns an unbind. Only the host calls this. */
 export function bindCommanderCallDriver(next: CommanderCallDriver): () => void {
@@ -264,6 +275,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       if (current.micMode !== 'push-to-talk' || (!current.pttHeld && !current.pttFinishing)) return
       const text = [current.pttDraft, tail.trim()].filter(Boolean).join(' ')
       const signal = mediaSignal
+      releasedTurnId = current.turnId
       set({ turnId: null, pttHeld: false, pttFinishing: false, micOpening: false, pttDraft: '', userCaption: text })
       if (signal) driver?.closeMicrophone(null, signal)
       mediaSignal = null; microphoneController = null
@@ -405,6 +417,7 @@ export function __resetCommanderCall(): void {
   startController?.abort()
   startController = null
   mediaSignal = null
+  releasedTurnId = null
   microphoneController?.abort(); microphoneController = null; microphoneGeneration++
   listeners.clear()
   useCommanderCallStore.setState({ ...OFF, micMode: 'open-mic', muted: false, inputDeviceId: '', error: null, retrySessionId: null, dismissedTurnErrorId: null, lastEvent: null })

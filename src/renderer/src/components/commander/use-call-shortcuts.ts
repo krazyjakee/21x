@@ -1,7 +1,7 @@
 import { useEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { parseCommanderAction } from '@shared/commander-action'
 import { isEditorOutsideCommander, isKeyboardInput } from '@/lib/keyboard-shortcuts'
-import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { isForeignVoiceTurn, useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -43,8 +43,7 @@ export function useCommanderCallShortcuts(): void {
       const key = event.key.toLowerCase()
       const typing = isKeyboardInput(event.target)
       const hasCall = call.status !== 'off' || !!call.error
-      const voiceTurn = useVoiceStore.getState().turnId
-      const foreignMicrophone = !!voiceTurn && voiceTurn !== call.turnId && !call.micOpening
+      const foreignMicrophone = isForeignVoiceTurn(useVoiceStore.getState().turnId, call)
       if ((event.metaKey || event.ctrlKey) && (hasCall || view === 'commander') && !isEditorOutsideCommander(event.target)) {
         const toggleSurface = () => {
           if (!hasCall) return
