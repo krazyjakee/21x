@@ -133,6 +133,14 @@ describe('production session commands on the actual manager', () => {
     expect(adapter.sendPrompt).toHaveBeenCalledOnce()
   })
 
+  it('reads a delivery by the same client id it was sent under', async () => {
+    const f = await live()
+    await call('agentSession:send', [f.sessionId, 'Looked up', f.task.id, f.agent.id, undefined, 'lookup-intent'])
+
+    expect(await call('agentSession:getDeliveryState', [f.task.id, 'lookup-intent'])).toBe('acknowledged')
+    expect(await call('agentSession:getDeliveryState', [f.task.id, 'never-sent'])).toBeNull()
+  })
+
   it('accepts a real send once after caller cancellation, keeps the raw work, and reuses the durable nonce after backend replacement', async () => {
     const f = await live(), gate = held(), entered = held(), cancel = new AbortController()
     finishers.push(gate.finish)

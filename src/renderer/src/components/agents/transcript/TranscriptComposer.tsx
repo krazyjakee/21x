@@ -10,7 +10,7 @@ import { CAPTAIN_COMPOSER_KEY, registerComposer, clearDictatedText } from '@/lib
 import { formatFileSize } from '@/lib/utils'
 import { AttachmentTray } from '@/components/chat/AttachmentTray'
 import { useChatAttachments } from '@/hooks/use-chat-attachments'
-import { keepComposerDraft, readComposerDraft } from '@/lib/composer-drafts'
+import { keepComposerDraft, readComposerDraft, receiveReturnedDrafts, returnToComposerDraft } from '@/lib/composer-drafts'
 import type { ChatImageInput } from '@shared/chat-images'
 import { ATTACHMENT_IMPORT_FAILURE, NATIVE_FILE_DROP_MESSAGE } from '@/lib/task-attachment-import'
 
@@ -112,6 +112,19 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     return () => keepComposerDraft(draftKey, { text: field?.value ?? '', ...draftParts.current })
   }, [draftKey])
 
+  useEffect(() => {
+    if (!draftKey) return undefined
+    return receiveReturnedDrafts(draftKey, (returned) => {
+      const field = inputRef.current
+      if (field && returned.text) {
+        field.value = field.value ? `${field.value}\n\n${returned.text}` : returned.text
+        fitTextarea(field, 128)
+      }
+      if (returned.attachments?.length) setPendingAttachments((current) => mergeAttachments(current, returned.attachments ?? []))
+      if (returned.images?.length) restoreImages(returned.images)
+    })
+  }, [draftKey, restoreImages])
+
   const handleSend = () => {
     const text = inputRef.current?.value.trim() ?? ''
     const imagesAtSend = images.attachments
@@ -151,7 +164,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     }).catch((error: unknown) => {
       if (!mounted.current || activeTask.current !== taskAtSend) {
         // The user flipped away mid-send: it goes back to this conversation's draft.
-        if (draftKey) keepComposerDraft(draftKey, { text, images: savedImages.length === 0 ? imagesAtSend : [], attachments: mergeAttachments(attachmentsAtSend, savedImages) })
+        if (draftKey) returnToComposerDraft(draftKey, { text, images: savedImages.length === 0 ? imagesAtSend : [], attachments: mergeAttachments(attachmentsAtSend, savedImages) })
         return
       }
       if (inputRef.current && !inputRef.current.value) inputRef.current.value = text

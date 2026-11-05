@@ -87,18 +87,26 @@ an auditable user decision instead of automatically replaying unknown effects.
 A message that fails to send is already saved. The `delivery_outbox` row stays
 `pending`, and a 30-second sweep retries it with no click, starting the Captain
 if it has to, for up to five attempts. So the column must not promise that a
-held message waits for the user. It says main retries on its own, and it drops
-the message from its list when the outbox row's user part reaches the
-transcript, which is the only sign the renderer gets.
+held message waits for the user. It says main retries on its own.
 
-The row goes terminal `failed` after five attempts. A person sending it again
-(Send now, Retry, or the next message, which sends older ones first) reopens it
-with a full set of attempts. Only the user-facing send surfaces do this.
-`sendMessage` does not, because internal senders replay their own stable keys
-and a failed wake must stay failed. `timed_out` stays shut, because the backend
-may have accepted it, and `cancelled` stays shut as a Stop boundary. Stop hands
-held words back to the composer. A timed-out message stays listed, and it no
-longer blocks the messages behind it.
+The column reads what became of each one with `agentSession:getDeliveryState`,
+because nothing else can say. The transcript cannot: a failed attempt on a
+running Captain writes the user part before the backend has accepted anything.
+
+| Outbox state | What the column does |
+|---|---|
+| `acknowledged` | Stops listing it. |
+| `failed` | Keeps it, and says 21x has stopped retrying. A person sending it again (Send now, Retry, or the next message, which sends older ones first) reopens the row with a full set of attempts. |
+| `timed_out` | Returns the words and attachments to the composer and says to check the conversation, because the backend may have accepted it. |
+| `cancelled` | Returns the words and attachments to the composer. This is how Stop gives them back. |
+| anything else | Keeps it, and main keeps retrying. |
+
+Only the user-facing send surfaces reopen a row. `sendMessage` does not, because
+internal senders replay their own stable keys and a failed wake must stay failed.
+
+A message with a row is never sent as the answer to a question, because main
+would then send the same words again. An answer has no row, so it is retried as
+an answer for as long as the question is open.
 
 ## Active provider recovery (#172, schema v33)
 

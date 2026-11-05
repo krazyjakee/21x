@@ -66,6 +66,8 @@ export interface AgentStartQueueChangedEvent {
         error: string;
     };
 }
+/** A message's progress through main's outbox. Only `acknowledged` means the backend took it. */
+export type AgentDeliveryState = 'pending' | 'claimed' | 'accepted' | 'acknowledged' | 'failed' | 'timed_out' | 'cancelled';
 export interface AgentSessionSuccessResult {
     success: boolean;
 }
@@ -281,6 +283,7 @@ export interface DesktopApi {
             newSessionId?: string;
         }>;
         approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string) => Promise<AgentSessionSuccessResult>;
+        getDeliveryState?: (taskId: string, deliveryId: string) => Promise<AgentDeliveryState | null>;
         getRawTranscript: (taskId: string) => Promise<Array<{
             role: string;
             parts: Array<{

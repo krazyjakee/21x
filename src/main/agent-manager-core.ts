@@ -46,7 +46,7 @@ import { BranchDiffCache, ResourceMonitor, agentCap, autoLowerForPressure, findF
 import { effectiveLevel, recommendLevel, type ProjectConcurrencyState, type ResourcePressure } from '../shared/concurrency'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events-core'
 import { CaptainRuntimeStore } from './sessions/runtime-store'
-import { DeliveryStore, type DeliveryRecord } from './sessions/delivery-store'
+import { DeliveryStore, type DeliveryRecord, type DeliveryState } from './sessions/delivery-store'
 import { DurableStartQueueStore, type DurableQueuedStartInfo } from './sessions/start-queue-store'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
 import { classifyProviderFailure, PROVIDER_CONTINUATION, PROVIDER_MAX_RETRIES, type ProviderFailure } from './agent-manager/provider-failure'
@@ -5849,12 +5849,6 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
-   * Sends a message by taskId — used when the renderer's session mapping
-   * is broken and the normal send-by-sessionId path can't resolve a sessionId.
-   * Tries to find a live in-memory session first, then falls back to
-   * sendMessage's built-in resume/create logic.
-   */
-  /**
    * For the user-facing send surfaces only. A person sending a held message
    * again is a new request, so a delivery that used up its bounded retries gets
    * another set. It is not in `sendMessage` because internal senders replay
@@ -5866,6 +5860,24 @@ export class AgentManager extends EventEmitter {
     if (record?.kind === 'agent_message' && record.state === 'failed') this.deliveries.reopen(record.id)
   }
 
+  /**
+   * What became of a message sent under this delivery id, or null when there is
+   * no such message for this task. The transcript cannot answer that: a failed
+   * attempt writes the user part too, before the backend has accepted anything.
+   */
+  getDeliveryState(taskId: string, deliveryId: string): DeliveryState | null {
+    if (!this.db.db || typeof this.db.db.prepare !== 'function') return null
+    const record = this.deliveries.getByKey(deliveryId)
+    const owner = this.taskGroupExecution(taskId)?.id ?? taskId
+    return record?.kind === 'agent_message' && record.taskId === owner ? record.state : null
+  }
+
+  /**
+   * Sends a message by taskId — used when the renderer's session mapping
+   * is broken and the normal send-by-sessionId path can't resolve a sessionId.
+   * Tries to find a live in-memory session first, then falls back to
+   * sendMessage's built-in resume/create logic.
+   */
   async sendByTaskId(
     taskId: string,
     message: string,

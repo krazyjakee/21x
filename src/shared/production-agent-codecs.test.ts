@@ -10,7 +10,7 @@ const runtime = () => ({ ownerId: 'captain-id', projectId: 'project-id', generat
 
 describe('production agent finite bounded codecs', () => {
   it('declares exact lifecycle operations without borrowing agent configuration, transcript pagination or installer authority', () => {
-    expect(PRODUCTION_AGENT_OPERATIONS).toHaveLength(17)
+    expect(PRODUCTION_AGENT_OPERATIONS).toHaveLength(18)
     expect(Object.keys(PRODUCTION_AGENT_CODECS)).toEqual([...PRODUCTION_AGENT_OPERATIONS])
     expect(PRODUCTION_AGENT_OPERATIONS).not.toContain('agent:update')
     expect(PRODUCTION_AGENT_OPERATIONS).not.toContain('agentSession:getTranscriptPage')
@@ -34,6 +34,14 @@ describe('production agent finite bounded codecs', () => {
     const file = { id: 'file-id', filename: 'file.txt', size: 1, mime_type: 'text/plain' }
     expect(() => send.decodeArguments({ taskId: 'task-id', message: 'hello', attachments: [file, file] })).toThrow('Invalid operation arguments')
     expect(send.decodeArguments({ taskId: 'task-id', message: 'hello', attachments: [file], deliveryId: 'intent:1' })).toEqual(['task-id', 'hello', [file], 'intent:1'])
+  })
+  it('bounds the delivery lookup to a known state or nothing', () => {
+    const codec = PRODUCTION_AGENT_CODECS['agentSession:getDeliveryState']
+    expect(codec.decodeArguments({ taskId: 'task-id', deliveryId: 'intent:1' })).toEqual(['task-id', 'intent:1'])
+    expect(() => codec.decodeArguments({ taskId: 'task-id' })).toThrow('Invalid operation')
+    expect(codec.validateResult(null)).toBe(true)
+    expect(codec.validateResult('acknowledged')).toBe(true)
+    expect(codec.validateResult('delivered')).toBe(false)
   })
   it('preserves active queue positions and terminal position zero, sanitizing provider error text', () => {
     const codec = PRODUCTION_AGENT_CODECS['agent:getStartRecoveryState']

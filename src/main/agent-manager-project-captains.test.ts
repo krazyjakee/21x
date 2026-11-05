@@ -598,6 +598,20 @@ describe('per-project Captain conversations', () => {
     expect(new DeliveryStore(db).getByKey('held-by-panel')).toMatchObject({ state: 'acknowledged' })
   })
 
+  it('reports what became of a message, to the task it belongs to', async () => {
+    const manager = newManager(new FakeAdapter())
+    const send = vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new Error('backend unavailable'))
+    await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'looked-up')).rejects.toThrow('backend unavailable')
+
+    expect(manager.getDeliveryState(alphaCaptain, 'looked-up')).toBe('pending')
+    expect(manager.getDeliveryState(betaCaptain, 'looked-up')).toBeNull()
+    expect(manager.getDeliveryState(alphaCaptain, 'never-seen')).toBeNull()
+
+    send.mockResolvedValue({})
+    await manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'looked-up')
+    expect(manager.getDeliveryState(alphaCaptain, 'looked-up')).toBe('acknowledged')
+  })
+
   it('leaves alone a delivery that was not given up on', async () => {
     const manager = newManager(new FakeAdapter())
     vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new Error('backend unavailable'))

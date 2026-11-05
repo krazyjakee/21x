@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { clipboard, imageFile } from '@/components/chat/paste-fixtures'
-import { clearComposerDrafts } from '@/lib/composer-drafts'
+import { clearComposerDrafts, returnToComposerDraft } from '@/lib/composer-drafts'
 import { SessionStatus } from '@/stores/agent-store'
 import { AgentTranscriptPanel } from '../AgentTranscriptPanel'
 import type { SaveImagesHandler, SendHandler } from './TranscriptComposer'
@@ -104,6 +104,33 @@ describe('Captain composer: a draft stays with its Captain', () => {
     expect(field().value).toBe('with a picture')
     expect(await screen.findByRole('img', { name: 'diagram.png' })).toBeInTheDocument()
     expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('takes returned words and attachments while on screen, beside what is being typed', async () => {
+    render(captain('captain-a'))
+    field().value = 'still typing'
+
+    act(() => { returnToComposerDraft('captain-a', { text: 'came back', attachments: [{ id: 'file-1', filename: 'notes.txt', size: 4, mime_type: 'text/plain' }] }) })
+
+    expect(field().value).toBe('still typing\n\ncame back')
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument()
+  })
+
+  it('returns a failed send to the composer the user has already come back to', async () => {
+    let refuse!: (reason: Error) => void
+    const onSaveImages: SaveImagesHandler = () => new Promise((_, reject) => { refuse = reject })
+    const view = render(captain('captain-a', { onSaveImages }))
+    fireEvent.paste(field(), { clipboardData: clipboard({ files: [imageFile('diagram.png')] }) })
+    await screen.findByRole('img', { name: 'diagram.png' })
+    field().value = 'with a picture'
+    fireEvent.click(screen.getByLabelText('Send message'))
+
+    view.rerender(captain('captain-b'))
+    view.rerender(captain('captain-a', { onSaveImages }))
+    await act(async () => { refuse(new Error('Disk full')); await new Promise((resolve) => setTimeout(resolve, 0)) })
+
+    expect(field().value).toBe('with a picture')
+    expect(await screen.findByRole('img', { name: 'diagram.png' })).toBeInTheDocument()
   })
 
   it('keeps no draft for a composer without a key', () => {

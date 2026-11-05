@@ -76,6 +76,9 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     agentManager.rollbackCaptainSwitch(projectId))
 
 
+  ipcMain.handle('agentSession:getDeliveryState', (_, taskId: string, deliveryId: string) =>
+    agentManager.getDeliveryState(taskId, deliveryId))
+
   ipcMain.handle('agentSession:sendByTaskId', async (_, taskId: string, message: string, attachments?: MessageAttachment[], deliveryId?: string) => {
     agentManager.reopenGaveUpDelivery(deliveryId)
     const result = await agentManager.sendByTaskId(taskId, message, attachments, deliveryId)

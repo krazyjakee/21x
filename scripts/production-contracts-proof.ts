@@ -105,7 +105,7 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'agentSession:sendByTaskId': [task, 'Fixture continuation', [], 'delivery_fixture_two'],
   'agentSession:abort': [session], 'agentSession:stop': [session], 'agentSession:stopByTaskId': [task], 'agentSession:switchAgent': [task, 'agent_other'],
   'agentSession:approve': [session, false, 'Fixture answer', 'question', 'native/request:fixture'],
-  'agent:getStartQueue': [], 'agent:getStartRecoveryState': [task], 'agentSession:getRawTranscript': [task],
+  'agent:getStartQueue': [], 'agent:getStartRecoveryState': [task], 'agentSession:getRawTranscript': [task], 'agentSession:getDeliveryState': [task, 'delivery_fixture_one'],
   'captainRuntime:get': [project], 'captainRuntime:switch': [project, agent], 'captainRuntime:retry': [project], 'captainRuntime:rollback': [project],
   'commander:listSessions': [{ search: 'Fixture', includeArchived: true }], 'commander:createSession': [{ title: 'Fixture Commander' }],
   'commander:renameSession': [session, 'Renamed fixture'], 'commander:archiveSession': [session, false], 'commander:listMessages': [session],

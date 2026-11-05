@@ -149,12 +149,15 @@ export class ProductionAgentBackend {
     const exact = this.exactSession(id, caller, 'write')
     if (!task || !exact || exact.task.id !== task.id) throw new ServiceProtocolError('INVALID_RESULT')
   }
+  /** Stable across engine restarts. Same-profile durable outbox, trusted caller
+   * and task scope prevent a nonce from acquiring someone else's delivery. */
+  private deliveryKey(taskId: string, clientId: string, caller: DesktopCallerContext): string {
+    return `desktop-agent:${createHash('sha256').update(JSON.stringify([caller.principal, caller.webviewId ?? '', caller.origin ?? '', taskId, clientId])).digest('hex')}`
+  }
   private deliveryId(taskId: string, message: string, attachments: Attachments, clientId: string | undefined, caller: DesktopCallerContext): string {
     if (!clientId) return `desktop-agent:${randomUUID()}`
     const task = this.options.database.getTaskGroupExecution(taskId) ?? this.options.database.getTask(taskId)!
-    // Stable across engine restarts. Same-profile durable outbox, trusted caller
-    // and task scope prevent a nonce from acquiring someone else's delivery.
-    const key = `desktop-agent:${createHash('sha256').update(JSON.stringify([caller.principal, caller.webviewId ?? '', caller.origin ?? '', task.id, clientId])).digest('hex')}`
+    const key = this.deliveryKey(task.id, clientId, caller)
     const previous = this.deliveries.getByKey(key)
     if (previous) {
       let payload: unknown
@@ -279,7 +282,7 @@ export class ProductionAgentBackend {
         // and durable; disconnect never rolls it back or resends it.
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
         this.available()
-        if (['agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'captainRuntime:get'].includes(operation) && !await authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
+        if (['agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'agentSession:getDeliveryState', 'captainRuntime:get'].includes(operation) && !await authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
         this.available()
         const encoded = codec.encodeResult(result)
         return codec.decodeResult(encoded.defined ? encoded.value : undefined)
@@ -379,6 +382,8 @@ export class ProductionAgentBackend {
     })
     this.bind('agentSession:getRawTranscript', ([taskId], caller) => !!this.taskAllowed(taskId, caller, 'read') && this.agentAllowed(this.selectedAgent(this.taskAllowed(taskId, caller, 'read')!), caller, 'read'), async ([taskId]) =>
       manager.getRawTranscriptForDebug((db.getTaskGroupExecution(taskId) ?? db.getTask(taskId)!).id, { requireAvailable: true }))
+    this.bind('agentSession:getDeliveryState', ([taskId], caller) => !!this.taskAllowed(taskId, caller, 'read'), ([taskId, nonce], caller) =>
+      manager.getDeliveryState(taskId, this.deliveryKey((db.getTaskGroupExecution(taskId) ?? db.getTask(taskId)!).id, nonce, caller)))
     this.bind('captainRuntime:get', ([projectId], caller) => this.captainAllowed(projectId, caller, 'read'), ([projectId]) => manager.getCaptainRuntime(projectId))
     this.bind('captainRuntime:switch', ([projectId, agentId], caller) => this.captainAllowed(projectId, caller, 'write') && this.agentAllowed(agentId, caller, 'write'), ([projectId, agentId]) => manager.switchCaptainAgent(projectId, agentId))
     this.bind('captainRuntime:retry', ([projectId], caller) => this.captainAllowed(projectId, caller, 'write'), ([projectId]) => manager.retryCaptainSwitch(projectId))

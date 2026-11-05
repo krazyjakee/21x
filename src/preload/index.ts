@@ -169,6 +169,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         : responseType
           ? ipcRenderer.invoke('agentSession:approve', sessionId, approved, message, responseType)
           : ipcRenderer.invoke('agentSession:approve', sessionId, approved, message),
+    getDeliveryState: (taskId: string, deliveryId: string): Promise<unknown> =>
+      ipcRenderer.invoke('agentSession:getDeliveryState', taskId, deliveryId),
     getRawTranscript: (taskId: string): Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>> =>
       ipcRenderer.invoke('agentSession:getRawTranscript', taskId),
     getTranscriptSnapshot: (taskId: string, sinceSeq?: number): Promise<Array<{ taskId: string; partId: string; seq: number; role: string; content: string; partType?: string; tool?: unknown; payload?: unknown; createdAt: number; updatedAt: number; rev: number }>> =>

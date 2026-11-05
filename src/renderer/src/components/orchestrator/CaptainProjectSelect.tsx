@@ -28,15 +28,14 @@ function stepsClosedSelect(event: KeyboardEvent): boolean {
  */
 export function CaptainProjectSelect({ projects, currentId, onChoose, tabbable }: CaptainProjectSelectProps) {
   const [stepped, setStepped] = useState<string | null>(null)
+  /** What the key that came just before this `change` was. The list's own keys never reach here. */
   const stepping = useRef(false)
-  const listOpen = useRef(false)
 
   // A move from elsewhere replaces whatever was being stepped to.
   useEffect(() => { setStepped(null) }, [currentId])
 
   const commit = (): void => {
     stepping.current = false
-    listOpen.current = false
     if (stepped && stepped !== currentId) onChoose(stepped)
     setStepped(null)
   }
@@ -50,12 +49,11 @@ export function CaptainProjectSelect({ projects, currentId, onChoose, tabbable }
       event.stopPropagation()
       stepping.current = false
       setStepped(null)
-    } else if (event.key === ' ' || event.altKey || platform === 'darwin') {
-      // These open the list: on macOS the arrow keys do too.
-      listOpen.current = true
-      stepping.current = false
-    } else if (!listOpen.current) {
-      stepping.current = stepsClosedSelect(event)
+    } else {
+      // Space and Alt open the list, as the arrow keys do on macOS. Decided on
+      // every key: nothing here is told when a list is dismissed, so the next
+      // key after that must still count as a step.
+      stepping.current = stepsClosedSelect(event) && !event.altKey && platform !== 'darwin'
     }
   }
 
@@ -63,12 +61,16 @@ export function CaptainProjectSelect({ projects, currentId, onChoose, tabbable }
     <select
       value={stepped ?? currentId}
       onChange={(event) => {
-        listOpen.current = false
-        if (stepping.current) setStepped(event.target.value)
-        else onChoose(event.target.value)
+        if (stepping.current) {
+          setStepped(event.target.value)
+          return
+        }
+        // A choice from the list ends any stepping, even a choice of the current project.
+        setStepped(null)
+        onChoose(event.target.value)
       }}
       onKeyDown={onKeyDown}
-      onMouseDown={() => { listOpen.current = true; stepping.current = false }}
+      onMouseDown={() => { stepping.current = false }}
       onBlur={commit}
       tabIndex={tabbable ? undefined : -1}
       aria-label="Captain project"

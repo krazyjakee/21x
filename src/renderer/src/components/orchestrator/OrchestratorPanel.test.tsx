@@ -7,6 +7,8 @@ const agentSessionApi = vi.hoisted(() => ({
   send: vi.fn(async () => ({ newSessionId: null })),
   sendByTaskId: vi.fn(async () => ({ success: true, sessionId: null, newSessionId: 'session-1' })),
   respondToApproval: vi.fn(async () => undefined),
+  approve: vi.fn(async () => ({ success: true })),
+  getDeliveryState: vi.fn(async (_taskId: string, _deliveryId: string) => null as string | null),
   resume: vi.fn(),
   getTranscriptSnapshot: vi.fn(async () => ({ parts: [], rev: 0 })),
 }))
@@ -156,6 +158,7 @@ beforeEach(() => {
   projectApi.getAll.mockResolvedValue([])
   settingsApi.get.mockResolvedValue(null)
   agentSessionApi.start.mockResolvedValue({ sessionId: 'session-1' })
+  agentSessionApi.getDeliveryState.mockImplementation(async () => null)
   captainRuntimeApi.get.mockResolvedValue(null)
   captainRuntimeApi.switch.mockImplementation(async (projectId: string, agentId: string) => captainRuntimeApi.state(projectId, agentId))
   captainRuntimeApi.retry.mockImplementation(async (projectId: string) => captainRuntimeApi.state(projectId, 'other-agent'))
@@ -551,12 +554,23 @@ describe('OrchestratorPanel — flipping between projects', () => {
     }
   }
 
-  function deliveredInTranscript(taskId: string, ...messages: Array<{ id: string; content: string; timestamp: Date }>): void {
-    useAgentStore.setState((state) => {
-      const sessions = new Map(state.sessions)
-      sessions.set(taskId, { ...sessions.get(taskId)!, messages: messages.map((message) => ({ ...message, role: 'user' as const })) })
-      return { sessions }
+  /** A new part reaches the transcript, which is one of the two things that re-reads delivery state. */
+  async function transcriptGrows(taskId: string, content: string): Promise<void> {
+    await act(async () => {
+      useAgentStore.setState((state) => {
+        const sessions = new Map(state.sessions)
+        const row = sessions.get(taskId)!
+        sessions.set(taskId, { ...row, messages: [...row.messages, { id: `delivery-${row.messages.length}`, role: 'user', content, timestamp: new Date() }] })
+        return { sessions }
+      })
     })
+  }
+
+  /** The delivery id of the nth attempt to send a message, as main would know it. */
+  const deliveryIdOf = (attempt: number): string => (agentSessionApi.sendByTaskId.mock.calls as unknown as unknown[][])[attempt][3] as string
+
+  function mainSays(state: string, onlyDeliveryId?: string): void {
+    agentSessionApi.getDeliveryState.mockImplementation(async (_taskId, deliveryId) => !onlyDeliveryId || deliveryId === onlyDeliveryId ? state : 'pending')
   }
 
   it('keeps a held message with its Captain, and Send now pushes it', async () => {
@@ -587,34 +601,68 @@ describe('OrchestratorPanel — flipping between projects', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('21x retries on its own')
   })
 
-  it('clears a held message once main\'s own retry delivers it', async () => {
+  it('keeps holding a message the transcript shows but main has not acknowledged', async () => {
     await holdInAlpha('hold this')
-    expect(await screen.findByRole('alert')).toHaveTextContent('1 message is waiting')
+    await screen.findByRole('alert')
+    mainSays('pending')
+    agentSessionApi.getDeliveryState.mockClear()
 
-    // The same words said before this message was sent are not this message.
-    await act(async () => { deliveredInTranscript(CAPTAIN, { id: 'delivery-old', content: 'hold this', timestamp: new Date(0) }) })
+    // A failed attempt on a running Captain writes the user part before the backend accepts anything.
+    await transcriptGrows(CAPTAIN, 'hold this')
+
+    await waitFor(() => expect(agentSessionApi.getDeliveryState).toHaveBeenCalled())
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
     expect(screen.getByRole('alert')).toHaveTextContent('1 message is waiting')
+  })
 
-    await act(async () => { deliveredInTranscript(CAPTAIN, { id: 'delivery-new', content: 'hold this', timestamp: new Date() }) })
+  it('stops listing a held message once main acknowledges it', async () => {
+    await holdInAlpha('hold this')
+    await screen.findByRole('alert')
+    mainSays('acknowledged')
+
+    await transcriptGrows(CAPTAIN, 'hold this')
+
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     expect(screen.queryByRole('status')).toBeNull()
     expect(agentSessionApi.sendByTaskId).toHaveBeenCalledTimes(1)
   })
 
-  it('counts one delivered copy against one of two held messages with the same words', async () => {
+  it('tells two held messages with the same words apart', async () => {
     await holdInAlpha('again', 'again')
     expect(await screen.findByRole('alert')).toHaveTextContent('2 messages are waiting')
+    mainSays('acknowledged', deliveryIdOf(0))
 
-    await act(async () => { deliveredInTranscript(CAPTAIN, { id: 'delivery-one', content: 'again', timestamp: new Date() }) })
+    await transcriptGrows(CAPTAIN, 'again')
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('1 message is waiting'))
   })
 
-  it('finds a message with attachments, which the transcript shows with a list of them', async () => {
-    await holdInAlpha('see this')
-    await act(async () => { deliveredInTranscript(CAPTAIN, { id: 'delivery-new', content: 'see this\n\nAttached to this message:\n- shot.png', timestamp: new Date() }) })
+  it('says so once main has stopped retrying', async () => {
+    await holdInAlpha('hold this')
+    await screen.findByRole('alert')
+    mainSays('failed')
 
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    await transcriptGrows(CAPTAIN, 'hold this')
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('21x has stopped retrying'))
+    await flipTo('proj-b', CAPTAIN_B)
+    await flipTo('proj-a', CAPTAIN)
+    expect(await screen.findByRole('status')).toHaveTextContent('21x has stopped retrying')
+    expect(screen.getByRole('button', { name: 'Send now' })).toBeInTheDocument()
+  })
+
+  it.each(['timed_out', 'cancelled'])('returns the words and attachments of a message main ended as %s', async (state) => {
+    const attachments = [{ id: 'file-1', filename: 'notes.txt', size: 4, mime_type: 'text/plain' }]
+    await holdInAlpha()
+    agentSessionApi.sendByTaskId.mockRejectedValueOnce(new Error('Captain unavailable'))
+    await act(async () => { await (composer.send as (text: string, options?: unknown) => Promise<unknown>)('hold this', { attachments }) })
+    await screen.findByRole('alert')
+    mainSays(state)
+
+    await transcriptGrows(CAPTAIN, 'hold this')
+
+    await waitFor(() => expect(readComposerDraft(CAPTAIN)).toMatchObject({ text: 'hold this', attachments }))
+    expect(screen.queryByRole('status')).toBeNull()
   })
 
   it('still sends the messages behind one that fails', async () => {
@@ -683,15 +731,71 @@ describe('OrchestratorPanel — flipping between projects', () => {
     await waitFor(() => expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'held', CAPTAIN_B, expect.any(String), undefined, expect.stringMatching(/^captain-drawer:/)))
   })
 
-  it('leaves nothing held after Stop, which cancels it in main, and returns the words', async () => {
-    await holdInAlpha('take this back')
+  it('returns held words and attachments once Stop has cancelled them in main', async () => {
+    const attachments = [{ id: 'file-1', filename: 'notes.txt', size: 4, mime_type: 'text/plain' }]
+    await holdInAlpha()
+    agentSessionApi.sendByTaskId.mockRejectedValueOnce(new Error('Captain unavailable'))
+    await act(async () => { await (composer.send as (text: string, options?: unknown) => Promise<unknown>)('take this back', { attachments }) })
     await screen.findByRole('alert')
+    mainSays('cancelled')
 
     await act(async () => { composer.stop?.() })
 
-    await waitFor(() => expect(agentSessionApi.stopByTaskId).toHaveBeenCalledWith(CAPTAIN))
-    await waitFor(() => expect(readComposerDraft(CAPTAIN)?.text).toBe('take this back'))
-    expect(screen.queryByRole('status')).toBeNull()
+    await waitFor(() => expect(readComposerDraft(CAPTAIN)).toMatchObject({ text: 'take this back', attachments }))
+    expect(agentSessionApi.stopByTaskId).toHaveBeenCalledWith(CAPTAIN)
+  })
+
+  it('gives nothing back when Stop cancelled nothing, or a resend would deliver it twice', async () => {
+    await holdInAlpha('still pending')
+    await screen.findByRole('alert')
+    mainSays('pending')
+    agentSessionApi.getDeliveryState.mockClear()
+
+    await act(async () => { composer.stop?.() })
+
+    await waitFor(() => expect(agentSessionApi.getDeliveryState).toHaveBeenCalled())
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(readComposerDraft(CAPTAIN)).toBeUndefined()
+    expect(screen.getByRole('alert')).toHaveTextContent('1 message is waiting')
+  })
+
+  function captainAsksAQuestion(): void {
+    useAgentStore.setState((state) => {
+      const sessions = new Map(state.sessions)
+      sessions.set(CAPTAIN, {
+        sessionId: 'session-1', agentId: 'other-agent', taskId: CAPTAIN, status: SessionStatus.WAITING_APPROVAL,
+        messages: [{ id: 'question-1', role: 'assistant', content: 'Which one?', timestamp: new Date(), partType: 'question', tool: { name: 'question', status: 'running', questions: [{ header: 'Pick', question: 'Which one?', options: [] }] } }],
+      } as never)
+      return { sessions }
+    })
+  }
+
+  it('sends a held message as itself while a question is open, because main still has its row', async () => {
+    await holdInAlpha('hold this')
+    await screen.findByRole('alert')
+    await act(async () => { captainAsksAQuestion() })
+
+    await act(async () => { screen.getByRole('button', { name: 'Retry' }).click() })
+
+    await waitFor(() => expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'hold this', CAPTAIN, 'other-agent', undefined, expect.stringMatching(/^captain-drawer:/)))
+    expect(agentSessionApi.approve).not.toHaveBeenCalled()
+  })
+
+  it('answers an open question, and retries a failed answer as an answer', async () => {
+    seedProjects(alpha, beta)
+    settingsApi.get.mockResolvedValue('false')
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(composer.draftKey).toBe(CAPTAIN))
+    await act(async () => { captainAsksAQuestion() })
+    agentSessionApi.approve.mockRejectedValueOnce(new Error('Captain unavailable'))
+
+    await act(async () => { await composer.send?.('the first') })
+    await screen.findByRole('alert')
+    await act(async () => { screen.getByRole('button', { name: 'Retry' }).click() })
+
+    await waitFor(() => expect(agentSessionApi.approve).toHaveBeenCalledTimes(2))
+    expect(agentSessionApi.send).not.toHaveBeenCalled()
+    expect(agentSessionApi.sendByTaskId).not.toHaveBeenCalled()
   })
 
   it('waits for the saved project before warming, so launch starts one Captain', async () => {
@@ -758,10 +862,30 @@ describe('OrchestratorPanel — flipping between projects', () => {
       seedProjects(alpha, beta)
       await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
       fireEvent.keyDown(projectControl(), { key: ' ' })
-      fireEvent.keyDown(projectControl(), { key: 'ArrowDown' })
       fireEvent.change(projectControl(), { target: { value: 'proj-b' } })
 
       expect(useProjectStore.getState().currentProjectId).toBe('proj-b')
+    })
+
+    it('still steps on the next arrow key after a list is dismissed', async () => {
+      seedProjects(alpha, beta)
+      await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+      fireEvent.keyDown(projectControl(), { key: ' ' })
+      fireEvent.keyDown(projectControl(), { key: 'ArrowDown' })
+      fireEvent.change(projectControl(), { target: { value: 'proj-b' } })
+
+      expect(projectControl()).toHaveValue('proj-b')
+      expect(useProjectStore.getState().currentProjectId).toBe('proj-a')
+    })
+
+    it('forgets a step when the current project is chosen from the list', async () => {
+      await stepToBeta()
+      fireEvent.keyDown(projectControl(), { key: ' ' })
+      fireEvent.change(projectControl(), { target: { value: 'proj-a' } })
+      fireEvent.blur(projectControl())
+
+      expect(projectControl()).toHaveValue('proj-a')
+      expect(useProjectStore.getState().currentProjectId).toBe('proj-a')
     })
   })
 
