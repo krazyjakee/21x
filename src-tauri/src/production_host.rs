@@ -1031,6 +1031,8 @@ fn production_containment() -> Result<DelegatedCgroup, EngineError> {
     ))
 }
 
+// Each owner is built once, before the engine exists, and moved in here.
+#[allow(clippy::too_many_arguments)]
 async fn start(
     app: &tauri::AppHandle,
     native_work: NativeWorkOwner,

@@ -1412,7 +1412,7 @@ mod tests {
         let (engine, _profile) = staged_engine().await;
         let status = engine.status();
         assert_eq!(status["available"], true);
-        assert!(status["engineEpoch"].as_str().unwrap().len() > 0);
+        assert!(!status["engineEpoch"].as_str().unwrap().is_empty());
         let reply = engine.request("engine.ping", json!({})).await.unwrap();
         assert_eq!(reply["engineEpoch"], status["engineEpoch"]);
         assert_eq!(reply["nodeVersion"], NODE_VERSION);

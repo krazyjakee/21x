@@ -312,7 +312,10 @@ fn mime(v: &Value) -> bool {
     choice(v, &["image/png", "image/jpeg", "image/gif", "image/webp"])
 }
 fn base64(data: &str) -> Option<usize> {
-    if data.is_empty() || data.len() % 4 != 0 || data.len() > (512 * 1024_usize).div_ceil(3) * 4 {
+    if data.is_empty()
+        || !data.len().is_multiple_of(4)
+        || data.len() > (512 * 1024_usize).div_ceil(3) * 4
+    {
         return None;
     }
     let padding = data

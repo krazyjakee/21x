@@ -147,12 +147,13 @@ async fn retained_request(
         .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
     Ok(answer)
 }
+type CloseWatch = tokio::sync::watch::Receiver<Option<Result<(), EngineError>>>;
 struct Inner {
     app: tauri::AppHandle,
     work: NativeWorkOwner,
     id: u64,
     closing: Arc<AtomicBool>,
-    close: Mutex<Option<tokio::sync::watch::Receiver<Option<Result<(), EngineError>>>>>,
+    close: Mutex<Option<CloseWatch>>,
 }
 #[derive(Clone)]
 pub struct NativeNotificationOwner(Arc<Inner>);
@@ -371,7 +372,10 @@ mod linux {
         closing: bool,
     }
     thread_local! {static SESSIONS:RefCell<HashMap<u64,Rc<RefCell<Session>>>>=RefCell::new(HashMap::new());}
-    struct SignalLifetime(std::sync::mpsc::Sender<()>);
+    /// Held for its drop: the receiver disconnects once every callback is gone.
+    struct SignalLifetime {
+        _retired: std::sync::mpsc::Sender<()>,
+    }
     impl Drop for SignalLifetime {
         fn drop(&mut self) {}
     }
@@ -390,7 +394,9 @@ mod linux {
             (s.connection.clone(), s.server.clone())
         };
         let weak = Rc::downgrade(session);
-        let lifetime = SignalLifetime(sender.clone());
+        let lifetime = SignalLifetime {
+            _retired: sender.clone(),
+        };
         let action = connection.signal_subscribe(
             Some(&server),
             Some(NAME),
@@ -451,7 +457,7 @@ mod linux {
             },
         );
         let weak = Rc::downgrade(session);
-        let lifetime = SignalLifetime(sender);
+        let lifetime = SignalLifetime { _retired: sender };
         let closed = connection.signal_subscribe(
             Some(&server),
             Some(NAME),
@@ -683,7 +689,7 @@ mod linux {
         request: Rc<Cleanup>,
     }
     fn finish_cleanup(id: u64, batch: &Rc<RefCell<CleanupBatch>>) {
-        let mut batch = batch.borrow_mut();
+        let batch = batch.borrow_mut();
         if batch.remaining != 0 {
             return;
         }
