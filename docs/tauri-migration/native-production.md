@@ -127,7 +127,11 @@ standalone Node dependencies, build `src-tauri/credentials` with `cargo --locked
 and stage the resulting physical credential helper before the production resource
 manifest is generated. A clean clone needs `pnpm install --frozen-lockfile` and
 the pinned Node 22.23.2 plus the platform's native build dependencies; no manual
-helper copy is needed. The staged helper is included in the manifest, and missing
+helper copy is needed. On Debian and Ubuntu those are `libwebkit2gtk-4.1-dev`,
+`build-essential`, `libxdo-dev`, `libssl-dev`, `libayatana-appindicator3-dev`,
+`librsvg2-dev`, `libdbus-1-dev`, `patchelf` and `libfuse2t64`. Without the
+appindicator package everything compiles and bundling then stops with
+`Can't detect any appindicator library`. The staged helper is included in the manifest, and missing
 or linked helpers are rejected. On Linux the host provisions its own delegation
 before any thread starts: it asks the user's systemd manager (`StartTransientUnit` on the
 session bus) to move the process into a transient `twentyonex-<pid>.scope` with
