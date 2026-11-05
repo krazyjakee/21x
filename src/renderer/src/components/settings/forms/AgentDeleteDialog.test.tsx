@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AgentDeleteDialog } from './AgentDeleteDialog'
 import { agentApi } from '@/lib/ipc-client'
 import type { AgentDeletionImpact } from '@shared/agent-deletion'
@@ -47,6 +47,58 @@ describe('AgentDeleteDialog', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete agent' }))
     expect((await screen.findByRole('alert')).textContent).toContain('the app is shutting down')
     expect(screen.getByRole('button', { name: 'Delete agent' })).toBeTruthy()
+  })
+
+  it('keeps the receipt when the parent re-renders with a new onClose', async () => {
+    const deletionImpact = vi.spyOn(agentApi, 'deletionImpact').mockResolvedValue(impact({ running }))
+    vi.spyOn(agentApi, 'delete').mockResolvedValue(impact({ running }))
+    const first = vi.fn(), view = render(<AgentDeleteDialog agent={agent} onClose={first} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop and delete' }))
+    expect(await screen.findByText('“Fable” was deleted')).toBeTruthy()
+    deletionImpact.mockResolvedValue(null)
+    const second = vi.fn()
+    view.rerender(<AgentDeleteDialog agent={agent} onClose={second} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByText('“Fable” was deleted')).toBeTruthy()
+    expect(first).not.toHaveBeenCalled(); expect(second).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(second).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the buttons disabled through a re-render while the delete runs', async () => {
+    vi.spyOn(agentApi, 'deletionImpact').mockResolvedValue(impact({ running }))
+    let finish!: (value: AgentDeletionImpact) => void
+    vi.spyOn(agentApi, 'delete').mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const view = render(<AgentDeleteDialog agent={agent} onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop and delete' }))
+    await waitFor(() => expect(agentApi.delete).toHaveBeenCalled())
+    view.rerender(<AgentDeleteDialog agent={agent} onClose={vi.fn()} />)
+    await act(async () => { await Promise.resolve() })
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Stop and delete' }) as HTMLButtonElement).disabled).toBe(true)
+    await act(async () => { finish(impact({ running })) })
+  })
+
+  it('keeps a named refusal when the parent re-renders', async () => {
+    vi.spyOn(agentApi, 'deletionImpact').mockResolvedValue(impact())
+    vi.spyOn(agentApi, 'delete').mockResolvedValue({ refused: 'The agent was not deleted because the app is shutting down.' })
+    const view = render(<AgentDeleteDialog agent={agent} onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete agent' }))
+    await screen.findByRole('alert')
+    view.rerender(<AgentDeleteDialog agent={agent} onClose={vi.fn()} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByRole('alert').textContent).toContain('the app is shutting down')
+  })
+
+  it('shows new work and asks again rather than stopping something the user never saw', async () => {
+    vi.spyOn(agentApi, 'deletionImpact').mockResolvedValueOnce(impact()).mockResolvedValue(impact({ running }))
+    const remove = vi.spyOn(agentApi, 'delete')
+    render(<AgentDeleteDialog agent={agent} onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete agent' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('work has changed')
+    expect(screen.getByText(/1 running session of this agent: “Build”/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop and delete' })).toBeTruthy()
+    expect(remove).not.toHaveBeenCalled()
   })
 
   it('never deletes blind: an unreadable impact offers a retry, not a delete', async () => {

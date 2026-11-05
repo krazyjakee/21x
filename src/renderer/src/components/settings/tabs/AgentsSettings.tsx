@@ -25,7 +25,11 @@ interface AgentDialogState {
 }
 
 export function AgentsSettings() {
-  const { agents, fetchAgents, createAgent, updateAgent } = useAgentStore()
+  // One field each: this view must not re-render for every status or transcript write.
+  const agents = useAgentStore((state) => state.agents)
+  const fetchAgents = useAgentStore((state) => state.fetchAgents)
+  const createAgent = useAgentStore((state) => state.createAgent)
+  const updateAgent = useAgentStore((state) => state.updateAgent)
   const [connections, setConnections] = useState<Map<string, ConnectionInfo>>(new Map())
   const [agentDialog, setAgentDialog] = useState<AgentDialogState>({ open: false })
   const [deleting, setDeleting] = useState<Agent | null>(null)

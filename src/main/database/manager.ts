@@ -1109,6 +1109,10 @@ export class DatabaseManager {
     return this.getAgent(id)
   }
 
+  /** Set by the lifecycle owner: `removeAgent` trusts that sessions are already
+   * stopped, so a caller that went round the owner is refused here. */
+  agentRemovalGuard?: (agentId: string) => void
+
   /** See `removeAgent`: the single path, so no caller can leave a reference behind. */
   deleteAgent(id: string): boolean {
     return this.removeAgent(id) !== false

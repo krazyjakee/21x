@@ -26,7 +26,12 @@ export function registerClaudePluginHandlers({ claudePluginManager, agentManager
     return agentsChanged(await manager().installPlugin(pluginName, marketplaceId, scope))
   })
 
-  ipcMain.handle('claudePlugin:uninstallPlugin', async (_, pluginId: string) => agentsChanged(await manager().uninstallPlugin(pluginId)))
+  // Plugin agents leave through the same owner as any other agent: their work
+  // stops first, and a refused uninstall leaves them all in place.
+  ipcMain.handle('claudePlugin:uninstallPlugin', async (_, pluginId: string) => {
+    const plugins = manager(), agentIds = plugins.getPluginResources(pluginId).agents.map((agent) => agent.id)
+    return agentsChanged(await agentManager.runAgentsDeletion(agentIds, () => plugins.uninstallPlugin(pluginId)))
+  })
 
   ipcMain.handle('claudePlugin:enablePlugin', async (_, pluginId: string) => agentsChanged(await manager().enablePlugin(pluginId)))
 

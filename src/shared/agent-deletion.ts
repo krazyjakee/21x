@@ -50,13 +50,22 @@ export type AgentDeletionResult = AgentDeletionImpact | AgentDeletionRefusal | f
 /** Thrown by the lifecycle owner; each host turns it into an AgentDeletionRefusal. */
 export class AgentDeletionRefused extends Error {}
 
+export const AGENT_DELETION_REFUSAL_LIMIT = 2048
+
 export const refusalOf = (error: unknown): AgentDeletionRefusal => {
-  if (error instanceof AgentDeletionRefused) return { refused: error.message }
+  if (error instanceof AgentDeletionRefused) return { refused: error.message.slice(0, AGENT_DELETION_REFUSAL_LIMIT) }
   throw error
 }
 
+/** Decided by the key alone: a length test here would read a long refusal as a report. */
 export const isAgentDeletionRefusal = (value: unknown): value is AgentDeletionRefusal =>
-  !!value && typeof value === 'object' && typeof (value as AgentDeletionRefusal).refused === 'string' && (value as AgentDeletionRefusal).refused.length <= 2048
+  !!value && typeof value === 'object' && typeof (value as AgentDeletionRefusal).refused === 'string'
+
+/** A refusal after some work already stopped has to say so; that does not roll back. */
+export function agentDeletionRefusalText(cause: string, stopped: number, withdrawn: number): string {
+  const done = [stopped ? plural(stopped, 'session') + ' stopped' : '', withdrawn ? plural(withdrawn, 'queued start') + ' withdrawn' : ''].filter(Boolean)
+  return `The agent was not deleted because ${cause}.${done.length ? ` Already done: ${done.join(', ')}.` : ''}`
+}
 
 /** Task ids held by the agent's lifecycle owners at the moment of deletion. */
 export interface AgentLiveWork { running: string[]; queued: string[] }

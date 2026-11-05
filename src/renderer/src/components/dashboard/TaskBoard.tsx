@@ -2,6 +2,7 @@ import { getDesktopHost } from '@/lib/desktop-api'
 import { useNativeBoardDrag } from './use-native-board-drag'
 import { useNativeBoardRecovery } from './use-native-board-recovery'
 import { useMemo, useCallback, useEffect, useRef, useState, memo } from 'react'
+import { taskLacksAgent } from '@shared/agent-utils'
 import { Clock, AlertCircle, CheckCircle2, ExternalLink, Bot, Terminal } from 'lucide-react'
 import {
   DndContext,
@@ -282,10 +283,10 @@ function TaskCardContent({ task, agent, transitionPhase, showActivity = true }: 
               </span>
             )
           })()}
-          {!task.agent_id && task.auto_start_agent && task.status !== TaskStatus.Completed && (
+          {taskLacksAgent(task) && (
             <span
               data-testid="task-no-agent-warning"
-              title="This task starts itself but has no chosen agent"
+              title="This task keeps producing work but has no chosen agent"
               className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-400 shrink-0"
             >
               <AlertCircle className="size-icon-xs" />

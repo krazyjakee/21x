@@ -1,4 +1,4 @@
-import { TaskGroupRequestScope } from './agent-manager/task-group-request-scope'
+import { TaskGroupRequestScope, TaskGroupRequestScopeError } from './agent-manager/task-group-request-scope'
 import { serializeTaskSend } from './task-send-lock'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import type { AgentAttachmentExecution, AgentManagerHost, AgentWindow } from './agent-manager/host'
@@ -61,7 +61,8 @@ import type { SessionObservation } from './sessions/event-inbox'
 import { modelContextWindow } from './sessions/model-windows'
 import { CaptainRollover, captainRolloverSeed } from './sessions/captain-rollover'
 import type { HandoffRecord, HandoffTurn } from './sessions/handoff'
-import { AgentDeletionRefused, captainSessionAgentKey, NO_AGENT_LIVE_WORK, type AgentDeletionImpact, type AgentLiveWork } from '../shared/agent-deletion'
+import { AgentDeletionRefused, agentDeletionRefusalText, captainSessionAgentKey, NO_AGENT_LIVE_WORK, type AgentDeletionImpact, type AgentLiveWork } from '../shared/agent-deletion'
+import { ServiceProtocolError } from '../shared/service-protocol'
 
 // Default OpenCode server URL (matches database default)
 
@@ -424,6 +425,7 @@ export class AgentManager extends EventEmitter {
     this.deliveries = new DeliveryStore(db)
     this.providerRecoveries = new ProviderRecoveryStore(db)
     this.startQueue = new DurableStartQueueStore(db)
+    db.agentRemovalGuard = agentId => this.assertAgentRemovable(agentId)
     this.startIdleSessionReaper()
     this.resourceMonitor.start(30_000, () => {
       this.refreshBranchDiffs()
@@ -1435,21 +1437,32 @@ export class AgentManager extends EventEmitter {
       try {
         const taskIds = deleting ? this.agentDeletionTaskIds(agentId) : this.agentOwnedTaskIds(agentId)
         const live = this.agentLiveWork(taskIds)
+        let stopped = 0, withdrawn = 0
+        const refusal = (cause: string): AgentDeletionRefused => new AgentDeletionRefused(agentDeletionRefusalText(cause, stopped, withdrawn))
         if ([...taskIds].some(taskId => this.taskGroupMutations.has(taskId) || this.taskLifecycleMutations.has(taskId))) throw new Error('Wait for task-group review or membership changes to finish before changing this agent.')
         if (disruptive) {
           for (const taskId of taskIds) this.cancelQueuedStart(taskId)
+          withdrawn = live.queued.length
           for (const taskId of taskIds) {
             await this.stopByTaskId(taskId).catch((error: unknown) => {
               if (!deleting) throw error
               const reason = error instanceof Error ? error.message : String(error)
-              throw new AgentDeletionRefused(`The agent was not deleted because “${this.db.getTask(taskId)?.title ?? taskId}” did not confirm it stopped (${reason}). It is still running; try again.`)
+              throw refusal(`“${this.db.getTask(taskId)?.title ?? taskId}” did not confirm it stopped (${reason}) and is still running`)
             })
+            if (live.running.includes(taskId)) stopped++
           }
         }
         if (disruptive) await Promise.all([...taskIds].map(taskId => serializeTaskSend(this, taskId, async () => undefined)))
-        if (this.shuttingDown) throw new Error('The app is shutting down.')
+        if (this.shuttingDown) throw deleting ? refusal('the app is shutting down') : new Error('The app is shutting down.')
         this.taskGroupRequests.assertCurrent()
-        const result = await mutation(live)
+        let result: T
+        try { result = await mutation(live) }
+        catch (error) {
+          // A protocol or scope error is the caller's own outcome; the transport
+          // would blank anything else on Tauri, so name it here for both hosts.
+          if (!deleting || error instanceof AgentDeletionRefused || error instanceof ServiceProtocolError || error instanceof TaskGroupRequestScopeError) throw error
+          throw refusal(`the change could not be saved (${error instanceof Error ? error.message : String(error)})`)
+        }
         if (disruptive) {
           // Every accepted backend must remain fenced until its own refresh
           // succeeds, even when an earlier notification refuses or loses scope.
@@ -1486,6 +1499,21 @@ export class AgentManager extends EventEmitter {
       ...[...this.sessionStarts.keys()].filter(taskId => (this.admittedStarts.get(taskId) ?? this.db.getTask(taskId)?.agent_id
         ?? this.db.getSetting(coordinatorSessionAgentKey(taskId))) === agentId)
     ])
+  }
+
+  /** Holds every named agent through its own stop, then runs one mutation that
+   * removes them together. A failure leaves all of them in place. */
+  runAgentsDeletion<T>(agentIds: readonly string[], mutation: () => T | Promise<T>): Promise<T> {
+    const [first, ...rest] = agentIds
+    return first ? this.runAgentConfigurationMutation(first, 'delete', () => this.runAgentsDeletion(rest, mutation)) : Promise.resolve().then(mutation)
+  }
+
+  /** The database's check on `removeAgent`. Holding the fence means Stop has run
+   * or is the caller's to run; live work with no fence means nobody stopped it. */
+  private assertAgentRemovable(agentId: string): void {
+    if (this.agentConfigurationMutations.has(agentId)) return
+    const [taskId] = this.agentDeletionTaskIds(agentId)
+    if (taskId) throw new AgentDeletionRefused(`The agent was not deleted because “${this.db.getTask(taskId)?.title ?? taskId}” is still running on it.`)
   }
 
   /** A provider recovery would otherwise redeliver to the agent after it is gone. */

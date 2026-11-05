@@ -127,6 +127,14 @@ describe('deleting an agent', () => {
     expect(h.db.getTask(open.id)?.agent_id).toBe(h.doomed.id)
   })
 
+  it('journals a project whose only task falls past the list shown to the user', () => {
+    const h = fixture(); for (let index = 0; index < 25; index++) h.task(`Task ${index}`)
+    const late = h.db.createProject({ name: 'Late' })!
+    const task = h.db.createTask({ title: 'Last', project_id: late.id })!; h.db.updateTask(task.id, { agent_id: h.doomed.id })
+    h.db.removeAgent(h.doomed.id)
+    expect(h.db.db.prepare('SELECT 1 FROM project_status_journal WHERE project_id = ?').get(late.id)).toBeDefined()
+  })
+
   it('journals the change in each affected project, so it outlives the dialog', () => {
     const h = fixture(); h.task('Open work')
     h.db.removeAgent(h.doomed.id)

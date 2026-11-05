@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isAgentConfigured, getAgentConfigIssue } from './agent-utils'
+import { isAgentConfigured, getAgentConfigIssue, taskLacksAgent } from './agent-utils'
 
 describe('isAgentConfigured', () => {
   it('returns false when agent is null/undefined', () => {
@@ -59,5 +59,25 @@ describe('getAgentConfigIssue', () => {
     expect(
       getAgentConfigIssue({ config: { coding_agent: 'claude_code', model: 'anthropic/claude-3-5' } })
     ).toBeNull()
+  })
+})
+
+describe('taskLacksAgent', () => {
+  const task = (fields = {}) => ({ agent_id: null, status: 'not_started', auto_start_agent: false, is_recurring: false, recurrence_parent_id: null, ...fields })
+  it('leaves an ordinary unassigned task alone, and anything with an agent', () => {
+    expect(taskLacksAgent(task())).toBe(false)
+    expect(taskLacksAgent(task({ agent_id: 'a', is_recurring: true, auto_start_agent: true }))).toBe(false)
+  })
+  it('flags a recurring schedule with or without auto-start', () => {
+    expect(taskLacksAgent(task({ is_recurring: true }))).toBe(true)
+    expect(taskLacksAgent(task({ is_recurring: true, auto_start_agent: true }))).toBe(true)
+  })
+  it('flags a completed schedule, because the scheduler keeps firing it', () => {
+    expect(taskLacksAgent(task({ is_recurring: true, status: 'completed' }))).toBe(true)
+  })
+  it('flags a self-starting task only until it is finished, and not a recurring instance by its flag alone', () => {
+    expect(taskLacksAgent(task({ auto_start_agent: true }))).toBe(true)
+    expect(taskLacksAgent(task({ auto_start_agent: true, status: 'completed' }))).toBe(false)
+    expect(taskLacksAgent(task({ is_recurring: true, recurrence_parent_id: 'template' }))).toBe(false)
   })
 })

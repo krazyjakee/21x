@@ -267,9 +267,14 @@ last agent can be deleted too. `agent:delete` returns what happened, or a
 `{ refused }` result naming what is in the way, as a result rather than an
 error because the service transport would mask an error's message.
 
+`removeAgent` trusts that sessions are already stopped, so it refuses an agent
+with live work unless the lifecycle owner holds it. Anything that removes agents
+goes through that owner: `runAgentsDeletion` does this for plugin uninstall.
+
 A task flagged `auto_start_agent` with no agent is triaged by the default agent
 on each run, or does nothing if no agent exists. The board and the task view
-both flag it, so losing its agent is never silent.
+flag that, and any recurring schedule with no agent, including a completed one
+because the scheduler keeps firing it. Losing an agent is never silent.
 
 ## Auto-Triage
 

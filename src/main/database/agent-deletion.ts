@@ -128,14 +128,23 @@ function clearAgentReferences(manager: DatabaseManager, agentId: string, impact:
   if (replacement) manager.db.prepare('UPDATE agents SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END').run(replacement.id)
 }
 
+/** Read before the row goes: the impact's lists are capped for display. */
+function affectedProjectIds(manager: DatabaseManager, agentId: string, live: AgentLiveWork, impact: AgentDeletionImpact): Set<string> {
+  const assigned = manager.db.prepare("SELECT DISTINCT project_id AS id FROM tasks WHERE agent_id = ? AND role = 'task' AND status <> ? AND project_id IS NOT NULL")
+    .all(agentId, TaskStatus.Completed) as Array<{ id: string }>
+  const projectIds = new Set(assigned.map(row => row.id))
+  for (const id of [...live.running, ...live.queued]) { const task = manager.getTask(id); if (task?.project_id) projectIds.add(task.project_id) }
+  for (const project of agentProjects(manager)) {
+    if (project.default_agent_id === agentId || project.captain_agent_id === agentId || holdsConcurrency(project.settings, agentId)) projectIds.add(project.id)
+  }
+  for (const item of impact.captain_projects.items) projectIds.add(item.id)
+  return projectIds
+}
+
 /** A line in each affected project's journal, so the change outlives the dialog. */
-function journalAgentDeletion(manager: DatabaseManager, impact: AgentDeletionImpact): void {
+function journalAgentDeletion(manager: DatabaseManager, impact: AgentDeletionImpact, projectIds: Set<string>): void {
   const { stops, changes } = describeAgentDeletion(impact)
   if (!stops.length && !changes.length) return
-  const projectIds = new Set<string>()
-  const ids = [...impact.running.items, ...impact.queued.items, ...impact.unassigned_tasks.items, ...impact.recurring_tasks.items].map(item => item.id)
-  for (const id of ids) { const task = manager.getTask(id); if (task?.project_id) projectIds.add(task.project_id) }
-  for (const list of [impact.captain_projects, impact.default_projects, impact.concurrency_projects]) for (const item of list.items) projectIds.add(item.id)
   const decisions = [...stops, ...changes].map(line => line.slice(0, 280)).slice(0, 8)
   for (const projectId of projectIds) {
     manager.appendProjectStatusJournal(projectId, { summary: `Agent “${impact.agent_name}” was deleted by the user.`, decisions }, { source: 'system_recovery' })
@@ -151,13 +160,15 @@ function journalAgentDeletion(manager: DatabaseManager, impact: AgentDeletionImp
  * history of what happened, and nothing resolves them back to an agent.
  */
 export function removeAgent(manager: DatabaseManager, agentId: string, live: AgentLiveWork = NO_AGENT_LIVE_WORK): AgentDeletionImpact | false {
+  manager.agentRemovalGuard?.(agentId)
   return manager.db.transaction((): AgentDeletionImpact | false => {
     const impact = readAgentDeletionImpact(manager, agentId, live)
     if (!impact) return false
+    const projectIds = affectedProjectIds(manager, agentId, live, impact)
     releaseAgentWork(manager, agentId)
     clearAgentReferences(manager, agentId, impact)
     manager.db.prepare('DELETE FROM agents WHERE id = ?').run(agentId)
-    journalAgentDeletion(manager, impact)
+    journalAgentDeletion(manager, impact, projectIds)
     return impact
   })()
 }

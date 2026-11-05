@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AgentsSettings } from './AgentsSettings'
 import { useAgentStore } from '@/stores/agent-store'
 import { agentApi } from '@/lib/ipc-client'
@@ -38,21 +38,21 @@ describe('AgentsSettings deletion', () => {
     useAgentStore.setState({ deleteAgent: vi.fn(async () => ({ refused: 'The agent was not deleted because the app is shutting down.' })) as never })
     await open()
     await confirmDeletion()
-    expect(screen.getByRole('alert')).toHaveTextContent('The agent was not deleted because the app is shutting down.')
+    expect(await screen.findByRole('alert')).toHaveTextContent('The agent was not deleted because the app is shutting down.')
   })
 
   it('never fails in silence, even when the impact cannot be read', async () => {
     vi.spyOn(agentApi, 'deletionImpact').mockRejectedValue(new Error('offline'))
     await open()
-    expect(screen.getByRole('alert')).toHaveTextContent('nothing was deleted')
+    expect(await screen.findByRole('alert')).toHaveTextContent('nothing was deleted')
   })
 
   it('shows nothing once the agent is gone', async () => {
     useAgentStore.setState({ deleteAgent: vi.fn(async () => IMPACT) as never })
     await open()
     await confirmDeletion()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete agent' })).toBeNull())
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Delete agent' })).toBeNull()
   })
 
   it('does nothing if the user changes their mind', async () => {

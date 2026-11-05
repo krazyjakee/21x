@@ -16,6 +16,8 @@ import type { Agent } from '@/types'
 
 type Phase = 'loading' | 'confirm' | 'deleting' | 'done'
 
+const workOf = (impact: AgentDeletionImpact): string => JSON.stringify([impact.running, impact.queued])
+
 function Lines({ title, lines }: { title: string; lines: string[] }) {
   if (lines.length === 0) return null
   return (
@@ -39,9 +41,19 @@ export function AgentDeleteDialog({ agent, onClose }: { agent: Agent; onClose: (
   const [impact, setImpact] = useState<AgentDeletionImpact | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const mounted = useRef(true)
+  // Parents pass a new function on every render. Reading it through a ref means
+  // a re-render can never restart the load and undo a receipt or a refusal.
+  const close = useRef(onClose)
+  close.current = onClose
   useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
+  }, [])
+
+  const unreadable = useCallback(() => {
+    setImpact(null)
+    setProblem('What this agent is doing could not be read, so nothing was deleted. Try again.')
+    setPhase('confirm')
   }, [])
 
   const load = useCallback(() => {
@@ -49,28 +61,34 @@ export function AgentDeleteDialog({ agent, onClose }: { agent: Agent; onClose: (
     setProblem(null)
     agentApi.deletionImpact(agent.id).then((next) => {
       if (!mounted.current) return
-      if (!next) { onClose(); return }
+      if (!next) { close.current(); return }
       setImpact(next)
       setPhase('confirm')
-    }).catch(() => {
-      if (!mounted.current) return
-      setImpact(null)
-      setProblem('What this agent is doing could not be read, so nothing was deleted. Try again.')
-      setPhase('confirm')
-    })
-  }, [agent.id, onClose])
+    }).catch(() => { if (mounted.current) unreadable() })
+  }, [agent.id, unreadable])
 
   useEffect(() => { load() }, [load])
 
-  const confirm = async (): Promise<void> => {
+  const confirm = async (shown: AgentDeletionImpact): Promise<void> => {
     setPhase('deleting')
     setProblem(null)
+    // The list may be minutes old. New work must be seen before it is stopped.
+    const current = await agentApi.deletionImpact(agent.id).catch(() => undefined)
+    if (!mounted.current) return
+    if (current === undefined) { unreadable(); return }
+    if (current === null) { close.current(); return }
+    if (workOf(current) !== workOf(shown)) {
+      setImpact(current)
+      setProblem('This agent’s work has changed. Check the list and confirm again.')
+      setPhase('confirm')
+      return
+    }
     const result = await deleteAgent(agent.id)
     if (!mounted.current) return
     if (isAgentDeletionRefusal(result)) { setProblem(result.refused); setPhase('confirm'); return }
-    if (typeof result !== 'object') { onClose(); return }
+    if (typeof result !== 'object') { close.current(); return }
     const { stops, changes } = describeAgentDeletion(result)
-    if (stops.length === 0 && changes.length === 0) { onClose(); return }
+    if (stops.length === 0 && changes.length === 0) { close.current(); return }
     setImpact(result)
     setPhase('done')
   }
@@ -80,7 +98,7 @@ export function AgentDeleteDialog({ agent, onClose }: { agent: Agent; onClose: (
   const busy = phase === 'loading' || phase === 'deleting'
 
   return (
-    <AlertDialog open onOpenChange={(open) => { if (!open && phase !== 'deleting') onClose() }}>
+    <AlertDialog open onOpenChange={(open) => { if (!open && phase !== 'deleting') close.current() }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{done ? `“${agent.name}” was deleted` : `Delete “${agent.name}”?`}</AlertDialogTitle>
@@ -101,13 +119,13 @@ export function AgentDeleteDialog({ agent, onClose }: { agent: Agent; onClose: (
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
         <AlertDialogFooter>
           {done ? (
-            <AlertDialogAction onClick={onClose}>Done</AlertDialogAction>
+            <AlertDialogAction onClick={() => close.current()}>Done</AlertDialogAction>
           ) : (
             <>
-              <AlertDialogCancel disabled={phase === 'deleting'} onClick={onClose}>Cancel</AlertDialogCancel>
+              <AlertDialogCancel disabled={phase === 'deleting'} onClick={() => close.current()}>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 disabled={busy}
-                onClick={(event) => { event.preventDefault(); if (impact) void confirm(); else load() }}
+                onClick={(event) => { event.preventDefault(); if (impact) void confirm(impact); else load() }}
               >
                 {!impact ? 'Try again' : stops.length > 0 ? 'Stop and delete' : 'Delete agent'}
               </AlertDialogAction>

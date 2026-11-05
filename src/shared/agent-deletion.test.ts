@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentDeletionRefused, describeAgentDeletion, isAgentDeletionImpact, isAgentDeletionRefusal, refusalOf, type AgentDeletionImpact } from './agent-deletion'
+import { AGENT_DELETION_REFUSAL_LIMIT, AgentDeletionRefused, agentDeletionRefusalText, describeAgentDeletion, isAgentDeletionImpact, isAgentDeletionRefusal, refusalOf, type AgentDeletionImpact } from './agent-deletion'
 
 const empty = { total: 0, items: [] }
 const impact = (fields: Partial<AgentDeletionImpact> = {}): AgentDeletionImpact => ({
@@ -37,6 +37,15 @@ describe('agent deletion wire shapes', () => {
     expect(isAgentDeletionImpact({ ...impact(), running: undefined })).toBe(false)
     expect(isAgentDeletionImpact({ ...impact(), agent_id: '' })).toBe(false)
     expect(isAgentDeletionImpact(impact({ running: { total: 21, items: Array.from({ length: 21 }, (_, index) => ({ id: `${index}`, title: 'x' })) } }))).toBe(false)
+  })
+  it('bounds a long refusal, which still reads as a refusal rather than a report', () => {
+    const refusal = refusalOf(new AgentDeletionRefused('x'.repeat(3000)))
+    expect(refusal.refused).toHaveLength(AGENT_DELETION_REFUSAL_LIMIT)
+    expect(isAgentDeletionRefusal({ refused: 'x'.repeat(3000) })).toBe(true)
+  })
+  it('says what had already stopped, and says nothing when nothing had', () => {
+    expect(agentDeletionRefusalText('the app is shutting down', 0, 0)).toBe('The agent was not deleted because the app is shutting down.')
+    expect(agentDeletionRefusalText('the app is shutting down', 1, 2)).toBe('The agent was not deleted because the app is shutting down. Already done: 1 session stopped, 2 queued starts withdrawn.')
   })
   it('turns only a named refusal into a result, so real failures still surface', () => {
     expect(refusalOf(new AgentDeletionRefused('named'))).toEqual({ refused: 'named' })

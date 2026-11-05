@@ -193,6 +193,33 @@ describe('actual AgentManager configuration ownership', () => {
     expect(mutation).not.toHaveBeenCalled(); expect(h.db.getAgent(h.agent.id)).toBeDefined()
     expect(h.manager.findSessionByTaskId(h.tasks[0].id)?.sessionId).toBe('configuration-one')
   })
+  it('says what had already stopped when the save fails afterwards', async () => {
+    const h = fixture(); await h.manager.startTask(h.tasks[0].id); await h.manager.startTask(h.tasks[1].id)
+    await expect(h.manager.runAgentConfigurationMutation(h.agent.id, 'delete', () => { throw new Error('disk full') }))
+      .rejects.toThrow('the change could not be saved (disk full). Already done: 1 session stopped, 1 queued start withdrawn.')
+    expect(h.db.getAgent(h.agent.id)).toBeDefined()
+  })
+  it('refuses a removal that went round the lifecycle owner while work is live, changing nothing', async () => {
+    const h = fixture(); await h.manager.startTask(h.tasks[0].id)
+    expect(() => h.db.deleteAgent(h.agent.id)).toThrow('“First” is still running on it')
+    expect(h.db.getAgent(h.agent.id)).toBeDefined(); expect(h.db.getTask(h.tasks[0].id)?.agent_id).toBe(h.agent.id)
+    expect(h.manager.findSessionByTaskId(h.tasks[0].id)).toBeDefined()
+  })
+  it('stops every plugin agent before one mutation removes them all', async () => {
+    const h = fixture(), second = h.db.createAgent({ name: 'Second', config: { coding_agent: 'codex', model: 'other' } })!
+    h.db.updateTask(h.tasks[1].id, { agent_id: second.id })
+    await h.manager.startTask(h.tasks[0].id); await h.manager.startTask(h.tasks[1].id)
+    const removed = await h.manager.runAgentsDeletion([h.agent.id, second.id], () => {
+      expect(h.manager.findSessionByTaskId(h.tasks[0].id)).toBeUndefined(); expect(h.manager.findSessionByTaskId(h.tasks[1].id)).toBeUndefined()
+      return h.db.deleteAgent(h.agent.id) && h.db.deleteAgent(second.id)
+    })
+    expect(removed).toBe(true); expect(h.adapter.destroySession).toHaveBeenCalledTimes(2)
+  })
+  it('leaves every plugin agent in place when the removal fails', async () => {
+    const h = fixture(), second = h.db.createAgent({ name: 'Second', config: { coding_agent: 'codex', model: 'other' } })!
+    await expect(h.manager.runAgentsDeletion([h.agent.id, second.id], () => { throw new Error('tree refused') })).rejects.toThrow('tree refused')
+    expect(h.db.getAgent(h.agent.id)).toBeDefined(); expect(h.db.getAgent(second.id)).toBeDefined()
+  })
   it('protects an unrelated agent using the same cached backend before side effects', async () => {
     const h = fixture(), other = h.db.createAgent({ name: 'Other', config: { coding_agent: 'codex', model: 'other-model' } })!
     h.db.updateTask(h.tasks[1].id, { agent_id: other.id }); await h.manager.startTask(h.tasks[1].id)
