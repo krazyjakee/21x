@@ -392,6 +392,10 @@ coordinator row through `AgentManager.sendMessage`, which rejoins the live
 session or resumes the persisted one. A Captain that is mid-turn is not
 interrupted: the batch waits for idle (dropped after 15 min). Rules:
 
+- **Not shown in the transcript.** The Captain still receives and stores each
+  wake-up; `buildTranscriptItems` leaves them out because they hold the same
+  work orders every time. The text cannot prove who wrote it, so `/send_message`
+  refuses that format: an agent cannot reach a Captain unseen.
 - **Per-project setting.** `projects.settings.captain_wakeups`
   (`src/shared/captain-wakeups.ts`): `{ enabled, kinds[] }`; absent means
   on for every kind. The project editor's "Captain wake-ups" section edits

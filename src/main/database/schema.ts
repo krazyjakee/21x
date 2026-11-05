@@ -1,3 +1,4 @@
+import { dropReviewAgentReferences } from './pr-review-agent-references'
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../../shared/constants'
@@ -15,7 +16,6 @@ import { createManagedSessionTables } from './managed-session-migration'
 import { createCommanderActionTables, migrateCommanderActions } from './commander-actions-migration'
 import { createSessionHandoffTable } from './session-handoff-migration'
 import { createTaskGroupTables, migrateTaskGroups } from './task-groups-migration'
-import { migrateReviewAgentHistory } from './review-agent-history-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -80,9 +80,6 @@ import { migrateReviewAgentHistory } from './review-agent-history-migration'
  * 34 → 35: Commander input mode and executed action snapshots / exact Undo (#86).
  * 35 → 36: durable planned session handoff steps (#103).
  * 36 → 37: shared task-group execution anchors and retained membership/progress (#192).
- * 38 → 39: PR review records keep the agent ids they were signed with as plain
- *          history, so reviewing a PR no longer makes an agent undeletable
- *          (migrateReviewAgentHistory in review-agent-history-migration.ts).
  */
 const SCHEMA_VERSION = 39
 
@@ -1136,9 +1133,7 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v37: retained group membership and one counted execution task.
   migrateTaskGroups(db)
-
-  // Migration v39: an agent can be deleted after it has reviewed a PR.
-  migrateReviewAgentHistory(db)
+  dropReviewAgentReferences(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

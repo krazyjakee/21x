@@ -103,6 +103,17 @@ const DELIVERY_CLAIM_MS = 60_000
 /** Sent to a session found idle after a restart cut its run short. */
 const RESTART_CONTINUE_PROMPT = 'The app restarted while you were working on this task. Continue from where you left off. If the task is already finished, say so briefly.'
 
+/** Why a promised retry was ruled out, in words. The bare code stays in the audit. */
+const RETRY_STOP_REASONS: Record<string, string> = {
+  unsafe_side_effect_unknown: 'a tool was still running, so a retry could repeat its work',
+  awaiting_approval: 'this is waiting for your answer'
+}
+
+function retryStopNotice(detail: string): string {
+  if (!/^[a-z_]+$/.test(detail)) return detail
+  return `Stopped retrying: ${RETRY_STOP_REASONS[detail] ?? detail.replace(/_/g, ' ')}.`
+}
+
 /** A host must keep its DB/provider/profile lease until exit on this failure. */
 export class AgentShutdownIncompleteError extends Error {
   readonly code = 'AGENT_SHUTDOWN_INCOMPLETE'
@@ -6261,7 +6272,7 @@ export class AgentManager extends EventEmitter {
       ?? (session.status === 'waiting_approval' ? 'awaiting_approval' : null)
     if (exclusion || failure.delivery === 'unknown' || failure.kind === 'terminal') {
       this.failProviderRecovery(row, exclusion ?? `${failure.message}; backend delivery or tool outcomes require review.`,
-        failure.delivery === 'unknown' && row.state === 'sending' ? 'prompt_delivery_unconfirmed' : 'review_required')
+        failure.delivery === 'unknown' && row.state === 'sending' ? 'prompt_delivery_unconfirmed' : 'review_required', !!exclusion)
       return false
     }
     const scheduled = this.providerRecoveries.schedule(row, failure)
@@ -6277,7 +6288,8 @@ export class AgentManager extends EventEmitter {
     return true
   }
 
-  private failProviderRecovery(row: ProviderRecovery, detail: string, result = 'review_required'): void {
+  /** `alreadyShown`: the transcript holds the failure, and a retry being ruled out adds nothing to it. */
+  private failProviderRecovery(row: ProviderRecovery, detail: string, result = 'review_required', alreadyShown = false): void {
     const failed = this.providerRecoveries.change(row, { state: 'failed', cause: detail, nextRetryAt: null })
     if (!failed) return
     const task = this.db.getTask(row.taskId)
@@ -6293,7 +6305,7 @@ export class AgentManager extends EventEmitter {
       this.stopAdapterPolling(live.sessionId)
       this.emitStatus(live.sessionId, live.session, 'error')
     }
-    this.emitSystemError(live?.sessionId ?? row.sessionId, row.taskId, `provider-terminal-${row.intentId}`, detail)
+    if (!alreadyShown) this.emitSystemError(live?.sessionId ?? row.sessionId, row.taskId, `provider-terminal-${row.intentId}`, retryStopNotice(detail))
     if (task && !live && !isCoordinatorTask(task) && task.status !== TaskStatus.Completed)
       this.updateTaskFromLocalAgent(task.id, { status: TaskStatus.NotStarted }, 'system')
     if (task) this.recordRecoveryAudit(task, detail, 'terminal_failure', result, detail)

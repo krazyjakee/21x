@@ -111,8 +111,12 @@ describe('deleting an agent', () => {
     const h = fixture(); const work = h.task('Work'); const review = h.task('Review'); h.db.updateTask(work.id, { agent_id: h.kept.id })
     const handoff = h.db.createPullRequestReviewHandoff({ project_id: h.project.id, repo: 'owner/repo', pr_number: 1, head_sha: 'a'.repeat(40), base_sha: 'b'.repeat(40),
       implementation_task_id: work.id, review_task_id: review.id, implementation_agent_id: h.kept.id, reviewer_agent_id: h.doomed.id })!
+    const attestation = h.db.createPullRequestReviewAttestation({ project_id: h.project.id, repo: 'owner/repo', pr_number: 1, head_sha: 'a'.repeat(40), base_sha: 'b'.repeat(40),
+      implementation_task_id: work.id, review_task_id: review.id, implementation_agent_id: h.kept.id, reviewer_agent_id: h.doomed.id, handoff_id: handoff.id, verdict: 'CHANGES_REQUIRED', summary: '' })!
     expect(h.db.removeAgent(h.doomed.id)).not.toBe(false)
     expect(h.db.db.prepare('SELECT reviewer_agent_id FROM pr_review_handoffs WHERE id = ?').get(handoff.id)).toEqual({ reviewer_agent_id: h.doomed.id })
+    expect(h.db.db.prepare('SELECT verdict, reviewer_agent_id FROM pr_review_attestations WHERE id = ?').get(attestation.id))
+      .toEqual({ verdict: 'CHANGES_REQUIRED', reviewer_agent_id: h.doomed.id })
   })
 
   it('rolls everything back when one step fails, leaving the agent exactly as it was', () => {

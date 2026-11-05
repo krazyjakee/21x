@@ -35,6 +35,7 @@ export function TopBarVoiceButton(): React.JSX.Element | null {
       // The loudest control in the bar — by colour, not by size. Speaking is
       // the point here and the written word beside it is the fallback.
       emphasis="strong"
+      followsEveryTurn
       className="h-8 w-8"
       title={
         conversational

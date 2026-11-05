@@ -11,6 +11,7 @@ import type { AgentMessage, TranscriptPartRecord } from '@shared/transcript/type
 import { applyPartsToProjection, createProjection, projectMessages, type TranscriptProjection } from '@shared/transcript/projection'
 import { useArtifactStore } from './artifact-store'
 import { isAgentDeletionRefusal, type AgentDeletionResult } from '@shared/agent-deletion'
+import { ipcErrorReason } from '@/lib/ipc-error'
 import { isAgentStatusHeartbeat } from '@shared/activity'
 import { recordAgentStatus } from '@/lib/activity/session-activity-adapter'
 
@@ -384,7 +385,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         return result
       } catch (err) {
         set({ error: String(err) })
-        return { refused: String(err instanceof Error ? err.message : err).replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '') }
+        return { refused: ipcErrorReason(err) }
       }
     },
 

@@ -222,6 +222,7 @@ export function AgentsSettings() {
                         onClick={() => setDeleting(agent)}
                         className="text-destructive hover:text-destructive"
                         title="Delete"
+                        aria-label={`Delete ${agent.name}`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>

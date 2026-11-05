@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { AlertTriangle, Check, Mic, X } from 'lucide-react'
+import { AlertTriangle, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { selectVoiceReady, useVoiceStore } from '@/stores/voice-store'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
@@ -8,10 +8,12 @@ import type { VoiceCandidate } from '@shared/voice'
 const RESULT_VISIBLE_MS = 6000
 
 /**
- * The in-app voice surface (design §5.3 and §5.5):
- *  - a listening indicator,
- *  - a live transcript bubble,
- *  - an explicit confirmation card for every action that needs one.
+ * The in-app voice surface (design §5.3 and §5.5): an explicit confirmation card
+ * for every action that needs one, and the outcome of a voice action.
+ *
+ * Listening draws nothing here. The microphone button lights up and stops the
+ * turn, and the one in the top bar does that for every turn, so a bubble only
+ * covered the controls under it.
  *
  * Confirmation is always visual. A spoken "yes" never approves anything, so a
  * mis-heard word cannot start or approve work on its own.
@@ -24,17 +26,11 @@ export function VoiceOverlay() {
   // Hidden until the optional runtime is installed and voice is switched on.
   const ready = useVoiceStore(selectVoiceReady)
   const state = useVoiceStore((s) => s.state)
-  const partial = useVoiceStore((s) => s.partial)
-  // Commander voice mode draws its own listening pill with the half-heard
-  // words. Showing them here as well would print every word twice (#83).
-  const captionsElsewhere = useVoiceStore((s) => s.captionOwner !== null)
-  const level = useVoiceStore((s) => s.level)
   const confirmation = useVoiceStore((s) => s.confirmation)
   const result = useVoiceStore((s) => s.result)
   const confirm = useVoiceStore((s) => s.confirm)
   const dismiss = useVoiceStore((s) => s.dismiss)
   const cancel = useVoiceStore((s) => s.cancel)
-  const endTurn = useVoiceStore((s) => s.endTurn)
   const clearResult = useVoiceStore((s) => s.clearResult)
   // Nothing is drawn while an answer is read, but Escape must still stop it.
   const speaking = useVoiceStore((s) => s.speaking)
@@ -70,66 +66,13 @@ export function VoiceOverlay() {
 
   if (!ready) return null
 
-  const listening = state === 'listening'
-  const transcribing = state === 'transcribing'
-  const loudness = Math.min(Math.max(level, 0), 1)
-  const showBubble = !commanderOwnsVoice && !captionsElsewhere && (listening || transcribing || Boolean(partial))
-  if (!showBubble && !confirmation && !result) return null
+  if (!confirmation && !result) return null
 
   return (
     <div
       className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex flex-col items-center gap-2 px-4"
       data-testid="voice-overlay"
     >
-      {showBubble && (
-        <div className="pointer-events-auto flex max-w-xl items-center gap-3 rounded-2xl border border-border bg-card/95 px-4 py-2.5 shadow-lg backdrop-blur">
-          {/* The halo follows the voice in both light and size. The size was
-              damped right down at one point and the movement became
-              invisible, which is worse than restless. */}
-          <span className="relative flex h-6 w-6 items-center justify-center" data-testid="voice-level">
-            <span
-              className="absolute inset-0 rounded-full bg-primary transition-all duration-75"
-              style={{
-                transform: `scale(${listening ? 0.7 + loudness * 1.0 : 0.7})`,
-                opacity: listening ? 0.12 + loudness * 0.68 : 0.12,
-              }}
-              aria-hidden
-            />
-            <Mic
-              className="relative h-3.5 w-3.5 text-primary transition-opacity duration-75"
-              style={{ opacity: listening ? 0.5 + loudness * 0.5 : 1 }}
-            />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              {/* One word for one state. "Listening — pause to send" read as
-                  an instruction to do something, when it only described what
-                  happens next by itself. */}
-              {transcribing ? 'Writing the words' : 'Listening'}
-            </p>
-            {/* Only the words being spoken now. A sentence that was already
-                sent is in the transcript above, and repeating it here says
-                the same thing twice. */}
-            <p className="truncate text-sm text-foreground" data-testid="voice-transcript">
-              {partial || (transcribing ? 'One moment…' : 'Speak now')}
-            </p>
-          </div>
-          {listening && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-              onClick={() => void endTurn()}
-              title="Stop listening. Escape throws the words away instead."
-              aria-label="Stop listening"
-              data-testid="voice-stop"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      )}
-
       {confirmation && (
         <div
           className="pointer-events-auto w-full max-w-xl rounded-2xl border border-yellow-500/40 bg-card/98 p-4 shadow-xl backdrop-blur"
