@@ -60,6 +60,15 @@ describe('voice store — words heard while reading', () => {
     return vi.spyOn(voicePlayback, 'stop')
   }
 
+  it.each(['Mm.', 'Thank you.'])('keeps reading through %s, which will not be sent', async (text) => {
+    const stop = await readingWithTurnOpen()
+
+    onPartial({ turnId: 'turn-1', turnEpoch: useVoiceStore.getState().turnEpoch, text })
+
+    expect(stop).not.toHaveBeenCalled()
+    expect(useVoiceStore.getState().partial).toBe(text)
+  })
+
   it('stops reading as soon as any word is recognised', async () => {
     const stop = await readingWithTurnOpen()
 

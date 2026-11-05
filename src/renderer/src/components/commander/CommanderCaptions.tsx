@@ -21,8 +21,9 @@ export function useCommanderCaption(presentation: CallPresentation) {
   const words = user.partial.trim() || user.final.trim() || call.userCaption
   const spoken = presentation.state === 'speaking' && assistant.speaking
   const textReply = presentation.textOnly && !user.partial.trim() ? streaming?.text : ''
-  const text = spoken ? assistant.text : textReply || (presentation.state === 'interrupted' ? '(interrupted)' : words || (call.status === 'starting' ? 'Starting voice conversation…' : call.status === 'live' ? call.micMode === 'push-to-talk' && !call.turnId ? 'Hold Space to talk' : presentation.label : ''))
-  return { text, speaker: spoken || textReply ? 'Commander' : words ? 'You' : 'Voice', partial: !!user.partial, spoken }
+  const reply = words ? '' : call.replyCaption
+  const text = spoken ? assistant.text : textReply || (presentation.state === 'interrupted' ? '(interrupted)' : words || reply || (call.status === 'starting' ? 'Starting voice conversation…' : call.status === 'live' ? call.micMode === 'push-to-talk' && !call.turnId ? 'Hold Space to talk' : presentation.label : ''))
+  return { text, speaker: spoken || textReply || reply ? 'Commander' : words ? 'You' : 'Voice', partial: !!user.partial, spoken }
 }
 
 export type CommanderCaption = ReturnType<typeof useCommanderCaption>

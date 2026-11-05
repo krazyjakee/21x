@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const hotkey = vi.hoisted(() => ({ fire: null as ((event: { action: string }) => void) | null }))
+const segment = vi.hoisted(() => ({
+  fire: null as ((event: { turnId: string; turnEpoch: string | null; text: string; index: number }) => void) | null,
+}))
 
 vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc-client')>()),
@@ -12,6 +15,12 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
         hotkey.fire = cb
         return () => {
           hotkey.fire = null
+        }
+      },
+      onSegment: (cb: NonNullable<typeof segment.fire>) => {
+        segment.fire = cb
+        return () => {
+          segment.fire = null
         }
       },
     } as Record<string, unknown>,
@@ -28,12 +37,19 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useVoiceControl } from './use-voice-control'
 import { useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
-import { __resetCommanderCall, useCommanderCallStore } from '@/stores/commander-call-store'
+import {
+  __resetCommanderCall,
+  bindCommanderCallDriver,
+  COMMANDER_VOICE_COMPOSER_KEY,
+  useCommanderCallStore,
+  type CommanderCallDriver,
+} from '@/stores/commander-call-store'
 import {
   CAPTAIN_COMPOSER_KEY,
   clearDictationTarget,
   getActiveComposer,
   registerComposer,
+  setActiveComposer,
 } from '@/lib/voice-dictation-target'
 
 /**
@@ -66,6 +82,58 @@ beforeEach(() => {
     setContextProvider: vi.fn() as never,
   })
   ;(window as unknown as { electronAPI: unknown }).electronAPI = { voice: {}, ui: {} }
+})
+
+describe('a sentence heard during a Commander call', () => {
+  function liveCall(micMode: 'open-mic' | 'push-to-talk' = 'open-mic'): CommanderCallDriver {
+    const driver: CommanderCallDriver = {
+      setActive: vi.fn(async () => undefined),
+      openMicrophone: vi.fn(async () => 'mic'),
+      closeMicrophone: vi.fn(),
+      stopPlayback: vi.fn(),
+      bargeIn: vi.fn(async () => undefined),
+      send: vi.fn(async () => undefined),
+    }
+    bindCommanderCallDriver(driver)
+    useCommanderCallStore.setState({ status: 'live', sessionId: 's1', turnId: 'mic', micMode })
+    useVoiceStore.setState({ turnId: 'mic', turnEpoch: 'epoch', partial: 'Half a sent', testTranscript: '' })
+    render(<Harness />)
+    return driver
+  }
+
+  it('is sent once even when the call has lost its private composer', () => {
+    const driver = liveCall()
+
+    segment.fire?.({ turnId: 'mic', turnEpoch: 'epoch', text: 'Where are we?', index: 1 })
+
+    expect(driver.send).toHaveBeenCalledExactlyOnceWith('s1', 'Where are we?')
+    expect(useCommanderCallStore.getState().userCaption).toBe('Where are we?')
+    expect(useVoiceStore.getState()).toMatchObject({ partial: '', testTranscript: '' })
+  })
+
+  it('goes through the composer alone when the composer is there', () => {
+    const driver = liveCall()
+    const field = document.createElement('textarea')
+    document.body.append(field)
+    const submit = vi.fn()
+    registerComposer(COMMANDER_VOICE_COMPOSER_KEY, { getField: () => field, submit, focusOnInsert: false })
+    setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
+
+    segment.fire?.({ turnId: 'mic', turnEpoch: 'epoch', text: 'Where are we?', index: 1 })
+
+    expect(submit).toHaveBeenCalledOnce()
+    expect(driver.send).not.toHaveBeenCalled()
+    field.remove()
+  })
+
+  it('does not change what push-to-talk does with a lost composer', () => {
+    const driver = liveCall('push-to-talk')
+
+    segment.fire?.({ turnId: 'mic', turnEpoch: 'epoch', text: 'Held sentence.', index: 1 })
+
+    expect(driver.send).not.toHaveBeenCalled()
+    expect(useVoiceStore.getState().testTranscript).toBe('Held sentence.')
+  })
 })
 
 describe('the global shortcut', () => {

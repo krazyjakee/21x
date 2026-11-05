@@ -232,6 +232,35 @@ describe('speaking the reply as it streams', () => {
     expect(worker.appended).toEqual(['I asked the Captain.'])
   })
 
+  it('closes a passage that opens after its turn was cancelled', async () => {
+    let open: (opened: boolean) => void = () => {}
+    const speech = {
+      beginStreamingAnswer: vi.fn(() => new Promise<boolean>((resolve) => { open = resolve })),
+      pushStreamingAnswer: vi.fn(),
+      endStreamingAnswer: vi.fn(),
+      speak: vi.fn(async () => false),
+      interrupt: vi.fn(),
+      stop: vi.fn(),
+      streamingTaskId: null as string | null,
+      currentTaskId: null,
+    }
+    const commander = new FakeCommander()
+    const voice = new CommanderVoice({ commander, speech })
+    voice.setActiveSession('s1')
+
+    start(commander, 's1', 't1')
+    delta(commander, 's1', 't1', 'I will check. ')
+    voice.bargeIn('s1')
+    expect(speech.stop).not.toHaveBeenCalled()
+
+    speech.streamingTaskId = commanderVoiceKey('s1')
+    open(true)
+    await flush()
+
+    expect(speech.stop).toHaveBeenCalledExactlyOnceWith('cancelled')
+    expect(speech.pushStreamingAnswer).not.toHaveBeenCalled()
+  })
+
   it('opens nothing for a turn that writes no reply', async () => {
     const { worker, speech, commander, voice } = setup()
     await speech.prepare()

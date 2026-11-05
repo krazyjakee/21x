@@ -14,7 +14,7 @@ import {
   VOICE_DEFAULT_SHORTCUT,
   VOICE_EVENTS,
   isVoiceNoise,
-  isVoiceThanks,
+  isVoiceDropped,
   VOICE_SETTING_KEYS,
   canTransition,
   type VoiceActionOutcome,
@@ -498,8 +498,12 @@ export class VoiceSessionManagerCore {
     const words = text.trim()
     // Very short output, or only "Mm." / "Hmm." / "Thank you.", is noise, not a
     // sentence. Sending it would be worse than dropping it, because the
-    // renderer submits it straight away.
-    if (isVoiceNoise(words) || isVoiceThanks(words)) return
+    // renderer submits it straight away. No segment follows, so the words on the
+    // caption are taken off here or they would sit there until the next sentence.
+    if (isVoiceDropped(words)) {
+      if (this.partial) this.onPartial(turnId, '')
+      return
+    }
     this.partial = ''
     this.segmentsSent += 1
     this.options.notify(VOICE_EVENTS.segment, {

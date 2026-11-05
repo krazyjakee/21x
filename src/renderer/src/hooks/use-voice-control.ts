@@ -131,6 +131,14 @@ export function useVoiceControl(): void {
           void voiceApi.expectAnswer(turnId, taskIdOfComposer(composer))
         }
       } else {
+        const call = useCommanderCallStore.getState()
+        if (call.status === 'live' && call.micMode === 'open-mic' && call.turnId === turnId) {
+          // The call lost its private composer (Test the microphone clears the
+          // active one). `testTranscript` shows nowhere in a call, so send here.
+          call.sendTranscript(text)
+          useVoiceStore.setState({ partial: '' })
+          return
+        }
         // No composer to send from — show it instead of losing it.
         useVoiceStore.setState({ testTranscript: text })
       }
