@@ -644,7 +644,12 @@ function useNativeAgentAutoStart(props: UseAgentAutoStartProps) {
     const interval = setInterval(reconcile, 60_000)
     const current = { reconcile }; cohort.current = current
     remember(host.subscribeConnection(() => { if (!scope.isCurrent()) retire() }))
-    remember(useProjectStore.subscribe((state, previous) => { if (state.currentProjectId !== previous.currentProjectId) retire() }))
+    remember(useProjectStore.subscribe((state, previous) => {
+      if (state.currentProjectId === previous.currentProjectId) return
+      // A flip is only meant to look, and running work carries on, so this is easy to miss.
+      if (live) latest.current.showToast('AutoRun turned off because the project changed. Turn it back on in the sidebar to keep going.')
+      retire()
+    }))
     remember(useAgentSchedulerStore.subscribe(state => { if (!state.isEnabled) retire() }))
     remember(onTaskCreated(reconcile))
     remember(onTaskUpdated(event => {

@@ -105,7 +105,7 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'agentSession:sendByTaskId': [task, 'Fixture continuation', [], 'delivery_fixture_two'],
   'agentSession:abort': [session], 'agentSession:stop': [session], 'agentSession:stopByTaskId': [task], 'agentSession:switchAgent': [task, 'agent_other'],
   'agentSession:approve': [session, false, 'Fixture answer', 'question', 'native/request:fixture'],
-  'agent:getStartQueue': [], 'agent:getStartRecoveryState': [task], 'agentSession:getRawTranscript': [task],
+  'agent:getStartQueue': [], 'agent:getStartRecoveryState': [task], 'agentSession:getRawTranscript': [task], 'agentSession:getDeliveryState': [task, 'delivery_fixture_one'],
   'captainRuntime:get': [project], 'captainRuntime:switch': [project, agent], 'captainRuntime:retry': [project], 'captainRuntime:rollback': [project],
   'commander:listSessions': [{ search: 'Fixture', includeArchived: true }], 'commander:createSession': [{ title: 'Fixture Commander' }],
   'commander:renameSession': [session, 'Renamed fixture'], 'commander:archiveSession': [session, false], 'commander:listMessages': [session],
@@ -304,7 +304,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 244 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 245 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

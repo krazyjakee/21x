@@ -123,6 +123,9 @@ export interface AgentStartQueueChangedEvent {
   failed?: { taskId: string; error: string }
 }
 
+/** A message's progress through main's outbox. Only `acknowledged` means the backend took it. */
+export type AgentDeliveryState = 'pending' | 'claimed' | 'accepted' | 'acknowledged' | 'failed' | 'timed_out' | 'cancelled'
+
 export interface AgentSessionSuccessResult {
   success: boolean
 }
@@ -327,6 +330,7 @@ interface ElectronAPI {
     send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[], deliveryId?: string) => Promise<AgentSessionSuccessResult & { newSessionId?: string }>
     sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[], deliveryId?: string) => Promise<AgentSessionSuccessResult & { sessionId: string | null; newSessionId?: string }>
     approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string) => Promise<AgentSessionSuccessResult>
+    getDeliveryState?: (taskId: string, deliveryId: string) => Promise<AgentDeliveryState | null>
     getRawTranscript: (taskId: string) => Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>>
     getTranscriptSnapshot: (taskId: string, sinceSeq?: number) => Promise<TranscriptPartRecord[]>
     getTranscriptDelta: (taskId: string, sinceRev: number) => Promise<{ parts: TranscriptPartRecord[]; maxRev: number }>

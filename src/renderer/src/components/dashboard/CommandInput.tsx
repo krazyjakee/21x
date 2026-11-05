@@ -6,17 +6,21 @@ import { useAgentStore } from '@/stores/agent-store'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { registerComposer, DASHBOARD_COMPOSER_KEY, clearDictatedText } from '@/lib/voice-dictation-target'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
+import { keepComposerDraft, readComposerDraft } from '@/lib/composer-drafts'
 
 /** Names this composer, so a spoken sentence reaches this box and no other. */
 const VOICE_COMPOSER_KEY = DASHBOARD_COMPOSER_KEY
 
 interface CommandInputProps {
-  onSendToCaptain: (message: string) => void
+  /** Returns false when it could not take the message, which then stays in the box. */
+  onSendToCaptain: (message: string) => boolean | void
   onCreateTask: (text: string) => void
+  /** Keeps unsent text per project; the box is remounted for each one. */
+  draftKey?: string
 }
 
-export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProps) {
-  const [text, setText] = useState('')
+export function CommandInput({ onSendToCaptain, onCreateTask, draftKey }: CommandInputProps) {
+  const [text, setText] = useState(() => readComposerDraft(draftKey)?.text ?? '')
   const agents = useAgentStore((state) => state.agents)
   const [chosenAgentId, setChosenAgentId] = useState<string | null>(null)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
@@ -25,6 +29,14 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
   // The box talks to the current project's Captain (#55); say which.
   const project = useCurrentProject()
   const captainName = project ? `Captain (${project.name})` : 'Captain'
+
+  useEffect(() => {
+    if (!draftKey) return undefined
+    // Held directly: the ref is already detached when this cleanup runs.
+    const field = textareaRef.current
+    if (field?.value) fitTextarea(field, 120)
+    return () => keepComposerDraft(draftKey, { text: field?.value ?? '' })
+  }, [draftKey])
 
   useEffect(() => {
     if (useAgentStore.getState().agents.length === 0) void useAgentStore.getState().fetchAgents()
@@ -63,7 +75,7 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
     // expectation straight after this, so the conversation loop is unaffected;
     // a typed one does not, and its reply stays silent.
     void voiceApi.answerNotExpected()
-    onSendToCaptain(trimmed)
+    if (onSendToCaptain(trimmed) === false) return
     setText('')
     if (textareaRef.current) {
       textareaRef.current.value = ''

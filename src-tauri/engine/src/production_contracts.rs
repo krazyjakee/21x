@@ -213,6 +213,7 @@ pub const COMMANDS: &[&str] = &[
     "agent:getStartQueue",
     "agent:getStartRecoveryState",
     "agentSession:getRawTranscript",
+    "agentSession:getDeliveryState",
     "captainRuntime:get",
     "captainRuntime:switch",
     "captainRuntime:retry",
@@ -1977,6 +1978,7 @@ fn fields(operation: &str) -> Option<(&'static [&'static str], &'static [&'stati
         | "agent:getStartRecoveryState"
         | "agentSession:getRawTranscript"
         | "agentSession:stopByTaskId" => (&["taskId"], &[]),
+        "agentSession:getDeliveryState" => (&["taskId", "deliveryId"], &[]),
         "agentSession:resume" => (&["agentId", "taskId", "sessionId"], &[]),
         "agentSession:send" => (
             &["sessionId", "message"],
@@ -3894,6 +3896,21 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
                 && result["success"].is_boolean()
                 && (result["sessionId"].is_null() || id(&result["sessionId"]))
         }
+        "agentSession:getDeliveryState" => {
+            result.is_null()
+                || result.as_str().is_some_and(|state| {
+                    [
+                        "pending",
+                        "claimed",
+                        "accepted",
+                        "acknowledged",
+                        "failed",
+                        "timed_out",
+                        "cancelled",
+                    ]
+                    .contains(&state)
+                })
+        }
         "agentSession:send" => {
             object(result, &["success"], &["newSessionId"]) && result["success"].is_boolean()
         }
@@ -5653,7 +5670,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 244);
+        assert_eq!(COMMANDS.len(), 245);
         assert!(valid_request(
             "agent:deletionImpact",
             &json!({"id":"agent_one","alsoRemoving":["agent_two"]})

@@ -51,6 +51,18 @@ it.each(['pagehide','project-return','unmount','disable'] as const)('retires nat
  if(mode==='disable')act(() => scheduler.getState().disable())
  await tick(); expect(calls('agentSession:start')).toHaveLength(0); expect(calls('db:updateTask')).toHaveLength(0)
 })
+it('says so when a project change turns AutoRun off, because it looks like a harmless flip', async () => {
+ mount()
+ act(() => projects.setState({ currentProjectId: 'other' }))
+ expect(toast).toHaveBeenCalledTimes(1)
+ expect(toast).toHaveBeenCalledWith(expect.stringContaining('AutoRun turned off'))
+ expect(scheduler.getState().isEnabled).toBe(false)
+})
+it('does not announce a change the user made to AutoRun itself', async () => {
+ mount()
+ act(() => scheduler.getState().disable())
+ expect(toast).not.toHaveBeenCalled()
+})
 it('stops future native requests after disable while preserving an already admitted raw start', async () => {
  const raw=held<unknown>(); handlers.set('agentSession:start',()=>raw.promise); canonical.push(task({id:'task-2',status:TaskStatus.NotStarted,agent_id:'agent-1'})); mount(); await tick(); expect(calls('agentSession:start')).toHaveLength(1)
  act(()=>scheduler.getState().disable()); await act(async()=>raw.resolve({sessionId:'accepted-session'})); await tick(); expect(calls('agentSession:start')).toHaveLength(1); expect(agents.getState().sessions.size).toBe(0); expect(calls('agentSession:stop')).toHaveLength(0)

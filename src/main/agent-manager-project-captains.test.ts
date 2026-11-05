@@ -584,6 +584,47 @@ describe('per-project Captain conversations', () => {
     expect(new DeliveryStore(db).getByKey('bounded-retry')).toMatchObject({ state: 'failed', attemptCount: 5 })
   })
 
+  it('delivers a message main gave up on once a person sends it again', async () => {
+    const manager = newManager(new FakeAdapter())
+    const send = vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new Error('backend unavailable'))
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'held-by-panel')).rejects.toThrow('backend unavailable')
+    }
+    send.mockResolvedValue({})
+
+    manager.reopenGaveUpDelivery('held-by-panel')
+    await manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'held-by-panel')
+
+    expect(new DeliveryStore(db).getByKey('held-by-panel')).toMatchObject({ state: 'acknowledged' })
+  })
+
+  it('reports what became of a message, to the task it belongs to', async () => {
+    const manager = newManager(new FakeAdapter())
+    const send = vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new Error('backend unavailable'))
+    await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'looked-up')).rejects.toThrow('backend unavailable')
+
+    expect(manager.getDeliveryState(alphaCaptain, 'looked-up')).toBe('pending')
+    expect(manager.getDeliveryState(betaCaptain, 'looked-up')).toBeNull()
+    expect(manager.getDeliveryState(alphaCaptain, 'never-seen')).toBeNull()
+
+    send.mockResolvedValue({})
+    await manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'looked-up')
+    expect(manager.getDeliveryState(alphaCaptain, 'looked-up')).toBe('acknowledged')
+  })
+
+  it('leaves alone a delivery that was not given up on', async () => {
+    const manager = newManager(new FakeAdapter())
+    vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new Error('backend unavailable'))
+    await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'still-retrying')).rejects.toThrow('backend unavailable')
+    const before = new DeliveryStore(db).getByKey('still-retrying')
+
+    manager.reopenGaveUpDelivery('still-retrying')
+    manager.reopenGaveUpDelivery('never-seen')
+    manager.reopenGaveUpDelivery(undefined)
+
+    expect(new DeliveryStore(db).getByKey('still-retrying')).toEqual(before)
+  })
+
   it('starts one Captain for concurrent durable messages without a prewarm owner', async () => {
     const fake = new FakeAdapter({ sessionIds: ['one-start'] })
     const manager = newManager(fake)

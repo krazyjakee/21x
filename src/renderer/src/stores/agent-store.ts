@@ -445,8 +445,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const owner = {}
       sendReceipts.set(taskId, { owner, timer: setTimeout(() => clearPendingSend(taskId, owner), 120_000) })
       set((state) => {
+        // A first message has no row yet, and this flag is what shows "Starting agent…".
         const s = state.sessions.get(taskId)
-        if (!s) return state
+          ?? { sessionId: null, agentId: '', taskId, status: SessionStatus.IDLE, messages: projectMessages(projections.get(taskId)) }
         return { sessions: new Map(state.sessions).set(taskId, { ...s, pendingSend: true }) }
       })
       return owner

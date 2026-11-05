@@ -46,7 +46,7 @@ import { BranchDiffCache, ResourceMonitor, agentCap, autoLowerForPressure, findF
 import { effectiveLevel, recommendLevel, type ProjectConcurrencyState, type ResourcePressure } from '../shared/concurrency'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events-core'
 import { CaptainRuntimeStore } from './sessions/runtime-store'
-import { DeliveryStore, type DeliveryRecord } from './sessions/delivery-store'
+import { DeliveryStore, type DeliveryRecord, type DeliveryState } from './sessions/delivery-store'
 import { DurableStartQueueStore, type DurableQueuedStartInfo } from './sessions/start-queue-store'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
 import { classifyProviderFailure, PROVIDER_CONTINUATION, PROVIDER_MAX_RETRIES, type ProviderFailure } from './agent-manager/provider-failure'
@@ -5949,6 +5949,30 @@ export class AgentManager extends EventEmitter {
         this.scheduleStartQueueDrain()
       }, delay)
     }
+  }
+
+  /**
+   * For the user-facing send surfaces only. A person sending a held message
+   * again is a new request, so a delivery that used up its bounded retries gets
+   * another set. It is not in `sendMessage` because internal senders replay
+   * their own stable keys there, and a failed wake must stay failed.
+   */
+  reopenGaveUpDelivery(deliveryId: string | undefined): void {
+    if (!deliveryId || !this.db.db || typeof this.db.db.prepare !== 'function') return
+    const record = this.deliveries.getByKey(deliveryId)
+    if (record?.kind === 'agent_message' && record.state === 'failed') this.deliveries.reopen(record.id)
+  }
+
+  /**
+   * What became of a message sent under this delivery id, or null when there is
+   * no such message for this task. The transcript cannot answer that: a failed
+   * attempt writes the user part too, before the backend has accepted anything.
+   */
+  getDeliveryState(taskId: string, deliveryId: string): DeliveryState | null {
+    if (!this.db.db || typeof this.db.db.prepare !== 'function') return null
+    const record = this.deliveries.getByKey(deliveryId)
+    const owner = this.taskGroupExecution(taskId)?.id ?? taskId
+    return record?.kind === 'agent_message' && record.taskId === owner ? record.state : null
   }
 
   /**

@@ -7,7 +7,7 @@ import { hasExactKeys, isRecord, ServiceProtocolError, type JsonValue } from './
 export const PRODUCTION_AGENT_OPERATIONS = [
   'agentSession:start', 'agentSession:startTask', 'agentSession:resume', 'agentSession:send', 'agentSession:sendByTaskId',
   'agentSession:abort', 'agentSession:stop', 'agentSession:stopByTaskId', 'agentSession:switchAgent', 'agentSession:approve',
-  'agent:getStartQueue', 'agent:getStartRecoveryState', 'agentSession:getRawTranscript',
+  'agent:getStartQueue', 'agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'agentSession:getDeliveryState',
   'captainRuntime:get', 'captainRuntime:switch', 'captainRuntime:retry', 'captainRuntime:rollback'
 ] as const
 export type ProductionAgentOperation = typeof PRODUCTION_AGENT_OPERATIONS[number]
@@ -21,6 +21,7 @@ const object = (value: unknown, required: readonly string[], allowed: readonly s
 const attachment = (value: unknown): boolean => object(value, ['id', 'filename', 'size', 'mime_type']) && isDatabaseId(value.id) && text(value.filename, 256) && !!value.filename && integer(value.size) && text(value.mime_type, 128)
 const attachments = (value: unknown): boolean => Array.isArray(value) && value.length <= PRODUCTION_AGENT_LIMITS.attachments && value.every(attachment) && new Set(value.map(item => item.id)).size === value.length
 const reasons = ['agent_limit', 'global_limit', 'global_pause', 'project_paused', 'project_daily_cap', 'project_limit', 'concurrency_level', 'file_overlap', 'recovery', 'dependency', 'agent_unavailable']
+const deliveryStates = ['pending', 'claimed', 'accepted', 'acknowledged', 'failed', 'timed_out', 'cancelled']
 const queueStates = ['queued', 'retrying', 'claimed', 'starting', 'started', 'recovered', 'failed', 'cancelled']
 const nullableText = (value: unknown): boolean => value === null || text(value, 128)
 const queueEntry = (value: unknown): boolean => object(value, AGENT_QUEUE_FIELDS) &&
@@ -110,6 +111,7 @@ const schemas: Record<ProductionAgentOperation, Schema> = {
   'agent:getStartQueue': { fields: [], checks: [], required: 0, result: queue, project: projectProductionAgentQueue },
   'agent:getStartRecoveryState': { ...one('taskId', value => value === null || queueEntry(value)), project: value => value === null ? null : (projectProductionAgentQueue([value]) as JsonValue[])[0] },
   'agentSession:getRawTranscript': { ...one('taskId', transcript), project: value => stripUndefined(value) },
+  'agentSession:getDeliveryState': { fields: ['taskId', 'deliveryId'], checks: [isDatabaseId, isAgentRequestId], required: 2, result: value => value === null || deliveryStates.includes(value as string) },
   'captainRuntime:get': { ...one('projectId', value => value === null || runtime(value)), project: value => value === null ? null : projectRuntime(value) },
   'captainRuntime:switch': { fields: ['projectId', 'agentId'], checks: [isDatabaseId, isDatabaseId], required: 2, result: runtime, project: projectRuntime },
   'captainRuntime:retry': { ...one('projectId', runtime), project: projectRuntime }, 'captainRuntime:rollback': { ...one('projectId', runtime), project: projectRuntime }

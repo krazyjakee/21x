@@ -112,6 +112,23 @@ describe('current project scoping', () => {
     expect(useUIStore.getState().dashboardPreviewTaskId).toBeNull()
   })
 
+  it('remembers leaving the launch project, even on the way back to it', () => {
+    useProjectStore.setState({ leftLaunchProject: false })
+
+    useProjectStore.getState().setCurrentProject('p2')
+    useProjectStore.getState().setCurrentProject(DEFAULT_PROJECT_ID)
+
+    expect(useProjectStore.getState().leftLaunchProject).toBe(true)
+  })
+
+  it('does not count the saved project arriving with the first load as leaving', () => {
+    useProjectStore.setState({ isLoaded: false, leftLaunchProject: false })
+
+    useProjectStore.setState({ currentProjectId: 'p2', isLoaded: true })
+
+    expect(useProjectStore.getState().leftLaunchProject).toBe(false)
+  })
+
   it('persists the selection', () => {
     useProjectStore.getState().setCurrentProject('p2')
     expect(api.settings.set).toHaveBeenCalledWith(CURRENT_PROJECT_SETTING, 'p2')

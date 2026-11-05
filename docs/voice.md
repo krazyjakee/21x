@@ -323,6 +323,11 @@ It costs one idle agent process, so it can be switched off in
 **Settings → General → Start Captain at launch**. Warming failure is silent:
 the first message starts the session exactly as it did before.
 
+Warming covers the project the app opened on and nothing else. Once the app moves
+to another project it stops for good: looking at a project, or coming back to a
+Captain that has no live session, starts nothing. That Captain's first message
+starts it.
+
 The Dashboard box is a **controlled** React field. Its send reads the DOM value,
 not the React state, because dictation writes and sends in the same tick and
 React has not re-rendered by then. A send that read the state would post the
