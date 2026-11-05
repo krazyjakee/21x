@@ -37,6 +37,7 @@ fn main() {
             "engine_invoke",
             "engine_status",
             "desktop_invoke",
+            "stop_using_old_folder",
         ]),
     ))
     .expect("failed to build restricted Tauri feasibility host");

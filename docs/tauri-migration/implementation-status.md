@@ -6,6 +6,8 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+2026-11-05 shared profiles stay locked or refuse. A Tauri profile that shares an Electron profile's folders now keeps that share when the marker or the Electron database goes, and refuses in plain words when the folder itself has gone, with a Stop using the old folder action for a folder deleted on purpose. See [cross-host profile ownership](profile-lock.md).
+
 2026-11-05 live artifact and recovery notices. `artifact:updated` has an exact codec (`src/shared/artifact-event-codecs.ts`) and a matching validator in `production_contracts.rs`, and both it and `agent:recoveryStateChanged` are bound in `NATIVE_EVENT_BINDINGS`. Both are advisory (`dropInvalid`): the task's durable reads remain the truth, so `encodePublishableOwnerEvent` drops a bad payload before it takes a sequence number, and `DesktopClient` skips one that still arrives. Every other event keeps its fatal contract. The Rust validators must never be stricter than these codecs, because a rejection there ends the service connection. `onAgentRecoveryStateChanged` is native only: the Electron preload has never exposed that event.
 
 2026-11-04 live voice: the preview now records, recognises, runs spoken commands and speaks answers, matching Electron. The WebView captures the microphone (audio-only, application page only; camera, screen and WebRTC stay off). The service binds turns, confirmations, spoken answers and Commander voice mode to the existing `VoiceSessionManagerCore`, the runtime installs with npm under the bundled Node, and Settings shows real status and install output. Global shortcut and custom model folders are still unbound. See [live voice](voice-live-turns.md).

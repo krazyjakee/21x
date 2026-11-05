@@ -443,6 +443,27 @@ fn engine_status(
             "phase":state.failure.as_ref().and_then(|error|error.startup_phase)}}),
     )
 }
+/// The answer to one refusal, so there is nothing to choose and no path to pass.
+/// The service has already stopped; the next launch's service clears the row.
+#[tauri::command]
+fn stop_using_old_folder(
+    window: WebviewWindow,
+    state: State<'_, ProductionState>,
+) -> Result<bool, EngineError> {
+    authorize(&window)?;
+    if state.engine.is_some()
+        || state.failure.as_ref().map(|error| error.code) != Some("ELECTRON_FOLDER_MISSING")
+    {
+        return Err(EngineError::new("UNAUTHORIZED"));
+    }
+    let base = window
+        .app_handle()
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| EngineError::new("DISCONNECTED"))?;
+    let base = std::fs::canonicalize(base).map_err(|_| EngineError::new("DISCONNECTED"))?;
+    detach_legacy_marker(&base.join("profile")).map_err(|_| EngineError::new("DISCONNECTED"))
+}
 #[tauri::command]
 async fn desktop_invoke(
     window: WebviewWindow,
@@ -851,22 +872,37 @@ fn tune_webkit_rendering() {
 const PERSISTENT_PROFILE_ID: &str = "tauri-default";
 /// Records which Electron profile this profile was imported from.
 const LEGACY_MARKER: &str = ".legacy-profile-root";
-/// The real directory of an Electron profile, whatever it still holds.
+/// The marker's content once the user stops using the old folder. It is not a
+/// path, so it reads as no share, and the service clears the database row.
+const LEGACY_DETACHED: &str = "detached";
+#[derive(Debug, PartialEq)]
+enum Sharing {
+    Unshared,
+    Shared(PathBuf),
+    /// Its tasks' files belong in a folder that is not there. Sent to the service,
+    /// which refuses, so the user can answer it.
+    FolderMissing(PathBuf),
+}
+/// Where a shared Electron profile really is, whatever it still holds. A link
+/// counts: a folder moved elsewhere and linked back has not gone, and the lock is
+/// taken on the real path, so both apps still meet on the same file.
 fn electron_root(root: &std::path::Path) -> Option<PathBuf> {
-    let metadata = std::fs::symlink_metadata(root).ok()?;
-    (metadata.is_dir() && !metadata.file_type().is_symlink())
-        .then(|| std::fs::canonicalize(root).ok())
-        .flatten()
+    std::fs::canonicalize(root)
+        .ok()
+        .filter(|path| path.is_dir())
 }
 /// An Electron 21x profile directory with a database worth importing.
 fn electron_profile(root: &std::path::Path) -> Option<PathBuf> {
+    let metadata = std::fs::symlink_metadata(root).ok()?;
     let database = std::fs::symlink_metadata(root.join("21x.db")).ok()?;
-    database.is_file().then(|| electron_root(root)).flatten()
+    (metadata.is_dir() && !metadata.file_type().is_symlink() && database.is_file())
+        .then(|| std::fs::canonicalize(root).ok())
+        .flatten()
 }
 fn read_legacy_marker(profile_root: &std::path::Path) -> Option<PathBuf> {
     let bytes = std::fs::read(profile_root.join(LEGACY_MARKER)).ok()?;
     let path = PathBuf::from(String::from_utf8(bytes).ok()?);
-    path.is_absolute().then_some(path)
+    twentyonex_engine::production::host_path(&path).then_some(path)
 }
 /// The Electron profile this one shares folders with, which the service locks
 /// for the whole session. A profile that already has a database stays shared
@@ -881,13 +917,19 @@ fn shared_electron_root(
     profile_root: &std::path::Path,
     creating: bool,
     candidate: impl FnOnce() -> Option<PathBuf>,
-) -> std::io::Result<Option<PathBuf>> {
+) -> std::io::Result<Sharing> {
     let marked = read_legacy_marker(profile_root);
     if !creating {
-        return Ok(marked.as_deref().and_then(electron_root));
+        return Ok(match marked {
+            Some(path) => match electron_root(&path) {
+                Some(root) => Sharing::Shared(root),
+                None => Sharing::FolderMissing(path),
+            },
+            None => Sharing::Unshared,
+        });
     }
     if let Some(root) = marked.as_deref().and_then(electron_profile) {
-        return Ok(Some(root));
+        return Ok(Sharing::Shared(root));
     }
     let detected = candidate().and_then(|root| electron_profile(&root));
     let marker = profile_root.join(LEGACY_MARKER);
@@ -898,7 +940,37 @@ fn shared_electron_root(
             _ => {}
         },
     }
-    Ok(detected)
+    Ok(detected.map_or(Sharing::Unshared, Sharing::Shared))
+}
+fn write_detached(path: &std::path::Path) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(LEGACY_DETACHED.as_bytes())?;
+    file.sync_all()
+}
+/// Returns false, changing nothing, if the folder has come back since the
+/// refusal. Written to the side and renamed, so a failed write leaves the marker
+/// exactly as it was, and a link at the marker is replaced, not followed.
+fn detach_legacy_marker(profile_root: &std::path::Path) -> std::io::Result<bool> {
+    if read_legacy_marker(profile_root)
+        .as_deref()
+        .and_then(electron_root)
+        .is_some()
+    {
+        return Ok(false);
+    }
+    let staged = profile_root.join(format!("{LEGACY_MARKER}.detaching"));
+    // Only a crash at this step can have left one.
+    let _ = std::fs::remove_file(&staged);
+    let outcome = write_detached(&staged)
+        .and_then(|()| std::fs::rename(&staged, profile_root.join(LEGACY_MARKER)));
+    if outcome.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    outcome.map(|()| true)
 }
 /// Create a private directory, or accept an existing real directory (never a
 /// symlink), so a profile and its roots survive relaunches.
@@ -1016,7 +1088,7 @@ async fn start(
     // A profile imported from the Electron app keeps using that app's
     // workspaces, repositories and attachments in place: worktrees and stored
     // paths point there, and 28 GB of workspaces should not be copied.
-    let legacy_root = shared_electron_root(
+    let sharing = shared_electron_root(
         &profile_root,
         profile_intent == ProfileIntent::CreateNew,
         || {
@@ -1027,7 +1099,12 @@ async fn start(
         },
     )
     .map_err(|_| unavailable("DISCONNECTED", "production-profile"))?;
-    let data_root = legacy_root.clone().unwrap_or_else(|| profile_root.clone());
+    let (legacy_root, data_root) = match sharing {
+        Sharing::Unshared => (None, profile_root.clone()),
+        Sharing::Shared(root) => (Some(root.clone()), root),
+        // The service refuses before anything runs on these folders.
+        Sharing::FolderMissing(root) => (Some(root), profile_root.clone()),
+    };
     let descriptor = ProductionDescriptor {
         version: 1,
         kind: "production-private-launch".into(),
@@ -1288,7 +1365,11 @@ pub fn run() {
                 .open_js_links_on_click(false)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![engine_status, desktop_invoke])
+        .invoke_handler(tauri::generate_handler![
+            engine_status,
+            desktop_invoke,
+            stop_using_old_folder
+        ])
         .setup(move |app| {
             let native_work = NativeWorkOwner::default();
             let oauth = native_oauth::NativeOAuthOwner::default();
@@ -1665,7 +1746,7 @@ mod tests {
         let f = SharingFixture::new("first");
         f.electron_database();
         let shared = shared_electron_root(&f.profile, true, || Some(f.electron.clone())).unwrap();
-        assert_eq!(shared.as_ref(), Some(&f.electron));
+        assert_eq!(shared, Sharing::Shared(f.electron.clone()));
         assert_eq!(read_legacy_marker(&f.profile).as_ref(), Some(&f.electron));
     }
 
@@ -1675,7 +1756,7 @@ mod tests {
         f.electron_database();
         f.mark();
         let shared = shared_electron_root(&f.profile, true, || None).unwrap();
-        assert_eq!(shared.as_ref(), Some(&f.electron));
+        assert_eq!(shared, Sharing::Shared(f.electron.clone()));
     }
 
     #[test]
@@ -1683,7 +1764,7 @@ mod tests {
         let f = SharingFixture::new("database-gone");
         f.mark();
         let shared = shared_electron_root(&f.profile, false, || panic!("not a first launch"));
-        assert_eq!(shared.unwrap().as_ref(), Some(&f.electron));
+        assert_eq!(shared.unwrap(), Sharing::Shared(f.electron.clone()));
     }
 
     #[test]
@@ -1692,12 +1773,12 @@ mod tests {
         f.mark();
         assert_eq!(
             shared_electron_root(&f.profile, true, || None).unwrap(),
-            None
+            Sharing::Unshared
         );
         assert!(!f.marker().exists());
         assert_eq!(
             shared_electron_root(&f.profile, false, || None).unwrap(),
-            None
+            Sharing::Unshared
         );
     }
 
@@ -1705,8 +1786,131 @@ mod tests {
     fn a_fresh_profile_with_no_electron_profile_shares_nothing() {
         let f = SharingFixture::new("fresh");
         let shared = shared_electron_root(&f.profile, true, || Some(f.electron.clone())).unwrap();
-        assert_eq!(shared, None);
+        assert_eq!(shared, Sharing::Unshared);
         assert!(!f.marker().exists());
+    }
+
+    #[test]
+    fn a_shared_profile_whose_folder_went_is_sent_to_the_service_to_refuse() {
+        let f = SharingFixture::new("folder-gone");
+        f.mark();
+        std::fs::remove_dir_all(&f.electron).unwrap();
+        assert_eq!(
+            shared_electron_root(&f.profile, false, || None).unwrap(),
+            Sharing::FolderMissing(f.electron.clone())
+        );
+    }
+
+    #[test]
+    fn a_marker_the_descriptor_would_reject_is_not_a_share() {
+        let f = SharingFixture::new("invalid");
+        for marker in ["relative/profile", "/electron/../profile"] {
+            std::fs::write(f.marker(), marker).unwrap();
+            assert_eq!(
+                shared_electron_root(&f.profile, false, || None).unwrap(),
+                Sharing::Unshared
+            );
+        }
+    }
+
+    #[test]
+    fn stopping_the_share_reads_as_no_share_afterwards() {
+        let f = SharingFixture::new("stop");
+        f.mark();
+        std::fs::remove_dir_all(&f.electron).unwrap();
+        assert!(detach_legacy_marker(&f.profile).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(f.marker()).unwrap(),
+            LEGACY_DETACHED
+        );
+        assert_eq!(
+            shared_electron_root(&f.profile, false, || None).unwrap(),
+            Sharing::Unshared
+        );
+        assert!(!f.profile.join(format!("{LEGACY_MARKER}.detaching")).exists());
+    }
+
+    #[test]
+    fn a_failed_stop_leaves_the_marker_exactly_as_it_was() {
+        let f = SharingFixture::new("stop-failed");
+        f.mark();
+        std::fs::remove_dir_all(&f.electron).unwrap();
+        let blocked = f.profile.join(format!("{LEGACY_MARKER}.detaching"));
+        std::fs::create_dir_all(blocked.join("in-the-way")).unwrap();
+        assert!(detach_legacy_marker(&f.profile).is_err());
+        assert_eq!(read_legacy_marker(&f.profile).as_ref(), Some(&f.electron));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_replaces_a_link_at_the_marker_instead_of_following_it() {
+        let f = SharingFixture::new("stop-link");
+        let target = f.base.join("target");
+        std::fs::write(&target, "untouched").unwrap();
+        std::os::unix::fs::symlink(&target, f.marker()).unwrap();
+        assert!(detach_legacy_marker(&f.profile).unwrap());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "untouched");
+        assert!(!std::fs::symlink_metadata(f.marker())
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_moved_and_linked_back_is_present() {
+        let f = SharingFixture::new("linked");
+        let moved = f.base.join("bigger-drive");
+        std::fs::rename(&f.electron, &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, &f.electron).unwrap();
+        f.mark();
+        assert_eq!(
+            shared_electron_root(&f.profile, false, || None).unwrap(),
+            Sharing::Shared(std::fs::canonicalize(&moved).unwrap())
+        );
+        assert!(!detach_legacy_marker(&f.profile).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_nothing_is_a_missing_folder() {
+        let f = SharingFixture::new("dangling");
+        f.mark();
+        std::fs::remove_dir_all(&f.electron).unwrap();
+        std::os::unix::fs::symlink(f.base.join("gone"), &f.electron).unwrap();
+        assert_eq!(
+            shared_electron_root(&f.profile, false, || None).unwrap(),
+            Sharing::FolderMissing(f.electron.clone())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_first_import_still_needs_a_real_folder() {
+        let f = SharingFixture::new("import-link");
+        f.electron_database();
+        let link = f.base.join("link");
+        std::os::unix::fs::symlink(&f.electron, &link).unwrap();
+        let shared = shared_electron_root(&f.profile, true, || Some(link)).unwrap();
+        assert_eq!(shared, Sharing::Unshared);
+    }
+
+    #[test]
+    fn a_folder_that_came_back_is_not_stopped() {
+        let f = SharingFixture::new("back");
+        f.mark();
+        assert!(!detach_legacy_marker(&f.profile).unwrap());
+        assert_eq!(read_legacy_marker(&f.profile).as_ref(), Some(&f.electron));
+    }
+
+    #[test]
+    fn a_stopped_share_does_not_block_a_later_fresh_import() {
+        let f = SharingFixture::new("reimport");
+        f.electron_database();
+        std::fs::write(f.marker(), LEGACY_DETACHED).unwrap();
+        let shared = shared_electron_root(&f.profile, true, || Some(f.electron.clone())).unwrap();
+        assert_eq!(shared, Sharing::Shared(f.electron.clone()));
+        assert_eq!(read_legacy_marker(&f.profile).as_ref(), Some(&f.electron));
     }
 
     #[test]

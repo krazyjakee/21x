@@ -74,6 +74,8 @@ const OWNER_RECOVERY_CODES: &[&str] = &[
     "ELECTRON_PROFILE_IN_USE",
     "ELECTRON_PROFILE_INVALID",
     "ELECTRON_CREDENTIALS_UNAVAILABLE",
+    "ELECTRON_FOLDER_MISSING",
+    "ELECTRON_LINK_RESTORED",
     "CONNECTOR_RESOURCES_REQUIRED",
     "AGENT_CLI_UNAVAILABLE",
     "NATIVE_RUNTIME_UNAVAILABLE",
@@ -612,7 +614,7 @@ fn digest(value: &str) -> bool {
 /// The Rust side of `isAbsoluteHostPath`, with the same UTF-16 count and device
 /// prefixes, so the two agree on any real path of this system. TypeScript also
 /// accepts another system's form, such as `C:\` on Linux, which is no path here.
-fn host_path(path: &Path) -> bool {
+pub fn host_path(path: &Path) -> bool {
     path.is_absolute()
         && path.to_str().is_some_and(|s| {
             s.encode_utf16().count() <= 4096

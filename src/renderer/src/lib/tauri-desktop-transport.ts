@@ -44,8 +44,11 @@ export async function invokeTauriNativeDrop(native: TauriDesktopApi, operation: 
 /** Fixed product wording only; native diagnostics, paths and credentials are
  * never part of the renderer's bootstrap failure. */
 export class NativeBootstrapUnavailableError extends ServiceProtocolError {
-  constructor(readonly explanation: string) { super('DISCONNECTED'); this.name = 'NativeBootstrapUnavailableError' }
+  /** `stopUsingOldFolder` resolves to whether it changed anything; false means the folder came back.
+   * `reopenRequired` means a page reload cannot help, because the service starts once per launch. */
+  constructor(readonly explanation: string, readonly stopUsingOldFolder?: () => Promise<boolean>, readonly reopenRequired = false) { super('DISCONNECTED'); this.name = 'NativeBootstrapUnavailableError' }
 }
+const startupFailureCode = (value: unknown): unknown => isRecord(value) && isRecord(value.startupFailure) ? value.startupFailure.code : undefined
 export function productionBootstrapMessage(value: unknown): string | null {
   if (!isRecord(value) || value.protocolVersion !== 1 || value.production !== true || value.available !== false || !isRecord(value.startupFailure)) return null
   const { code, phase } = value.startupFailure
@@ -68,6 +71,8 @@ export function productionBootstrapMessage(value: unknown): string | null {
   if (code === 'PROFILE_DATABASE_LOCKED' && ['database', 'database-preflight'].includes(phase)) return 'The profile database is busy. Close the other application using this copied profile, then relaunch. Changes are paused.'
   if (code === 'PROFILE_LOW_DISK' && ['profile-lock', 'resources', 'database-preflight', 'database', 'secret-broker', 'task-api', 'services', 'recovery', 'background'].includes(phase)) return 'The profile has insufficient free disk space. Free space on its drive, then relaunch. Existing data is preserved. Changes are paused.'
   if (code === 'ELECTRON_PROFILE_IN_USE' && phase === 'profile-lock') return 'Your previous 21x app (the Electron version) is using this profile, and the two cannot run on it together. Quit it, then open this app again. Your data was not changed.'
+  if (code === 'ELECTRON_FOLDER_MISSING' && ['profile-lock', 'database-preflight'].includes(phase)) return 'The folder where your previous 21x app kept its workspaces, repositories and attachments is missing, so 21x stopped before changing anything. It is normally a folder named 21x in your app data folder. If it was moved or is on a drive that is not connected, put it back, then close 21x and open it again. If you deleted it on purpose, you can stop using it.'
+  if (code === 'ELECTRON_LINK_RESTORED' && phase === 'database-preflight') return '21x lost its record of the folder it shares with your previous 21x app, so it stopped and put the record back. Your data was not changed. Close 21x and open it again.'
   if (code === 'ELECTRON_CREDENTIALS_UNAVAILABLE' && phase === 'database-preflight') return 'Your system keyring could not be opened to bring over the API keys saved by your previous 21x app. Unlock your keyring (or sign in again), then try again.'
   if (code === 'ELECTRON_PROFILE_INVALID' && phase === 'database-preflight') return 'Your previous 21x data could not be read for import. It has not been changed. Try again; if this keeps happening, move it aside and open 21x to start fresh.'
   if (code === 'AMBIGUOUS_MANAGED_MCP_SERVER' && phase === 'database') return 'This profile has a task-management tool server that 21x cannot confirm it created, so it was left untouched. Rename or remove that server in the original app, then reopen 21x. Changes are paused.'
@@ -137,7 +142,10 @@ export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<stri
   catch (error) { throw nativeError(error) }
   if (bootstrapGenerations.get(native) !== generation) throw new ServiceProtocolError('STALE_EPOCH')
   const failure = productionBootstrapMessage(status)
-  if (failure) throw new NativeBootstrapUnavailableError(failure)
+  if (failure) {
+    const code = startupFailureCode(status), folderMissing = code === 'ELECTRON_FOLDER_MISSING'
+    throw new NativeBootstrapUnavailableError(failure, folderMissing ? () => native.core.invoke<boolean>('stop_using_old_folder') : undefined, folderMissing || code === 'ELECTRON_LINK_RESTORED')
+  }
   if (!isRecord(status) || status.available !== true || status.protocolVersion !== 1 ||
     typeof status.engineEpoch !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(status.engineEpoch)) {
     throw new ServiceProtocolError('DISCONNECTED')
