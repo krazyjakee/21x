@@ -208,6 +208,40 @@ describe('CommanderWorkspace', () => {
     expect(screen.getByLabelText('Message the Commander')).toHaveClass('text-base', 'leading-relaxed', 'min-w-0')
   })
 
+  it('shows an executed action and its Undo while the reply is still being written', async () => {
+    const content = JSON.stringify({ status: 'ok', target: { kind: 'project', id: 'web', name: 'Web' }, changes: [{ field: 'archived', before: false, after: true }], undoId: 'undo-1' })
+    useCommanderStore.setState({ sessions: [session()], selectedSessionId: 's1', messages: { s1: [message({ id: 'u1', content: 'archive web' })] } })
+    render(<CommanderWorkspace />)
+    await waitFor(() => expect(api.markRead).toHaveBeenCalled())
+    const turn = (event: Extract<CommanderEvent, { type: 'turn_event' }>['event']) => emit({ type: 'turn_event', sessionId: 's1', turnId: 't-live-action', event })
+    act(() => {
+      emit({ type: 'turn_started', sessionId: 's1', turnId: 't-live-action' })
+      turn({ type: 'tool_call_start', id: 'a1', name: 'archive_project', input: {} })
+      turn({ type: 'tool_call_result', id: 'a1', name: 'archive_project', content, isError: false })
+    })
+    const card = within(screen.getByTestId('commander-streaming')).getByTestId('commander-action-card')
+    expect(within(card).getByRole('button', { name: 'Undo' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'Actions' }))
+    expect(within(screen.getByLabelText('Commander actions')).getByRole('button', { name: 'Undo' })).toBeTruthy()
+  })
+
+  it('keeps two executions apart when a provider reuses a call id', async () => {
+    const result = (name: string) => JSON.stringify({ status: 'ok', target: { kind: 'project', id: name, name }, changes: [{ field: 'archived', before: false, after: true }], undoId: `undo-${name}` })
+    const call = { id: 'call_0', name: 'archive_project', input: {} }
+    api.listMessages.mockResolvedValue({ activeTurnId: null, messages: [
+      message({ id: 'a1', role: 'assistant', tool_calls: [call], created_at: 1 }),
+      message({ id: 'r1', role: 'tool', tool_call_id: 'call_0', tool_name: 'archive_project', content: result('Alpha'), created_at: 2 }),
+      message({ id: 'a2', role: 'assistant', tool_calls: [call], created_at: 3 }),
+      message({ id: 'r2', role: 'tool', tool_call_id: 'call_0', tool_name: 'archive_project', content: result('Beta'), created_at: 4 })
+    ] })
+    useCommanderStore.setState({ sessions: [session()], selectedSessionId: 's1', messages: {} })
+    render(<CommanderWorkspace />)
+    const cards = await screen.findAllByTestId('commander-action-card')
+    expect(cards).toHaveLength(2)
+    expect(cards[0].textContent).toContain('Alpha')
+    expect(cards[1].textContent).toContain('Beta')
+  })
+
   it('leaves Shift+Enter and IME Enter to the editor, and submits plain Enter once', async () => {
     api.listSessions.mockResolvedValue([session()])
     let finish: (value: unknown) => void = () => {}

@@ -307,10 +307,17 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
   attribution shows only a stored voice user's actual heard sentence. Legacy
   records retain their evidence without inventing changes or successful
   execution. Exact reversible actions use direct Undo IPC, with conflict errors
-  shown inline; unsupported operations say Can't be undone here. A fresh
-  validated action has one eight-second toast beside either call surface;
-  destructive changes use the single CallAnnouncer assertive region. Undo notes disable a historical card's
-  Undo after reload. The server owns the exact reversal and idempotency.
+  shown inline; unsupported operations say Can't be undone here. Cards appear
+  as soon as a write returns, not when the reply finishes, so Undo stays
+  reachable while the model is still answering; a note written meanwhile is
+  moved behind the action when the turn is stored, so the next turn reads the
+  change as undone. Calls and results are paired in transcript order because
+  provider call ids can repeat between turns. A fresh validated action has one
+  eight-second toast beside either call surface, naming the target and up to
+  three old → new values so Undo's effect is clear; it sits clear of the floating
+  call and scrolls inside short windows. Destructive changes use the single
+  CallAnnouncer assertive region. Undo notes disable a historical card's Undo
+  after reload. The server owns the exact reversal and idempotency.
 
 - **Floating call:** approximately 280px wide, with Commander identity, state
   icon + word, current captions, Mic, Stop, Expand, CC and End. Drag its grip to

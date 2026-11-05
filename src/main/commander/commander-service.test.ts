@@ -10,6 +10,8 @@ import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, type CommanderAg
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { CaptainDeliveryService } from './captain-delivery'
+import { undoCommanderAction } from './action-undo'
+import { migrateCommanderActions } from '../database/commander-actions-migration'
 
 /** A model answer: text, a failure, or text plus tool calls (the turn then continues with their results). */
 type ModelAnswer = string | Error | { text?: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }
@@ -251,6 +253,27 @@ describe('CommanderService turns', () => {
       const toolRow = store.listMessages(session.id).find((m) => m.role === 'tool')
       expect(toolRow).toBeUndefined()
     })
+  })
+
+  it('keeps an Undo made during the reply behind the action it reversed', async () => {
+    migrateCommanderActions(db.db)
+    const project = db.createProject({ name: 'Web launch' })!
+    const session = store.createSession('Undo during a reply')
+    const provider = fakeProvider({
+      chat: (request) => {
+        const result = request.messages.find((m) => m.role === 'tool')
+        if (!result) return { toolCalls: [{ id: 'a1', name: 'archive_project', input: { project: project.id } }] }
+        // The plain path has stored nothing of this turn yet, exactly as when the user presses Undo.
+        undoCommanderAction({ db, store, sessionId: session.id, actionId: JSON.parse(result.content as string).undoId })
+        return 'Archived it.'
+      }
+    })
+    const service = new CommanderService({ store, emit: (e) => events.push(e), createProvider: () => provider, getTools: (context) => createCommanderProjectTools({ db, context }) })
+
+    await service.sendUserMessage(session.id, 'archive the web launch project').done
+
+    expect(store.listMessages(session.id).map((m) => m.tool_name ?? m.role)).toEqual(['user', 'assistant', 'archive_project', 'assistant', 'undo_action'])
+    expect(db.getProject(project.id)?.archived).toBeFalsy()
   })
 
   it('hands no message id to the tools for a voice transcript, so it cannot back a merge grant (#137)', async () => {
