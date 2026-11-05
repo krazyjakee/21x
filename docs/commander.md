@@ -49,10 +49,10 @@ does the following:
    `appendHumanMessage` stores the message and images in one transaction. Turn preparation runs before commit; a failure
    rolls that transaction back.
 2. Builds the model context (`context.ts`). It splits the history into turns.
-   A turn starts at a `user` or `report` message. The newest turns are sent
-   verbatim, up to `keepTurns` (default 8) and `maxChars` (default 24k). The
-   newest turn is always kept. Anything older is covered by the latest `summary`
-   message, which is appended to the system prompt. Cuts always fall on turn
+   A turn starts at a `user` or `report` message. Turns the latest `summary`
+   does not cover are sent verbatim, up to twice `maxChars` (default 24k), and
+   the newest turn is always kept. Anything older is covered by that summary,
+   which is appended to the system prompt. Cuts always fall on turn
    boundaries, so a tool call is never separated from its result. Reports go to
    the model as user-side notes (`[Report from project X]`).
 3. Runs one `ChatRuntime` turn with the Commander system prompt (`prompts.ts`)
@@ -69,12 +69,19 @@ does the following:
    - Names an untitled session with a one-shot model call. If that fails, the
      title falls back to the first six words of the first user message. A
      rename made meanwhile is never overwritten.
-   - Folds turns that no longer fit the budget into a new rolling `summary`.
+   - Folds older turns into a new rolling `summary`, once one is due. A fold
+     starts only when more than `foldAtTurns` (default 24) turns or
+     `foldAtChars` (default 36k) characters are unsummarised, then leaves the
+     newest `keepTurns` (default 8) turns within `maxChars` (default 24k), so
+     the "Context compacted" divider and its model call come in batches rather
+     than after every turn. Reports count as turns here even though they start
+     no model call. Between folds the model sees more history, which is a
+     deliberate trade of input size for fewer summary calls.
      The previous summary is merged in. The summary's `correlation_id` is the
      id of the last message it covers. If the summary call fails (or comes
      back empty), nothing is stored, the failure is logged and recorded
      (`CommanderService.foldFailure`), and the fold is retried after the next
-     turn. Turns never drop silently: unsummarised turns past the budget stay
+     turn. Turns never drop silently: unsummarised turns stay
      verbatim up to twice `maxChars`, and any left out beyond that are replaced
      by a "N earlier turns omitted (summary pending)" marker at the start of
      the history. The newest turn is always kept, so this is a soft ceiling
