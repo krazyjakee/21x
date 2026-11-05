@@ -549,6 +549,11 @@ behalf and can name no task, so the next answer to arrive within ninety seconds
 is taken as the reply — armed only by the user having just spoken, and consumed
 once.
 
+The Commander opens its passage at the first words of a reply, not at the start
+of the turn. An open passage counts as speaking, so an early one held the
+microphone through all of the model's thinking, and a noise then stopped it and
+lost the reply.
+
 ## Barge-in by hand
 
 The moment a voice turn opens, playback stops in the renderer in the same tick

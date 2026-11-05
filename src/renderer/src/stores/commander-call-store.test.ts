@@ -140,6 +140,50 @@ describe('Commander call lifetime', () => {
     await vi.waitFor(() => expect(useCommanderCallStore.getState().replyInterrupted).toBe(false))
   })
 
+  it('moves the caption from an answered sentence to its reply, and back for the next sentence', async () => {
+    const driver = fakeDriver()
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+
+    useCommanderCallStore.getState().sendTranscript('Where are we?')
+    expect(useCommanderCallStore.getState()).toMatchObject({ userCaption: 'Where are we?', replyCaption: '' })
+
+    useCommanderCallStore.getState().replyWritten('another-session', 'Not this one.')
+    expect(useCommanderCallStore.getState()).toMatchObject({ userCaption: 'Where are we?', replyCaption: '' })
+
+    useCommanderCallStore.getState().replyWritten('session-1', ' All green. ')
+    expect(useCommanderCallStore.getState()).toMatchObject({ userCaption: '', replyCaption: 'All green.' })
+
+    // The turn's `done` follows the reply and must not take it away.
+    useCommanderCallStore.getState().replyWritten('session-1', '')
+    expect(useCommanderCallStore.getState()).toMatchObject({ userCaption: '', replyCaption: 'All green.' })
+
+    useCommanderCallStore.getState().sendTranscript('And the tests?')
+    expect(useCommanderCallStore.getState()).toMatchObject({ userCaption: 'And the tests?', replyCaption: '' })
+    expect(driver.send).toHaveBeenCalledTimes(2)
+  })
+
+  it('clears an answered sentence when its turn ends with nothing to show', async () => {
+    bindCommanderCallDriver(fakeDriver())
+    await useCommanderCallStore.getState().start('session-1')
+    useCommanderCallStore.getState().sendTranscript('Where are we?')
+
+    useCommanderCallStore.getState().replyWritten('session-1', '')
+
+    expect(useCommanderCallStore.getState()).toMatchObject({ userCaption: '', replyCaption: '' })
+  })
+
+  it('leaves the push-to-talk caption alone', async () => {
+    bindCommanderCallDriver(fakeDriver())
+    await useCommanderCallStore.getState().start('session-1')
+    await useCommanderCallStore.getState().setMicMode('push-to-talk')
+    useCommanderCallStore.getState().sendTranscript('Released sentence.')
+
+    useCommanderCallStore.getState().replyWritten('session-1', 'A reply.')
+
+    expect(useCommanderCallStore.getState()).toMatchObject({ userCaption: 'Released sentence.', replyCaption: '' })
+  })
+
   it('turns failed start and lost media into retryable errors', async () => {
     const first = fakeDriver(async () => { throw new Error('No microphone') })
     bindCommanderCallDriver(first)

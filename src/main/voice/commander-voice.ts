@@ -134,8 +134,14 @@ interface TurnState {
   /** The text run still being written, or null after a tool call. */
   textPart: VoiceAnswerPart | null
   runs: number
-  /** Resolves once the passage is open (or refused). Deltas wait for it. */
-  began: Promise<boolean>
+  /**
+   * Resolves once the passage is open (or refused). Deltas wait for it. Null
+   * until there is something to say: an open passage counts as speaking, so
+   * opening one at the start of the turn would hold the microphone and listen
+   * for barge-in through all of the model's thinking. A noise then stopped the
+   * passage and the reply was dropped without a word, with the turn still alive.
+   */
+  began: Promise<boolean> | null
   /** Barge-in or a close. Nothing more of this turn is spoken. */
   dead: boolean
   /** One factual announcement per actual tool result in this turn. */
@@ -219,7 +225,9 @@ export class CommanderVoice {
       this.bargeIn(sessionId)
       await this.awaitTurnEnd(sessionId, running)
     }
-    return this.options.commander.sendUserMessage(sessionId, content, 'voice')
+    // `done` is a promise and this reply crosses IPC, which cannot clone one.
+    const { turnId, message } = this.options.commander.sendUserMessage(sessionId, content, 'voice')
+    return { turnId, message }
   }
 
   // ── Events ────────────────────────────────────────────────
@@ -253,16 +261,10 @@ export class CommanderVoice {
       parts: [],
       textPart: null,
       runs: 0,
-      began: Promise.resolve(false),
+      began: null,
       dead: false,
       announcedActions: new Set(),
     }
-    turn.began = this.options.speech
-      .beginStreamingAnswer(key, undefined, 'conversation')
-      .catch((err) => {
-        console.error('[voice] could not open the Commander passage:', err)
-        return false
-      })
     this.turns.set(turnId, turn)
   }
 
@@ -307,7 +309,8 @@ export class CommanderVoice {
       case 'done':
       case 'error':
         this.turns.delete(turnId)
-        void turn.began.then((opened) => {
+        // A turn that wrote nothing never opened a passage, so none is closed.
+        void turn.began?.then((opened) => {
           if (!opened || turn.dead) return
           this.options.speech.pushStreamingAnswer(turn.key, turn.parts, true)
           this.options.speech.endStreamingAnswer(turn.key)
@@ -319,6 +322,12 @@ export class CommanderVoice {
   }
 
   private push(turn: TurnState, final: boolean): void {
+    turn.began ??= this.options.speech
+      .beginStreamingAnswer(turn.key, undefined, 'conversation')
+      .catch((err) => {
+        console.error('[voice] could not open the Commander passage:', err)
+        return false
+      })
     void turn.began.then((opened) => {
       if (!opened || turn.dead) return
       this.options.speech.pushStreamingAnswer(turn.key, turn.parts, final)

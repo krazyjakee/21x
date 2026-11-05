@@ -59,6 +59,8 @@ export interface CommanderCallState {
   pttFinishing: boolean
   pttDraft: string
   userCaption: string
+  /** Open mic: the last reply, kept on the caption so a reply that was not heard is still seen. */
+  replyCaption: string
   setMicMode: (mode: CommanderMicMode) => Promise<void>
   setInputDevice: (id: string) => Promise<void>
   toggleMicrophone: () => Promise<void>
@@ -92,6 +94,8 @@ export interface CommanderCallState {
   dismissError: () => void
   /** A pause-delimited sentence the microphone heard. */
   sendTranscript: (text: string) => void
+  /** The turn answering the last sentence wrote `text`, or ended with nothing more to show. */
+  replyWritten: (sessionId: string, text: string) => void
   /** The microphone turn closed without End (worker failure, timeout, another mic). */
   mediaLost: (message: string) => void
   recordEvent: (event: CallEvent) => void
@@ -151,7 +155,7 @@ const OFF = {
   interruptedAt: null,
   replyInterrupted: false,
   startedAt: null,
-  micOpening: false, pttHeld: false, pttFinishing: false, pttDraft: '', userCaption: ''
+  micOpening: false, pttHeld: false, pttFinishing: false, pttDraft: '', userCaption: '', replyCaption: ''
 }
 
 export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
@@ -210,7 +214,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
     micMode: 'open-mic', muted: false, inputDeviceId: '',
     setMicMode: async (mode) => {
       if (get().status === 'starting' || mode === get().micMode) return
-      suspendMicrophone(); set({ micMode: mode, muted: false })
+      suspendMicrophone(); set({ micMode: mode, muted: false, replyCaption: '' })
       if (mode === 'open-mic') await resumeMicrophone()
     },
     setInputDevice: async (id) => {
@@ -341,7 +345,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
         return
       }
       const mine = generation
-      set({ error: null, userCaption: words })
+      set({ error: null, userCaption: words, replyCaption: '' })
       void driver
         .send(sessionId, words)
         .then(() => {
@@ -355,6 +359,15 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
             set({ error: messageOf(err) })
           }
         })
+    },
+
+    replyWritten: (sessionId, text) => {
+      const current = get()
+      if (current.status !== 'live' || current.sessionId !== sessionId || current.micMode !== 'open-mic') return
+      // The sentence has been answered. Left up, it reads as words still waiting
+      // to be sent, for as long as the user stays quiet.
+      const reply = text.trim()
+      set(reply ? { userCaption: '', replyCaption: reply } : { userCaption: '' })
     },
 
     mediaLost: (message) => {

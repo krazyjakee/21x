@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { CallMedia } from '@shared/commander-call'
 import type { CommanderEvent } from '@shared/commander'
 import { isCommanderAdminTool } from '@shared/commander-tools'
+import { isVoiceNoise } from '@shared/voice'
 import { commanderApi, commanderVoiceApi, voiceApi } from '@/lib/ipc-client'
 import { activityNow } from '@/lib/activity/activity-clock'
 import {
@@ -65,6 +66,9 @@ async function reconcileActiveSession(): Promise<void> {
 let activeMicrophoneLease: AbortSignal | null = null
 let activeMicrophoneTurnId: string | null = null
 let activeMicrophoneTurnEpoch: string | null = null
+// The turn answering the last spoken sentence. Main finishes a cancelled turn
+// while the next sentence is on its way, and that reply must not replace it.
+let spokenTurnId: string | null = null
 
 function ownedMicrophone() {
   const call = useCommanderCallStore.getState()
@@ -262,7 +266,12 @@ export function CommanderCallHost() {
       },
       stopPlayback: () => useVoiceStore.getState().stopPlaybackNow(),
       bargeIn: (activeSessionId) => commanderVoiceApi.bargeIn(activeSessionId),
-      send: (activeSessionId, text) => commanderVoiceApi.send(activeSessionId, text)
+      send: async (activeSessionId, text) => {
+        spokenTurnId = null
+        const sent = await commanderVoiceApi.send(activeSessionId, text)
+        spokenTurnId = sent?.turnId ?? null
+        return sent
+      }
     })
   }, [])
 
@@ -307,10 +316,19 @@ export function CommanderCallHost() {
         } else if (inner.type === 'done') {
           const prefix = `${event.sessionId}:${event.turnId}:`
           for (const key of tools.keys()) if (key.startsWith(prefix)) tools.delete(key)
+          if (event.turnId === spokenTurnId) {
+            spokenTurnId = null
+            useCommanderCallStore.getState().replyWritten(event.sessionId, '')
+          }
         }
         return
       }
       if (event.type === 'messages_appended') {
+        if (event.turnId && event.turnId === spokenTurnId) {
+          // Tool notes and context notices are assistant rows too; neither is the reply.
+          const reply = event.messages.filter(message => message.role === 'assistant' && !message.tool_name && message.content.trim()).at(-1)
+          if (reply) useCommanderCallStore.getState().replyWritten(event.sessionId, reply.content)
+        }
         for (const message of event.messages) {
           if (message.role !== 'report') continue
           recordEvent({
@@ -344,8 +362,10 @@ export function CommanderCallHost() {
   // Voice barge-in stops in the same tick. A turn preparing text/tools counts
   // too: the user's new words supersede that reply before the sentence ends.
   const replyActive = speaking || !!turn && !turn.unavailable && turn.known !== false && activityNow() - turn.observedAt < 15_000 && ['thinking', 'working', 'tool'].includes(turn.phase)
+  // A hesitation sound is not the user talking: its segment will be dropped, so
+  // cancelling on it would lose the reply with nothing sent in its place.
   useEffect(() => {
-    if (status !== 'live' || voiceTurnId !== callTurnId || !partial.trim() || !replyActive || replyInterrupted) return
+    if (status !== 'live' || voiceTurnId !== callTurnId || isVoiceNoise(partial) || !replyActive || replyInterrupted) return
     interrupt('barge_in')
   }, [status, voiceTurnId, callTurnId, partial, replyActive, replyInterrupted, interrupt])
 
