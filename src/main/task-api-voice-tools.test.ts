@@ -392,12 +392,12 @@ describe('get_ui_state', () => {
   })
 
   it('reports what the renderer last published', async () => {
-    setTaskApiUiState({ view: 'canvas', selectedTaskId: 't1', selectedTaskTitle: 'Fix login' })
+    setTaskApiUiState({ view: 'tasks', selectedTaskId: 't1', selectedTaskTitle: 'Fix login' })
     const result = (await handleTaskApiRoute('/get_ui_state', {}, makeDb())) as {
       available: boolean
       view: string
       selectedTaskId: string
     }
-    expect(result).toMatchObject({ available: true, view: 'canvas', selectedTaskId: 't1' })
+    expect(result).toMatchObject({ available: true, view: 'tasks', selectedTaskId: 't1' })
   })
 })

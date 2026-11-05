@@ -4,11 +4,10 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 pub const MAX_BYTES: usize = 256 * 1024;
-const VIEWS: &[&str] = &["dashboard", "tasks", "canvas", "skills", "settings"];
+const VIEWS: &[&str] = &["dashboard", "tasks", "skills", "settings"];
 const STATE_VIEWS: &[&str] = &[
     "dashboard",
     "tasks",
-    "canvas",
     "skills",
     "settings",
     "commander",
@@ -40,22 +39,6 @@ fn identifier(value: &Value, limit: usize) -> bool {
 fn nullable_id(value: &Value) -> bool {
     value.is_null() || id(value)
 }
-fn number(value: &Value, min: f64, max: f64) -> bool {
-    value
-        .as_f64()
-        .is_some_and(|v| v.is_finite() && v >= min && v <= max)
-}
-fn coordinate(value: &Value) -> bool {
-    number(value, -10_000_000., 10_000_000.)
-}
-fn dimension(value: &Value) -> bool {
-    value
-        .as_f64()
-        .is_some_and(|v| v.is_finite() && v > 0. && v <= 1_000_000.)
-}
-fn zoom(value: &Value) -> bool {
-    number(value, 0.1, 3.)
-}
 pub fn lease_id(value: &Value) -> bool {
     value.as_str().is_some_and(|s| {
         !s.is_empty()
@@ -79,7 +62,6 @@ pub fn state(value: &Value) -> bool {
                 "settingsTab",
                 "waitingForYou",
                 "visibleTaskIds",
-                "canvas",
             ],
             &[],
         )
@@ -109,63 +91,14 @@ pub fn state(value: &Value) -> bool {
     let Some(tasks) = value["visibleTaskIds"].as_array() else {
         return false;
     };
-    if tasks.len() > 50
-        || !tasks.iter().all(id)
-        || tasks
+    tasks.len() <= 50
+        && tasks.iter().all(id)
+        && tasks
             .iter()
             .filter_map(Value::as_str)
             .collect::<HashSet<_>>()
             .len()
-            != tasks.len()
-    {
-        return false;
-    }
-    let canvas = &value["canvas"];
-    let viewport = &canvas["viewport"];
-    if !object(canvas, &["viewport", "panels"], &[])
-        || !object(viewport, &["x", "y", "zoom"], &[])
-        || !coordinate(&viewport["x"])
-        || !coordinate(&viewport["y"])
-        || !zoom(&viewport["zoom"])
-    {
-        return false;
-    }
-    let Some(panels) = canvas["panels"].as_array() else {
-        return false;
-    };
-    panels.len() <= 50
-        && panels.iter().all(|panel| {
-            object(
-                panel,
-                &[
-                    "panelId", "type", "taskId", "title", "x", "y", "width", "height",
-                ],
-                &[],
-            ) && identifier(&panel["panelId"], 256)
-                && member(
-                    &panel["type"],
-                    &[
-                        "task",
-                        "transcript",
-                        "terminal",
-                        "placeholder",
-                        "webpage",
-                        "browser",
-                    ],
-                )
-                && nullable_id(&panel["taskId"])
-                && text(&panel["title"], 4096)
-                && coordinate(&panel["x"])
-                && coordinate(&panel["y"])
-                && dimension(&panel["width"])
-                && dimension(&panel["height"])
-        })
-        && panels
-            .iter()
-            .filter_map(|p| p["panelId"].as_str())
-            .collect::<HashSet<_>>()
-            .len()
-            == panels.len()
+            == tasks.len()
 }
 pub fn command(value: &Value) -> bool {
     if !bounded(value) {
@@ -183,22 +116,7 @@ pub fn command(value: &Value) -> bool {
         Some("open_task") => {
             object(value, &["kind", "taskId", "where"], &[])
                 && id(&value["taskId"])
-                && member(&value["where"], &["workspace", "canvas", "modal"])
-        }
-        Some("move_task_panel") => {
-            object(value, &["kind", "taskId", "x", "y"], &[])
-                && id(&value["taskId"])
-                && coordinate(&value["x"])
-                && coordinate(&value["y"])
-        }
-        Some("close_task_panel") => object(value, &["kind", "taskId"], &[]) && id(&value["taskId"]),
-        Some("set_canvas_view") => {
-            object(value, &["kind", "mode"], &["zoom"])
-                && if value["mode"] == "zoom" {
-                    zoom(&value["zoom"])
-                } else {
-                    member(&value["mode"], &["fit_all", "reset"]) && value.get("zoom").is_none()
-                }
+                && member(&value["where"], &["workspace", "modal"])
         }
         Some("open_artifact") => {
             object(value, &["kind", "taskId", "artifactId"], &[])
@@ -245,7 +163,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     pub(crate) fn fixture() -> Value {
-        json!({"view":"canvas","projectId":"project_1","modal":null,"selectedTaskId":"task_1","selectedTaskTitle":"Title\nnext","dashboardPreviewTaskId":null,"captainOpen":true,"settingsTab":null,"waitingForYou":false,"visibleTaskIds":["task_1"],"canvas":{"viewport":{"x":-1,"y":2,"zoom":0.1},"panels":[{"panelId":"panel:1","type":"task","taskId":"task_1","title":"Task","x":0,"y":0,"width":100,"height":200}]}})
+        json!({"view":"dashboard","projectId":"project_1","modal":null,"selectedTaskId":"task_1","selectedTaskTitle":"Title\nnext","dashboardPreviewTaskId":null,"captainOpen":true,"settingsTab":null,"waitingForYou":false,"visibleTaskIds":["task_1"]})
     }
     #[test]
     fn full_snapshot_is_passive_exact_and_bounded() {
@@ -260,19 +178,6 @@ mod tests {
         let mut duplicate = fixture();
         duplicate["visibleTaskIds"] = json!(["task_1", "task_1"]);
         assert!(!state(&duplicate));
-        let mut duplicate = fixture();
-        let panel = duplicate["canvas"]["panels"][0].clone();
-        duplicate["canvas"]["panels"]
-            .as_array_mut()
-            .unwrap()
-            .push(panel);
-        assert!(!state(&duplicate));
-        let mut bound = fixture();
-        bound["canvas"]["viewport"]["zoom"] = json!(3.0001);
-        assert!(!state(&bound));
-        let mut inert = fixture();
-        inert["canvas"]["panels"][0]["type"] = json!("browser");
-        assert!(state(&inert));
         let mut oversized = fixture();
         oversized["selectedTaskTitle"] = json!("x".repeat(4097));
         assert!(!state(&oversized));
@@ -284,9 +189,6 @@ mod tests {
         assert!(state(&unicode));
         unicode["selectedTaskTitle"] = json!("🧭".repeat(2049));
         assert!(!state(&unicode));
-        let mut aggregate = fixture();
-        aggregate["canvas"]["panels"]=Value::Array((0..50).map(|index| json!({"panelId":format!("panel:{index}"),"type":"task","taskId":"task","title":"🧭".repeat(2048),"x":0,"y":0,"width":100,"height":200})).collect());
-        assert!(!state(&aggregate));
     }
     #[test]
     fn finite_commands_cannot_grant_elements_paths_or_browser_control() {
@@ -294,9 +196,6 @@ mod tests {
             json!({"kind":"navigate","view":"settings","settingsTab":"voice"}),
             json!({"kind":"switch_project","projectId":"project"}),
             json!({"kind":"open_task","taskId":"task","where":"modal"}),
-            json!({"kind":"move_task_panel","taskId":"task","x":-10000000,"y":10000000}),
-            json!({"kind":"close_task_panel","taskId":"task"}),
-            json!({"kind":"set_canvas_view","mode":"zoom","zoom":3}),
             json!({"kind":"open_artifact","taskId":"task","artifactId":"artifact:1"}),
         ];
         for good in cases {
@@ -308,7 +207,11 @@ mod tests {
         for bad in [
             json!({"kind":"navigate","view":"commander"}),
             json!({"kind":"open_task","taskId":"task","where":"auto"}),
-            json!({"kind":"set_canvas_view","mode":"reset","zoom":1}),
+            json!({"kind":"set_canvas_view","mode":"reset"}),
+            json!({"kind":"move_task_panel","taskId":"task","x":0,"y":0}),
+            json!({"kind":"close_task_panel","taskId":"task"}),
+            json!({"kind":"open_task","taskId":"task","where":"canvas"}),
+            json!({"kind":"navigate","view":"canvas"}),
             json!({"kind":"open_browser","url":"https://example.com"}),
             json!({"kind":"open_artifact","taskId":"task","artifactId":"a\n"}),
         ] {
@@ -324,7 +227,7 @@ mod tests {
         assert!(!snapshot_result(
             &json!({"available":false,"leaseId":"ui:1"})
         ));
-        let command = json!({"kind":"close_task_panel","taskId":"task"});
+        let command = json!({"kind":"open_task","taskId":"task","where":"workspace"});
         assert!(command_request(
             &json!({"command":command,"leaseId":"ui:1"})
         ));
@@ -356,7 +259,7 @@ mod tests {
         ));
         assert!(crate::production::contracts::valid_event(
             "ui:command",
-            &json!({"kind":"close_task_panel","taskId":"task"})
+            &json!({"kind":"open_task","taskId":"task","where":"workspace"})
         ));
         assert!(void_result(&json!({"defined":false})));
         assert!(!void_result(&json!({"defined":true,"value":null})));

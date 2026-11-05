@@ -28,9 +28,6 @@ import { setMobileApiDeps, assertMobileApiDeps, setMobileApiNotifier, applyMobil
 import { ProductionMobileActions } from './production-mobile-actions'
 import { TunnelManagerCore } from '../main/tunnel-manager-core'
 import SQLite from 'better-sqlite3'
-import { createRequire } from 'node:module'
-import { TerminalServiceCore, type TerminalProcessHost } from '../main/terminal-service-core'
-import { createNodePty, resolveShell, terminalProcessCwd } from '../main/terminal-process'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
 import { ELECTRON_SHARED_ROOT_SETTING, ElectronProfileImportError, LEGACY_MARKER_DETACHED, MANAGED_TASK_MCP_MARKER, holdElectronProfile, importElectronProfile, folderPresent, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
@@ -170,7 +167,6 @@ export interface ProductionOwnerExternalBoundaries {
   createAdapter?: AgentManagerHost['createAdapter']
   createProvider?: typeof createChatProviderFromSettings
   connectorTransport?: ConnectorRuntimeHost['createTransport']
-  terminalProcessHost?: TerminalProcessHost
   mobileTunnel?: TunnelManagerCore
   agentDetection?: PortableAgentDetectionOwner
   agentInstallation?: { nodeExecutable: string; homeDir: string; environment: NodeJS.ProcessEnv; npmCliPath?: string | null; create?: (options: PortableAgentInstallationOwnerOptions) => PortableAgentInstallationOwner }
@@ -216,7 +212,6 @@ export interface ProductionServices {
   coordination: ScheduledCoordination
   cleanup: WorkspaceCleanupSchedulerCore
   reminders: OverdueNotifier
-  terminals: TerminalServiceCore
   mcpProbes: McpProbeService
 }
 
@@ -252,7 +247,6 @@ export class ProductionOwner {
   private broker: SecretBroker | null = null
   private services: ProductionServices | null = null
   private workspaceProcesses: ProductionWorkspaceProcessOwner | null = null
-  private readonly workspaceTerminalUsers = new Set<object>()
   private connector: ConnectorBridgeCore | null = null
   private connectorRuntime: ConnectorRuntime | null = null
   private connectorService: ConnectorBridgeService | null = null
@@ -590,7 +584,7 @@ export class ProductionOwner {
   private assertWorkspaceCleanupUsersIdle(services: ProductionServices, ids: readonly string[]): void {
     this.getDatabaseBindingLease()
     if (this.services !== services || services.workspaceFiles.inflightCount || services.heartbeatFiles.inflightCount ||
-      this.workspaceTerminalUsers.size || ids.some(id => services.heartbeat.hasTaskOwnership(id))) throw new ProductionOwnerError('WORKSPACE_CLEANUP_BUSY')
+      ids.some(id => services.heartbeat.hasTaskOwnership(id))) throw new ProductionOwnerError('WORKSPACE_CLEANUP_BUSY')
   }
 
   getUiBindingLease(): { ui: ProductionUiOwner; database: DatabaseManager; manager: AgentManager; assertUiOwners(owners: { ui: ProductionUiOwner; database: DatabaseManager; manager: AgentManager }): void } | null {
@@ -1041,26 +1035,6 @@ export class ProductionOwner {
     configureCaptainGithubTools({ db, mergeDb: db, issueDb: db, notifyUser: (title, body) => this.notify(title, body), notifyRenderer: (channel, data) => this.emit(channel, data) })
     const chat = new ChatRuntime()
     this.register('chat', () => chat.shutdown(), () => chat.close())
-    const terminalHost: TerminalProcessHost = this.boundaries.terminalProcessHost ?? {
-      resolveShell,
-      // The resource-verified staged engine resolves its own physical pinned
-      // native module only when a terminal is accepted, never from caller paths.
-      create: options => createNodePty(options, createRequire(import.meta.url)('node-pty') as typeof import('node-pty')),
-      getCwd: terminalProcessCwd
-    }
-    const terminals = new TerminalServiceCore({ resolveShell: () => terminalHost.resolveShell(),
-      create: options => {
-        workspaceProcesses.assertOtherWorkAllowed()
-        const token = {}; this.workspaceTerminalUsers.add(token)
-        try { return terminalHost.create({ ...options, onExit: (...args) => { this.workspaceTerminalUsers.delete(token); options.onExit(...args) } }) }
-        catch (error) { this.workspaceTerminalUsers.delete(token); throw error }
-      },
-      getCwd: async (pid, current) => {
-        workspaceProcesses.assertOtherWorkAllowed()
-        const token = {}; this.workspaceTerminalUsers.add(token)
-        try { return await terminalHost.getCwd(pid, current) } finally { this.workspaceTerminalUsers.delete(token) }
-      } })
-    this.register('terminals', () => terminals.shutdown(), () => terminals.close())
     const createChatProvider = () => provider(db)
     const commanderStore = new CommanderStore(db)
     let commander: CommanderService | null = null
@@ -1187,7 +1161,7 @@ export class ProductionOwner {
     // Loads the runtime status, the speech engine and, when voice is on, the
     // recognition model. It never throws: voice must not block start-up.
     if (voice) void voice.voice.initialize()
-    this.services = { ui, cliMcp, cliMcpFiles, taskAttachmentFiles, workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, agentInstallation, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, terminals, mcpProbes, sessionContext }
+    this.services = { ui, cliMcp, cliMcpFiles, taskAttachmentFiles, workspaceFiles, heartbeatFiles, github, gitlab, forgejo, gitProviderProcess, voice, agentDetection, agentInstallation, db, agents, oauth, worktrees, sync, registry, groups, chat, createChatProvider, commander: commanderService, commanderStore, captainDelivery, plugins, heartbeat, recurrence, automation, wakeups, coordination, cleanup, reminders, mcpProbes, sessionContext }
     if (this.bootstrap.mobile) {
       const { distRoot, port } = this.bootstrap.mobile
       const actual = realpathSync(distRoot), resource = realpathSync(this.bootstrap.paths.resourceRoot), location = relative(resource, actual)

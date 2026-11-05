@@ -9,7 +9,8 @@ import {
 } from './task-api-server-core'
 import { buildTaskMcpUrl } from './task-mcp-endpoint'
 import { TaskApiListener } from './task-api/listener'
-import { browserTools } from './mcp-servers/task-management-tools'
+
+const REMOVED_TOOLS = ['browser_navigate', 'browser_snapshot', 'browser_recording_list', 'move_task_panel', 'close_task_panel', 'set_canvas_view']
 
 describe('portable task API lifetime and tool availability', () => {
   let source: ReturnType<typeof createPortableDbFixture>
@@ -71,20 +72,20 @@ describe('portable task API lifetime and tool availability', () => {
     } finally { finish(); abort.abort(); await response; await closeTaskApiServer() }
   })
 
-  it('serves real MCP task tools while excluding and refusing every legacy browser tool', async () => {
+  it('serves real MCP task tools while excluding and refusing every removed tool', async () => {
     const task = source.db.createTask(makeTask({ title: 'Portable MCP fixture' }))!
     const port = await startTaskApiServer(source.db)
     const client = new Client({ name: 'portable-api-fixture', version: '1.0.0' })
     try {
       await client.connect(new StreamableHTTPClientTransport(new URL(buildTaskMcpUrl(port, getTaskApiToken()))))
       const { tools } = await client.listTools()
-      for (const tool of browserTools) expect(tools.some(visible => visible.name === tool.name)).toBe(false)
+      for (const name of REMOVED_TOOLS) expect(tools.some(visible => visible.name === name)).toBe(false)
       const listed = await client.callTool({ name: 'list_tasks', arguments: {} })
       expect(JSON.stringify(listed)).toContain(task.id)
-      for (const tool of browserTools) {
-        const refused = await client.callTool({ name: tool.name, arguments: { task_id: task.id, url: 'https://fixture.invalid' } })
+      for (const name of REMOVED_TOOLS) {
+        const refused = await client.callTool({ name, arguments: { task_id: task.id, url: 'https://fixture.invalid' } })
         expect(refused.isError).toBe(true)
-        expect(JSON.stringify(refused)).toContain(`Unknown tool: ${tool.name}`)
+        expect(JSON.stringify(refused)).toContain(`Unknown tool: ${name}`)
       }
     } finally { await client.close() }
   })

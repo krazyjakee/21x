@@ -19,7 +19,7 @@ beforeEach(() => {
   manager = new AgentManager(db, { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, secrets: { kind: 'unsupported' }, configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' }, createAdapter: () => new FakeAdapter(), isCodexAppServerAdapter: () => false })
   const project = db.createProject({ name: 'Scoped UI project' })!, agent = db.createAgent({ name: 'Scoped UI agent' })!, task = db.createTask({ title: 'Readable task title', project_id: project.id })!
   db.updateTask(task.id, { agent_id: agent.id })
-  state = { view: 'dashboard', projectId: project.id, modal: null, selectedTaskId: task.id, selectedTaskTitle: task.title, dashboardPreviewTaskId: task.id, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [task.id], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [{ panelId: 'panel_one', type: 'task', taskId: task.id, title: task.title, x: 0, y: 0, width: 600, height: 400 }] } }
+  state = { view: 'dashboard', projectId: project.id, modal: null, selectedTaskId: task.id, selectedTaskTitle: task.title, dashboardPreviewTaskId: task.id, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [task.id] }
   snapshot = vi.fn(async () => native)
   const grants = { canAccessProject: () => true, canAccessTask: () => true, canAccessAgent: () => true }
   ui = new ProductionUiOwner({ database: db, manager, native: { snapshot, send: async (_command, leaseId) => ({ ok: true, leaseId }) }, assertCurrent: () => { if (!db.db.open) throw new ServiceProtocolError('DISCONNECTED') }, beforeState: value => assertUiStateReferences(db, value, grants), beforeCommand: command => assertUiCommandReferences(db, command, grants) })

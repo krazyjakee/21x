@@ -81,7 +81,7 @@ Each agent has a hard cap the user set: at most that many of its jobs run at onc
 
 ## 7. Show the user
 
-When it helps, open what you are talking about: \`open_task\`, \`navigate\`, \`set_canvas_view\`, \`open_artifact\`.
+When it helps, open what you are talking about: \`open_task\`, \`navigate\`, \`open_artifact\`.
 
 ## 8. Explain the work clearly
 

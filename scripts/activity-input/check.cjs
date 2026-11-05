@@ -55,7 +55,7 @@ const expanded = kind => `[data-testid="expanded-${kind}"] [data-activity-state]
 async function snapshot() {
   return js(`(() => {
     const inspect=window.fixture.inspect(), now=inspect.now;
-    const region=el=>el.closest('[data-testid="audit-topbar"]')?'top-bar':el.closest('[data-testid="audit-nav"]')?'nav-rail':el.closest('[data-testid="audit-status"]')?'status-bar':el.closest('[data-canvas-panel]')?'canvas':el.closest('.audit-board')?'board':el.closest('[data-testid="hero-captain-activity"]')?'hero':'expanded';
+    const region=el=>el.closest('[data-testid="audit-topbar"]')?'top-bar':el.closest('[data-testid="audit-nav"]')?'nav-rail':el.closest('[data-testid="audit-status"]')?'status-bar':el.closest('.audit-board')?'board':el.closest('[data-testid="hero-captain-activity"]')?'hero':'expanded';
     const nodes=[...document.querySelectorAll('[data-activity-state]')].map(el=>({region:region(el),name:el.getAttribute('aria-label')??el.closest('button')?.getAttribute('aria-label')??el.getAttribute('title'),state:el.dataset.activityState,motion:el.dataset.activityMotion,text:el.textContent.trim(),accents:[...el.querySelectorAll('[data-accent]')].map(accent=>accent.dataset.accent),animations:[...el.querySelectorAll('*')].flatMap(child=>[getComputedStyle(child).animationName,getComputedStyle(child,'::after').animationName]).filter(name=>name&&name!=='none')}));
     return {visibility:document.visibilityState,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,dark:document.documentElement.classList.contains('dark'),nodes,
       observations:Object.fromEntries(Object.entries(inspect.session.sessions).map(([id,value])=>[id,{...value,ageMs:now-value.observedAt}])),
@@ -76,9 +76,7 @@ function assertOwners(state) {
     assert.deepEqual(mirror.animations, [], mirror.region + ' mirror has no CSS activity animation')
   }
   const board = moving.filter(node => node.region === 'board')
-  const canvas = moving.filter(node => node.region === 'canvas')
   assert(board.length <= 1, 'One moving board indicator')
-  assert(canvas.length <= 1, 'Only the frontmost canvas task may move')
   const entities = moving.map(node => node.name?.split(' — ')[0])
   assert.equal(new Set(entities).size, entities.length, 'One motion owner per mirrored entity')
   assert.equal(state.announcers.activity, 1, 'One task/Captain announcer')
@@ -131,9 +129,9 @@ app.whenReady().then(async () => {
     else if (level >= 2) log('console', { level, message: text })
   })
   wc.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith(process.env.ACTIVITY_INPUT_URL) && !details.url.startsWith('devtools:') }))
-  log('scope', { inputs: 'Controlled stamped IPC/source observations', production: 'Actual board, canvas, shell, Commander/PiP, stores, derivation, monotonic clock, deadlines, motion owners and announcers', excluded: 'No SDK, real agent process, physical capture or provider proof; Commander PCM/Stop/drain remains in existing native suite', screenReaderGate: 'Native DOM/accessibility names are evidence only; actual reader audit is separate.' })
+  log('scope', { inputs: 'Controlled stamped IPC/source observations', production: 'Actual board, shell, Commander/PiP, stores, derivation, monotonic clock, deadlines, motion owners and announcers', excluded: 'No SDK, real agent process, physical capture or provider proof; Commander PCM/Stop/drain remains in existing native suite', screenReaderGate: 'Native DOM/accessibility names are evidence only; actual reader audit is separate.' })
   await win.loadURL(process.env.ACTIVITY_INPUT_URL)
-  await wait(`window.fixture.inspect && document.querySelector('[data-testid="task-card-task-ready"]') && document.querySelectorAll('[data-canvas-panel]').length===2`, 25_000)
+  await wait(`window.fixture.inspect && document.querySelector('[data-testid="task-card-task-ready"]')`, 25_000)
   await js(`(() => {
     const regions=[document.querySelector('[data-testid="activity-announcer"]'),...document.querySelectorAll('[data-testid="commander-call-announcer"] [aria-live]')];
     window.fixture.liveObserver=new MutationObserver(changes=>{
@@ -161,13 +159,12 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelector(${JSON.stringify(expanded('commander'))}).dataset.activityState`), 'idle', 'Snapshot hydration must not replay Commander finish')
     assert.equal(await js(`document.querySelector('[data-testid="expanded-commander"] [data-accent]')`), null)
   })
-  await step('many cards and canvas mirrors have one motion owner per entity', async () => {
+  await step('many cards have one motion owner per entity', async () => {
     await focus('[data-testid="task-card-task-one"]')
     await status('task-one', 'working'); await status('task-two', 'working'); await status('captain-audit', 'working')
     await startCommander('silent-tool'); await toolCommander('silent-tool')
     await wait(`document.querySelector(${JSON.stringify(card('task-one'))})?.dataset.activityState==='running' && document.querySelector(${JSON.stringify(card('task-two'))})?.dataset.activityState==='running'`)
     await wait(`document.querySelectorAll('.audit-board [data-activity-motion="breathe"]').length===1`)
-    assert.equal(await js(`document.querySelectorAll('[data-canvas-panel] [data-activity-state]').length`), 2, 'Canvas embedded task headers must not duplicate panel badges')
     assert(await js(`document.querySelector('[data-testid="hero-captain-activity"]')?.textContent.includes('Running')`))
     assert.equal((await snapshot()).running, '3 running')
     assert(await js(`document.activeElement===document.querySelector('[data-testid="task-card-task-one"]')`), 'Activity updates must not move keyboard focus')
@@ -320,7 +317,6 @@ app.whenReady().then(async () => {
     await evidence('review transition observed')
     await wait(`document.querySelector(${JSON.stringify(card('task-two'))}).querySelector('[data-accent]').dataset.accent==='none'`, 4_000)
     assert.equal(await js(`document.querySelector(${JSON.stringify(card('task-two'))}).textContent.trim()`), 'Ready for review')
-    assert(await js(`!document.querySelector('.canvas-status-transition-flash')`), 'Canvas review must not add a second completion flash')
   })
   await step('both themes honor reduced motion and actual badge contrast', async () => {
     await js(`window.fixture.taskStatus('task-two','agent_working')`)

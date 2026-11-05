@@ -3,7 +3,7 @@ import { TaskMcpStdioProxy } from './task-mcp-stdio-proxy'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
 import { startTaskApiServer, closeTaskApiServer, getTaskApiToken } from '../main/task-api-server-core'
 import { buildTaskMcpUrl } from '../main/task-mcp-endpoint'
-import { browserTools } from '../main/mcp-servers/task-management-tools'
+const REMOVED_TOOLS = ['browser_navigate', 'browser_snapshot', 'browser_recording_list', 'move_task_panel', 'close_task_panel', 'set_canvas_view']
 
 const api = 'http://127.0.0.1:4999'
 const signed = `${api}/mcp?token=${'a'.repeat(64)}&project=project&scope_signature=${'b'.repeat(64)}`
@@ -48,7 +48,7 @@ describe('production signed task MCP stdio proxy', () => {
     expect((await proxy.list()).tools.map(tool => tool.name)).toEqual(['list_tasks'])
     expect(await proxy.call('list_tasks', { project_id: 'spoofed', trustedScope: { projectId: 'foreign' } })).toEqual({ content: [{ type: 'text', text: '{"tasks":[]}' }] })
     expect(JSON.parse(http.mock.calls[1][1]!.body as string)).toMatchObject({ method: 'tools/call', params: { name: 'list_tasks', arguments: { project_id: 'spoofed' } } })
-    for (const tool of browserTools) expect((await proxy.call(tool.name, {})).isError, tool.name).toBe(true)
+    for (const name of REMOVED_TOOLS) expect((await proxy.call(name, {})).isError, name).toBe(true)
     expect(http).toHaveBeenCalledTimes(2); expect(proxy.pendingCount).toBe(0)
   })
 
@@ -122,7 +122,7 @@ describe('production signed task MCP stdio proxy', () => {
     const proxy = own(fetch, 15000, url, base)
     const listed = await proxy.list()
     expect(listed.tools.some(tool => tool.name === 'list_tasks')).toBe(true)
-    expect(listed.tools.some(tool => browserTools.some(browser => browser.name === tool.name))).toBe(false)
+    expect(listed.tools.some(tool => REMOVED_TOOLS.includes(tool.name))).toBe(false)
     const tasks = await proxy.call('list_tasks', { project_id: b.id })
     expect(errorText(tasks)).toContain('Own task'); expect(errorText(tasks)).not.toContain('Foreign task')
     expect(errorText(await proxy.call('get_task', { task_id: foreign.id }))).toContain('not in this project')

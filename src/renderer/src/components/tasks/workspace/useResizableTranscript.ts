@@ -4,8 +4,8 @@ const MIN_WORKSPACE_PANE_WIDTH = 320
 const WORKSPACE_RESIZER_WIDTH = 4
 /** Fraction of the workspace body given to the transcript by default. Leaves ~40% for the artifacts/details sidebar. */
 const DEFAULT_TRANSCRIPT_WIDTH_FRACTION = 0.6
-// v3 key: v2 values could be poisoned by drags performed inside scaled canvas
-// panels (screen px persisted as if they were local px), pinning the details
+// v3 key: v2 values could be poisoned by drags performed inside scaled
+// containers (screen px persisted as if they were local px), pinning the details
 // sidebar at ~70% until re-dragged. Bump to give everyone a clean default.
 const TRANSCRIPT_WIDTH_STORAGE_KEY = '20x:task:transcriptWidth:v3'
 
@@ -39,8 +39,8 @@ export function useResizableTranscript(sidebarOpen: boolean) {
     const container = workspaceBodyRef.current
     const applyWidth = () => {
       // offsetWidth is the LAYOUT width in local px. getBoundingClientRect()
-      // would return scaled screen px on the canvas, where task panels render
-      // under a scale(zoom) transform — mixing the two spaces is what pinned
+      // would return scaled screen px under a scale() transform — mixing the
+      // two spaces is what pinned
       // the details sidebar at ~70% regardless of dragging.
       const containerWidth = container.offsetWidth
       if (containerWidth <= 0) return
@@ -66,8 +66,8 @@ export function useResizableTranscript(sidebarOpen: boolean) {
   const handleResizeMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!resizingRef.current || !workspaceBodyRef.current) return
     const container = workspaceBodyRef.current
-    // clientX/rect are in screen px and include any ancestor transform scale
-    // (canvas zoom); the width style is applied in layout px. Convert the
+    // clientX/rect are in screen px and include any ancestor transform scale;
+    // the width style is applied in layout px. Convert the
     // pointer position to local px so the pane tracks the cursor and the
     // clamp operates in the same space as the applied width.
     const rect = container.getBoundingClientRect()

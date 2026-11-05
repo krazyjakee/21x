@@ -4,7 +4,6 @@ import { DesktopHostStatus } from './DesktopHostStatus'
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { Sidebar } from './Sidebar'
 import { TaskWorkspace } from '@/components/tasks/TaskWorkspace'
-import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas'
 import { OnboardingWizard, ensureDefaultAgentConfigured, shouldShowOnboarding } from '@/components/onboarding/OnboardingWizard'
 import { ProgressToastStack } from '@/components/ui/ProgressToastStack'
 import { VoiceOverlay } from '@/components/voice/VoiceOverlay'
@@ -244,7 +243,7 @@ export function AppLayout() {
       <div className="app-chrome-field flex flex-1 min-h-0 overflow-hidden bg-background">
         <NavRail />
 
-        {sidebarView !== 'dashboard' && sidebarView !== 'canvas' && sidebarView !== 'commander' && sidebarView !== 'overview' && !sidebarCollapsed && (
+        {sidebarView !== 'dashboard' && sidebarView !== 'commander' && sidebarView !== 'overview' && !sidebarCollapsed && (
           <Sidebar
             tasks={tasks}
             selectedTaskId={selectedTask?.id || null}
@@ -257,14 +256,6 @@ export function AppLayout() {
         {/* Workspace — floats as a rounded card, shrinks when orchestrator is open */}
         <main className="flex flex-col flex-1 min-w-0 overflow-hidden rounded-2xl border border-border bg-card shadow-card m-2 transition-all duration-200">
           <div className="flex-1 h-0 overflow-hidden relative">
-            {/* Canvas — always mounted so iframes/terminals survive navigation */}
-            <div
-              className="absolute inset-0"
-              style={{ visibility: sidebarView === 'canvas' && activeModal !== 'settings' ? 'visible' : 'hidden' }}
-            >
-              <InfiniteCanvas />
-            </div>
-
             {activeModal === 'settings' ? (
               <Suspense fallback={workspaceFallback}>
                 <SettingsWorkspace />
@@ -285,7 +276,7 @@ export function AppLayout() {
               <Suspense fallback={workspaceFallback}>
                 <OverviewWorkspace />
               </Suspense>
-            ) : sidebarView !== 'canvas' ? (
+            ) : (
               <TaskWorkspace
                 task={selectedTask}
                 agents={agents}
@@ -299,7 +290,7 @@ export function AppLayout() {
                 onNavigateToTask={handleNavigateToTask}
                 onBack={() => selectTask(null)}
               />
-            ) : null}
+            )}
           </div>
         </main>
 

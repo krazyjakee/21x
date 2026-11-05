@@ -108,8 +108,7 @@ async function fixture(providerOverride?: ChatProvider, connectors = false, mobi
     canAccessSkill: (_id, value) => trusted(value), canCreateGlobalSkill: (_data, value) => trusted(value),
     canCreateAgent: (_data, value) => trusted(value), canCreateMcpServer: (_data, value) => trusted(value),
     canUseSecretEnvironment: (_name, value) => trusted(value), canReadEnvironment: (_key, value) => trusted(value),
-    canAccessTerminal: (_id, value) => trusted(value), resolveTerminalDirectory: (_id, value) => trusted(value)
-      ? { cwd: bootstrap.paths.workspaceRoot, root: bootstrap.paths.workspaceRoot } : null },
+ },
     emit: (operation, payload) => events.push({ operation, payload }), fatal: () => {} }
   const backend = await ProductionDesktopBindings.attach(owner, options), signal = new AbortController().signal
   return { owner, services, backend, options, caller, signal, events, bootstrap, boundaries, root }

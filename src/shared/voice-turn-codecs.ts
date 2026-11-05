@@ -50,7 +50,7 @@ const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]
 const natural = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
 const bounded = (v: unknown): boolean => isJsonValue(v) && bytes(JSON.stringify(v)) <= VOICE_TURN_LIMITS.frameBytes
 const MODES = ['dictation', 'command', 'conversation']
-const VIEWS = ['tasks', 'skills', 'dashboard', 'canvas', 'commander', 'overview', 'settings']
+const VIEWS = ['tasks', 'skills', 'dashboard', 'commander', 'overview', 'settings']
 const SOURCES = ['agent_answer', 'action_result', 'read_last_answer', 'preview', 'manual', 'conversation']
 const END_REASONS = ['complete', 'cancelled', 'error', 'skipped']
 const OUTCOMES = ['needs_confirmation', 'executed', 'rejected', 'dictation', 'completed', 'cancelled']

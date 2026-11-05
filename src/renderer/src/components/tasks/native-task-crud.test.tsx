@@ -33,7 +33,7 @@ beforeEach(async () => {
   handlers.set('db:getTasks', async () => tasks.getState().tasks); values.set('settings:get', null); values.set('agent:getAll', []); values.set('skills:getAll', [])
   tasks.setState({ tasks: [task()], selectedTaskId: 'task-1', error: null })
   projects.setState({ projects: [project('default'), project('other-project'), project('third-project')], currentProjectId: 'default' })
-  ui.setState({ activeModal: null, deletingTaskId: null, editingTaskId: null, dashboardPreviewTaskId: 'task-1', canvasPendingTaskId: 'task-1' })
+  ui.setState({ activeModal: null, deletingTaskId: null, editingTaskId: null, dashboardPreviewTaskId: 'task-1' })
   agents.setState({ sessions: new Map(), agents: [] }); vi.stubGlobal('confirm', vi.fn(() => true))
   await host.reconnect()
   ;(await import('@/stores/task-store')).initializeTaskDesktopState()
@@ -114,9 +114,9 @@ it.each(['project-return', 'pagehide', 'reconnect'] as const)('retires native de
   if (mode === 'project-return') act(() => { projects.setState({ currentProjectId: 'third-project' }); projects.setState({ currentProjectId: 'default' }) })
   if (mode === 'pagehide') act(() => window.dispatchEvent(new Event('pagehide')))
   if (mode === 'reconnect') await act(async () => { await host.reconnect() })
-  ui.setState({ activeModal: 'delete', deletingTaskId: 'task-1', dashboardPreviewTaskId: 'task-1', canvasPendingTaskId: 'task-1' })
+  ui.setState({ activeModal: 'delete', deletingTaskId: 'task-1', dashboardPreviewTaskId: 'task-1' })
   await act(async () => { raw.resolve(true) }); expect(ui.getState().activeModal).toBe('delete')
-  expect(ui.getState().dashboardPreviewTaskId).toBe('task-1'); expect(ui.getState().canvasPendingTaskId).toBe('task-1')
+  expect(ui.getState().dashboardPreviewTaskId).toBe('task-1')
 })
 it.each(['create', 'delete', 'move'] as const)('refuses old-connection %s cache/error publication', async kind => {
   const raw = held<unknown>(); const op = kind === 'create' ? 'db:createTask' : kind === 'delete' ? 'db:deleteTask' : 'project:moveTask'

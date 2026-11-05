@@ -43,7 +43,7 @@ export function assertUiStateReferences(database: DatabaseManager, state: UiStat
     }
   }
   project(state.projectId, state.captainOpen)
-  const local = new Set([...state.visibleTaskIds, ...state.canvas.panels.flatMap(panel => panel.taskId ? [panel.taskId] : [])])
+  const local = new Set(state.visibleTaskIds)
   const tasks = new Set([...local, ...[state.selectedTaskId, state.dashboardPreviewTaskId].filter((id): id is string => id !== null)])
   for (const id of tasks) {
     if (!grants.canAccessTask(id)) throw new ServiceProtocolError('INVALID_REQUEST')
@@ -65,7 +65,7 @@ export function assertUiStateReferences(database: DatabaseManager, state: UiStat
  * by its sending route. This helper proves only its literal task/scalar scope. */
 export function assertUiCommandReferences(database: DatabaseManager, command: UiCommand, grants: UiReferenceGrants): void {
   if (!isUiCommand(command)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
-  if (command.kind === 'navigate' || command.kind === 'set_canvas_view') return
+  if (command.kind === 'navigate') return
   let projectId: string, taskId: string | null = null
   if (command.kind === 'switch_project') projectId = command.projectId
   else {
@@ -76,7 +76,7 @@ export function assertUiCommandReferences(database: DatabaseManager, command: Ui
     projectId = row.project_id ?? DEFAULT_PROJECT_ID
     if (command.kind === 'open_artifact' && !/^artifact_[a-z0-9][a-z0-9_-]{5,80}$/.test(command.artifactId)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
   }
-  assertUiStateReferences(database, { view: 'tasks', projectId, modal: null, selectedTaskId: taskId, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } }, grants)
+  assertUiStateReferences(database, { view: 'tasks', projectId, modal: null, selectedTaskId: taskId, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [] }, grants)
 }
 
 /** Owns the real native acknowledgement. Window absence does not stop the

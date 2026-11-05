@@ -68,10 +68,6 @@ export function useVoiceControl(): void {
         ui.openSettings()
         return
       }
-      if (destination === 'canvas' && taskId) {
-        ui.openTaskOnCanvas(taskId)
-        return
-      }
       ui.setSidebarView(destination)
     })
 

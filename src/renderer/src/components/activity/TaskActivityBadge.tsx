@@ -3,7 +3,7 @@ import { isQuietActivity } from '@/lib/activity/derive-activity'
 import { ActivityBadge } from './ActivityBadge'
 
 /**
- * One task's live activity badge (#95): canvas headers now, board cards in the
+ * One task's live activity badge (#95): task headers now, board cards in the
  * hook-up follow-up. Separate from the lifecycle column/label: a lifecycle
  * value alone never makes this say "Running".
  *

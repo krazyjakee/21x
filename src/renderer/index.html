@@ -18,12 +18,12 @@
                      nonce makes the browser ignore 'unsafe-inline' entirely.
                      Serving artifact HTML from its own protocol would let this
                      tighten to a hash later.
-        style-src    Tailwind/Vite inject <style>, xterm and Radix set inline styles.
+        style-src    Tailwind/Vite inject <style>, Radix sets inline styles.
         font-src     Web fonts come from jsDelivr (styles/globals.css).
         img-src      Attachments (app-attachment:), pasted/downscaled images (data:,
                      blob:) and remote images in markdown/PR avatars.
         connect-src  Only the app itself plus the dev server's HMR socket.
-        frame-src    Canvas web-page panels embed arbitrary sites.
+        frame-src    Sandboxed artifact previews render here and inherit this policy.
         worker-src   blob: workers; object-src/base-uri/form-action are locked down.
     -->
     <meta

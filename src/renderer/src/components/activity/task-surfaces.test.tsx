@@ -130,11 +130,4 @@ describe('task header bar (#95)', () => {
     push({ status: SessionStatus.WORKING, epoch: 'E', seq: 1 })
     expect(screen.getByRole('img', { name: 't1 — Running' })).toBeInTheDocument()
   })
-
-  it('renders no badge when the surrounding chrome owns it (canvas panels)', () => {
-    useTaskStore.setState({ tasks: [task('t1')] })
-    render(<TaskHeaderBar task={task('t1')} {...props} showActivity={false} />)
-    push({ status: SessionStatus.WORKING, epoch: 'E', seq: 1 })
-    expect(screen.queryByRole('img', { name: 't1 — Running' })).toBeNull()
-  })
 })

@@ -42,12 +42,12 @@ describe('isTrustedSender', () => {
 
 describe('assertTrustedSender', () => {
   it('passes for the main window', () => {
-    expect(() => assertTrustedSender(event(), 'terminal:create')).not.toThrow()
+    expect(() => assertTrustedSender(event(), 'shell:openPath')).not.toThrow()
   })
 
   it('throws for anything else', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(() => assertTrustedSender(event({ sender: { getType: () => 'webview' } }), 'terminal:create'))
-      .toThrow(/terminal:create/)
+    expect(() => assertTrustedSender(event({ sender: { getType: () => 'webview' } }), 'shell:openPath'))
+      .toThrow(/shell:openPath/)
   })
 })

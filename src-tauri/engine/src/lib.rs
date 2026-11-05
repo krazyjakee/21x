@@ -686,7 +686,6 @@ fn valid_result(operation: &str, result: &Value, epoch: &str) -> bool {
             };
             let names = [
                 "sqlite",
-                "pty",
                 "worker",
                 "@anthropic-ai/claude-agent-sdk",
                 "@opencode-ai/sdk",

@@ -335,9 +335,9 @@ describe('VoiceActionService — events', () => {
 
   it('asks the renderer to navigate without touching the database', async () => {
     const ctx = makeService()
-    const outcome = await ctx.service.apply('turn1', proposalFor({ type: 'navigate', destination: 'canvas' }), ON_TASK)
+    const outcome = await ctx.service.apply('turn1', proposalFor({ type: 'navigate', destination: 'dashboard' }), ON_TASK)
     expect(outcome.status).toBe('executed')
-    expect(ctx.notify).toHaveBeenCalledWith('voice:navigate', { destination: 'canvas', taskId: 't1' })
+    expect(ctx.notify).toHaveBeenCalledWith('voice:navigate', { destination: 'dashboard', taskId: 't1' })
     expect(ctx.db.updateTask).not.toHaveBeenCalled()
   })
 

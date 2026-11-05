@@ -31,7 +31,7 @@ export class TaskMcpStdioProxy {
       const forwarding = signedTaskMcpForwarding(signedUrl, apiUrl)
       if (!forwarding) throw invalid()
       this.url = forwarding.url
-      this.tools = listToolsForScope(forwarding.scope, { includeLegacyBrowserTools: false })
+      this.tools = listToolsForScope(forwarding.scope)
       this.names = new Set(this.tools.map(tool => tool.name))
     } catch { throw invalid() }
   }

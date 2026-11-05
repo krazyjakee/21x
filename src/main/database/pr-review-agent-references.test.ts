@@ -101,7 +101,7 @@ describe('v39 review reference migration', () => {
 
   it('lets the agent go and keeps every record, including one with no handoff', () => {
     const { db, rawDb, reviewer, attestation } = upgraded()
-    expect(db.getSetting('__schema_version')).toBe('39')
+    expect(db.getSetting('__schema_version')).toBe('40')
     expect(db.deleteAgent(reviewer.id)).toBe(true)
     expect(rawDb.prepare('SELECT id FROM pr_review_attestations ORDER BY id').all()).toEqual(
       [{ id: 'before-handoffs' }, { id: attestation.id }].sort((a, b) => a.id.localeCompare(b.id)))

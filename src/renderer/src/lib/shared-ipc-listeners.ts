@@ -1,8 +1,8 @@
 /**
  * Shared IPC Listener Bus
  *
- * Solves the MaxListenersExceededWarning that occurs when many canvas panels
- * are open — each panel's component tree (TaskWorkspace, WorktreeProgressOverlay,
+ * Solves the MaxListenersExceededWarning that occurs when many task views
+ * are open — each view's component tree (TaskWorkspace, WorktreeProgressOverlay,
  * GhCliSetupDialog, HeartbeatSection, etc.) independently registers IPC listeners
  * on the same channels. With 11+ panels, individual channels exceed Node's
  * default limit of 10 listeners.

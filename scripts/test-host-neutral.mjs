@@ -17,9 +17,9 @@ try {
   const resources = readHostNeutralResources(root), abi = inspectHostNeutralAbi(resources)
   const rows = reviewTestInventory(root)
   const env = { ...hostNeutralEnvironment(), TAURI_HOST_NEUTRAL_RUNNER: '1', TAURI_NODE_RUNTIME: resources.node,
-    TAURI_SQLITE_MODULE: resources.sqlite, TAURI_NODE_PTY_MODULE: resources.pty }
-  const proofFlags = ['--service-proofs', '--production-proofs', '--terminal-proofs']
-  for (const [flag, name] of [['--service-proofs', 'TAURI_STANDALONE_SERVICE_PROOFS'], ['--production-proofs', 'TAURI_PRODUCTION_SERVICE_PROOFS'], ['--terminal-proofs', 'TAURI_TERMINAL_PROOFS']]) env[name] = args.includes(flag) ? '1' : '0'
+    TAURI_SQLITE_MODULE: resources.sqlite }
+  const proofFlags = ['--service-proofs', '--production-proofs', '--owner-proofs']
+  for (const [flag, name] of [['--service-proofs', 'TAURI_STANDALONE_SERVICE_PROOFS'], ['--production-proofs', 'TAURI_PRODUCTION_SERVICE_PROOFS'], ['--owner-proofs', 'TAURI_OWNER_PROOFS']]) env[name] = args.includes(flag) ? '1' : '0'
   if (args.includes('--service-proofs')) env.TAURI_DATABASE_SERVICE_ENTRY = realpathSync(join(root, 'src-tauri/resources/service/database-stdio.mjs'))
   if (args.includes('--production-proofs')) {
     env.TAURI_PRODUCTION_SERVICE_ENTRY = realpathSync(join(root, 'src-tauri/resources/service/production-stdio.mjs'))
@@ -29,7 +29,7 @@ try {
   const forwarded = args.filter(arg => !proofFlags.includes(arg) && arg !== '--node-tests' && !arg.startsWith('--run-receipt='))
   const command = nodeTests ? ['--test', '--test-concurrency=1', ...forwarded, ...rows.filter(row => row.framework === 'node:test' && row.cohort === 'host-neutral').map(row => row.file)]
     : [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', 'vitest.host-neutral.config.ts', ...forwarded]
-  console.log(`Standalone Node ${abi.node} ABI ${abi.modules}; staged SQLite/PTY verified; ${nodeTests ? 'node:test' : 'Vitest'} host-neutral cohort`)
+  console.log(`Standalone Node ${abi.node} ABI ${abi.modules}; staged SQLite verified; ${nodeTests ? 'node:test' : 'Vitest'} host-neutral cohort`)
   const excluded = nodeTests ? [] : Object.entries(HOST_NEUTRAL_PROOF_FILES).filter(([, flag]) => env[flag] !== '1').map(([file, flag]) => ({ file, reason: `Opt-in ${flag} not selected` }))
   if (excluded.length) console.log(`${excluded.length} opt-in proof files excluded; historical Electron cohort runs separately`)
   const signature = file => ({ file: relative(root, file).replaceAll('\\', '/'), sha256: createHash('sha256').update(readFileSync(file)).digest('hex') })
@@ -60,6 +60,6 @@ try {
   })
 } catch (error) {
   console.error(error instanceof Error && /overrides|Unreviewed|quarantine|cohort/.test(error.message) ? error.message
-    : 'Host-neutral tests require physical pinned Node/SQLite/PTY resources; run explicit native preparation first.')
+    : 'Host-neutral tests require physical pinned Node/SQLite resources; run explicit native preparation first.')
   process.exitCode = 1
 }

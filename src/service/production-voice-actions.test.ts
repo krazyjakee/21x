@@ -88,7 +88,6 @@ async function fixture(kind: string) {
     canCreateSecret: check,
     canUseSecretEnvironment: check,
     canReadEnvironment: check,
-    canAccessTerminal: check,
     canAccessMcpServer: check,
     canAccessCli: check,
     canUseTransport: check,
@@ -111,8 +110,7 @@ async function fixture(kind: string) {
     canAccessSkill: check,
     canCreateGlobalSkill: check,
     canCreateAgent: check,
-    canCreateMcpServer: check,
-    resolveTerminalDirectory: () => null
+    canCreateMcpServer: check
   }
   let session = 0
   const adapter = {
@@ -449,7 +447,7 @@ for (const kind of cases)
       const held=new Promise<void>(resolve=>{release=resolve});releases.push(release)
       const delivered:NativeVoiceEvent[]=[]
       const turn=f.begin({selectedTaskId:task.id,async publish(event,beforePublish){entered=true;await held;beforePublish();delivered.push(event)}})
-      const pending=turn.finalTranscript('open canvas for this')
+      const pending=turn.finalTranscript('open the dashboard')
       await vi.waitFor(()=>expect(entered).toBe(true))
       const joining=turn.close()
       let joined=false;void joining.then(()=>{joined=true})
@@ -525,11 +523,11 @@ for (const kind of cases)
       expect(written).toEqual(['start this'])
       expect(f.adapter.sendPrompt).not.toHaveBeenCalled()
       const nav = f.begin({ selectedTaskId: task.id })
-      expect((await nav.finalTranscript('open canvas for this')).status).toBe('executed')
+      expect((await nav.finalTranscript('open the dashboard')).status).toBe('executed')
       expect(f.voiceEvents.find((event) => event.type === 'navigate')).toMatchObject({
         turnId: nav.turnId,
         turnEpoch: nav.turnEpoch,
-        destination: 'canvas',
+        destination: 'dashboard',
         taskId: task.id
       })
       current = false

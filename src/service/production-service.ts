@@ -521,8 +521,6 @@ export function createStagedProductionService(descriptor: ProductionLaunchDescri
     canReadSetting: (_key, caller) => trusted(caller), canWriteSetting: (_key, caller) => trusted(caller),
     canAccessSecret: (_id, caller) => trusted(caller), canCreateSecret: trusted,
     canUseSecretEnvironment: (_name, caller) => trusted(caller), canReadEnvironment: (_key, caller) => trusted(caller),
-    canAccessTerminal: (_id, caller) => trusted(caller), resolveTerminalDirectory: (_id, caller) => trusted(caller)
-      ? { cwd: descriptor.paths.workspaceRoot, root: descriptor.paths.workspaceRoot } : null,
     canAccessCli: (_cli, caller) => trusted(caller),
     canAccessMcpServer: (_id, caller) => trusted(caller),
     canUseTransport: (_input, caller) => trusted(caller) && descriptor.capabilities.configuredMcp === 'enabled',

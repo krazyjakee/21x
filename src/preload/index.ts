@@ -1,4 +1,3 @@
-import type { BrowserRecordingManifest } from '../shared/browser-recording'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ArtifactContent, ArtifactCopyFileResult, ArtifactFileEntry, PullRequestDetails } from '../shared/artifacts'
 import { UI_COMMAND_CHANNEL, type UiCommand } from '../shared/ui-commands'
@@ -596,30 +595,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   webUtils: {
     getPathForFile: (file: File): string => webUtils.getPathForFile(file)
   },
-  terminal: {
-    create: (id: string, cols: number, rows: number, cwd?: string): Promise<{ pid: number }> =>
-      ipcRenderer.invoke('terminal:create', { id, cols, rows, cwd }),
-    write: (id: string, data: string): Promise<void> =>
-      ipcRenderer.invoke('terminal:write', { id, data }),
-    resize: (id: string, cols: number, rows: number): Promise<void> =>
-      ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
-    kill: (id: string, expectedPid?: number): Promise<void> =>
-      ipcRenderer.invoke('terminal:kill', { id, expectedPid }),
-    getCwd: (id: string, expectedPid?: number): Promise<{ cwd: string | null }> =>
-      ipcRenderer.invoke('terminal:getCwd', { id, expectedPid }),
-    getBuffer: (id: string, lines?: number): Promise<{ lines: string[] }> =>
-      ipcRenderer.invoke('terminal:getBuffer', { id, lines }),
-    onData: (callback: (data: { id: string; data: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { id: string; data: string }): void => callback(d)
-      ipcRenderer.on('terminal:data', handler)
-      return () => ipcRenderer.removeListener('terminal:data', handler)
-    },
-    onExit: (callback: (data: { id: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { id: string }): void => callback(d)
-      ipcRenderer.on('terminal:exit', handler)
-      return () => ipcRenderer.removeListener('terminal:exit', handler)
-    }
-  },
   ui: {
     publishState: (state: Record<string, unknown>): Promise<void> =>
       ipcRenderer.invoke('ui:publishState', state),
@@ -828,18 +803,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     bargeIn: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('voice:commander:bargeIn', { sessionId }),
     send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('voice:commander:send', { sessionId, text })
   },
-  browser: {
-    startRecording: (panelId: string, title?: string): Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }> =>
-      ipcRenderer.invoke('browser:startRecording', panelId, title),
-    stopRecording: (panelId: string): Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }> =>
-      ipcRenderer.invoke('browser:stopRecording', panelId),
-    recordingStatus: (panelId: string): Promise<{ recording: BrowserRecordingManifest | null }> =>
-      ipcRenderer.invoke('browser:recordingStatus', panelId),
-    registerBrokerPanel: (payload: { panelId: string; webContentsId: number; taskIds: string[] }): Promise<{ success: boolean }> =>
-      ipcRenderer.invoke('browser:registerBrokerPanel', payload),
-    unregisterBrokerPanel: (panelId: string): Promise<{ success: boolean }> =>
-      ipcRenderer.invoke('browser:unregisterBrokerPanel', panelId),
-    openExternalAuth: (loginUrl: string): Promise<{ success: boolean; finalUrl: string; cookieCount: number }> =>
-      ipcRenderer.invoke('browser:openExternalAuth', loginUrl)
-  }
 })

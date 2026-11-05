@@ -1,7 +1,7 @@
 import { useTaskEditReceipt } from '@/hooks/use-task-edit-receipt'
 import { desktopApi, getDesktopHost } from '@/lib/desktop-api'
 import React, { useEffect } from 'react'
-import { Pencil, Trash2, Calendar, User, Tag, Clock, Bot, Play, History, GitBranch, Route, Plus, X, BookOpen, AlarmClockOff, BellRing, Folder, Repeat, Star, Sparkles, Layers, Settings2, Terminal } from 'lucide-react'
+import { Pencil, Trash2, Calendar, User, Tag, Clock, Bot, Play, History, GitBranch, Route, Plus, X, BookOpen, AlarmClockOff, BellRing, Folder, Repeat, Star, Sparkles, Settings2, Terminal } from 'lucide-react'
 import { CollapsibleDescription } from '@/components/ui/CollapsibleDescription'
 import { Button } from '@/components/ui/Button'
 import { TaskStatusBadge } from './TaskStatusBadge'
@@ -19,7 +19,6 @@ import { formatRecurrencePattern } from './recurrence-format'
 import { SNOOZE_SOMEDAY } from '@/lib/snooze-options'
 import { AnthropicLogo, OpenCodeLogo, OpenAILogo, PiLogo } from '@/components/icons/AgentLogos'
 import { HeartbeatSection } from './HeartbeatSection'
-import { useUIStore } from '@/stores/ui-store'
 import { SubtasksSection } from './SubtasksSection'
 import { ParentTaskContext } from './ParentTaskContext'
 import { AgentConfigWarning } from './AgentConfigWarning'
@@ -62,7 +61,6 @@ interface TaskDetailViewProps {
   onUpdateNextSubtaskIds?: (taskIds: string[]) => void | Promise<void>
   onNavigateToTask?: (taskId: string) => void
   /** When provided, each subtask shows an action to open it as a separate window/panel. */
-  onOpenSubtaskInWindow?: (taskId: string) => void
   onAddSubtask?: (title: string) => void | Promise<void>
   onReorderSubtasks?: (orderedIds: string[]) => void | Promise<void>
   /** Presentation-only mode used by the task workspace redesign. */
@@ -73,12 +71,11 @@ interface TaskDetailViewProps {
   showPrimaryActions?: boolean
 }
 
-function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttachments, onUpdateOutputFields, onCompleteTask, onAssignAgent, agentActionDisabled, onUpdateRepos, onAddRepos, onUpdateSkillIds, onAddSkills, onStartAgent, canStartAgent, onResumeAgent, canResumeAgent, onRestartAgent, canRestartAgent, onSnooze, onUnsnooze, onReassign, onTriage, canTriage, onEditAgent, onUpdateDescription, onUpdateAutoFlags, subtasks, siblingSubtasks, parentTask, onUpdateNextSubtaskIds, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks, displayMode = 'full', showOutputFields = true, showPrimaryActions = true }: TaskDetailViewProps) {
+function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttachments, onUpdateOutputFields, onCompleteTask, onAssignAgent, agentActionDisabled, onUpdateRepos, onAddRepos, onUpdateSkillIds, onAddSkills, onStartAgent, canStartAgent, onResumeAgent, canResumeAgent, onRestartAgent, canRestartAgent, onSnooze, onUnsnooze, onReassign, onTriage, canTriage, onEditAgent, onUpdateDescription, onUpdateAutoFlags, subtasks, siblingSubtasks, parentTask, onUpdateNextSubtaskIds, onNavigateToTask, onAddSubtask, onReorderSubtasks, displayMode = 'full', showOutputFields = true, showPrimaryActions = true }: TaskDetailViewProps) {
   // Per-field selectors — a selector-less useSkillStore() re-renders this
   // large view on every skill-store mutation.
   const skills = useSkillStore((s) => s.skills)
   const fetchSkills = useSkillStore((s) => s.fetchSkills)
-  const openTaskOnCanvas = useUIStore((s) => s.openTaskOnCanvas)
   const metadata = useTaskEditReceipt(task.id)
   const isActive = task.status !== TaskStatus.Completed
 
@@ -118,10 +115,6 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
               Snooze
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={() => openTaskOnCanvas(task.id)} title="Open in Canvas">
-            <Layers className="h-3.5 w-3.5" />
-            Canvas
-          </Button>
           <Button variant="ghost" size="sm" onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" />
             Edit
@@ -470,7 +463,6 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
               key={task.id}
               subtasks={subtasks || []}
               onNavigateToTask={onNavigateToTask}
-              onOpenSubtaskInWindow={onOpenSubtaskInWindow}
               onAddSubtask={onAddSubtask}
               onReorderSubtasks={onReorderSubtasks}
             />

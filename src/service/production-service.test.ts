@@ -111,14 +111,13 @@ function fixture(workspaceFiles = false, ui = false, installation = false, attac
     canAccessProject: (_id, _caller, access) => permitted && (access === 'read' || grantWrites), canAccessAgent: (_id, _caller, access) => permitted && (access === 'read' || grantWrites), canAccessSession: check, canAccessGlobalCommander: check,
     canManageGlobalConfiguration: (_caller, access) => permitted && (access === 'read' || grantWrites), canQueryBackend: check, canCreateProject: check, canEditSettings: check,
     canAccessGlobalSkills: check, canChangeSkillScope: check, canReorderProjects: check, canReadSetting: check, canWriteSetting: check, canAccessSecret: check,
-    canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessTerminal: check, canAccessMcpServer: check, canAccessCli: check,
+    canCreateSecret: check, canUseSecretEnvironment: check, canReadEnvironment: check, canAccessMcpServer: check, canAccessCli: check,
     canUseTransport: check, canUseEnvironmentName: check, canAccessConnector: check, canUseSourcePlugin: check,
     canCreateInstance: check, canUsePiece: check, canBorrowSourceCredentials: check, canResolveUnsavedConfig: check,
     canManageMobile: check, canAccessMobileSession: check,
     canAccessMarketplace: check, canCreateMarketplace: check, canAccessPluginName: check, canAccessPlugin: check,
     canUseMarketplaceSource: check, canUsePluginAddress: check, canUsePluginSource: check, canAccessSkill: check,
-    canCreateGlobalSkill: check, canCreateAgent: check, canCreateMcpServer: check,
-    resolveTerminalDirectory: () => ({ cwd: launch.paths.workspaceRoot, root: launch.paths.workspaceRoot }) }
+    canCreateGlobalSkill: check, canCreateAgent: check, canCreateMcpServer: check }
   const schemas: Record<string, OperationSchema> = Object.fromEntries(Object.entries(PRODUCTION_COMMAND_CODECS).map(([operation, codec]) => [operation, {
     validatePayload: (value: unknown) => { try { return codec.validateArguments(codec.decodeArguments(value as JsonValue)) } catch { return false } }, validateResult: codec.validateWireResult
   }]))
@@ -688,7 +687,7 @@ describe('production resource gate before engine loading', () => {
 })
 
 describe('private native document publication into the actual production singleton', () => {
-  const state = (projectId: string) => ({ view: 'commander', projectId, modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } })
+  const state = (projectId: string) => ({ view: 'commander', projectId, modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [] })
   it('rejects public lease injection and stamps private native ingress before reading actual UI state', async () => {
     const f = fixture(false, true); await f.initialize()
     const services = f.service.getReadyServices()!, snapshot = state(services.db.getDefaultProject()!.id)
@@ -730,7 +729,7 @@ describe('private native document publication into the actual production singlet
 
 it.skipIf(process.platform === 'win32')('installs a controlled real package through private native ingress and the actual singleton, preserving external files', async () => {
   const f = fixture(false, true, true); await f.initialize()
-  const services = f.service.getReadyServices()!, state = { view: 'settings', projectId: services.db.getDefaultProject()!.id, modal: 'settings', selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: 'agents', waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } }
+  const services = f.service.getReadyServices()!, state = { view: 'settings', projectId: services.db.getDefaultProject()!.id, modal: 'settings', selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: 'agents', waitingForYou: false, visibleTaskIds: [] }
   await f.host.request('engine.ui.publish', { state, leaseId: 'document_fixture_1' })
   const external = join(f.root, 'external-user-cli.txt'); writeFileSync(external, 'preserve external installation')
   await expect(f.host.request('agent-installer:install', { agentName: 'opencode' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })

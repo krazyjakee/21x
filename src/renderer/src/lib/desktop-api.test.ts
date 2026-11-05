@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import type { DesktopApi } from '@shared/desktop-api'
-import { createElectronHost, electronBrowserApi, desktopApi, desktopSupports, getDesktopHost, installDesktopHost } from './desktop-api'
+import { createElectronHost, desktopApi, desktopSupports, getDesktopHost, installDesktopHost } from './desktop-api'
 const releases: Array<() => void> = []
 afterEach(() => { for (const release of releases.splice(0)) release(); vi.restoreAllMocks() })
 it('preserves Electron binary/file values and subscription ownership without serialization', async () => {
@@ -24,13 +24,4 @@ it('reads the current Electron bridge at call time and restores the previous hos
   bridge = { settings: { get: vi.fn().mockResolvedValue('second') } } as unknown as DesktopApi
   expect(await desktopApi.settings.get('theme')).toBe('second')
   release(); release(); expect(getDesktopHost()).toBe(previous)
-})
-
-it('keeps legacy browser access confined to Electron even with a stale preload', () => {
-  const browser = { registerBrokerPanel: vi.fn() }
-  const electron = createElectronHost(() => ({ browser }) as unknown as DesktopApi)
-  releases.push(installDesktopHost(electron))
-  expect(electronBrowserApi()).toBe(browser)
-  releases.push(installDesktopHost({ ...electron, kind: 'tauri' }))
-  expect(electronBrowserApi()).toBeUndefined()
 })

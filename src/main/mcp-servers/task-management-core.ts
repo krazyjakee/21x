@@ -21,8 +21,6 @@
  */
 import {
   artifactToolNames,
-  browserRecordingToolNames,
-  browserTools,
   captainTools,
   sharedTools,
   subtaskTools,
@@ -311,14 +309,11 @@ async function skillScopeFor(scope: TaskMcpScope, invoke: TaskApiInvoke): Promis
 }
 
 /** The tools a session may see. This is the whole answer to "which tools to serve". */
-export interface TaskToolAvailability { includeLegacyBrowserTools?: boolean }
-
-export function listToolsForScope(scope: TaskMcpScope, availability: TaskToolAvailability = {}) {
+export function listToolsForScope(scope: TaskMcpScope) {
   const taskOnly = scope.taskId && scope.artifactTaskId ? taskAgentTools : []
-  const browser = availability.includeLegacyBrowserTools === false ? [] : browserTools
   return isScopedSession(scope)
-    ? [...subtaskTools, ...taskOnly, ...browser, ...sharedTools]
-    : [...captainTools, ...(isCoordinatorScope(scope) ? taskGroupCaptainTools : []), ...taskOnly, ...browser, ...sharedTools]
+    ? [...subtaskTools, ...taskOnly, ...sharedTools]
+    : [...captainTools, ...(isCoordinatorScope(scope) ? taskGroupCaptainTools : []), ...taskOnly, ...sharedTools]
 }
 
 /**
@@ -329,8 +324,7 @@ export async function callToolForScope(
   name: string,
   args: Record<string, unknown> | undefined,
   scope: TaskMcpScope,
-  invoke: TaskApiInvoke,
-  availability: TaskToolAvailability = {}
+  invoke: TaskApiInvoke
 ): Promise<ToolCallResult> {
   try {
     const bindScope = isScopedSession(scope) || isProjectScopedSession(scope)
@@ -343,7 +337,7 @@ export async function callToolForScope(
     // `update_task` instead of `update_own_task`, used to reach that
     // pass-through and act on any task at all. The tool list is the boundary, so
     // it must be enforced here and not only advertised.
-    if (!listToolsForScope(scope, availability).some((tool) => tool.name === name)) {
+    if (!listToolsForScope(scope).some((tool) => tool.name === name)) {
       return {
         content: [{ type: 'text', text: JSON.stringify({ error: `Unknown tool: ${name}` }) }],
         isError: true
@@ -363,9 +357,6 @@ export async function callToolForScope(
     const normalizedArgs: Record<string, unknown> = args ? { ...args } : {}
     if (normalizedArgs.status === 'in_progress') normalizedArgs.status = 'agent_working'
     if (artifactToolNames.has(name) && scope.artifactTaskId) normalizedArgs.task_id = scope.artifactTaskId
-    if (browserRecordingToolNames.has(name) && (scope.taskId || scope.artifactTaskId)) {
-      normalizedArgs.task_id = scope.taskId || scope.artifactTaskId
-    }
     // #74: the skill routes see who is calling. The scope's project wins over
     // anything the caller put under the key; full access carries no scope.
     delete normalizedArgs[SKILL_SCOPE_PARAM]

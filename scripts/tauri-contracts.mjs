@@ -18,7 +18,7 @@ const knownFamilies = new Set(['agent-installer', 'agent', 'agentConfig', 'agent
   'attachments', 'browser', 'captainRuntime', 'chat', 'chatImages', 'claudePlugin', 'cliMcp', 'commander', 'concurrency',
   'connectors', 'db', 'env', 'forgejo', 'git', 'github', 'gitlab', 'heartbeat', 'mcp', 'menu', 'mobile', 'notifications',
   'oauth', 'overdue', 'plugin', 'project', 'projectLimits', 'projectRepo', 'projectResource', 'secrets', 'settings',
-  'sessionContext', 'shell', 'skills', 'task', 'taskGroups', 'taskSource', 'tasks', 'terminal', 'transcript', 'ui', 'updater', 'voice', 'workspace', 'worktree'])
+  'sessionContext', 'shell', 'skills', 'task', 'taskGroups', 'taskSource', 'tasks', 'transcript', 'ui', 'updater', 'voice', 'workspace', 'worktree'])
 const callbackCommands = new Set(['attachments:save', 'artifacts:copyFile', 'attachments:open', 'attachments:download',
   // Node admits only an actual current task workspace; native receives the
   // captured path receipt rather than a caller-selected global filesystem grant.
@@ -214,7 +214,7 @@ export function buildOperationManifest(inventory, preloadSource, forwardingRevie
   }
   const forwarding = reviewEventForwarding(inventory, operations, forwardingReview)
   return { contractVersion: 1, status: 'contract-foundation; G1 not accepted',
-    removedFeatures: ['embedded-browser', 'remote-webpage-panels', 'built-in-browser-tools', 'browser-recording-capture', 'browser-cookie-import'],
+    removedFeatures: ['canvas', 'embedded-browser', 'remote-webpage-panels', 'built-in-browser-tools', 'browser-recording-capture', 'browser-recording-read-tools', 'browser-cookie-import', 'embedded-terminal'],
     retainedSecurity: ['trusted-app-webview', 'sandboxed-artifact-previews', 'external-OAuth', 'external-link-validation'],
     operations, unresolvedReferences: forwarding.references, forwardingReview: forwarding.review,
     // This is a native document lifecycle protocol, not a retained Source

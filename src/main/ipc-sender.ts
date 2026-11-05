@@ -5,10 +5,10 @@ import { isMainWindowUrl } from './main-window-url'
 /**
  * Sender checks for the handlers that can run code or read the disk.
  *
- * `ipcMain` accepts a message from *any* frame in *any* WebContents — a canvas
- * <webview>, an embedded iframe, an artifact preview. Only the main window's
- * top-level frame is ever meant to call terminal spawn, `shell:openPath` or
- * `shell:readTextFile`, so everything else is refused here. The navigation
+ * `ipcMain` accepts a message from *any* frame in *any* WebContents — an embedded
+ * iframe, an artifact preview. Only the main window's top-level frame is ever
+ * meant to call `shell:openPath` or `shell:readTextFile`, so everything else is
+ * refused here. The navigation
  * guards in `main-window-url.ts` keep that frame on the app's own URL.
  */
 
@@ -34,7 +34,7 @@ function devRendererUrl(): string | null {
 export function isTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent | SenderLike): boolean {
   const { sender, senderFrame } = event as SenderLike
   if (!senderFrame) return false
-  // A <webview> guest has its own WebContents; only a real window may call these.
+  // Only a real window may call these.
   if (sender?.getType && sender.getType() !== 'window') return false
   // Sub-frames (iframes, artifact previews) are never the caller.
   if (senderFrame.parent) return false

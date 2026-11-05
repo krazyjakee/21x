@@ -36,7 +36,7 @@ export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcut
             </section>
           ))}
           <p className="text-xs text-muted-foreground">
-            Shortcuts pause while you type. Canvas drawing controls keep priority in Canvas.
+            Shortcuts pause while you type.
           </p>
         </DialogBody>
       </DialogContent>

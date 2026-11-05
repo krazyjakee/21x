@@ -19,7 +19,7 @@ beforeEach(() => {
   manager = new AgentManager(db, { renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' }, secrets: { kind: 'unsupported' }, configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' }, createAdapter: () => new FakeAdapter(), isCodexAppServerAdapter: () => false })
   const project = db.createProject({ name: 'UI project' })!, agent = db.createAgent({ name: 'UI agent' })!, task = db.createTask({ title: 'Meaningful change', project_id: project.id })!
   db.updateTask(task.id, { agent_id: agent.id })
-  state = { view: 'canvas', projectId: project.id, modal: null, selectedTaskId: task.id, selectedTaskTitle: task.title, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [task.id], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [{ panelId: 'panel_one', type: 'task', taskId: task.id, title: task.title, x: 10, y: 20, width: 600, height: 400 }] } }
+  state = { view: 'dashboard', projectId: project.id, modal: null, selectedTaskId: task.id, selectedTaskTitle: task.title, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [task.id] }
   snapshot = vi.fn(async () => nativeState); send = vi.fn(async (_command, leaseId) => ({ ok: true as const, leaseId }))
   ui = new ProductionUiOwner({ database: db, manager, native: { snapshot, send }, assertCurrent: () => { if (!current || !db.db.open) throw new ServiceProtocolError('DISCONNECTED') }, beforeState: value => assertUiStateReferences(db, value, grants), beforeCommand: command => assertUiCommandReferences(db, command, grants) })
 })
@@ -43,9 +43,9 @@ describe('real DB and captured native UI acknowledgement owner', () => {
   it('does not redirect a snapshot-derived command to a replacement document or replay accepted work', async () => {
     await ui.publish(state, 'lease:one', controls()); await ui.snapshot(); const receipt = ui.observedLeaseId!
     nativeState = { available: true, leaseId: 'lease:two' }
-    expect(await ui.send({ kind: 'open_task', taskId: state.selectedTaskId!, where: 'canvas' }, controls(), receipt)).toHaveProperty('error'); expect(send).not.toHaveBeenCalled()
+    expect(await ui.send({ kind: 'open_task', taskId: state.selectedTaskId!, where: 'workspace' }, controls(), receipt)).toHaveProperty('error'); expect(send).not.toHaveBeenCalled()
     const held = gate<{ ok: true; leaseId: string }>(); send.mockImplementationOnce(() => held.promise); releases.push(() => held.resolve({ ok: true, leaseId: 'lease:two' }))
-    const pending = ui.send({ kind: 'open_task', taskId: state.selectedTaskId!, where: 'canvas' }, controls())
+    const pending = ui.send({ kind: 'open_task', taskId: state.selectedTaskId!, where: 'workspace' }, controls())
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1)); nativeState = { available: true, leaseId: 'lease:three' }; held.resolve({ ok: true, leaseId: 'lease:two' })
     expect(await pending).toHaveProperty('error'); expect(send).toHaveBeenCalledTimes(1); expect(await ui.snapshot()).toEqual({ available: false })
   })

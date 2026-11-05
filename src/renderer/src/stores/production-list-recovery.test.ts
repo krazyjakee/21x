@@ -14,7 +14,6 @@ import { rehydrateOverviewDesktopState, resetOverviewStoreForTests, useOverviewS
 import { rehydrateTaskGroupDesktopState, retireTaskGroupDesktopState, useTaskGroupStore } from './task-group-store'
 import type { TaskGroupRecord } from '@shared/task-groups'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
-import { readProjectScopedSetting } from '@/lib/project-scoped-setting'
 
 function held<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(done => { resolve = done }), resolve: (value: T) => resolve(value) } }
 const project = (id = DEFAULT_PROJECT_ID, archived = false): ProjectRecord => ({ id, name: id, archived,
@@ -81,13 +80,6 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   retireTaskGroupDesktopState(); resetOverviewStoreForTests()
-  // Project changes also start the actual layout owners; join those read-only
-  // loads before retiring the fixture's captured native connection.
-  const [{ useCanvasStore }, { useDrawingStore }] = await Promise.all([import('./canvas-store'), import('./drawing-store')])
-  await Promise.all([
-    useCanvasStore.getState().loadCanvas(useProjectStore.getState().currentProjectId),
-    useDrawingStore.getState().loadDrawings(useProjectStore.getState().currentProjectId)
-  ])
   releaseTasks(); releaseProjects(); releaseHost()
   Object.defineProperty(window, 'electronAPI', { configurable: true, value: legacyBridge })
   initializeTaskDesktopState(); initializeProjectDesktopState()
@@ -221,19 +213,6 @@ it('disposes task/project callbacks and pending publications, then binds one rep
   f.emit('task:created', { task: task('current') })
   expect(useTaskStore.getState().tasks.map(row => row.id)).toEqual(['current'])
 })
-
-it.each(['canvas_state', 'drawing_state'])('reads legacy %s only for Default without migration writes or cleared-value resurrection', async base => {
-  f.values.set(`settings:get:${base}`, '{"retained":"legacy"}')
-  expect(await readProjectScopedSetting(base, DEFAULT_PROJECT_ID)).toBe('{"retained":"legacy"}')
-  expect(await readProjectScopedSetting(base, 'other')).toBeNull()
-  f.values.set(`settings:get:${base}:${DEFAULT_PROJECT_ID}`, '')
-  expect(await readProjectScopedSetting(base, DEFAULT_PROJECT_ID)).toBe('')
-  f.values.delete(`settings:get:${base}:${DEFAULT_PROJECT_ID}`)
-  f.values.set(`settings:get:${base}_migrated_to_projects`, '1')
-  expect(await readProjectScopedSetting(base, DEFAULT_PROJECT_ID)).toBeNull()
-  expect(f.calls('settings:set')).toBe(0)
-})
-
 
 function groupSnapshot(title = 'Group') {
   const group: TaskGroupRecord = { id: 'group-1', title, project_id: DEFAULT_PROJECT_ID, agent_id: 'agent-1', execution_task_id: 'execution-1',

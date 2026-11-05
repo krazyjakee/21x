@@ -16,6 +16,7 @@ import { createManagedSessionTables } from './managed-session-migration'
 import { createCommanderActionTables, migrateCommanderActions } from './commander-actions-migration'
 import { createSessionHandoffTable } from './session-handoff-migration'
 import { createTaskGroupTables, migrateTaskGroups } from './task-groups-migration'
+import { dropCanvasSettings } from './canvas-removal-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -81,7 +82,7 @@ import { createTaskGroupTables, migrateTaskGroups } from './task-groups-migratio
  * 35 → 36: durable planned session handoff steps (#103).
  * 36 → 37: shared task-group execution anchors and retained membership/progress (#192).
  */
-const SCHEMA_VERSION = 39
+const SCHEMA_VERSION = 40
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -1134,6 +1135,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v37: retained group membership and one counted execution task.
   migrateTaskGroups(db)
   dropReviewAgentReferences(db)
+
+  // Migration v40: Canvas is gone, so its saved layouts and drawings go too.
+  dropCanvasSettings(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

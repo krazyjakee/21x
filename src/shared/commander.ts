@@ -1,7 +1,7 @@
 /**
  * Wire types for Commander chat sessions (docs/commander.md).
  *
- * The Commander is a fast conversational model with no canvas: its UI is a
+ * The Commander is a fast conversational model: its UI is a
  * list of persisted chat sessions. These shapes cross IPC between the
  * main-process CommanderService and the renderer.
  */

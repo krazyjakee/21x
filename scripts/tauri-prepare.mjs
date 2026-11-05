@@ -1,6 +1,6 @@
 /** Stage an isolated runtime once; native compilation is an explicit batch action. */
 import { constants } from 'node:fs'
-import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -132,29 +132,6 @@ export async function pruneForeignSqlitePrebuilds(service, {
   return candidates.map(path => relative(directory, path)).sort()
 }
 
-export async function repairPtyHelperModes(service, platform = process.platform) {
-  if (platform !== 'darwin') return []
-  const base = await realpath(service)
-  const helpers = []
-  // node-pty1.1.0 publishes Darwin prebuild helpers as0644. Repair only
-  // isolated staging copies; no application or dependency code is changed.
-  for (const directory of ['build/Release', 'build/Debug', 'prebuilds/darwin-x64', 'prebuilds/darwin-arm64']) {
-    const path = join(service, 'node_modules/node-pty', directory, 'spawn-helper')
-    let details
-    try { details = await lstat(path) }
-    catch (error) { if (error.code === 'ENOENT') continue; throw error }
-    if (!details.isFile() || details.isSymbolicLink()) throw new Error('PTY helper must be a regular staged file')
-    const location = relative(base, await realpath(path))
-    if (isAbsolute(location) || location === '..' || location.startsWith(`..${sep}`)) {
-      throw new Error('PTY helper cannot escape the isolated staging tree')
-    }
-    if ((details.mode & 0o111) !== 0o111) await chmod(path, (details.mode & 0o777) | 0o111)
-    helpers.push(directory)
-  }
-  if (helpers.length === 0) throw new Error('Staged Darwin PTY spawn helper is missing')
-  return helpers
-}
-
 export async function prepareRuntime({
   projectRoot = repositoryRoot,
   nodeExecutable = process.execPath,
@@ -202,12 +179,12 @@ export async function prepareRuntime({
     }))).every(Boolean)
     const smoke = () => {
       const checked = spawnSync(executable, ['--input-type=commonjs', '-e',
-        "console.log=()=>{};const fs=require('node:fs'),path=require('node:path');const base=fs.realpathSync(path.join(process.cwd(),'node_modules'));const result={};for(const name of ['better-sqlite3','node-pty']){try{const entry=fs.realpathSync(require.resolve(name));const within=path.relative(base,entry);if(path.isAbsolute(within)||within==='..'||within.startsWith('..'+path.sep))throw new Error();const module=require(entry);if(name==='better-sqlite3'){const db=new module(':memory:');db.prepare('SELECT 1').get();db.close()}result[name]=true}catch{result[name]=false}}process.stdout.write(JSON.stringify(result))"],
+        "console.log=()=>{};const fs=require('node:fs'),path=require('node:path');const base=fs.realpathSync(path.join(process.cwd(),'node_modules'));const result={};for(const name of ['better-sqlite3']){try{const entry=fs.realpathSync(require.resolve(name));const within=path.relative(base,entry);if(path.isAbsolute(within)||within==='..'||within.startsWith('..'+path.sep))throw new Error();const module=require(entry);if(name==='better-sqlite3'){const db=new module(':memory:');db.prepare('SELECT 1').get();db.close()}result[name]=true}catch{result[name]=false}}process.stdout.write(JSON.stringify(result))"],
       { cwd: service, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', timeout: 15_000, maxBuffer: 8192 })
       try {
-        if (checked.error || checked.status !== 0) return { 'better-sqlite3': false, 'node-pty': false }
+        if (checked.error || checked.status !== 0) return { 'better-sqlite3': false }
         return JSON.parse(checked.stdout)
-      } catch { return { 'better-sqlite3': false, 'node-pty': false } }
+      } catch { return { 'better-sqlite3': false } }
     }
     const healthy = result => Object.keys(config.nativeDependencies).every(name => result?.[name] === true)
     const priorSmoke = packagesPresent ? smoke() : undefined
@@ -234,7 +211,6 @@ export async function prepareRuntime({
       }
       await writeChanged(join(service, '.native-prepared.json'), nativeSignature)
     }
-    await repairPtyHelperModes(service)
     await pruneForeignSqlitePrebuilds(service)
   }
   await writeChanged(manifestPath, { node: nodeSignature, service: sourceSignature })

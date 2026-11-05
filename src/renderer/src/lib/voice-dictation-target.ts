@@ -5,8 +5,8 @@ import { getCaptainTaskId } from '@/stores/coordinator-store'
  *
  * Two problems shape this file.
  *
- * 1. The transcript panel is mounted many times at once — the task workspace,
- *    each canvas panel, and the Captain drawer. If every copy listened, one
+ * 1. The transcript panel is mounted more than once — the task workspace and
+ *    the Captain drawer. If every copy listened, one
  *    spoken sentence would appear in all of them. So there is exactly one
  *    active composer, and the microphone button that starts the turn names it.
  *

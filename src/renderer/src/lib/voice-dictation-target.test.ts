@@ -14,7 +14,7 @@ import {
 
 /**
  * The transcript panel is mounted many times at once — the task workspace, each
- * canvas panel, and the Captain drawer. These tests pin the rule that one
+ * and the Captain drawer. These tests pin the rule that one
  * spoken sentence reaches exactly one field.
  */
 

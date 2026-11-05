@@ -1,6 +1,5 @@
 import type { TranscriptPartRecord } from '@shared/transcript/types'
 import type { TranscriptPage, TranscriptPageRequest } from '@shared/transcript-page'
-import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import type { UiCommand } from '@shared/ui-commands'
 import type { CaptainRuntimeState } from '@shared/captain-runtime'
 import type { AgentDeletionImpact, AgentDeletionResult, PluginUninstallResult } from '@shared/agent-deletion'
@@ -585,16 +584,6 @@ interface ElectronAPI {
   webUtils: {
     getPathForFile: (file: File) => string
   }
-  terminal: {
-    create: (id: string, cols: number, rows: number, cwd?: string) => Promise<{ pid: number }>
-    write: (id: string, data: string) => Promise<void>
-    resize: (id: string, cols: number, rows: number) => Promise<void>
-    kill: (id: string, expectedPid?: number) => Promise<void>
-    getCwd: (id: string, expectedPid?: number) => Promise<{ cwd: string | null }>
-    getBuffer: (id: string, lines?: number) => Promise<{ lines: string[] }>
-    onData: (callback: (data: { id: string; data: string }) => void) => () => void
-    onExit: (callback: (data: { id: string }) => void) => () => void
-  }
   onOverdueCheck: (callback: () => void) => () => void
   onTasksRefresh: (callback: () => void) => () => void
   onArtifactUpdated: (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void) => () => void
@@ -613,14 +602,6 @@ interface ElectronAPI {
   onHeartbeatDisabled: (callback: (event: { taskId: string; reason: string }) => void) => () => void
   onWorktreeProgress: (callback: (event: WorktreeProgressEvent) => void) => () => void
   onWorkspaceCleanupProgress: (callback: (event: WorkspaceCleanupProgressEvent) => void) => () => void
-  browser: {
-    startRecording: (panelId: string, title?: string) => Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }>
-    stopRecording: (panelId: string) => Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }>
-    recordingStatus: (panelId: string) => Promise<{ recording: BrowserRecordingManifest | null }>
-    registerBrokerPanel: (payload: { panelId: string; webContentsId: number; taskIds: string[] }) => Promise<{ success: boolean }>
-    unregisterBrokerPanel: (panelId: string) => Promise<{ success: boolean }>
-    openExternalAuth: (loginUrl: string) => Promise<{ success: boolean; finalUrl: string; cookieCount: number }>
-  }
   ui: {
     publishState: (state: Record<string, unknown>) => Promise<void>
     onCommand: (callback: (command: UiCommand) => void) => () => void

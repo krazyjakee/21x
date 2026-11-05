@@ -171,10 +171,6 @@
       "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
     },
     {
-      "file": "src/main/panel-browser-broker.test.ts",
-      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
-    },
-    {
       "file": "src/main/platform/credential-setting-format.test.ts",
       "reason": "Historical Electron database/bootstrap or safeStorage transition adapter graph; preserve shipping formats and host assumptions separately."
     },
@@ -200,10 +196,6 @@
     },
     {
       "file": "src/main/secret-broker.test.ts",
-      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
-    },
-    {
-      "file": "src/main/task-api-browser-recording.test.ts",
       "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
     },
     {

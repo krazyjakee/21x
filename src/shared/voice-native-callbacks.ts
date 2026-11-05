@@ -50,7 +50,7 @@ export type NativeVoiceEvent =
       type: 'navigate'
       turnId: string
       turnEpoch: string
-      destination: 'tasks' | 'skills' | 'dashboard' | 'canvas' | 'commander' | 'overview' | 'settings'
+      destination: 'tasks' | 'skills' | 'dashboard' | 'commander' | 'overview' | 'settings'
       taskId: string | null
     }
   | { type: 'hotkey'; action: 'toggle' }
@@ -186,7 +186,7 @@ const intentTypes = [
   'read_last_answer',
   'cancel'
 ]
-const views = ['tasks', 'skills', 'dashboard', 'canvas', 'commander', 'overview', 'settings']
+const views = ['tasks', 'skills', 'dashboard', 'commander', 'overview', 'settings']
 function reference(value: unknown): boolean {
   return (
     isRecord(value) &&

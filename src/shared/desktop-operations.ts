@@ -215,12 +215,6 @@ export interface DesktopCommandMap {
   "taskSource:update": { apiArguments: Parameters<NonNullable<DesktopApi["taskSources"]["update"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskSources"]["update"]>>> }
   "tasks:getCoordinatorTaskId": { apiArguments: Parameters<NonNullable<DesktopApi["tasks"]["getCoordinatorTaskId"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["tasks"]["getCoordinatorTaskId"]>>> }
   "tasks:getWorkspaceDir": { apiArguments: Parameters<NonNullable<DesktopApi["tasks"]["getWorkspaceDir"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["tasks"]["getWorkspaceDir"]>>> }
-  "terminal:create": { apiArguments: Parameters<NonNullable<DesktopApi["terminal"]["create"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["terminal"]["create"]>>> }
-  "terminal:getBuffer": { apiArguments: Parameters<NonNullable<DesktopApi["terminal"]["getBuffer"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["terminal"]["getBuffer"]>>> }
-  "terminal:getCwd": { apiArguments: Parameters<NonNullable<DesktopApi["terminal"]["getCwd"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["terminal"]["getCwd"]>>> }
-  "terminal:kill": { apiArguments: Parameters<NonNullable<DesktopApi["terminal"]["kill"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["terminal"]["kill"]>>> }
-  "terminal:resize": { apiArguments: Parameters<NonNullable<DesktopApi["terminal"]["resize"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["terminal"]["resize"]>>> }
-  "terminal:write": { apiArguments: Parameters<NonNullable<DesktopApi["terminal"]["write"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["terminal"]["write"]>>> }
   "ui:publishState": { apiArguments: Parameters<NonNullable<DesktopApi["ui"]["publishState"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["ui"]["publishState"]>>> }
   "updater:check": { apiArguments: Parameters<NonNullable<DesktopApi["updater"]["check"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["updater"]["check"]>>> }
   "updater:download": { apiArguments: Parameters<NonNullable<DesktopApi["updater"]["download"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["updater"]["download"]>>> }
@@ -308,8 +302,6 @@ export interface DesktopEventMap {
   "task:subtasks-reordered": TaskSubtasksReorderedEvent
   "task:updated": CallbackPayload<NonNullable<DesktopApi["onTaskUpdated"]>>
   "tasks:refresh": CallbackPayload<NonNullable<DesktopApi["onTasksRefresh"]>>
-  "terminal:data": CallbackPayload<NonNullable<DesktopApi["terminal"]["onData"]>>
-  "terminal:exit": CallbackPayload<NonNullable<DesktopApi["terminal"]["onExit"]>>
   "transcript:changed": CallbackPayload<NonNullable<DesktopApi["onTranscriptChanged"]>>
   "ui:command": CallbackPayload<NonNullable<DesktopApi["ui"]["onCommand"]>>
   "updater:status": CallbackPayload<NonNullable<DesktopApi["updater"]["onStatus"]>>
@@ -384,12 +376,6 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "command/attachments:pick": {"name":"attachments:pick","kind":"command","disposition":"retained","owner":"native-host","caller":"trusted-desktop-main","destination":"native-host"},
   "command/attachments:remove": {"name":"attachments:remove","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/attachments:save": {"name":"attachments:save","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
-  "command/browser:openExternalAuth": {"name":"browser:openExternalAuth","kind":"command","disposition":"removed-browser","owner":"service","caller":"none","destination":"none"},
-  "command/browser:recordingStatus": {"name":"browser:recordingStatus","kind":"command","disposition":"removed-browser","owner":"service","caller":"none","destination":"none"},
-  "command/browser:registerBrokerPanel": {"name":"browser:registerBrokerPanel","kind":"command","disposition":"removed-browser","owner":"service","caller":"none","destination":"none"},
-  "command/browser:startRecording": {"name":"browser:startRecording","kind":"command","disposition":"removed-browser","owner":"service","caller":"none","destination":"none"},
-  "command/browser:stopRecording": {"name":"browser:stopRecording","kind":"command","disposition":"removed-browser","owner":"service","caller":"none","destination":"none"},
-  "command/browser:unregisterBrokerPanel": {"name":"browser:unregisterBrokerPanel","kind":"command","disposition":"removed-browser","owner":"service","caller":"none","destination":"none"},
   "command/captainRuntime:get": {"name":"captainRuntime:get","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/captainRuntime:retry": {"name":"captainRuntime:retry","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/captainRuntime:rollback": {"name":"captainRuntime:rollback","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
@@ -580,14 +566,6 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "command/tasks:getCoordinatorTaskId": {"name":"tasks:getCoordinatorTaskId","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/tasks:getWorkspaceDir": {"name":"tasks:getWorkspaceDir","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "event/tasks:refresh": {"name":"tasks:refresh","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
-  "command/terminal:create": {"name":"terminal:create","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
-  "event/terminal:data": {"name":"terminal:data","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
-  "event/terminal:exit": {"name":"terminal:exit","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
-  "command/terminal:getBuffer": {"name":"terminal:getBuffer","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
-  "command/terminal:getCwd": {"name":"terminal:getCwd","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
-  "command/terminal:kill": {"name":"terminal:kill","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
-  "command/terminal:resize": {"name":"terminal:resize","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
-  "command/terminal:write": {"name":"terminal:write","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "event/transcript:changed": {"name":"transcript:changed","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
   "event/ui:command": {"name":"ui:command","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
   "command/ui:publishState": {"name":"ui:publishState","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},

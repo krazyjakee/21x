@@ -11,7 +11,7 @@ import { isProductionLaunchDescriptor, PRODUCTION_DESCRIPTOR_MAX_BYTES, type Pro
 import { hasExactKeys, isRecord } from '../shared/service-protocol'
 
 export const PRODUCTION_RESOURCE_PINS = Object.freeze({
-  'better-sqlite3': '13.0.3', 'node-pty': '1.1.0', '@paralleldrive/cuid2': '2.3.1',
+  'better-sqlite3': '13.0.3', '@paralleldrive/cuid2': '2.3.1',
   '@anthropic-ai/claude-agent-sdk': '0.3.260', '@anthropic-ai/sdk': '0.123.0', '@opencode-ai/sdk': '1.18.28'
 })
 export class ProductionBootstrapError extends Error {

@@ -28,7 +28,6 @@ export const KEYBOARD_SHORTCUT_GROUPS = [
       { keys: ['Enter'], label: 'Open selected task' },
       { keys: ['Esc'], label: 'Close or clear selection' },
       { keys: ['G', 'D'], label: 'Go to Dashboard' },
-      { keys: ['G', 'C'], label: 'Open selected task on Canvas or go to Canvas' },
       { keys: ['G', 'P'], label: 'Go to parent task' },
       { keys: ['G', 'T'], label: 'Go to Tasks' },
       { keys: ['G', 'S'], label: 'Go to Skills' },

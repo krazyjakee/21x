@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { fork } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { lstatSync, realpathSync, statSync } from 'node:fs'
+import { lstatSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -70,7 +70,7 @@ function cleanup() {
   closing = true
   for (const { controller } of active.values()) controller.abort()
   // Keep ownership until each exit callback confirms termination. A stopped
-  // probe must not remove a still-running PTY/worker from this set.
+  // probe must not remove a still-running worker from this set.
   for (const child of children) { try { child.kill() } catch {} }
   if (children.size) {
     setTimeout(() => {
@@ -147,73 +147,6 @@ function workerEnvironment() {
     .filter(key => process.env[key]).map(key => [key, process.env[key]]))
 }
 
-async function ptyProbe(signal) {
-  const errno = error => ['EACCES', 'ENOENT', 'ENOEXEC', 'EPERM', 'EAGAIN', 'ENOMEM', 'ENOTDIR', 'EIO',
-    'ETIMEDOUT', 'ERR_DLOPEN_FAILED'].includes(error?.code) ? error.code : 'UNKNOWN'
-  let pty
-  let helper = null
-  try {
-    const entry = stagedModule('node-pty')
-    pty = require(entry)
-    if (process.platform === 'darwin') {
-      const native = require(join(dirname(entry), 'utils.js')).loadNativeModule('pty')
-      const path = join(dirname(entry), native.dir, 'spawn-helper')
-      let details
-      try { details = statSync(path) } catch (error) {
-        return { ok: false, phase: 'helper-lookup', errno: errno(error), helper: { present: false } }
-      }
-      helper = { present: details.isFile(), mode: (details.mode & 0o777).toString(8),
-        executable: Boolean(details.mode & 0o111) }
-      if (!helper.present || !helper.executable) return { ok: false, phase: 'helper-permission', helper }
-    }
-  } catch (error) { return { ok: false, phase: 'module-load', errno: errno(error) } }
-  return new Promise(resolve => {
-    let terminal
-    try {
-      terminal = pty.spawn(process.execPath, ['-e',
-        "process.stdout.write('pty-ok', () => setTimeout(() => process.exit(0), 100));"], {
-        name: 'xterm', cols: 40, rows: 10, cwd: fileURLToPath(new URL('.', import.meta.url)),
-        env: workerEnvironment()
-      })
-    } catch (error) { resolve({ ok: false, phase: 'spawn', errno: errno(error), helper }); return }
-    children.add(terminal)
-    let output = ''
-    let chunks = 0
-    let settled = false
-    const data = terminal.onData(chunk => {
-      output = (output + chunk).slice(-256)
-      chunks = Math.min(chunks + 1, 1_000_000)
-    })
-    const finish = result => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      signal.removeEventListener('abort', abort)
-      data.dispose()
-      if (result.phase === 'cancelled' || result.phase === 'timeout') {
-        setTimeout(() => {
-          if (children.has(terminal)) { try { terminal.kill('SIGKILL') } catch {} }
-        }, 500).unref()
-      }
-      resolve({ ...result, helper, dataChunks: chunks, markerSeen: output.includes('pty-ok') })
-    }
-    const abort = () => { try { terminal.kill() } catch {}; finish({ ok: false, phase: 'cancelled' }) }
-    signal.addEventListener('abort', abort, { once: true })
-    const exit = terminal.onExit(({ exitCode, signal: exitSignal }) => {
-      children.delete(terminal)
-      exit.dispose()
-      finish({ ok: exitCode === 0 && output.includes('pty-ok'), phase: 'exit',
-        exitCode: Number.isInteger(exitCode) ? exitCode : null,
-        signal: Number.isInteger(exitSignal) ? exitSignal : null })
-    })
-    const timer = setTimeout(() => {
-      try { terminal.kill() } catch {}
-      finish({ ok: false, phase: 'timeout' })
-    }, 10_000)
-    if (signal.aborted) abort()
-  })
-}
-
 async function probe(signal) {
   if (probeRunning) throw fail('BACKPRESSURE')
   probeRunning = true
@@ -234,7 +167,6 @@ async function probe(signal) {
         return { ok: true, inMemory: true }
       } finally { db.close() }
     })
-    await check('pty', () => ptyProbe(signal))
     await check('worker', () => workerProbe(signal))
     for (const name of ['@anthropic-ai/claude-agent-sdk', '@opencode-ai/sdk']) {
       await check(name, async () => { stagedModule(name); await import(name); return { ok: true, importedOnly: true } })

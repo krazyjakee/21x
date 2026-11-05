@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createRequire } from 'node:module'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { constants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { open, readlink, type FileHandle } from 'node:fs/promises'
@@ -13,7 +12,6 @@ import { PRODUCTION_HOST_SCHEMAS, type ProductionLaunchDescriptor } from '../src
 import { isBootstrapResult, isRecord, ServiceProtocolError, type JsonValue, type ServiceErrorCode } from '../src/shared/service-protocol'
 import { WORKSPACE_CLEANUP_CALLBACK_SCHEMA, type WorkspaceCleanupObservationRequest, type WorkspaceCleanupObservationResult } from '../src/shared/workspace-native-callbacks'
 import { WorkspaceFileOwner } from '../src/main/workspace-file-owner'
-import { createNodePty, terminalProcessCwd } from '../src/main/terminal-process'
 import { SessionStatusType, type CodingAgentAdapter } from '../src/main/adapters/coding-agent-adapter'
 import { createWorkspaceCleanupGitFixture, type CleanupGitRemovalReceipt } from './production-workspace-cleanup-git-fixture'
 
@@ -69,7 +67,7 @@ export interface WorkspaceCleanupProofReport {
   contracts: Array<{ name: string; kind: string; declaredOwner: string; declaredCaller: string; destination: string; codec: boolean; runtimeInThisLaunch: boolean; attempted: number; succeededOrObserved: number; authorityProof: string; nativeProof: string }>
   observation: { scope: string; acquire: number; check: number; release: number; peakDirectoryFds: number; openDirectoryFds: number }
   git: { removal: CleanupGitRemovalReceipt | null; final: ReturnType<Awaited<ReturnType<typeof createWorkspaceCleanupGitFixture>>['snapshot']> | null }
-  cleanup: { ownerStopped: boolean; profileRemoved: boolean; childExits: number; ptyExits: number }
+  cleanup: { ownerStopped: boolean; profileRemoved: boolean; childExits: number }
   remaining: string[]
 }
 
@@ -78,20 +76,18 @@ export interface WorkspaceCleanupProofReport {
 export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCleanupProofReport> {
   const pins = JSON.parse(readFileSync(resolve('scripts/tauri-runtime.json'), 'utf8')) as { nodeVersion: string; nativeDependencies: Record<string, string> }
   if (process.platform !== 'linux' || process.versions.electron || process.version !== `v${pins.nodeVersion}` ||
-      !process.env.TAURI_NODE_RUNTIME || realpathSync(process.execPath) !== realpathSync(process.env.TAURI_NODE_RUNTIME)) throw new Error('CLEANUP_PROOF requires pinned staged Linux Node and --terminal-proofs')
+      !process.env.TAURI_NODE_RUNTIME || realpathSync(process.execPath) !== realpathSync(process.env.TAURI_NODE_RUNTIME)) throw new Error('CLEANUP_PROOF requires pinned staged Linux Node and --owner-proofs')
   const artifacts: Record<string, string> = { node: hash(readFileSync(process.execPath)) }
-  for (const [name, variable] of [['better-sqlite3', 'TAURI_SQLITE_MODULE'], ['node-pty', 'TAURI_NODE_PTY_MODULE']] as const) {
-    const selected = process.env[variable]
-    if (!selected || realpathSync(selected) !== realpathSync(resolve('src-tauri/resources/service/node_modules', name))) throw new Error(`CLEANUP_PROOF missing staged ${name}`)
-    const bytes = readFileSync(join(selected, 'package.json')), metadata = JSON.parse(bytes.toString())
-    if (metadata.version !== pins.nativeDependencies[name] || metadata.name !== name) throw new Error(`CLEANUP_PROOF wrong staged ${name}`)
-    artifacts[`${name}/package.json`] = hash(bytes)
-    artifacts[`${name}/native-addon`] = hash(readFileSync(join(selected, name === 'node-pty' ? 'build/Release/pty.node' : `prebuilds/${process.platform}-${process.arch}.node`)))
-  }
+  const name = 'better-sqlite3', selected = process.env.TAURI_SQLITE_MODULE
+  if (!selected || realpathSync(selected) !== realpathSync(resolve('src-tauri/resources/service/node_modules', name))) throw new Error(`CLEANUP_PROOF missing staged ${name}`)
+  const packageBytes = readFileSync(join(selected, 'package.json')), metadata = JSON.parse(packageBytes.toString())
+  if (metadata.version !== pins.nativeDependencies[name] || metadata.name !== name) throw new Error(`CLEANUP_PROOF wrong staged ${name}`)
+  artifacts[`${name}/package.json`] = hash(packageBytes)
+  artifacts[`${name}/native-addon`] = hash(readFileSync(join(selected, `prebuilds/${process.platform}-${process.arch}.node`)))
   const sourcePaths = ['scripts/production-workspace-cleanup-proof.ts', 'scripts/production-workspace-cleanup-proof.test.ts',
     'src/service/production-workspace-cleanup-acceptance.test.ts', 'src/service/production-owner.ts', 'src/service/production-service.ts',
     'src/service/production-desktop-bindings.ts', 'src/service/worktree-runtime-backend.ts', 'src/main/workspace-cleanup-scheduler-core.ts',
-    'src/main/agent-manager-core.ts', 'src/main/worktree-manager-core.ts', 'src/main/terminal-service-core.ts',
+    'src/main/agent-manager-core.ts', 'src/main/worktree-manager-core.ts',
     'src/main/workspace-file-owner.ts', 'src/shared/workspace-native-callbacks.ts', 'src/shared/production-bootstrap.ts',
     'src/service/production-workspace-process-owner.ts', 'src-tauri/engine/src/production_cleanup_observation.rs', 'src/shared/desktop-operations.ts', 'scripts/tauri-runtime.json',
     'scripts/production-workspace-cleanup-git-fixture.ts', 'scripts/production-workspace-cleanup-git-fixture.test.ts',
@@ -102,13 +98,13 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
   const observation = { scope: 'controlled-retained-fixture-processes-only-not-full-host-procfs', acquire: 0, check: 0, release: 0, peakDirectoryFds: 0, openDirectoryFds: 0 }
   const report: WorkspaceCleanupProofReport = { version: 1, scope: 'actual-production-owner-private-peer-cleanup-controlled-native-observer', fixture: WORKSPACE_CLEANUP_FIXTURE,
     provenance: { platform: process.platform, architecture: process.arch, osRelease: osRelease(), node: process.version, electron: null, webview: null,
-      packages: { 'better-sqlite3': pins.nativeDependencies['better-sqlite3'], 'node-pty': pins.nativeDependencies['node-pty'] }, sources, artifacts }, counters: [], contracts: [], observation, git: { removal: null, final: null },
-    cleanup: { ownerStopped: false, profileRemoved: false, childExits: 0, ptyExits: 0 }, remaining: [
+      packages: { 'better-sqlite3': pins.nativeDependencies['better-sqlite3'] }, sources, artifacts }, counters: [], contracts: [], observation, git: { removal: null, final: null },
+    cleanup: { ownerStopped: false, profileRemoved: false, childExits: 0 }, remaining: [
       'Actual Rust full-host procfs authority and physical-root source-wire proof must supplement this controlled native callback.',
       'Partial/unreadable full-host visibility is unknown, never idle; unsupported OS remains unavailable.',
       'Installed supported-platform and full issue210 acceptance/#202 closure prerequisite remain open.' ] }
   const check = (name: string, expected: number, actual: number): void => { const counter: ProofCounter = { name, expected, actual, comparison: 'equal' }; report.counters.push(counter); assertProofCounter(counter) }
-  const keys = new Map<string, Buffer>(), children: ChildReceipt[] = [], ptys: Array<{ exited: boolean }> = []
+  const keys = new Map<string, Buffer>(), children: ChildReceipt[] = []
   const adapterSessions = new Map<string, string>(), adapterDestroyed: string[] = []
   let workloadFailure: unknown, hadWorkloadFailure = false
   const leases = new Map<string, { taskId: string; rootFd: FileHandle; taskFd: FileHandle; rootIdentity: string; taskIdentity: string }>()
@@ -179,7 +175,6 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
     return request.action === 'acquire' && status === 'idle' ? { status, leaseId } : { status }
   }
   const hold = (action: Hold['action']): Hold => { const value = { action, entered: gate(), finish: gate() }; nextHold = value; holds.push(value); return value }
-  const ptyRoot = realpathSync(process.env.TAURI_NODE_PTY_MODULE!), pty = createRequire(join(ptyRoot, 'package.json'))(ptyRoot) as typeof import('node-pty')
   const adapter: CodingAgentAdapter = { initialize: async () => {}, createSession: async config => {
     const sessionId = `cleanup_adapter_${++adapterCreates}`; adapterSessions.set(config.taskId, sessionId)
     const selected = adapterStartHold
@@ -193,23 +188,14 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
   const gitFixture = await createWorkspaceCleanupGitFixture({ root, profileRoot: descriptor.paths.profileRoot, reposRoot: descriptor.paths.reposRoot, workspaceRoot, tempRoot: descriptor.paths.tempRoot })
   let allowed = true
   const trusted = (): boolean => allowed
-  const terminalDirectories = new Map<string, Readonly<{ taskId: string; cwd: string; rootIdentity: string; cwdIdentity: string }>>()
   const authority: ProductionDesktopBindingOptions['authority'] = { isTrustedDesktop: trusted, canAccessTask: trusted, canAccessSource: trusted, canAccessProject: trusted, canAccessAgent: trusted,
     canAccessSession: trusted, canAccessGlobalCommander: trusted, canManageGlobalConfiguration: trusted, canQueryBackend: trusted, canCreateProject: trusted, canEditSettings: trusted,
     canAccessGlobalSkills: trusted, canChangeSkillScope: trusted, canReorderProjects: trusted, canReadSetting: trusted, canWriteSetting: trusted, canAccessSecret: trusted,
-    canCreateSecret: trusted, canUseSecretEnvironment: trusted, canReadEnvironment: trusted, canAccessTerminal: trusted, canAccessMcpServer: trusted, canAccessCli: trusted, canUseTransport: trusted,
+    canCreateSecret: trusted, canUseSecretEnvironment: trusted, canReadEnvironment: trusted, canAccessMcpServer: trusted, canAccessCli: trusted, canUseTransport: trusted,
     canUseEnvironmentName: trusted, canAccessConnector: trusted, canUseSourcePlugin: trusted, canCreateInstance: trusted, canUsePiece: trusted, canBorrowSourceCredentials: trusted,
     canResolveUnsavedConfig: trusted, canManageMobile: trusted, canAccessMobileSession: trusted, canAccessMarketplace: trusted, canCreateMarketplace: trusted,
     canAccessPluginName: trusted, canAccessPlugin: trusted, canUseMarketplaceSource: trusted, canUsePluginAddress: trusted, canUsePluginSource: trusted,
-    canAccessSkill: trusted, canCreateGlobalSkill: trusted, canCreateAgent: trusted, canCreateMcpServer: trusted,
-    resolveTerminalDirectory: id => {
-      const selected = terminalDirectories.get(id)
-      if (!trusted() || !selected || selected.cwd !== join(workspaceRoot, selected.taskId) || !isSyntheticDescendant(workspaceRoot, selected.cwd)) return null
-      try {
-        if (identity(workspaceRoot) !== selected.rootIdentity || identity(selected.cwd) !== selected.cwdIdentity) return null
-        return { cwd: selected.cwd, root: workspaceRoot }
-      } catch { return null }
-    } }
+    canAccessSkill: trusted, canCreateGlobalSkill: trusted, canCreateAgent: trusted, canCreateMcpServer: trusted }
   const schemas: Record<string, OperationSchema> = Object.fromEntries(Object.entries(PRODUCTION_COMMAND_CODECS).map(([operation, codec]) => [operation, {
     validatePayload: value => { try { return codec.validateArguments(codec.decodeArguments(value as JsonValue)) } catch { return false } }, validateResult: codec.validateWireResult }]))
   schemas['engine.ping'] = { validatePayload: isRecord, validateResult: isBootstrapResult }; schemas['engine.initialize'] = { validatePayload: isRecord, validateResult: isBootstrapResult }
@@ -219,10 +205,7 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
   const deliver = (peer: ServicePeer, bytes: Uint8Array): void => { for (let at = 0; at < bytes.length; at += WORKSPACE_CLEANUP_FIXTURE.fragmentBytes) peer.receive(bytes.subarray(at, at + WORKSPACE_CLEANUP_FIXTURE.fragmentBytes)) }
   const service = new ProductionService(sealProductionServiceHost({ descriptor, authority, caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' }, unbridgedOwnerEvent: () => {},
     boundaries: { gitProviderProcess: options => gitFixture.gitProviderProcess(options), cliMcp: { homeDir: root, environment: {} }, createAdapter: () => adapter, createProvider: () => { throw new Error('CLEANUP_PROOF unexpected provider') },
-      terminalProcessHost: { resolveShell: () => '/bin/bash', getCwd: terminalProcessCwd, create: options => {
-        const receipt = { exited: false }; ptys.push(receipt)
-        return createNodePty({ ...options, onExit: (pid, code, signal) => { receipt.exited = true; options.onExit(pid, code, signal) } }, { spawn: (shell, _args, settings) => pty.spawn(shell, ['--noprofile', '--norc'], { ...settings, env: { HOME: root, PATH: '/usr/bin:/bin', TERM: 'xterm-256color', PS1: '', HISTFILE: '/dev/null' } }) })
-      } }, workspaceFiles: options => new WorkspaceFileOwner({ ...options, fs: { open: async (path, flags) => {
+      workspaceFiles: options => new WorkspaceFileOwner({ ...options, fs: { open: async (path, flags) => {
         const fd = await open(path, flags); fileFds++
         const selected = fileHold; if (selected) { fileHold = null; selected.entered.release(); await selected.finish.promise }
         return { stat: () => fd.stat({ bigint: true }), read: (buffer, offset, length, position) => fd.read(buffer, offset, length, position), close: async () => { await fd.close(); fileFds-- } }
@@ -314,17 +297,6 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
     check('raw observation retains directory descriptors', 2, observation.openDirectoryFds)
     held.finish.release(); check('held cleanup completes after observer acknowledgment', 1, Number(await cleaningResult === 'resolved'))
     await deadline('private cleanup owners drain', Promise.all([service.peer.drain(), host.drain()]))
-
-    const ptyTask = await create('live managed PTY preserves workspace')
-    if (ptyTask.path !== join(workspaceRoot, ptyTask.task.id) || !isSyntheticDescendant(workspaceRoot, ptyTask.path)) throw new Error('CLEANUP_PROOF foreign terminal task directory')
-    terminalDirectories.set('cleanup:owned', Object.freeze({ taskId: ptyTask.task.id, cwd: ptyTask.path, rootIdentity: identity(workspaceRoot), cwdIdentity: identity(ptyTask.path) }))
-    const native = await call('terminal:create', ['cleanup:owned', 80, 24, ptyTask.path]) as { pid: number }
-    check('actual native PTY created', 1, ptys.length)
-    const nativeCwd = await call('terminal:getCwd', ['cleanup:owned', native.pid]) as { cwd: string | null }
-    check('actual native PTY cwd matches captured synthetic task directory', 1, Number(nativeCwd.cwd === ptyTask.path))
-    check('managed PTY cleanup reports busy', 1, Number(await outcome(manual()) === 'BACKPRESSURE'))
-    await scheduled(); check('scheduled managed PTY workspace preserved', 1, Number(existsSync(ptyTask.path)))
-    await call('terminal:kill', ['cleanup:owned', native.pid]); check('PTY stop acknowledges native exit', 1, Number(ptys[0].exited)); await manual()
 
     const sessionTask = await create('actual managed session preserves workspace')
     db.updateAgent(agent.id, { config: { coding_agent: 'pi', model: 'fixture/model', max_parallel_sessions: 1 } })
@@ -682,11 +654,10 @@ export async function runProductionWorkspaceCleanupProof(): Promise<WorkspaceCle
     check('final Git children all closed', report.git.final.started, report.git.final.childCloses)
     check('final Git stdio all closed', report.git.final.started * 2, report.git.final.stdioCloses)
     check('final Git raw work drained', 0, report.git.final.rawPending)
-    report.cleanup.ownerStopped = service.owner.snapshot().phase === 'stopped'; report.cleanup.childExits = children.filter(value => value.exited).length; report.cleanup.ptyExits = ptys.filter(value => value.exited).length
-    if (leases.size || observation.openDirectoryFds || fileFds || ptys.some(value => !value.exited)) throw new Error('CLEANUP_PROOF raw resources retained; disposable root preserved')
+    report.cleanup.ownerStopped = service.owner.snapshot().phase === 'stopped'; report.cleanup.childExits = children.filter(value => value.exited).length
+    if (leases.size || observation.openDirectoryFds || fileFds) throw new Error('CLEANUP_PROOF raw resources retained; disposable root preserved')
     check('observer lease receipts all released', 0, leases.size)
     check('observer directory descriptors all closed', 0, observation.openDirectoryFds)
-    check('actual native PTY exit receipts', ptys.length, report.cleanup.ptyExits)
     check('actual child close receipts', children.length, report.cleanup.childExits)
     check('observation callback actually exercised', 1, Number(observerCalls > 0))
     check('complete cleanup proof has zero fatal transport disconnects', 0, transportState.fatalCount)

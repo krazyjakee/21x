@@ -20,19 +20,15 @@ export const PRODUCTION_SETTINGS_KEYS = [
   'heartbeat_enabled_global', 'heartbeat_default_interval', 'heartbeat_active_hours_start', 'heartbeat_active_hours_end', 'heartbeat_global_instructions',
   'workspace_autocleanup_enabled', 'workspace_autocleanup_days', 'workspace_nodemodules_gc_enabled', 'workspace_nodemodules_gc_days',
   'sessions.ledger', 'sessions.captain_managed', 'sessions.commander_managed', 'sessions.task_managed', 'sessions.rollover', 'sessions.rollover_thresholds',
-  'canvas_state', 'drawing_state', 'canvas_state_migrated_to_projects', 'drawing_state_migrated_to_projects', 'OPENCODE_BINARY_PATH', 'minimize_to_tray',
+  'OPENCODE_BINARY_PATH', 'minimize_to_tray',
   ...PRODUCTION_PROVIDER_KEY_SETTINGS, ...Object.values(CHAT_SETTING_KEYS), ...Object.values(VOICE_SETTING_KEYS), ...Object.values(VOICE_TTS_SETTING_KEYS)
 ] as const
 const readOnly = new Set(['current_user_email', 'forgejo_login', 'repo_providers', 'OPENCODE_BINARY_PATH'])
 const voicePreferenceKeys = new Set<string>([VOICE_SETTING_KEYS.advancedStt, VOICE_SETTING_KEYS.advancedTts])
 const nativeKeys = new Set<string>([...Object.values(VOICE_SETTING_KEYS), ...Object.values(VOICE_TTS_SETTING_KEYS), 'minimize_to_tray'].filter(key => !voicePreferenceKeys.has(key)))
 export const requiresNativeSettingsOwner = (key: string): boolean => nativeKeys.has(key)
-export function settingProjectId(key: string): string | null {
-  const match = /^(?:canvas_state|drawing_state):([a-zA-Z0-9_-]{1,128})$/.exec(key)
-  return match?.[1] ?? null
-}
 export function isProductionSettingKey(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= 256 && ((PRODUCTION_SETTINGS_KEYS as readonly string[]).includes(value) || settingProjectId(value) !== null)
+  return typeof value === 'string' && value.length <= 256 && (PRODUCTION_SETTINGS_KEYS as readonly string[]).includes(value)
 }
 export const isProductionProviderKey = (key: string): boolean => (PRODUCTION_PROVIDER_KEY_SETTINGS as readonly string[]).includes(key)
 export const isProductionCredentialKey = (key: string): boolean => isProductionProviderKey(key) || key === VOICE_TTS_SETTING_KEYS.elevenlabsApiKey
@@ -50,7 +46,7 @@ function jsonSetting(value: string, check: (data: unknown) => boolean): boolean 
 }
 const booleanKeys = new Set(['sidebar_collapsed', 'captain_prewarm', RTK_ENABLED_SETTING, 'heartbeat_enabled_global', 'workspace_autocleanup_enabled', 'workspace_nodemodules_gc_enabled', ...voicePreferenceKeys])
 export function isProductionSettingWrite(key: unknown, value: unknown): boolean {
-  if (!isProductionSettingKey(key) || readOnly.has(key) || !text(value, settingProjectId(key) || key === 'canvas_state' || key === 'drawing_state' ? 800_000 : isProductionCredentialKey(key) ? 262_144 : 65_536) || !bounded(value)) return false
+  if (!isProductionSettingKey(key) || readOnly.has(key) || !text(value, isProductionCredentialKey(key) ? 262_144 : 65_536) || !bounded(value)) return false
   if (isProductionCredentialKey(key)) return true
   if (booleanKeys.has(key) || key.startsWith('voice_') && !['voice_global_shortcut', 'voice_input_device_id', 'voice_model_id', 'voice_custom_model_dir', 'voice_endpoint_silence', 'voice_tts_engine', 'voice_tts_model_id', 'voice_tts_voice_id', 'voice_tts_speed', 'voice_tts_max_chars', 'voice_tts_elevenlabs_voice_id', 'voice_tts_elevenlabs_model_id'].includes(key)) return boolString(value)
   if (key === 'theme') return ['', 'light', 'dark', 'system'].includes(value)
@@ -77,8 +73,6 @@ export function isProductionSettingWrite(key: unknown, value: unknown): boolean 
   if (key === 'sessions.rollover_thresholds') return jsonSetting(value, data => isRecord(data) && hasExactKeys(data, [], ['contextRatio', 'compactions', 'wakeups', 'turns', 'maxAgeDays']) &&
     Object.entries(data).every(([field, item]) => typeof item === 'number' && Number.isFinite(item) && item > 0 && (field === 'contextRatio' ? item <= 1 : field === 'maxAgeDays' ? item <= 3650 : Number.isSafeInteger(item) && item <= 1_000_000)))
   if (key === 'commander_briefing') return jsonSetting(value, data => isRecord(data) && hasExactKeys(data, ['enabled', 'cron', 'speak']) && typeof data.enabled === 'boolean' && typeof data.speak === 'boolean' && text(data.cron, 256) && !!data.cron.trim())
-  if (key.endsWith('_migrated_to_projects')) return ['', '1'].includes(value)
-  if (settingProjectId(key) || key === 'canvas_state' || key === 'drawing_state') return jsonSetting(value, data => isRecord(data) && bounded(data))
   return true
 }
 export function projectProductionSetting(key: string, value: unknown): string {
