@@ -870,10 +870,13 @@ fn read_legacy_marker(profile_root: &std::path::Path) -> Option<PathBuf> {
 }
 /// The Electron profile this one shares folders with, which the service locks
 /// for the whole session. A profile that already has a database stays shared
-/// whatever has become of the Electron database, because its stored paths still
-/// point into those folders. A new one is shared only if there is a database to
-/// import, so a marker left by an interrupted first launch cannot make a fresh
-/// profile look shared on its next launch.
+/// whatever has become of the Electron database, because the workspaces,
+/// repositories and attachments of its tasks live in those folders. A new one is
+/// shared only if there is a database to import, so a marker left by an
+/// interrupted first launch cannot make a fresh profile look shared on its next
+/// launch. An earlier build could leave such a marker on a profile that went on to
+/// make its own database. That reads as shared, which is why cleanup never removes
+/// a workspace with no task while a profile is shared.
 fn shared_electron_root(
     profile_root: &std::path::Path,
     creating: bool,

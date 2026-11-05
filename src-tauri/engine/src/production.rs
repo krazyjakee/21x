@@ -609,13 +609,16 @@ fn digest(value: &str) -> bool {
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
-/// The Rust side of `isAbsoluteHostPath`. Counts UTF-16 units as TypeScript does,
-/// so a path the service would accept is never rejected here.
+/// The Rust side of `isAbsoluteHostPath`, with the same UTF-16 count and device
+/// prefixes, so the two agree on any real path of this system. TypeScript also
+/// accepts another system's form, such as `C:\` on Linux, which is no path here.
 fn host_path(path: &Path) -> bool {
     path.is_absolute()
         && path.to_str().is_some_and(|s| {
             s.encode_utf16().count() <= 4096
                 && !s.contains('\0')
+                && !s.starts_with(r"\\?\")
+                && !s.starts_with(r"\\.\")
                 && !s.split(['/', '\\']).any(|part| matches!(part, "." | ".."))
         })
 }
@@ -4340,6 +4343,8 @@ mod tests {
             format!("{base}/./electron"),
             format!("{base}/../electron"),
             format!("{base}/electron/.."),
+            r"\\?\C:\electron".to_owned(),
+            r"\\.\pipe\electron".to_owned(),
         ] {
             assert!(with(bad).is_err());
         }
