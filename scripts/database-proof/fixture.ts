@@ -135,7 +135,7 @@ export function runDatabaseFixture(directory: string) {
       reportVersion: 1,
       passed: true,
       runtime: 'standalone-node',
-      schemaVersion: 38,
+      schemaVersion: 39,
       proofs: ['task-crud', 'durable-transcript-snapshot-delta-reopen', 'project-captain-seeds', 'explicit-paths', 'encrypted-settings-provider', 'authenticated-settings-envelope-tamper', 'managed-mcp-idempotency-ownership']
     }
   } finally {
