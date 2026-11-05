@@ -183,7 +183,8 @@ app.whenReady().then(async () => {
     for (let i = 0; i < 10; i++) { await key('Tab'); assert(await js(`!!document.activeElement.closest('[role="dialog"]')`)) }
     await key('Escape')
     await wait(`!document.querySelector('[role="dialog"]')`)
-    assert.equal(await js('document.activeElement.ariaLabel'), 'Open Commander sessions')
+    // Radix returns focus on a timer after the dialog has left the DOM.
+    await wait(`document.activeElement.ariaLabel === 'Open Commander sessions'`)
     assert.equal(await js(`${field}.value`), 'retained draft')
   })
   await check('PTT Space preserves text entry and completes once on release or focus change', async () => {
@@ -298,6 +299,8 @@ app.whenReady().then(async () => {
     assert.notEqual(await js(`${field}.value`), 'native undo')
     await js('document.activeElement.blur()'); await key('M', ['control', 'shift'])
     await wait(`document.querySelector('[data-testid="commander-pip"]')`)
+    await js(`document.querySelector('[data-testid="commander-action-toast"]').style.setProperty('--commander-toast-offset', '5000px')`)
+    assert(await js(`(() => { const r = document.querySelector('[data-testid="commander-action-toast"]').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight })()`), 'a tile taller than the window must not push the toast off screen')
     await key('z', ['control']); await wait('window.fixture.undos.length === 1')
     assert.deepEqual(await js('window.fixture.undos[0]'), { sessionId: 'session-1', actionId: 'exact-undo' })
     assert(await js(`document.querySelector('[data-testid="commander-action-toast"]').textContent.includes('Undone')`))

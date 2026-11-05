@@ -3,6 +3,7 @@ import { parseCommanderAction } from '@shared/commander-action'
 import { isKeyboardInput } from '@/lib/keyboard-shortcuts'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
+import { pairToolResults, toolRunKey } from '@/lib/commander-tool-runs'
 import { useCommanderStore } from '@/stores/commander-store'
 import { useUIStore } from '@/stores/ui-store'
 
@@ -11,11 +12,11 @@ export function undoLatestCommanderAction(): void {
   const sessionId = useCommanderCallStore.getState().sessionId ?? state.selectedSessionId
   if (!sessionId) return
   const history = state.messages[sessionId] ?? []
-  const calls = new Map(history.flatMap(message => message.tool_calls ?? []).map(call => [call.id, call]))
-  const candidates = [...history].reverse().flatMap(result => {
-    const call = result.tool_call_id ? calls.get(result.tool_call_id) : undefined
-    return call ? [{ call, result }] : []
-  })
+  const results = pairToolResults(history)
+  const candidates = [...history].reverse().flatMap(message => (message.tool_calls ?? []).flatMap((call, index) => {
+    const result = results.get(toolRunKey(message.id, index))
+    return result ? [{ call, result }] : []
+  }).reverse())
   if (state.recentAction?.result.session_id === sessionId) candidates.unshift(state.recentAction)
   for (const { call, result } of candidates) {
     const action = parseCommanderAction(call.name, result.content, result.is_error)

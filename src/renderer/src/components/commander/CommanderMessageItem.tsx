@@ -8,6 +8,7 @@ import { Markdown } from '@/components/ui/Markdown'
 import { ChatMessageImages } from '@/components/chat/ChatMessageImages'
 import { cachedCommanderImage, loadCommanderImage } from '@/lib/commander-images'
 import { cn } from '@/lib/utils'
+import { toolRunKey } from '@/lib/commander-tool-runs'
 import { formatToolResult, toolCallLabel } from './tool-call-label'
 import { ContextDivider, readContextDivider } from '@/components/context/ContextDivider'
 
@@ -81,7 +82,7 @@ export function ToolChip({ name, input, result, isError }: ToolChipProps) {
 
 interface MessageItemProps {
   message: CommanderMessage
-  /** Tool results by call id, so an assistant message can show its calls' outcomes. */
+  /** Tool results by `toolRunKey`, so an assistant message can show its calls' outcomes. */
   toolResults: Map<string, CommanderMessage>
   requestedBy?: CommanderMessage
   reports?: CommanderMessage[]
@@ -142,11 +143,12 @@ export function CommanderMessageItem({ message, toolResults, reports = [], unsee
         )}
         {calls.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {calls.map((call) => {
-              const result = toolResults.get(call.id)
-              if (result && isCommanderAdminTool(call.name)) return <ActionCard key={call.id} call={call} result={result} requestedBy={requestedBy} />
+            {calls.map((call, index) => {
+              const key = toolRunKey(message.id, index)
+              const result = toolResults.get(key)
+              if (result && isCommanderAdminTool(call.name)) return <ActionCard key={key} call={call} result={result} requestedBy={requestedBy} />
               return (
-                <ToolChip key={call.id} name={call.name} input={call.input} result={result?.content} isError={result?.is_error} />
+                <ToolChip key={key} name={call.name} input={call.input} result={result?.content} isError={result?.is_error} />
               )
             })}
           </div>

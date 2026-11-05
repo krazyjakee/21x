@@ -80,7 +80,7 @@ export function CallAnnouncer() {
   useEffect(() => {
     if (!action || action.result.session_id !== current.current.sessionId || activityNow() - action.observedAt >= 8_000) return
     const parsed = parseCommanderAction(action.call.name, action.result.content, action.result.is_error)
-    if (parsed) announce(`action:${action.result.session_id}:${action.call.id}`, `${toolCallLabel(action.call.name, {})}: ${parsed.target.name}.`, parsed.severity === 'destructive')
+    if (parsed) announce(`action:${action.result.session_id}:${action.result.id}`, `${toolCallLabel(action.call.name, {})}: ${parsed.target.name}.`, parsed.severity === 'destructive')
   }, [action, announce])
   useEffect(() => {
     if (notice) announce(`notice:${notice.id}`, notice.text, notice.assertive)
