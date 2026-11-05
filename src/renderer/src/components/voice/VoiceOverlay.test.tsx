@@ -77,6 +77,7 @@ describe('VoiceOverlay', () => {
   })
 
   it('dismisses a confirmation on Escape during a muted Commander call', () => {
+    const real = useVoiceStore.getState().dismiss
     const dismiss = vi.fn(async () => undefined)
     reset({ confirmation: { turnId: 'turn-1', proposal: CREATE_PROPOSAL, reason: 'policy' }, dismiss: dismiss as never })
     useCommanderCallStore.setState({ status: 'live', sessionId: 's1', turnId: null, muted: true })
@@ -84,6 +85,7 @@ describe('VoiceOverlay', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(dismiss).toHaveBeenCalledOnce()
     __resetCommanderCall()
+    useVoiceStore.setState({ dismiss: real })
   })
 
   it('asks for a confirmation before the action runs', async () => {
