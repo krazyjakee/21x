@@ -259,9 +259,13 @@ view is part of this window, not an always-on-top OS window. The Commander
 speaks only while this window has focus and its session or the floating call is
 showing; anything else stays in Chat (see `docs/voice-tts.md`).
 
-- **Stage:** an abstract presence tile shows an icon and a state word. The user
-  tile shows an initial, a real input meter while its owned microphone runs,
-  and a crossed-out mic otherwise. Listening requires matching turn ownership
+- **Stage:** an abstract presence tile shows an icon and a state word; the
+  header shows how long the call has been live. The user tile shows an initial,
+  a real input meter while its owned microphone runs, and a crossed-out mic when
+  muted. In push to talk with nothing held it reads Hold Space to talk, because
+  the microphone is closed, not muted. A report that arrives during a call shows
+  a quiet Report from *project* chip in either surface; it never interrupts
+  (#88). Listening requires matching turn ownership
   and a physically running capture; a cached turn ID cannot animate the mic.
   PTT can show Writing your words after capture closes while its recogniser
   delivers the final tail, with the input meter at zero. Before a call, Start talking uses the same
@@ -277,8 +281,12 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
   at most two lines, and Read full captions exposes the complete current text.
   Completed messages remain in Chat. Partials are not live-region announcements.
 - **Toolbar:** mic/mute, the mode/input-device menu, Stop, CC, Chat panel,
-  Voice settings, PiP and a separate red End. Left/Right/Home/End
-  navigate its buttons; Chat/Actions support arrow keys. Stop and Escape
+  Voice settings, PiP and a separate red End. Each toolbar is one Tab stop:
+  Left/Right/Home/End navigate its buttons, and Tab returns to the one last
+  used; if that control disables, as Stop does once pressed, the stop and focus
+  move to the first enabled control. Chat/Actions support arrow keys. An open
+  microphone menu takes Escape first, wherever focus is, so closing it does not
+  stop a reply; focus inside the menu returns to its button. Otherwise Stop and Escape
   interrupt a reply while leaving the call open. End closes media, cancels
   synthesis/the active reply and retains the conversation.
 - **Microphone modes:** open mic preserves the existing default. Its pauses
@@ -380,6 +388,22 @@ boundaries as the in-app shortcuts: a pending confirmation, an open dialog or
 focus in another editor makes it wait, though it can still finish a held PTT
 sentence. Focus only counts while this window has it. If another surface owns
 the microphone, the shortcut stays with that surface, as it would with no call.
+
+The design decisions on #82 as shipped. Recommendations were not separately
+approved; this records what the app does.
+
+| ID | Decision | As shipped |
+| --- | --- | --- |
+| D1 | Avatar | Abstract orb, no image |
+| D2 | Default microphone | Open mic; the proposal leaned to push to talk, which is one menu choice away |
+| D3 | Layout | Stage first, Chat in a side panel |
+| D4 | Window | In-app view and floating call; no always-on-top OS window (#93 optional) |
+| D5 | Leaving the view | The call survives in the floating tile |
+| D6 | Global shortcut | Active Commander call, Captain otherwise |
+| D7 | Destructive voice requests | Cards and Undo; no grace delay (#94 optional) |
+| D8 | Undo scope | Exact reversals only; removals and skill promote/move cannot be undone here |
+| D9 | Captions | On by default |
+| D10 | Sessions | Drawer |
 
 The view lives in `components/commander/`; `commander-store.ts` owns durable
 session projections and drafts, `commander-call-store.ts` owns call/microphone

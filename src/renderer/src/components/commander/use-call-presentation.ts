@@ -32,6 +32,8 @@ export function useCallPresentation() {
   const fresh = !!observation && !observation.unavailable && observation.known !== false && (!activePhase || now - observation.observedAt < 15_000)
   const ownedTurn = call.status === 'live' && !!call.turnId && snapshot.turnId === call.turnId
   const microphoneOpen = ownedTurn && voiceCapture.isCapturing && snapshot.state === 'listening'
+  /** Push to talk with nothing held: the microphone is closed, but not muted. */
+  const pushToTalkReady = call.status === 'live' && call.micMode === 'push-to-talk' && !call.muted && !microphoneOpen
   const presentation = deriveCallState({
     call,
     unavailable,
@@ -43,5 +45,5 @@ export function useCallPresentation() {
   })
   const expiresAt = activePhase && fresh ? Math.min(presentation.expiresAt ?? Infinity, observation.observedAt + 15_000) : presentation.expiresAt
   useEffect(() => scheduleActivityDeadline(expiresAt), [expiresAt])
-  return { call, snapshot, selected, presentation, readiness, observation, speechOutput, fresh, microphoneOpen }
+  return { call, snapshot, selected, presentation, readiness, observation, speechOutput, fresh, microphoneOpen, pushToTalkReady }
 }

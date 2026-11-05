@@ -230,6 +230,37 @@ app.whenReady().then(async () => {
     await wait(`!document.querySelector('[data-testid="commander-output-ring"]')`)
     assert.equal(await js('window.fixture.callState().status'), 'live')
   })
+  await check('a toolbar keeps one Tab stop, and an open microphone menu takes Escape first', async () => {
+    const toolbar = '[aria-label="Commander call controls"]'
+    const stops = () => js(`[...document.querySelectorAll('${toolbar} button')].filter(button => button.tabIndex === 0 && !button.disabled).length`)
+    const inToolbar = () => js(`!!document.activeElement.closest('${toolbar}')`)
+    await click('[aria-label="Turn voice mode on"]'); await wait('window.fixture.callState().status === "live"')
+    assert.equal(await stops(), 1)
+    await js('window.fixture.speech()'); await wait(`!document.querySelector('[aria-label="Stop the reply"]').disabled`)
+    const speaking = '!!document.querySelector(\'[data-testid="commander-output-ring"]\')'
+    const bargeIns = await js('window.fixture.bargeIns.length')
+    // From the menu's own button, where a plain click leaves focus.
+    await click('[aria-label="Microphone mode and input device"]'); await wait(`document.querySelector('[aria-label="Microphone options"]')`)
+    await key('Escape')
+    await wait(`!document.querySelector('[aria-label="Microphone options"]')`)
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Microphone mode and input device')
+    assert(await js(speaking), 'closing the menu must not stop the reply')
+    // From a control inside the menu.
+    await click('[aria-label="Microphone mode and input device"]'); await wait(`document.querySelector('[aria-label="Microphone options"]')`)
+    await js(`document.querySelector('[aria-label="Microphone mode"]').focus()`)
+    await key('Escape')
+    await wait(`!document.querySelector('[aria-label="Microphone options"]')`)
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Microphone mode and input device')
+    assert(await js(speaking), 'closing the menu must not stop the reply')
+    assert.equal(await js('window.fixture.bargeIns.length'), bargeIns)
+    // Stop disables itself once pressed: the toolbar must stay reachable by keyboard.
+    await click('[aria-label="Stop the reply"]'); await wait(`document.querySelector('[aria-label="Stop the reply"]').disabled`)
+    await wait(`document.activeElement.closest('${toolbar}') && !document.activeElement.disabled`)
+    assert.equal(await stops(), 1)
+    const stop = await js('document.activeElement.ariaLabel')
+    await key('Tab'); assert.equal(await inToolbar(), false)
+    await key('Tab', ['shift']); assert.equal(await js('document.activeElement.ariaLabel'), stop)
+  })
   await check('native floating call drag, navigation, single captions and full-view focus restoration', async () => {
     await click('[aria-label="Turn voice mode on"]'); await wait('window.fixture.callState().status === "live"')
     await click('textarea[aria-label="Message the Commander"]'); await type('preserved draft')

@@ -12,6 +12,25 @@ import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderCallUiStore, useCommanderPipVisible } from '@/stores/commander-call-ui-store'
 import { SessionContextMeter } from '@/components/context/SessionContextMeter'
 
+/** "04:12", or "1:04:12" past the hour. */
+export function formatCallElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const hours = Math.floor(seconds / 3600)
+  const minutes = pad(Math.floor(seconds / 60) % 60)
+  return hours ? `${hours}:${minutes}:${pad(seconds % 60)}` : `${minutes}:${pad(seconds % 60)}`
+}
+
+/** Mounted only while a call is live, and not a live region: the time is there to read, not announce. */
+function CallElapsed({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return <span className="text-xs font-medium tabular-nums" data-testid="commander-call-elapsed">Live {formatCallElapsed(now - startedAt)}</span>
+}
+
 /** Stage first, with a mounted Chat/Actions panel and a focus-contained sessions drawer. */
 export function CommanderWorkspace() {
   const [sessionsOpen, setSessionsOpen] = useState(false)
@@ -55,7 +74,8 @@ export function CommanderWorkspace() {
         <h1 className="min-w-0 flex-1 break-words text-base font-medium">{session?.is_report_inbox ? 'Project reports' : session?.title || 'Commander'}</h1>
         {!!session?.unread_count && !session.is_report_inbox && <Button size="sm" variant="secondary" onClick={() => { setTab('chat'); setPanelOpen(true) }}>{session.unread_count} new {session.unread_count === 1 ? 'report' : 'reports'}</Button>}
         {inbox && <Button size="sm" variant={sessionId === inbox.id ? 'secondary' : 'outline'} aria-label={`Project reports, ${inbox.unread_count} unread`} onClick={() => { setTab('chat'); setPanelOpen(true); void useCommanderStore.getState().selectSession(inbox.id) }}><Inbox className="size-icon-sm" aria-hidden="true" />Project reports{inbox.unread_count > 0 && <span className="font-semibold">{inbox.unread_count}</span>}</Button>}
-        {call.status !== 'off' && <span className="text-xs font-medium text-muted-foreground">{call.status === 'starting' ? 'Joining…' : 'Live'}</span>}
+        {call.status === 'starting' && <span className="text-xs font-medium">Joining…</span>}
+        {call.status === 'live' && <CallElapsed startedAt={call.startedAt ?? Date.now()} />}
         {!panelOpen && sessionId && <SessionContextMeter compact scope={{ kind: 'commander', ownerId: sessionId }} />}
       </header>
       <div className="commander-layout commander-stage-layout">

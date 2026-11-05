@@ -36,7 +36,7 @@ const api = mocks.commanderApi
 import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
-import { CommanderWorkspace } from './CommanderWorkspace'
+import { CommanderWorkspace, formatCallElapsed } from './CommanderWorkspace'
 import { toolCallLabel } from './tool-call-label'
 
 function session(over: Partial<CommanderSession> = {}): CommanderSession {
@@ -469,5 +469,14 @@ describe('toolCallLabel', () => {
     expect(toolCallLabel('list_projects', {})).toBe('List projects')
     expect(toolCallLabel('archive_project', { project: 'Web' })).toBe('Archive project · Web')
     expect(toolCallLabel('navigate_to_project', { project: 'Web' })).toBe('Navigate to project · Web')
+  })
+})
+
+describe('formatCallElapsed', () => {
+  it('counts minutes and seconds, then hours', () => {
+    expect(formatCallElapsed(0)).toBe('00:00')
+    expect(formatCallElapsed(252_900)).toBe('04:12')
+    expect(formatCallElapsed(3_852_000)).toBe('1:04:12')
+    expect(formatCallElapsed(-5)).toBe('00:00')
   })
 })
