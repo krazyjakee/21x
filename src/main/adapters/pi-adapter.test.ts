@@ -3,7 +3,7 @@ import { nodeWorkerRuntime } from '../node-worker-runtime'
 import { EventEmitter } from 'events'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { delimiter, join } from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
@@ -156,6 +156,11 @@ describe('PiAdapter', () => {
       expect(env.RTK_DISABLED).toBeUndefined()
     })
 
+    it('puts RTK on the session PATH, because rewritten commands use a bare rtk', async () => {
+      const { env } = await spawnWith({ rtkExecutable: '/opt/rtk-only/rtk' })
+      expect(env.PATH?.split(delimiter)).toContain('/opt/rtk-only')
+    })
+
     it('adds nothing when RTK is unavailable', async () => {
       const { args, env, installRtk } = await spawnWith({})
       expect(args).not.toContain('/tmp/20x-rtk.ts')
@@ -164,15 +169,17 @@ describe('PiAdapter', () => {
       expect(env.RTK_DISABLED).toBeUndefined()
     })
 
-    it('tells a global RTK extension to stand down after the opt-out', async () => {
-      const { args, env } = await spawnWith({ rtkDisabled: true })
+    it('passes the session limits on to a global RTK extension', async () => {
+      const { args, env } = await spawnWith({ rtkEnv: { RTK_DISABLED: '1', RTK_DB_PATH: '/dev/null' } })
       expect(args).not.toContain('/tmp/20x-rtk.ts')
       expect(env.RTK_DISABLED).toBe('1')
+      expect(env.RTK_DB_PATH).toBe('/dev/null')
     })
 
-    it('delegates to rtk rewrite and accepts only its rewritten exit codes', () => {
+    it('delegates to rtk rewrite, accepts only its rewritten exit codes and skips PATH assignments', () => {
       expect(PI_RTK_EXTENSION_SOURCE).toContain('["rewrite", "--", command]')
       expect(PI_RTK_EXTENSION_SOURCE).toContain('result.code !== 0 && result.code !== 3')
+      expect(PI_RTK_EXTENSION_SOURCE).toContain('PATH_ASSIGNMENT.test(command)')
     })
   })
 

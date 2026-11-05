@@ -36,6 +36,7 @@ import {
 import { execFileAsync, findExecutable } from '../find-executable'
 import { onJsonLines } from './shared/jsonl'
 import { dangerousToolReason } from './tool-safety'
+import { rtkProcessEnv } from './shared/rtk-session'
 
 const RPC_TIMEOUT_MS = 15_000
 const MAX_BUFFERED_PARTS = 1_000
@@ -251,8 +252,7 @@ export class PiAdapter implements CodingAgentAdapter {
       ...process.env,
       ...(config.secretEnvVars ?? {}),
       [PI_PERMISSION_MODE_ENV]: config.permissionMode ?? 'ask',
-      // RTK's own global Pi extension honours RTK_DISABLED.
-      ...(config.rtkDisabled ? { RTK_DISABLED: '1' } : {}),
+      ...rtkProcessEnv(config, process.env),
       ...(config.rtkExecutable ? { [PI_RTK_EXECUTABLE_ENV]: config.rtkExecutable } : {}),
     } as NodeJS.ProcessEnv
     delete env.AI_AGENT

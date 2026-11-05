@@ -1,3 +1,4 @@
+import { devNull } from 'os'
 import { describe, it, expect, vi } from 'vitest'
 import { assembleSessionConfig, mcpOptionsForTask } from './session-config'
 import { assembleSessionConfig as assemblePortableSessionConfig } from './session-config-core'
@@ -153,14 +154,28 @@ describe('assembleSessionConfig access', () => {
 
 describe('assembleSessionConfig RTK', () => {
   const RTK_PATH = '/opt/bin/rtk'
+  const INSTRUCTION = 'Prefix shell commands with `rtk`'
+  const OFF = 'RTK is turned off for this session'
   const ordinary = { id: 'task-1', title: 'Fix login', role: 'task', agent_id: 'agent-x' } as unknown as TaskRecord
   const captain = { id: 'mm-1', title: 'Captain', role: 'captain', agent_id: null } as unknown as TaskRecord
 
-  function rtkConfig(backend: typeof BACKENDS[number], setting: string | null, executable: string | null, task: TaskRecord = ordinary) {
-    const agent = agentFor(backend)
-    const db = { ...EMPTY_DB, getSetting: (key: string) => key === 'rtk_enabled' ? setting : null } as unknown as DatabaseManager
+  function rtkConfig(
+    backend: typeof BACKENDS[number],
+    setting: string | null,
+    executable: string | null,
+    { task = ordinary, agentConfig = {} }: { task?: TaskRecord; agentConfig?: Record<string, unknown> } = {}
+  ) {
+    const base = agentFor(backend)
+    const agent = { ...base, config: { ...base.config, ...agentConfig } } as AgentRecord
+    const db = {
+      ...EMPTY_DB,
+      getSetting: (key: string) => key === 'rtk_enabled' ? setting : null,
+      getSecretsByIds: () => [],
+      getSecretsWithValues: () => [{ env_var_name: 'API_TOKEN', value: 'canary-secret-value' }]
+    } as unknown as DatabaseManager
     const host: SessionConfigHost = {
-      secrets: { kind: 'unsupported' }, configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' },
+      secrets: { kind: 'broker', getPort: () => null, register: () => undefined, unregister: () => undefined, writeShellWrapper: () => '/tmp/shell' },
+      configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' },
       findRtkExecutable: () => executable
     }
     return assemblePortableSessionConfig(db, agent, {
@@ -169,11 +184,13 @@ describe('assembleSessionConfig RTK', () => {
   }
 
   for (const backend of ['claude-code', 'opencode', 'pi'] as const) {
-    it(`rewrites ${backend} commands by default, without an instruction`, () => {
+    it(`rewrites ${backend} commands by default and tells the agent how to get raw output`, () => {
       const config = rtkConfig(backend, null, RTK_PATH)
       expect(config.rtkExecutable).toBe(RTK_PATH)
-      expect(config.rtkDisabled).toBeUndefined()
-      expect(config.systemPrompt).toBe(AGENT_PROMPT)
+      expect(config.rtkEnv).toBeUndefined()
+      expect(config.systemPrompt).toContain(AGENT_PROMPT)
+      expect(config.systemPrompt).toContain('rtk proxy <command>')
+      expect(config.systemPrompt).not.toContain(INSTRUCTION)
     })
   }
 
@@ -182,31 +199,57 @@ describe('assembleSessionConfig RTK', () => {
       const config = rtkConfig(backend, null, RTK_PATH)
       expect(config.rtkExecutable).toBeUndefined()
       expect(config.systemPrompt).toContain(AGENT_PROMPT)
-      expect(config.systemPrompt).toContain('Prefix shell commands with `rtk`')
+      expect(config.systemPrompt).toContain(INSTRUCTION)
     })
   }
 
   it('reaches Captain sessions the same way as task sessions', () => {
-    expect(rtkConfig('claude-code', null, RTK_PATH, captain).rtkExecutable).toBe(RTK_PATH)
-    expect(rtkConfig('codex', null, RTK_PATH, captain).systemPrompt).toContain('Prefix shell commands with `rtk`')
+    expect(rtkConfig('claude-code', null, RTK_PATH, { task: captain }).rtkExecutable).toBe(RTK_PATH)
+    expect(rtkConfig('codex', null, RTK_PATH, { task: captain }).systemPrompt).toContain(INSTRUCTION)
   })
 
   for (const backend of BACKENDS) {
     it(`honours the opt-out on ${backend}`, () => {
       const config = rtkConfig(backend, 'false', RTK_PATH)
       expect(config.rtkExecutable).toBeUndefined()
-      expect(config.rtkDisabled).toBe(true)
-      expect(config.systemPrompt).toContain('RTK is turned off in 21x')
-      expect(config.systemPrompt).not.toContain('Prefix shell commands with `rtk`')
+      expect(config.rtkEnv).toEqual({ RTK_DISABLED: '1' })
+      expect(config.systemPrompt).toContain(OFF)
+      expect(config.systemPrompt).not.toContain(INSTRUCTION)
+    })
+
+    it(`honours the opt-out on ${backend} even when RTK was not found, because a global hook may still use it`, () => {
+      const config = rtkConfig(backend, 'false', null)
+      expect(config.rtkEnv).toEqual({ RTK_DISABLED: '1' })
+      expect(config.systemPrompt).toContain(OFF)
     })
 
     it(`leaves ${backend} sessions untouched when RTK is unavailable`, () => {
-      for (const setting of [null, 'true', 'false']) {
+      for (const setting of [null, 'true']) {
         const config = rtkConfig(backend, setting, null)
         expect(config.rtkExecutable).toBeUndefined()
-        expect(config.rtkDisabled).toBeUndefined()
+        expect(config.rtkEnv).toBeUndefined()
         expect(config.systemPrompt).toBe(AGENT_PROMPT)
       }
+    })
+
+    // The shell expands $API_TOKEN before rtk starts, so RTK would store the value.
+    for (const [kind, agentConfig] of [
+      ['secrets', { secret_ids: ['secret-1'] }],
+      ['its own API key', { api_keys: { openai: 'canary-secret-value' } }]
+    ] as const) {
+      it(`never lets RTK near a ${backend} session with ${kind}, even with RTK on`, () => {
+        const config = rtkConfig(backend, null, RTK_PATH, { agentConfig })
+        expect(config.rtkExecutable).toBeUndefined()
+        expect(config.systemPrompt).not.toContain(INSTRUCTION)
+        expect(config.systemPrompt).toContain(OFF)
+        expect(config.rtkEnv).toEqual({ RTK_DISABLED: '1', RTK_DB_PATH: devNull, RTK_RECALL: '0', RTK_TEE: '0' })
+      })
+    }
+
+    it(`stops storage in a ${backend} session with secrets even when RTK was not found`, () => {
+      const config = rtkConfig(backend, null, null, { agentConfig: { secret_ids: ['secret-1'] } })
+      expect(config.rtkEnv).toMatchObject({ RTK_DB_PATH: devNull })
+      expect(config.systemPrompt).not.toContain(OFF)
     })
   }
 
@@ -217,6 +260,7 @@ describe('assembleSessionConfig RTK', () => {
       agentId: agent.id, taskId: 'task-1', task: ordinary, workspaceDir: '/tmp/ws', mcpServers: {}, systemPrompt: AGENT_PROMPT
     }, host)
     expect(config.rtkExecutable).toBeUndefined()
+    expect(config.rtkEnv).toBeUndefined()
     expect(config.systemPrompt).toBe(AGENT_PROMPT)
   })
 })

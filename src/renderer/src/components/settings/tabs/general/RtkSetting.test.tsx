@@ -37,9 +37,24 @@ describe('RtkSetting', () => {
     expect(screen.getByRole('switch')).toBeChecked()
     expect(screen.getByTestId('rtk-effective-state')).toHaveTextContent('On')
     const coverage = screen.getByTestId('rtk-coverage')
-    expect(coverage).toHaveTextContent('Claude Code: Every command goes through RTK')
+    expect(coverage).toHaveTextContent('Claude Code: Commands RTK can filter are rewritten')
     expect(coverage).toHaveTextContent('Codex: Instructions only, not enforced')
     expect(coverage).not.toHaveTextContent('OpenCode')
+  })
+
+  it('says that agents with secrets run without RTK', async () => {
+    await renderLoaded()
+
+    expect(screen.getByTestId('rtk-setting')).toHaveTextContent('Agents with secrets or their own API keys always run without RTK')
+  })
+
+  it('does not report On for an RTK that cannot rewrite', async () => {
+    mockInstaller.detect.mockResolvedValue(detection({ installed: true, version: '0.20.0' }))
+    await renderLoaded()
+
+    expect(screen.getByTestId('rtk-effective-state')).toHaveTextContent('Unsupported version')
+    expect(screen.getByTestId('rtk-unsupported')).toHaveTextContent('commands run unchanged')
+    expect(screen.queryByTestId('rtk-coverage')).toBeNull()
   })
 
   it('saves the opt-out and shows it', async () => {
@@ -87,6 +102,7 @@ describe('RtkSetting', () => {
 
     expect(await screen.findByText('The RTK preference could not be loaded.')).toBeInTheDocument()
     expect(screen.getByRole('switch')).toBeDisabled()
+    expect(screen.queryByTestId('rtk-effective-state')).toBeNull()
   })
 
   it('offers to install RTK when it is missing, and reports that commands run unchanged', async () => {

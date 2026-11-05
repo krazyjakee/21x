@@ -15,11 +15,18 @@ describe('isRtkEnabled', () => {
 
 describe('rtkEffectiveState', () => {
   it('separates the preference from what actually happens', () => {
-    expect(rtkEffectiveState(true, { installed: true })).toBe('on')
+    expect(rtkEffectiveState(true, { installed: true, version: '0.49.0' })).toBe('on')
     expect(rtkEffectiveState(true, { installed: false })).toBe('unavailable')
     expect(rtkEffectiveState(true, undefined)).toBe('unavailable')
-    expect(rtkEffectiveState(false, { installed: true })).toBe('off')
+    expect(rtkEffectiveState(false, { installed: true, version: '0.49.0' })).toBe('off')
     expect(rtkEffectiveState(false, { installed: false })).toBe('off')
+  })
+
+  it('does not report On for an RTK that cannot rewrite', () => {
+    expect(rtkEffectiveState(true, { installed: true, version: '0.23.0' })).toBe('on')
+    expect(rtkEffectiveState(true, { installed: true, version: '1.0.0' })).toBe('on')
+    expect(rtkEffectiveState(true, { installed: true, version: '0.22.9' })).toBe('unsupported')
+    expect(rtkEffectiveState(true, { installed: true, version: null })).toBe('unsupported')
   })
 })
 
@@ -53,7 +60,7 @@ describe('rtkGlobalHooksAfterOptOut', () => {
   const detection = { claudeCode: installed, opencode: installed, codex: installed, pi: installed, cursor: { installed: false } }
 
   it('names the backends whose global hook 21x cannot stop', () => {
-    const rtk = { installed: true, integrations: { claudeCode: true, opencode: false, codex: true, pi: true, cursor: true } }
+    const rtk = { installed: true, version: '0.49.0', integrations: { claudeCode: true, opencode: false, codex: true, pi: true, cursor: true } }
     expect(rtkGlobalHooksAfterOptOut(detection, rtk).map(backend => backend.key)).toEqual(['claudeCode'])
   })
 

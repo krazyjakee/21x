@@ -4,6 +4,7 @@
  */
 
 import type { SessionConfig } from './coding-agent-adapter'
+import { PATH_ASSIGNMENT } from './shared/rtk-session'
 
 export const PI_PERMISSION_MODE_ENV = 'TWENTYX_PI_PERMISSION_MODE'
 export const PI_RTK_EXECUTABLE_ENV = 'TWENTYX_PI_RTK_EXECUTABLE'
@@ -152,9 +153,11 @@ export default function permissions(pi: ExtensionAPI) {
 }
 `
 
-/** The rewrite rules of `rewriteWithRtk`, for Pi's extension runtime. */
+/** The rewrite rules of `rewriteWithRtk`, for Pi's extension runtime. `pi.exec` runs in the session's directory. */
 export const PI_RTK_EXTENSION_SOURCE = `\
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+const PATH_ASSIGNMENT = ${String(PATH_ASSIGNMENT)};
 
 export default function rtk(pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
@@ -162,7 +165,7 @@ export default function rtk(pi: ExtensionAPI) {
     if (!executable || event.toolName !== "bash") return;
     const input = event.input as { command?: unknown };
     const command = input.command;
-    if (typeof command !== "string" || !command.trim()) return;
+    if (typeof command !== "string" || !command.trim() || PATH_ASSIGNMENT.test(command)) return;
     try {
       const result = await pi.exec(executable, ["rewrite", "--", command], { timeout: 2000, signal: ctx.signal });
       if (result.killed || (result.code !== 0 && result.code !== 3)) return;

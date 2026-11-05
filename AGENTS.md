@@ -210,7 +210,7 @@ Uses `@opencode-ai/sdk` to communicate with the OpenCode server (typically runni
 
 ### Claude Code Adapter (`src/main/adapters/claude-code-adapter.ts`)
 
-Uses `@anthropic-ai/claude-agent-sdk` (`query()`), passing MCP servers through the SDK's `mcpServers` option and secrets through a `SHELL` wrapper plus `PreToolUse` hooks. Supports `subscription` (OAuth/Pro/Max) and `api_key` (pay-per-use) auth methods. Runs in Claude Code's `default` mode with a `canUseTool` callback that approves every request except dangerous ones (see HITL Flow).
+Uses `@anthropic-ai/claude-agent-sdk` (`query()`), passing MCP servers through the SDK's `mcpServers` option and secrets through `CLAUDE_ENV_FILE`. Supports `subscription` (OAuth/Pro/Max) and `api_key` (pay-per-use) auth methods. Runs in Claude Code's `default` mode with a `canUseTool` callback that approves every request except dangerous ones (see HITL Flow).
 
 ### Codex Adapter (`src/main/adapters/codex-app-server-adapter.ts`)
 
@@ -448,7 +448,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - **Encryption**: Values encrypted with Electron `safeStorage` at rest
 - **Secret Broker**: An HTTP server on `localhost` that serves secrets to the agent's shell process
 - **Wrapper script**: `secret-shell.sh` intercepts bash commands to inject env vars
-- **Claude Code path**: `SHELL` points at the wrapper, and `PreToolUse` hooks inject secrets (`buildSecretHooks` in `claude-code-adapter.ts`)
+- **Claude Code path**: secrets go in an owner-only `CLAUDE_ENV_FILE`, which the CLI sources before each Bash command (`syncSecretEnvFile` in `claude-code-adapter.ts`). A `PreToolUse` rewrite would lose them to a global hook
 - **System prompt awareness**: Agents are told which secrets are available (name/description only — never the value)
 
 ### Task API Server

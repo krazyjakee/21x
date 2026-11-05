@@ -6,9 +6,11 @@ shell-command output before it enters an agent's context.
 RTK is on by default. The control is in **Settings → General → Agent & Tool
 Setup → RTK output compression**, which shows the state in effect:
 
-- **On**: RTK is installed and sessions use it.
+- **On**: RTK is installed and sessions without secrets use it.
 - **Not installed**: the preference is on, but commands run unchanged. The row
   offers to install RTK. 21x never installs it without being asked.
+- **Unsupported version**: the `rtk` found is older than 0.23.0, the first
+  release with `rtk rewrite`, or is a different program. Commands run unchanged.
 - **Off**: the user opted out. This is stored as `rtk_enabled = false`. An unset
   value means on, so there is no migration, and installing RTK later turns it
   on for everyone who has not opted out.
@@ -18,8 +20,13 @@ A change applies to new sessions.
 ## What happens in a session
 
 `assembleSessionConfig` reads the preference and looks for RTK, so Captain,
-task, triage, heartbeat and review sessions all follow the same rules. Commander
-has no shell tools, so RTK does not apply to it.
+task, triage, heartbeat and review sessions all follow the same rules, on both
+the Electron and Tauri hosts.
+
+Commander does not go through `assembleSessionConfig`, so RTK rewriting and the
+preference do not reach it. Its Claude transport has no tools. Its Codex
+transport runs a separate read-only `codex exec`, whose commands 21x does not
+rewrite, and a global `AGENTS.md` instruction can still reach that process.
 
 | Backend | Mechanism | Enforced? |
 | --- | --- | --- |
@@ -38,13 +45,65 @@ and it decides what can be filtered. It leaves these alone:
 - commands with no filter, which run exactly as written
 - commands that are already wrapped, so nothing is wrapped twice
 - shapes that need raw output, such as `git log | wc -l` or `ls > out.txt`
+- commands denied by Claude Code rules. RTK honours project rules, which is why
+  it runs from the session's directory, and user rules, including under
+  `CLAUDE_CONFIG_DIR`. A rewritten command would no longer match the rule.
 
-Any failure runs the original command: RTK missing, an old RTK without
-`rewrite`, a non-zero exit or a 2 second timeout. RTK can never stop a command.
+21x also leaves alone any command that assigns `PATH`, because the bare `rtk`
+that `rtk rewrite` emits might not resolve under that PATH.
 
-On Claude Code and OpenCode, RTK sees the command before secret `export` lines
-are added, so secret values do not reach its command line. On Claude Code both
-steps share one hook, because parallel hooks would overwrite each other.
+If RTK cannot be run, or `rtk rewrite` fails or takes over 2 seconds, the original
+command runs. The rewritten output is not always byte-identical to the original,
+which is why the session prompt tells agents about `rtk proxy <command>`.
+
+`rtk rewrite` emits a bare `rtk`, so its directory has to be on PATH. On Claude
+Code and Pi, 21x adds it to the end of the session's PATH when it is missing. The
+OpenCode server is shared, so its plugin checks the server's PATH and does not
+rewrite if `rtk` would not resolve.
+
+## Sessions with secrets
+
+A session whose agent has secrets or its own API keys never uses RTK, whatever
+the preference says. The shell expands `$TOKEN` before `rtk` starts, so RTK sees
+the value and stores it, where any later session could read it. Checking the
+command text cannot rule that out: `eval`, `${!name}` and a pasted value all
+get past it.
+
+So for these sessions:
+
+- 21x does not rewrite commands, and tells the agent not to use RTK.
+- Every process in the session gets these variables, so that a global hook, or an
+  `rtk` the agent types anyway, stores nothing:
+
+| Variable | Stops |
+| --- | --- |
+| `RTK_DB_PATH=/dev/null` | Command text in `history.db` |
+| `RTK_RECALL=0` | Raw output in `recall.db` |
+| `RTK_TEE=0` | Raw output in tee logs |
+
+All three are needed. With RTK 0.49.0, leaving any one out still writes to disk,
+and a redirected `RTK_DB_PATH` only moves the data. On Windows the path is `NUL`,
+which has not been tested.
+
+On Claude Code, Pi, Codex and Cursor these are set in the environment of the CLI,
+which its hooks and shells inherit. On OpenCode they travel with the secrets as
+`export` lines, because the server is shared.
+
+This covers secrets configured in 21x. Variables that the app inherits from the
+user's own environment are not known to be secret, so a session without 21x
+secrets can still pass them to RTK, as any use of RTK would.
+
+## How Claude Code receives secrets
+
+Secrets go in an owner-only file named by `CLAUDE_ENV_FILE`, which the CLI sources
+before each Bash command. The file is deleted when the session ends. A crash can
+leave it in the temporary directory until the system clears it.
+
+They used to be added to each command by a `PreToolUse` hook. When a global RTK
+hook also returned a command, the CLI used the global one and the secrets were
+lost, on every call tested with Claude Code 2.1.317. They are not passed in the
+CLI's environment because a secret named `ANTHROPIC_API_KEY` would change how it
+authenticates.
 
 ## Global setup
 
@@ -65,10 +124,11 @@ it disables RTK telemetry; users can make their own telemetry choice later with
 the RTK CLI.
 
 Claude Code sessions load these files because 21x leaves the SDK's
-`settingSources` unset, which means all sources. A global hook and the 21x hook
-produce the same rewrite. Codex reads `AGENTS.md` only with a subscription login:
-API-key sessions use a temporary `CODEX_HOME`, so the session prompt is what
-reaches them.
+`settingSources` unset, which means all sources. The global hook can return
+`permissionDecision: "allow"`, which skips 21x's dangerous-command check. That
+comes from RTK's hook and only applies to users who installed it. Codex reads
+`AGENTS.md` only with a subscription login: API-key sessions use a temporary
+`CODEX_HOME`, so the session prompt is what reaches them.
 
 ## Limits of the opt-out
 
@@ -80,4 +140,4 @@ remove the user's global setup:
   `rtk rewrite`. Settings names the affected backends and the fix,
   `rtk init -g --uninstall`, which also removes the hook outside 21x.
 - **Pi**: RTK's global extension honours `RTK_DISABLED`, which 21x sets.
-- **Codex**: the session prompt overrides the global instruction.
+- **Codex**: the session prompt asks the agent to ignore the global instruction.

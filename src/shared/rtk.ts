@@ -12,7 +12,8 @@ export function isRtkEnabled(value: string | null | undefined): boolean {
 
 /**
  * What 21x can do for a backend's sessions:
- * - `rewrite`: every shell command goes through `rtk rewrite` before it runs.
+ * - `rewrite`: shell commands go through `rtk rewrite` before they run. RTK
+ *   rewrites the ones it can filter and leaves the rest as they are.
  * - `instructions`: 21x has no way to change the command, so the agent is told
  *   to use RTK. The agent may not follow that, so it is not enforcement.
  */
@@ -37,11 +38,24 @@ export function rtkCoverageFor(codingAgent: string | null | undefined): RtkCover
   return RTK_BACKENDS.find(backend => backend.codingAgent === codingAgent)?.coverage ?? 'rewrite'
 }
 
-export type RtkEffectiveState = 'on' | 'off' | 'unavailable'
+/** `rtk rewrite` first shipped in this release. */
+export const MINIMUM_RTK_VERSION = '0.23.0'
+
+export type RtkEffectiveState = 'on' | 'off' | 'unavailable' | 'unsupported'
 
 export interface RtkDetection {
   installed?: boolean
+  version?: string | null
   integrations?: Record<string, boolean>
+}
+
+/** False for an old RTK, and for an unrelated program that happens to be called rtk. */
+function isSupportedRtkVersion(version: string | null | undefined): boolean {
+  const parse = (value: string) => /^(\d+)\.(\d+)/.exec(value)?.slice(1).map(Number)
+  const current = version ? parse(version) : undefined
+  const minimum = parse(MINIMUM_RTK_VERSION)
+  if (!current || !minimum) return false
+  return current[0] > minimum[0] || (current[0] === minimum[0] && current[1] >= minimum[1])
 }
 
 interface BackendDetection {
@@ -51,13 +65,15 @@ interface BackendDetection {
 
 export function rtkEffectiveState(enabled: boolean, rtk: RtkDetection | undefined): RtkEffectiveState {
   if (!enabled) return 'off'
-  return rtk?.installed ? 'on' : 'unavailable'
+  if (!rtk?.installed) return 'unavailable'
+  return isSupportedRtkVersion(rtk.version) ? 'on' : 'unsupported'
 }
 
 export const RTK_STATE_LABELS: Record<RtkEffectiveState, string> = {
   on: 'On',
   off: 'Off',
-  unavailable: 'Not installed'
+  unavailable: 'Not installed',
+  unsupported: 'Unsupported version'
 }
 
 const isReady = (backend: BackendDetection | undefined): boolean =>

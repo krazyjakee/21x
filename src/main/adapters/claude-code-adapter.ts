@@ -30,8 +30,8 @@ import { buildToolTitle, ClaudeSystemSubtype, convertSDKMessageToParts, resultEr
 import { claudeCodePermissionMode } from './permission-mode'
 import { dangerousToolReason } from './tool-safety'
 import { claudeServerPrefix, claudeToolIds, resolveDisallowedToolNames } from '../mcp-tool-limits'
-import { buildShellExports } from './shared/shell-exports'
-import { rewriteWithRtk } from './shared/rtk-session'
+import { rewriteWithRtk, rtkProcessEnv } from './shared/rtk-session'
+import { removeSessionEnvFile, writeSessionEnvFile } from './shared/session-env-file'
 
 type ClaudeSDK = typeof import('@anthropic-ai/claude-agent-sdk')
 type Query = import('@anthropic-ai/claude-agent-sdk').Query
@@ -135,6 +135,8 @@ interface ClaudeSession {
   /** Tool-permission requests awaiting the user, oldest first ('ask' mode only). */
   pendingApprovals: PendingClaudeApproval[]
   pendingQuestions: Set<string>
+  /** File the CLI sources before each Bash command. Holds the session's secrets. */
+  secretEnvFile?: string
 }
 
 type HookMap = Partial<Record<string, HookCallbackMatcher[]>>
@@ -281,26 +283,31 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
   }
 
   /**
-   * The PreToolUse hook that changes Bash commands: RTK rewriting, then secret
-   * injection. They share one hook because PreToolUse hooks run in parallel and
-   * each returns a whole command, so two hooks would overwrite each other. RTK
-   * must see the command before the `export` lines, which would otherwise put
-   * secret values on its command line.
-   * The LLM never sees the modified command, only the original tool call and
-   * the output.
+   * Keeps the session's secrets in `CLAUDE_ENV_FILE`, which the CLI sources before
+   * each Bash command. They must not be delivered by rewriting the command in a
+   * PreToolUse hook: when a user's global RTK hook also returns a command, the
+   * CLI uses that one and the secrets are lost. Seen on every call on Claude Code
+   * 2.1.317. They stay out of the CLI's own environment, where a secret named
+   * ANTHROPIC_API_KEY would change how it authenticates.
    */
-  private buildBashHooks(config: SessionConfig): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
+  private syncSecretEnvFile(session: ClaudeSession, config: SessionConfig): void {
     const secretEnvVars = config.secretEnvVars
-    const hasSecrets = !!secretEnvVars && Object.keys(secretEnvVars).length > 0
-    const rtkExecutable = config.rtkExecutable
-    if (!hasSecrets && !rtkExecutable) {
-      return undefined
+    if (secretEnvVars && Object.keys(secretEnvVars).length > 0) {
+      session.secretEnvFile = writeSessionEnvFile(session.secretEnvFile, secretEnvVars)
+    } else if (session.secretEnvFile) {
+      removeSessionEnvFile(session.secretEnvFile)
+      session.secretEnvFile = undefined
     }
+  }
 
-    const exportLines = hasSecrets ? buildShellExports(secretEnvVars) : ''
-
-    if (hasSecrets) {
-      console.log(`[ClaudeCodeAdapter] Registering PreToolUse hook for secrets: [${Object.keys(secretEnvVars).join(', ')}]`)
+  /**
+   * PreToolUse hook that sends Bash commands through RTK. The LLM never sees the
+   * modified command, only the original tool call and the output.
+   */
+  private buildRtkHooks(config: SessionConfig): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
+    const rtkExecutable = config.rtkExecutable
+    if (!rtkExecutable) {
+      return undefined
     }
 
     const hook: HookCallback = async (input) => {
@@ -310,9 +317,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       }
 
       const originalCommand = toolInput.command as string
-      const rewrittenCommand = rtkExecutable ? await rewriteWithRtk(rtkExecutable, originalCommand) : originalCommand
-      const modifiedCommand = hasSecrets ? exportLines + '\n' + rewrittenCommand : rewrittenCommand
-      if (modifiedCommand === originalCommand) {
+      const rewrittenCommand = await rewriteWithRtk(rtkExecutable, originalCommand, input.cwd || config.workspaceDir)
+      if (rewrittenCommand === originalCommand) {
         return {}
       }
 
@@ -321,7 +327,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           hookEventName: 'PreToolUse' as const,
           updatedInput: {
             ...toolInput,
-            command: modifiedCommand
+            command: rewrittenCommand
           }
         }
       }
@@ -557,14 +563,15 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.abortController = abortController
 
     // Build options
-    const hooks = mergeHooks(this.buildBashHooks(config), this.buildMcpToolLimitHooks(config))
+    const hooks = mergeHooks(this.buildRtkHooks(config), this.buildMcpToolLimitHooks(config))
+    this.syncSecretEnvFile(session, config)
     const effort = config.reasoningEffort === 'minimal' ? undefined : config.reasoningEffort
     const claudePermissionMode = claudeCodePermissionMode(config)
 
     const options: Options = {
       cwd: config.workspaceDir,
       pathToClaudeCodeExecutable: claudePath,
-      env: this.buildClaudeEnvironment(),
+      env: this.buildClaudeEnvironment(config, session.secretEnvFile),
       mcpServers: this.buildClaudeMcpServers(config),
       model: config.model,
       effort,
@@ -862,6 +869,11 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     for (const key of keysToDelete) {
       this.sessions.delete(key)
       console.log(`[ClaudeCodeAdapter] Removed session key: ${key}`)
+    }
+
+    if (session.secretEnvFile) {
+      removeSessionEnvFile(session.secretEnvFile)
+      session.secretEnvFile = undefined
     }
   }
 
@@ -1471,9 +1483,11 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
    * Environment for the Claude process. CLAUDECODE is removed so the CLI does
    * not refuse to start as a nested session.
    */
-  private buildClaudeEnvironment(): Record<string, string> {
+  private buildClaudeEnvironment(config?: SessionConfig, secretEnvFile?: string): Record<string, string> {
     const env = { ...process.env } as Record<string, string>
     delete env.CLAUDECODE
+    if (config) Object.assign(env, rtkProcessEnv(config, env))
+    if (secretEnvFile) env.CLAUDE_ENV_FILE = secretEnvFile
     return env
   }
 }

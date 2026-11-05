@@ -306,10 +306,13 @@ export function assembleSessionConfig(
     }
   }
 
-  const rtkExecutable = host.findRtkExecutable?.() ?? null
-  if (rtkExecutable) {
-    applyRtkSessionPolicy(config, agent.config?.coding_agent, isRtkEnabled(db.getSetting(RTK_ENABLED_SETTING)), rtkExecutable)
-  }
+  applyRtkSessionPolicy(
+    config,
+    agent.config?.coding_agent,
+    isRtkEnabled(db.getSetting(RTK_ENABLED_SETTING)),
+    host.findRtkExecutable?.() ?? null,
+    (secretIds?.length ?? 0) > 0 || Object.values(agent.config?.api_keys ?? {}).some(Boolean)
+  )
 
   return config
 }

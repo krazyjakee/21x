@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { delimiter, join, resolve } from 'path'
 import { pathToFileURL } from 'url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SessionConfig } from './coding-agent-adapter'
@@ -10,6 +10,7 @@ const FAKE_RTK = `#!/bin/sh
 case "$3" in
   "git status"|"rtk git status") echo "rtk git status"; exit 3 ;;
   "broken") echo "not a command"; exit 2 ;;
+  "where") echo "rtk where $(pwd)"; exit 0 ;;
   *) exit 1 ;;
 esac
 `
@@ -18,6 +19,7 @@ describe.skipIf(process.platform === 'win32')('OpenCode RTK plugin', () => {
   let root: string
   let workspaceDir: string
   let rtk: string
+  const originalPath = process.env.PATH
   const config = (extra: Partial<SessionConfig>): SessionConfig => ({ agentId: 'a', taskId: 't', workspaceDir, tillDone: false, ...extra })
 
   beforeEach(() => {
@@ -29,9 +31,13 @@ describe.skipIf(process.platform === 'win32')('OpenCode RTK plugin', () => {
     rtk = join(root, 'rtk')
     writeFileSync(rtk, FAKE_RTK)
     chmodSync(rtk, 0o755)
+    process.env.PATH = [originalPath, root].join(delimiter)
   })
 
-  afterEach(() => rmSync(root, { recursive: true, force: true }))
+  afterEach(() => {
+    process.env.PATH = originalPath
+    rmSync(root, { recursive: true, force: true })
+  })
 
   async function runPlugin(path: string, tool: string, command: unknown): Promise<unknown> {
     const plugin = await import(/* @vite-ignore */ pathToFileURL(path).href)
@@ -46,12 +52,18 @@ describe.skipIf(process.platform === 'win32')('OpenCode RTK plugin', () => {
     expect(files.pluginFilePaths).toEqual([])
   })
 
-  it('runs before the secret injector and is declared to OpenCode', () => {
-    const files = writeRuntimePluginFiles(config({ rtkExecutable: rtk, tillDone: true, secretEnvVars: { TOKEN: 'x' } }))
+  it('is declared to OpenCode', () => {
+    const files = writeRuntimePluginFiles(config({ rtkExecutable: rtk, tillDone: true }))
     expect(files.pluginFilePaths[0]).toMatch(/20x-rtk\.js$/)
-    expect(files.pluginFilePaths.at(-1)).toMatch(/20x-secret-injector\.js$/)
     const declared = JSON.parse(readFileSync(join(workspaceDir, '.opencode', 'opencode.json'), 'utf8'))
     expect(declared.plugin).toEqual(files.pluginFilePaths)
+  })
+
+  it('carries the limits on RTK with the secrets, because the server is shared', () => {
+    writeRuntimePluginFiles(config({ secretEnvVars: { TOKEN: 'x' }, rtkEnv: { RTK_DB_PATH: '/dev/null' } }))
+    const exports = readFileSync(join(workspaceDir, '.opencode', '.20x-secrets'), 'utf8')
+    expect(exports).toContain("export RTK_DB_PATH='/dev/null'")
+    expect(exports).toContain("export TOKEN='x'")
   })
 
   it('removes the plugin once RTK is turned off', () => {
@@ -85,9 +97,17 @@ describe.skipIf(process.platform === 'win32')('OpenCode RTK plugin', () => {
       expect(await runPlugin(plugin, 'read', 'git status')).toBe('git status')
     })
 
-    it('never gives RTK a command that may already hold secrets', async () => {
-      const command = "export TOKEN='x'\ngit status"
-      expect(await runPlugin(plugin, 'bash', command)).toBe(command)
+    it('runs RTK from the workspace, where project deny rules are read', async () => {
+      expect(await runPlugin(plugin, 'bash', 'where')).toBe(`rtk where ${resolve(workspaceDir)}`)
+    })
+
+    it('leaves a command alone when it sets its own PATH', async () => {
+      expect(await runPlugin(plugin, 'bash', 'PATH=/usr/bin git status')).toBe('PATH=/usr/bin git status')
+    })
+
+    it('does not rewrite when a bare rtk would not resolve in the server', async () => {
+      process.env.PATH = originalPath
+      expect(await runPlugin(plugin, 'bash', 'git status')).toBe('git status')
     })
 
     it('keeps the command when RTK has disappeared', async () => {

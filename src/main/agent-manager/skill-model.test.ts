@@ -103,6 +103,7 @@ describe('assembleSessionConfig model', () => {
     s3: { id: 's3', name: 'other', preferred_model: 'claude-haiku-4-5' }
   }
   const db = {
+    getSetting: vi.fn(() => undefined),
     getSkillsByIds: vi.fn((ids: string[]) => ids.map((id) => skills[id]).filter(Boolean))
   } as unknown as DatabaseManager
 

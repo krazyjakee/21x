@@ -8,6 +8,7 @@ import { settingsApi } from '@/lib/ipc-client'
 import type { ToolStatus } from '@/types/electron'
 import {
   isRtkEnabled,
+  MINIMUM_RTK_VERSION,
   RTK_ENABLED_SETTING,
   RTK_STATE_LABELS,
   rtkBackendCoverage,
@@ -17,7 +18,7 @@ import {
 } from '@shared/rtk'
 
 const COVERAGE_LABELS: Record<RtkCoverage, string> = {
-  rewrite: 'Every command goes through RTK',
+  rewrite: 'Commands RTK can filter are rewritten',
   instructions: 'Instructions only, not enforced'
 }
 
@@ -96,7 +97,7 @@ export function RtkSetting({ setupOpen }: { setupOpen: boolean }) {
             <Label htmlFor={SWITCH_ID}>RTK output compression</Label>
             {detecting ? (
               <Loader2 className="size-3 animate-spin text-muted-foreground" aria-label="Checking RTK" />
-            ) : detection || !enabled ? (
+            ) : preferenceLoaded && (detection || !enabled) ? (
               <span className={`text-xs ${state === 'on' ? 'text-emerald-400' : 'text-muted-foreground'}`} data-testid="rtk-effective-state">
                 {RTK_STATE_LABELS[state]}
               </span>
@@ -104,7 +105,8 @@ export function RtkSetting({ setupOpen }: { setupOpen: boolean }) {
           </div>
           <p className="text-xs text-muted-foreground">
             Shortens noisy shell output in Captain and task agent sessions. Commands RTK has no filter for
-            run unchanged. A change applies to new sessions.
+            run unchanged. Agents with secrets or their own API keys always run without RTK, so RTK cannot
+            store those values. A change applies to new sessions.
           </p>
         </div>
         <Switch
@@ -129,6 +131,13 @@ export function RtkSetting({ setupOpen }: { setupOpen: boolean }) {
             {installing ? <Loader2 className="size-3 animate-spin" /> : <><Download className="size-3 mr-1" />Install</>}
           </Button>
         </div>
+      )}
+
+      {!detecting && state === 'unsupported' && (
+        <p className="text-xs text-muted-foreground" data-testid="rtk-unsupported">
+          This RTK is older than {MINIMUM_RTK_VERSION}, or is a different program called rtk, so commands
+          run unchanged.
+        </p>
       )}
 
       {state === 'on' && coverage.length > 0 && (

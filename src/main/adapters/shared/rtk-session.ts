@@ -1,7 +1,7 @@
 import { execFile } from 'child_process'
 import { accessSync, constants, statSync } from 'fs'
-import { homedir } from 'os'
-import { delimiter, join } from 'path'
+import { devNull, homedir } from 'os'
+import { delimiter, dirname, isAbsolute, join } from 'path'
 import { rtkCoverageFor } from '../../../shared/rtk'
 import type { SessionConfig } from '../coding-agent-adapter'
 
@@ -9,6 +9,22 @@ import type { SessionConfig } from '../coding-agent-adapter'
 const REWRITE_TIMEOUT_MS = 2_000
 /** `rtk rewrite` exit codes that carry a command on stdout. Anything else means "leave it alone". */
 const REWRITTEN_EXIT_CODES = new Set<unknown>([0, 3])
+/**
+ * A command that sets its own PATH. RTK would keep the assignment and put a bare
+ * `rtk` after it (`PATH=/usr/bin rtk git status`), which that PATH cannot find.
+ */
+export const PATH_ASSIGNMENT = /(^|[\s;&|(])PATH\+?=/
+
+/**
+ * Stops RTK storing anything for a session, including from a global hook or an
+ * `rtk` the agent types itself. RTK keeps three stores: command text in
+ * history.db (`RTK_DB_PATH`, and only a path it cannot open stores nothing),
+ * raw output in recall.db (`RTK_RECALL`), and raw output in tee logs (`RTK_TEE`).
+ * Tested on RTK 0.49.0: leaving out any one of them still writes to disk.
+ */
+const RTK_NO_STORAGE_ENV = { RTK_DISABLED: '1', RTK_DB_PATH: devNull, RTK_RECALL: '0', RTK_TEE: '0' }
+/** RTK's own Pi extension honours this. Other global hooks ignore it. */
+const RTK_OPT_OUT_ENV = { RTK_DISABLED: '1' }
 
 const RTK_INSTRUCTIONS_PROMPT = `
 
@@ -17,11 +33,18 @@ const RTK_INSTRUCTIONS_PROMPT = `
 RTK is installed on this machine and compresses command output. Prefix shell commands with \`rtk\`, for example \`rtk git status\` or \`rtk cargo test\`, and keep the prefix inside chains: \`rtk git add . && rtk git commit -m "msg"\`. Commands RTK has no filter for run unchanged. Never write \`rtk rtk\`. Leave the prefix off the left side of a pipe, because later commands need the raw output. If the output is unusable, run \`rtk proxy <command>\`.
 `
 
+const RTK_REWRITE_PROMPT = `
+
+## Shell output compression
+
+Shell output may be compressed by RTK before you see it. If a result looks incomplete or unusable, run \`rtk proxy <command>\` to get the raw output.
+`
+
 const RTK_OFF_PROMPT = `
 
 ## Shell output compression
 
-RTK is turned off in 21x. Run shell commands directly, without an \`rtk\` prefix, even if other instructions ask for one.
+RTK is turned off for this session. Run shell commands directly, without an \`rtk\` prefix, even if other instructions ask for one.
 `
 
 function isExecutableFile(path: string, platform: NodeJS.Platform): boolean {
@@ -45,7 +68,8 @@ export function findRtkExecutable(
   // The installer's target, which a desktop launch can leave out of PATH.
   const directories = [...searchPath.split(delimiter), join(home, '.local', 'bin')]
   for (const directory of directories) {
-    if (!directory) continue
+    // A relative entry would resolve against whichever repository is open.
+    if (!isAbsolute(directory)) continue
     const candidate = join(directory, name)
     if (isExecutableFile(candidate, platform)) return candidate
   }
@@ -57,13 +81,17 @@ export function findRtkExecutable(
  * what can be filtered: it leaves unfiltered commands and commands that are
  * already wrapped alone, and declines shapes that need raw output, such as the
  * left side of `| wc -l`. Any failure, including a missing or old RTK, returns
- * the command unchanged so that RTK can never stop a command from running.
+ * the command unchanged.
+ *
+ * `cwd` must be the session's directory. RTK reads project deny rules from there
+ * and refuses to rewrite a denied command. A rewritten command no longer matches
+ * a rule such as `Bash(git push:*)`, so without this the rule stops working.
  */
-export function rewriteWithRtk(executable: string, command: string): Promise<string> {
-  if (!command.trim()) return Promise.resolve(command)
+export function rewriteWithRtk(executable: string, command: string, cwd: string): Promise<string> {
+  if (!command.trim() || PATH_ASSIGNMENT.test(command)) return Promise.resolve(command)
   return new Promise(resolve => {
     try {
-      execFile(executable, ['rewrite', '--', command], { timeout: REWRITE_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
+      execFile(executable, ['rewrite', '--', command], { cwd, timeout: REWRITE_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
         const exitCode = error ? error.code : 0
         const rewritten = stdout.replace(/\r?\n$/, '')
         resolve(REWRITTEN_EXIT_CODES.has(exitCode) && rewritten ? rewritten : command)
@@ -74,21 +102,55 @@ export function rewriteWithRtk(executable: string, command: string): Promise<str
   })
 }
 
-/** Applies the RTK preference to a session on a machine that has RTK. */
+/**
+ * Environment additions for a process whose shell runs rewritten commands.
+ * `rtk rewrite` emits a bare `rtk`, so RTK's directory has to be on PATH. It goes
+ * last, and only when missing, so no other command resolves differently.
+ */
+export function rtkProcessEnv(
+  config: Pick<SessionConfig, 'rtkEnv' | 'rtkExecutable'>,
+  env: NodeJS.ProcessEnv
+): Record<string, string> {
+  const additions: Record<string, string> = { ...config.rtkEnv }
+  if (config.rtkExecutable) {
+    const key = Object.keys(env).find(name => name.toUpperCase() === 'PATH') ?? 'PATH'
+    const directory = dirname(config.rtkExecutable)
+    const entries = (env[key] ?? '').split(delimiter)
+    if (!entries.includes(directory)) additions[key] = [...entries, directory].filter(Boolean).join(delimiter)
+  }
+  return additions
+}
+
+/**
+ * Applies the RTK preference to a session.
+ *
+ * A session with secrets never uses RTK, whatever the preference says. The shell
+ * expands `$TOKEN` before `rtk` starts, so RTK would see and store the value, and
+ * no check of the command text can rule that out (`eval`, `${!name}`, or a value
+ * the agent pasted). Any later session could then read it from RTK's files.
+ */
 export function applyRtkSessionPolicy(
   config: SessionConfig,
   codingAgent: string | null | undefined,
   enabled: boolean,
-  executable: string
+  executable: string | null,
+  hasSecrets: boolean
 ): void {
+  if (hasSecrets) {
+    config.rtkEnv = RTK_NO_STORAGE_ENV
+    if (executable) config.systemPrompt = (config.systemPrompt || '') + RTK_OFF_PROMPT
+    return
+  }
   if (!enabled) {
-    config.rtkDisabled = true
+    config.rtkEnv = RTK_OPT_OUT_ENV
     config.systemPrompt = (config.systemPrompt || '') + RTK_OFF_PROMPT
     return
   }
+  if (!executable) return
   if (rtkCoverageFor(codingAgent) === 'instructions') {
     config.systemPrompt = (config.systemPrompt || '') + RTK_INSTRUCTIONS_PROMPT
   } else {
     config.rtkExecutable = executable
+    config.systemPrompt = (config.systemPrompt || '') + RTK_REWRITE_PROMPT
   }
 }
