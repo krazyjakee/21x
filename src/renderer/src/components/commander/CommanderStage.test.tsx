@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ProjectRecord } from '@shared/projects'
@@ -10,6 +11,7 @@ import { useCommanderStore } from '@/stores/commander-store'
 import { __resetCommanderCall, useCommanderCallStore } from '@/stores/commander-call-store'
 import { CommanderStage } from './CommanderStage'
 import { CommanderCallHost, commanderCallMedia } from './CommanderCallHost'
+import { moveToolbarTabStop, useToolbarTabStop } from './use-call-shortcuts'
 import { voiceCapture } from '@/lib/voice-capture'
 import { insertAndSubmit, clearDictationTarget } from '@/lib/voice-dictation-target'
 import { __resetCommanderActivity } from '@/lib/activity/commander-activity-adapter'
@@ -37,12 +39,38 @@ describe('Commander stage controls', () => {
     stage(); await act(async () => useCommanderCallStore.getState().start('s1'))
     const toolbar = screen.getByRole('toolbar', { name: 'Commander call controls' })
     const stops = () => within(toolbar).getAllByRole('button').filter(button => button.getAttribute('tabindex') === '0')
-    expect(stops()).toEqual([within(toolbar).getByLabelText('Mute microphone')])
+    // The stage first renders with the call off and Mute disabled, so the stop starts on the menu button.
+    expect(stops()).toEqual([within(toolbar).getByLabelText('Microphone mode and input device')])
     const mute = within(toolbar).getByLabelText('Mute microphone')
     act(() => mute.focus())
     fireEvent.keyDown(mute, { key: 'End' })
     expect(document.activeElement).toBe(within(toolbar).getByLabelText('Turn voice mode off'))
     expect(stops()).toEqual([within(toolbar).getByLabelText('Turn voice mode off')])
+  })
+  it('keeps the Tab stop and focus when the control holding them disables', async () => {
+    stage(); await act(async () => useCommanderCallStore.getState().start('s1'))
+    const toolbar = screen.getByRole('toolbar', { name: 'Commander call controls' })
+    const end = within(toolbar).getByLabelText('Turn voice mode off')
+    act(() => end.focus())
+    act(() => useCommanderCallStore.getState().end())
+    expect(end).toBeDisabled()
+    const stops = within(toolbar).getAllByRole('button').filter(button => button.getAttribute('tabindex') === '0')
+    expect(stops).toHaveLength(1)
+    expect(stops[0]).not.toBeDisabled()
+    expect(document.activeElement).toBe(stops[0])
+  })
+  it('keeps the Tab stop when a control mounts ahead of it', () => {
+    function Toolbar({ retry }: { retry: boolean }) {
+      const ref = useRef<HTMLDivElement>(null)
+      useToolbarTabStop(ref)
+      return <div ref={ref} onFocus={moveToolbarTabStop}>{retry && <button>Retry</button>}<button>Mute</button><button>End</button></div>
+    }
+    const view = render(<Toolbar retry={false} />)
+    act(() => screen.getByText('End').focus())
+    act(() => screen.getByText('End').blur())
+    view.rerender(<Toolbar retry />)
+    expect(screen.getByText('End')).toHaveAttribute('tabindex', '0')
+    expect(screen.getByText('Retry')).toHaveAttribute('tabindex', '-1')
   })
   it('closes the microphone menu with Escape, without stopping the reply, and returns focus', async () => {
     stage(); await act(async () => useCommanderCallStore.getState().start('s1'))
@@ -50,13 +78,31 @@ describe('Commander stage controls', () => {
     const original = useCommanderCallStore.getState().interrupt
     useCommanderCallStore.setState({ interrupt })
     const button = screen.getByLabelText('Microphone mode and input device')
-    fireEvent.click(button)
-    const mode = screen.getByLabelText('Microphone mode')
-    act(() => mode.focus())
-    fireEvent.keyDown(mode, { key: 'Escape' })
-    expect(screen.queryByRole('group', { name: 'Microphone options' })).toBeNull()
+    const open = (focused: () => HTMLElement) => { fireEvent.click(button); act(() => focused().focus()) }
+    const escape = () => {
+      expect(fireEvent.keyDown(document.activeElement!, { key: 'Escape' })).toBe(false)
+      expect(screen.queryByRole('group', { name: 'Microphone options' })).toBeNull()
+    }
+    open(() => button); escape()
     expect(document.activeElement).toBe(button)
+    open(() => screen.getByLabelText('Microphone mode')); escape()
+    expect(document.activeElement).toBe(button)
+    const draft = screen.getByLabelText('Typed draft')
+    open(() => draft); escape()
+    expect(document.activeElement).toBe(draft)
     expect(interrupt).not.toHaveBeenCalled()
+    useCommanderCallStore.setState({ interrupt: original })
+  })
+  it('stops the reply on Escape once the menu is closed', async () => {
+    stage(); await act(async () => useCommanderCallStore.getState().start('s1'))
+    const interrupt = vi.fn()
+    const original = useCommanderCallStore.getState().interrupt
+    useCommanderCallStore.setState({ interrupt })
+    fireEvent.click(screen.getByLabelText('Microphone mode and input device'))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(interrupt).not.toHaveBeenCalled()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(interrupt).toHaveBeenCalledOnce()
     useCommanderCallStore.setState({ interrupt: original })
   })
   it('says a closed push-to-talk microphone is waiting, not muted', async () => {

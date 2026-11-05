@@ -283,8 +283,10 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
 - **Toolbar:** mic/mute, the mode/input-device menu, Stop, CC, Chat panel,
   Voice settings, PiP and a separate red End. Each toolbar is one Tab stop:
   Left/Right/Home/End navigate its buttons, and Tab returns to the one last
-  used. Chat/Actions support arrow keys. Escape closes the microphone menu and
-  returns focus to its button. Stop and Escape
+  used; if that control disables, as Stop does once pressed, the stop and focus
+  move to the first enabled control. Chat/Actions support arrow keys. An open
+  microphone menu takes Escape first, wherever focus is, so closing it does not
+  stop a reply; focus inside the menu returns to its button. Otherwise Stop and Escape
   interrupt a reply while leaving the call open. End closes media, cancels
   synthesis/the active reply and retains the conversation.
 - **Microphone modes:** open mic preserves the existing default. Its pauses

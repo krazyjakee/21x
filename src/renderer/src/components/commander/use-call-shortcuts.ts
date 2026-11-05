@@ -74,15 +74,19 @@ export function useCommanderCallShortcuts(): void {
 
 /**
  * Makes a toolbar one Tab stop, with the arrow keys moving inside it. Runs after
- * every render because controls enable and disable with the call's state.
+ * every render because controls enable and disable with the call's state: Stop
+ * disables itself once pressed, so the stop, and focus with it, has to move on or
+ * the whole toolbar would drop out of the Tab order.
  */
 export function useToolbarTabStop(toolbar: RefObject<HTMLElement | null>): void {
   useLayoutEffect(() => {
     const element = toolbar.current
     if (!element) return
     const enabled = [...element.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
-    const stop = enabled.find(button => button === document.activeElement) ?? enabled.find(button => button.getAttribute('tabindex') !== '-1')
+    const active = document.activeElement
+    const stop = enabled.find(button => button === active) ?? enabled.find(button => button.getAttribute('tabindex') === '0') ?? enabled[0]
     setTabStop(element, stop)
+    if (active instanceof HTMLButtonElement && active.disabled && element.contains(active)) stop?.focus()
   })
 }
 

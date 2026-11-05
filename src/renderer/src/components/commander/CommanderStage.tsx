@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, AudioLines, Brain, Captions, ChevronDown, Circle, Loader2, Mic, MicOff, PanelRight, PhoneOff, PictureInPicture2, Settings, Square, Wrench } from 'lucide-react'
 import type { CallState } from '@shared/commander-call'
 import { Button } from '@/components/ui/Button'
@@ -40,9 +40,15 @@ export function CommanderStage({ panelOpen, onPanelToggle, compact, onCompactTog
   const caption = useCommanderCaption(presentation)
   const [menu, setMenu] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
+  const micMenu = useRef<HTMLDivElement>(null)
   const toolbar = useRef<HTMLDivElement>(null)
   useToolbarTabStop(toolbar)
-  const closeMenu = () => { setMenu(false); menuButton.current?.focus() }
+  const closeMenu = useCallback(() => {
+    // Only bring focus back from the menu; someone typing in Chat stays there.
+    const inside = micMenu.current?.contains(document.activeElement)
+    setMenu(false)
+    if (inside) menuButton.current?.focus()
+  }, [])
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [deviceError, setDeviceError] = useState('')
   const [localProblem, setLocalProblem] = useState<string | null>(null)
@@ -66,6 +72,19 @@ export function CommanderStage({ panelOpen, onPanelToggle, compact, onCompactTog
     if (readiness?.blocking) { setLocalProblem(readiness.problem); return }
     setLocalProblem(null); void call.start(selected)
   }
+  // An open menu takes Escape before the call does, wherever focus is: closing
+  // the menu must not stop the reply. Captures ahead of the host's window listener.
+  useEffect(() => {
+    if (!menu) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.isComposing || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      closeMenu()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [menu, closeMenu])
   useEffect(() => {
     if (!menu) return
     let active = true
@@ -124,7 +143,7 @@ export function CommanderStage({ panelOpen, onPanelToggle, compact, onCompactTog
       <Button size="icon" variant="ghost" aria-label={compact ? 'Expand Commander stage' : 'Picture in picture'} aria-pressed={compact} disabled={call.status === 'off'} onClick={onCompactToggle}><PictureInPicture2 className="size-icon" /></Button>
       <Button variant="destructive" aria-label="Turn voice mode off" disabled={call.status === 'off'} onClick={() => call.end()}><PhoneOff className="size-icon" aria-hidden="true" />End</Button>
     </div>
-    {menu && <div className="commander-mic-menu" role="group" aria-label="Microphone options" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu() } }}>
+    {menu && <div ref={micMenu} className="commander-mic-menu" role="group" aria-label="Microphone options">
       <label className="flex flex-col gap-1 text-sm">Microphone mode<select aria-label="Microphone mode" disabled={call.status === 'starting'} value={call.micMode} onChange={event => void call.setMicMode(event.target.value === 'push-to-talk' ? 'push-to-talk' : 'open-mic')}><option value="open-mic">Open mic</option><option value="push-to-talk">Push to talk</option></select></label>
       <label className="flex flex-col gap-1 text-sm">Input device<select aria-label="Microphone input device" disabled={call.status === 'starting'} value={call.inputDeviceId} onChange={event => void call.setInputDevice(event.target.value)}><option value="">System default</option>{devices.filter(device => device.deviceId !== 'default').map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label>
       <label className="flex flex-col gap-1 text-sm">Caption size<select aria-label="Caption size" value={captionSize} onChange={event => useCommanderCallUiStore.getState().setCaptionSize(event.target.value as typeof captionSize)}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
