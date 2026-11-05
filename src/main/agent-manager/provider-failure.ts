@@ -1,3 +1,4 @@
+import { isAgentRecoveryToken } from '../../shared/agent-desktop-codecs'
 import { findCreditExhaustionMessage } from './credit-exhaustion'
 
 /** Recovery semantics are independent of the backend's spelling of an error.
@@ -26,6 +27,16 @@ export function classifyProviderFailure(error: unknown, delivery: ProviderFailur
     return { kind: 'transient', message, delivery, code }
   }
   return { kind: 'terminal', message, delivery, code }
+}
+
+/**
+ * The cause for the `agent:recoveryStateChanged` notice. A provider failure's
+ * cause is its free-text message, which both token checks on the Tauri path
+ * refuse, so the notice carries this token instead. The message stays in the
+ * journal and the transcript, which are where it is shown.
+ */
+export function recoveryEventCause(cause: string): string {
+  return isAgentRecoveryToken(cause) ? cause : 'provider_failure'
 }
 
 export function providerFailureError(error: unknown, delivery: ProviderFailure['delivery']): Error & { providerFailure: ProviderFailure } {

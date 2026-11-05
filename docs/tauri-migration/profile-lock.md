@@ -81,7 +81,11 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
   neither manual Run cleanup nor a scheduled pass touches a workspace with no matching
   task, not even its `node_modules`. It may be the other app's work, and removal
   cannot be undone. This also protects tasks created in Electron after the import,
-  which the Tauri database cannot see.
+  which the Tauri database cannot see. It does not protect a task both databases
+  know. The import copies tasks with their IDs, and after that the two copies change
+  separately. So if a task is Completed and past retention in Tauri's copy, Tauri
+  still removes its workspace, even if the task was reopened in Electron after the
+  import.
 - **A lost marker comes back.** The share is also held in a settings row,
   `__electron_shared_root`, written in the import copy and added on the next launch
   to profiles imported before it existed. The native host cannot read SQLite, so if
@@ -112,9 +116,22 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
   out from the current folders. The two apps no longer exclude each other, and the
   folder is not taken back if it reappears.
 - **Still open, Electron's own cleanup:** Electron cannot tell that the folders are
-  shared, so it treats a workspace of a Tauri-created task as an orphan once it is
-  past the retention period. Its Run cleanup, or a scheduled pass with auto-cleanup
-  on, can remove it. Closing this needs a lasting record in the Electron profile.
+  shared. Its Run cleanup needs no setting, a scheduled pass needs auto-cleanup on,
+  and Tauri does not have to be running. Either can remove a workspace by two routes:
+  - **A task Electron does not know.** A workspace of a Tauri-created task looks like
+    an orphan to Electron, and it is removed once its age passes the retention period.
+    That age comes from the modification time of the top-level task folder,
+    `workspaces/<task>`, only. Worktrees sit one level down, at
+    `workspaces/<task>/<repo>`, so editing files inside a repository does not change
+    it. An older Tauri task can be selected while it is still being worked on,
+    whatever its status in Tauri.
+  - **A task both databases know.** A task that is Completed and past retention in
+    Electron's copy has its workspace removed, even if it was reopened in Tauri after
+    the import and is being worked on in that same folder. This route uses Electron's
+    own task record, not the folder's age.
+
+  Uncommitted work in a removed workspace cannot be recovered. Commits on the task
+  branch stay in the shared repository. How to close this is an open user decision.
 
 A refused launch writes nothing to the profile, with one limit on Linux: the native
 Tauri host creates missing `workspaces/` and `attachments/` before the service runs,

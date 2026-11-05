@@ -600,7 +600,7 @@
       "expression": "desktopApi.onAgentRecoveryStateChanged",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 210,
+      "line": 196,
       "path": [
         "onAgentRecoveryStateChanged"
       ],
@@ -611,7 +611,7 @@
       "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 717,
+      "line": 694,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -623,7 +623,7 @@
       "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 718,
+      "line": 695,
       "path": [
         "shell",
         "openPath"
@@ -635,7 +635,7 @@
       "expression": "desktopApi.github.fetchPullRequestDetails",
       "file": "src/renderer/src/components/tasks/workspace/useTaskShortcutRouter.ts",
       "kind": "call",
-      "line": 117,
+      "line": 120,
       "path": [
         "github",
         "fetchPullRequestDetails"
@@ -6125,6 +6125,7 @@
     "src/renderer/src/lib/mermaid-fence.ts",
     "src/renderer/src/lib/native-attachment-drop-owner.ts",
     "src/renderer/src/lib/native-desktop-host.ts",
+    "src/renderer/src/lib/native-fresh-session.ts",
     "src/renderer/src/lib/oauth-api.ts",
     "src/renderer/src/lib/platform.ts",
     "src/renderer/src/lib/project-editor.ts",
@@ -14678,7 +14679,7 @@
   "summary": {
     "desktopAPIConsumers": 371,
     "directAPIConsumers": 1,
-    "files": 950,
+    "files": 951,
     "operations": 741,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,
