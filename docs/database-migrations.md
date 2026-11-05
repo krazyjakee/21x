@@ -2,6 +2,17 @@
 
 All schema migrations live in `src/main/database/schema.ts` as plain functions over the raw SQLite handle; `DatabaseManager.initialize()` applies them through `applySchema()`. Tests build their schema from the same functions (`test/helpers/db-test-helper.ts`).
 
+## Version 39 — PR reviews no longer hold agents in place
+
+`pr_review_handoffs` and `pr_review_attestations` lose their `ON DELETE RESTRICT`
+references to `agents`, because one finished review made an agent impossible to
+delete. The ids stay as plain text: the merge check compares them as text against
+a review bound to an exact commit, and never reads the agent row. References to
+`tasks` keep `RESTRICT`. `dropReviewAgentReferences` rebuilds each table from its
+own stored definition, since installed tables differ from fresh ones and older
+attestations have no `handoff_id`, and it restores the tables' indexes. Other
+tables keep their links in, because foreign keys are off while it runs.
+
 ## Version 20 — managed runtime and durable delivery
 
 Version 20 adds `managed_agent_runtimes` and `delivery_outbox`. Runtime rows

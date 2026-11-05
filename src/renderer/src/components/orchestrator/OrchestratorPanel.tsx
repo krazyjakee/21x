@@ -1,3 +1,4 @@
+import { ipcErrorReason } from '@/lib/ipc-error'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { X, FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -34,12 +35,6 @@ interface QueuedCaptainMessage {
   message: string
   deliveryId: string
   options?: { attachments?: ComposerAttachment[] }
-}
-
-/** The reason without Electron's "Error invoking remote method '…': Error: " wrapper. */
-function startFailureMessage(err: unknown): string {
-  const text = err instanceof Error ? err.message : String(err)
-  return text.replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '')
 }
 
 interface OrchestratorPanelProps {
@@ -184,7 +179,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       if (!showsProject(projectId)) return
       selectedAgentIdRef.current = previous
       setSelectedAgentId(previous)
-      setStartFailure({ agentId: newAgentId, message: startFailureMessage(err) })
+      setStartFailure({ agentId: newAgentId, message: ipcErrorReason(err) })
     } finally {
       if (showsProject(projectId)) setRuntimeActivity(null)
     }
@@ -230,7 +225,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           // start() already cleared its "starting" state when it failed; a
           // timeout left it behind.
           useAgentStore.getState().endSession(taskId)
-          if (captainViewRef.current.taskId === taskId && selectedAgentIdRef.current === agentId) setStartFailure({ agentId, message: startFailureMessage(err) })
+          if (captainViewRef.current.taskId === taskId && selectedAgentIdRef.current === agentId) setStartFailure({ agentId, message: ipcErrorReason(err) })
           throw err
         } finally {
           clearTimeout(timer)
@@ -321,7 +316,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         queuedRef.current.set(taskId, queue)
         if (captainViewRef.current.taskId === taskId) {
           setQueuedCount(queue.length)
-          setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: startFailureMessage(err) })
+          setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: ipcErrorReason(err) })
         }
       }
     },
@@ -352,7 +347,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     } catch (err) {
       if (!ownsView()) return
       console.error('Failed to deliver held Captain messages:', err)
-      setStartFailure({ agentId: runtime?.candidateAgentId ?? selectedAgentIdRef.current ?? '', message: startFailureMessage(err) })
+      setStartFailure({ agentId: runtime?.candidateAgentId ?? selectedAgentIdRef.current ?? '', message: ipcErrorReason(err) })
     } finally {
       if (ownsView()) setRuntimeActivity(null)
     }
@@ -369,7 +364,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       setSelectedAgentId(next.agentId)
       await fetchProjects()
     } catch (error) {
-      if (showsProject(projectId)) setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: startFailureMessage(error) })
+      if (showsProject(projectId)) setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: ipcErrorReason(error) })
     }
   }, [projectId, fetchProjects, showsProject])
 

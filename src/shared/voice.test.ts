@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   canTransition,
   isVoiceNoise,
+  isVoiceThanks,
   MOBILE_VOICE_CAPABILITIES,
   VOICE_TRANSITIONS,
   type VoiceState,
@@ -64,5 +65,15 @@ describe('isVoiceNoise', () => {
     for (const text of ['Add twenty one X.', 'Mm, add a task.', 'OK', 'No.', 'Yes', 'Hi', 'Me', '42']) {
       expect(isVoiceNoise(text), text).toBe(false)
     }
+  })
+})
+
+describe('isVoiceThanks', () => {
+  it.each(['Thank you.', 'thank you', 'Thanks.', 'Thanks a lot!', 'Thank you very much.', 'Thank you so much.', 'Uh, thank you.', 'Thank you. Thank you.'])('treats %j as nothing to send', (text) => {
+    expect(isVoiceThanks(text)).toBe(true)
+  })
+
+  it.each(['Thank you, now fix the build.', 'Thanks for the update, what is next?', 'Say thank you to the team.', 'Mm.', ''])('keeps %j out of the rule', (text) => {
+    expect(isVoiceThanks(text)).toBe(false)
   })
 })

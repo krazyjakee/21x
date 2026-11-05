@@ -162,7 +162,7 @@ export function AgentTranscriptPanel({
   })
 
   return (
-    <div ref={panelRef} tabIndex={-1} className={cn('flex flex-col min-h-0 bg-background border-l border-border relative', className)}>
+    <div ref={panelRef} tabIndex={-1} data-transcript-task={taskId} className={cn('flex flex-col min-h-0 bg-background border-l border-border relative', className)}>
       {debugCopyToast && (
         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-card border border-border rounded-md px-3 py-1.5 text-xs text-foreground shadow-lg animate-in fade-in duration-150">
           Debug info copied to clipboard

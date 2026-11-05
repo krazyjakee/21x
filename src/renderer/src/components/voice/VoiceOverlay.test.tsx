@@ -36,73 +36,22 @@ describe('VoiceOverlay', () => {
     reset()
   })
 
-  it('says only that it is listening, in every mode', () => {
-    // "Listening — pause to send" read as an instruction to do something,
-    // when it only described what happens next by itself.
-    reset({ state: 'listening', turnId: 'turn-1', mode: 'conversation' })
-    render(<VoiceOverlay />)
-    expect(screen.getByText('Listening')).toBeInTheDocument()
-    expect(screen.queryByText(/pause to send/i)).not.toBeInTheDocument()
+  // The mic button says it is listening and stops it. A bubble as well covered
+  // the controls underneath it.
+  it.each(['listening', 'transcribing'] as const)('draws nothing while %s', (state) => {
+    reset({ state, turnId: 'turn-1', partial: 'half a sentence' })
+    const { container } = render(<VoiceOverlay />)
+    expect(container).toBeEmptyDOMElement()
   })
 
-  it('does not repeat a sentence it has already sent', () => {
-    // The sent sentence is in the transcript above the composer. Showing it
-    // again in the bubble says the same thing twice, and the bubble is for
-    // what is being said now.
-    reset({
-      state: 'listening',
-      turnId: 'turn-1',
-      mode: 'conversation',
-      sentSentences: ['run the tests again'],
-      partial: '',
-    })
+  it('still cancels the turn on Escape', async () => {
+    const cancel = vi.fn(async () => undefined)
+    reset({ state: 'listening', turnId: 'turn-1', cancel: cancel as never })
     render(<VoiceOverlay />)
-
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('Speak now')
-    expect(screen.queryByText(/run the tests again/)).not.toBeInTheDocument()
-  })
-
-  it('shows nothing once the sentence has been sent', () => {
-    // The words are in the transcript now. Leaving them in the bubble shows
-    // the user something they have already sent, as though it were still
-    // being heard.
-    reset({ state: 'listening', turnId: 'turn-1', mode: 'conversation', partial: '' })
-    render(<VoiceOverlay />)
-
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('Speak now')
-  })
-
-  it('brightens and swells with the voice, visibly', () => {
-    reset({ state: 'listening', turnId: 'turn-1', level: 0 })
-    const { rerender } = render(<VoiceOverlay />)
-    const halo = (): HTMLElement => screen.getByTestId('voice-level').firstElementChild as HTMLElement
-    const quiet = halo().style.opacity
-
-    act(() => {
-      useVoiceStore.setState({ level: 1 })
-    })
-    rerender(<VoiceOverlay />)
-
-    // Both must move: light alone was hard to read, size alone was missed.
-    expect(Number(halo().style.opacity)).toBeGreaterThan(Number(quiet) * 3)
-    expect(halo().style.transform).toBe('scale(1.7)')
-  })
-
-  it('offers a cross that stops listening', async () => {
-    const endTurn = vi.fn(async () => undefined)
-    reset({ state: 'listening', turnId: 'turn-1', endTurn: endTurn as never })
-    render(<VoiceOverlay />)
-
     await act(async () => {
-      screen.getByTestId('voice-stop').click()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     })
-    expect(endTurn).toHaveBeenCalledTimes(1)
-  })
-
-  it('hides the cross when there is nothing to stop', () => {
-    reset({ state: 'transcribing', turnId: 'turn-1', partial: 'half a sentence' })
-    render(<VoiceOverlay />)
-    expect(screen.queryByTestId('voice-stop')).not.toBeInTheDocument()
+    expect(cancel).toHaveBeenCalledTimes(1)
   })
 
   it('shows nothing while voice is switched off', () => {
@@ -124,12 +73,6 @@ describe('VoiceOverlay', () => {
   it('shows nothing while the session is idle', () => {
     const { container } = render(<VoiceOverlay />)
     expect(container).toBeEmptyDOMElement()
-  })
-
-  it('shows the live transcript while listening', () => {
-    reset({ state: 'listening', turnId: 'turn-1', partial: 'create a task to' })
-    render(<VoiceOverlay />)
-    expect(screen.getByTestId('voice-transcript')).toHaveTextContent('create a task to')
   })
 
   it('asks for a confirmation before the action runs', async () => {

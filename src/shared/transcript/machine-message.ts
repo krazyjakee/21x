@@ -78,3 +78,22 @@ export function parseMachineMessage(content: string): MachineMessageView | null 
     notice
   }
 }
+
+/**
+ * The exact prompt the app wakes a Captain with: the same work orders every time,
+ * and nothing the user acts on. It is left out of the transcript, not stored less.
+ * The text alone cannot prove who wrote it, which is why `/send_message` refuses
+ * this format: an agent must not be able to reach a Captain unseen.
+ */
+export function isCaptainWakeUp(message: Pick<AgentMessage, 'content' | 'partType' | 'role'>): boolean {
+  if (message.role !== 'user' || !isMachineMessageCandidate(message)) return false
+  // Not `parseMachineMessage`: it only accepts today's notice, and wake-ups
+  // stored before 2026-09-27 are worded differently. Its view also has no origin
+  // on purpose, so it cannot read as a verified source. This only decides what
+  // to draw, from the parts of the envelope that have never changed.
+  const lines = message.content.split(/\r?\n/)
+  if (lines[0] !== SYSTEM_MESSAGE_MARKER) return false
+  if (SYSTEM_HEADER.exec(lines[1] ?? '')?.[1] !== SystemMessageOrigin.Coordinator) return false
+  return lines.includes(FINDINGS_BEGIN) && lines.includes(FINDINGS_END) &&
+    MARKERS.every(token => message.content.split(token).length - 1 === ([SYSTEM_MESSAGE_MARKER, FINDINGS_BEGIN, FINDINGS_END].includes(token) ? 1 : 0))
+}
