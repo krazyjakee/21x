@@ -140,10 +140,10 @@ export function DeletionDialog(props: DeletionDialogProps) {
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
         <AlertDialogFooter>
           {done ? (
-            <AlertDialogAction onClick={() => latest.current.onClose()}>Done</AlertDialogAction>
+            <AlertDialogAction>Done</AlertDialogAction>
           ) : (
             <>
-              <AlertDialogCancel disabled={phase === 'deleting'} onClick={() => latest.current.onClose()}>Cancel</AlertDialogCancel>
+              <AlertDialogCancel disabled={phase === 'deleting'}>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 disabled={busy}
                 onClick={(event) => { event.preventDefault(); if (impacts) void confirm(impacts); else load() }}
