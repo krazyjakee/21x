@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, wri
 import { join } from 'path'
 import type { SessionConfig } from './coding-agent-adapter'
 import { buildShellExports } from './shared/shell-exports'
-import { PATH_ASSIGNMENT } from './shared/rtk-session'
+import { PATH_ASSIGNMENT, RTK_INVOCATION } from './shared/rtk-session'
 
 interface TillDoneConfig {
   defaultEnabled: boolean
@@ -234,6 +234,12 @@ export function removeRuntimePluginFiles(files: RuntimePluginFiles): void {
  * The server is shared, so PATH cannot be set per session as on other backends.
  * This code runs inside the server, so it can check that server's PATH instead,
  * and does not rewrite when a bare `rtk` would not resolve there.
+ *
+ * OpenCode checks `permission` rules after this hook, so it would judge the
+ * rewritten text, and `rtk git push` matches no rule on `git push`. It has no
+ * later hook to use, so this asks for the merged config and does not rewrite if
+ * it holds any deny rule, or if that cannot be established. A missed saving is
+ * acceptable and a bypassed rule is not.
  */
 function buildRtkPluginCode(rtkExecutable: string, workspaceDir: string): string {
   return [
@@ -244,26 +250,37 @@ function buildRtkPluginCode(rtkExecutable: string, workspaceDir: string): string
     'var RTK_PATH = ' + JSON.stringify(rtkExecutable) + ';',
     'var WORKSPACE_DIR = ' + JSON.stringify(workspaceDir) + ';',
     'var PATH_ASSIGNMENT = ' + String(PATH_ASSIGNMENT) + ';',
+    'var RTK_INVOCATION = ' + String(RTK_INVOCATION) + ';',
     'var RTK_RESOLVES = (process.env.PATH || "").split(delimiter).includes(dirname(RTK_PATH));',
+    '',
+    'function hasNoDenyRules(client) {',
+    '  var read = Promise.resolve().then(function() {',
+    '    return client.config.get({ query: { directory: WORKSPACE_DIR } });',
+    '  }).then(function(result) {',
+    '    return !!result.data && !JSON.stringify(result.data).includes(\'"deny"\');',
+    '  });',
+    '  var timeout = new Promise(function(resolve) { setTimeout(resolve, 2000, false); });',
+    '  return Promise.race([read, timeout]).catch(function() { return false; });',
+    '}',
     '',
     'function rewrite(command) {',
     '  return new Promise(function(resolve) {',
     '    execFile(RTK_PATH, ["rewrite", "--", command], { cwd: WORKSPACE_DIR, timeout: 2000, windowsHide: true }, function(error, stdout) {',
     '      var code = error ? error.code : 0;',
     '      var rewritten = String(stdout || "").replace(/\\r?\\n$/, "");',
-    '      resolve((code === 0 || code === 3) && rewritten ? rewritten : command);',
+    '      resolve((code === 0 || code === 3) && RTK_INVOCATION.test(rewritten) ? rewritten : command);',
     '    });',
     '  });',
     '}',
     '',
-    'export var RtkRewriter = async function() {',
+    'export var RtkRewriter = async function(context) {',
     '  return {',
     '    "tool.execute.before": async function(input, output) {',
     '      if (input.tool !== "bash" || !RTK_RESOLVES) return;',
     '      var command = output.args && output.args.command;',
     '      if (typeof command !== "string" || !command.trim() || PATH_ASSIGNMENT.test(command)) return;',
     '      try {',
-    '        output.args.command = await rewrite(command);',
+    '        if (await hasNoDenyRules(context.client)) output.args.command = await rewrite(command);',
     '      } catch(e) {}',
     '    }',
     '  };',

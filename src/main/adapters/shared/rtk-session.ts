@@ -14,15 +14,25 @@ const REWRITTEN_EXIT_CODES = new Set<unknown>([0, 3])
  * `rtk` after it (`PATH=/usr/bin rtk git status`), which that PATH cannot find.
  */
 export const PATH_ASSIGNMENT = /(^|[\s;&|(])PATH\+?=/
+/** A real rewrite runs rtk. Anything else came from a different program called rtk. */
+export const RTK_INVOCATION = /(^|[\s;&|(])rtk\s/
 
 /**
  * Stops RTK storing anything for a session, including from a global hook or an
- * `rtk` the agent types itself. RTK keeps three stores: command text in
- * history.db (`RTK_DB_PATH`, and only a path it cannot open stores nothing),
- * raw output in recall.db (`RTK_RECALL`), and raw output in tee logs (`RTK_TEE`).
- * Tested on RTK 0.49.0: leaving out any one of them still writes to disk.
+ * `rtk` the agent types itself. RTK keeps command text in history.db and raw
+ * output in recall.db or tee logs, and a user's own `RTK_HOOK_AUDIT=1` adds a log.
+ *
+ * The database path sits under the null device so that RTK can neither create it
+ * nor touch its parent. Pointing at the device itself would make RTK, if running
+ * as root, chmod /dev and /dev/null.
  */
-const RTK_NO_STORAGE_ENV = { RTK_DISABLED: '1', RTK_DB_PATH: devNull, RTK_RECALL: '0', RTK_TEE: '0' }
+const RTK_NO_STORAGE_ENV = {
+  RTK_DISABLED: '1',
+  RTK_DB_PATH: join(devNull, '21x-rtk.db'),
+  RTK_RECALL: '0',
+  RTK_TEE: '0',
+  RTK_HOOK_AUDIT: '0'
+}
 /** RTK's own Pi extension honours this. Other global hooks ignore it. */
 const RTK_OPT_OUT_ENV = { RTK_DISABLED: '1' }
 
@@ -30,7 +40,9 @@ const RTK_INSTRUCTIONS_PROMPT = `
 
 ## Shell output compression
 
-RTK is installed on this machine and compresses command output. Prefix shell commands with \`rtk\`, for example \`rtk git status\` or \`rtk cargo test\`, and keep the prefix inside chains: \`rtk git add . && rtk git commit -m "msg"\`. Commands RTK has no filter for run unchanged. Never write \`rtk rtk\`. Leave the prefix off the left side of a pipe, because later commands need the raw output. If the output is unusable, run \`rtk proxy <command>\`.
+RTK is installed on this machine and compresses command output. Prefix commands that read state or run tests and builds with \`rtk\`, for example \`rtk git status\` or \`rtk cargo test\`. Commands RTK has no filter for run unchanged. Never write \`rtk rtk\`. Leave the prefix off the left side of a pipe, because later commands need the raw output. If the output is unusable, run \`rtk proxy <command>\`.
+
+Permission rules match the start of a command, so \`rtk\` can hide a command from them. Do not use it on commands that change anything outside the workspace, such as \`git push\`, and never use it to get around a command that was denied.
 `
 
 const RTK_REWRITE_PROMPT = `
@@ -83,9 +95,11 @@ export function findRtkExecutable(
  * left side of `| wc -l`. Any failure, including a missing or old RTK, returns
  * the command unchanged.
  *
- * `cwd` must be the session's directory. RTK reads project deny rules from there
- * and refuses to rewrite a denied command. A rewritten command no longer matches
- * a rule such as `Bash(git push:*)`, so without this the rule stops working.
+ * This cannot enforce deny rules. RTK honours some Claude Code rules, but it does
+ * not see managed settings, and it rewrites `timeout 5 git push` past a rule on
+ * `git push`. So a caller must rewrite only after the backend's own permission
+ * check, or after proving no deny rule exists. `cwd` is the session's directory,
+ * where RTK reads those rules, as a second line of defence.
  */
 export function rewriteWithRtk(executable: string, command: string, cwd: string): Promise<string> {
   if (!command.trim() || PATH_ASSIGNMENT.test(command)) return Promise.resolve(command)
@@ -94,7 +108,7 @@ export function rewriteWithRtk(executable: string, command: string, cwd: string)
       execFile(executable, ['rewrite', '--', command], { cwd, timeout: REWRITE_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
         const exitCode = error ? error.code : 0
         const rewritten = stdout.replace(/\r?\n$/, '')
-        resolve(REWRITTEN_EXIT_CODES.has(exitCode) && rewritten ? rewritten : command)
+        resolve(REWRITTEN_EXIT_CODES.has(exitCode) && RTK_INVOCATION.test(rewritten) ? rewritten : command)
       })
     } catch {
       resolve(command)

@@ -12,15 +12,17 @@ export function isRtkEnabled(value: string | null | undefined): boolean {
 
 /**
  * What 21x can do for a backend's sessions:
+ * - `approved`: as `rewrite`, but only commands that reach the approval step.
+ *   Commands the backend approves by itself stay uncompressed.
  * - `rewrite`: shell commands go through `rtk rewrite` before they run. RTK
  *   rewrites the ones it can filter and leaves the rest as they are.
  * - `instructions`: 21x has no way to change the command, so the agent is told
  *   to use RTK. The agent may not follow that, so it is not enforcement.
  */
-export type RtkCoverage = 'rewrite' | 'instructions'
+export type RtkCoverage = 'approved' | 'rewrite' | 'instructions'
 
 export const RTK_BACKENDS = [
-  { key: 'claudeCode', codingAgent: 'claude-code', label: 'Claude Code', coverage: 'rewrite' },
+  { key: 'claudeCode', codingAgent: 'claude-code', label: 'Claude Code', coverage: 'approved' },
   { key: 'opencode', codingAgent: 'opencode', label: 'OpenCode', coverage: 'rewrite' },
   { key: 'pi', codingAgent: 'pi', label: 'Pi', coverage: 'rewrite' },
   { key: 'codex', codingAgent: 'codex', label: 'Codex', coverage: 'instructions' },
@@ -28,11 +30,11 @@ export const RTK_BACKENDS = [
 ] as const satisfies ReadonlyArray<{ key: string; codingAgent: string; label: string; coverage: RtkCoverage }>
 
 /**
- * Global RTK hooks that 21x cannot turn off for a single session: they run
- * inside the backend and ignore RTK_DISABLED. Pi's extension honours it, and a
- * Codex integration is only an instruction, which the session prompt overrides.
+ * Global RTK hooks that 21x cannot turn off for a session. They run inside the
+ * backend, before its permission check, and ignore RTK_DISABLED. Pi's extension
+ * honours it, and a Codex integration is only an instruction.
  */
-const GLOBAL_HOOKS_SURVIVE_OPT_OUT = ['claudeCode', 'opencode', 'cursor'] as const
+const GLOBAL_HOOKS_OUTSIDE_21X = ['claudeCode', 'opencode', 'cursor'] as const
 
 export function rtkCoverageFor(codingAgent: string | null | undefined): RtkCoverage {
   return RTK_BACKENDS.find(backend => backend.codingAgent === codingAgent)?.coverage ?? 'rewrite'
@@ -84,10 +86,10 @@ export function rtkBackendCoverage(detection: Record<string, BackendDetection | 
   return RTK_BACKENDS.filter(backend => isReady(detection[backend.key]))
 }
 
-/** Backends whose global hook keeps rewriting commands after the opt-out. */
-export function rtkGlobalHooksAfterOptOut(detection: Record<string, BackendDetection | undefined>, rtk: RtkDetection | undefined) {
+/** Backends with a global RTK hook, which 21x can neither stop nor make respect deny rules. */
+export function rtkGlobalHooks(detection: Record<string, BackendDetection | undefined>, rtk: RtkDetection | undefined) {
   return RTK_BACKENDS.filter(backend =>
-    (GLOBAL_HOOKS_SURVIVE_OPT_OUT as readonly string[]).includes(backend.key)
+    (GLOBAL_HOOKS_OUTSIDE_21X as readonly string[]).includes(backend.key)
     && isReady(detection[backend.key])
     && rtk?.integrations?.[backend.key] === true)
 }

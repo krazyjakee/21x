@@ -11,6 +11,7 @@ case "$3" in
   "git status"|"rtk git status") echo "rtk git status"; exit 3 ;;
   "broken") echo "not a command"; exit 2 ;;
   "where") echo "rtk where $(pwd)"; exit 0 ;;
+  "unrelated") echo "Rust Type Kit: nothing to do"; exit 0 ;;
   *) exit 1 ;;
 esac
 `
@@ -39,9 +40,11 @@ describe.skipIf(process.platform === 'win32')('OpenCode RTK plugin', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  async function runPlugin(path: string, tool: string, command: unknown): Promise<unknown> {
+  const noRules = { config: { get: async () => ({ data: { permission: { bash: 'allow' } } }) } }
+
+  async function runPlugin(path: string, tool: string, command: unknown, client: unknown = noRules): Promise<unknown> {
     const plugin = await import(/* @vite-ignore */ pathToFileURL(path).href)
-    const hooks = await plugin.RtkRewriter()
+    const hooks = await plugin.RtkRewriter({ client })
     const output = { args: { command } }
     await hooks['tool.execute.before']({ tool }, output)
     return output.args.command
@@ -109,6 +112,41 @@ describe.skipIf(process.platform === 'win32')('OpenCode RTK plugin', () => {
       process.env.PATH = originalPath
       expect(await runPlugin(plugin, 'bash', 'git status')).toBe('git status')
     })
+
+    it('never runs the output of a different program called rtk', async () => {
+      expect(await runPlugin(plugin, 'bash', 'unrelated')).toBe('unrelated')
+    })
+
+    // OpenCode checks permission rules after this hook, so a rewrite would bypass them.
+    it.each([
+      'git status',
+      'FOO=1 git status',
+      'timeout 5 git status',
+      'command git status',
+      'env git status',
+      'nice git status',
+      'nohup git status',
+    ])('does not rewrite %s while any deny rule exists', async (command) => {
+      const denied = { config: { get: async () => ({ data: { permission: { bash: { '*': 'allow', 'git push*': 'deny' } } } }) } }
+      expect(await runPlugin(plugin, 'bash', command, denied)).toBe(command)
+    })
+
+    it('finds a deny rule set on an agent', async () => {
+      const denied = { config: { get: async () => ({ data: { agent: { build: { permission: { bash: 'deny' } } } } }) } }
+      expect(await runPlugin(plugin, 'bash', 'git status', denied)).toBe('git status')
+    })
+
+    it('does not rewrite when the rules cannot be read', async () => {
+      const failing = { config: { get: async () => { throw new Error('offline') } } }
+      const empty = { config: { get: async () => ({}) } }
+      expect(await runPlugin(plugin, 'bash', 'git status', failing)).toBe('git status')
+      expect(await runPlugin(plugin, 'bash', 'git status', empty)).toBe('git status')
+    })
+
+    it('does not rewrite when reading the rules hangs', async () => {
+      const hanging = { config: { get: () => new Promise(() => undefined) } }
+      expect(await runPlugin(plugin, 'bash', 'git status', hanging)).toBe('git status')
+    }, 5000)
 
     it('keeps the command when RTK has disappeared', async () => {
       rmSync(rtk)

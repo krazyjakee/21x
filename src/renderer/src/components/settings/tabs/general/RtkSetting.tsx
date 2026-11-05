@@ -13,12 +13,13 @@ import {
   RTK_STATE_LABELS,
   rtkBackendCoverage,
   rtkEffectiveState,
-  rtkGlobalHooksAfterOptOut,
+  rtkGlobalHooks,
   type RtkCoverage
 } from '@shared/rtk'
 
 const COVERAGE_LABELS: Record<RtkCoverage, string> = {
-  rewrite: 'Commands RTK can filter are rewritten',
+  approved: 'Rewritten after the permission check. Commands it approves by itself, such as git status, stay uncompressed',
+  rewrite: 'Commands RTK can filter are rewritten, unless the backend has deny rules',
   instructions: 'Instructions only, not enforced'
 }
 
@@ -86,7 +87,7 @@ export function RtkSetting({ setupOpen }: { setupOpen: boolean }) {
   const rtk = detection?.rtk
   const state = rtkEffectiveState(enabled, rtk)
   const coverage = detection ? rtkBackendCoverage(detection) : []
-  const remainingHooks = detection ? rtkGlobalHooksAfterOptOut(detection, rtk) : []
+  const globalHooks = detection ? rtkGlobalHooks(detection, rtk) : []
 
   return (
     <div className="space-y-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5" data-testid="rtk-setting">
@@ -148,11 +149,12 @@ export function RtkSetting({ setupOpen }: { setupOpen: boolean }) {
         </ul>
       )}
 
-      {state === 'off' && remainingHooks.length > 0 && (
+      {globalHooks.length > 0 && (
         <p className="text-xs text-amber-400" data-testid="rtk-global-hooks">
-          A global RTK hook still rewrites commands for {remainingHooks.map(backend => backend.label).join(', ')}.
-          21x cannot turn it off for a session. To remove it, run <code>rtk init -g --uninstall</code> in a
-          terminal, which also removes it outside 21x.
+          A global RTK hook also rewrites commands for {globalHooks.map(backend => backend.label).join(', ')}, even
+          with this switch off. It runs before the permission check, so it can get a denied command past a
+          rule, for example <code>timeout 5 git push</code>. 21x cannot change that hook. To remove it, run{' '}
+          <code>rtk init -g --uninstall</code> in a terminal, which also removes it outside 21x.
         </p>
       )}
 

@@ -5024,6 +5024,7 @@ export class AgentManager extends EventEmitter {
     const token = existing?.secretSessionToken ?? this.setupSecretSession(sourceSession.agentId)
     const allocatedToken = token !== undefined && token !== existing?.secretSessionToken
     config.secretSessionToken = token
+    if (token && this.host.secrets.kind === 'broker') config.secretBrokerPort = this.host.secrets.getPort() ?? undefined
     try {
       const history = await this.ownShutdownWork(sourceSession.adapter.resumeSession(target, config))
       guard()

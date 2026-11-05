@@ -1,6 +1,10 @@
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import { dirname, join } from 'path'
-import { findExecutable } from '../find-executable'
+import { execFileAsync, findExecutable } from '../find-executable'
+import { isVersionAtLeast } from '../agent-installer/detect.js'
+
+/** Older CLIs ignore CLAUDE_ENV_FILE: 2.0.20 ran commands with empty variables, 2.0.60 did not. */
+export const MINIMUM_CLAUDE_VERSION_FOR_SECRETS = '2.0.60'
 
 /** Resolved once per process; shared across adapter instances. */
 let resolvedClaudeExecutablePath: string | null = null
@@ -90,4 +94,24 @@ export async function findClaudeExecutable(): Promise<string> {
   resolvedClaudeExecutablePath = isWin && !/\.(js|exe)$/i.test(found) ? resolveWindowsCmdToJs(found) : found
   console.log(`[ClaudeCodeAdapter] Found claude executable at: ${resolvedClaudeExecutablePath}`)
   return resolvedClaudeExecutablePath
+}
+
+/** Null when it cannot be read, as with a cli.js that is not directly executable. */
+async function readClaudeVersion(executable: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(executable, ['--version'], { timeout: 10_000, windowsHide: true })
+    return /\d+\.\d+\.\d+/.exec(stdout)?.[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Refuses to start a session whose secrets would silently come through empty. */
+export async function assertClaudeSupportsSecrets(executable: string): Promise<void> {
+  const version = await readClaudeVersion(executable)
+  if (version === null) {
+    console.warn(`[ClaudeCodeAdapter] Could not read the Claude Code version. Secrets need ${MINIMUM_CLAUDE_VERSION_FOR_SECRETS} or newer.`)
+  } else if (!isVersionAtLeast(version, MINIMUM_CLAUDE_VERSION_FOR_SECRETS)) {
+    throw new Error(`This agent has secrets, which need Claude Code ${MINIMUM_CLAUDE_VERSION_FOR_SECRETS} or newer. Found ${version}. Update Claude Code.`)
+  }
 }

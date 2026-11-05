@@ -30,8 +30,8 @@ rewrite, and a global `AGENTS.md` instruction can still reach that process.
 
 | Backend | Mechanism | Enforced? |
 | --- | --- | --- |
-| Claude Code | SDK `PreToolUse` hook | Yes |
-| OpenCode | Generated plugin, `tool.execute.before` | Yes |
+| Claude Code | `canUseTool`, after the CLI's permission check | Yes, for commands that reach it |
+| OpenCode | Generated plugin, `tool.execute.before` | Yes, unless any deny rule exists |
 | Pi | Generated extension, `tool_call` | Yes |
 | Codex | Added to the session's system prompt | No, instructions only |
 | Cursor | Added to the session's system prompt | No, instructions only |
@@ -45,12 +45,11 @@ and it decides what can be filtered. It leaves these alone:
 - commands with no filter, which run exactly as written
 - commands that are already wrapped, so nothing is wrapped twice
 - shapes that need raw output, such as `git log | wc -l` or `ls > out.txt`
-- commands denied by Claude Code rules. RTK honours project rules, which is why
-  it runs from the session's directory, and user rules, including under
-  `CLAUDE_CONFIG_DIR`. A rewritten command would no longer match the rule.
 
 21x also leaves alone any command that assigns `PATH`, because the bare `rtk`
-that `rtk rewrite` emits might not resolve under that PATH.
+that `rtk rewrite` emits might not resolve under that PATH, and any output from
+`rtk rewrite` that does not run `rtk`, which means a different program has the
+same name.
 
 If RTK cannot be run, or `rtk rewrite` fails or takes over 2 seconds, the original
 command runs. The rewritten output is not always byte-identical to the original,
@@ -60,6 +59,39 @@ which is why the session prompt tells agents about `rtk proxy <command>`.
 Code and Pi, 21x adds it to the end of the session's PATH when it is missing. The
 OpenCode server is shared, so its plugin checks the server's PATH and does not
 rewrite if `rtk` would not resolve.
+
+## Deny rules
+
+A rewritten command must never get past a deny rule, and a missed saving is
+acceptable. Permission rules match the start of a command, so `rtk git push` no
+longer matches `Bash(git push:*)`. RTK cannot be relied on to prevent that: it
+honours project and user rules for the plain form, but it rewrites `FOO=1 git
+push` and `timeout 5 git push`, and it does not read managed settings.
+
+- **Claude Code**: the rewrite happens in `canUseTool`, which the CLI calls after
+  its permission check. A denied command never gets there, whichever settings
+  file holds the rule and however the command is wrapped, including managed
+  settings and a nested `.claude`. The cost is that commands the CLI approves by
+  itself, such as `git status`, `git log`, `git diff`, `ls`, `cat` and `grep`, stay
+  uncompressed. Test, build and commit commands are compressed.
+- **OpenCode**: there is no hook after its permission check. The plugin reads the
+  merged config before each command, and does not rewrite if it contains any deny
+  rule, or if the config cannot be read within 2 seconds.
+- **Pi**: has no deny rules of its own.
+- **Codex and Cursor**: 21x does not rewrite. The prompt limits RTK to commands
+  that read state or run tests and builds, and tells the agent not to use it to
+  get around a denied command. That is a request and cannot be enforced.
+
+`ask` rules stop matching a rewritten command on OpenCode. This does not change
+the outcome: sessions run in `allow` mode, where a request is approved anyway
+unless it is dangerous. On Claude Code they are checked before the rewrite.
+
+**A user's global hook is outside this.** `rtk hook claude` rewrites in
+`PreToolUse`, before the CLI's permission check, so with it installed `timeout 5
+git push` runs past a rule on `git push`, in 21x sessions as anywhere else. This
+is RTK's behaviour and predates 21x's default. Settings warns when a global hook
+is present. The fix is `rtk init -g --uninstall`, which also removes it outside
+21x.
 
 ## Sessions with secrets
 
@@ -77,13 +109,17 @@ So for these sessions:
 
 | Variable | Stops |
 | --- | --- |
-| `RTK_DB_PATH=/dev/null` | Command text in `history.db` |
+| `RTK_DB_PATH=/dev/null/21x-rtk.db` | Command text in `history.db` |
 | `RTK_RECALL=0` | Raw output in `recall.db` |
 | `RTK_TEE=0` | Raw output in tee logs |
+| `RTK_HOOK_AUDIT=0` | Command text in `hook-audit.log`, if the user turned that log on |
 
-All three are needed. With RTK 0.49.0, leaving any one out still writes to disk,
-and a redirected `RTK_DB_PATH` only moves the data. On Windows the path is `NUL`,
-which has not been tested.
+With RTK 0.49.0 these left no files at all, with default settings and with tee
+mode forced, and a control without them stored the value in plain text.
+`RTK_DB_PATH` alone is not enough, because raw output still goes to `recall.db` or
+tee logs. Pointing it at a different file only moves the data. It sits under the null device because RTK
+would otherwise chmod its parent directory, which as root means `/dev`. Windows
+has not been tested.
 
 On Claude Code, Pi, Codex and Cursor these are set in the environment of the CLI,
 which its hooks and shells inherit. On OpenCode they travel with the secrets as
@@ -95,11 +131,17 @@ secrets can still pass them to RTK, as any use of RTK would.
 
 ## How Claude Code receives secrets
 
-Secrets go in an owner-only file named by `CLAUDE_ENV_FILE`, which the CLI sources
-before each Bash command. The file is deleted when the session ends. A crash can
-leave it in the temporary directory until the system clears it.
+`CLAUDE_ENV_FILE` names a script the CLI sources before each Bash command. It
+fetches the session's secrets from the secret broker with `curl`. The file holds a
+session token and never a secret value, so a crash leaves nothing usable: the
+token dies with the session and with the app.
 
-They used to be added to each command by a `PreToolUse` hook. When a global RTK
+This needs Claude Code 2.0.60 or newer: older versions ignore the file, so a
+session with secrets refuses to start rather than run with empty variables. If
+the version cannot be read, it starts and logs a warning. Without a running broker
+secrets are not injected, which is also logged.
+
+Secrets used to be added to each command by a `PreToolUse` hook. When a global RTK
 hook also returned a command, the CLI used the global one and the secrets were
 lost, on every call tested with Claude Code 2.1.317. They are not passed in the
 CLI's environment because a secret named `ANTHROPIC_API_KEY` would change how it
@@ -137,7 +179,6 @@ remove the user's global setup:
 
 - **Claude Code, OpenCode, Cursor**: a global hook keeps rewriting commands.
   `RTK_DISABLED=1` in the environment does not stop `rtk hook claude` or
-  `rtk rewrite`. Settings names the affected backends and the fix,
-  `rtk init -g --uninstall`, which also removes the hook outside 21x.
+  `rtk rewrite`. See [Deny rules](#deny-rules) for what that hook can do.
 - **Pi**: RTK's global extension honours `RTK_DISABLED`, which 21x sets.
 - **Codex**: the session prompt asks the agent to ignore the global instruction.

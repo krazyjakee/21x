@@ -24,7 +24,7 @@ import type {
   BackendModel,
 } from './coding-agent-adapter'
 import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
-import { findClaudeExecutable } from './claude-code-executable'
+import { assertClaudeSupportsSecrets, findClaudeExecutable } from './claude-code-executable'
 import { cleanSessionFile, isValidClaudeSessionId, loadSessionHistory } from './claude-code-history'
 import { buildToolTitle, ClaudeSystemSubtype, convertSDKMessageToParts, resultErrorText } from './claude-code-message-converter'
 import { claudeCodePermissionMode } from './permission-mode'
@@ -135,23 +135,8 @@ interface ClaudeSession {
   /** Tool-permission requests awaiting the user, oldest first ('ask' mode only). */
   pendingApprovals: PendingClaudeApproval[]
   pendingQuestions: Set<string>
-  /** File the CLI sources before each Bash command. Holds the session's secrets. */
+  /** Script the CLI sources before each Bash command, which fetches the session's secrets. */
   secretEnvFile?: string
-}
-
-type HookMap = Partial<Record<string, HookCallbackMatcher[]>>
-
-/** Combine hook maps, keeping every matcher from each event. */
-function mergeHooks(...maps: Array<HookMap | undefined>): HookMap | undefined {
-  const merged: HookMap = {}
-  for (const map of maps) {
-    if (!map) continue
-    for (const [event, matchers] of Object.entries(map)) {
-      if (!matchers) continue
-      merged[event] = [...(merged[event] || []), ...matchers]
-    }
-  }
-  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 function newClaudeSession(sessionId: string, config: SessionConfig, isResumed: boolean): ClaudeSession {
@@ -283,62 +268,43 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
   }
 
   /**
-   * Keeps the session's secrets in `CLAUDE_ENV_FILE`, which the CLI sources before
-   * each Bash command. They must not be delivered by rewriting the command in a
-   * PreToolUse hook: when a user's global RTK hook also returns a command, the
-   * CLI uses that one and the secrets are lost. Seen on every call on Claude Code
-   * 2.1.317. They stay out of the CLI's own environment, where a secret named
-   * ANTHROPIC_API_KEY would change how it authenticates.
+   * Delivers the session's secrets through `CLAUDE_ENV_FILE`, a script the CLI
+   * sources before each Bash command, which fetches them from the broker. They
+   * must not be delivered by rewriting the command in a PreToolUse hook: when a
+   * user's global RTK hook also returns a command, the CLI uses that one and the
+   * secrets are lost. Seen on every call on Claude Code 2.1.317. They stay out of
+   * the CLI's own environment, where a secret named ANTHROPIC_API_KEY would change
+   * how it authenticates.
    */
   private syncSecretEnvFile(session: ClaudeSession, config: SessionConfig): void {
-    const secretEnvVars = config.secretEnvVars
-    if (secretEnvVars && Object.keys(secretEnvVars).length > 0) {
-      session.secretEnvFile = writeSessionEnvFile(session.secretEnvFile, secretEnvVars)
-    } else if (session.secretEnvFile) {
-      removeSessionEnvFile(session.secretEnvFile)
+    if (Object.keys(config.secretEnvVars ?? {}).length === 0) {
+      if (session.secretEnvFile) removeSessionEnvFile(session.secretEnvFile)
       session.secretEnvFile = undefined
+    } else if (config.secretBrokerPort && config.secretSessionToken) {
+      session.secretEnvFile = writeSessionEnvFile(session.secretEnvFile, config.secretBrokerPort, config.secretSessionToken)
+    } else if (!session.secretEnvFile) {
+      console.warn('[ClaudeCodeAdapter] Secret broker not running: secrets will not be injected')
     }
   }
 
   /**
-   * PreToolUse hook that sends Bash commands through RTK. The LLM never sees the
-   * modified command, only the original tool call and the output.
+   * Approves a tool call, sending Bash commands through RTK. This has to happen
+   * here, and not in a PreToolUse hook. The CLI checks permission rules after
+   * PreToolUse and before canUseTool, so a hook's rewrite is what the rules would
+   * see, and `rtk timeout 5 git push` matches no rule on `git push`. A command a
+   * rule denies never gets this far, whichever settings file holds the rule and
+   * however the command is wrapped.
+   *
+   * The cost: commands the CLI approves by itself, such as `git status`, skip
+   * canUseTool and stay uncompressed.
    */
-  private buildRtkHooks(config: SessionConfig): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
-    const rtkExecutable = config.rtkExecutable
-    if (!rtkExecutable) {
-      return undefined
+  private async allowWithRtk(session: ClaudeSession, toolName: string, input: Record<string, unknown>): Promise<PermissionResult> {
+    const { rtkExecutable, workspaceDir } = session.config
+    const command = input.command
+    if (toolName !== 'Bash' || !rtkExecutable || typeof command !== 'string') {
+      return { behavior: 'allow', updatedInput: input }
     }
-
-    const hook: HookCallback = async (input) => {
-      const toolInput = ('tool_input' in input ? input.tool_input : undefined) as Record<string, unknown> | undefined
-      if (!toolInput?.command) {
-        return {}
-      }
-
-      const originalCommand = toolInput.command as string
-      const rewrittenCommand = await rewriteWithRtk(rtkExecutable, originalCommand, input.cwd || config.workspaceDir)
-      if (rewrittenCommand === originalCommand) {
-        return {}
-      }
-
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse' as const,
-          updatedInput: {
-            ...toolInput,
-            command: rewrittenCommand
-          }
-        }
-      }
-    }
-
-    return {
-      PreToolUse: [{
-        matcher: 'Bash',
-        hooks: [hook]
-      }]
-    }
+    return { behavior: 'allow', updatedInput: { ...input, command: await rewriteWithRtk(rtkExecutable, command, workspaceDir) } }
   }
 
   /**
@@ -370,7 +336,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       const danger = session.config.permissionMode === 'allow'
         ? dangerousToolReason({ toolName, input, workspaceDir: session.config.workspaceDir })
         : undefined
-      if (danger === null) return Promise.resolve({ behavior: 'allow', updatedInput: input })
+      if (danger === null) return this.allowWithRtk(session, toolName, input)
 
       return new Promise<PermissionResult>((resolve) => {
         const detail = buildToolTitle(toolName, input)
@@ -563,7 +529,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.abortController = abortController
 
     // Build options
-    const hooks = mergeHooks(this.buildRtkHooks(config), this.buildMcpToolLimitHooks(config))
+    const hooks = this.buildMcpToolLimitHooks(config)
+    if (Object.keys(config.secretEnvVars ?? {}).length > 0) await assertClaudeSupportsSecrets(claudePath)
     this.syncSecretEnvFile(session, config)
     const effort = config.reasoningEffort === 'minimal' ? undefined : config.reasoningEffort
     const claudePermissionMode = claudeCodePermissionMode(config)

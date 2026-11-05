@@ -4,7 +4,7 @@
  */
 
 import type { SessionConfig } from './coding-agent-adapter'
-import { PATH_ASSIGNMENT } from './shared/rtk-session'
+import { PATH_ASSIGNMENT, RTK_INVOCATION } from './shared/rtk-session'
 
 export const PI_PERMISSION_MODE_ENV = 'TWENTYX_PI_PERMISSION_MODE'
 export const PI_RTK_EXECUTABLE_ENV = 'TWENTYX_PI_RTK_EXECUTABLE'
@@ -153,24 +153,26 @@ export default function permissions(pi: ExtensionAPI) {
 }
 `
 
-/** The rewrite rules of `rewriteWithRtk`, for Pi's extension runtime. `pi.exec` runs in the session's directory. */
+/**
+ * The rewrite rules of `rewriteWithRtk`, for Pi's extension runtime. `pi.exec`
+ * runs in the session's directory. Pi has no deny rules of its own to bypass.
+ * It is plain JavaScript so that a test can load and run exactly what ships.
+ */
 export const PI_RTK_EXTENSION_SOURCE = `\
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
 const PATH_ASSIGNMENT = ${String(PATH_ASSIGNMENT)};
+const RTK_INVOCATION = ${String(RTK_INVOCATION)};
 
-export default function rtk(pi: ExtensionAPI) {
+export default function rtk(pi) {
   pi.on("tool_call", async (event, ctx) => {
     const executable = process.env.${PI_RTK_EXECUTABLE_ENV};
     if (!executable || event.toolName !== "bash") return;
-    const input = event.input as { command?: unknown };
-    const command = input.command;
+    const command = event.input.command;
     if (typeof command !== "string" || !command.trim() || PATH_ASSIGNMENT.test(command)) return;
     try {
       const result = await pi.exec(executable, ["rewrite", "--", command], { timeout: 2000, signal: ctx.signal });
       if (result.killed || (result.code !== 0 && result.code !== 3)) return;
       const rewritten = result.stdout.replace(/\\r?\\n$/, "");
-      if (rewritten) input.command = rewritten;
+      if (RTK_INVOCATION.test(rewritten)) event.input.command = rewritten;
     } catch {
       // RTK must never stop a command from running.
     }

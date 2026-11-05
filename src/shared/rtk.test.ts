@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isRtkEnabled, rtkBackendCoverage, rtkCoverageFor, rtkEffectiveState, rtkGlobalHooksAfterOptOut } from './rtk'
+import { isRtkEnabled, rtkBackendCoverage, rtkCoverageFor, rtkEffectiveState, rtkGlobalHooks } from './rtk'
 
 const installed = { installed: true }
 
@@ -32,7 +32,7 @@ describe('rtkEffectiveState', () => {
 
 describe('rtkCoverageFor', () => {
   it('never reports an instruction as enforcement', () => {
-    expect(rtkCoverageFor('claude-code')).toBe('rewrite')
+    expect(rtkCoverageFor('claude-code')).toBe('approved')
     expect(rtkCoverageFor('opencode')).toBe('rewrite')
     expect(rtkCoverageFor('pi')).toBe('rewrite')
     expect(rtkCoverageFor('codex')).toBe('instructions')
@@ -56,16 +56,16 @@ describe('rtkBackendCoverage', () => {
   })
 })
 
-describe('rtkGlobalHooksAfterOptOut', () => {
+describe('rtkGlobalHooks', () => {
   const detection = { claudeCode: installed, opencode: installed, codex: installed, pi: installed, cursor: { installed: false } }
 
   it('names the backends whose global hook 21x cannot stop', () => {
     const rtk = { installed: true, version: '0.49.0', integrations: { claudeCode: true, opencode: false, codex: true, pi: true, cursor: true } }
-    expect(rtkGlobalHooksAfterOptOut(detection, rtk).map(backend => backend.key)).toEqual(['claudeCode'])
+    expect(rtkGlobalHooks(detection, rtk).map(backend => backend.key)).toEqual(['claudeCode'])
   })
 
   it('is empty when no global hook exists', () => {
-    expect(rtkGlobalHooksAfterOptOut(detection, { installed: true, integrations: {} })).toEqual([])
-    expect(rtkGlobalHooksAfterOptOut(detection, undefined)).toEqual([])
+    expect(rtkGlobalHooks(detection, { installed: true, integrations: {} })).toEqual([])
+    expect(rtkGlobalHooks(detection, undefined)).toEqual([])
   })
 })

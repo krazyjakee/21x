@@ -37,7 +37,8 @@ describe('RtkSetting', () => {
     expect(screen.getByRole('switch')).toBeChecked()
     expect(screen.getByTestId('rtk-effective-state')).toHaveTextContent('On')
     const coverage = screen.getByTestId('rtk-coverage')
-    expect(coverage).toHaveTextContent('Claude Code: Commands RTK can filter are rewritten')
+    expect(coverage).toHaveTextContent('Claude Code: Rewritten after the permission check')
+    expect(coverage).toHaveTextContent('such as git status, stay uncompressed')
     expect(coverage).toHaveTextContent('Codex: Instructions only, not enforced')
     expect(coverage).not.toHaveTextContent('OpenCode')
   })
@@ -139,8 +140,14 @@ describe('RtkSetting', () => {
     expect(screen.getByTestId('rtk-global-hooks')).toHaveTextContent('rtk init -g --uninstall')
   })
 
-  it('does not warn when RTK is on', async () => {
+  it('warns while RTK is on too, because a global hook can get past deny rules', async () => {
     mockInstaller.detect.mockResolvedValue(detection({ installed: true, integrations: { claudeCode: true } }))
+    await renderLoaded()
+
+    expect(screen.getByTestId('rtk-global-hooks')).toHaveTextContent('it can get a denied command past a rule')
+  })
+
+  it('does not warn without a global hook', async () => {
     await renderLoaded()
 
     expect(screen.queryByTestId('rtk-global-hooks')).toBeNull()

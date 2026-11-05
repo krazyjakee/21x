@@ -16,6 +16,7 @@ vi.mock('fs', () => ({ existsSync: vi.fn(() => false) }))
 // so resolve it to a fixed path.
 vi.mock('./claude-code-executable', () => ({
   findClaudeExecutable: vi.fn(async () => '/usr/local/bin/claude'),
+  assertClaudeSupportsSecrets: vi.fn(async () => undefined),
 }))
 
 // shared/rtk-session.test.ts runs the real rewrite against a real process.
@@ -35,6 +36,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeCodeAdapter, claudeModelsFromInfo } from './claude-code-adapter'
 import { ClaudeSystemSubtype } from './claude-code-message-converter'
 import { MessagePartType } from './coding-agent-adapter'
+import { assertClaudeSupportsSecrets } from './claude-code-executable'
 import { rewriteWithRtk } from './shared/rtk-session'
 import { removeSessionEnvFile, writeSessionEnvFile } from './shared/session-env-file'
 
@@ -1631,8 +1633,10 @@ describe('ClaudeCodeAdapter MCP isolation and tool limits', () => {
     adapter.claudeExecutablePath = '/usr/local/bin/claude'
     const cfg = config({ chat: limitedChat }, {
       rtkExecutable: '/opt/bin/rtk',
-      rtkEnv: { RTK_DB_PATH: '/dev/null' },
+      rtkEnv: { RTK_DB_PATH: '/dev/null/x.db' },
       secretEnvVars: { TOKEN: 'x' },
+      secretBrokerPort: 4321,
+      secretSessionToken: 'session-token',
     })
     const session: any = {
       sessionId: '', queryIterator: null, abortController: null, status: 'idle',
@@ -1646,12 +1650,15 @@ describe('ClaudeCodeAdapter MCP isolation and tool limits', () => {
     await session.streamTask
 
     const options = queryMock.mock.calls[0][0].options
-    expect(options.hooks.PreToolUse.map((m: any) => m.matcher)).toEqual(['Bash', 'mcp__.*'])
+    // No Bash hook, even with RTK on. The CLI checks deny rules after PreToolUse,
+    // so a rewrite there makes `timeout 5 git push` miss a rule on `git push`.
+    expect(options.hooks.PreToolUse.map((m: any) => m.matcher)).toEqual(['mcp__.*'])
     expect(options.env.CLAUDE_ENV_FILE).toBe('/tmp/21x-session-env/env.sh')
-    expect(writeSessionEnvFile).toHaveBeenCalledWith(undefined, { TOKEN: 'x' })
+    expect(writeSessionEnvFile).toHaveBeenCalledWith(undefined, 4321, 'session-token')
+    expect(assertClaudeSupportsSecrets).toHaveBeenCalledWith('/usr/local/bin/claude')
     // The secret stays out of the CLI's own environment; RTK's limits do not.
     expect(options.env.TOKEN).toBeUndefined()
-    expect(options.env.RTK_DB_PATH).toBe('/dev/null')
+    expect(options.env.RTK_DB_PATH).toBe('/dev/null/x.db')
     expect(options.strictMcpConfig).toBe(true)
     expect(options.disallowedTools).toEqual(['mcp__chat__delete_channel'])
     expect(options.mcpServers.chat.enabledTools).toBeUndefined()
@@ -1699,53 +1706,82 @@ describe('model listing', () => {
   })
 })
 
-describe('ClaudeCodeAdapter RTK hook', () => {
+describe('ClaudeCodeAdapter RTK rewrite', () => {
   const RTK = '/opt/bin/rtk'
-  const hooksFor = (extra: Record<string, unknown>): any =>
-    (new ClaudeCodeAdapter() as any).buildRtkHooks({ agentId: 'a-1', taskId: 't-1', workspaceDir: '/tmp/ws', ...extra })
-  const run = (hooks: any, command: string, cwd?: string): Promise<any> =>
-    hooks.PreToolUse[0].hooks[0]({ cwd, tool_input: { command, description: 'kept' } })
+  const sessionWith = (extra: Record<string, unknown>) => {
+    const { adapter, session } = createAdapterWithSession('s1', [])
+    session.config = { agentId: 'a', taskId: 't', workspaceDir: '/tmp/ws', permissionMode: 'allow', ...extra }
+    return { canUseTool: (adapter as any).buildCanUseTool('s1', session), session }
+  }
+  const approve = (canUseTool: any, toolName: string, input: Record<string, unknown>) =>
+    canUseTool(toolName, input, { signal: new AbortController().signal, toolUseID: 'tool-1' })
 
-  it('registers nothing without RTK, so commands run as written', () => {
-    expect(hooksFor({})).toBeUndefined()
-  })
-
-  it('never touches a command to deliver secrets, because a global hook would win', () => {
-    expect(hooksFor({ secretEnvVars: { TOKEN: 'x' } })).toBeUndefined()
-  })
-
-  it('rewrites a command RTK has a filter for and keeps the other tool input', async () => {
-    const result = await run(hooksFor({ rtkExecutable: RTK }), 'git status')
-    expect(result.hookSpecificOutput.updatedInput).toEqual({ command: 'rtk git status', description: 'kept' })
+  it('rewrites an approved Bash command and keeps the other tool input', async () => {
+    const { canUseTool } = sessionWith({ rtkExecutable: RTK })
+    const result = await approve(canUseTool, 'Bash', { command: 'git status', description: 'kept' })
+    expect(result).toEqual({ behavior: 'allow', updatedInput: { command: 'rtk git status', description: 'kept' } })
   })
 
   it('leaves a command RTK has no filter for untouched', async () => {
-    expect(await run(hooksFor({ rtkExecutable: RTK }), 'npm test')).toEqual({})
+    const { canUseTool } = sessionWith({ rtkExecutable: RTK })
+    expect((await approve(canUseTool, 'Bash', { command: 'npm test' })).updatedInput.command).toBe('npm test')
   })
 
-  it('asks RTK from the directory the command runs in, where deny rules live', async () => {
+  it('leaves other tools and sessions without RTK alone', async () => {
     vi.mocked(rewriteWithRtk).mockClear()
-    await run(hooksFor({ rtkExecutable: RTK }), 'git status', '/tmp/ws/repo')
-    expect(rewriteWithRtk).toHaveBeenCalledWith(RTK, 'git status', '/tmp/ws/repo')
+    await approve(sessionWith({ rtkExecutable: RTK }).canUseTool, 'Read', { command: 'git status' })
+    await approve(sessionWith({}).canUseTool, 'Bash', { command: 'git status' })
+    expect(rewriteWithRtk).not.toHaveBeenCalled()
   })
 
-  it('falls back to the workspace when the CLI reports no directory', async () => {
+  it('runs RTK from the session workspace', async () => {
     vi.mocked(rewriteWithRtk).mockClear()
-    await run(hooksFor({ rtkExecutable: RTK }), 'git status')
+    await approve(sessionWith({ rtkExecutable: RTK }).canUseTool, 'Bash', { command: 'git status' })
     expect(rewriteWithRtk).toHaveBeenCalledWith(RTK, 'git status', '/tmp/ws')
+  })
+
+  it('does not rewrite a dangerous command that is waiting for the user', () => {
+    vi.mocked(rewriteWithRtk).mockClear()
+    const { canUseTool, session } = sessionWith({ rtkExecutable: RTK })
+    void approve(canUseTool, 'Bash', { command: 'rm -rf /etc' })
+    expect(session.pendingApprovals).toHaveLength(1)
+    expect(rewriteWithRtk).not.toHaveBeenCalled()
   })
 })
 
 describe('ClaudeCodeAdapter secret env file', () => {
+  const config = (extra: Record<string, unknown> = {}): any => ({ agentId: 'a', taskId: 't', workspaceDir: '/w', ...extra })
+
   it('removes the file when the secrets go away', () => {
     const { adapter, session } = createAdapterWithSession('s1', [])
     vi.mocked(removeSessionEnvFile).mockClear()
     ;(session as any).secretEnvFile = '/tmp/21x-session-env/env.sh'
 
-    ;(adapter as any).syncSecretEnvFile(session, { agentId: 'a', taskId: 't', workspaceDir: '/w' })
+    ;(adapter as any).syncSecretEnvFile(session, config())
 
     expect(removeSessionEnvFile).toHaveBeenCalledWith('/tmp/21x-session-env/env.sh')
     expect((session as any).secretEnvFile).toBeUndefined()
+  })
+
+  it('writes no file without the broker, because the only other route puts values on disk', () => {
+    const { adapter, session } = createAdapterWithSession('s1', [])
+    vi.mocked(writeSessionEnvFile).mockClear()
+
+    ;(adapter as any).syncSecretEnvFile(session, config({ secretEnvVars: { TOKEN: 'x' } }))
+
+    expect(writeSessionEnvFile).not.toHaveBeenCalled()
+    expect((session as any).secretEnvFile).toBeUndefined()
+  })
+
+  it('keeps a working file when a later config has no broker details', () => {
+    const { adapter, session } = createAdapterWithSession('s1', [])
+    vi.mocked(removeSessionEnvFile).mockClear()
+    ;(session as any).secretEnvFile = '/tmp/21x-session-env/env.sh'
+
+    ;(adapter as any).syncSecretEnvFile(session, config({ secretEnvVars: { TOKEN: 'x' } }))
+
+    expect(removeSessionEnvFile).not.toHaveBeenCalled()
+    expect((session as any).secretEnvFile).toBe('/tmp/21x-session-env/env.sh')
   })
 
   it('removes the file with the session', async () => {

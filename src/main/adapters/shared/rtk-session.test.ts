@@ -1,5 +1,5 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { devNull, tmpdir } from 'os'
 import { delimiter, join, resolve } from 'path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { SessionConfig } from '../coding-agent-adapter'
@@ -15,6 +15,7 @@ case "$3" in
   "empty") exit 0 ;;
   "slow") exec sleep 10 ;;
   "where") echo "rtk where $(pwd)"; exit 0 ;;
+  "unrelated") echo "Rust Type Kit: nothing to do"; exit 0 ;;
   *) exit 1 ;;
 esac
 `
@@ -55,6 +56,10 @@ describe.skipIf(process.platform === 'win32')('RTK session support', () => {
     it('keeps the command when RTK fails or prints nothing', async () => {
       expect(await rewrite('broken')).toBe('broken')
       expect(await rewrite('empty')).toBe('empty')
+    })
+
+    it('never runs the output of a different program called rtk', async () => {
+      expect(await rewrite('unrelated')).toBe('unrelated')
     })
 
     it('keeps the command when RTK hangs', async () => {
@@ -165,7 +170,7 @@ describe('applyRtkSessionPolicy', () => {
   it('starts a prompt for a session that had none', () => {
     const config = session()
     applyRtkSessionPolicy(config, 'codex', true, '/opt/bin/rtk', false)
-    expect(config.systemPrompt).toContain('Prefix shell commands with `rtk`')
+    expect(config.systemPrompt).toContain('run tests and builds with `rtk`')
   })
 
   it('tells the agent to ignore global RTK instructions after the opt-out', () => {
@@ -179,6 +184,7 @@ describe('applyRtkSessionPolicy', () => {
     const config = session()
     applyRtkSessionPolicy(config, 'claude-code', true, '/opt/bin/rtk', true)
     expect(config.rtkExecutable).toBeUndefined()
-    expect(config.rtkEnv).toMatchObject({ RTK_RECALL: '0', RTK_TEE: '0' })
+    expect(config.rtkEnv).toMatchObject({ RTK_RECALL: '0', RTK_TEE: '0', RTK_HOOK_AUDIT: '0' })
+    expect(config.rtkEnv?.RTK_DB_PATH).not.toBe(devNull)
   })
 })

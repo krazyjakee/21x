@@ -1,4 +1,5 @@
 import { devNull } from 'os'
+import { join } from 'path'
 import { describe, it, expect, vi } from 'vitest'
 import { assembleSessionConfig, mcpOptionsForTask } from './session-config'
 import { assembleSessionConfig as assemblePortableSessionConfig } from './session-config-core'
@@ -154,7 +155,8 @@ describe('assembleSessionConfig access', () => {
 
 describe('assembleSessionConfig RTK', () => {
   const RTK_PATH = '/opt/bin/rtk'
-  const INSTRUCTION = 'Prefix shell commands with `rtk`'
+  const INSTRUCTION = 'run tests and builds with `rtk`'
+  const NO_STORAGE_DB = join(devNull, '21x-rtk.db')
   const OFF = 'RTK is turned off for this session'
   const ordinary = { id: 'task-1', title: 'Fix login', role: 'task', agent_id: 'agent-x' } as unknown as TaskRecord
   const captain = { id: 'mm-1', title: 'Captain', role: 'captain', agent_id: null } as unknown as TaskRecord
@@ -203,6 +205,10 @@ describe('assembleSessionConfig RTK', () => {
     })
   }
 
+  it('tells instruction-only backends not to use RTK around a permission rule', () => {
+    expect(rtkConfig('codex', null, RTK_PATH).systemPrompt).toContain('never use it to get around a command that was denied')
+  })
+
   it('reaches Captain sessions the same way as task sessions', () => {
     expect(rtkConfig('claude-code', null, RTK_PATH, { task: captain }).rtkExecutable).toBe(RTK_PATH)
     expect(rtkConfig('codex', null, RTK_PATH, { task: captain }).systemPrompt).toContain(INSTRUCTION)
@@ -242,13 +248,13 @@ describe('assembleSessionConfig RTK', () => {
         expect(config.rtkExecutable).toBeUndefined()
         expect(config.systemPrompt).not.toContain(INSTRUCTION)
         expect(config.systemPrompt).toContain(OFF)
-        expect(config.rtkEnv).toEqual({ RTK_DISABLED: '1', RTK_DB_PATH: devNull, RTK_RECALL: '0', RTK_TEE: '0' })
+        expect(config.rtkEnv).toEqual({ RTK_DISABLED: '1', RTK_DB_PATH: NO_STORAGE_DB, RTK_RECALL: '0', RTK_TEE: '0', RTK_HOOK_AUDIT: '0' })
       })
     }
 
     it(`stops storage in a ${backend} session with secrets even when RTK was not found`, () => {
       const config = rtkConfig(backend, null, null, { agentConfig: { secret_ids: ['secret-1'] } })
-      expect(config.rtkEnv).toMatchObject({ RTK_DB_PATH: devNull })
+      expect(config.rtkEnv).toMatchObject({ RTK_DB_PATH: NO_STORAGE_DB })
       expect(config.systemPrompt).not.toContain(OFF)
     })
   }
