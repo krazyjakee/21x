@@ -131,7 +131,10 @@ describe('actual SQLite/scheduler heartbeat controls', () => {
   })
   it('retains raw adapter initialization through cancelled backend close and refuses late creation/send', async () => {
     const h = task(), held = gate(), entered = gate(), controller = new AbortController()
-    await call('heartbeat:writeFile', [h.task.id, 'Check current state'])
+    // This proof starts at adapter initialization. Guarding every file syscall costs thousands of
+    // authorization passes before it, which outlasts the default timeout on a busy machine.
+    files.writeFile(h.task.id, 'Check current state')
+    const read = files.readFile.bind(files); vi.spyOn(files, 'readFile').mockImplementation(id => read(id))
     adapter.initialize.mockImplementation(async () => { entered.release(); await held.promise })
     const pending = call('heartbeat:runNow', [h.task.id], controller.signal).catch(cause => cause)
     await entered.promise; controller.abort()
