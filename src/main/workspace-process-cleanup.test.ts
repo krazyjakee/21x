@@ -345,8 +345,7 @@ describe('an orphan adopted by the session instead of pid 1', () => {
   })
 
   it('needs the proof to be passed in: no list means no kill', () => {
-    const { agentWorkPids: _unused, ...input } = adopted()
-    expect(selectLeakedWorkspaceRoots(input)).toEqual([])
+    expect(selectLeakedWorkspaceRoots({ ...adopted(), agentWorkPids: undefined })).toEqual([])
   })
 
   it.each([
