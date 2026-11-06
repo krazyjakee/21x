@@ -297,9 +297,11 @@ describe('active-turn provider recovery', () => {
     await h.seed()
     const previous = h.row()
     h.adapter.sendPrompt.mockRejectedValueOnce(new Error('connection reset after dispatch'))
-    await expect(h.manager.sendMessage('thread', 'Write next task', h.task.id, h.agent.id)).rejects.toThrow('connection reset')
+    await expect(h.manager.sendMessage('thread', 'Write next task', h.task.id, h.agent.id, undefined, 'unknown-send')).rejects.toThrow('connection reset')
     expect(h.row().state).toBe('failed')
-    expect(h.db.db.prepare("SELECT state FROM delivery_outbox WHERE task_id = ?").get(h.task.id)).toEqual({ state: 'failed' })
+    expect(h.db.db.prepare("SELECT state FROM delivery_outbox WHERE task_id = ?").get(h.task.id)).toEqual({ state: 'timed_out' })
+    // The Captain column reads this to put the words back in the composer.
+    expect(h.manager.getDeliveryState(h.task.id, 'unknown-send')).toBe('timed_out')
     await h.internal.sendTrackedPrompt(h.session, 'thread', 'New explicit intent', h.config)
     const current = h.row()
     expect(await h.internal.tryProviderRecovery('thread', h.session, { ...classifyProviderFailure('serverOverloaded', 'turn_failed'), intentId: previous.intentId })).toBe(false)
