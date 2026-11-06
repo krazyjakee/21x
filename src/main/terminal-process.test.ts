@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { spawn } from 'child_process'
 import { createNodePty, createPythonPty } from './terminal-process'
+import { AGENT_WORK_MARKER } from '../shared/agent-work-marker'
 
 vi.mock('child_process', async importOriginal => ({
   ...await importOriginal<typeof import('child_process')>(), spawn: vi.fn()
@@ -44,6 +45,26 @@ describe('native terminal listener lifetime', () => {
     })
     exit({ exitCode: 0 })
     expect(offExit).toHaveBeenCalledOnce(); expect(onExit).toHaveBeenCalledOnce()
+  })
+})
+
+describe('terminal environment', () => {
+  afterEach(() => { delete process.env[AGENT_WORK_MARKER] })
+
+  // A 21x started by an agent inherits the marker, and what a person runs in
+  // its terminal is theirs, not agent work the sweep may kill.
+  it('keeps the agent work marker out of a shell a person types into', () => {
+    process.env[AGENT_WORK_MARKER] = '1'
+    const native = { pid: 4242, onData: () => ({ dispose: vi.fn() }), onExit: () => ({ dispose: vi.fn() }) }
+    const nodeSpawn = vi.fn().mockReturnValue(native)
+    createNodePty({ shellPath: '/fixture-shell', cols: 80, rows: 24, onData: vi.fn(), onExit: vi.fn() }, { spawn: nodeSpawn })
+    expect(nodeSpawn.mock.calls[0][2].env).not.toHaveProperty(AGENT_WORK_MARKER)
+
+    const child = Object.assign(new EventEmitter(), { pid: 4243, stdout: new PassThrough(), stderr: new PassThrough(), stdin: new PassThrough(), kill: vi.fn() })
+    vi.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    createPythonPty({ shellPath: '/fixture-shell', cols: 80, rows: 24, onData: vi.fn(), onExit: vi.fn() })
+    expect(vi.mocked(spawn).mock.calls.at(-1)![2].env).not.toHaveProperty(AGENT_WORK_MARKER)
   })
 })
 

@@ -300,34 +300,73 @@ describe('an active task is an absolute veto', () => {
 })
 
 describe('an orphan adopted by the session instead of pid 1', () => {
-  const adopted = (manager: string, state: { status?: string; exists: boolean } = { status: 'completed', exists: true }, orphansIgnoreTaskState = false) => ({
-    rows: parseProcessTable([' 10 77 20x-main', ` 77 1 ${manager}`, ' 500 77 ' + TSX_WATCH].join('\n')),
+  const SYSTEMD = '/usr/lib/systemd/systemd --user'
+  const adopted = (
+    { manager = SYSTEMD, command = TSX_WATCH, marked = true, status = 'completed', boot = false }:
+    { manager?: string; command?: string; marked?: boolean; status?: string; boot?: boolean } = {}
+  ) => ({
+    rows: parseProcessTable([' 10 77 20x-main', ` 77 1 ${manager}`, ` 500 77 ${command}`].join('\n')),
     cwdRows: cwds([[500, WS('task_A', '/repo')]]),
     workspacesRoot: ROOT,
     ownPid: 10,
-    workspaceState: () => state,
-    orphansIgnoreTaskState
+    workspaceState: () => ({ status, exists: true }),
+    agentWorkPids: new Set(marked ? [500] : []),
+    orphansIgnoreTaskState: boot
   })
 
-  it('collects one left behind on a systemd desktop, though systemd is our own ancestor', () => {
-    const leaked = selectLeakedWorkspaceRoots(adopted('/usr/lib/systemd/systemd --user'))
+  it('collects agent work left behind on a systemd desktop, though systemd is our own ancestor', () => {
+    const leaked = selectLeakedWorkspaceRoots(adopted())
     expect(leaked.map((entry) => entry.pid)).toEqual([500])
     expect(leaked[0].reason).toContain('orphaned (ppid 77)')
   })
 
   it('never signals the session manager itself', () => {
-    expect(selectLeakedWorkspacePids(adopted('/usr/lib/systemd/systemd --user'))).toEqual([500])
+    expect(selectLeakedWorkspacePids(adopted())).toEqual([500])
   })
 
-  it('treats it as parentless at boot, like pid 1', () => {
-    const leaked = selectLeakedWorkspaceRoots(adopted('/lib/systemd/systemd --user', { status: 'agent_working', exists: true }, true))
+  it('treats marked agent work as parentless at boot, like pid 1', () => {
+    const leaked = selectLeakedWorkspaceRoots(adopted({ status: 'agent_working', boot: true }))
     expect(leaked[0].reason).toContain('parentless at startup')
   })
 
-  it('leaves the child of any other ancestor alone, because that parent is alive and owns it', () => {
-    expect(selectLeakedWorkspaceRoots(adopted('/bin/bash'))).toEqual([])
-    expect(selectLeakedWorkspaceRoots(adopted('/usr/lib/systemd/systemd-logind'))).toEqual([])
-    expect(selectLeakedWorkspaceRoots(adopted('vim notes-about-systemd --user'))).toEqual([])
+  it.each([
+    ['an editor opened with `code .`', '/usr/share/code/code --ms-enable-electron-run-as-node .'],
+    ['a tmux server', 'tmux new-session -d -s work'],
+    ['a screen server', 'SCREEN -dmS work'],
+    ['anything else with no proof', TSX_WATCH]
+  ])('leaves %s alone, whatever the task state', (_name, command) => {
+    for (const status of ['completed', 'agent_working']) {
+      for (const boot of [false, true]) {
+        const input = adopted({ command, marked: false, status, boot })
+        expect(selectLeakedWorkspaceRoots(input)).toEqual([])
+        expect(selectLeakedWorkspacePids(input)).toEqual([])
+      }
+    }
+  })
+
+  it('needs the proof to be passed in: no list means no kill', () => {
+    const { agentWorkPids: _unused, ...input } = adopted()
+    expect(selectLeakedWorkspaceRoots(input)).toEqual([])
+  })
+
+  it.each([
+    ['vim /etc/systemd --user'],
+    ['bash -c grep -rn /lib/systemd/systemd --user docs'],
+    ['strace -f /usr/lib/systemd/systemd --user'],
+    ['/bin/bash'],
+    ['/usr/lib/systemd/systemd-logind'],
+    ['vim notes-about-systemd --user']
+  ])('leaves a marked child of %s alone, because that parent is alive and owns it', (manager) => {
+    expect(selectLeakedWorkspaceRoots(adopted({ manager, boot: true, status: 'agent_working' }))).toEqual([])
+  })
+
+  it.each([
+    [SYSTEMD],
+    ['/usr/lib/systemd/systemd --user --deserialize=31'],
+    ['/lib/systemd/systemd --user'],
+    ['systemd --user']
+  ])('recognises %s as the manager', (manager) => {
+    expect(selectLeakedWorkspaceRoots(adopted({ manager })).map((entry) => entry.pid)).toEqual([500])
   })
 })
 

@@ -37,6 +37,7 @@ import { execFileAsync, findExecutable } from '../find-executable'
 import { onJsonLines } from './shared/jsonl'
 import { dangerousToolReason } from './tool-safety'
 import { rtkProcessEnv } from './shared/rtk-session'
+import { AGENT_WORK_ENV } from '../../shared/agent-work-marker'
 
 const RPC_TIMEOUT_MS = 15_000
 const MAX_BUFFERED_PARTS = 1_000
@@ -250,6 +251,7 @@ export class PiAdapter implements CodingAgentAdapter {
   private processEnv(config: SessionConfig): NodeJS.ProcessEnv {
     const env = {
       ...process.env,
+      ...AGENT_WORK_ENV,
       ...(config.secretEnvVars ?? {}),
       [PI_PERMISSION_MODE_ENV]: config.permissionMode ?? 'ask',
       ...rtkProcessEnv(config, process.env),

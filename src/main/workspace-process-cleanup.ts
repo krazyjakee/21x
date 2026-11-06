@@ -20,9 +20,19 @@
  *   2. that workspace belongs to a task that is not being worked on, or to no
  *      task at all, or to a directory that has already been removed, and
  *   3. the process is either a descendant of THIS 20x instance (so no other
- *      instance can be using it) or has already lost its parent: `ppid 1`, or
- *      adopted by `systemd --user`, which is where a Linux desktop session
- *      sends an orphan instead of pid 1.
+ *      instance can be using it) or has already lost its parent (`ppid 1`).
+ *      On a Linux desktop an orphan goes to `systemd --user` instead, and there
+ *      the parent proves nothing: terminals, editors and tmux servers all live
+ *      under it. Such a process counts as parentless only when it also carries
+ *      `AGENT_WORK_MARKER`, proof that an agent 21x started is behind it. No
+ *      marker means no kill, whatever the task's state.
+ *
+ * The marker misses work whose environment was replaced, and that leak is the
+ * accepted cost. Stdio MCP servers get a scrubbed environment from their agent,
+ * a task runner may filter what it passes down, and the shared `opencode serve`
+ * is not marked. A cgroup would catch those, but `app-21x-*.scope` also holds
+ * whatever a person runs in the integrated terminal, so it cannot tell agent
+ * work from a user's `screen -dm`.
  *
  * Rule 3 is copied from `selectKillableMcpPids` for the same reason: two 20x
  * instances on one machine (a packaged app and a dev build) are normal, and
@@ -39,11 +49,12 @@
 
 import { execFile } from 'child_process'
 import { existsSync, realpathSync, statfsSync } from 'fs'
-import { readlink } from 'fs/promises'
+import { readFile, readlink } from 'fs/promises'
 import { setTimeout as sleep } from 'timers/promises'
 import { promisify } from 'util'
 import { isAbsolute, normalize, resolve, sep } from 'path'
 import { collectDescendantPids, parseProcessTable, type ProcessRow } from './mcp-process-cleanup'
+import { AGENT_WORK_ENV, AGENT_WORK_MARKER } from '../shared/agent-work-marker'
 
 export type { ProcessRow }
 
@@ -119,18 +130,21 @@ export function collectAncestorPids(rows: ProcessRow[], pid: number): Set<number
 }
 
 /**
- * The per-user service manager, which registers as a child subreaper. In a
- * systemd desktop session it adopts every orphan of that session, so the parent
- * a leaked process ends up with is this and not pid 1. Matched on the command
- * and never on "one of our ancestors": a shell above us is a live owner of its
- * children, and only this process adopts ones that nobody owns.
+ * The per-user service manager, which registers as a child subreaper. Anchored
+ * to the program: `vim /etc/systemd --user` is a live owner of its children.
  */
-const SESSION_SUBREAPER = /(?:^|\/)systemd --user(?:\s|$)/
+const SESSION_SUBREAPER = /^(?:\S*\/)?systemd --user(?:\s|$)/
 
-/** Whether a process has lost its parent: pid 1, or the session's subreaper. */
-function parentlessPids(rows: readonly ProcessRow[]): Set<number> {
+/** Direct children of the session's subreaper. Being one proves nothing alone. */
+function sessionAdoptedPids(rows: readonly ProcessRow[]): Set<number> {
   const subreapers = new Set(rows.filter((row) => SESSION_SUBREAPER.test(row.command)).map((row) => row.pid))
-  return new Set(rows.filter((row) => row.ppid === 1 || subreapers.has(row.ppid)).map((row) => row.pid))
+  return new Set(rows.filter((row) => subreapers.has(row.ppid)).map((row) => row.pid))
+}
+
+/** `ppid 1`, or adopted by the session with proof that an agent started it. */
+function parentlessPids(rows: readonly ProcessRow[], agentWorkPids: ReadonlySet<number>): Set<number> {
+  const adopted = sessionAdoptedPids(rows)
+  return new Set(rows.filter((row) => row.ppid === 1 || (adopted.has(row.pid) && agentWorkPids.has(row.pid))).map((row) => row.pid))
 }
 
 /** The pids that must never be signalled: this process and everything above it. */
@@ -203,6 +217,8 @@ export type LeakSelection = {
   ownPid: number
   /** Looks up the task behind a workspace directory name. */
   workspaceState: (workspaceId: string) => WorkspaceState
+  /** Processes carrying `AGENT_WORK_MARKER`. See rule 3 at the top of this file. */
+  agentWorkPids?: ReadonlySet<number>
   /**
    * Whether a parentless process is leaked WHATEVER its task's status says.
    *
@@ -216,8 +232,9 @@ export type LeakSelection = {
    *
    * Sound only at boot, and only for a parentless process: this instance has no
    * descendants yet, so no agent of ours can own the process; and another live
-   * instance's agent children are parented to that instance, not to launchd or
-   * the session's subreaper. Our own
+   * instance's agent children are parented to that instance, not to launchd.
+   * A process adopted by `systemd --user` without the marker is not parentless,
+   * so this never reaches it. Our own
    * descendants are still judged on task state, so a live session is safe.
    */
   orphansIgnoreTaskState?: boolean
@@ -234,7 +251,7 @@ export function selectLeakedWorkspaceRoots(input: LeakSelection): LeakedProcess[
   const { rows, cwdRows, workspacesRoot, ownPid, workspaceState } = input
   const guarded = protectedPids(rows, ownPid)
   const ourDescendants = collectDescendantPids(rows, ownPid)
-  const parentless = parentlessPids(rows)
+  const parentless = parentlessPids(rows, input.agentWorkPids ?? new Set())
   const cwdByPid = new Map(cwdRows.map((row) => [row.pid, row.cwd]))
 
   const leaked: LeakedProcess[] = []
@@ -384,6 +401,20 @@ async function readCwdsWithLsof(): Promise<CwdRow[]> {
  * that exited mid-scan or belongs to another user is skipped: not readable is
  * not leaked.
  */
+/**
+ * Which of `pids` carry the marker. Linux only: elsewhere nothing is adopted by
+ * a session manager, so an unreadable environment is simply no proof. Only the
+ * one entry is looked for, and nothing read here is kept or logged, because an
+ * environment holds the process's secrets.
+ */
+async function readAgentWorkPids(pids: readonly number[]): Promise<Set<number>> {
+  const entry = `${AGENT_WORK_MARKER}=${AGENT_WORK_ENV[AGENT_WORK_MARKER]}`
+  const results = await Promise.allSettled(pids.map(async (pid) => ({
+    pid, marked: (await readFile(`/proc/${pid}/environ`, 'latin1')).split('\0').includes(entry)
+  })))
+  return new Set(results.flatMap((result) => (result.status === 'fulfilled' && result.value.marked ? [result.value.pid] : [])))
+}
+
 async function readCwdsFromProc(pids: readonly number[]): Promise<CwdRow[]> {
   const results = await Promise.allSettled(pids.map(async (pid) => ({ pid, cwd: await readlink(`/proc/${pid}/cwd`) })))
   return results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
@@ -518,12 +549,15 @@ export async function sweepLeakedWorkspaceProcesses(input: {
   const ownPid = input.ownPid ?? process.pid
   const { rows, cwdRows } = await readProcessSnapshot()
   const workspacesRoot = resolveWorkspacesRoot(input.workspacesRoot)
+  // Read only what could be selected, so no other process's environment is opened.
+  const rooted = rootedInWorkspaces(cwdRows, workspacesRoot)
   const selection: LeakSelection = {
     rows,
     cwdRows,
     workspacesRoot,
     ownPid,
     workspaceState: input.workspaceState,
+    agentWorkPids: await readAgentWorkPids([...sessionAdoptedPids(rows)].filter(rooted)),
     orphansIgnoreTaskState: input.orphansIgnoreTaskState
   }
 

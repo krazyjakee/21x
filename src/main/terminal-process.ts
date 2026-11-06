@@ -4,6 +4,7 @@ import { readlink } from 'fs/promises'
 import { guardChildStreams, writeToChildStdin } from './child-stream-guards'
 import { execFileAsync } from './find-executable'
 import type { TerminalHandle, PtyOptions } from './terminal-service-core'
+import { withoutAgentWorkMarker } from '../shared/agent-work-marker'
 
 export function resolveShell(): string {
   if (process.platform === 'win32') return 'powershell.exe'
@@ -22,7 +23,7 @@ export function createNodePty(
     cols: cols || 80,
     rows: rows || 24,
     cwd: cwd || process.env.HOME || process.cwd(),
-    env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
+    env: { ...withoutAgentWorkMarker(process.env), TERM: 'xterm-256color' } as Record<string, string>,
   })
 
   let exited = false
@@ -133,7 +134,7 @@ export function createPythonPty({ shellPath, cols, rows, cwd, onData, onExit }: 
   const child = spawn('python3', ['-u', '-c', PYTHON_PTY_SCRIPT, shellPath, String(cols || 80), String(rows || 24)], {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: cwd || process.env.HOME || process.cwd(),
-    env: { ...process.env } as Record<string, string>,
+    env: withoutAgentWorkMarker(process.env) as Record<string, string>,
   })
 
   // Every pipe needs an error listener before the first write. The shell can
