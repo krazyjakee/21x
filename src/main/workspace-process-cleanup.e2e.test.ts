@@ -15,7 +15,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { AGENT_WORK_ENV } from '../shared/agent-work-marker'
+import { AGENT_WORK_ENV, AGENT_WORK_MARKER } from '../shared/agent-work-marker'
 import {
   readProcessSnapshot,
   selectLeakedWorkspacePids,
@@ -23,6 +23,7 @@ import {
   sweepLeakedWorkspaceProcesses,
   terminateProcessesInWorkspaces,
   canReadProcessCwd,
+  isSessionSubreaper,
   type WorkspaceState
 } from './workspace-process-cleanup'
 
@@ -210,7 +211,7 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
     // live process, and the whole premise of the test would be wrong.
     const adopter = before.rows.find((row) => row.pid === orphan!.ppid)
     const reparentedToInit = orphan!.ppid === 1
-    expect(reparentedToInit || /systemd --user/.test(adopter?.command ?? ''), `unexpected new parent ${orphan!.ppid}: ${adopter?.command}`).toBe(true)
+    expect(reparentedToInit || isSessionSubreaper(adopter?.command ?? ''), `unexpected new parent ${orphan!.ppid}: ${adopter?.command}`).toBe(true)
 
     // macOS reparents to pid 1. A systemd desktop session hands the child to
     // `systemd --user` instead, which is an ancestor of this test and so does
@@ -234,24 +235,31 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
   }, 90000)
 
   it('leaves an orphan with no proof of 21x alone when the session adopted it, at boot and on an active task', async (context) => {
-    // The same shape as a user's `code .` or tmux server started from a task
+    // The same shape as a `code .` or tmux server a person started from a task
     // workspace: nothing owns it now, and nothing says 21x started it.
     const fx = fixture()
-    const env = { ...process.env }
-    delete env[Object.keys(AGENT_WORK_ENV)[0]]
-    const pid = await startOrphanedWatcher(fx.root, fx.script, fx.workspaceDir('task_user_editor'), env)
+    const unmarked = { ...process.env, [AGENT_WORK_MARKER]: undefined }
+    const pid = await startOrphanedWatcher(fx.root, fx.script, fx.workspaceDir('task_user_editor'), unmarked)
     const { rows } = await readProcessSnapshot()
-    if (rows.find((row) => row.pid === pid)?.ppid === 1) context.skip() // The `ppid 1` rule applies here instead.
+    const adopter = rows.find((row) => row.pid === rows.find((candidate) => candidate.pid === pid)?.ppid)
+    // Only this adopter reaches the rule: pid 1 has its own, and any other
+    // subreaper is never swept, so a pass there would prove nothing.
+    if (!adopter || !isSessionSubreaper(adopter.command)) return context.skip()
 
-    for (const status of ['completed', 'agent_working']) {
-      const swept = await sweepLeakedWorkspaceProcesses({
-        workspacesRoot: fx.workspaces,
-        workspaceState: () => ({ status, exists: true }),
-        orphansIgnoreTaskState: true
-      })
-      expect(swept.map((leak) => leak.pid)).not.toContain(pid)
-    }
+    // The control: the same sweep does take the marked twin, so this test
+    // cannot pass with the rule switched off or the environment unreadable.
+    const twin = await startOrphanedWatcher(fx.root, fx.script, fx.workspaceDir('task_user_editor'), { ...process.env, ...AGENT_WORK_ENV })
+    const sweep = (status: string) => sweepLeakedWorkspaceProcesses({
+      workspacesRoot: fx.workspaces,
+      workspaceState: () => ({ status, exists: true }),
+      orphansIgnoreTaskState: true
+    })
+    const swept = await sweep('completed')
+    expect(swept.map((leak) => leak.pid)).toContain(twin)
+    expect(swept.map((leak) => leak.pid)).not.toContain(pid)
+    expect((await sweep('agent_working')).map((leak) => leak.pid)).not.toContain(pid)
     await settle()
+    expect(alive(twin), 'the marked twin must be gone').toBe(false)
     expect(alive(pid), 'an orphan with no proof must survive').toBe(true)
   }, 60000)
 

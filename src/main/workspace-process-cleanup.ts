@@ -34,6 +34,13 @@
  * whatever a person runs in the integrated terminal, so it cannot tell agent
  * work from a user's `screen -dm`.
  *
+ * THE MARKER PROVES WHO STARTED A PROCESS, NOT THAT NOBODY WANTS IT. Anything an
+ * agent ran, rooted in a workspace, can be stopped here once it has lost its
+ * parent, and that is accepted: an agent-run `code .`, `tmux new -d` or browser
+ * included, and at boot even on an active task. A person attached to an
+ * agent-started tmux loses that session with it. One a person starts themselves
+ * never carries the marker and is left alone.
+ *
  * Rule 3 is copied from `selectKillableMcpPids` for the same reason: two 20x
  * instances on one machine (a packaged app and a dev build) are normal, and
  * quitting one must not kill the live children of the other.
@@ -134,10 +141,11 @@ export function collectAncestorPids(rows: ProcessRow[], pid: number): Set<number
  * to the program: `vim /etc/systemd --user` is a live owner of its children.
  */
 const SESSION_SUBREAPER = /^(?:\S*\/)?systemd --user(?:\s|$)/
+export const isSessionSubreaper = (command: string): boolean => SESSION_SUBREAPER.test(command)
 
 /** Direct children of the session's subreaper. Being one proves nothing alone. */
 function sessionAdoptedPids(rows: readonly ProcessRow[]): Set<number> {
-  const subreapers = new Set(rows.filter((row) => SESSION_SUBREAPER.test(row.command)).map((row) => row.pid))
+  const subreapers = new Set(rows.filter((row) => isSessionSubreaper(row.command)).map((row) => row.pid))
   return new Set(rows.filter((row) => subreapers.has(row.ppid)).map((row) => row.pid))
 }
 
