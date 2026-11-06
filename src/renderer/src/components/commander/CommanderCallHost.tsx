@@ -27,6 +27,7 @@ import {
   bindCommanderCallDriver,
   COMMANDER_VOICE_COMPOSER_KEY,
   emitCallMediaEvent,
+  isForeignVoiceTurn,
   onCallMediaEvent,
   useCommanderCallStore
 } from '@/stores/commander-call-store'
@@ -35,6 +36,7 @@ import {
   selectVoiceReady,
   useVoiceStore
 } from '@/stores/voice-store'
+import { isEditorOutsideCommander } from '@/lib/keyboard-shortcuts'
 import { useCommanderCallShortcuts } from './use-call-shortcuts'
 
 export const MICROPHONE_BUSY_MESSAGE =
@@ -126,6 +128,7 @@ function captureAdvice(message: string): string {
   if (/no microphone/i.test(message)) return `${withFullStop(message)} Connect a microphone, then check it in Settings → Voice.`
   if (/refused|blocked/i.test(message)) return `${withFullStop(message)} Allow microphone access for 21x, then check it in Settings → Voice.`
   if (/in use/i.test(message)) return `${withFullStop(message)} Close the other application, then try again.`
+  if (/not connected/i.test(message)) return `${withFullStop(message)} Choose another input device in the microphone menu.`
   return message
 }
 
@@ -394,12 +397,13 @@ export function CommanderCallHost() {
   useEffect(() => {
     if (status !== 'live') return undefined
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
-      const voiceTurn = useVoiceStore.getState().turnId
-      if (voiceTurn && voiceTurn !== useCommanderCallStore.getState().turnId) return
+      // Escape first cancels an IME composition, and another editor's Escape is its own.
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || isEditorOutsideCommander(event.target) || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      if (isForeignVoiceTurn(useVoiceStore.getState().turnId, useCommanderCallStore.getState())) return
       event.preventDefault()
       event.stopImmediatePropagation()
-      interrupt('stop')
+      // Claimed but not repeated: a held key is one Stop.
+      if (!event.repeat) interrupt('stop')
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)

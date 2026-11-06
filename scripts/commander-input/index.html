@@ -58,6 +58,7 @@ window.electronAPI = new Proxy({
   },
   voice: { onFinal: callback => { window.fixture.finalReceiver = callback; return () => { window.fixture.finalReceiver = null } } },
   settings: { getAll: async () => ({}), set: noop },
+  skills: {},
   commander: {
     listSessions: async () => window.fixture.sessions,
     listMessages: async id => ({ messages: window.fixture.histories[id] ?? [], activeTurnId: window.fixture.activeTurns[id] ?? null }),

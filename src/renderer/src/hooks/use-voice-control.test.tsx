@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
 
 const hotkey = vi.hoisted(() => ({ fire: null as ((event: { action: string }) => void) | null }))
 const segment = vi.hoisted(() => ({
@@ -77,6 +77,8 @@ beforeEach(() => {
   useUIStore.setState({ showOrchestrator: false })
   useVoiceStore.setState({
     conversation: true,
+    turnId: null,
+    confirmation: null,
     toggleTurn: toggleTurn as never,
     initialize: (async () => undefined) as never,
     setContextProvider: vi.fn() as never,
@@ -166,6 +168,71 @@ describe('the global shortcut', () => {
     expect(finishTalk).toHaveBeenCalledOnce(); expect(toggleTurn).not.toHaveBeenCalled()
     useCommanderCallStore.setState({ beginTalk: state.beginTalk, finishTalk: state.finishTalk })
   })
+  describe('during a Commander call', () => {
+    let toggleMicrophone: ReturnType<typeof vi.fn>
+    const realToggle = useCommanderCallStore.getState().toggleMicrophone
+    const fire = () => act(async () => hotkey.fire?.({ action: 'toggle' }))
+    beforeEach(async () => {
+      toggleMicrophone = vi.fn(async () => {})
+      useCommanderCallStore.setState({ status: 'live', sessionId: 'call-session', toggleMicrophone: toggleMicrophone as never })
+      await act(async () => { render(<Harness />) })
+    })
+    afterEach(() => {
+      useCommanderCallStore.setState({ toggleMicrophone: realToggle })
+      document.body.innerHTML = ''
+      vi.restoreAllMocks()
+    })
+
+    it('waits for a pending voice confirmation', async () => {
+      useVoiceStore.setState({ confirmation: { turnId: 'other', proposal: {} as never, reason: 'policy' } })
+      await fire()
+      expect(toggleMicrophone).not.toHaveBeenCalled()
+      expect(toggleTurn).not.toHaveBeenCalled()
+    })
+    it('waits for an open dialog', async () => {
+      document.body.insertAdjacentHTML('beforeend', '<div role="dialog"></div>')
+      await fire()
+      expect(toggleMicrophone).not.toHaveBeenCalled()
+    })
+    it('leaves another editor alone only while this window has focus', async () => {
+      document.body.insertAdjacentHTML('beforeend', '<textarea aria-label="Task notes"></textarea>')
+      document.querySelector<HTMLTextAreaElement>('textarea')!.focus()
+      const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+      await fire()
+      expect(toggleMicrophone).not.toHaveBeenCalled()
+      // Pressed from another application: the field still has this document's focus.
+      focused.mockReturnValue(false)
+      await fire()
+      expect(toggleMicrophone).toHaveBeenCalledOnce()
+    })
+    it('can always finish a sentence that is being held', async () => {
+      const finishTalk = vi.fn()
+      const original = useCommanderCallStore.getState().finishTalk
+      document.body.insertAdjacentHTML('beforeend', '<div role="dialog"></div>')
+      useCommanderCallStore.setState({ micMode: 'push-to-talk', pttHeld: true, finishTalk })
+      await fire()
+      expect(finishTalk).toHaveBeenCalledOnce()
+      useCommanderCallStore.setState({ finishTalk: original })
+    })
+    it('does not mistake a just-finished push-to-talk turn for another surface', async () => {
+      const real = useCommanderCallStore.getState().beginTalk
+      const beginTalk = vi.fn(async () => {})
+      useCommanderCallStore.setState({ micMode: 'push-to-talk', turnId: 'ptt', pttFinishing: true, beginTalk })
+      useCommanderCallStore.getState().microphoneFinished('')
+      useVoiceStore.setState({ turnId: 'ptt' })
+      await fire()
+      expect(toggleTurn).not.toHaveBeenCalled()
+      expect(beginTalk).toHaveBeenCalledOnce()
+      useCommanderCallStore.setState({ beginTalk: real })
+    })
+    it('stays with a microphone another surface owns', async () => {
+      useVoiceStore.setState({ turnId: 'captain-turn' })
+      await fire()
+      expect(toggleMicrophone).not.toHaveBeenCalled()
+      expect(toggleTurn).toHaveBeenCalledOnce()
+    })
+  })
+
   it('talks to Captain rather than running a command', async () => {
     registerComposer(CAPTAIN_COMPOSER_KEY, { getField: () => null, submit: vi.fn() })
     await act(async () => {

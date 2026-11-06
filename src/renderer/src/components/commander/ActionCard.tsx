@@ -12,6 +12,9 @@ import { formatToolResult, toolCallLabel } from './tool-call-label'
 
 type CommanderToolCall = NonNullable<CommanderMessage['tool_calls']>[number]
 
+/** The toast must say what Undo reverses; the full list stays on the card in Actions. */
+const COMPACT_CHANGES = 3
+
 function valueText(value: unknown): string {
   if (value === undefined) return 'Not set'
   if (value === null) return 'None'
@@ -43,7 +46,8 @@ export function ActionCard({ call, result, requestedBy, compact = false }: {
       <time className="ml-auto text-xs font-normal text-muted-foreground" dateTime={new Date(result.created_at).toISOString()}>{new Date(result.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
     </header>
     <p className="mt-2 break-words text-base font-medium">{action ? `${toolCallLabel(call.name, {})} · ${action.target.name}` : label}</p>
-    {!compact && action && <dl className="mt-2 space-y-1 text-sm leading-relaxed">{action.changes.map((change, index) => <div key={index} className="break-words"><dt className="inline font-medium">{change.field}: </dt><dd className="inline"><span>{valueText(change.before)}</span><span aria-label="changes to"> → </span><span>{valueText(change.after)}</span></dd></div>)}</dl>}
+    {action && <dl className="mt-2 space-y-1 text-sm leading-relaxed">{(compact ? action.changes.slice(0, COMPACT_CHANGES) : action.changes).map((change, index) => <div key={index} className="break-words"><dt className="inline font-medium">{change.field}: </dt><dd className="inline"><span>{valueText(change.before)}</span><span aria-label="changes to"> → </span><span>{valueText(change.after)}</span></dd></div>)}</dl>}
+    {compact && action && action.changes.length > COMPACT_CHANGES && <p className="mt-1 text-sm text-muted-foreground">{action.changes.length - COMPACT_CHANGES} more in Actions</p>}
     {!compact && requestedBy?.input_mode === 'voice' && <p className="mt-2 break-words text-sm leading-relaxed text-muted-foreground">Heard: “{requestedBy.content}”</p>}
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {action?.undoId ? <Button size="sm" variant="outline" disabled={undoing || undone} onClick={() => { setError(''); void useCommanderStore.getState().undoAction(result.session_id, action.undoId!).catch(reason => { const message = reason instanceof Error ? reason.message : 'The action could not be undone.'; setError(message); useCommanderCallUiStore.getState().announce(message) }) }}><Undo2 className="size-icon-sm" aria-hidden="true" />{undone ? 'Undone' : undoing ? 'Undoing…' : 'Undo'}</Button> : <span className="text-xs text-muted-foreground">Can't be undone here</span>}

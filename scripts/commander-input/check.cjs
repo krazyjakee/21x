@@ -38,6 +38,8 @@ app.whenReady().then(async () => {
   const failures = []
   const check = async (name, test) => {
     win.setContentSize(1200, 900); wc.setZoomFactor(1)
+    // Call choices now survive a reload, so one step's mode must not leak into the next.
+    await wc.session.clearStorageData({ storages: ['localstorage'] })
     await win.loadURL(url)
     win.focus()
     await wait(`${field} && !document.querySelector('[aria-label="Commander model"]').disabled && document.querySelector('[aria-label="Turn voice mode on"]')`)
@@ -183,7 +185,8 @@ app.whenReady().then(async () => {
     for (let i = 0; i < 10; i++) { await key('Tab'); assert(await js(`!!document.activeElement.closest('[role="dialog"]')`)) }
     await key('Escape')
     await wait(`!document.querySelector('[role="dialog"]')`)
-    assert.equal(await js('document.activeElement.ariaLabel'), 'Open Commander sessions')
+    // Radix returns focus on a timer after the dialog has left the DOM.
+    await wait(`document.activeElement.ariaLabel === 'Open Commander sessions'`)
     assert.equal(await js(`${field}.value`), 'retained draft')
   })
   await check('PTT Space preserves text entry and completes once on release or focus change', async () => {
@@ -226,6 +229,37 @@ app.whenReady().then(async () => {
     await click('[aria-label="Stop the reply"]')
     await wait(`!document.querySelector('[data-testid="commander-output-ring"]')`)
     assert.equal(await js('window.fixture.callState().status'), 'live')
+  })
+  await check('a toolbar keeps one Tab stop, and an open microphone menu takes Escape first', async () => {
+    const toolbar = '[aria-label="Commander call controls"]'
+    const stops = () => js(`[...document.querySelectorAll('${toolbar} button')].filter(button => button.tabIndex === 0 && !button.disabled).length`)
+    const inToolbar = () => js(`!!document.activeElement.closest('${toolbar}')`)
+    await click('[aria-label="Turn voice mode on"]'); await wait('window.fixture.callState().status === "live"')
+    assert.equal(await stops(), 1)
+    await js('window.fixture.speech()'); await wait(`!document.querySelector('[aria-label="Stop the reply"]').disabled`)
+    const speaking = '!!document.querySelector(\'[data-testid="commander-output-ring"]\')'
+    const bargeIns = await js('window.fixture.bargeIns.length')
+    // From the menu's own button, where a plain click leaves focus.
+    await click('[aria-label="Microphone mode and input device"]'); await wait(`document.querySelector('[aria-label="Microphone options"]')`)
+    await key('Escape')
+    await wait(`!document.querySelector('[aria-label="Microphone options"]')`)
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Microphone mode and input device')
+    assert(await js(speaking), 'closing the menu must not stop the reply')
+    // From a control inside the menu.
+    await click('[aria-label="Microphone mode and input device"]'); await wait(`document.querySelector('[aria-label="Microphone options"]')`)
+    await js(`document.querySelector('[aria-label="Microphone mode"]').focus()`)
+    await key('Escape')
+    await wait(`!document.querySelector('[aria-label="Microphone options"]')`)
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Microphone mode and input device')
+    assert(await js(speaking), 'closing the menu must not stop the reply')
+    assert.equal(await js('window.fixture.bargeIns.length'), bargeIns)
+    // Stop disables itself once pressed: the toolbar must stay reachable by keyboard.
+    await click('[aria-label="Stop the reply"]'); await wait(`document.querySelector('[aria-label="Stop the reply"]').disabled`)
+    await wait(`document.activeElement.closest('${toolbar}') && !document.activeElement.disabled`)
+    assert.equal(await stops(), 1)
+    const stop = await js('document.activeElement.ariaLabel')
+    await key('Tab'); assert.equal(await inToolbar(), false)
+    await key('Tab', ['shift']); assert.equal(await js('document.activeElement.ariaLabel'), stop)
   })
   await check('native floating call drag, navigation, single captions and full-view focus restoration', async () => {
     await click('[aria-label="Turn voice mode on"]'); await wait('window.fixture.callState().status === "live"')
@@ -298,6 +332,8 @@ app.whenReady().then(async () => {
     assert.notEqual(await js(`${field}.value`), 'native undo')
     await js('document.activeElement.blur()'); await key('M', ['control', 'shift'])
     await wait(`document.querySelector('[data-testid="commander-pip"]')`)
+    await js(`document.querySelector('[data-testid="commander-action-toast"]').style.setProperty('--commander-toast-offset', '5000px')`)
+    assert(await js(`(() => { const r = document.querySelector('[data-testid="commander-action-toast"]').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight })()`), 'a tile taller than the window must not push the toast off screen')
     await key('z', ['control']); await wait('window.fixture.undos.length === 1')
     assert.deepEqual(await js('window.fixture.undos[0]'), { sessionId: 'session-1', actionId: 'exact-undo' })
     assert(await js(`document.querySelector('[data-testid="commander-action-toast"]').textContent.includes('Undone')`))
