@@ -7038,7 +7038,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 28,
+          "line": 29,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7094,7 +7094,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 34,
+          "line": 35,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7148,7 +7148,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 33,
+          "line": 34,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7202,7 +7202,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 35,
+          "line": 36,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7258,7 +7258,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 29,
+          "line": 30,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7315,7 +7315,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 37,
+          "line": 38,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7369,7 +7369,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 9,
+          "line": 10,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7425,7 +7425,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 11,
+          "line": 12,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7479,7 +7479,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 10,
+          "line": 11,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7535,7 +7535,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 13,
+          "line": 14,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7589,7 +7589,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 12,
+          "line": 13,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7643,7 +7643,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 22,
+          "line": 23,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7699,7 +7699,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 24,
+          "line": 25,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7753,7 +7753,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 23,
+          "line": 24,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -7807,7 +7807,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 25,
+          "line": 26,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -19065,7 +19065,7 @@
         {
           "column": 46,
           "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 22,
+          "line": 23,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -19110,7 +19110,7 @@
         {
           "column": 46,
           "file": "src/main/workspace-cleanup-scheduler.ts",
-          "line": 21,
+          "line": 22,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -19164,7 +19164,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 68,
+          "line": 76,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -19221,7 +19221,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 52,
+          "line": 53,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -19280,7 +19280,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 64,
+          "line": 65,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -19337,7 +19337,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 56,
+          "line": 57,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -19448,7 +19448,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 60,
+          "line": 61,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -19507,7 +19507,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/git.ts",
-          "line": 42,
+          "line": 43,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"

@@ -19,6 +19,8 @@ export interface CleanupResult {
   cleaned: number
   errors: string[]
   nodeModulesCleaned: number
+  /** Whole workspaces left in place because another app shares these folders. Absent when none were. */
+  workspacesKept?: number
 }
 
 /**
@@ -48,7 +50,14 @@ export interface WorkspaceCleanupHost {
   /** These folders are shared with another app, whose tasks this database cannot
    * see, so a workspace with no task here may be its work, and the only copy. */
   keepWorkspacesWithoutTask?: boolean
+  /** Asked at the start of a pass and again before each removal. True means whole
+   * workspaces stay, because their work may belong to another app. Only the Electron
+   * host sets this: the Tauri app must keep cleaning the folders it shares. */
+  keepWholeWorkspaces?(): boolean
 }
+
+/** Raised inside a worktree removal when `keepWholeWorkspaces` turns true part way through it. */
+class WorkspacesKeptError extends Error {}
 
 export interface WorkspaceCleanupRequestControls {
   beforeEffect(): void
@@ -117,6 +126,7 @@ export class WorkspaceCleanupSchedulerCore {
       pruneNodeModules: pruneStaleNodeModules
     }
   ) {
+    if (host.portablePolicy && host.keepWholeWorkspaces) throw new Error('WORKSPACE_CLEANUP_POLICY_INVALID')
     this.dbManager = dbManager
     this.worktreeManager = worktreeManager
     this.portablePolicy = host.portablePolicy ? this.captureControls(host.portablePolicy) : undefined
@@ -217,11 +227,13 @@ export class WorkspaceCleanupSchedulerCore {
     const combined: CleanupResult = {
       cleaned: result.cleaned,
       errors: [...result.errors, ...nm.errors],
-      nodeModulesCleaned: nm.pruned
+      nodeModulesCleaned: nm.pruned,
+      ...(result.kept > 0 ? { workspacesKept: result.kept } : {})
     }
     this.sendToRenderer('workspace:cleanup-progress', {
       phase: 'done', current: combined.cleaned, total: combined.cleaned,
-      cleaned: combined.cleaned, nodeModulesCleaned: combined.nodeModulesCleaned, errors: combined.errors
+      cleaned: combined.cleaned, nodeModulesCleaned: combined.nodeModulesCleaned, errors: combined.errors,
+      ...(result.kept > 0 ? { workspacesKept: result.kept } : {})
     })
     return combined
   }
@@ -276,7 +288,13 @@ export class WorkspaceCleanupSchedulerCore {
       const result = await this.doCleanup(false)
       if (this.closing) return
 
-      this.dbManager.setSetting('workspace_autocleanup_last_run', new Date().toISOString())
+      if (result.kept > 0) {
+        // Not stamped: this pass did not do its work, and once the marker is
+        // removed by hand the next hourly check should clean rather than wait a day.
+        console.log(`[WorkspaceCleanup] Kept ${result.kept} workspace(s): another app shares these folders`)
+      } else {
+        this.dbManager.setSetting('workspace_autocleanup_last_run', new Date().toISOString())
+      }
 
       if (result.cleaned > 0) {
         console.log(`[WorkspaceCleanup] Cleaned ${result.cleaned} workspace(s)`)
@@ -438,12 +456,25 @@ export class WorkspaceCleanupSchedulerCore {
     } finally { active = false }
   }
 
-  private async doCleanup(reportProgress: boolean): Promise<{ cleaned: number; errors: string[] }> {
+  /** True while whole workspaces must stay. Always false on the Tauri host. */
+  private keepsWholeWorkspaces(): boolean {
+    return this.host.keepWholeWorkspaces?.() ?? false
+  }
+
+  /** Checks before every git or filesystem step, so a task with several repositories stops part way. */
+  private removeTaskWorktrees(task: { id: string; repos: string[] }, org: string): Promise<void> {
+    const remove = (): Promise<void> => this.worktreeManager.cleanupTaskWorkspace(task.id, task.repos.map((r) => ({ fullName: r })), org, true)
+    if (!this.host.keepWholeWorkspaces) return remove()
+    return this.worktreeManager.withRequestGuard(remove, () => { if (this.keepsWholeWorkspaces()) throw new WorkspacesKeptError() })
+  }
+
+  private async doCleanup(reportProgress: boolean): Promise<{ cleaned: number; errors: string[]; kept: number }> {
     const retentionDays = this.getRetentionDays()
     const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000)
     const org = this.dbManager.getSetting('github_org') || ''
 
     let cleaned = 0
+    let kept = 0
     const errors: string[] = []
 
     // Phase 1: Clean workspaces for completed tasks past retention
@@ -481,6 +512,13 @@ export class WorkspaceCleanupSchedulerCore {
     const total = eligibleTasks.length + orphanDirs.length
     let processed = 0
 
+    // Only reads have happened so far. Checked before processes too: stopping a
+    // process in a workspace that is about to stay would help nobody.
+    if (this.keepsWholeWorkspaces()) {
+      this.reportWorkspaceCount()
+      return { cleaned, errors, kept: total }
+    }
+
     // A process must not outlive its workspace. Removing the directory under a
     // running watcher leaves it holding several thousand descriptors on files
     // that no longer exist — the exact leak this cleanup is supposed to end.
@@ -502,7 +540,7 @@ export class WorkspaceCleanupSchedulerCore {
       }
     }
 
-    if (this.closing) return { cleaned, errors }
+    if (this.closing) return { cleaned, errors, kept }
     if (reportProgress) {
       this.sendToRenderer('workspace:cleanup-progress', {
         phase: 'scanning',
@@ -514,6 +552,7 @@ export class WorkspaceCleanupSchedulerCore {
 
     for (const task of eligibleTasks) {
       if (this.closing) break
+      if (this.keepsWholeWorkspaces()) { kept = total - processed; break }
       const taskDir = join(this.host.workspacesRoot, task.id)
 
       if (reportProgress) {
@@ -527,12 +566,7 @@ export class WorkspaceCleanupSchedulerCore {
 
       try {
         if (task.repos.length > 0 && org) {
-          await this.worktreeManager.cleanupTaskWorkspace(
-            task.id,
-            task.repos.map((r) => ({ fullName: r })),
-            org,
-            true
-          )
+          await this.removeTaskWorktrees(task, org)
         } else {
           // No repos — just remove the workspace directory
           rmSync(taskDir, { recursive: true, force: true })
@@ -540,6 +574,7 @@ export class WorkspaceCleanupSchedulerCore {
         cleaned++
         console.log(`[WorkspaceCleanup] Cleaned workspace for completed task "${task.title}" (${task.id})`)
       } catch (err) {
+        if (err instanceof WorkspacesKeptError) { kept = total - processed; break }
         const message = `Failed to clean workspace for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`
         console.error(`[WorkspaceCleanup] ${message}`)
         errors.push(message)
@@ -550,6 +585,7 @@ export class WorkspaceCleanupSchedulerCore {
     // Phase 2: Clean orphaned workspace directories (no matching task in DB)
     for (const name of orphanDirs) {
       if (this.closing) break
+      if (kept > 0 || this.keepsWholeWorkspaces()) { kept = total - processed; break }
       const dirPath = join(this.host.workspacesRoot, name)
 
       if (reportProgress) {
@@ -575,7 +611,7 @@ export class WorkspaceCleanupSchedulerCore {
 
     this.reportWorkspaceCount()
 
-    return { cleaned, errors }
+    return { cleaned, errors, kept }
   }
 
   /**
@@ -665,6 +701,12 @@ export class WorkspaceCleanupSchedulerCore {
     let skip = await this.operations.findLiveProcesses(this.host.workspacesRoot, dirs)
     if (this.closing) return { pruned: 0, errors: [] }
     if (skip === null) skip = activeStatusWorkspaceIds(allTasks)
+    // The shared-folder rule: a workspace with no task here may be the other app's
+    // work, and removal cannot be undone, so even its dependencies stay.
+    if (this.keepsWholeWorkspaces()) {
+      const known = new Set(allTasks.map((task) => task.id))
+      skip = new Set([...skip, ...dirs.filter((id) => !known.has(id))])
+    }
 
     if (reportProgress) {
       this.sendToRenderer('workspace:cleanup-progress', {

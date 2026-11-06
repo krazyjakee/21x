@@ -147,6 +147,8 @@ export interface WorkspaceCleanupProgressEvent {
     message?: string;
     cleaned?: number;
     nodeModulesCleaned?: number;
+    /** Whole workspaces left in place because the Tauri app shares these folders. */
+    workspacesKept?: number;
     errors?: string[];
 }
 export interface ToolStatus {
@@ -443,6 +445,7 @@ export interface DesktopApi {
             cleaned: number;
             errors: string[];
             nodeModulesCleaned: number;
+            workspacesKept?: number;
         }>;
     };
     taskSources: {

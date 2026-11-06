@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { acquireProfileLock, heldByTauri, HOST_CLAIM_TIMEOUT_MS, jointProfileLock, PROFILE_LOCK_FILE, TAURI_HOLDER_FILE, type ProfileLock } from './profile-lock'
+import { acquireProfileLock, heldByTauri, HOST_CLAIM_TIMEOUT_MS, jointProfileLock, PROFILE_LOCK_FILE, TAURI_HOLDER_FILE, TAURI_SHARED_WORKSPACES_FILE, tauriSharesWorkspaces, type ProfileLock } from './profile-lock'
 import { holdProfileElsewhere, profileListing, raceForProfile, stopOtherHosts } from '../../../test/helpers/profile-holder'
 
 const require = createRequire(import.meta.url)
@@ -45,6 +45,36 @@ afterEach(async () => {
   await stopOtherHosts()
   for (const guard of guards.splice(0)) guard.release()
   for (const root of profiles.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe('the marker that keeps whole workspaces', () => {
+  it('is absent only when the name is really absent', () => {
+    const root = temporary()
+    expect(tauriSharesWorkspaces(root)).toBe(false)
+    writeFileSync(join(root, TAURI_SHARED_WORKSPACES_FILE), '')
+    expect(tauriSharesWorkspaces(root)).toBe(true)
+  })
+  it('counts a link to nowhere, and a folder', () => {
+    const link = temporary(), folder = temporary()
+    symlinkSync(join(link, 'missing'), join(link, TAURI_SHARED_WORKSPACES_FILE))
+    mkdirSync(join(folder, TAURI_SHARED_WORKSPACES_FILE))
+    expect(tauriSharesWorkspaces(link)).toBe(true)
+    expect(tauriSharesWorkspaces(folder)).toBe(true)
+  })
+  it('counts as present when the folder cannot be searched', () => {
+    if (process.getuid?.() === 0) return
+    const root = temporary()
+    chmodSync(root, 0o000)
+    try { expect(tauriSharesWorkspaces(root)).toBe(true) } finally { chmodSync(root, 0o700) }
+  })
+  it('counts as present when the path is not a folder at all', () => {
+    const root = temporary(), file = join(root, 'file'); writeFileSync(file, '')
+    expect(tauriSharesWorkspaces(file)).toBe(true)
+  })
+  it('is not the note that says who holds the lock, which is cleared on exit', () => {
+    expect(TAURI_SHARED_WORKSPACES_FILE).not.toBe(TAURI_HOLDER_FILE)
+    expect(TAURI_SHARED_WORKSPACES_FILE).not.toBe(PROFILE_LOCK_FILE)
+  })
 })
 
 describe('real SQLite lifetime profile ownership', () => {

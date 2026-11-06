@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, s
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
+import { TAURI_SHARED_WORKSPACES_FILE } from './platform/profile-lock'
 import { WorktreeDirectoryAuthority } from './worktree-directory-authority'
 import { WorktreeManager } from './worktree-manager-core'
 import { WorkspaceCleanupSchedulerCore, createBoundedWorkspaceCleanupStore, type WorkspaceCleanupRequestControls, type WorkspaceCleanupOperations } from './workspace-cleanup-scheduler-core'
@@ -113,6 +114,17 @@ describe('strict portable cleanup policy', () => {
       vi.useFakeTimers(); owner.start(); await vi.advanceTimersByTimeAsync(120000); owner.stop()
       expect(db.getSetting('workspace_autocleanup_last_run')).toBeDefined()
       expect(readFileSync(join(path, 'uncommitted'), 'utf8')).toBe('the only copy')
+    })
+    it('is not switched off by the marker it writes for Electron, in the folder that holds it', async () => {
+      // On a shared profile the workspaces sit beside the marker, so this is the real layout.
+      const value = oldTask(), other = otherAppsWork()
+      writeFileSync(join(root, TAURI_SHARED_WORKSPACES_FILE), '')
+      await sharedOwner()
+      expect(await owner.runNow({ ...controls, ...authority })).toEqual({ cleaned: 1, errors: [], nodeModulesCleaned: 0 })
+      expect(existsSync(value.path)).toBe(false); expect(readFileSync(join(other, 'uncommitted'), 'utf8')).toBe('the only copy')
+    })
+    it('refuses a host that asks for both the Tauri policy and the Electron rule', () => {
+      expect(() => new WorkspaceCleanupSchedulerCore(db, worktrees, { workspacesRoot: join(root, 'workspaces'), listWorkspaceDirs: () => [], portablePolicy: controls, keepWholeWorkspaces: () => true }, ambient)).toThrow('WORKSPACE_CLEANUP_POLICY_INVALID')
     })
     it('still removes the workspace of a completed task this profile does know', async () => {
       const value = oldTask()

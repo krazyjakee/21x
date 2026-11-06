@@ -18,10 +18,10 @@
  * macOS) or, for Linux v10, the fixed "peanuts" password.
  */
 import { createDecipheriv, pbkdf2Sync } from 'node:crypto'
-import { existsSync, fsyncSync, lstatSync, openSync, closeSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, fsyncSync, lstatSync, openSync, closeSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import SQLite from 'better-sqlite3'
-import { acquireProfileLock, heldByTauri, HOST_CLAIM_TIMEOUT_MS, ProfileLockError, type ProfileLock } from '../main/platform/profile-lock'
+import { acquireProfileLock, heldByTauri, HOST_CLAIM_TIMEOUT_MS, ProfileLockError, TAURI_SHARED_WORKSPACES_FILE, type ProfileLock } from '../main/platform/profile-lock'
 import type { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
 import { encryptRecordCredential, encryptSettingValue } from '../main/database/serializers'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
@@ -118,6 +118,45 @@ export function holdElectronProfile(profileRoot: string): ProfileLock {
     if (error instanceof ProfileLockError && error.code === 'PROFILE_IN_USE' && !heldByTauri(profileRoot)) throw new ElectronProfileImportError('ELECTRON_PROFILE_IN_USE')
     throw error
   }
+}
+
+const TAURI_SHARED_WORKSPACES_NOTE = `The Tauri version of 21x shares this folder. While this file exists, the Electron
+version does not remove whole workspaces here, because they may hold Tauri's work.
+If you have stopped using the Tauri version for good, delete this file to get that
+cleanup back.
+`
+
+/**
+ * Tells Electron to leave whole workspaces alone. Written on every launch that finds
+ * it missing, so profiles imported before it existed are covered, and under the lock,
+ * because Electron could otherwise be part way through a cleanup. Anything already at
+ * the name counts, as it does for Electron. Nothing ever removes the file: it has to
+ * outlast this app, including an uninstall. Throws if the file cannot be put in place.
+ */
+export function ensureTauriSharedMarker(lock: Pick<ProfileLock, 'assertHeld' | 'profileRoot'>): void {
+  lock.assertHeld()
+  const path = join(lock.profileRoot, TAURI_SHARED_WORKSPACES_FILE), staged = `${path}.writing`
+  try { lstatSync(path); return } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  // Left by a crash, or planted. Removed, so a link is never followed.
+  rmSync(staged, { force: true })
+  try {
+    const descriptor = openSync(staged, 'wx', 0o600)
+    try { writeSync(descriptor, TAURI_SHARED_WORKSPACES_NOTE); fsyncSync(descriptor) } finally { closeSync(descriptor) }
+    renameSync(staged, path)
+  } catch (error) {
+    rmSync(staged, { force: true })
+    throw error
+  }
+  syncFolder(lock.profileRoot)
+}
+
+/** So the rename survives a power cut. Windows cannot open a folder, and the file is in place either way. */
+function syncFolder(path: string): void {
+  if (process.platform === 'win32') return
+  try {
+    const descriptor = openSync(path, 'r')
+    try { fsyncSync(descriptor) } finally { closeSync(descriptor) }
+  } catch { /* the next launch finds it missing and writes it again */ }
 }
 
 /** Copy, convert and publish. Returns false when there is nothing to import. */

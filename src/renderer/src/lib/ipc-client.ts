@@ -766,7 +766,7 @@ export const worktreeApi = {
     }
     return readFile(taskId, repoFullName, filePath)
   },
-  runCleanupNow: (): Promise<{ cleaned: number; errors: string[]; nodeModulesCleaned: number }> => {
+  runCleanupNow: (): Promise<{ cleaned: number; errors: string[]; nodeModulesCleaned: number; workspacesKept?: number }> => {
     return desktopApi.worktree.runCleanupNow()
   }
 }

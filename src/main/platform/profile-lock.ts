@@ -5,6 +5,8 @@ import { isAbsolute, join } from 'node:path'
 export const PROFILE_LOCK_FILE = '.21x-profile-lock.sqlite'
 /** Present only while the Tauri app runs on an Electron profile. See `heldByTauri`. */
 export const TAURI_HOLDER_FILE = '.21x-tauri-holder'
+/** Written by the Tauri app into an Electron profile it shares, and never removed by either app. See `tauriSharesWorkspaces`. */
+export const TAURI_SHARED_WORKSPACES_FILE = '.21x-tauri-shares-workspaces'
 /** Long enough for two simultaneous hosts to settle on one winner, not both fail. */
 export const HOST_CLAIM_TIMEOUT_MS = 250
 export type ProfileLockErrorCode = 'PROFILE_IN_USE' | 'PROFILE_DUPLICATE_OWNER' | 'PROFILE_LOCK_INVALID' | 'PROFILE_LOCK_LOST' | 'PROFILE_LOW_DISK'
@@ -54,6 +56,17 @@ function regularUnaliasedFile(path: string, absentAllowed = false): void {
  */
 export function heldByTauri(profileRoot: string): boolean {
   try { return lstatSync(join(profileRoot, TAURI_HOLDER_FILE)).isFile() } catch { return false }
+}
+
+/**
+ * Tells Electron that the Tauri app shares these folders, so a workspace that looks
+ * finished or unknown here may hold Tauri's only copy of some work. Presence alone
+ * decides: the content is never read, and anything at this name counts, as does any
+ * failure to look other than the name being absent. Wrongly keeping a folder costs
+ * disk; wrongly removing one loses work.
+ */
+export function tauriSharesWorkspaces(profileRoot: string): boolean {
+  try { lstatSync(join(profileRoot, TAURI_SHARED_WORKSPACES_FILE)); return true } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ENOENT' }
 }
 
 /** Only an owner may call this. Failing costs a precise message, never safety. */

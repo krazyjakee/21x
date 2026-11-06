@@ -115,23 +115,63 @@ profile for their whole session. Whoever gets it first runs; the other is refuse
   but its workspace, repositories and attachments start empty, because they are worked
   out from the current folders. The two apps no longer exclude each other, and the
   folder is not taken back if it reappears.
-- **Still open, Electron's own cleanup:** Electron cannot tell that the folders are
-  shared. Its Run cleanup needs no setting, a scheduled pass needs auto-cleanup on,
-  and Tauri does not have to be running. Either can remove a workspace by two routes:
-  - **A task Electron does not know.** A workspace of a Tauri-created task looks like
-    an orphan to Electron, and it is removed once its age passes the retention period.
-    That age comes from the modification time of the top-level task folder,
-    `workspaces/<task>`, only. Worktrees sit one level down, at
-    `workspaces/<task>/<repo>`, so editing files inside a repository does not change
-    it. An older Tauri task can be selected while it is still being worked on,
-    whatever its status in Tauri.
-  - **A task both databases know.** A task that is Completed and past retention in
-    Electron's copy has its workspace removed, even if it was reopened in Tauri after
-    the import and is being worked on in that same folder. This route uses Electron's
-    own task record, not the folder's age.
-
-  Uncommitted work in a removed workspace cannot be recovered. Commits on the task
-  branch stay in the shared repository. How to close this is an open user decision.
+- **Electron keeps whole workspaces on a shared profile.** Electron cannot tell from
+  its own data that its folders are shared. Left alone it would remove a workspace by
+  two routes, whether or not Tauri was running: a Tauri task it has never heard of
+  looks like an orphan once the top-level folder `workspaces/<task>` passes retention,
+  and a task Completed in its own record is removed even if it was reopened in Tauri.
+  So Tauri leaves a permanent file, `.21x-tauri-shares-workspaces`, in the Electron
+  profile, and Electron does not remove whole workspaces while it exists.
+  - **Writing it.** Every Tauri launch on a shared profile checks for the file, with
+    both locks held, and writes it if it is missing, so profiles imported earlier are
+    covered on their next launch. It is a short owner-only note with no paths or
+    secrets, written to a temporary file and renamed. Links are not followed, and
+    anything already at that name is left alone. An unshared profile writes nothing
+    into any Electron folder.
+  - **If it cannot be written,** the launch is refused with
+    `ELECTRON_MARKER_UNWRITABLE`, before the crash log, the database or any folder is
+    touched, because a shared profile must not run unprotected. The way forward is to
+    make room on the drive or fix the permissions, then reopen. A folder that is fully
+    read-only is refused earlier, by the lock (`PROFILE_LOCK_INVALID`).
+  - **Reading it.** Electron checks with `lstat` at the start of each pass and again
+    before each removal, including between repositories of one task, so a file that
+    appears during a pass stops the rest. Presence alone decides. The content is never
+    read, and anything at that name counts, as does any error other than `ENOENT`.
+  - **What stops while it exists.** Manual Run cleanup, the scheduled pass, and the
+    automatic removal when a task moves to Completed with a live session in Electron.
+    No process is stopped for a workspace that stays. Run cleanup says how many
+    workspaces it kept and why. A scheduled pass that kept any does not count as the
+    day's run, so cleanup returns on the next hourly check once the file is gone.
+  - **What keeps working.** Idle `node_modules` pruning still runs, by the shared-folder
+    rule above: tasks Electron knows are pruned, and a workspace with no task here is
+    left alone, including its `node_modules`. The boot and shutdown process sweeps stop
+    leaked processes and remove no files.
+  - **What it costs.** Old workspaces pile up in that folder, because nothing removes
+    them while the file exists. An explicit delete still works.
+  - **Tauri is not affected by its own file.** Only the Electron host passes the check
+    (`keepWholeWorkspaces`), and the scheduler refuses a host that combines it with the
+    Tauri cleanup policy. On a shared profile Tauri's workspaces sit beside the file,
+    and it cleans exactly what it cleaned before.
+  - **Older Electron builds do not know the file.** An older build still removes
+    workspaces by both routes until it is updated. The file protects nothing there, so
+    update Electron before running cleanup on a shared profile.
+  - **Nothing removes the file automatically.** It stays when Tauri quits or is
+    uninstalled, and after **Stop using the old folder**, because the folder can still
+    hold that work. A user who has left Tauri for good gets cleanup back by quitting
+    both apps and deleting `.21x-tauri-shares-workspaces` from the Electron profile by
+    hand. After that, Electron treats any workspace it does not know as an orphan, so
+    move out anything worth keeping first. A later Tauri launch on a shared profile
+    writes the file again.
+  - **What still removes a workspace.** An explicit task delete in Electron is
+    unchanged: it removes that task's worktrees and workspace at once, and removing one
+    repository from a task removes that worktree. The user asked for those, and whether
+    a shared folder should overrule them has not been decided. Deleting a task in
+    Electron also removes its `attachments/<task>` folder, even if Tauri's copy of the
+    task still uses it.
+  - **Limits that remain.** The Tauri route above is not changed: a task that is
+    Completed and past retention in Tauri's copy is still removed by Tauri, even if it
+    was reopened in Electron after the import. A profile that lost its share marker
+    before it ever ran with the settings row runs unshared, so it writes no file.
 
 A refused launch writes nothing to the profile, with one limit on Linux: the native
 Tauri host creates missing `workspaces/` and `attachments/` before the service runs,
@@ -150,7 +190,7 @@ original data and performs no credential/profile conversion.
 At the central batch boundary run:
 
 ```sh
-node node_modules/vitest/vitest.mjs run --project main --maxWorkers=1 src/main/platform/profile-lock.test.ts src/main/platform/electron-profile-claim.test.ts src/service/electron-profile-import.test.ts src/service/production-owner.test.ts
+node node_modules/vitest/vitest.mjs run --project main --maxWorkers=1 src/main/platform/profile-lock.test.ts src/main/platform/electron-profile-claim.test.ts src/main/workspace-cleanup-tauri-marker.test.ts src/service/electron-profile-import.test.ts src/service/production-owner.test.ts
 ```
 
 The tests exercise real cross-process contention, owner crash/reacquisition,

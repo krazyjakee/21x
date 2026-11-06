@@ -86,6 +86,10 @@ it('explains a missing or relinked Electron folder, and offers the action only f
   const status = (code: string, phase: string) => ({ protocolVersion: 1, production: true, available: false, startupFailure: { code, phase } })
   for (const phase of ['profile-lock', 'database-preflight']) expect(productionBootstrapMessage(status('ELECTRON_FOLDER_MISSING', phase))).toContain('you can stop using it')
   expect(productionBootstrapMessage(status('ELECTRON_LINK_RESTORED', 'database-preflight'))).toContain('Close 21x and open it again')
+  const unwritable = productionBootstrapMessage(status('ELECTRON_MARKER_UNWRITABLE', 'profile-lock'))
+  expect(unwritable).toContain('stopped before changing anything')
+  expect(unwritable).toContain('free space')
+  expect(unwritable).toContain('close 21x and open it again')
   const failure = async (code: string, phase: string, result: unknown = true) => {
     const invoke = vi.fn(async (command: string) => command === 'engine_status' ? status(code, phase) : result)
     const error = await getTauriEngineEpoch({ core: { invoke }, event: { listen: vi.fn() } } as unknown as TauriDesktopApi).catch((caught: unknown) => caught)
@@ -99,6 +103,7 @@ it('explains a missing or relinked Electron folder, and offers the action only f
   const restored = (await failure('ELECTRON_LINK_RESTORED', 'database-preflight')).error
   expect(restored.stopUsingOldFolder).toBeUndefined()
   expect(restored.reopenRequired).toBe(true)
+  expect((await failure('ELECTRON_MARKER_UNWRITABLE', 'profile-lock')).error.reopenRequired).toBe(true)
   expect((await failure('PROFILE_IN_USE', 'profile-lock')).error.reopenRequired).toBe(false)
 })
 

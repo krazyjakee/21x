@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { settingsApi, worktreeApi, onWorkspaceCleanupProgress } from '@/lib/ipc-client'
 
 /** Human-readable summary of a cleanup run, or null when there is nothing to report. */
-function describeCleanupOutcome(cleaned: number | undefined, nodeModulesCleaned: number | undefined): string | null {
+function describeCleanupOutcome(cleaned: number | undefined, nodeModulesCleaned: number | undefined, workspacesKept: number | undefined): string | null {
   const parts: string[] = []
   if (cleaned !== undefined && cleaned > 0) {
     parts.push(`Cleaned ${cleaned} workspace${cleaned !== 1 ? 's' : ''}`)
@@ -15,7 +15,10 @@ function describeCleanupOutcome(cleaned: number | undefined, nodeModulesCleaned:
   if (nodeModulesCleaned !== undefined && nodeModulesCleaned > 0) {
     parts.push(`pruned ${nodeModulesCleaned} idle node_modules`)
   }
-  return parts.length > 0 ? parts.join(', ') : null
+  const kept = workspacesKept !== undefined && workspacesKept > 0
+    ? `Kept ${workspacesKept} workspace${workspacesKept !== 1 ? 's' : ''}: the Tauri version of 21x shares this folder, so this app no longer removes whole workspaces`
+    : null
+  return [parts.join(', '), kept].filter(Boolean).join('. ') || null
 }
 
 const SELECT_CLASS = 'bg-transparent border rounded px-2 py-1 text-sm disabled:opacity-50'
@@ -65,7 +68,7 @@ export function WorkspaceCleanupSection() {
       if (event.phase === 'done') {
         setCleanupRunning(false)
         setCleanupProgress(null)
-        const summary = describeCleanupOutcome(event.cleaned, event.nodeModulesCleaned)
+        const summary = describeCleanupOutcome(event.cleaned, event.nodeModulesCleaned, event.workspacesKept)
         if (summary) {
           setCleanupResult(summary)
         } else if (event.errors && event.errors.length > 0) {
@@ -89,7 +92,7 @@ export function WorkspaceCleanupSection() {
       // The progress listener normally settles the final state via the 'done'
       // event; the IPC response is a fallback for when no progress arrived.
       if (!cleanupProgress) {
-        const summary = describeCleanupOutcome(result.cleaned, result.nodeModulesCleaned)
+        const summary = describeCleanupOutcome(result.cleaned, result.nodeModulesCleaned, result.workspacesKept)
         if (summary) {
           setCleanupResult(summary)
         } else if (result.errors.length > 0 && result.errors[0] === 'Cleanup is already in progress') {
