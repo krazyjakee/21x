@@ -49,12 +49,12 @@ describe('native terminal listener lifetime', () => {
 })
 
 describe('terminal environment', () => {
-  afterEach(() => { delete process.env[AGENT_WORK_MARKER] })
+  afterEach(() => { vi.unstubAllEnvs() })
 
   // A 21x started by an agent inherits the marker, and what a person runs in
   // its terminal is theirs, not agent work the sweep may kill.
   it('keeps the agent work marker out of a shell a person types into', () => {
-    process.env[AGENT_WORK_MARKER] = '1'
+    vi.stubEnv(AGENT_WORK_MARKER, '1')
     const native = { pid: 4242, onData: () => ({ dispose: vi.fn() }), onExit: () => ({ dispose: vi.fn() }) }
     const nodeSpawn = vi.fn().mockReturnValue(native)
     createNodePty({ shellPath: '/fixture-shell', cols: 80, rows: 24, onData: vi.fn(), onExit: vi.fn() }, { spawn: nodeSpawn })

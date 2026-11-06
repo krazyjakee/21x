@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'child_process'
 import { AGENT_WORK_MARKER } from '../../shared/agent-work-marker'
 import { AcpAdapter } from './acp-adapter'
@@ -15,7 +15,9 @@ vi.mock('child_process', async importOriginal => ({
 const config: SessionConfig = { agentId: 'agent', taskId: 'task', workspaceDir: '/workspace' }
 
 describe('agent process environment', () => {
-  afterEach(() => vi.mocked(spawn).mockReset())
+  // An agent running this suite has the marker itself, so start from a known state.
+  beforeEach(() => { vi.stubEnv(AGENT_WORK_MARKER, undefined) })
+  afterEach(() => { vi.mocked(spawn).mockReset(); vi.unstubAllEnvs() })
 
   // The workspace sweep can only tell agent work from a user's own process on
   // Linux by this marker, so an agent backend without it leaks silently.
