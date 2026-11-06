@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { AlertTriangle, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { selectVoiceReady, useVoiceStore } from '@/stores/voice-store'
-import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { isForeignVoiceTurn, useCommanderCallStore } from '@/stores/commander-call-store'
 import type { VoiceCandidate } from '@shared/voice'
 
 const RESULT_VISIBLE_MS = 6000
@@ -37,8 +37,9 @@ export function VoiceOverlay() {
   const stopSpeaking = useVoiceStore((s) => s.stopSpeaking)
   const commanderCallLive = useCommanderCallStore((s) => s.status !== 'off')
   const commanderTurnId = useCommanderCallStore(s => s.turnId)
+  const commanderMicOpening = useCommanderCallStore(s => s.micOpening)
   const voiceTurnId = useVoiceStore(s => s.turnId)
-  const commanderOwnsVoice = commanderCallLive && (!voiceTurnId || voiceTurnId === commanderTurnId)
+  const commanderOwnsVoice = commanderCallLive && !isForeignVoiceTurn(voiceTurnId, { turnId: commanderTurnId, micOpening: commanderMicOpening })
 
   // Escape cancels the current turn or the open confirmation.
   useEffect(() => {
@@ -46,8 +47,9 @@ export function VoiceOverlay() {
       if (event.key !== 'Escape') return
       // The app-level Commander host owns Escape for a live call. Letting this
       // generic overlay cancel the same microphone turns a normal Stop into a
-      // false media-loss error.
-      if (commanderOwnsVoice) return
+      // false media-loss error. A confirmation is never the call's: the host
+      // leaves it alone, so Escape has to dismiss it here.
+      if (commanderOwnsVoice && !confirmation) return
       if (confirmation) void dismiss()
       else if (state === 'listening') void cancel()
       // Escape also stops speech. It is the one key a user reaches for when

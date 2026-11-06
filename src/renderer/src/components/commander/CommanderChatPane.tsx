@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AlertCircle, Radio, Send, Square } from 'lucide-react'
 import type { CommanderMessage } from '@shared/commander'
+import { isCommanderAdminTool } from '@shared/commander-tools'
 import {
   CHAT_SETTING_KEYS,
   chatProviderForAgentModel,
@@ -15,12 +16,14 @@ import { settingsApi } from '@/lib/ipc-client'
 import { AttachmentTray } from '@/components/chat/AttachmentTray'
 import { useChatAttachments } from '@/hooks/use-chat-attachments'
 import { useAgentStore } from '@/stores/agent-store'
-import { useCommanderStore } from '@/stores/commander-store'
+import { liveToolResult, useCommanderStore } from '@/stores/commander-store'
+import { pairToolResults } from '@/lib/commander-tool-runs'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useUIStore } from '@/stores/ui-store'
 import type { Agent } from '@/types'
 import { CommanderMessageItem, ToolChip } from './CommanderMessageItem'
 import { CommanderActions } from './CommanderActions'
+import { ActionCard } from './ActionCard'
 import { commanderReportThreads } from '@/lib/commander-report-threads'
 import { UNTITLED_SESSION } from './CommanderSessionList'
 
@@ -178,11 +181,7 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
     }
   }, [configuredModels, configLoaded, selectedAgentId])
 
-  const toolResults = useMemo(() => {
-    const map = new Map<string, CommanderMessage>()
-    for (const m of messages) if (m.role === 'tool' && m.tool_call_id) map.set(m.tool_call_id, m)
-    return map
-  }, [messages])
+  const toolResults = useMemo(() => pairToolResults(messages), [messages])
 
   const reportThreads = useMemo(() => commanderReportThreads(messages), [messages])
   const threadedIds = useMemo(() => new Set([...reportThreads.values()].flat().map(message => message.id)), [reportThreads])
@@ -197,6 +196,7 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
     for (const message of messages) { if (message.role === 'user') latest = message; if (message.role === 'assistant' && latest) map.set(message.id, latest) }
     return map
   }, [messages])
+  const latestRequest = useMemo(() => messages.findLast(message => message.role === 'user'), [messages])
   const conversationCount = visible.filter(message => message.role !== 'report' && message.role !== 'summary' && !['session_rollover', 'session_recovery'].includes(message.tool_name ?? '')).length
 
   useEffect(() => {
@@ -274,9 +274,9 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
             ) : null}
             {streaming.toolCalls.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {streaming.toolCalls.map((c) => (
-                  <ToolChip key={c.id} name={c.name} input={c.input} result={c.result} isError={c.isError} />
-                ))}
+                {streaming.toolCalls.map((c, index) => isCommanderAdminTool(c.name) && c.result !== undefined
+                  ? <ActionCard key={`${c.id}:${index}`} call={c} result={liveToolResult(sessionId, streaming.turnId, c, index)} requestedBy={latestRequest} />
+                  : <ToolChip key={`${c.id}:${index}`} name={c.name} input={c.input} result={c.result} isError={c.isError} />)}
               </div>
             )}
           </div>

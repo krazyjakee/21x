@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CallEvent, CallMediaEvent } from '@shared/commander-call'
 import { activityNow } from '@/lib/activity/activity-clock'
+import { readCallChoice, readCallText, rememberCallChoice } from '@/lib/commander-call/call-preferences'
 
 /**
  * The Commander call's lifetime (#84, epic #82 decision D5).
@@ -18,6 +19,7 @@ import { activityNow } from '@/lib/activity/activity-clock'
  */
 
 export type CommanderMicMode = 'open-mic' | 'push-to-talk'
+const MIC_MODES: readonly CommanderMicMode[] = ['open-mic', 'push-to-talk']
 export type CallStatus = 'off' | 'starting' | 'live'
 
 /** Private composer used by the app-level host for pause-delimited sentences. */
@@ -110,7 +112,18 @@ let mediaSignal: AbortSignal | null = null
 let microphoneController: AbortController | null = null
 let microphoneGeneration = 0
 const finishedMicrophones = new WeakSet<AbortSignal>()
+/** The push-to-talk turn just handed in. Main still reports it until its outcome arrives. */
+let releasedTurnId: string | null = null
 const listeners = new Map<CallMediaEvent, Set<() => void>>()
+
+/**
+ * True when the open voice turn belongs to another surface. The turn id alone
+ * cannot say: main publishes the call's own turn before the call has recorded
+ * it, and keeps reporting a finished push-to-talk turn for a moment afterwards.
+ */
+export function isForeignVoiceTurn(voiceTurnId: string | null, call: Pick<CommanderCallState, 'turnId' | 'micOpening'>): boolean {
+  return !!voiceTurnId && voiceTurnId !== call.turnId && voiceTurnId !== releasedTurnId && !call.micOpening
+}
 
 /** Binds the media driver. Returns an unbind. Only the host calls this. */
 export function bindCommanderCallDriver(next: CommanderCallDriver): () => void {
@@ -211,14 +224,16 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
 
   return {
     ...OFF,
-    micMode: 'open-mic', muted: false, inputDeviceId: '',
+    micMode: readCallChoice('mic-mode', MIC_MODES, 'open-mic'), muted: false, inputDeviceId: readCallText('input-device'),
     setMicMode: async (mode) => {
       if (get().status === 'starting' || mode === get().micMode) return
+      rememberCallChoice('mic-mode', mode)
       suspendMicrophone(); set({ micMode: mode, muted: false, replyCaption: '' })
       if (mode === 'open-mic') await resumeMicrophone()
     },
     setInputDevice: async (id) => {
       if (get().status === 'starting' || id === get().inputDeviceId) return
+      rememberCallChoice('input-device', id)
       suspendMicrophone(); set({ inputDeviceId: id })
       if (get().micMode === 'open-mic' && !get().muted) await resumeMicrophone()
     },
@@ -230,7 +245,13 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
     },
     beginTalk: async () => {
       const current = get()
-      if (current.status !== 'live' || current.micMode !== 'push-to-talk' || current.muted || current.pttHeld || current.pttFinishing) return
+      if (current.status !== 'live' || current.micMode !== 'push-to-talk' || current.muted || current.pttHeld) return
+      if (current.pttFinishing) {
+        // Released before the microphone opened: nothing was captured, so this
+        // press carries on with the same turn instead of being dropped.
+        if (current.micOpening) set({ pttHeld: true, pttFinishing: false })
+        return
+      }
       set({ pttHeld: true, pttDraft: '', userCaption: '' })
       if (driver?.isReplyActive?.()) get().interrupt('barge_in')
       else { driver?.stopPlayback(); if (current.sessionId) void driver?.bargeIn(current.sessionId).catch(() => {}) }
@@ -254,6 +275,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       if (current.micMode !== 'push-to-talk' || (!current.pttHeld && !current.pttFinishing)) return
       const text = [current.pttDraft, tail.trim()].filter(Boolean).join(' ')
       const signal = mediaSignal
+      releasedTurnId = current.turnId
       set({ turnId: null, pttHeld: false, pttFinishing: false, micOpening: false, pttDraft: '', userCaption: text })
       if (signal) driver?.closeMicrophone(null, signal)
       mediaSignal = null; microphoneController = null
@@ -395,6 +417,7 @@ export function __resetCommanderCall(): void {
   startController?.abort()
   startController = null
   mediaSignal = null
+  releasedTurnId = null
   microphoneController?.abort(); microphoneController = null; microphoneGeneration++
   listeners.clear()
   useCommanderCallStore.setState({ ...OFF, micMode: 'open-mic', muted: false, inputDeviceId: '', error: null, retrySessionId: null, dismissedTurnErrorId: null, lastEvent: null })

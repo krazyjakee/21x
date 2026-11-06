@@ -32,6 +32,7 @@ import { dangerousToolReason } from './tool-safety'
 import { claudeServerPrefix, claudeToolIds, resolveDisallowedToolNames } from '../mcp-tool-limits'
 import { rewriteWithRtk, rtkProcessEnv } from './shared/rtk-session'
 import { removeSessionEnvFile, writeSessionEnvFile } from './shared/session-env-file'
+import { AGENT_WORK_ENV } from '../../shared/agent-work-marker'
 
 type ClaudeSDK = typeof import('@anthropic-ai/claude-agent-sdk')
 type Query = import('@anthropic-ai/claude-agent-sdk').Query
@@ -1451,7 +1452,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
    * not refuse to start as a nested session.
    */
   private buildClaudeEnvironment(config?: SessionConfig, secretEnvFile?: string): Record<string, string> {
-    const env = { ...process.env } as Record<string, string>
+    const env = { ...process.env, ...AGENT_WORK_ENV } as Record<string, string>
     delete env.CLAUDECODE
     if (config) Object.assign(env, rtkProcessEnv(config, env))
     if (secretEnvFile) env.CLAUDE_ENV_FILE = secretEnvFile

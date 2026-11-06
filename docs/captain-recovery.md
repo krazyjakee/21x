@@ -97,13 +97,13 @@ running Captain writes the user part before the backend has accepted anything.
 |---|---|
 | `acknowledged` | Stops listing it. |
 | `failed` | Keeps it, and says 21x has stopped retrying. A person sending it again (Send now, Retry, or the next message, which sends older ones first) reopens the row with a full set of attempts. |
-| `timed_out` | Returns the words and attachments to the composer and says to check the conversation, because the backend may have accepted it. |
+| `timed_out` | Returns the words and attachments to the composer and says to check the conversation, because the backend may have accepted it. A delivery stopped for provider review ends here too, for the same reason. |
 | `cancelled` | Returns the words and attachments to the composer. This is how Stop gives them back. |
 | anything else | Keeps it, and main keeps retrying. |
 
-A `failed` row stopped for provider review stays shut. Delivery is unknown there,
-so sending it again under the same key reports that failure and sends nothing;
-the person inspects the conversation and writes a new message.
+Neither `timed_out` nor `cancelled` can be sent again under the same key: doing
+so reports the failure and sends nothing. Rows an earlier build left as `failed`
+after stopping for provider review stay shut the same way.
 
 Only the user-facing send surfaces reopen a row. `sendMessage` does not, because
 internal senders replay their own stable keys and a failed wake must stay failed.

@@ -1,3 +1,6 @@
+import { Inbox } from 'lucide-react'
+import type { CallEvent } from '@shared/commander-call'
+import { useProjectStore } from '@/stores/project-store'
 import { useVoiceStore } from '@/stores/voice-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
@@ -27,6 +30,13 @@ export function useCommanderCaption(presentation: CallPresentation) {
 }
 
 export type CommanderCaption = ReturnType<typeof useCommanderCaption>
+
+/** A quiet "where to read it" chip. Reports never interrupt the call (#88). */
+export function CallReportNotice({ event }: { event: CallEvent | null }) {
+  const project = useProjectStore(s => event?.kind === 'report' ? s.projects.find(item => item.id === event.projectId)?.name : undefined)
+  if (event?.kind !== 'report') return null
+  return <p className="commander-stage-notice text-sm"><Inbox className="size-icon-sm shrink-0" aria-hidden="true" />{project ? `Report from ${project}` : 'Report arrived'} · read it in Chat</p>
+}
 
 export function CommanderCaptions({ caption, compact = false }: { caption: CommanderCaption; compact?: boolean }) {
   const enabled = useCommanderCallUiStore(s => s.captions)

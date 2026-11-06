@@ -263,6 +263,22 @@ describe('owned Commander microphone modes', () => {
     expect(useCommanderCallStore.getState().status).toBe('off')
   })
 
+  it('carries on with the turn when the key is pressed again while the microphone opens', async () => {
+    let complete!: (id: string) => void
+    const driver = fakeDriver(() => new Promise(resolve => { complete = resolve }))
+    driver.finishMicrophone = vi.fn(async () => undefined)
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().setMicMode('push-to-talk')
+    await useCommanderCallStore.getState().start('session-1')
+    const opening = useCommanderCallStore.getState().beginTalk()
+    useCommanderCallStore.getState().finishTalk()
+    await useCommanderCallStore.getState().beginTalk()
+    complete('slow-mic'); await opening
+    expect(useCommanderCallStore.getState()).toMatchObject({ pttHeld: true, pttFinishing: false, turnId: 'slow-mic' })
+    expect(driver.openMicrophone).toHaveBeenCalledOnce()
+    expect(driver.finishMicrophone).not.toHaveBeenCalled()
+  })
+
   it('switches mode/device and mute without ending the call or opening concurrent capture', async () => {
     const driver = fakeDriver()
     bindCommanderCallDriver(driver)

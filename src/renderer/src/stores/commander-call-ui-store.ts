@@ -1,10 +1,13 @@
 import { create } from 'zustand'
+import { readCallChoice, rememberCallChoice } from '@/lib/commander-call/call-preferences'
 import { useUIStore } from './ui-store'
 import { useCommanderCallStore } from './commander-call-store'
 import { useCommanderStore } from './commander-store'
 
 export type CaptionSize = 'small' | 'medium' | 'large'
 export type PipCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+const CAPTION_SIZES: readonly CaptionSize[] = ['small', 'medium', 'large']
+const PIP_CORNERS: readonly PipCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
 
 let returnFocus: HTMLElement | null = null
 let returnLabel: string | null = null
@@ -28,12 +31,16 @@ interface CallUiState {
 }
 
 export const useCommanderCallUiStore = create<CallUiState>((set, get) => ({
-  captions: true, captionSize: 'medium', pipRequested: false, corner: 'bottom-right', panelOpen: true, notice: null,
-  setCaptionSize: captionSize => set({ captionSize }),
-  toggleCaptions: () => set({ captions: !get().captions }),
+  captions: readCallChoice('captions', ['on', 'off'], 'on') === 'on',
+  captionSize: readCallChoice('caption-size', CAPTION_SIZES, 'medium'),
+  pipRequested: false,
+  corner: readCallChoice('pip-corner', PIP_CORNERS, 'bottom-right'),
+  panelOpen: true, notice: null,
+  setCaptionSize: captionSize => { rememberCallChoice('caption-size', captionSize); set({ captionSize }) },
+  toggleCaptions: () => { const captions = !get().captions; rememberCallChoice('captions', captions ? 'on' : 'off'); set({ captions }) },
   togglePanel: () => set({ panelOpen: !get().panelOpen }),
   setPanelOpen: panelOpen => set({ panelOpen }),
-  setCorner: corner => set({ corner }),
+  setCorner: corner => { rememberCallChoice('pip-corner', corner); set({ corner }) },
   showPip: () => {
     cancelFocusRestore?.()
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
