@@ -4,7 +4,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-host-dispatch",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 7243,
+      "line": 7245,
       "column": 52,
       "target": "reviewed-event-wrapper",
       "method": "send",
@@ -43,7 +43,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-broadcast",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 7248,
+      "line": 7250,
       "column": 7,
       "target": "reviewed-event-wrapper",
       "method": "send",
@@ -80,7 +80,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-persist-or-broadcast",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 7279,
+      "line": 7281,
       "column": 5,
       "target": "reviewed-event-wrapper",
       "method": "send",
