@@ -1794,3 +1794,88 @@ describe('ClaudeCodeAdapter secret env file', () => {
     expect(removeSessionEnvFile).toHaveBeenCalledWith('/tmp/21x-session-env/env.sh')
   })
 })
+
+describe('ClaudeCodeAdapter AskUserQuestion pause', () => {
+  // The sequence Claude Code 2.1.317 sends when canUseTool denies AskUserQuestion with interrupt.
+  const questions = [{ question: 'Red or blue?', header: 'Colour', options: [{ label: 'Red' }, { label: 'Blue' }], multiSelect: false }]
+  const asked = { type: 'assistant', uuid: 'a-1', message: { id: 'msg-1', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'AskUserQuestion', input: { questions } }] } }
+  const denied = {
+    type: 'user', uuid: 'u-1', message: { role: 'user', content: [{
+      type: 'tool_result', tool_use_id: 'toolu_1', is_error: true,
+      content: "The user doesn't want to proceed with this tool use. The tool use was rejected.",
+    }] },
+  }
+  const interrupted = { type: 'user', uuid: 'u-2', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } }
+  const paused = {
+    type: 'result', subtype: 'error_during_execution', is_error: true, uuid: 'r-1', stop_reason: 'tool_use', terminal_reason: 'aborted_tools',
+    errors: ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use'],
+    permission_denials: [{ tool_name: 'AskUserQuestion', tool_use_id: 'toolu_1', tool_input: { questions } }],
+  }
+
+  async function consume(messages: unknown[]) {
+    const { adapter, session: created } = createAdapterWithSession('s1', [], { status: 'busy' })
+    const session: any = created
+    const remaining = [...messages]
+    session.queryIterator = {
+      [Symbol.asyncIterator]() { return this },
+      async next() { return remaining.length ? { done: false, value: remaining.shift() } : { done: true, value: undefined } },
+    }
+    await (adapter as any).consumeStream('s1', session)
+    return { adapter, session }
+  }
+
+  const poll = (adapter: ClaudeCodeAdapter, seen = { messages: new Set<string>(), parts: new Set<string>(), lengths: new Map<string, string>() }) =>
+    adapter.pollMessages('s1', seen.messages, seen.parts, seen.lengths, {} as any)
+
+  it('waits for the answer instead of reporting a failed turn', async () => {
+    const { adapter, session } = await consume([asked, denied, interrupted, paused])
+
+    expect(session.lastError).toBeNull()
+    expect(session.providerFailure).toBeUndefined()
+    expect(session.pendingQuestions.has('toolu_1')).toBe(true)
+    await expect(adapter.getStatus('s1', {} as any)).resolves.toEqual({ type: 'waiting_approval' })
+  })
+
+  it('leaves the question open when the denial arrives in the same poll', async () => {
+    const { adapter } = await consume([asked, denied, interrupted, paused])
+    const parts = await poll(adapter)
+
+    expect(parts.filter((part) => part.type === 'error')).toEqual([])
+    expect(parts.filter((part) => part.id === 'tool-toolu_1')).toEqual([expect.objectContaining({ type: 'question', tool: expect.objectContaining({ status: 'pending', questions }) })])
+  })
+
+  it('leaves the question open when the denial arrives in a later poll', async () => {
+    const { adapter, session } = await consume([asked])
+    const seen = { messages: new Set<string>(), parts: new Set<string>(), lengths: new Map<string, string>() }
+    await poll(adapter, seen)
+    session.messageBuffer.push(denied, interrupted, paused)
+
+    const parts = await poll(adapter, seen)
+    expect(parts.filter((part) => part.id === 'tool-toolu_1' || part.type === 'error')).toEqual([])
+  })
+
+  it('still reports a question tool failure that is not the denial', async () => {
+    const { adapter, session } = await consume([asked])
+    const seen = { messages: new Set<string>(), parts: new Set<string>(), lengths: new Map<string, string>() }
+    await poll(adapter, seen)
+    session.messageBuffer.push({ type: 'user', uuid: 'u-3', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'Red' }] } })
+
+    const parts = await poll(adapter, seen)
+    expect(parts).toEqual([expect.objectContaining({ id: 'tool-toolu_1', update: true, tool: expect.objectContaining({ status: 'success', output: 'Red' }) })])
+  })
+
+  it('still treats an interrupted turn as failed when another tool was denied', async () => {
+    const { adapter, session } = await consume([{ ...paused, permission_denials: [{ tool_name: 'Bash', tool_use_id: 'toolu_2', tool_input: {} }] }])
+
+    expect(session.lastError).toContain('ede_diagnostic')
+    await expect(adapter.getStatus('s1', {} as any)).resolves.toMatchObject({ type: 'error' })
+    expect((await poll(adapter)).map((part) => part.type)).toEqual(['error'])
+  })
+
+  it('finishes the turn normally once the answer has been sent', async () => {
+    const { adapter, session } = await consume([asked, denied, interrupted, paused])
+    session.pendingQuestions.clear()
+
+    await expect(adapter.getStatus('s1', {} as any)).resolves.toEqual({ type: 'idle' })
+  })
+})

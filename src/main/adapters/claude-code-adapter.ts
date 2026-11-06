@@ -26,7 +26,7 @@ import type {
 import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
 import { assertClaudeSupportsSecrets, findClaudeExecutable } from './claude-code-executable'
 import { cleanSessionFile, isValidClaudeSessionId, loadSessionHistory } from './claude-code-history'
-import { buildToolTitle, ClaudeSystemSubtype, convertSDKMessageToParts, resultErrorText } from './claude-code-message-converter'
+import { buildToolTitle, ClaudeSystemSubtype, convertSDKMessageToParts, isQuestionPauseResult, resultErrorText } from './claude-code-message-converter'
 import { claudeCodePermissionMode } from './permission-mode'
 import { dangerousToolReason } from './tool-safety'
 import { claudeServerPrefix, claudeToolIds, resolveDisallowedToolNames } from '../mcp-tool-limits'
@@ -1153,8 +1153,10 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           if (reported) session.tokenUsage = { ...reported, provenance: 'reported', turnId: session.recoveryIntentId }
         }
 
+        const questionPause = isQuestionPauseResult(msg as Record<string, unknown>)
+
         // Handle error result messages (e.g., rate limits) before treating as normal
-        if (msg.type === 'result' && msg.is_error) {
+        if (msg.type === 'result' && msg.is_error && !questionPause) {
           const raw = msg as Record<string, unknown>
           const errorText = resultErrorText(raw)
             ?? (typeof raw.subtype === 'string' && raw.subtype ? `Error during ${raw.subtype}` : 'Unknown error (no details in result message)')
@@ -1228,7 +1230,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           } else if (msg.subtype === 'idle') {
             session.status = 'idle'
           }
-        } else if (msg.type === 'result' && !msg.is_error) {
+        } else if (msg.type === 'result' && (!msg.is_error || questionPause)) {
           console.log('[ClaudeCodeAdapter] Received result message')
           session.sawResult = true
         } else if (msg.type === 'assistant' || msg.type === 'user') {

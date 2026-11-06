@@ -48,6 +48,17 @@ export function resultErrorText(raw: Record<string, unknown>): string | null {
 }
 
 /**
+ * True for the `result` of a turn the adapter paused to ask AskUserQuestion:
+ * canUseTool denies it with interrupt, and the CLI reports any interrupted turn
+ * as an error. Nothing failed here, the turn waits for the user's answer.
+ */
+export function isQuestionPauseResult(raw: Record<string, unknown>): boolean {
+  return raw.type === 'result' && raw.is_error === true && raw.subtype === 'error_during_execution'
+    && Array.isArray(raw.permission_denials)
+    && raw.permission_denials.some((denial) => (denial as { tool_name?: unknown } | null)?.tool_name === 'AskUserQuestion')
+}
+
+/**
  * Converts SDKMessage to MessagePart[] format
  */
 export function convertSDKMessageToParts(
@@ -254,6 +265,7 @@ export function convertSDKMessageToParts(
         tool_use_id?: string
         content?: string
         text?: string
+        is_error?: boolean
       }
 
       if (blockWithProps.type === 'text' && blockWithProps.text) {
@@ -274,6 +286,8 @@ export function convertSDKMessageToParts(
         const resultContent = blockWithProps.content || ''
 
         const previousContent = partContentLengths.get(toolPartId)
+        // The denial only ends the turn. The question stays open for the answer.
+        if (blockWithProps.is_error && previousContent?.endsWith(':AskUserQuestion')) continue
         // Plan mode tools should not be truncated (cap at 50K for safety)
         const isPlanReview = previousContent?.endsWith(':ExitPlanMode') || previousContent?.endsWith(':EnterPlanMode')
         // Filter out confirmation prompts like "Exit plan mode?" / "Enter plan mode?" — not useful content
@@ -382,6 +396,7 @@ export function convertSDKMessageToParts(
   } else if (msgWithProps.type === 'result') {
     // Surface error result messages (e.g., rate limit errors) to the UI
     const resultMsg = msg as Record<string, unknown>
+    if (isQuestionPauseResult(resultMsg)) return parts
     if (resultMsg.is_error) {
       const errorText = resultErrorText(resultMsg) ?? 'An error occurred (no details available)'
 
