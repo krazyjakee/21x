@@ -101,7 +101,7 @@ export const AGENT_SERVER_START_TIMEOUT_MS = 30_000
 export const AGENT_SESSION_START_TIMEOUT_MS = 60_000
 export const AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS = 1000
 const DELIVERY_CLAIM_MS = 60_000
-/** Ends `last_error` on a row stopped at an unknown delivery. It can never be sent again. */
+/** Ends `last_error` on a row stopped at an unknown delivery. Never sent again. */
 const DELIVERY_NEEDS_REVIEW = '; provider recovery requires review before any new delivery.'
 /** Sent to a session found idle after a restart cut its run short. */
 const RESTART_CONTINUE_PROMPT = 'The app restarted while you were working on this task. Continue from where you left off. If the task is already finished, say so briefly.'
@@ -5962,8 +5962,8 @@ export class AgentManager extends EventEmitter {
   reopenGaveUpDelivery(deliveryId: string | undefined): void {
     if (!deliveryId || !this.db.db || typeof this.db.db.prepare !== 'function') return
     const record = this.deliveries.getByKey(deliveryId)
-    // Stopped for review is not gave up: the backend may have the message, so
-    // this row stays shut for the same reason as `timed_out`.
+    // Rows from before these were written as `timed_out` are still `failed`. The
+    // backend may have those too, so they stay shut for the same reason.
     if (record?.kind === 'agent_message' && record.state === 'failed' && !record.lastError?.endsWith(DELIVERY_NEEDS_REVIEW)) this.deliveries.reopen(record.id)
   }
 
@@ -6140,7 +6140,9 @@ export class AgentManager extends EventEmitter {
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-timeout-${claimed.id}`,
           `${detail}. Backend acceptance is unknown; inspect the conversation before retrying.`)
       } else if (claimed.taskId && this.providerRecoveries.get(claimed.taskId)?.state === 'failed') {
-        this.deliveries.terminal(claimed.id, 'failed', `${detail}${DELIVERY_NEEDS_REVIEW}`)
+        // Not `failed`: the backend may have it, so it can never be sent again and
+        // the words go back to the person, who checks the conversation first.
+        this.deliveries.terminal(claimed.id, 'timed_out', `${detail}${DELIVERY_NEEDS_REVIEW}`)
       } else if (claimed.attemptCount >= 5) {
         this.deliveries.terminal(claimed.id, 'failed', detail)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-failed-${claimed.id}`,

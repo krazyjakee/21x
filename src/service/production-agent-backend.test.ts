@@ -167,6 +167,9 @@ describe('production session commands on the actual manager', () => {
     await expect(call('agentSession:sendByTaskId', [f.task.id, 'Unconfirmed instruction', undefined, 'uncertain-intent'])).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
     expect(adapter.sendPrompt).toHaveBeenCalledTimes(2)
     expect(adapter.createSession).toHaveBeenCalledOnce()
+    // Handled like a timeout, so the Captain column returns the words instead of
+    // listing a row that no retry can ever clear.
+    expect(db.db.prepare("SELECT state FROM delivery_outbox WHERE task_id = ? AND kind = 'agent_message' AND last_error LIKE '%requires review%'").get(f.task.id)).toEqual({ state: 'timed_out' })
   })
 
   it('uses actual pending native request identity, rejects stale/foreign answers and supports permission and question outcomes', async () => {

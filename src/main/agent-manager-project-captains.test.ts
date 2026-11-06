@@ -598,7 +598,7 @@ describe('per-project Captain conversations', () => {
     expect(new DeliveryStore(db).getByKey('held-by-panel')).toMatchObject({ state: 'acknowledged' })
   })
 
-  it('keeps a delivery shut when it stopped for review, because the backend may have it', async () => {
+  it('keeps a row an earlier build stopped for review shut, because the backend may have it', async () => {
     const manager = newManager(new FakeAdapter())
     const store = new DeliveryStore(db)
     const { record } = store.enqueue({ idempotencyKey: 'unknown-boundary', kind: 'agent_message', taskId: alphaCaptain, payload: '{}' })
