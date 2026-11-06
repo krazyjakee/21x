@@ -563,6 +563,18 @@ describe('TaskWorkspace – stale triage session cleanup', () => {
     })
   })
 
+  it('states no choice in the automatic cleanup when a task completes, so the main process can keep a shared workspace', async () => {
+    const task = makeRendererTask({ repos: ['peakflo/20x'], status: TaskStatus.AgentWorking })
+    useAgentStore.getState().initSession(task.id, 'live-session', 'agent-1')
+    ;(window.electronAPI.agentSession.stop as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true })
+    const view = renderWorkspace(task)
+    view.rerender(
+      <TaskWorkspace task={{ ...task, status: TaskStatus.Completed }} agents={[makeAgent()]} onEdit={noopFn} onDelete={noopFn} onUpdateAttachments={noopFn} onUpdateOutputFields={noopFn} onCompleteTask={noopFn} onAssignAgent={noopFn} onUpdateTask={noopAsync} />
+    )
+    await waitFor(() => expect(window.electronAPI.worktree.cleanup).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(window.electronAPI.worktree.cleanup).mock.calls[0]).toEqual([task.id, [{ fullName: 'peakflo/20x' }], 'peakflo', undefined])
+  })
+
   it('removes stale triage session on mount when task is no longer triaging', () => {
     // Simulate a leftover triage session: sessionId set, idle, has messages, but task
     // has already transitioned to NotStarted and has no persisted session_id.

@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import type { IpcDeps } from './deps'
 import { FORGEJO_LOGIN_SETTING, isGitProvider, recordRepoProviders, type GitProvider } from '../repo-providers'
+import { electronKeepsWorkspaces } from '../workspace-paths'
 
 const TEA_UNAVAILABLE = { installed: false, authenticated: false, logins: [], code: 'not-installed' }
 
@@ -62,6 +63,13 @@ export function registerGitHandlers({ db, githubManager, gitlabManager, forgejoM
   })
 
   ipcMain.handle('worktree:cleanup', async (_, taskId: string, repos: { fullName: string }[], org: string, removeTaskDir?: boolean) => {
+    // A caller that states no choice is the automatic cleanup when a task completes.
+    // Deleting a task says true and dropping a repository says false: the user asked
+    // for those, and whether a shared folder should overrule them is not decided.
+    if (removeTaskDir === undefined && electronKeepsWorkspaces()) {
+      console.log(`[WorkspaceCleanup] Kept the workspace of completed task ${taskId}: another app shares these folders`)
+      return
+    }
     await worktreeManager.cleanupTaskWorkspace(taskId, repos, org, removeTaskDir ?? true)
   })
 

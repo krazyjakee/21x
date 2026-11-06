@@ -163,7 +163,8 @@ export function TaskDialogs({
           await worktreeApi.cleanup(
             deletingTaskId,
             deletingTask.repos.map((r) => ({ fullName: r })),
-            org
+            org,
+            true
           )
         }
       } catch (error) {

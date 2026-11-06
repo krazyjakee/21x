@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { existsSync, readdirSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
+import { tauriSharesWorkspaces } from './platform/profile-lock'
 
 /**
  * The root every agent task workspace lives under.
@@ -11,6 +12,15 @@ import { join } from 'path'
  * second copy that drifted would make a process look un-leaked and keep it.
  */
 export const WORKSPACES_DIR = join(app.getPath('userData'), 'workspaces')
+
+/**
+ * Whether this app must leave whole workspaces alone, because the Tauri app shares
+ * this folder and its tasks can look finished or unknown here. This file is
+ * Electron-only, which is what keeps Tauri's own cleanup out of this rule.
+ */
+export function electronKeepsWorkspaces(): boolean {
+  return tauriSharesWorkspaces(dirname(WORKSPACES_DIR))
+}
 
 /** Where a task's uploaded attachments are stored. */
 export function taskAttachmentsDir(taskId: string): string {

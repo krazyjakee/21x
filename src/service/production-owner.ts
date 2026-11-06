@@ -30,7 +30,7 @@ import { TunnelManagerCore } from '../main/tunnel-manager-core'
 import SQLite from 'better-sqlite3'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { TASK_SOURCE_STORED_CREDENTIAL_FIELDS } from '../shared/task-source-credentials'
-import { ELECTRON_SHARED_ROOT_SETTING, ElectronProfileImportError, LEGACY_MARKER_DETACHED, MANAGED_TASK_MCP_MARKER, holdElectronProfile, importElectronProfile, folderPresent, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
+import { ELECTRON_SHARED_ROOT_SETTING, ElectronProfileImportError, LEGACY_MARKER_DETACHED, MANAGED_TASK_MCP_MARKER, ensureTauriSharedMarker, holdElectronProfile, importElectronProfile, folderPresent, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
 import { ProductionAdapters } from './production-adapters'
 import { ProductionProviderOwner } from './production-provider-owner'
 import { createHash, randomUUID } from 'node:crypto'
@@ -772,7 +772,11 @@ export class ProductionOwner {
     if (legacy) {
       // Checked first: taking the lock would recreate a folder the user deleted.
       if (!folderPresent(legacy.profileRoot)) throw new ProductionOwnerError('ELECTRON_FOLDER_MISSING')
-      this.lock = jointProfileLock(this.lock, holdElectronProfile(legacy.profileRoot))
+      const shared = holdElectronProfile(legacy.profileRoot)
+      this.lock = jointProfileLock(this.lock, shared)
+      // Without it Electron's cleanup can remove this session's work, so no shared
+      // profile runs unprotected. Nothing else has touched a folder yet.
+      try { ensureTauriSharedMarker(shared) } catch { throw new ProductionOwnerError('ELECTRON_MARKER_UNWRITABLE') }
     }
     const profileRoot = this.lock.profileRoot
     // After both locks: a refused launch has thrown above and logs nothing. This

@@ -2,7 +2,7 @@ import type { BrowserWindow } from 'electron'
 import { guardedIpcSend } from './guarded-ipc-send'
 import type { DatabaseManager } from './database'
 import type { WorktreeManager } from './worktree-manager'
-import { WORKSPACES_DIR, listWorkspaceDirs } from './workspace-paths'
+import { WORKSPACES_DIR, electronKeepsWorkspaces, listWorkspaceDirs } from './workspace-paths'
 import { WorkspaceCleanupSchedulerCore } from './workspace-cleanup-scheduler-core'
 export type { CleanupResult } from './workspace-cleanup-scheduler-core'
 
@@ -14,6 +14,7 @@ export class WorkspaceCleanupScheduler extends WorkspaceCleanupSchedulerCore {
     super(db, worktrees, {
       workspacesRoot: WORKSPACES_DIR,
       listWorkspaceDirs,
+      keepWholeWorkspaces: electronKeepsWorkspaces,
       emit: (channel, data) => {
         const window = this.mainWindow
         if (!window || window.isDestroyed()) return

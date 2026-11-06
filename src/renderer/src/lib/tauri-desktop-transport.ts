@@ -73,6 +73,7 @@ export function productionBootstrapMessage(value: unknown): string | null {
   if (code === 'ELECTRON_PROFILE_IN_USE' && phase === 'profile-lock') return 'Your previous 21x app (the Electron version) is using this profile, and the two cannot run on it together. Quit it, then open this app again. Your data was not changed.'
   if (code === 'ELECTRON_FOLDER_MISSING' && ['profile-lock', 'database-preflight'].includes(phase)) return 'The folder where your previous 21x app kept its workspaces, repositories and attachments is missing, so 21x stopped before changing anything. It is normally a folder named 21x in your app data folder. If it was moved or is on a drive that is not connected, put it back, then close 21x and open it again. If you deleted it on purpose, you can stop using it.'
   if (code === 'ELECTRON_LINK_RESTORED' && phase === 'database-preflight') return '21x lost its record of the folder it shares with your previous 21x app, so it stopped and put the record back. Your data was not changed. Close 21x and open it again.'
+  if (code === 'ELECTRON_MARKER_UNWRITABLE' && phase === 'profile-lock') return '21x could not save a small file in the folder it shares with your previous 21x app, so it stopped before changing anything. That file stops the previous app\'s cleanup from removing your work. The folder is normally named 21x, in your app data folder. Make sure the drive has free space and that your user account can write to that folder, then close 21x and open it again.'
   if (code === 'ELECTRON_CREDENTIALS_UNAVAILABLE' && phase === 'database-preflight') return 'Your system keyring could not be opened to bring over the API keys saved by your previous 21x app. Unlock your keyring (or sign in again), then try again.'
   if (code === 'ELECTRON_PROFILE_INVALID' && phase === 'database-preflight') return 'Your previous 21x data could not be read for import. It has not been changed. Try again; if this keeps happening, move it aside and open 21x to start fresh.'
   if (code === 'AMBIGUOUS_MANAGED_MCP_SERVER' && phase === 'database') return 'This profile has a task-management tool server that 21x cannot confirm it created, so it was left untouched. Rename or remove that server in the original app, then reopen 21x. Changes are paused.'
@@ -144,7 +145,7 @@ export async function getTauriEngineEpoch(native: TauriDesktopApi): Promise<stri
   const failure = productionBootstrapMessage(status)
   if (failure) {
     const code = startupFailureCode(status), folderMissing = code === 'ELECTRON_FOLDER_MISSING'
-    throw new NativeBootstrapUnavailableError(failure, folderMissing ? () => native.core.invoke<boolean>('stop_using_old_folder') : undefined, folderMissing || code === 'ELECTRON_LINK_RESTORED')
+    throw new NativeBootstrapUnavailableError(failure, folderMissing ? () => native.core.invoke<boolean>('stop_using_old_folder') : undefined, folderMissing || code === 'ELECTRON_LINK_RESTORED' || code === 'ELECTRON_MARKER_UNWRITABLE')
   }
   if (!isRecord(status) || status.available !== true || status.protocolVersion !== 1 ||
     typeof status.engineEpoch !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(status.engineEpoch)) {

@@ -1,14 +1,14 @@
 import { open } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SQLite from 'better-sqlite3'
-import { constants, cpSync, existsSync, linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync, utimesSync } from 'node:fs'
+import { chmodSync, constants, cpSync, existsSync, linkSync, lstatSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, symlinkSync, statfsSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProductionOwner, ProductionOwnerBootstrap, ProductionServices } from './production-owner'
 import type { CodingAgentAdapter } from '../main/adapters/coding-agent-adapter'
 import type { ChatProvider, ChatProviderEvent } from '../main/chat/providers/types'
 import type { ProtectedApplicationKeyStore } from '../main/platform/authenticated-secret-storage'
-import { heldByTauri } from '../main/platform/profile-lock'
+import { acquireProfileLock, heldByTauri, TAURI_HOLDER_FILE, TAURI_SHARED_WORKSPACES_FILE } from '../main/platform/profile-lock'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import { holdProfileElsewhere, profileFreeElsewhere, profileListing, stopOtherHosts } from '../../test/helpers/profile-holder'
 
@@ -200,6 +200,11 @@ describe('actual production application owner', () => {
       owners.push(next)
       return next
     }
+    const startLoaded = async (f: Awaited<ReturnType<typeof fixture>>, electron?: string) => {
+      const next = load(f, electron)
+      await next.start()
+      return next
+    }
     const storedShare = (f: Awaited<ReturnType<typeof fixture>>) => {
       const db = new SQLite(join(f.bootstrap.paths.profileRoot, '21x.db'), { readonly: true })
       try { return db.prepare('SELECT value FROM settings WHERE key = ?').pluck().get('__electron_shared_root') } finally { db.close() }
@@ -303,6 +308,116 @@ describe('actual production application owner', () => {
       utimesSync(path, new Date('2020-01-01'), new Date('2020-01-01'))
       expect((await session.run(services => services.cleanup.runNow())).cleaned).toBe(0)
       expect(readFileSync(join(path, 'uncommitted'), 'utf8')).toBe('the only copy')
+    })
+
+    describe('the marker that stops Electron cleanup removing this session\'s work', () => {
+      const keepMarker = (root: string) => join(root, TAURI_SHARED_WORKSPACES_FILE)
+
+      it('reaches a profile imported before it existed, on the next launch, while the lock is held', async () => {
+        const f = await fixture(), electron = electronProfile(f)
+        await f.owner.start(); await f.owner.close()
+        expect(existsSync(keepMarker(electron))).toBe(false)
+        const session = load(f, electron)
+        await session.start()
+        expect(lstatSync(keepMarker(electron)).isFile()).toBe(true)
+        expect(await profileFreeElsewhere(electron)).toBe(false)
+      })
+      it('is in place before a first launch imports anything, even one whose import fails', async () => {
+        const f = await fixture(), electron = electronProfile(f)
+        f.bootstrap.legacyImport = { profileRoot: electron, appName: '21x' }
+        await f.owner.start().catch(() => {})
+        expect(existsSync(keepMarker(electron))).toBe(true)
+      })
+      it('outlives the session, and the next launch leaves it alone', async () => {
+        const f = await fixture(), electron = electronProfile(f)
+        const session = await reopen(f, electron)
+        const written = lstatSync(keepMarker(electron), { bigint: true })
+        await session.close()
+        expect(heldByTauri(electron)).toBe(false)
+        expect(lstatSync(keepMarker(electron), { bigint: true }).mtimeNs).toBe(written.mtimeNs)
+        await (await startLoaded(f, electron)).close()
+        expect(lstatSync(keepMarker(electron), { bigint: true }).ino).toBe(written.ino)
+      })
+      it('stays after the user stops sharing, because Electron\'s folders still hold that work', async () => {
+        const f = await fixture(), electron = electronProfile(f)
+        await sharedOnce(f, electron)
+        writeFileSync(marker(f), 'detached')
+        await (await startLoaded(f)).close()
+        expect(existsSync(keepMarker(electron))).toBe(true)
+      })
+      it('writes nothing into any Electron folder for a fresh unshared profile', async () => {
+        const f = await fixture(), electron = electronProfile(f), before = profileListing(electron)
+        await f.owner.start(); await f.owner.close()
+        expect(profileListing(electron)).toEqual(before)
+        expect(existsSync(keepMarker(f.bootstrap.paths.profileRoot))).toBe(false)
+      })
+      it('does not refuse a copied profile, whether the copy already has one or not', async () => {
+        const f = await fixture(), electron = electronProfile(f)
+        await (await reopen(f, electron)).close()
+        const copy = join(f.root, 'copied'), withoutOne = join(f.root, 'copied-before')
+        cpSync(electron, copy, { recursive: true }); cpSync(electron, withoutOne, { recursive: true }); rmSync(keepMarker(withoutOne))
+        writeFileSync(join(copy, TAURI_HOLDER_FILE), 'left by a crash')
+        for (const folder of [copy, withoutOne]) {
+          const session = await startLoaded(f, folder)
+          expect(session.snapshot().phase).toBe('ready')
+          expect(existsSync(keepMarker(folder))).toBe(true)
+          await session.close()
+        }
+      })
+      it('writes nothing when one is there, so something blocking the write cannot refuse it', async () => {
+        const f = await fixture(), electron = electronProfile(f)
+        await (await reopen(f, electron)).close()
+        mkdirSync(join(electron, `${TAURI_SHARED_WORKSPACES_FILE}.writing`))
+        const session = await startLoaded(f, electron)
+        expect(session.snapshot().phase).toBe('ready')
+        await session.close()
+      })
+      it('refuses the launch before anything runs when it cannot be written', async () => {
+        const f = await fixture(), electron = electronProfile(f)
+        // Cannot be cleared away or written past, on any system.
+        mkdirSync(join(electron, `${TAURI_SHARED_WORKSPACES_FILE}.writing`))
+        f.bootstrap.legacyImport = { profileRoot: electron, appName: '21x' }
+        acquireProfileLock(electron).release()
+        const before = profileListing(electron), monitors = process.listenerCount('uncaughtExceptionMonitor')
+        await expect(f.owner.start()).rejects.toThrow('ELECTRON_MARKER_UNWRITABLE')
+        expect(f.owner.recoveryState()).toEqual({ phase: 'failed', stage: 'profile-lock', code: 'ELECTRON_MARKER_UNWRITABLE', owned: false })
+        expect(f.store.create).not.toHaveBeenCalled()
+        expect(existsSync(join(f.bootstrap.paths.profileRoot, '21x.db'))).toBe(false)
+        expect(existsSync(join(f.bootstrap.paths.profileRoot, 'logs'))).toBe(false)
+        expect(existsSync(f.bootstrap.paths.workspaceRoot)).toBe(false)
+        expect(process.listenerCount('uncaughtExceptionMonitor')).toBe(monitors)
+        expect(profileListing(electron)).toEqual(before)
+        // Both locks went with it, so the way forward works without a restart.
+        expect(await profileFreeElsewhere(electron)).toBe(true)
+      })
+      it('never reaches the write in a read-only folder: the lock refuses that first, and writes nothing', async () => {
+        if (process.getuid?.() === 0) return
+        const f = await fixture(), electron = electronProfile(f)
+        f.bootstrap.legacyImport = { profileRoot: electron, appName: '21x' }
+        acquireProfileLock(electron).release()
+        const before = profileListing(electron)
+        chmodSync(electron, 0o500)
+        try {
+          await expect(f.owner.start()).rejects.toThrow('PROFILE_LOCK_INVALID')
+          expect(profileListing(electron)).toEqual(before)
+        } finally { chmodSync(electron, 0o700) }
+      })
+      it('leaves Tauri cleaning what it cleaned before, in the folder that holds the marker', async () => {
+        const f = await fixture(), electron = electronProfile(f)
+        f.bootstrap.paths.workspaceRoot = join(electron, 'workspaces')
+        const lease = '00000000-0000-4000-8000-000000000000'
+        f.bootstrap.native.workspaceCleanup = { observe: async request => request.action === 'release' ? { released: true } : request.action === 'acquire' ? { status: 'idle', leaseId: lease } : { status: 'idle' } }
+        const session = await reopen(f, electron)
+        const task = await session.run(services => {
+          const created = services.db.createTask(makeTask())!
+          services.db.db.prepare("UPDATE tasks SET status='completed',updated_at='2020-01-01T00:00:00Z' WHERE id=?").run(created.id)
+          return created
+        })
+        const path = join(f.bootstrap.paths.workspaceRoot, task.id); mkdirSync(path); writeFileSync(join(path, 'done'), 'finished work')
+        expect(existsSync(keepMarker(electron))).toBe(true)
+        expect((await session.run(services => services.cleanup.runNow())).cleaned).toBe(1)
+        expect(existsSync(path)).toBe(false)
+      })
     })
 
     it('refuses before credentials, migrations or any write while the Electron app runs', async () => {

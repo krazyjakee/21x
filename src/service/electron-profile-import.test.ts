@@ -1,5 +1,5 @@
 import { createCipheriv, pbkdf2Sync, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import SQLite from 'better-sqlite3'
@@ -7,9 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
 import { configureSecretStorage, getSecretStorage, releaseSecretStorage, type SecretStorage } from '../main/platform/secret-storage'
 import { decryptRecordCredential, decryptSettingValue } from '../main/database/serializers'
-import { acquireProfileLock, HOST_CLAIM_TIMEOUT_MS, PROFILE_LOCK_FILE, type ProfileLock } from '../main/platform/profile-lock'
+import { acquireProfileLock, HOST_CLAIM_TIMEOUT_MS, PROFILE_LOCK_FILE, TAURI_SHARED_WORKSPACES_FILE, tauriSharesWorkspaces, type ProfileLock } from '../main/platform/profile-lock'
 import { holdProfileElsewhere, profileFreeElsewhere, profileListing, stopOtherHosts } from '../../test/helpers/profile-holder'
-import { DROPPED_CREDENTIALS_SETTING, ELECTRON_SHARED_ROOT_SETTING, MANAGED_TASK_MCP_MARKER, createSafeStorageDecoder, holdElectronProfile, importElectronProfile, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
+import { DROPPED_CREDENTIALS_SETTING, ELECTRON_SHARED_ROOT_SETTING, MANAGED_TASK_MCP_MARKER, createSafeStorageDecoder, ensureTauriSharedMarker, holdElectronProfile, importElectronProfile, readLegacyMarker, writeLegacyMarker } from './electron-profile-import'
 
 vi.mock('../main/platform/profile-lock', async importOriginal => {
   const actual = await importOriginal<typeof import('../main/platform/profile-lock')>()
@@ -69,6 +69,61 @@ function fixture() {
   configureSecretStorage(storage)
   return { electron, profile, destination: join(profile, '21x.db'), storage }
 }
+
+describe('the marker a shared profile leaves for Electron', () => {
+  const folder = (): string => { const root = mkdtempSync(join(tmpdir(), '21x-shared-marker-')); roots.push(root); return root }
+  const markerIn = (root: string): string => join(root, TAURI_SHARED_WORKSPACES_FILE)
+  const staged = (root: string): string => `${markerIn(root)}.writing`
+
+  it('is a private regular file with no path, secret or task in it', () => {
+    const root = folder()
+    ensureTauriSharedMarker(hold(root))
+    const info = lstatSync(markerIn(root))
+    expect(info.isFile()).toBe(true); expect(info.mode & 0o777).toBe(0o600); expect(info.size).toBeLessThan(512)
+    expect(readFileSync(markerIn(root), 'utf8')).not.toContain(root)
+    expect(readFileSync(markerIn(root), 'utf8')).not.toContain('/')
+    expect(tauriSharesWorkspaces(root)).toBe(true)
+    expect(existsSync(staged(root))).toBe(false)
+  })
+  it('leaves one already there exactly as it found it', () => {
+    const root = folder(); writeFileSync(markerIn(root), 'an older note')
+    const before = lstatSync(markerIn(root), { bigint: true })
+    ensureTauriSharedMarker(hold(root))
+    const after = lstatSync(markerIn(root), { bigint: true })
+    expect([after.ino, after.mtimeNs]).toEqual([before.ino, before.mtimeNs])
+    expect(readFileSync(markerIn(root), 'utf8')).toBe('an older note')
+  })
+  it('follows no link at either name', () => {
+    const root = folder(), outside = join(folder(), 'outside')
+    symlinkSync(outside, staged(root))
+    ensureTauriSharedMarker(hold(root))
+    expect(existsSync(outside)).toBe(false); expect(lstatSync(markerIn(root)).isFile()).toBe(true)
+    const linked = folder()
+    symlinkSync(outside, markerIn(linked))
+    ensureTauriSharedMarker(hold(linked))
+    expect(existsSync(outside)).toBe(false); expect(readlinkSync(markerIn(linked))).toBe(outside)
+  })
+  it('writes nothing without the lock', () => {
+    const root = folder()
+    expect(() => ensureTauriSharedMarker({ profileRoot: root, assertHeld() { throw new Error('PROFILE_LOCK_LOST') } })).toThrow('PROFILE_LOCK_LOST')
+    expect(readdirSync(root)).toEqual([])
+  })
+  it('fails and leaves nothing when the folder cannot be written', () => {
+    if (process.getuid?.() === 0) return
+    const root = folder(), lock = hold(root), before = profileListing(root)
+    chmodSync(root, 0o500)
+    try {
+      expect(() => ensureTauriSharedMarker(lock)).toThrow()
+      expect(profileListing(root)).toEqual(before)
+    } finally { chmodSync(root, 0o700) }
+  })
+  it('fails when something it cannot clear is in the way of the write', () => {
+    const root = folder(), lock = hold(root)
+    mkdirSync(staged(root))
+    expect(() => ensureTauriSharedMarker(lock)).toThrow()
+    expect(existsSync(markerIn(root))).toBe(false)
+  })
+})
 
 describe('Electron profile import', () => {
   it('copies the data and re-encrypts every credential class under the new profile key', async () => {

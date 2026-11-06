@@ -10,7 +10,7 @@ vi.mock('electron', () => ({
   },
   nativeImage: { createFromPath: vi.fn(() => ({ isEmpty: () => true, toPNG: () => Buffer.alloc(0) })) },
   Notification: vi.fn().mockImplementation(() => ({ show: vi.fn() })),
-  app: { isPackaged: false }
+  app: { isPackaged: false, getPath: vi.fn(() => '/tmp/pf-desktop-test') }
 }))
 
 const { mockSpawn } = vi.hoisted(() => {

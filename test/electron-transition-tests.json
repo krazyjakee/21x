@@ -235,6 +235,10 @@
       "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
     },
     {
+      "file": "src/main/workspace-cleanup-tauri-marker.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
       "file": "src/main/worktree-manager.test.ts",
       "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
     },
