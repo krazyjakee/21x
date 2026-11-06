@@ -15,7 +15,7 @@ vi.mock('@tanstack/react-virtual', () => ({
   })
 }))
 
-/** The task, canvas and Captain chats all render this composer through AgentTranscriptPanel. */
+/** The task and Captain chats both render this composer through AgentTranscriptPanel. */
 function mountTranscript({ onSend = vi.fn(), onSaveImages }: { onSend?: SendHandler; onSaveImages?: SaveImagesHandler } = {}) {
   render(
     <AgentTranscriptPanel

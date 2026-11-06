@@ -7,7 +7,7 @@ import { collectProductionClosure, stageProductionMobile, stageProductionVoiceWo
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
-const pins = { nodeVersion: '22.23.2', nativeDependencies: { 'better-sqlite3': '13.0.3', 'node-pty': '1.1.0' },
+const pins = { nodeVersion: '22.23.2', nativeDependencies: { 'better-sqlite3': '13.0.3' },
   serviceDependencies: { '@paralleldrive/cuid2': '2.3.1' },
   sdkDependencies: { '@anthropic-ai/claude-agent-sdk': '0.3.260', '@anthropic-ai/sdk': '0.123.0', '@opencode-ai/sdk': '1.18.28' } }
 function root() { const value = mkdtempSync(join(tmpdir(), '21x-production-stage-')); roots.push(value); return value }

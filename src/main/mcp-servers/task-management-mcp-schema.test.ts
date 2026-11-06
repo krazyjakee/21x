@@ -149,49 +149,23 @@ describe('tool sets per scope', () => {
   })
 })
 
-describe('browser_reload schema', () => {
-  it('exposes an optional hard-refresh flag for both scopes', () => {
+describe('removed surfaces', () => {
+  const removed = ['browser_navigate', 'browser_snapshot', 'browser_click', 'browser_reload', 'browser_console', 'browser_network',
+    'browser_list_panels', 'browser_recording_list', 'browser_recording_get', 'browser_recording_steps', 'browser_recording_snapshot',
+    'move_task_panel', 'close_task_panel', 'set_canvas_view']
+
+  it('advertises no Canvas or browser tool to any scope', () => {
     for (const scope of [FULL_ACCESS_SCOPE, SCOPED]) {
-      const hard = propertiesOf(scope, 'browser_reload').hard as { type?: string } | undefined
-      expect(hard, 'browser_reload must accept a hard flag').toBeDefined()
-      expect(hard!.type).toBe('boolean')
+      for (const name of removed) expect(toolByName(scope, name), name).toBeUndefined()
     }
   })
 
-  it('keeps hard optional and task_id required', () => {
-    const tool = toolByName(FULL_ACCESS_SCOPE, 'browser_reload')
-    expect(tool!.inputSchema.required).toEqual(['task_id'])
-  })
-})
-
-describe('browser console + network schemas', () => {
-  it('exposes browser_console with level/limit/clear for both scopes', () => {
-    for (const scope of [FULL_ACCESS_SCOPE, SCOPED]) {
-      const props = propertiesOf(scope, 'browser_console')
-      expect(Object.keys(props)).toEqual(expect.arrayContaining(['task_id', 'level', 'limit', 'clear', 'panel_id']))
-      const tool = toolByName(scope, 'browser_console')
-      expect(tool!.inputSchema.required).toEqual(['task_id'])
+  it('offers only the views and targets that still exist', () => {
+    expect(propertiesOf(FULL_ACCESS_SCOPE, 'navigate').view).toMatchObject({ enum: ['dashboard', 'tasks', 'skills', 'settings'] })
+    expect(propertiesOf(FULL_ACCESS_SCOPE, 'open_task').where).toMatchObject({ enum: ['auto', 'workspace', 'modal'] })
+    for (const name of ['get_ui_state', 'navigate', 'open_task']) {
+      expect(toolByName(FULL_ACCESS_SCOPE, name)!.description, name).not.toMatch(/canvas/i)
     }
-  })
-
-  it('exposes browser_network with filter/limit for both scopes', () => {
-    for (const scope of [FULL_ACCESS_SCOPE, SCOPED]) {
-      const props = propertiesOf(scope, 'browser_network')
-      expect(Object.keys(props)).toEqual(expect.arrayContaining(['task_id', 'filter', 'limit', 'panel_id']))
-      const tool = toolByName(scope, 'browser_network')
-      expect(tool!.inputSchema.required).toEqual(['task_id'])
-    }
-  })
-
-  it('dispatches both tools through the shared pass-through route', async () => {
-    const calls: Array<{ route: string; params: Record<string, unknown> }> = []
-    const invoke = async (route: string, params: Record<string, unknown>): Promise<unknown> => {
-      calls.push({ route, params })
-      return { ok: true }
-    }
-    await callToolForScope('browser_console', { task_id: 't1', level: 'error' }, FULL_ACCESS_SCOPE, invoke)
-    await callToolForScope('browser_network', { task_id: 't1', filter: 'api' }, FULL_ACCESS_SCOPE, invoke)
-    expect(calls.map((c) => c.route)).toEqual(['/browser_console', '/browser_network'])
   })
 })
 
@@ -224,37 +198,5 @@ describe('task completion guidance', () => {
     const status = propertiesOf(FULL_ACCESS_SCOPE, 'update_task').status as { description?: string }
     expect(status.description).toContain('source-less tasks')
     expect(status.description).toContain('external source')
-  })
-})
-
-describe('saved browser recording tools', () => {
-  const names = ['browser_recording_list', 'browser_recording_get', 'browser_recording_steps', 'browser_recording_snapshot']
-
-  it('always advertises reading tools for full and task scopes', () => {
-    for (const scope of [FULL_ACCESS_SCOPE, SCOPED]) {
-      for (const name of names) expect(toolByName(scope, name)).toBeDefined()
-    }
-    expect(propertiesOf(SCOPED, 'browser_recording_steps').limit).toMatchObject({ maximum: 100, minimum: 1 })
-  })
-
-  it('pins every reading tool to the caller task scope', async () => {
-    for (const name of names) {
-      const calls: Record<string, unknown>[] = []
-      await callToolForScope(name, { task_id: 'another-task' }, SCOPED, async (_route, params) => {
-        calls.push(params)
-        return { ok: true }
-      })
-      expect(calls).toEqual([{ task_id: 'task-own' }])
-    }
-  })
-
-  it('pins a main task session to its artifact task scope', async () => {
-    const calls: Record<string, unknown>[] = []
-    await callToolForScope('browser_recording_list', { task_id: 'another-task' },
-      { parentTaskId: null, taskId: null, artifactTaskId: 'owner' }, async (_route, params) => {
-        calls.push(params)
-        return { recordings: [] }
-      })
-    expect(calls).toEqual([{ task_id: 'owner' }])
   })
 })

@@ -1,6 +1,6 @@
 import type { AgentDeletionImpact, AgentDeletionResult, PluginUninstallResult } from '@shared/agent-deletion'
 import type { DesktopApi } from '@shared/desktop-api'
-import { desktopApi, desktopSupports, electronBrowserApi } from '@/lib/desktop-api'
+import { desktopApi, desktopSupports } from '@/lib/desktop-api'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
 import type { AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, AgentDeliveryState, TranscriptPartRecord, TranscriptChangedEvent, AgentSessionStartResult, AgentTaskStartResult, AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
@@ -878,18 +878,6 @@ export const voiceTtsApi = {
     desktopApi.voice.tts.onStatus?.(callback),
   onModelProgress: (callback: (event: { model: VoiceTtsModelState }) => void): (() => void) | undefined =>
     desktopApi.voice.tts.onModelProgress?.(callback)
-}
-
-export const browserRecordingApi = {
-  start: (panelId: string, title?: string) => electronBrowserApi()?.startRecording
-    ? electronBrowserApi()!.startRecording(panelId, title)
-    : Promise.resolve({ error: 'Browser recording is unavailable.' } as const),
-  stop: (panelId: string) => electronBrowserApi()?.stopRecording
-    ? electronBrowserApi()!.stopRecording(panelId)
-    : Promise.resolve({ error: 'Browser recording is unavailable.' } as const),
-  status: (panelId: string) => electronBrowserApi()?.recordingStatus
-    ? electronBrowserApi()!.recordingStatus(panelId)
-    : Promise.resolve({ recording: null }),
 }
 
 // ── Chat runtime ────────────────────────────────────────────

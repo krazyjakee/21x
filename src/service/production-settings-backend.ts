@@ -12,7 +12,7 @@ import { AUTHENTICATED_SECRET_STORAGE_FORMAT, getSecretStorage, type SecretStora
 import { CHAT_SETTING_KEYS } from '../shared/chat'
 import type { ProductionCredentialMutation } from '../shared/production-credential-mutation'
 import { PRODUCTION_SETTINGS_CODECS, PRODUCTION_SETTINGS_OPERATIONS, PRODUCTION_API_KEY_SET_MARKER, isProductionCredentialKey,
-  isProductionSettingKey, isProductionSettingWrite, requiresNativeSettingsOwner, settingProjectId, projectProductionSetting, projectProductionSecret,
+  isProductionSettingKey, isProductionSettingWrite, requiresNativeSettingsOwner, projectProductionSetting, projectProductionSecret,
   type ProductionSettingsCodec, type ProductionSettingsOperation, type ProductionEnvKey } from '../shared/production-settings-codecs'
 import type { DesktopCommandMap } from '../shared/desktop-operations'
 import { isJsonValue, ServiceProtocolError, type JsonValue } from '../shared/service-protocol'
@@ -101,9 +101,7 @@ export class ProductionSettingsBackend {
   }
   private settingAllowed(key: string, caller: DesktopCallerContext, write: boolean, value?: string): boolean {
     if (!isProductionSettingKey(key) || !(write ? this.options.canWriteSetting(key, caller) : this.options.canReadSetting(key, caller))) return false
-    const project = settingProjectId(key)
-    if (project && (!this.options.database.getProject(project) || !this.options.canAccessProject(project, caller, write ? 'write' : 'read'))) return false
-    if (!project && !this.options.canManageGlobalConfiguration(caller, write ? 'write' : 'read')) return false
+    if (!this.options.canManageGlobalConfiguration(caller, write ? 'write' : 'read')) return false
     if (!write) {
       const saved = ['current_project_id', 'default_agent_id', CHAT_SETTING_KEYS.agentId].includes(key) ? this.options.database.getSetting(key) : undefined
       if (key === 'current_project_id' && saved && (!this.options.database.getProject(saved) || !this.options.canAccessProject(saved, caller, 'read'))) return false

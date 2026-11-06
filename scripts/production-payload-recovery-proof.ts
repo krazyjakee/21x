@@ -12,19 +12,16 @@ import { PRODUCTION_HOST_SCHEMAS, type ProductionLaunchDescriptor } from '../src
 import { UI_NATIVE_CALLBACK_SCHEMAS } from '../src/shared/ui-native-callbacks'
 import { ATTACHMENT_NATIVE_CALLBACK_SCHEMAS, isPrivateAttachmentDownload, type AttachmentPathReceipt } from '../src/shared/attachment-native-callbacks'
 import { TASK_ATTACHMENT_CODECS, TASK_ATTACHMENT_LIMITS } from '../src/shared/task-attachment-codecs'
-import { TERMINAL_DESKTOP_LIMITS } from '../src/shared/terminal-desktop-codecs'
 import { SERVICE_LIMITS, isBootstrapResult, isRecord, ServiceProtocolError, type JsonValue } from '../src/shared/service-protocol'
 import { TRANSCRIPT_PAGE_LIMITS, type TranscriptPage } from '../src/shared/transcript-page'
 import { createProjection, applyPartsToProjection } from '../src/shared/transcript/projection'
 import { hydrateTranscriptProjection, type TranscriptPageReader } from '../src/renderer/src/lib/transcript-pagination'
-import { createNodePty, terminalProcessCwd } from '../src/main/terminal-process'
-import type { TerminalProcessHost } from '../src/main/terminal-service-core'
 import { TaskAttachmentFileOwner } from '../src/main/task-attachment-file-owner'
 import type { FileAttachmentRecord } from '../src/main/database/types'
 
 /** Fixed workload, not a benchmark with caller-controlled unbounded allocations. */
 export const PAYLOAD_RECOVERY_FIXTURE = Object.freeze({ version: 1, transcriptParts: 1024, partChars: 4096,
-  largeToolChars: 400_000, terminals: 4, terminalLines: 256, terminalLineChars: 1024,
+  largeToolChars: 400_000,
   fragmentBytes: 79, attachmentBytes: TASK_ATTACHMENT_LIMITS.imageBytes, deadlineMs: 15_000 })
 export interface ProofCounter { name: string; expected: number; actual: number; comparison: 'equal' | 'atMost' | 'atLeast' }
 export function assertProofCounter(counter: ProofCounter): void {
@@ -49,56 +46,48 @@ export interface PayloadRecoveryReport {
   counters: ProofCounter[]
   memory: { startRss: number; peakSampledRss: number; peakSampledHeap: number; note: string }
   epochs: string[]
-  cleanup: { ownerClosed: boolean; nativeExits: number; profileRemoved: boolean }
+  cleanup: { ownerClosed: boolean; profileRemoved: boolean }
   remaining: string[]
 }
 
 /** Runs source ProductionService's actual private peer and singleton owners under
- * pinned staged Node/SQLite/node-pty. The host callback is deliberately controlled;
+ * pinned staged Node/SQLite. The host callback is deliberately controlled;
  * this is not a packaged stdio, native Save dialog or installed WebView proof. */
 export async function runProductionPayloadRecoveryProof(): Promise<PayloadRecoveryReport> {
   const pins = JSON.parse(readFileSync(resolve('scripts/tauri-runtime.json'), 'utf8')) as { nodeVersion: string; nativeDependencies: Record<string, string> }
   if (process.versions.electron || process.version !== `v${pins.nodeVersion}` || process.platform !== 'linux' ||
       !process.env.TAURI_NODE_RUNTIME || realpathSync(process.execPath) !== realpathSync(process.env.TAURI_NODE_RUNTIME)) {
-    throw new Error('PAYLOAD_PROOF requires pinned staged standalone Node on Linux; use test:tauri --terminal-proofs')
+    throw new Error('PAYLOAD_PROOF requires pinned staged standalone Node on Linux; use test:tauri --owner-proofs')
   }
   const artifacts: Record<string, string> = {}
-  for (const [name, variable] of [['better-sqlite3', 'TAURI_SQLITE_MODULE'], ['node-pty', 'TAURI_NODE_PTY_MODULE']] as const) {
-    const selected = process.env[variable]
-    if (!selected || realpathSync(selected) !== realpathSync(resolve('src-tauri/resources/service/node_modules', name))) throw new Error(`PAYLOAD_PROOF missing staged ${name}`)
-    const path = join(selected, 'package.json'), bytes = readFileSync(path), metadata = JSON.parse(bytes.toString())
-    if (metadata.name !== name || metadata.version !== pins.nativeDependencies[name]) throw new Error(`PAYLOAD_PROOF wrong staged ${name}`)
-    artifacts[`${name}/package.json`] = digest(bytes)
-    const addon = name === 'node-pty' ? join(selected, 'build/Release/pty.node') : join(selected, 'prebuilds', `${process.platform}-${process.arch}.node`)
-    artifacts[`${name}/native-addon`] = digest(readFileSync(addon))
-  }
+  const name = 'better-sqlite3', selected = process.env.TAURI_SQLITE_MODULE
+  if (!selected || realpathSync(selected) !== realpathSync(resolve('src-tauri/resources/service/node_modules', name))) throw new Error(`PAYLOAD_PROOF missing staged ${name}`)
+  const packagePath = join(selected, 'package.json'), packageBytes = readFileSync(packagePath), metadata = JSON.parse(packageBytes.toString())
+  if (metadata.name !== name || metadata.version !== pins.nativeDependencies[name]) throw new Error(`PAYLOAD_PROOF wrong staged ${name}`)
+  artifacts[`${name}/package.json`] = digest(packageBytes)
+  artifacts[`${name}/native-addon`] = digest(readFileSync(join(selected, 'prebuilds', `${process.platform}-${process.arch}.node`)))
   artifacts.node = digest(readFileSync(process.execPath))
   const sourcePaths = ['scripts/production-payload-recovery-proof.ts', 'scripts/production-payload-recovery-proof.test.ts',
     'src/service/production-service.ts', 'src/service/production-owner.ts', 'src/service/production-desktop-bindings.ts',
     'src/service/transport/peer.ts', 'src/service/transport/framing.ts', 'src/service/task-attachment-backend.ts',
-    'src/main/task-attachment-file-owner.ts', 'src/main/terminal-service-core.ts', 'src/main/terminal-process.ts',
-    'src/service/terminal-backend.ts', 'src/main/database/manager.ts', 'src/renderer/src/lib/transcript-pagination.ts',
+    'src/main/task-attachment-file-owner.ts', 'src/main/database/manager.ts', 'src/renderer/src/lib/transcript-pagination.ts',
     'src/shared/transcript/projection.ts', 'src/shared/service-protocol.ts', 'src/shared/transcript-page.ts',
-    'src/shared/task-attachment-codecs.ts', 'src/shared/terminal-desktop-codecs.ts', 'scripts/tauri-runtime.json']
+    'src/shared/task-attachment-codecs.ts', 'scripts/tauri-runtime.json']
   const sources = Object.fromEntries(sourcePaths.map(path => [path, digest(readFileSync(resolve(path)))]))
   const root = realpathSync(mkdtempSync(join(tmpdir(), '21x-payload-recovery-'))), keys = new Map<string, Buffer>()
   mkdirSync(join(root, 'resources'))
-  const ptyRoot = realpathSync(process.env.TAURI_NODE_PTY_MODULE!), pty = createRequire(join(ptyRoot, 'package.json'))(ptyRoot) as typeof import('node-pty')
   const sqliteRoot = realpathSync(process.env.TAURI_SQLITE_MODULE!), SQLite = createRequire(join(sqliteRoot, 'package.json'))(sqliteRoot) as typeof import('better-sqlite3')
-  const receipts: Array<{ exited: boolean; kills: number }> = []
   let maxRead = 0, maxWrite = 0, fdCount = 0, maxFds = 0, sampleHeap = 0, sampleRss = process.memoryUsage().rss
-  let maxQueueBytes = 0, maxQueueFrames = 0, maxPending = 0, fragments = 0, maxFrame = 0, terminalEvents = 0, maxTerminalEvent = 0
+  let maxQueueBytes = 0, maxQueueFrames = 0, maxPending = 0, fragments = 0, maxFrame = 0
   let pageBytes = 0, maxPageParts = 0, snapshotPages = 0, deltaPages = 0, downloaded = 0, heldReply: ReturnType<typeof deferred> | null = null
   let downloadEntered = false, downloadGate: ReturnType<typeof deferred> | null = null, lease: string | null = 'document_payload_1'
   let inspectionOpen = false
-  const received = new Map<string, { bytes: number; tail: string; partial: string; rows: number; sequenceErrors: number; markers: Set<string> }>()
   const counters: ProofCounter[] = [], epochs: string[] = []
-  const report: PayloadRecoveryReport = { version: 1, scope: 'source-production-private-peer-real-linux-pty-controlled-native-attachment-callback',
+  const report: PayloadRecoveryReport = { version: 1, scope: 'source-production-private-peer-controlled-native-attachment-callback',
     fixture: PAYLOAD_RECOVERY_FIXTURE, provenance: { platform: process.platform, architecture: process.arch, node: process.version, electron: process.versions.electron ?? null, webview: null, sources, artifacts },
     counters, memory: { startRss: sampleRss, peakSampledRss: sampleRss, peakSampledHeap: 0, note: 'Sampled process memory includes Vitest/runtime. Logical page/frame/FD/tail bounds are asserted; RSS is diagnostic, not a constant-memory claim.' },
-    epochs, cleanup: { ownerClosed: false, nativeExits: 0, profileRemoved: false }, remaining: [
+    epochs, cleanup: { ownerClosed: false, profileRemoved: false }, remaining: [
       'Installed supported OS/architecture/WebView runs, actual native Save dialog/copy, native host process-tree drain and packaged stdio load proof.',
-      'Terminal getBuffer is a bounded volatile tail; saturation retires its owner and cannot recover discarded output losslessly.',
       'Audio/binary ServiceStreams foundation has no production Rust consumer; this proof uses existing domain payload paths.',
       '#202 closure dependency remains open; source readiness does not close #207 or pass migration gates.' ] }
   const connection: { service: ProductionService | null; host: ServicePeer | null } = { service: null, host: null }
@@ -112,13 +101,6 @@ export async function runProductionPayloadRecoveryProof(): Promise<PayloadRecove
   const check = (name: string, expected: number, actual: number, comparison: ProofCounter['comparison'] = 'equal'): void => {
     const row = { name, expected, actual, comparison }; counters.push(row); assertProofCounter(row)
   }
-  const terminalProcessHost: TerminalProcessHost = { resolveShell: () => '/bin/bash', getCwd: terminalProcessCwd, create(options) {
-    const receipt = { exited: false, kills: 0 }; receipts.push(receipt)
-    const handle = createNodePty({ ...options, onExit: (pid, code, signal) => { receipt.exited = true; options.onExit(pid, code, signal) } }, {
-      spawn: (shell, _args, settings) => pty.spawn(shell, ['--noprofile', '--norc'], { ...settings,
-        env: { HOME: root, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', TERM: 'xterm-256color', PS1: '', HISTFILE: '/dev/null' } }) })
-    return { ...handle, kill: () => { receipt.kills++; handle.kill() } }
-  } }
   const deliver = (peer: ServicePeer, bytes: Uint8Array): void => {
     maxFrame = Math.max(maxFrame, bytes.length)
     // Include one-byte header/UTF8 splits and larger bounded fragments.
@@ -139,13 +121,12 @@ export async function runProductionPayloadRecoveryProof(): Promise<PayloadRecove
       canAccessSession: trusted, canAccessGlobalCommander: trusted, canManageGlobalConfiguration: trusted, canQueryBackend: trusted,
       canCreateProject: trusted, canEditSettings: trusted, canAccessGlobalSkills: trusted, canChangeSkillScope: trusted, canReorderProjects: trusted,
       canReadSetting: trusted, canWriteSetting: trusted, canAccessSecret: trusted, canCreateSecret: trusted, canUseSecretEnvironment: trusted,
-      canReadEnvironment: trusted, canAccessTerminal: trusted, canAccessMcpServer: trusted, canAccessCli: trusted, canUseTransport: trusted,
+      canReadEnvironment: trusted, canAccessMcpServer: trusted, canAccessCli: trusted, canUseTransport: trusted,
       canUseEnvironmentName: trusted, canAccessConnector: trusted, canUseSourcePlugin: trusted, canCreateInstance: trusted, canUsePiece: trusted,
       canBorrowSourceCredentials: trusted, canResolveUnsavedConfig: trusted, canManageMobile: trusted, canAccessMobileSession: trusted,
       canAccessMarketplace: trusted, canCreateMarketplace: trusted, canAccessPluginName: trusted, canAccessPlugin: trusted,
       canUseMarketplaceSource: trusted, canUsePluginAddress: trusted, canUsePluginSource: trusted, canAccessSkill: trusted,
-      canCreateGlobalSkill: trusted, canCreateAgent: trusted, canCreateMcpServer: trusted,
-      resolveTerminalDirectory: () => ({ cwd: descriptor.paths.workspaceRoot, root: descriptor.paths.workspaceRoot }) }
+      canCreateGlobalSkill: trusted, canCreateAgent: trusted, canCreateMcpServer: trusted }
     const schemas: Record<string, OperationSchema> = Object.fromEntries(Object.entries(PRODUCTION_COMMAND_CODECS).map(([operation, codec]) => [operation, {
       validatePayload: value => { try { return codec.validateArguments(codec.decodeArguments(value as JsonValue)) } catch { return false } }, validateResult: codec.validateWireResult }]))
     schemas['engine.ping'] = { validatePayload: isRecord, validateResult: isBootstrapResult }
@@ -167,7 +148,7 @@ export async function runProductionPayloadRecoveryProof(): Promise<PayloadRecove
     } }
     const currentService = new ProductionService(sealProductionServiceHost({ descriptor, authority,
       caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' }, unbridgedOwnerEvent: () => {},
-      boundaries: { cliMcp: { homeDir: root, environment: {} }, terminalProcessHost,
+      boundaries: { cliMcp: { homeDir: root, environment: {} },
         createAdapter: () => { throw new Error('PAYLOAD_PROOF unexpected provider session') },
         createProvider: () => { throw new Error('PAYLOAD_PROOF unexpected remote provider') },
         taskAttachmentFiles: options => new TaskAttachmentFileOwner({ ...options, fs: { open: async (path, flags, mode) => {
@@ -191,22 +172,7 @@ export async function runProductionPayloadRecoveryProof(): Promise<PayloadRecove
     connection.service = currentService
     connection.host = new ServicePeer({ role: 'host', engineEpoch: null, operations: schemas,
       eventSchemas: Object.fromEntries(Object.keys(PRODUCTION_EVENT_CODECS).map(operation => [operation, value => validateProductionEventWire(operation, value)])),
-      write: async bytes => deliver(currentService.peer, bytes), onEvent: event => {
-        if (event.operation !== 'terminal:data' || !isRecord(event.payload)) return
-        const id = String(event.payload.id), data = String(event.payload.data), state = received.get(id) ?? { bytes: 0, tail: '', partial: '', rows: 0, sequenceErrors: 0, markers: new Set<string>() }
-        terminalEvents++; maxTerminalEvent = Math.max(maxTerminalEvent, Buffer.byteLength(data)); state.bytes += Buffer.byteLength(data)
-        const text = state.tail + data
-        const lines = (state.partial + data).split('\n'); state.partial = lines.pop()!.slice(-2048)
-        for (const line of lines) {
-          const normalized = line.replace(/\r$/, '')
-          if (/^PAYLOAD_(?:READY|DONE)_[0-9]+$/.test(normalized)) state.markers.add(normalized)
-          if (/^[0-9]+$/.test(normalized) && normalized.length === PAYLOAD_RECOVERY_FIXTURE.terminalLineChars) {
-            if (normalized !== String(state.rows).padStart(PAYLOAD_RECOVERY_FIXTURE.terminalLineChars, '0')) state.sequenceErrors++
-            state.rows++
-          }
-        }
-        state.tail = text.slice(-2048); received.set(id, state)
-      } })
+      write: async bytes => deliver(currentService.peer, bytes) })
     await connection.host.request('engine.ping', {})
     await connection.host.request('engine.initialize', { protocolVersion: 1, launchId: descriptor.launchId })
     epochs.push(connection.host.engineEpoch!); sample()
@@ -281,29 +247,6 @@ export async function runProductionPayloadRecoveryProof(): Promise<PayloadRecove
     check('attachment read syscall bytes', 65536, maxRead, 'atMost'); check('attachment write syscall bytes', 65536, maxWrite, 'atMost')
     check('attachment active descriptors', 1, maxFds, 'atMost')
 
-    // All shells are actual staged node-pty handles. Only shell startup policy
-    // differs from production: no profiles, keys, remote provider or history.
-    for (let index = 0; index < PAYLOAD_RECOVERY_FIXTURE.terminals; index++) {
-      await command('terminal:create', [`payload:${index}`, 120, 30])
-      await command('terminal:write', [`payload:${index}`, `stty -echo; printf '\\nPAYLOAD_READY_${index}\\n'\r`])
-    }
-    await until('parallel PTYs ready', () => Array.from({ length: PAYLOAD_RECOVERY_FIXTURE.terminals }, (_, i) => received.get(`payload:${i}`)?.markers.has(`PAYLOAD_READY_${i}`)).every(Boolean))
-    await Promise.all(Array.from({ length: PAYLOAD_RECOVERY_FIXTURE.terminals }, (_, index) => command('terminal:write', [`payload:${index}`,
-      `for ((i=0;i<${PAYLOAD_RECOVERY_FIXTURE.terminalLines};i++)); do printf '%0${PAYLOAD_RECOVERY_FIXTURE.terminalLineChars}d\\n' "$i"; done; printf 'PAYLOAD_DONE_${index}\\n'\r`])))
-    await until('parallel PTY payload delivery', () => Array.from({ length: PAYLOAD_RECOVERY_FIXTURE.terminals }, (_, i) => received.get(`payload:${i}`)?.markers.has(`PAYLOAD_DONE_${i}`)).every(Boolean))
-    for (let index = 0; index < PAYLOAD_RECOVERY_FIXTURE.terminals; index++) {
-      const id = `payload:${index}`, before = services.terminals.identity(id)!, attached = await command('terminal:create', [id, 120, 30]) as { pid: number }
-      check(`terminal ${index} reconnect keeps native PID`, before.pid, attached.pid)
-      const buffer = await command('terminal:getBuffer', [id, 500]) as { lines: string[] }
-      check(`terminal ${index} bounded recovery tail`, TERMINAL_DESKTOP_LIMITS.bufferBytes, Buffer.byteLength(JSON.stringify(buffer)), 'atMost')
-      check(`terminal ${index} completion in recovery tail`, 1, Number(buffer.lines.join('\n').includes(`PAYLOAD_DONE_${index}`)))
-      check(`terminal ${index} minimum delivered bytes`, PAYLOAD_RECOVERY_FIXTURE.terminalLines * PAYLOAD_RECOVERY_FIXTURE.terminalLineChars, received.get(id)!.bytes, 'atLeast')
-      check(`terminal ${index} exact sequential payload lines`, PAYLOAD_RECOVERY_FIXTURE.terminalLines, received.get(id)!.rows)
-      check(`terminal ${index} duplicate or out-of-order payload lines`, 0, received.get(id)!.sequenceErrors)
-    }
-    check('parallel native PTY spawns', PAYLOAD_RECOVERY_FIXTURE.terminals, receipts.length)
-    check('terminal event byte bound', TERMINAL_DESKTOP_LIMITS.eventBytes, maxTerminalEvent, 'atMost')
-    check('terminal event deliveries', PAYLOAD_RECOVERY_FIXTURE.terminals, terminalEvents, 'atLeast')
     // Make one actual durable mutation uncertain at the reply boundary. Neither
     // old peer nor replacement may automatically replay it.
     const mutationGate = deferred(); heldReply = mutationGate
@@ -313,7 +256,6 @@ export async function runProductionPayloadRecoveryProof(): Promise<PayloadRecove
     mutationAbort.abort(); mutationGate.release()
     check('uncertain mutation reply cancelled', 1, Number(await mutation === 'CANCELLED'))
     await connection.service!.close(); connection.host!.disconnect(); await connection.host!.waitForHandlers()
-    check('all native PTYs exited before profile reopen', receipts.length, receipts.filter(value => value.exited).length)
     await start(true)
     check('replacement epoch differs', 1, Number(epochs[0] !== epochs[1]))
     const replacement = connection.service!.getReadyServices()!, restored = createProjection()
@@ -354,8 +296,8 @@ export async function runProductionPayloadRecoveryProof(): Promise<PayloadRecove
     // A failed close deliberately retains the disposable profile for repair.
     // Never remove it while an actual owner/FD/native process still exists.
     await connection.service?.close(); connection.host?.disconnect(); await connection.host?.waitForHandlers()
-    report.cleanup.ownerClosed = true; report.cleanup.nativeExits = receipts.filter(value => value.exited).length
-    if (receipts.some(value => !value.exited) || fdCount !== 0 || inspectionOpen) throw new Error('PAYLOAD_PROOF cleanup incomplete; disposable profile retained')
+    report.cleanup.ownerClosed = true
+    if (fdCount !== 0 || inspectionOpen) throw new Error('PAYLOAD_PROOF cleanup incomplete; disposable profile retained')
     rmSync(root, { recursive: true, force: true }); report.cleanup.profileRemoved = !existsSync(root)
     for (const key of keys.values()) key.fill(0); keys.clear()
     report.memory.peakSampledRss = sampleRss; report.memory.peakSampledHeap = sampleHeap

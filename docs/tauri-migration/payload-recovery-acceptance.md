@@ -1,5 +1,7 @@
 # Production payload and recovery acceptance
 
+The terminal workload was removed on 2026-11-05 with the embedded terminal. Terminal rows and paragraphs below are the earlier run's record; the proof no longer starts any PTY.
+
 The bounded acceptance harness is
 `scripts/production-payload-recovery-proof.ts`, driven by its adjacent Vitest
 test. Source readiness is separate from a successful run and from issue closure.
@@ -14,14 +16,14 @@ After staging the pinned runtime and native dependencies using the existing
 project preparation procedure, the primary runs:
 
 ```sh
-rtk pnpm test:tauri -- --terminal-proofs scripts/production-payload-recovery-proof.test.ts --reporter=default --reporter=json
+rtk pnpm test:tauri -- --owner-proofs scripts/production-payload-recovery-proof.test.ts --reporter=default --reporter=json
 ```
 
 The standalone configuration must include this test in its finite input list.
-It runs with the existing runner, which selects staged Node/SQLite/node-pty and
+It runs with the existing runner, which selects staged Node/SQLite and
 rejects configuration overrides. No dependency, workflow or generator changes
 are required by the harness. The integration case requires Linux and the explicit
-terminal-proof flag. A skipped integration case is **not** load evidence; the
+owner-proof flag. A skipped integration case is **not** load evidence; the
 small evidence-guard cases alone do not establish production acceptance.
 
 Preserve the command, exit status and `PRODUCTION_PAYLOAD_RECOVERY_REPORT` JSON

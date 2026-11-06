@@ -64,7 +64,7 @@ describe('useUiRemoteControl', () => {
     published.length = 0
 
     act(() => {
-      useUIStore.getState().setSidebarView('canvas')
+      useUIStore.getState().setSidebarView('skills')
       useUIStore.getState().setSidebarView('skills')
     })
     // Both changes fall inside one window, so nothing goes out yet.
@@ -91,12 +91,12 @@ describe('useUiRemoteControl', () => {
     published.length = 0
 
     act(() => {
-      commandListener?.({ kind: 'navigate', view: 'canvas' })
+      commandListener?.({ kind: 'navigate', view: 'skills' })
     })
 
-    expect(useUIStore.getState().sidebarView).toBe('canvas')
+    expect(useUIStore.getState().sidebarView).toBe('skills')
     // The next tool call must see the screen this command produced.
-    expect(published.at(-1)).toMatchObject({ view: 'canvas' })
+    expect(published.at(-1)).toMatchObject({ view: 'skills' })
   })
 
   it('stops listening when it is unmounted', () => {

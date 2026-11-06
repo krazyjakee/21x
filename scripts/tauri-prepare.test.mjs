@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { prepareRuntime, repairPtyHelperModes, nativeNpmEnvironment, pruneForeignSqlitePrebuilds } from './tauri-prepare.mjs'
+import { prepareRuntime, nativeNpmEnvironment, pruneForeignSqlitePrebuilds } from './tauri-prepare.mjs'
 
 async function fixture(t, nodeVersion = process.versions.node) {
   const root = await mkdtemp(join(tmpdir(), '21x-tauri-preparation-'))
@@ -11,27 +11,11 @@ async function fixture(t, nodeVersion = process.versions.node) {
   await mkdir(join(root, 'scripts'), { recursive: true })
   await mkdir(join(root, 'src/service'), { recursive: true })
   await writeFile(join(root, 'scripts/tauri-runtime.json'), JSON.stringify({ nodeVersion,
-    nativeDependencies: { 'better-sqlite3': '13.0.3', 'node-pty': '1.1.0' },
+    nativeDependencies: { 'better-sqlite3': '13.0.3' },
     connectorDependencies: { '@activepieces/piece-trello': '0.6.0', '@activepieces/piece-todoist': '0.5.0' } }))
   await writeFile(join(root, 'src/service/feasibility.mjs'), 'process.exit(0)\n')
   return root
 }
-
-test('Darwin staged PTY helpers gain executable bits without rewriting their contents', async t => {
-  if (process.platform === 'win32') return
-  const root = await fixture(t)
-  const service = join(root, 'service')
-  const directory = join(service, 'node_modules/node-pty/prebuilds/darwin-x64')
-  await mkdir(directory, { recursive: true })
-  const helper = join(directory, 'spawn-helper')
-  await writeFile(helper, 'fixture-helper', { mode: 0o644 })
-  const before = await stat(helper)
-  assert.deepEqual(await repairPtyHelperModes(service, 'darwin'), ['prebuilds/darwin-x64'])
-  assert.equal((await stat(helper)).mode & 0o111, 0o111)
-  assert.equal((await stat(helper)).mtimeMs, before.mtimeMs)
-  assert.equal(await readFile(helper, 'utf8'), 'fixture-helper')
-  assert.deepEqual(await repairPtyHelperModes(service, 'darwin'), ['prebuilds/darwin-x64'])
-})
 
 test('repeated preparation leaves the large runtime and service untouched', async t => {
   const root = await fixture(t)
@@ -45,10 +29,9 @@ test('repeated preparation leaves the large runtime and service untouched', asyn
   assert.equal((await stat(service)).mtimeMs, first.service)
   const manifest = JSON.parse(await readFile(join(resources, 'service/package.json'), 'utf8'))
   assert.equal(manifest.dependencies['better-sqlite3'], '13.0.3')
-  assert.equal(manifest.dependencies['node-pty'], '1.1.0')
   assert.equal(manifest.dependencies['@activepieces/piece-trello'], '0.6.0')
   assert.equal(manifest.dependencies['@activepieces/piece-todoist'], '0.5.0')
-  assert.deepEqual(manifest.allowScripts, { 'better-sqlite3@13.0.3': true, 'node-pty@1.1.0': true })
+  assert.deepEqual(manifest.allowScripts, { 'better-sqlite3@13.0.3': true })
   assert.equal((await stat(join(resources, 'service/node_modules')).catch(() => null)), null)
   await writeFile(join(root, 'src/service/feasibility.mjs'), 'process.exit(1)\n')
   await prepareRuntime({ projectRoot: root })

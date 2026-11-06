@@ -65,7 +65,6 @@ const report = {
     'src/main/secret-broker.ts', 'src/main/secret-broker-core.ts', 'src/main/secret-shell.ts',
     'src/main/commander/commander-service.ts', 'src/main/commander/captain-delivery.ts', 'src/main/ipc/commander.ts',
     'src/main/chat/chat-runtime.ts', 'src/main/ipc/chat.ts',
-    'src/main/terminal-service-core.ts', 'src/main/terminal-process.ts', 'src/main/terminal-service.ts', 'src/main/ipc/terminal.ts',
     'src/main/overdue-notifier.ts',
     'src/main/workspace-cleanup-scheduler.ts', 'src/main/workspace-cleanup-scheduler-core.ts',
     'src/main/heartbeat-scheduler.ts', 'src/main/heartbeat-scheduler-core.ts',

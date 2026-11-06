@@ -55,7 +55,6 @@ describe('keyboard shortcuts', () => {
     expect(shortcuts).toEqual(expect.arrayContaining([
       expect.objectContaining({ keys: ['O', 'S'], label: 'Choose a subtask to open' }),
       expect.objectContaining({ keys: ['G', 'P'], label: 'Go to parent task' }),
-      expect.objectContaining({ keys: ['G', 'C'], label: 'Open selected task on Canvas or go to Canvas' }),
       expect.objectContaining({ keys: ['Shift', 'H'], label: 'Run heartbeat now' })
     ]))
   })

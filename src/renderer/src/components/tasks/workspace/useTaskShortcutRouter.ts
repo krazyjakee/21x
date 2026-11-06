@@ -64,7 +64,7 @@ export function useTaskShortcutRouter({
 
   useEffect(() => onTaskShortcut(({ action, taskId }) => {
     if (!task || task.id !== taskId) return
-    // Hidden canvas panels stay mounted; only the visible workspace should act.
+    // Only the visible workspace should act.
     const workspace = workspaceBodyRef.current
     if (workspace && window.getComputedStyle(workspace).visibility === 'hidden') return
     if (action === TaskShortcutAction.COMPLETE) {

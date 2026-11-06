@@ -14,6 +14,8 @@ These documents prepare the work and its review criteria. They do not authorize 
 
 ## Approved browser removal
 
+On 2026-11-05 the user widened this: Canvas, the embedded browser and the embedded terminal are removed from both hosts, not only from Tauri. Saved layouts are dropped rather than kept dormant. See [Canvas, browser and terminal removal](canvas-browser-retirement.md), which supersedes older mentions in this folder.
+
 On 2026-10-12 the user approved removing embedded browser features during migration. Tauri will omit browser panels, arbitrary website iframe panels, task-linked browser automation, screenshots/console/network browser tools, browser recordings and browser-panel Chrome cookie import. T02 is cancelled; T11 now owns removal and saved-data compatibility. Preserve inactive saved panel metadata and recording files. External OAuth login, ordinary external URL opening, sandboxed artifact previews and the trusted app WebView remain required.
 
 ## Reading order
@@ -49,8 +51,7 @@ The existing [AGENTS.md](../../AGENTS.md), [task lifecycle](../task-lifecycle.md
 | Database and credentials | [database.ts](../../src/main/database.ts), [serializers.ts](../../src/main/database/serializers.ts), [connector credentials](../../src/main/connectors/credentials.ts) | Retain `21x.db`, WAL behavior, and schema migrations; replace Electron `safeStorage` with an explicit credential migration |
 | Paths and app identity | [workspace-paths.ts](../../src/main/workspace-paths.ts), [app-identity.ts](../../src/main/app-identity.ts), [identity migration](../../src/main/app-identity-migration.ts) | Preserve worktrees, attachments, models, plugins, logs, and the existing 20x-to-21x import; do not assume Tauri's default data path matches Electron's |
 | Background services | `src/main/*-scheduler.ts`, [task-api-server.ts](../../src/main/task-api-server.ts), [mobile-api-server.ts](../../src/main/mobile-api-server.ts) | One service owner continues work without a visible window; retain API authentication and mobile pairing |
-| Terminals and subprocesses | [terminal.ts](../../src/main/ipc/terminal.ts), [node-worker-runtime.ts](../../src/main/node-worker-runtime.ts), `src/main/connectors/piece-host/` | Rebuild native modules for bundled Node; replace `utilityProcess`, `process.parentPort`, and Electron runtime assumptions |
-| Browser canvas and recordings | [BrowserPanelContent.tsx](../../src/renderer/src/components/canvas/BrowserPanelContent.tsx), [panel-browser-broker.ts](../../src/main/panel-browser-broker.ts), [browser recording](../browser-recording.md) | Remove these surfaces/tools from Tauri; preserve saved metadata and recording files without remote navigation or replay |
+| Subprocesses | [node-worker-runtime.ts](../../src/main/node-worker-runtime.ts), `src/main/connectors/piece-host/` | Rebuild native modules for bundled Node; replace `utilityProcess`, `process.parentPort`, and Electron runtime assumptions |
 | Voice | `src/main/voice/`, [voice IPC](../../src/main/ipc/voice.ts), [spoken answers](../voice-tts.md) | Preserve optional local runtime, native microphone permission, global shortcut, worker packaging, cancellation, and desktop-only speech audio |
 | Build and release | [package.json](../../package.json), [electron.vite.config.ts](../../electron.vite.config.ts), [.github/workflows/release.yml](../../.github/workflows/release.yml), [vitest.config.ts](../../vitest.config.ts) | Add Tauri/Rust builds, retain mobile output, move tests off Electron's Node runtime, and replace release artifacts and updater metadata |
 

@@ -66,7 +66,7 @@ describe('NavRail Settings', () => {
       expect(button).toHaveFocus()
     }
     expect(screen.getByRole('button', { name: 'Settings' })).toHaveFocus()
-    expect(navShortcutDigit('commander')).toBe(5)
+    expect(navShortcutDigit('commander')).toBe(4)
   })
 
   it('shows the same tooltip outside the scroll container on hover and keyboard focus', () => {

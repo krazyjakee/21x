@@ -1,6 +1,6 @@
 # Commander chat sessions
 
-The Commander is a fast conversational model with no canvas. The user talks to
+The Commander is a fast conversational model. The user talks to
 it in persisted chat sessions; it delegates work to each project's Captain
 and keeps their reports available as quiet updates. It never does the project work itself, and it has
 no tool that could: its registry (#61, #73) holds delegation, status reads
@@ -355,12 +355,11 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
 
 Call shortcuts apply while Commander is open or a call survives elsewhere.
 Mod means Cmd on macOS and Ctrl elsewhere. Dialogs and IME composition retain
-their keys. No call shortcut intercepts an editor or terminal outside the
-Commander composer, so a task field keeps Escape and a terminal keeps
-Ctrl+Shift+C. Inside the composer, Escape, captions, panel, full view and End
-still work; Mic and Undo do not, so native text Undo continues there. Mod+D
-leaves a microphone another surface opened alone. Mod+5 and palette navigation
-remain available.
+their keys. No call shortcut intercepts an editor outside the Commander composer,
+so a task field keeps Escape. Inside the composer, Escape, captions, panel, full
+view and End still work; Mic and Undo do not, so native text Undo continues there.
+Mod+D leaves a microphone another surface opened alone. Mod+4 and palette
+navigation remain available.
 
 Microphone mode, input device, captions on/off, caption size and the floating
 corner are remembered between runs in this window's local storage. Device ids

@@ -47,7 +47,6 @@ const VIEWS: &[&str] = &[
     "tasks",
     "skills",
     "dashboard",
-    "canvas",
     "commander",
     "overview",
     "settings",

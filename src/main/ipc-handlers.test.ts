@@ -13,17 +13,16 @@ vi.mock('electron', () => ({
   app: { isPackaged: false, getPath: vi.fn(() => '/tmp/pf-desktop-test') }
 }))
 
-const { mockChildKill, mockSpawn } = vi.hoisted(() => {
-  const kill = vi.fn()
+const { mockSpawn } = vi.hoisted(() => {
   const spawn = vi.fn(() => ({
     stdout: { on: vi.fn() },
     stderr: { on: vi.fn() },
     stdin: { writable: true, write: vi.fn() },
     on: vi.fn(),
-    kill,
+    kill: vi.fn(),
     pid: 4242
   }))
-  return { mockChildKill: kill, mockSpawn: spawn }
+  return { mockSpawn: spawn }
 })
 
 vi.mock('child_process', () => ({
@@ -32,8 +31,6 @@ vi.mock('child_process', () => ({
 }))
 
 import { ipcMain } from 'electron'
-import { join } from 'path'
-import { pathToFileURL } from 'url'
 import { registerIpcHandlers } from './ipc-handlers'
 import type { IpcDeps } from './ipc/deps'
 import { setTaskSchedulers } from './task-updates'
@@ -215,61 +212,6 @@ describe('registerIpcHandlers', () => {
       'confirmation-epoch'
     )
     expect(dismiss).toHaveBeenCalledExactlyOnceWith('shared-turn', 'confirmation-epoch')
-  })
-
-  it('terminal:kill ignores stale expectedPid and only kills matching process', async () => {
-    register()
-
-    const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
-    const createHandler = handleCalls.find((call) => call[0] === 'terminal:create')?.[1]
-    const killHandler = handleCalls.find((call) => call[0] === 'terminal:kill')?.[1]
-
-    expect(createHandler).toBeDefined()
-    expect(killHandler).toBeDefined()
-
-    const sender = { isDestroyed: () => false, send: vi.fn(), getType: () => 'window' }
-    // terminal:create only accepts the main window's own frame.
-    const senderFrame = { url: pathToFileURL(join(__dirname, '../renderer/index.html')).href, parent: null }
-    await createHandler?.({ sender, senderFrame }, { id: 'panel-1', cols: 80, rows: 24 })
-
-    await killHandler?.({ sender, senderFrame }, { id: 'panel-1', expectedPid: 9999 })
-    expect(mockChildKill).not.toHaveBeenCalled()
-
-    await killHandler?.({ sender, senderFrame }, { id: 'panel-1', expectedPid: 4242 })
-    expect(mockChildKill).toHaveBeenCalledTimes(1)
-    expect(mockChildKill).toHaveBeenCalledWith('SIGTERM')
-  })
-
-  it('terminal buffer, cwd, resize and kill refuse embedded callers', async () => {
-    register()
-    const handlers = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const event = { sender: { getType: () => 'webview' }, senderFrame: { url: 'https://example.invalid', parent: null } }
-    try {
-      for (const name of ['terminal:getBuffer', 'terminal:getCwd', 'terminal:resize', 'terminal:kill']) {
-        const handler = handlers.find(([channel]) => channel === name)![1]
-        expect(() => handler(event, { id: 'fixture', cols: 80, rows: 24 })).toThrow(name)
-      }
-      expect(mockSpawn).not.toHaveBeenCalled()
-      expect(mockChildKill).not.toHaveBeenCalled()
-    } finally { warn.mockRestore() }
-  })
-
-  it('terminal:create refuses a sender that is not the main window frame', async () => {
-    register()
-
-    const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
-    const createHandler = handleCalls.find((call) => call[0] === 'terminal:create')?.[1]
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    const sender = { isDestroyed: () => false, send: vi.fn(), getType: () => 'webview' }
-    const senderFrame = { url: 'https://evil.example/', parent: null }
-
-    await expect(createHandler?.({ sender, senderFrame }, { id: 'panel-evil', cols: 80, rows: 24 }))
-      .rejects.toThrow(/terminal:create/)
-    expect(mockSpawn).not.toHaveBeenCalled()
-
-    warn.mockRestore()
   })
 })
 

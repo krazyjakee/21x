@@ -2,6 +2,15 @@
 
 All schema migrations live in `src/main/database/schema.ts` as plain functions over the raw SQLite handle; `DatabaseManager.initialize()` applies them through `applySchema()`. Tests build their schema from the same functions (`test/helpers/db-test-helper.ts`).
 
+## Version 40 — Canvas layouts and drawings are dropped
+
+Canvas was removed, so its settings rows have no reader. `dropCanvasSettings`
+deletes `canvas_state`, `drawing_state`, their `:<projectId>` variants and the two
+`*_migrated_to_projects` markers. They held panel positions, panel links, viewport,
+z-order and drawing objects. The rows are not task data: a panel held a task ID,
+never the task. No task, transcript or artifact row is touched, and saved browser
+recordings stay on disk unread.
+
 ## Version 39 — PR reviews no longer hold agents in place
 
 `pr_review_handoffs` and `pr_review_attestations` lose their `ON DELETE RESTRICT`

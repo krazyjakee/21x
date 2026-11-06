@@ -635,7 +635,7 @@ fn install_menu(window: &WebviewWindow) -> Result<(), EngineError> {
         MenuItem::with_id(window, id, label, true, accelerator)
             .map_err(|_| EngineError::new("INTERNAL_ERROR"))
     };
-    // Editing accelerators remain with the focused WebView/terminal. Explicit
+    // Editing accelerators remain with the focused WebView. Explicit
     // native menu clicks use only the fixed editing-command table above.
     let edit = [
         make("native.edit.undo", "Undo", None)?,
@@ -1123,7 +1123,7 @@ pub(crate) mod wry_proof {
             "input"
         );
         // The real focused WebView receives exact editing commands. Keyboard
-        // event accelerators remain with the input/terminal, not a global hook.
+        // event accelerators remain with the input, not a global hook.
         pump(&mut app, || window.is_focused().unwrap_or(false));
         eprintln!("WINDOW_PROOF: selecting via GTK menu");
         activate_menu(&window, "Edit", "Select all");

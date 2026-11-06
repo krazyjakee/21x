@@ -9,10 +9,3 @@
  */
 export const AGENT_WORK_MARKER = 'TWENTYONEX_AGENT_WORK'
 export const AGENT_WORK_ENV: Readonly<Record<string, string>> = { [AGENT_WORK_MARKER]: '1' }
-
-/** A copy without the marker, for a shell a person will type into. */
-export function withoutAgentWorkMarker<T extends Record<string, string | undefined>>(env: T): T {
-  const copy = { ...env }
-  delete copy[AGENT_WORK_MARKER]
-  return copy
-}

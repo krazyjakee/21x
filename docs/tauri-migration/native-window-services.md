@@ -46,8 +46,8 @@ remains available after a failed drain so that path can retry; it never reopens
 ordinary native admission or bypasses the shutdown coordinator.
 
 Linux editing menu clicks call exact WebKit editing commands. Editing keyboard
-accelerators stay with the focused WebView/terminal so Ctrl+C and other terminal
-input are not diverted to a global hook. Non-Linux editing menu items remain
+accelerators stay with the focused WebView so Ctrl+C and other input are not
+diverted to a global hook. Non-Linux editing menu items remain
 disabled until their actual platform counterpart is implemented/proven. Zoom
 uses half-level steps with the retained 1.2 exponent and range -8..9, resets once
 on launch, and supports exact local menu accelerators plus shifted Ctrl+'+'.

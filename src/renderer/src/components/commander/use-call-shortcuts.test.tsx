@@ -10,7 +10,6 @@ function Harness() {
   useCommanderCallShortcuts()
   return <>
     <textarea aria-label="Task notes" />
-    <div className="xterm"><textarea aria-label="Terminal input" /></div>
     <div data-testid="commander-composer"><textarea aria-label="Message the Commander" /></div>
   </>
 }
@@ -28,8 +27,8 @@ beforeEach(() => {
 afterEach(() => { cleanup(); __resetCommanderCall(); useVoiceStore.setState({ turnId: null }); vi.restoreAllMocks() })
 
 describe('Commander call shortcuts', () => {
-  it.each(['Task notes', 'Terminal input'])('leaves every chord to %s', (name) => {
-    const field = screen.getByLabelText(name)
+  it('leaves every chord to a field outside the composer', () => {
+    const field = screen.getByLabelText('Task notes')
     expect(fireEvent.keyDown(field, captionsChord)).toBe(true)
     expect(fireEvent.keyDown(field, endChord)).toBe(true)
     expect(fireEvent.keyDown(field, { key: '\\', ctrlKey: true })).toBe(true)

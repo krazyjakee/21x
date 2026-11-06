@@ -1,5 +1,5 @@
 /**
- * Projects group tasks, task sources and (later) the canvas, drawings and a
+ * Projects group tasks, task sources and (later) a
  * Captain. A project may have zero, one or many git repos; everything else
  * it points at (a Google Drive, docs, a dashboard) is a resource — a link and
  * notes given to agents as context, with no integration.

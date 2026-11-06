@@ -55,13 +55,12 @@ async function fixture(kind: 'source' | 'staged') {
     canAccessProject: permitted, canAccessAgent: permitted, canAccessSession: permitted, canAccessGlobalCommander: permitted,
     canManageGlobalConfiguration: permitted, canQueryBackend: permitted, canCreateProject: permitted, canEditSettings: permitted,
     canAccessGlobalSkills: permitted, canChangeSkillScope: permitted, canReorderProjects: permitted, canReadSetting: permitted, canWriteSetting: permitted, canAccessSecret: permitted,
-    canCreateSecret: permitted, canUseSecretEnvironment: permitted, canReadEnvironment: permitted, canAccessTerminal: permitted, canAccessMcpServer: permitted, canAccessCli: permitted,
+    canCreateSecret: permitted, canUseSecretEnvironment: permitted, canReadEnvironment: permitted, canAccessMcpServer: permitted, canAccessCli: permitted,
     canUseTransport: permitted, canUseEnvironmentName: permitted, canAccessConnector: permitted, canUseSourcePlugin: permitted,
     canCreateInstance: permitted, canUsePiece: permitted, canBorrowSourceCredentials: permitted, canResolveUnsavedConfig: permitted,
     canManageMobile: permitted, canAccessMobileSession: permitted, canAccessMarketplace: permitted, canCreateMarketplace: permitted,
     canAccessPluginName: permitted, canAccessPlugin: permitted, canUseMarketplaceSource: permitted, canUsePluginAddress: permitted, canUsePluginSource: permitted,
-    canAccessSkill: permitted, canCreateGlobalSkill: permitted, canCreateAgent: permitted, canCreateMcpServer: permitted,
-    resolveTerminalDirectory: () => ({ cwd: descriptor.paths.workspaceRoot, root: descriptor.paths.workspaceRoot }) }
+    canAccessSkill: permitted, canCreateGlobalSkill: permitted, canCreateAgent: permitted, canCreateMcpServer: permitted }
   const service: ServiceModule.ProductionService = new module.ProductionService(module.sealProductionServiceHost({ descriptor, authority,
     caller: { principal: 'trusted-desktop-main', webviewId: 'main', origin: 'tauri://localhost' }, unbridgedOwnerEvent: () => {},
     boundaries: { createAdapter: () => { throw new Error('No provider process is allowed in this boundary proof') }, createProvider: () => { throw new Error('No chat provider is allowed in this boundary proof') }, cliMcp: { homeDir: root, environment: {} } },

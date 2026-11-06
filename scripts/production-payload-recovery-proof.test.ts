@@ -11,20 +11,19 @@ describe('production payload acceptance evidence', () => {
 
   it('keeps the workload finite and large enough to require bounded pagination', () => {
     expect(PAYLOAD_RECOVERY_FIXTURE.transcriptParts * PAYLOAD_RECOVERY_FIXTURE.partChars).toBeGreaterThan(4_000_000)
-    expect(PAYLOAD_RECOVERY_FIXTURE.terminals).toBe(4)
     expect(PAYLOAD_RECOVERY_FIXTURE.attachmentBytes).toBe(512 * 1024)
   })
 
-  it.skipIf(process.env.TAURI_TERMINAL_PROOFS !== '1' || process.platform !== 'linux')('loads actual production owners under staged Node and emits measured recovery evidence', async () => {
+  it.skipIf(process.env.TAURI_OWNER_PROOFS !== '1' || process.platform !== 'linux')('loads actual production owners under staged Node and emits measured recovery evidence', async () => {
     // ProductionOwner owns its process-global storage registration. As in the
     // existing production-service fixture, isolate it from portable test setup.
     vi.resetModules()
     const { runProductionPayloadRecoveryProof } = await import('./production-payload-recovery-proof')
     const report = await runProductionPayloadRecoveryProof()
-    expect(report.cleanup).toEqual({ ownerClosed: true, nativeExits: 4, profileRemoved: true })
+    expect(report.cleanup).toEqual({ ownerClosed: true, profileRemoved: true })
     expect(report.epochs).toHaveLength(2)
     expect(report.epochs[0]).not.toBe(report.epochs[1])
-    expect(report.counters.length).toBeGreaterThan(35)
+    expect(report.counters.length).toBeGreaterThan(7)
     for (const counter of report.counters) assertProofCounter(counter)
     expect(report.provenance.electron).toBeNull()
     expect(report.provenance.webview).toBeNull()

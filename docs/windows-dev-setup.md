@@ -9,7 +9,7 @@ This guide covers building and running 21x from source on Windows. It complement
 | **Node.js** | >= 22 | [nodejs.org](https://nodejs.org/) |
 | **pnpm** | 9 | Required — the version is pinned by `packageManager` in `package.json` |
 | **Git** | Latest | Required for worktree features |
-| **Visual Studio 2022 Build Tools** | Latest | Required to compile native modules (`better-sqlite3`, `node-pty`) for Electron |
+| **Visual Studio 2022 Build Tools** | Latest | Required to compile the native module (`better-sqlite3`) for Electron |
 
 Optional:
 
@@ -37,16 +37,6 @@ Native addons must be compiled against Electron's Node.js runtime, not your syst
    - **MSVC v143** (or latest) C++ x64/x86 build tools
    - **Windows SDK**
 
-### Optional: embedded terminal support (`node-pty`)
-
-If `node-pty` fails to rebuild with **MSB8040: Spectre-mitigated libraries are required**, the rest of the app still runs — only canvas terminal panels are affected.
-
-To fix it, open **Visual Studio Installer → Modify → Individual components** and add:
-
-- **MSVC Spectre-mitigated libs (x64/x86)**
-
-Then rerun the rebuild command from step 3.
-
 ## 3. Clone and install dependencies
 
 ```powershell
@@ -66,9 +56,6 @@ node scripts/rebuild-native.mjs
 | Module | Required? | Purpose |
 |--------|-----------|---------|
 | `better-sqlite3` | **Yes** | Local SQLite database — app will not start without this |
-| `node-pty` | No | Embedded terminals in the canvas workspace |
-
-The rebuild script continues if `node-pty` fails and logs a warning.
 
 ## 4. Run the app
 

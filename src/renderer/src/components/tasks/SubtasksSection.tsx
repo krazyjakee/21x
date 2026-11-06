@@ -1,6 +1,6 @@
 import React from 'react'
 import { getDesktopHost } from '@/lib/desktop-api'
-import { Plus, X, ListTree, ChevronRight, GripVertical, SquareArrowOutUpRight } from 'lucide-react'
+import { Plus, X, ListTree, ChevronRight, GripVertical } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -16,7 +16,7 @@ const subtaskStatusDotColor: Record<TaskStatus, string> = {
   [TaskStatus.Completed]: 'bg-emerald-400'
 }
 
-function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow, disabled }: { disabled?: boolean; subtask: Task; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void }) {
+function SortableSubtaskItem({ subtask, onNavigateToTask, disabled }: { disabled?: boolean; subtask: Task; onNavigateToTask?: (taskId: string) => void; }) {
   const {
     attributes,
     listeners,
@@ -56,22 +56,12 @@ function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow,
           <div className="text-sm truncate">{subtask.title}</div>
         </div>
       </button>
-      {onOpenSubtaskInWindow && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onOpenSubtaskInWindow(subtask.id) }}
-          title="Open in a separate window"
-          aria-label="Open subtask in a separate window"
-          className="shrink-0 p-1 rounded text-muted-foreground/50 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
-        >
-          <SquareArrowOutUpRight className="h-3.5 w-3.5" />
-        </button>
-      )}
       <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
     </div>
   )
 }
 
-export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks }: { subtasks: Task[]; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void; onAddSubtask?: (title: string) => void | Promise<void>; onReorderSubtasks?: (orderedIds: string[]) => void | Promise<void> }) {
+export function SubtasksSection({ subtasks, onNavigateToTask, onAddSubtask, onReorderSubtasks }: { subtasks: Task[]; onNavigateToTask?: (taskId: string) => void; onAddSubtask?: (title: string) => void | Promise<void>; onReorderSubtasks?: (orderedIds: string[]) => void | Promise<void> }) {
   const [isAdding, setIsAdding] = React.useState(false)
   const [newTitle, setNewTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
@@ -159,7 +149,6 @@ export function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWin
                 subtask={subtask}
                 disabled={busy || reviewRequired}
                 onNavigateToTask={onNavigateToTask}
-                onOpenSubtaskInWindow={onOpenSubtaskInWindow}
               />
             ))}
           </SortableContext>

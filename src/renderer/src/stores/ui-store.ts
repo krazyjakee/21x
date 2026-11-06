@@ -6,7 +6,7 @@ import { useProjectStore } from './project-store'
 export type SortField = 'created_at' | 'updated_at' | 'priority' | 'due_date' | 'title' | 'status'
 export type SortDirection = 'asc' | 'desc'
 export type ActiveModal = 'create' | 'edit' | 'delete' | 'settings' | 'repo-selector' | 'gh-setup' | null
-export type SidebarView = 'tasks' | 'skills' | 'dashboard' | 'canvas' | 'commander' | 'overview'
+export type SidebarView = 'tasks' | 'skills' | 'dashboard' | 'commander' | 'overview'
 
 // ── Persisted sidebar layout (localStorage) ──
 const SIDEBAR_WIDTH_KEY = 'ui-sidebar-width'
@@ -45,8 +45,6 @@ interface UIState {
   deletingTaskId: string | null
   settingsTab: SettingsTab
   dashboardPreviewTaskId: string | null
-  /** Task ID to add to canvas when switching to canvas view */
-  canvasPendingTaskId: string | null
   /** Pre-fill text for the create task modal (from dashboard command input / quick chips) */
   createTaskPrefill: { title: string; description: string } | null
   /** Whether the Captain drawer is open (global) */
@@ -75,12 +73,6 @@ interface UIState {
   closeModal: () => void
   openDashboardPreview: (taskId: string) => void
   closeDashboardPreview: () => void
-  /** Switch to canvas view and queue a task to be added as a panel */
-  openTaskOnCanvas: (taskId: string) => void
-  /** Set a pending task ID to be added as a panel on the canvas (without switching views) */
-  setCanvasPendingTaskId: (taskId: string) => void
-  clearCanvasPendingTask: () => void
-  /** Switch to canvas view and queue an app to be added as a panel */
   /** Open create modal with pre-filled text from command input */
   openCreateWithPrefill: (text: string) => void
   /** Clear prefill data after the form has consumed it */
@@ -113,7 +105,6 @@ export const useUIStore = create<UIState>((set) => ({
   deletingTaskId: null,
   settingsTab: SettingsTab.GENERAL,
   dashboardPreviewTaskId: null,
-  canvasPendingTaskId: null,
   createTaskPrefill: null,
   showOrchestrator: false,
   sidebarCollapsed: readStoredCollapsed(),
@@ -148,9 +139,6 @@ export const useUIStore = create<UIState>((set) => ({
   closeModal: () => set({ activeModal: null, editingTaskId: null, deletingTaskId: null }),
   openDashboardPreview: (taskId) => set({ dashboardPreviewTaskId: taskId }),
   closeDashboardPreview: () => set({ dashboardPreviewTaskId: null }),
-  openTaskOnCanvas: (taskId) => set({ sidebarView: 'canvas', canvasPendingTaskId: taskId, dashboardPreviewTaskId: null }),
-  setCanvasPendingTaskId: (taskId) => set({ canvasPendingTaskId: taskId, dashboardPreviewTaskId: null }),
-  clearCanvasPendingTask: () => set({ canvasPendingTaskId: null }),
   openCreateWithPrefill: (text: string) => {
     // Split text: first sentence becomes title, rest becomes description
     const firstSentenceMatch = text.match(/^(.+?[.!?])\s+([\s\S]+)$/)

@@ -44,8 +44,7 @@ function Fixture() {
   })
   return <div className="h-screen bg-background text-foreground" data-testid="task-fixture">
     <TaskWorkspace task={activeTask} agents={[agent]} onEdit={noop} onDelete={noop}
-      onUpdateAttachments={noop} onUpdateOutputFields={noop} onCompleteTask={noop} onAssignAgent={noop}
-      showActivity={false} />
+      onUpdateAttachments={noop} onUpdateOutputFields={noop} onCompleteTask={noop} onAssignAgent={noop} />
   </div>
 }
 createRoot(document.getElementById('root')!).render(<Fixture />)

@@ -9,7 +9,7 @@ import { build } from 'vite'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
-const requiredPins = { 'better-sqlite3': '13.0.3', 'node-pty': '1.1.0', '@paralleldrive/cuid2': '2.3.1',
+const requiredPins = { 'better-sqlite3': '13.0.3', '@paralleldrive/cuid2': '2.3.1',
   '@anthropic-ai/claude-agent-sdk': '0.3.260', '@anthropic-ai/sdk': '0.123.0', '@opencode-ai/sdk': '1.18.28' }
 export function validateProductionPins(pins) {
   const actual = { ...pins.nativeDependencies, ...pins.serviceDependencies, ...pins.sdkDependencies }

@@ -1,5 +1,7 @@
 # Production workspace cleanup acceptance
 
+Terminal steps were removed on 2026-11-05 with the embedded terminal. Rows below that name a PTY are the earlier run's record; the proof no longer creates one.
+
 This continuation addresses the actual nonempty cleanup consumer in issue #210. It is
 one part of that issue's task/project/configuration/settings acceptance, not a
 claim that the whole issue or the migration is complete. The explicit #202
@@ -46,11 +48,11 @@ The source harness is `scripts/production-workspace-cleanup-proof.ts`. Its
 adjacent test covers fixture guards. The actual-owner wrapper is
 `src/service/production-workspace-cleanup-acceptance.test.ts`, already included
 by the standalone configuration's service-test wildcard. It requires Linux and
-the existing explicitly staged terminal-proof flag; it does not change the
+the explicitly staged owner-proof flag; it does not change the
 runner or dependency set. The primary runs, after all owners freeze:
 
 ```sh
-rtk pnpm test:tauri -- --terminal-proofs src/service/production-workspace-cleanup-acceptance.test.ts --reporter=default --reporter=json
+rtk pnpm test:tauri -- --owner-proofs src/service/production-workspace-cleanup-acceptance.test.ts --reporter=default --reporter=json
 ```
 
 Retain `PRODUCTION_WORKSPACE_CLEANUP_REPORT`, actual exit status, command,

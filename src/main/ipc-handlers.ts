@@ -10,9 +10,6 @@ import { registerSettingsHandlers } from './ipc/settings'
 import { registerAppHandlers } from './ipc/app'
 import { registerClaudePluginHandlers } from './ipc/claude-plugins'
 import { registerMobileHandlers } from './ipc/mobile'
-import { registerTerminalHandlers } from './ipc/terminal'
-import { registerBrowserBrokerHandlers } from './ipc/browser-broker'
-import { registerExternalAuthHandlers } from './ipc/external-auth'
 import { registerVoiceHandlers } from './ipc/voice'
 import { registerChatHandlers } from './ipc/chat'
 import { registerCommanderHandlers } from './ipc/commander'
@@ -35,9 +32,6 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerAppHandlers(deps)
   registerClaudePluginHandlers(deps)
   registerMobileHandlers(deps)
-  registerTerminalHandlers()
-  registerBrowserBrokerHandlers()
-  registerExternalAuthHandlers()
   registerVoiceHandlers(deps)
   registerChatHandlers(deps)
   registerCommanderHandlers(deps)

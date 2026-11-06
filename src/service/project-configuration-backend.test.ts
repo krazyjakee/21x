@@ -102,7 +102,6 @@ async function fixture(kind: string, controlledProvider?: ChatProvider) {
     canCreateSecret: check,
     canUseSecretEnvironment: check,
     canReadEnvironment: check,
-    canAccessTerminal: check,
     canAccessMcpServer: check,
     canAccessCli: check,
     canUseTransport: check,
@@ -125,8 +124,7 @@ async function fixture(kind: string, controlledProvider?: ChatProvider) {
     canAccessSkill: check,
     canCreateGlobalSkill: check,
     canCreateAgent: check,
-    canCreateMcpServer: check,
-    resolveTerminalDirectory: () => null
+    canCreateMcpServer: check
   }
   let session = 0
   const adapter = {

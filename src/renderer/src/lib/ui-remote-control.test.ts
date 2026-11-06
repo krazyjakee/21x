@@ -8,10 +8,8 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
 }))
 
 import { applyUiCommand, collectUiState } from './ui-remote-control'
-import { settingsApi } from '@/lib/ipc-client'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
-import { useCanvasStore } from '@/stores/canvas-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useArtifactStore } from '@/stores/artifact-store'
 import { SettingsTab } from '@/types'
@@ -20,10 +18,8 @@ import { ArtifactType } from '@shared/artifacts'
 /**
  * Driving the window from an agent command.
  *
- * The rule these tests protect: a command names a task, never a panel. A panel
- * is rebuilt when a session starts, so a panel ID read a moment ago may be gone
- * — and the settings pane covers the workspace, so leaving it is part of going
- * anywhere else.
+ * The rule these tests protect: a command names a task, and the settings pane
+ * covers the workspace, so leaving it is part of going anywhere else.
  */
 
 function seedTasks(): void {
@@ -31,22 +27,9 @@ function seedTasks(): void {
     tasks: [
       { id: 't1', title: 'Fix login' },
       { id: 't2', title: 'Release notes' },
-      // In another project: its panel lives on that project's canvas.
       { id: 't3', title: 'Mobile spike', project_id: 'p2' },
     ] as never,
     selectedTaskId: null,
-  })
-}
-
-function addTaskPanel(taskId: string, x = 0, y = 0): string {
-  return useCanvasStore.getState().addPanel({
-    type: 'task',
-    title: taskId,
-    refId: taskId,
-    x,
-    y,
-    width: 100,
-    height: 100,
   })
 }
 
@@ -56,81 +39,11 @@ beforeEach(() => {
     sidebarView: 'dashboard',
     activeModal: null,
     dashboardPreviewTaskId: null,
-    canvasPendingTaskId: null,
     settingsTab: SettingsTab.GENERAL,
     showOrchestrator: false,
   })
   useProjectStore.setState({ currentProjectId: 'default' })
-  useCanvasStore.setState({
-    panels: [],
-    edges: [],
-    pendingViewCommand: null,
-    viewport: { x: 0, y: 0, zoom: 1 },
-    projectId: 'default',
-    isLoaded: true,
-  })
   useArtifactStore.setState({ artifactsByTask: {}, uiByTask: {} })
-})
-
-describe('a task from another project', () => {
-  /** The canvas saved for project p2: one panel, for t3. */
-  const p2Canvas = JSON.stringify({
-    viewport: { x: 0, y: 0, zoom: 1 },
-    panels: [{ id: 'panel-9', type: 'task', refId: 't3', title: 't3', x: 0, y: 0, width: 100, height: 100, zIndex: 1 }],
-    edges: [],
-    nextZIndex: 2,
-  })
-
-  beforeEach(() => {
-    vi.mocked(settingsApi.get).mockImplementation(async (key) => (key === 'canvas_state:p2' ? p2Canvas : null))
-  })
-
-  afterEach(() => {
-    vi.mocked(settingsApi.get).mockImplementation(async () => null)
-    useProjectStore.setState({ currentProjectId: 'default' })
-  })
-
-  it('open_task on the canvas switches to its project first, then hands the task to that canvas', () => {
-    addTaskPanel('t1')
-    expect(applyUiCommand({ kind: 'open_task', taskId: 't3', where: 'canvas' })).toEqual({ applied: true })
-
-    expect(useProjectStore.getState().currentProjectId).toBe('p2')
-    const ui = useUIStore.getState()
-    expect(ui.sidebarView).toBe('canvas')
-    expect(ui.canvasPendingTaskId).toBe('t3')
-    // The previous project's panels are gone; nothing was focused on them.
-    expect(useCanvasStore.getState().projectId).toBe('p2')
-    expect(useCanvasStore.getState().pendingViewCommand).toBeNull()
-  })
-
-  it('moves the panel on the other project\'s canvas once that canvas has loaded', async () => {
-    const result = applyUiCommand({ kind: 'move_task_panel', taskId: 't3', x: 400, y: -50 })
-    expect(result.applied).toBe(true)
-    expect(useProjectStore.getState().currentProjectId).toBe('p2')
-
-    await vi.waitFor(() => {
-      const panel = useCanvasStore.getState().panels.find((p) => p.refId === 't3')
-      expect([panel?.x, panel?.y]).toEqual([400, -50])
-    })
-    expect(useCanvasStore.getState().projectId).toBe('p2')
-  })
-
-  it('closes the panel on the other project\'s canvas once that canvas has loaded', async () => {
-    applyUiCommand({ kind: 'close_task_panel', taskId: 't3' })
-    await vi.waitFor(() => expect(useCanvasStore.getState().isLoaded).toBe(true))
-    expect(useCanvasStore.getState().projectId).toBe('p2')
-    expect(useCanvasStore.getState().panels).toEqual([])
-  })
-
-  it('leaves the project alone for a task that is already in it', () => {
-    addTaskPanel('t1')
-    applyUiCommand({ kind: 'move_task_panel', taskId: 't1', x: 5, y: 5 })
-    expect(useProjectStore.getState().currentProjectId).toBe('default')
-  })
-
-  it('reports the project on screen with the canvas', () => {
-    expect(collectUiState().projectId).toBe('default')
-  })
 })
 
 describe('switch_project', () => {
@@ -157,9 +70,9 @@ describe('switch_project', () => {
   })
 
   it('keeps a project view where it is', () => {
-    useUIStore.getState().setSidebarView('canvas')
+    useUIStore.getState().setSidebarView('skills')
     applyUiCommand({ kind: 'switch_project', projectId: 'p2' })
-    expect(useUIStore.getState().sidebarView).toBe('canvas')
+    expect(useUIStore.getState().sidebarView).toBe('skills')
   })
 
   it('refuses an unknown or archived project', () => {
@@ -171,8 +84,8 @@ describe('switch_project', () => {
 
 describe('navigate', () => {
   it('switches view', () => {
-    expect(applyUiCommand({ kind: 'navigate', view: 'canvas' })).toEqual({ applied: true })
-    expect(useUIStore.getState().sidebarView).toBe('canvas')
+    expect(applyUiCommand({ kind: 'navigate', view: 'skills' })).toEqual({ applied: true })
+    expect(useUIStore.getState().sidebarView).toBe('skills')
   })
 
   it('leaves settings behind — it covers the workspace', () => {
@@ -208,65 +121,11 @@ describe('open_task', () => {
     expect(useUIStore.getState().sidebarView).toBe('dashboard')
   })
 
-  it('adds a canvas panel when the task has none', () => {
-    applyUiCommand({ kind: 'open_task', taskId: 't1', where: 'canvas' })
-    const ui = useUIStore.getState()
-    expect(ui.sidebarView).toBe('canvas')
-    // The canvas places the panel itself, so it is queued rather than added here.
-    expect(ui.canvasPendingTaskId).toBe('t1')
-  })
-
-  it('centres the existing panel instead of opening a second copy', () => {
-    addTaskPanel('t1')
-    applyUiCommand({ kind: 'open_task', taskId: 't1', where: 'canvas' })
-    expect(useUIStore.getState().canvasPendingTaskId).toBeNull()
-    expect(useCanvasStore.getState().pendingViewCommand).toEqual({ kind: 'focus_task', taskId: 't1' })
-    expect(useCanvasStore.getState().panels).toHaveLength(1)
-  })
-
   it('refuses a task the window does not have', () => {
     expect(applyUiCommand({ kind: 'open_task', taskId: 'ghost', where: 'workspace' })).toEqual({
       applied: false,
       detail: 'That task is not loaded',
     })
-  })
-})
-
-describe('canvas panels', () => {
-  it('moves the panel of a task', () => {
-    const id = addTaskPanel('t1', 10, 10)
-    expect(applyUiCommand({ kind: 'move_task_panel', taskId: 't1', x: 400, y: -50 })).toEqual({ applied: true })
-    const panel = useCanvasStore.getState().panels.find((p) => p.id === id)
-    expect([panel?.x, panel?.y]).toEqual([400, -50])
-  })
-
-  it('closes the panel of a task and leaves the others', () => {
-    addTaskPanel('t1')
-    addTaskPanel('t2')
-    applyUiCommand({ kind: 'close_task_panel', taskId: 't1' })
-    expect(useCanvasStore.getState().panels.map((p) => p.refId)).toEqual(['t2'])
-  })
-
-  it('reports when a task has no panel rather than acting on another', () => {
-    addTaskPanel('t2')
-    expect(applyUiCommand({ kind: 'move_task_panel', taskId: 't1', x: 0, y: 0 }).applied).toBe(false)
-    expect(applyUiCommand({ kind: 'close_task_panel', taskId: 't1' }).applied).toBe(false)
-    expect(useCanvasStore.getState().panels).toHaveLength(1)
-  })
-
-  it('queues a viewport change for the canvas to carry out, and shows the canvas', () => {
-    addTaskPanel('t1')
-    applyUiCommand({ kind: 'set_canvas_view', mode: 'fit_all' })
-    expect(useCanvasStore.getState().pendingViewCommand).toEqual({ kind: 'fit_all' })
-    expect(useUIStore.getState().sidebarView).toBe('canvas')
-  })
-
-  it('does not send the user to an empty canvas to fit nothing', () => {
-    expect(applyUiCommand({ kind: 'set_canvas_view', mode: 'fit_all' })).toEqual({
-      applied: false,
-      detail: 'The canvas is empty',
-    })
-    expect(useUIStore.getState().sidebarView).toBe('dashboard')
   })
 })
 
@@ -301,20 +160,11 @@ describe('open_artifact', () => {
 })
 
 describe('collectUiState', () => {
-  it('reports the canvas, so an agent can move a panel without guessing', () => {
-    addTaskPanel('t1', 30, 40)
-    useCanvasStore.getState().setViewport({ x: -100, y: 20, zoom: 0.5 })
-    const state = collectUiState()
-    expect(state.canvas.viewport).toEqual({ x: -100, y: 20, zoom: 0.5 })
-    expect(state.canvas.panels).toEqual([
-      expect.objectContaining({ taskId: 't1', x: 30, y: 40, type: 'task' }),
-    ])
-  })
-
   it('reports the open task and the screen it is on', () => {
     useTaskStore.getState().selectTask('t1')
     useUIStore.getState().setSidebarView('tasks')
     const state = collectUiState()
     expect(state).toMatchObject({ view: 'tasks', selectedTaskId: 't1', selectedTaskTitle: 'Fix login' })
+    expect(state).not.toHaveProperty('canvas')
   })
 })

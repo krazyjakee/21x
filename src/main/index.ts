@@ -27,11 +27,8 @@ import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { ConnectorBridgePlugin } from './plugins/connector-bridge-plugin'
 import { closeConnectorRuntime, disposeConnectorRuntime } from './connectors/bridge/runtime'
 import { registerIpcHandlers } from './ipc-handlers'
-import { shutdownTerminalServices, closeTerminalServices } from './ipc/terminal'
 import { shutdownChatServices, closeChatServices } from './ipc/chat'
 import { shutdownCommanderServices, closeCommanderServices } from './ipc/commander'
-import { panelBrowserBroker } from './panel-browser-broker'
-import { hardenWebviewPreferences } from './webview-hardening'
 import { VoiceSessionManager } from './voice/voice-session-manager'
 import { voiceEventSenders, watchAgentAnswersForSpeech } from './voice/voice-bridge'
 import { loadPlatformShellEnv } from './shell-env'
@@ -190,7 +187,6 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 
 async function shutdownAppServices(): Promise<void> {
   overdueNotifier.shutdown()
-  shutdownTerminalServices()
   shutdownChatServices()
   shutdownCommanderServices()
   shutdownSecretBroker()
@@ -214,7 +210,7 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices(), closeSecretBroker(), closeMcpProbes(), claudePluginManager?.close(), voiceSessionManager?.close()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeChatServices(), closeCommanderServices(), closeSecretBroker(), closeMcpProbes(), claudePluginManager?.close(), voiceSessionManager?.close()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason
@@ -264,7 +260,6 @@ function createWindow(): void {
       // needs from Node already goes through IPC. Keep it that way: adding a
       // Node `require` to the preload would fail at run time with this on.
       sandbox: true,
-      webviewTag: true,
       // Keep processing agent transcript IPC/timers while the window is
       // hidden or minimized — throttling a hidden renderer stalls streamed
       // updates and safety reconciles until the window is shown again.
@@ -289,8 +284,7 @@ function createWindow(): void {
   // zoom per host, so an accidental Cmd+- gets remembered — and because `pnpm dev`
   // loads from `localhost`, a stray zoom level stays applied on every dev launch
   // (the app opens zoomed out/in with no obvious way back). Reset once per launch;
-  // in-session Cmd+/Cmd- still works. Embedded <webview> contents have their own
-  // webContents and are unaffected.
+  // in-session Cmd+/Cmd- still works.
   let didResetZoom = false
   mainWindow.webContents.on('did-finish-load', () => {
     if (didResetZoom) return
@@ -345,9 +339,8 @@ function createWindow(): void {
   })
 
   // SAFETY: Prevent the main window from ever navigating away from the app.
-  // Defense in depth for the panel browser broker: only registered canvas
-  // browser panels are addressable by agents, so this should never fire —
-  // but if anything ever drives the main window off-app, block it here.
+  // Defense in depth: this should never fire, but if anything ever drives the
+  // main window off-app, block it here.
   //
   const appUrl = is.dev && process.env['ELECTRON_RENDERER_URL']
     ? process.env['ELECTRON_RENDERER_URL']
@@ -644,42 +637,9 @@ if (!profileClaim.refused) {
   app.exit(1)
 }
 
-// NOTE: The app intentionally does NOT expose a --remote-debugging-port.
-// Canvas browser panels are driven by agents through the in-app panel browser
-// broker (panel-browser-broker.ts) via browser_* MCP tools — only registered
-// panels are addressable, so the main window can never be reached or
-// navigated away by an agent. A global debug port would expose every target
-// (main window = first page target) to any local process.
-
-// ── Anti-bot-detection for embedded browser panels ─────────────────────────
-// Some sites (Xero, banking portals) use Akamai's WAF which fingerprints
-// the TLS ClientHello and HTTP/2 SETTINGS frames — baked into the compiled
-// Electron binary and impossible to change at runtime.  We apply best-effort
-// mitigations here; sites that still block are handled gracefully in the
-// browser panel UI with an "Open in Chrome" fallback.
-
-// 1. Replace user-agent with a real Chrome UA string.
-const chromiumVersion = process.versions.chrome || '136.0.0.0'
-const chromiumMajor = chromiumVersion.split('.')[0]
-const cleanUA = process.platform === 'darwin'
-  ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromiumVersion} Safari/537.36`
-  : process.platform === 'win32'
-    ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromiumVersion} Safari/537.36`
-    : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromiumVersion} Safari/537.36`
-app.userAgentFallback = cleanUA
-
-// 2. Disable AutomationControlled so navigator.webdriver = false when CDP is active.
-app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
-
-// 3. Best-effort TLS/HTTP2 mitigations — these help with less aggressive WAFs
-//    but cannot fully defeat Akamai's binary-level TLS fingerprinting.
-app.commandLine.appendSwitch('enable-features', [
-  'PermuteTLSExtensions',          // randomise TLS extension order
-  'PostQuantumKyber',              // Chrome enables this by default
-].join(','))
-app.commandLine.appendSwitch('disable-features', [
-  'AcceptCHFrame',                 // Electron-only ALPS extension not in Chrome
-].join(','))
+// NOTE: The app intentionally does NOT expose a --remote-debugging-port. A
+// global debug port would expose every target (main window = first page target)
+// to any local process.
 
 installProcessStreamErrorHandlers()
 
@@ -954,81 +914,6 @@ app.whenReady().then(async () => {
     }
   )
 
-  // ── Patch Sec-CH-UA on all outgoing requests ──────────────────────────────
-  // Electron's Sec-CH-UA omits the "Google Chrome" brand, which Akamai uses
-  // as a signal.  We intercept via will-attach-webview to configure each
-  // webview's session.
-  //
-  // We modify the defaultSession headers directly.
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['http://*/*', 'https://*/*'] },
-    (details, callback) => {
-      const headers = { ...details.requestHeaders }
-
-      // Rewrite Sec-CH-UA to include "Google Chrome" brand like real Chrome
-      for (const key of Object.keys(headers)) {
-        const lower = key.toLowerCase()
-        if (lower === 'sec-ch-ua') {
-          headers[key] = `"Chromium";v="${chromiumMajor}", "Google Chrome";v="${chromiumMajor}", "Not_A Brand";v="24"`
-        } else if (lower === 'sec-ch-ua-full-version-list') {
-          headers[key] = `"Chromium";v="${chromiumVersion}", "Google Chrome";v="${chromiumVersion}", "Not_A Brand";v="24.0.0.0"`
-        }
-      }
-
-      // If Sec-CH-UA wasn't present at all, add it
-      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'sec-ch-ua')) {
-        headers['Sec-CH-UA'] = `"Chromium";v="${chromiumMajor}", "Google Chrome";v="${chromiumMajor}", "Not_A Brand";v="24"`
-      }
-
-      callback({ requestHeaders: headers })
-    }
-  )
-
-  // Inject anti-bot JS patches into webview pages (handles client-side
-  // fingerprinting that Akamai runs after the page loads).
-  app.on('web-contents-created', (_event, contents) => {
-    // Before any <webview> attaches, drop whatever preload / Node settings its
-    // markup asked for. Guest pages get no bridge into this process.
-    contents.on('will-attach-webview', (_e, webPreferences, params) => {
-      hardenWebviewPreferences(webPreferences, params as unknown as Record<string, unknown>)
-    })
-
-    if (contents.getType() === 'webview') {
-      // Intercept window.open calls from webviews — open valid URLs externally,
-      // silently ignore about:blank and other invalid URLs to prevent the macOS
-      // "no application set to open the URL" popup.
-      contents.setWindowOpenHandler((details) => {
-        if (isExternalUrl(details.url)) {
-          shell.openExternal(details.url)
-        }
-        return { action: 'deny' }
-      })
-
-      contents.on('dom-ready', () => {
-        // Each patch is best effort: a page that already locked a property
-        // (non-configurable) keeps its own value, and the rest still apply.
-        // Wrapped in a function so nothing leaks into (or clashes with) page globals.
-        contents.executeJavaScript(`(() => {
-          const patch = (apply) => { try { apply() } catch { /* locked by the page */ } };
-          const define = (prop, get) => patch(() => Object.defineProperty(navigator, prop, { get, configurable: true }));
-          define('webdriver', () => false);
-          patch(() => {
-            if (!window.chrome) { window.chrome = {}; }
-            if (!window.chrome.runtime) { window.chrome.runtime = { id: undefined }; }
-          });
-          define('plugins', () => [
-            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-            { name: 'Native Client', filename: 'internal-nacl-plugin' },
-          ]);
-          define('languages', () => ['en-US', 'en']);
-        })()`).catch(() => {
-          // The page navigated away or was destroyed before the script ran.
-        })
-      })
-    }
-  })
-
   createWindow()
 
   // OpenCode server starts lazily on first agent session (avoids macOS permission
@@ -1051,8 +936,6 @@ app.on('before-quit', async (event) => {
   if (isShuttingDown) {
     return
   }
-
-  panelBrowserBroker.stopAll()
 
   event.preventDefault()
 

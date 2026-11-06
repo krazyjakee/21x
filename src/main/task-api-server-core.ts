@@ -37,8 +37,6 @@ export interface TaskApiHost {
   /** Captured production policy. Raw MCP/HTTP arrays have no import receipt
    * or original metadata baseline; the Electron host retains its old route. */
   attachmentMetadata?: 'unavailable'
-  /** Only the legacy adapter supplies the retired embedded browser host. */
-  legacyBrowserRoute?: TaskApiRouteHandler
 }
 let active: ServerOwner | null = null
 let port: number | null = null
@@ -113,14 +111,14 @@ export function startTaskApiServer(db: DatabaseManager, host: TaskApiHost = {}):
       // The MCP endpoint speaks JSON-RPC and sets its own headers, so it
       // must be served before anything below assumes a plain JSON route.
       if (route === TASK_MCP_PATH) {
-        await handleTaskMcpRequest(req, res, url, body, (mcpRoute, params, trustedScope) => handleRoute(db, mcpRoute, params, trustedScope, host), { includeLegacyBrowserTools: !!host.legacyBrowserRoute })
+        await handleTaskMcpRequest(req, res, url, body, (mcpRoute, params, trustedScope) => handleRoute(db, mcpRoute, params, trustedScope, host))
         return
       }
 
       res.setHeader('Content-Type', 'application/json')
       const params = parseJsonBody(body)
-      // Only route names and sizes are logged: bodies can carry typed
-      // passwords (browser_type) and other sensitive content.
+      // Only route names and sizes are logged: bodies can carry sensitive
+      // content.
       console.log(`[TaskApiServer] → ${route} (${body.length} bytes)`)
       const resultStr = JSON.stringify(await handleRoute(db, route, params, undefined, host))
       console.log(`[TaskApiServer] ← ${route} 200 (${resultStr.length} bytes)`)
@@ -184,7 +182,7 @@ const ROUTE_HANDLERS = [handleTaskGroupRoute, handleTaskRoute, handleSkillRoute,
 export async function handleRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope, host: TaskApiHost = {}): Promise<unknown> {
   if (host.attachmentMetadata === 'unavailable' && route === '/update_task' && Object.hasOwn(params, 'attachments'))
     return { error: 'Attachment metadata updates are unavailable through this task API' }
-  for (const handle of [...ROUTE_HANDLERS, ...(host.legacyBrowserRoute ? [host.legacyBrowserRoute] : [])]) {
+  for (const handle of ROUTE_HANDLERS) {
     const result = await handle(db, route, params, trustedScope)
     if (result !== undefined) return result
   }

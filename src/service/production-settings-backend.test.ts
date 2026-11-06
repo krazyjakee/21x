@@ -178,7 +178,7 @@ describe('production settings actual-owner bindings', () => {
     options.canAccessProject = () => true
     for (const key of ['default_agent_id', 'chat_agent_id']) await expect(call('settings:set', [key, 'missing-agent'])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     await expect(call('settings:set', ['current_project_id', 'missing-project'])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
-    await expect(call('settings:set', ['canvas_state:missing-project', '{}'])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(call('settings:set', ['canvas_state:missing-project', '{}'])).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
     for (const [key, value] of [['voice_enabled', 'true'], ['voice_custom_model_dir', '/tmp/untrusted'], ['voice_global_shortcut', 'Ctrl+X'], ['elevenlabs_api_key', 'new-private-key'], ['minimize_to_tray', 'true']]) {
       await expect(call('settings:set', [key, value])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
       expect(db.getSetting(key)).toBeUndefined()
@@ -200,10 +200,7 @@ describe('production settings actual-owner bindings', () => {
     expect(await call('settings:getAll', [])).not.toHaveProperty('default_agent_id')
   })
 
-  it('stores bounded scoped/UI/scheduler settings without triggering destructive cleanup or a paid briefing', async () => {
-    const project = db.createProject({ name: 'Scoped content' })!
-    await call('settings:set', [`drawing_state:${project.id}`, '{"objects":[],"nextZIndex":1}'])
-    expect(await call('settings:get', [`drawing_state:${project.id}`])).toBe('{"objects":[],"nextZIndex":1}')
+  it('stores bounded UI/scheduler settings without triggering destructive cleanup or a paid briefing', async () => {
     await call('settings:set', ['heartbeat_default_interval', '15'])
     await call('settings:set', ['workspace_autocleanup_days', '14'])
     await call('settings:set', ['commander_briefing', '{"enabled":true,"cron":"0 8 * * 1-5","speak":false}'])
@@ -211,9 +208,6 @@ describe('production settings actual-owner bindings', () => {
     expect(db.getSetting('heartbeat_default_interval')).toBe('15')
     expect(db.getSetting('workspace_autocleanup_days')).toBe('14')
     expect(adapter.sendPrompt).not.toHaveBeenCalled()
-    options.canAccessProject = id => id !== project.id
-    await expect(call('settings:get', [`drawing_state:${project.id}`])).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
-    expect(await call('settings:getAll', [])).not.toHaveProperty(`drawing_state:${project.id}`)
   })
 
   it('encrypts secret BLOBs and returns exact metadata while preserving omitted/empty updates', async () => {

@@ -2,7 +2,6 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { TaskBoard } from '../../src/renderer/src/components/dashboard/TaskBoard'
 import { HeroSection } from '../../src/renderer/src/components/dashboard/HeroSection'
-import { CanvasPanel } from '../../src/renderer/src/components/canvas/CanvasPanel'
 import { NavRail } from '../../src/renderer/src/components/layout/NavRail'
 import { StatusBar } from '../../src/renderer/src/components/layout/StatusBar'
 import { TopBar } from '../../src/renderer/src/components/layout/TopBar'
@@ -19,7 +18,6 @@ import { useTaskStore } from '../../src/renderer/src/stores/task-store'
 import { useAgentStore } from '../../src/renderer/src/stores/agent-store'
 import { useProjectStore } from '../../src/renderer/src/stores/project-store'
 import { useCoordinatorStore } from '../../src/renderer/src/stores/coordinator-store'
-import { useCanvasStore, type CanvasPanelData } from '../../src/renderer/src/stores/canvas-store'
 import { useCommanderStore } from '../../src/renderer/src/stores/commander-store'
 import { useCommanderCallStore } from '../../src/renderer/src/stores/commander-call-store'
 import { useVoiceStore } from '../../src/renderer/src/stores/voice-store'
@@ -49,8 +47,6 @@ useUIStore.setState({ sidebarView: 'tasks', activeModal: null, statusFilter: 'al
 // Commander native harness exercises controlled capture and real PCM output.
 useCommanderCallStore.setState({ micMode: 'push-to-talk' })
 useVoiceStore.setState({ available: true, enabled: true, permission: 'granted', runtime: { installed: true }, engine: { state: 'ready' }, tts: { enabled: true, status: { state: 'ready' } } })
-const panels: CanvasPanelData[] = ['task-one', 'task-two'].map((id, index) => ({ id: 'panel-' + id, type: 'task', refId: id, title: id, x: index * 620, y: 0, width: 600, height: 390, zIndex: index + 1 }))
-useCanvasStore.setState({ panels, edges: [] })
 Object.assign(window.fixture, {
   inspect: () => ({ now: activityNow(), session: useSessionActivityStore.getState(), commander: useCommanderActivityStore.getState(), deadlines: pendingActivityDeadlines(), call: { status: useCommanderCallStore.getState().status, sessionId: useCommanderCallStore.getState().sessionId }, agentCache: [...useAgentStore.getState().sessions].map(([id, session]) => ({ id, status: session.status, sessionId: session.sessionId })) }),
   hydrateLegacy: () => useAgentStore.getState().initSession('task-one', 'cached-dead-session', agent.id),
@@ -68,7 +64,6 @@ function ExpandedEvidence() {
 }
 function Fixture() {
   const view = useUIStore(s => s.sidebarView)
-  const activePanels = useCanvasStore(s => s.panels)
   return <div className="audit-shell bg-background text-foreground">
     <CommanderCallHost /><CommanderCallSurfaces />
     <header data-testid="audit-topbar"><TopBar onOpenCommandPalette={noop} /></header>
@@ -78,7 +73,6 @@ function Fixture() {
         <HeroSection onSeeFullConversation={noop} />
         <ExpandedEvidence />
         <section className="audit-board" aria-label="Actual task board"><TaskBoard /></section>
-        <section className="audit-canvas" aria-label="Actual canvas panels">{activePanels.map(panel => <CanvasPanel key={panel.id} panel={panel} zoom={1} />)}</section>
       </main>}
     </div>
     <footer data-testid="audit-status"><StatusBar /></footer>

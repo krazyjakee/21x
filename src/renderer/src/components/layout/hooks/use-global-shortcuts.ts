@@ -15,7 +15,6 @@ const CHORD_ACTIONS: Record<string, keyof CommandPaletteActions> = {
   op: 'openPullRequest',
   yp: 'copyPullRequestUrl',
   yb: 'copyPullRequestBranch',
-  gc: 'openTaskOnCanvas',
   gp: 'openParentTask',
   os: 'openSubtasks',
   vt: 'toggleTaskAudio',
@@ -24,7 +23,6 @@ const CHORD_ACTIONS: Record<string, keyof CommandPaletteActions> = {
 
 /** Command palette toggle, view switching, two-key chords, and single-key task shortcuts. */
 export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: Dispatch<SetStateAction<boolean>>) {
-  const sidebarView = useUIStore((s) => s.sidebarView)
   const setSidebarView = useUIStore((s) => s.setSidebarView)
   const activeModal = useUIStore((s) => s.activeModal)
   const closeModal = useUIStore((s) => s.closeModal)
@@ -79,7 +77,7 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
         return
       }
 
-      if (key === 'g' || (sidebarView !== 'canvas' && (key === 'o' || key === 'y' || key === 'v'))) {
+      if (key === 'g' || key === 'o' || key === 'y' || key === 'v') {
         e.preventDefault()
         chordRef.current = {
           key: key as ChordPrefix,
@@ -87,7 +85,6 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
         }
         return
       }
-      if (sidebarView === 'canvas') return
       if (e.repeat && key !== 'j' && key !== 'k') return
 
       // Explicit composer focus (I) — before single-letter task shortcuts
@@ -124,5 +121,5 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
       window.removeEventListener('keydown', onKey)
       if (chordRef.current) window.clearTimeout(chordRef.current.timer)
     }
-  }, [actions, activeModal, closeModal, openCreateModal, setCmdOpen, setShowOrchestrator, setSidebarView, showOrchestrator, sidebarView])
+  }, [actions, activeModal, closeModal, openCreateModal, setCmdOpen, setShowOrchestrator, setSidebarView, showOrchestrator])
 }

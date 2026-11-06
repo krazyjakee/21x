@@ -122,11 +122,11 @@ export async function runProductionTaskFeedbackProof(): Promise<TaskFeedbackProo
     canAccessSource: (_id, caller, access) => trustedCaller(caller) && (access !== 'read' || !denySource), canAccessSession: () => trusted, canAccessGlobalCommander: () => trusted,
     canManageGlobalConfiguration: () => trusted, canQueryBackend: () => trusted, canCreateProject: () => trusted, canEditSettings: () => trusted,
     canAccessGlobalSkills: () => trusted, canChangeSkillScope: () => trusted, canReorderProjects: () => trusted, canReadSetting: () => trusted, canWriteSetting: () => trusted, canAccessSecret: () => trusted,
-    canCreateSecret: () => trusted, canUseSecretEnvironment: () => trusted, canReadEnvironment: () => trusted, canAccessTerminal: () => trusted, canAccessMcpServer: () => trusted, canAccessCli: () => trusted, canUseTransport: () => trusted,
+    canCreateSecret: () => trusted, canUseSecretEnvironment: () => trusted, canReadEnvironment: () => trusted, canAccessMcpServer: () => trusted, canAccessCli: () => trusted, canUseTransport: () => trusted,
     canUseEnvironmentName: () => trusted, canAccessConnector: () => trusted, canUseSourcePlugin: () => trusted, canCreateInstance: () => trusted, canUsePiece: () => trusted, canBorrowSourceCredentials: () => trusted,
     canResolveUnsavedConfig: () => trusted, canManageMobile: () => trusted, canAccessMobileSession: () => trusted, canAccessMarketplace: () => trusted, canCreateMarketplace: () => trusted,
     canAccessPluginName: () => trusted, canAccessPlugin: () => trusted, canUseMarketplaceSource: () => trusted, canUsePluginAddress: () => trusted, canUsePluginSource: () => trusted,
-    canAccessSkill: () => trusted, canCreateGlobalSkill: () => trusted, canCreateAgent: () => trusted, canCreateMcpServer: () => trusted, resolveTerminalDirectory: () => null
+    canAccessSkill: () => trusted, canCreateGlobalSkill: () => trusted, canCreateAgent: () => trusted, canCreateMcpServer: () => trusted
   }
   const disconnect = (side: 'service' | 'host', error: ServiceProtocolError): void => {
     disconnectCodes[side] ??= error.code

@@ -101,15 +101,15 @@ export function buildTaskMcpUrl(
 }
 
 /** A fresh MCP server bound to one scope. */
-function createScopedServer(scope: TaskMcpScope, invoke: TaskApiInvoke, availability: { includeLegacyBrowserTools?: boolean }): Server {
+function createScopedServer(scope: TaskMcpScope, invoke: TaskApiInvoke): Server {
   const server = new Server(
     { name: 'task-management', version: '1.0.0' },
     { capabilities: { tools: {} } }
   )
-  server.setRequestHandler('tools/list', async () => ({ tools: listToolsForScope(scope, availability) }))
+  server.setRequestHandler('tools/list', async () => ({ tools: listToolsForScope(scope) }))
   server.setRequestHandler('tools/call', async (request) => {
     const { name, arguments: args } = request.params as { name: string; arguments?: Record<string, unknown> }
-    return callToolForScope(name, args, scope, invoke, availability)
+    return callToolForScope(name, args, scope, invoke)
   })
   return server
 }
@@ -168,8 +168,7 @@ export async function handleTaskMcpRequest(
   res: ServerResponse,
   url: URL,
   body: string,
-  invoke: TaskApiInvoke,
-  availability: { includeLegacyBrowserTools?: boolean } = {}
+  invoke: TaskApiInvoke
 ): Promise<void> {
   // Refuse the standalone SSE stream before a transport is ever built.
   //
@@ -211,7 +210,7 @@ export async function handleTaskMcpRequest(
     // request/response only, and no tool sends server-initiated notifications.
     enableJsonResponse: true
   })
-  const server = createScopedServer(scope, (route, params) => invoke(route, params, scope), availability)
+  const server = createScopedServer(scope, (route, params) => invoke(route, params, scope))
 
   try {
     await server.connect(transport)
