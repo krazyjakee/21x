@@ -7,6 +7,10 @@
       "reason": "Historical Electron packaging/fuse hook; not a production service dependency."
     },
     {
+      "file": "src/main/agent-installer/install-rtk.test.ts",
+      "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
+    },
+    {
       "file": "src/main/agent-installer/install.test.ts",
       "reason": "Historical shipping Electron host/adapter dependency; retain this regression without loading its graph in production tests."
     },
@@ -28,6 +32,10 @@
     },
     {
       "file": "src/main/agent-manager-coordinator.test.ts",
+      "reason": "Historical AgentManager Electron host constructor/adapter graph; standalone production owners exercise the portable manager."
+    },
+    {
+      "file": "src/main/agent-manager-dead-process.test.ts",
       "reason": "Historical AgentManager Electron host constructor/adapter graph; standalone production owners exercise the portable manager."
     },
     {
@@ -145,6 +153,10 @@
     {
       "file": "src/main/ipc/chat.test.ts",
       "reason": "Historical Electron IPC/host adapter graph; production service bindings have separate real-owner regressions."
+    },
+    {
+      "file": "src/main/ipc/claude-plugins.test.ts",
+      "reason": "Historical Electron IPC handler registration; the standalone service binds the same plugin owner."
     },
     {
       "file": "src/main/ipc/commander-actions.test.ts",

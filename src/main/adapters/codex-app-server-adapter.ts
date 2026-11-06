@@ -55,6 +55,7 @@ import {
 import { onJsonLines } from './shared/jsonl'
 import { groupPartsIntoMessages } from './shared/session-messages'
 import { dangerousToolReason } from './tool-safety'
+import { AGENT_WORK_ENV } from '../../shared/agent-work-marker'
 
 const DEFAULT_CODEX_APP_SERVER_MODEL = 'gpt-6-astra'
 const LABEL = 'CodexAppServerAdapter'
@@ -801,7 +802,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     usesApiKey: boolean
     summary: string
   } {
-    const env: NodeJS.ProcessEnv = { ...process.env, ...config.secretEnvVars, ...config.rtkEnv }
+    const env: NodeJS.ProcessEnv = { ...process.env, ...AGENT_WORK_ENV, ...config.secretEnvVars, ...config.rtkEnv }
     return { env, ...applyCodexAuthEnv(env, config) }
   }
 

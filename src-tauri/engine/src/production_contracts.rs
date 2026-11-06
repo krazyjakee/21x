@@ -2594,7 +2594,14 @@ fn artifact_event(value: &Value, task_id: &Value) -> bool {
     };
     object(
         value,
-        &["id", "taskId", "type", "title", "updatedAt", "reloadTrigger"],
+        &[
+            "id",
+            "taskId",
+            "type",
+            "title",
+            "updatedAt",
+            "reloadTrigger",
+        ],
         &["path", "url", "workpieceKey", "files"],
     ) && value["taskId"] == *task_id
         && artifact_label(&value["id"], 8192)
@@ -3112,7 +3119,9 @@ fn voice_request(op: &str, v: &Value) -> bool {
         }
         "voice:setEndpointSilence" => {
             object(v, &["seconds"], &[])
-                && v["seconds"].as_f64().is_some_and(|n| n >= 0.1 && n <= 10.0)
+                && v["seconds"]
+                    .as_f64()
+                    .is_some_and(|n| (0.1..=10.0).contains(&n))
         }
         "voice:tts:setEngine" => {
             object(v, &["engine"], &[]) && matches!(v["engine"].as_str(), Some("system" | "local"))
@@ -4031,7 +4040,7 @@ fn transcript_page_request(value: &Value) -> bool {
         && value.get("watermark").is_none_or(integer)
         && value
             .get("limit")
-            .is_none_or(|limit| limit.as_u64().is_some_and(|n| n >= 1 && n <= 64))
+            .is_none_or(|limit| limit.as_u64().is_some_and(|n| (1..=64).contains(&n)))
         && (value["mode"] != "delta"
             || value.get("watermark").is_none()
             || value["after"].as_u64() <= value["watermark"].as_u64())
@@ -4465,7 +4474,10 @@ mod tests {
         ] {
             let mut foreign = sample.clone();
             foreign[key] = bad;
-            assert!(!valid_event("agent:recoveryStateChanged", &foreign), "{key}");
+            assert!(
+                !valid_event("agent:recoveryStateChanged", &foreign),
+                "{key}"
+            );
         }
     }
 

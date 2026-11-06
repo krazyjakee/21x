@@ -30,7 +30,9 @@ fn six(byte: u8) -> Option<u8> {
 }
 fn canonical(data: &str) -> bool {
     let bytes = data.as_bytes();
-    if bytes.is_empty() || bytes.len() % 4 != 0 || bytes.len() > (512 * 1024_usize).div_ceil(3) * 4
+    if bytes.is_empty()
+        || !bytes.len().is_multiple_of(4)
+        || bytes.len() > (512 * 1024_usize).div_ceil(3) * 4
     {
         return false;
     }

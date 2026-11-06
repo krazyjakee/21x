@@ -53,6 +53,7 @@ import {
 import { onJsonLines } from './shared/jsonl'
 import { groupPartsIntoMessages } from './shared/session-messages'
 import { dangerousToolReason } from './tool-safety'
+import { AGENT_WORK_ENV } from '../../shared/agent-work-marker'
 
 interface AcpPermissionRequest {
   requestId: string | number
@@ -207,6 +208,7 @@ export class AcpAdapter implements CodingAgentAdapter {
   private async startSession(sessionId: string, acpSessionId: string | null, config: SessionConfig): Promise<AcpSession> {
     const env: Record<string, string | undefined> = {
       ...process.env,
+      ...AGENT_WORK_ENV,
       ...this.agentConfig.env,
       ...(config.apiKeys?.anthropic ? { ANTHROPIC_API_KEY: config.apiKeys.anthropic } : {}),
       ...config.secretEnvVars,

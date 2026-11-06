@@ -5,7 +5,7 @@ use raw_window_handle::HasWindowHandle;
 use serde_json::{json, Value};
 use std::{
     collections::{hash_map::RandomState, VecDeque},
-    hash::{BuildHasher, Hash, Hasher},
+    hash::BuildHasher,
     sync::{Arc, Mutex},
 };
 use tauri::{Emitter, EventTarget, Manager, WebviewWindow};
@@ -91,11 +91,7 @@ impl DocumentLease {
         self.advance()?;
         // Wry does not expose navigation IDs. Do not infer a successful new
         // document from an older same-URL completion when loads overlap.
-        if self.loads.is_empty() {
-            self.ambiguous_load = false;
-        } else {
-            self.ambiguous_load = true;
-        }
+        self.ambiguous_load = !self.loads.is_empty();
         if self.loads.len() >= 16 {
             self.closed = true;
             return Err(EngineError::new("BACKPRESSURE"));
@@ -139,14 +135,9 @@ impl DocumentLease {
         {
             // RandomState carries private OS-seeded keys. These are opaque
             // document identities; no paths or general host grants are encoded.
-            let mut a = RandomState::new().build_hasher();
-            let mut b = RandomState::new().build_hasher();
-            (self.attachment, self.generation, epoch).hash(&mut a);
-            (epoch, self.generation, self.attachment).hash(&mut b);
-            self.lease = Some((
-                format!("ui_{:016x}{:016x}", a.finish(), b.finish()),
-                epoch.to_owned(),
-            ));
+            let a = RandomState::new().hash_one((self.attachment, self.generation, epoch));
+            let b = RandomState::new().hash_one((epoch, self.generation, self.attachment));
+            self.lease = Some((format!("ui_{a:016x}{b:016x}"), epoch.to_owned()));
         }
         self.lease.as_ref().map(|(lease, _)| lease.clone())
     }
@@ -865,7 +856,9 @@ mod tests {
             state.document.finished(ticket, "physical-A");
         }
         let generation = owner.document_terminated(ticket).unwrap();
-        owner.assert_terminated_document(ticket, generation).unwrap();
+        owner
+            .assert_terminated_document(ticket, generation)
+            .unwrap();
         // The user chose View > Reload during the delay.
         owner.navigation(ticket).unwrap();
         assert_eq!(
@@ -877,7 +870,9 @@ mod tests {
         );
         let generation = owner.document_terminated(ticket).unwrap();
         owner.close().unwrap();
-        assert!(owner.assert_terminated_document(ticket, generation).is_err());
+        assert!(owner
+            .assert_terminated_document(ticket, generation)
+            .is_err());
         assert_eq!(owner.document_terminated(ticket), None);
     }
     #[test]
