@@ -45,7 +45,6 @@ export function useActiveTaskActions({
   const closeDashboardPreview = useUIStore((s) => s.closeDashboardPreview)
   const setShowOrchestrator = useUIStore((s) => s.setShowOrchestrator)
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
-  const openTaskOnCanvas = useUIStore((s) => s.openTaskOnCanvas)
 
   const filteredTasksRef = useRef(tasks)
   filteredTasksRef.current = tasks
@@ -134,14 +133,6 @@ export function useActiveTaskActions({
     if (dashboardPreviewTaskId) handleNavigateFromDashboardPreview(activeTask.parent_task_id)
     else selectTask(activeTask.parent_task_id)
   }, [activeTask, dashboardPreviewTaskId, handleNavigateFromDashboardPreview, selectTask, showToast])
-
-  const openActiveTaskOnCanvas = useCallback(() => {
-    if (!activeTaskId) {
-      setSidebarView('canvas')
-      return
-    }
-    openTaskOnCanvas(activeTaskId)
-  }, [activeTaskId, openTaskOnCanvas, setSidebarView])
 
   const selectSubtask = useCallback((taskId: string) => {
     if (dashboardPreviewTaskId) handleNavigateFromDashboardPreview(taskId)
@@ -301,13 +292,12 @@ export function useActiveTaskActions({
     openPullRequest: () => runTaskShortcut(TaskShortcutAction.OPEN_PR),
     openSubtasks,
     openParentTask,
-    openTaskOnCanvas: openActiveTaskOnCanvas,
     runHeartbeat: () => { void runActiveHeartbeat() },
     copyPullRequestUrl: () => runTaskShortcut(TaskShortcutAction.COPY_PR_URL),
     copyPullRequestBranch: () => runTaskShortcut(TaskShortcutAction.COPY_PR_BRANCH),
     toggleTaskAudio,
     toggleCaptainAudio
-  }), [clearTaskSelection, completeActiveTask, deleteActiveTask, focusComposer, focusSearch, navigateVisibleTask, nudgeActiveTask, openActiveTaskOnCanvas, openParentTask, openSelectedTask, openSubtasks, runActiveHeartbeat, runTaskShortcut, setShortcutsOpen, toggleCaptainAudio, toggleTaskAudio])
+  }), [clearTaskSelection, completeActiveTask, deleteActiveTask, focusComposer, focusSearch, navigateVisibleTask, nudgeActiveTask, openParentTask, openSelectedTask, openSubtasks, runActiveHeartbeat, runTaskShortcut, setShortcutsOpen, toggleCaptainAudio, toggleTaskAudio])
 
   return {
     commandActions,

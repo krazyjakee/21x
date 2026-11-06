@@ -10,8 +10,8 @@ Match current release architecture coverage, then set minimum OS/WebView version
 | --- | --- |
 | macOS x64 | Intel machine/runner, packaged app/DMG and selected update/download artifact; native permissions, workers and WebKit tests |
 | macOS arm64 | Apple Silicon machine/runner, architecture-correct native resources and workers; same scenarios as Intel |
-| Windows x64 | NSIS install on a clean user account; WebView2 bootstrap/availability, PTY, paths, permissions and child-process teardown |
-| Linux x64 | AppImage on the chosen supported distribution/desktop; WebKitGTK dependencies, executable permissions, PTY and secret-store availability |
+| Windows x64 | NSIS install on a clean user account; WebView2 bootstrap/availability, paths, permissions and child-process teardown |
+| Linux x64 | AppImage on the chosen supported distribution/desktop; WebKitGTK dependencies, executable permissions and secret-store availability |
 
 Each target runs development and packaged smoke checks; native parity must be demonstrated in the packaged app. Built-in runtime tests remove system Node from PATH. Installed agent CLIs, Git/provider CLIs, optional speech runtime/models, and integrations retain their existing explicit prerequisites.
 
@@ -35,8 +35,8 @@ For every row attach test/report location, OS/architecture, build version, fixtu
 | Git/workspaces | GitHub/GitLab/Forgejo CLI sessions and mapping, multi-repo worktrees, failures/fallback, compatible paths, safe workspace cleanup; unrelated processes/directories untouched | T09/T10 |
 | MCP/task APIs | Authenticated HTTP and stdio task tools; rejected missing/wrong launch token; local/remote MCP tool scopes/OAuth; correct app-managed runtime paths; preserve user MCP entries | T06/T09/T10 |
 | Task sources/connectors | Sync/import/export/actions, OAuth warm/cold callbacks, allowlist/pins, call-scoped KV/credentials, timeout/cancel/crash restart, minimal child environment and redacted diagnostics | T09/T13 |
-| Terminals/Commander/chat | PTY create/write/resize/reconnect/buffer/exit/kill; ownership and PID guards; CLI resolution and shell environment; Commander/chat sessions and image attachments | T09 |
-| Canvas/artifacts/files | Retained terminal/task panel lifecycle and layering; drawing/canvas persistence; sandboxed artifact previews; attachment URLs/drag-drop; read/open/reveal/download; image and file clipboard behavior | T07/T08/T11 |
+| Commander/chat | CLI resolution and shell environment; Commander/chat sessions and image attachments | T09 |
+| Artifacts/files | Sandboxed artifact previews; attachment URLs/drag-drop; read/open/reveal/download; image and file clipboard behavior | T07/T08/T11 |
 | Browser retirement | No browser/webpage creation or live embedding, browser tools/routes/controls absent, retired operations fail explicitly; inert saved panel IDs/layout/URLs/edges survive repeated load/save; recording files and rollback backup unchanged | T10/T11 |
 | Voice recognition/TTS | Optional runtime visibility/install/remove, model selection, microphone denial, global shortcut, dictation/commands, progressive recognition, speech cancellation/epochs, system/downloaded TTS, no audio to mobile | T07/T09 |
 | Mobile/tunnel | Existing mobile build, pairing/auth/session revoke, task/session controls, WebSocket projection rehydrate, settings/tunnel lifecycle; no desktop bridge requirement | T09/T12 |

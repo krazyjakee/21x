@@ -381,7 +381,7 @@ it('uses exact codecs and trusted host metadata; missing binary/file bindings ne
   const before = f.invoke.mock.calls.length
   await expect(desktopApi.voice.setCustomModelDir('/private/models')).rejects.toMatchObject({ code: 'DESKTOP_UNAVAILABLE', capability: 'voice.setCustomModelDir' })
   expect(() => desktopApi.webUtils.getPathForFile(new File([], 'private'))).toThrow('unavailable')
-  expect(typeof desktopApi.commander.onEvent).toBe('function'); expect(Reflect.get(desktopApi, 'browser')).toBeUndefined()
+  expect(typeof desktopApi.commander.onEvent).toBe('function')
   expect(f.host.supports('commander.send')).toBe(true); expect(f.invoke.mock.calls.length).toBe(before)
 })
 it('binds voice management; shortcut, custom model folders and hosted speech remain unavailable', async () => {
@@ -510,16 +510,15 @@ it('hydrates the tray preference as a read but fences mutations and requires the
   f.results.set('app:getMinimizeToTray', { enabled: true, action: 'hide' })
   await expect(desktopApi.app.getMinimizeToTray()).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })
-it('binds the 256 finite production commands including settings effects, secret metadata and terminal ownership', async () => {
+it('binds the finite production commands including settings effects and secret metadata', async () => {
   const f = fixture(); releases.push(installDesktopHost(f.host))
   const secret = { id: 'secret-1', name: 'Build credential', description: 'Private integration', env_var_name: 'BUILD_TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13' }
   f.results.set('settings:get', PRODUCTION_API_KEY_SET_MARKER)
   f.results.set('settings:getAll', { theme: 'dark', openai_api_key: PRODUCTION_API_KEY_SET_MARKER })
   f.results.set('env:get', PRODUCTION_API_KEY_SET_MARKER)
   f.results.set('secrets:getAll', [secret]); f.results.set('secrets:create', secret); f.results.set('secrets:update', secret); f.results.set('secrets:delete', true)
-  f.results.set('terminal:create', { pid: 4242 }); f.results.set('terminal:getCwd', { cwd: '/selected/workspace' }); f.results.set('terminal:getBuffer', { lines: ['recent output'] })
   f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(256)
+  expect(Object.keys(NATIVE_COMMAND_BINDINGS)).toHaveLength(250)
   expect(NATIVE_COMMAND_BINDINGS['app:setLoginItemSettings']).toBe('app.setLoginItemSettings')
   expect(await desktopApi.settings.get('openai_api_key')).toBe(PRODUCTION_API_KEY_SET_MARKER)
   await desktopApi.settings.set('max_concurrent_agent_sessions', '2')
@@ -529,33 +528,14 @@ it('binds the 256 finite production commands including settings effects, secret 
   expect(await desktopApi.secrets.create(input)).toEqual(secret)
   expect(await desktopApi.secrets.update(secret.id, { description: 'Updated metadata' })).toEqual(secret)
   expect(await desktopApi.secrets.delete(secret.id)).toBe(true)
-  expect(await desktopApi.terminal.create('panel-1', 80, 24)).toEqual({ pid: 4242 })
-  expect(await desktopApi.terminal.getCwd('panel-1', 4242)).toEqual({ cwd: '/selected/workspace' })
-  expect(await desktopApi.terminal.getBuffer('panel-1', 200)).toEqual({ lines: ['recent output'] })
-  await desktopApi.terminal.write('panel-1', '\x03'); await desktopApi.terminal.resize('panel-1', 100, 40); await desktopApi.terminal.kill('panel-1', 4242)
-  expect(f.invoke).toHaveBeenCalledWith('desktop_invoke', { operation: 'terminal:kill', payload: { id: 'panel-1', expectedPid: 4242 }, engineEpoch: 'engine-1' })
   const before = f.invoke.mock.calls.length
   await expect(desktopApi.env.get('HOME')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   await expect(desktopApi.settings.set('unknown_owner_key', 'yes')).rejects.toMatchObject({ code: 'INVALID_ARGUMENTS' })
   expect(f.invoke.mock.calls.length).toBe(before)
 })
 
-it('preserves terminal subscriptions through reconnect and drops retired-epoch output', async () => {
-  const f = fixture(), data = vi.fn(), exit = vi.fn()
-  const offData = f.host.api.terminal.onData(data), offExit = f.host.api.terminal.onExit(exit)
-  f.host.setRehydrator(async () => {}); await f.host.reconnect()
-  f.emit('terminal:data', { id: 'panel-1', data: '\x1b[31mfirst\x1b[0m' })
-  expect(data).toHaveBeenCalledExactlyOnceWith({ id: 'panel-1', data: '\x1b[31mfirst\x1b[0m' })
-  f.changeEpoch(); await f.host.reconnect()
-  f.history[0]?.({ payload: { protocolVersion: 1, kind: 'event', operation: 'terminal:data', payload: { id: 'panel-1', data: 'retired' }, engineEpoch: 'engine-1', sequence: 2 } })
-  expect(data).toHaveBeenCalledOnce()
-  f.emit('terminal:exit', { id: 'panel-1' }); expect(exit).toHaveBeenCalledExactlyOnceWith({ id: 'panel-1' })
-  offData(); offExit()
-})
-
-it('keeps native terminal mutation fenced during recovery and refuses secret value exposure', async () => {
+it('keeps native mutation fenced during recovery and refuses secret value exposure', async () => {
   const f = fixture(); await f.host.reconnect()
-  await expect(f.host.api.terminal.create('panel-1', 80, 24)).rejects.toMatchObject({ code: 'DISCONNECTED' })
   await expect(f.host.api.secrets.create({ name: 'Secret', description: '', env_var_name: 'TOKEN', value: 'private' })).rejects.toMatchObject({ code: 'DISCONNECTED' })
   f.host.setRehydrator(async () => {}); await f.host.rehydrate()
   f.results.set('secrets:getAll', [{ id: 'secret-1', name: 'Secret', description: '', env_var_name: 'TOKEN', created_at: '2026-10-13', updated_at: '2026-10-13', value: 'private stored value' }])
@@ -1084,7 +1064,7 @@ it('rejects raw Tea errors and private pull request author fields on the wire', 
   await expect(f.host.api.github.fetchPullRequestDetails('https://github.com/fixture/repo/pull/42')).rejects.toMatchObject({ code: 'INVALID_RESULT' })
 })
 
-const publishedUi = { view: 'commander', projectId: 'project_fixture', modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } }
+const publishedUi = { view: 'commander', projectId: 'project_fixture', modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [] }
 it('captures native document authority separately from published state and filters retired UI intents', async () => {
   const f = fixture(true); f.host.setRehydrator(async () => {}); await f.host.reconnect()
   const received = vi.fn(), cleanup = f.host.api.ui.onCommand(received)

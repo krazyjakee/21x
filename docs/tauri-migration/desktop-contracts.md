@@ -16,7 +16,7 @@ The generated API uses type-only imports from existing shared definitions and th
 
 Channel argument types describe the public preload API, not an invented wire schema. The generator records actual argument expressions, including transformations such as positional API arguments becoming `{ id, changes }`. A service adapter must preserve that transformation before binding a migrated handler. `unknown` extension/backend fields remain validation obligations rather than fabricated types. Parse-only generation does not establish declaration/handler agreement at runtime.
 
-All built-in `browser:*` commands are `removed-browser`, have no caller/destination and are omitted from retained types. Remote browser and `webpage` canvas features have no operation/native grants. Stored metadata/edges/recording files follow retirement compatibility policy. User-managed external MCP tools, system-browser links and provider/MCP/source/connector OAuth remain retained.
+No `browser:*` or `terminal:*` command remains. The generator still classes any `browser:*` channel as `removed-browser`, with no caller/destination and no retained type. See [Canvas, browser and terminal removal](canvas-browser-retirement.md). Remote browser and `webpage` canvas features have no operation/native grants. Stored metadata/edges/recording files follow retirement compatibility policy. User-managed external MCP tools, system-browser links and provider/MCP/source/connector OAuth remain retained.
 
 ## Exact dispatcher registration
 

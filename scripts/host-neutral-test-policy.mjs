@@ -11,8 +11,7 @@ const isElectron = name => /^(?:electron(?:$|[-/])|@electron(?:$|[-/]))/.test(na
 
 export const HOST_NEUTRAL_PROOF_FILES = {
   'scripts/production-service-proof.test.ts': 'TAURI_PRODUCTION_SERVICE_PROOFS',
-  'scripts/production-terminal-proof.test.ts': 'TAURI_TERMINAL_PROOFS',
-  'scripts/production-payload-recovery-proof.test.ts': 'TAURI_TERMINAL_PROOFS',
+  'scripts/production-payload-recovery-proof.test.ts': 'TAURI_OWNER_PROOFS',
   'scripts/database-service-proof.test.ts': 'TAURI_STANDALONE_SERVICE_PROOFS',
   'scripts/configuration-service-proof.test.ts': 'TAURI_STANDALONE_SERVICE_PROOFS',
   'scripts/transcript-page-proof.test.ts': 'TAURI_STANDALONE_SERVICE_PROOFS',

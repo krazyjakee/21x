@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PRODUCTION_SETTINGS_CODECS as codecs, PRODUCTION_API_KEY_SET_MARKER as marker, isProductionSettingWrite, projectProductionSetting, requiresNativeSettingsOwner, settingProjectId } from './production-settings-codecs'
+import { PRODUCTION_SETTINGS_CODECS as codecs, PRODUCTION_API_KEY_SET_MARKER as marker, PRODUCTION_SETTINGS_KEYS, isProductionSettingWrite, projectProductionSetting, requiresNativeSettingsOwner } from './production-settings-codecs'
 
 const secret = { id: 'secret-one', name: 'Database', description: 'Private database access', env_var_name: 'DATABASE_URL', created_at: 'created', updated_at: 'updated' }
 describe('production settings and secret codecs', () => {
@@ -23,10 +23,8 @@ describe('production settings and secret codecs', () => {
     expect(codecs['env:get'].validateResult('private-environment-value')).toBe(false)
   })
 
-  it('validates exact setting domains, scoped identities, URLs and thresholds', () => {
-    expect(settingProjectId('canvas_state:project-one')).toBe('project-one')
-    expect(settingProjectId('drawing_state:../outside')).toBeNull()
-    for (const key of ['mobile_auth_token', '__schema_version', 'sessions.commander_generation:owner', 'session-feedback-completion:task', 'arbitrary_api_key', 'drawing_state:../outside']) expect(codecs['settings:get'].validateArguments([key])).toBe(false)
+  it('validates exact setting domains, URLs and thresholds', () => {
+    for (const key of ['mobile_auth_token', '__schema_version', 'sessions.commander_generation:owner', 'session-feedback-completion:task', 'arbitrary_api_key', 'canvas_state', 'canvas_state:project-one', 'drawing_state:project-one']) expect(codecs['settings:get'].validateArguments([key])).toBe(false)
     for (const [key, value] of [['max_concurrent_agent_sessions', '2junk'], ['max_concurrent_agent_sessions', '-1'], ['heartbeat_default_interval', '0'], ['heartbeat_active_hours_start', '28:00'],
       ['git_provider', 'arbitrary'], ['chat_base_url', 'https://user:secret@example.test'], ['chat_base_url', 'https://example.test/?token=secret'], ['chat_agent_id', '../outside'],
       ['sessions.rollover_thresholds', '{"contextRatio":2}'], ['sessions.rollover_thresholds', '{"unknown":1}'], ['commander_briefing', '{"enabled":true,"cron":"* * * * *","speak":false,"token":"private"}']]) {
@@ -59,7 +57,7 @@ describe('production settings and secret codecs', () => {
   })
 
   it('bounds UTF8 aggregate values and record counts without truncation', () => {
-    const tooLarge = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`canvas_state:project-${index}`, '界'.repeat(20_000)]))
+    const tooLarge = Object.fromEntries(PRODUCTION_SETTINGS_KEYS.slice(0, 20).map(key => [key, '界'.repeat(20_000)]))
     expect(() => codecs['settings:getAll'].encodeResult(tooLarge)).toThrow('result')
     expect(codecs['settings:getAll'].validateWireResult({ defined: true, value: tooLarge })).toBe(false)
     expect(codecs['secrets:getAll'].validateResult(Array.from({ length: 129 }, () => secret))).toBe(false)

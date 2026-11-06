@@ -153,7 +153,7 @@ test('an unstaged service cannot borrow native modules or SDKs from the reposito
   await f.initialize()
   const report = (await f.request('engine.probe')).result
   assert.equal(report.ok, false)
-  for (const name of ['sqlite', 'pty', '@anthropic-ai/claude-agent-sdk', '@opencode-ai/sdk']) {
+  for (const name of ['sqlite', '@anthropic-ai/claude-agent-sdk', '@opencode-ai/sdk']) {
     assert.equal(report.checks[name].ok, false)
   }
   assert.equal(report.checks.worker.ok, true)

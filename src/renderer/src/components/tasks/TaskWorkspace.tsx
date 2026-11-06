@@ -23,7 +23,6 @@ import { memo, useEffect, useCallback, useRef, useState, useMemo } from 'react'
 import { TaskStatus } from '@/types'
 import type { Task, FileAttachment, OutputField, Agent } from '@/types'
 import { isAgentConfigured } from '@shared/agent-utils'
-import { useUIStore } from '@/stores/ui-store'
 import { useArtifactStore, PinnedArtifactTabId } from '@/stores/artifact-store'
 import { ArtifactType } from '@shared/artifacts'
 import { ArtifactsPanel } from '@/components/artifacts/ArtifactsPanel'
@@ -66,17 +65,10 @@ interface TaskWorkspaceProps {
   onAssignAgent: (taskId: string, agentId: string | null) => void | Promise<void>
   onUpdateTask?: (taskId: string, data: Record<string, unknown>) => Promise<void>
   onNavigateToTask?: (taskId: string) => void
-  /** When provided, each subtask shows an action to open it as a separate canvas window/panel. */
-  onOpenSubtaskInWindow?: (taskId: string) => void
   onBack?: () => void
   onOpenFullView?: () => void
   /** Override the layout — which panels to show. Default: 'both' */
   panelLayout?: TaskWorkspaceLayout
-  /**
-   * Show the header's live activity badge (#95). Canvas task panels pass
-   * false: their own panel header already indicates the same session.
-   */
-  showActivity?: boolean
   /** Shared execution owns agent controls; member approval stays outside it. */
   groupExecution?: 'active' | 'history'
 }
@@ -92,11 +84,9 @@ function TaskWorkspaceComponent({
   onAssignAgent,
   onUpdateTask,
   onNavigateToTask,
-  onOpenSubtaskInWindow,
   onBack,
   onOpenFullView,
   panelLayout = 'both',
-  showActivity = true,
   groupExecution
 }: TaskWorkspaceProps) {
   const isGroupExecution = !!groupExecution || task?.role === 'task_group'
@@ -134,7 +124,6 @@ function TaskWorkspaceComponent({
   attachmentOwner.current = task
   useEffect(() => { attachmentMounted.current = true; return () => { attachmentMounted.current = false } }, [])
   const submittedQuestionIdsRef = useRef(new Set<string>())
-  const openTaskOnCanvas = useUIStore((s) => s.openTaskOnCanvas)
   const artifacts = useArtifactStore((s) => task?.id ? (s.artifactsByTask[task.id] || EMPTY_ARTIFACTS) : EMPTY_ARTIFACTS)
   const artifactUI = useArtifactStore((s) => task?.id ? (s.uiByTask[task.id] || DEFAULT_ARTIFACT_UI) : DEFAULT_ARTIFACT_UI)
   const hydrateArtifacts = useArtifactStore((s) => s.hydrate)
@@ -258,7 +247,7 @@ function TaskWorkspaceComponent({
   }, [task])
 
   // Re-fetch tasks when agent status changes (status is updated in DB by agent-manager).
-  // Debounced to 500ms to prevent cascading re-fetches when multiple canvas panels
+  // Debounced to 500ms to prevent cascading re-fetches when several views
   // observe simultaneous status transitions — each would otherwise trigger an
   // independent fetchTasks() call that replaces the entire tasks array and causes
   // a cascade of re-renders through AppLayout → all child components.
@@ -850,7 +839,6 @@ function TaskWorkspaceComponent({
       parentTask={parentTask}
       onUpdateNextSubtaskIds={handleUpdateNextSubtaskIds}
       onNavigateToTask={onNavigateToTask}
-      onOpenSubtaskInWindow={onOpenSubtaskInWindow}
       onAddSubtask={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handleAddSubtask}
       onReorderSubtasks={getDesktopHost().kind === 'tauri' && task.role !== 'task' ? undefined : handleReorderSubtasks}
       displayMode={hasSession ? 'panel' : 'prestart'}
@@ -902,12 +890,10 @@ function TaskWorkspaceComponent({
           onToggleDetails={openDetails}
           onEdit={onEdit}
           onSnooze={handleShowSnooze}
-          onOpenCanvas={() => openTaskOnCanvas(task.id)}
           onOpenFolder={() => void handleOpenFolder()}
           onOpenFullView={onOpenFullView}
           onDelete={onDelete}
           recoveryState={recoveryLabel}
-          showActivity={showActivity}
         />}
         <div ref={workspaceBodyRef} className="relative flex min-h-0 flex-1 overflow-hidden">
           {panelLayout === 'task-only' || (!hasSession && panelLayout === 'both') ? (

@@ -64,10 +64,7 @@ export function TaskDialogs({
   const openDeleteModal = useUIStore((s) => s.openDeleteModal)
   const createTaskPrefill = useUIStore((s) => s.createTaskPrefill)
   const clearCreateTaskPrefill = useUIStore((s) => s.clearCreateTaskPrefill)
-  const sidebarView = useUIStore((s) => s.sidebarView)
   const setSidebarView = useUIStore((s) => s.setSidebarView)
-  const setCanvasPendingTaskId = useUIStore((s) => s.setCanvasPendingTaskId)
-  const clearCanvasPendingTask = useUIStore((s) => s.clearCanvasPendingTask)
   const dashboardPreviewTaskId = useUIStore((s) => s.dashboardPreviewTaskId)
   const closeDashboardPreview = useUIStore((s) => s.closeDashboardPreview)
 
@@ -138,12 +135,8 @@ export function TaskDialogs({
       }
       if (!isCurrent()) return
       closeCreate()
-      if (sidebarView === 'canvas') {
-        setCanvasPendingTaskId(newTask.id)
-      } else {
-        selectTask(newTask.id)
-        setSidebarView('tasks')
-      }
+      selectTask(newTask.id)
+      setSidebarView('tasks')
     } finally { releaseModal(); releaseProject(); creating.current = false }
   }
 
@@ -157,7 +150,6 @@ export function TaskDialogs({
       }, () => {
         const current = useUIStore.getState()
         if (intent !== formIntentRef.current || current.activeModal !== 'delete' || current.deletingTaskId !== id) return
-        if (current.canvasPendingTaskId === id) clearCanvasPendingTask()
         if (current.dashboardPreviewTaskId === id) closeDashboardPreview()
         closeModal()
       })
@@ -180,9 +172,6 @@ export function TaskDialogs({
     }
     try {
       await deleteTask(deletingTaskId)
-      if (useUIStore.getState().canvasPendingTaskId === deletingTaskId) {
-        clearCanvasPendingTask()
-      }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
       showToast(`Failed to delete task: ${reason}`, true)

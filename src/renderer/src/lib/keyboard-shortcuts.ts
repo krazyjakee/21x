@@ -28,7 +28,6 @@ export const KEYBOARD_SHORTCUT_GROUPS = [
       { keys: ['Enter'], label: 'Open selected task' },
       { keys: ['Esc'], label: 'Close or clear selection' },
       { keys: ['G', 'D'], label: 'Go to Dashboard' },
-      { keys: ['G', 'C'], label: 'Open selected task on Canvas or go to Canvas' },
       { keys: ['G', 'P'], label: 'Go to parent task' },
       { keys: ['G', 'T'], label: 'Go to Tasks' },
       { keys: ['G', 'S'], label: 'Go to Skills' },
@@ -37,8 +36,8 @@ export const KEYBOARD_SHORTCUT_GROUPS = [
       { keys: ['Type'], label: 'Just start typing to focus composer' },
       { keys: ['Cmd/Ctrl', 'K'], label: 'Open command palette' },
       { keys: ['Cmd/Ctrl', 'P'], label: 'Switch project' },
-      { keys: ['Cmd/Ctrl', '1–4'], label: 'Switch main view' },
-      { keys: ['Cmd/Ctrl', '5'], label: 'Go to Commander' }
+      { keys: ['Cmd/Ctrl', '1–3'], label: 'Switch main view' },
+      { keys: ['Cmd/Ctrl', '4'], label: 'Go to Commander' }
     ]
   },
   {
@@ -107,14 +106,14 @@ export function getNextNudgeMessage(): string {
 export function isKeyboardInput(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   return target.isContentEditable
-    || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName)
-    || !!target.closest('[contenteditable="true"], .xterm')
+    || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+    || !!target.closest('[contenteditable="true"]')
 }
 
 /**
- * Any editor or terminal other than the Commander's own composer. Those keep
- * their keys during a call (Ctrl+Shift+C is copy in a terminal); the composer
- * belongs to the call, so its shortcuts still work there.
+ * Any editor other than the Commander's own composer. Those keep their keys
+ * during a call; the composer belongs to the call, so its shortcuts still work
+ * there.
  */
 export function isEditorOutsideCommander(target: EventTarget | null): boolean {
   return isKeyboardInput(target) && !(target instanceof HTMLElement && target.closest('[data-testid="commander-composer"]'))

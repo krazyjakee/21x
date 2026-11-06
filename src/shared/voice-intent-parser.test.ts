@@ -138,11 +138,8 @@ describe('interpretTranscript — task control', () => {
   it('navigates', () => {
     expect(intentOf('open the dashboard')).toEqual({ type: 'navigate', destination: 'dashboard' })
     expect(intentOf('go to skills')).toEqual({ type: 'navigate', destination: 'skills' })
-    expect(intentOf('open the canvas for this task')).toEqual({
-      type: 'navigate',
-      destination: 'canvas',
-      taskRef: { kind: 'current' },
-    })
+    expect(intentOf('open the board')).toEqual({ type: 'navigate', destination: 'dashboard' })
+    expect(intentOf('open the canvas')).toBeNull()
   })
 
   it('reads the last answer', () => {

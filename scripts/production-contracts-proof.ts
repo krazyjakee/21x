@@ -22,7 +22,6 @@ import { TASK_LIFECYCLE_CODECS } from '../src/shared/task-lifecycle-codecs'
 import { PRODUCTION_AGENT_CODECS } from '../src/shared/production-agent-codecs'
 import { COMMANDER_COMMAND_CODECS } from '../src/shared/commander-desktop-codecs'
 import { PRODUCTION_SETTINGS_CODECS, PRODUCTION_SETTINGS_KEYS, PRODUCTION_ENV_KEYS } from '../src/shared/production-settings-codecs'
-import { TERMINAL_COMMAND_CODECS } from '../src/shared/terminal-desktop-codecs'
 import { MCP_CODECS } from '../src/shared/mcp-codecs'
 import { TASK_SOURCE_CODECS } from '../src/shared/task-source-codecs'
 import { CONNECTOR_CODECS } from '../src/shared/connector-codecs'
@@ -37,7 +36,7 @@ import type { JsonValue } from '../src/shared/service-protocol'
 export const PROOF_COMMAND_CODECS = { ...DATABASE_COMMAND_CODECS, ...TRAY_PREFERENCE_CODECS,
   ...Object.fromEntries(CONFIGURATION_CONTENT_OPERATIONS.map(name => [name, CONFIGURATION_COMMAND_CODECS[name]])),
   ...PROJECT_CONFIGURATION_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS,
-  ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...VOICE_TURN_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
+  ...PRODUCTION_SETTINGS_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...VOICE_MANAGEMENT_CODECS, ...VOICE_TURN_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS }
 const task = 'task_fixture', project = 'project_fixture', agent = 'agent_fixture', session = 'session_fixture'
 const image = { name: 'fixture.png', mimeType: 'image/png', data: 'iVBORw0KGgoAAAAA' }
 const policy = { mode: 'observe', contextRatio: 0.6, compactions: 3, wakeups: 20, turns: 10, maxAgeDays: 7 }
@@ -48,7 +47,7 @@ const largeConfig = { coding_agent: 'pi', mcp_servers: Array.from({ length: 30 }
 /** One explicit valid API argument tuple for every finite production command. */
 export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'app:getMinimizeToTray': [], 'app:setMinimizeToTray': [true],
-  'ui:publishState': [{ view: 'commander', projectId: project, modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [] } }],
+  'ui:publishState': [{ view: 'commander', projectId: project, modal: null, selectedTaskId: null, selectedTaskTitle: null, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [] }],
   'cliMcp:snapshot': [], 'cliMcp:upsert': [{ name: 'fixture', targets: ['codex'], definition: { transport: 'stdio', command: 'fixture-mcp', args: [], env: {} } }],
   'cliMcp:remove': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64) }], 'cliMcp:setEnabled': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64), enabled: true }],
   'cliMcp:setToolEnabled': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64), tool: 'fixture_tool', enabled: true }], 'cliMcp:probe': [{ cli: 'codex', name: 'fixture', expectedFingerprint: 'a'.repeat(64) }],
@@ -114,8 +113,6 @@ export const PRODUCTION_REQUEST_ARGUMENTS: Record<string, unknown[]> = {
   'chat:start': [{ messages: [{ role: 'user', content: 'Describe fixture', images: [image] }], system: 'Fixture context', maxToolCalls: 0 }], 'chat:cancel': ['turn_fixture'],
   'secrets:getAll': [], 'secrets:create': [{ name: 'Fixture metadata', description: 'Not a live credential', env_var_name: 'FIXTURE_PROOF_VALUE', value: 'synthetic-fixture-value' }],
   'secrets:update': ['secret_fixture', { description: 'Updated fixture metadata' }], 'secrets:delete': ['secret_fixture'], 'env:get': ['OPENAI_API_KEY'],
-  'terminal:create': ['terminal:fixture', 80, 24, '/trusted-fixture/workspace'], 'terminal:write': ['terminal:fixture', '\u001b[31m\u0000'],
-  'terminal:resize': ['terminal:fixture', 120, 32], 'terminal:kill': ['terminal:fixture', 42], 'terminal:getCwd': ['terminal:fixture', 42], 'terminal:getBuffer': ['terminal:fixture', 500],
   'mcp:getAll': [], 'mcp:create': [{ name: 'Fixture MCP', type: 'local', command: 'fixture-mcp', args: ['--fixture'], headers: { Authorization: 'synthetic-fixture-value' }, environment: { FIXTURE_VALUE: 'synthetic-fixture-value' } }],
   'mcp:update': ['mcp.fixture:one', { name: 'Updated fixture MCP', type: 'remote', url: 'https://mcp.example.test/api' }],
   'mcp:delete': ['mcp.fixture:one'], 'mcp:testConnection': [{ id: 'mcp.fixture:one', name: 'Fixture MCP', type: 'remote', url: 'https://mcp.example.test/api' }],
@@ -155,7 +152,7 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'project:update', case: 'full-project-editor-update', args: [project, { default_agent_id: null, captain_agent_id: agent, settings: { limits: { paused: true }, captain_wakeups: { enabled: false }, scheduled_review: { enabled: false, cron: '0 9 * * 1-5' } } }] },
   { operation: 'project:create', case: 'project-editor-ecma-nonwhitespace-name', args: [{ name: '\u0085', settings: { scheduled_review: { enabled: false, cron: '\uFEFF0\uFEFF9 * * 1-5\uFEFF' } } }] },
   { operation: 'app:setMinimizeToTray', case: 'tray-disabled-preference', args: [false] },
-  { operation: 'ui:publishState', case: 'ui-full-finite-state', args: [{ view: 'canvas', projectId: project, modal: 'edit', selectedTaskId: task, selectedTaskTitle: 'Local🌱state', dashboardPreviewTaskId: task, captainOpen: true, settingsTab: 'voice', waitingForYou: true, visibleTaskIds: [task], canvas: { viewport: { x: -10000000, y: 10000000, zoom: 3 }, panels: [{ panelId: 'panel:fixture', type: 'task', taskId: task, title: 'Local🌱panel', x: 10000000, y: -10000000, width: 1000000, height: 1 }] } }] },
+  { operation: 'ui:publishState', case: 'ui-full-finite-state', args: [{ view: 'dashboard', projectId: project, modal: 'edit', selectedTaskId: task, selectedTaskTitle: 'Local🌱state', dashboardPreviewTaskId: task, captainOpen: true, settingsTab: 'voice', waitingForYou: true, visibleTaskIds: [task] }] },
 
   { operation: 'cliMcp:upsert', case: 'cli-ecma-nonwhitespace-name-command', args: [{ name: '\u0085', targets: ['claude-code'], definition: { transport: 'stdio', command: '\u0085' } }] },
   { operation: 'cliMcp:upsert', case: 'cli-utf16-args-env-boundaries', args: [{ name: '🌱'.repeat(64), previousName: 'previous', targets: ['claude-code', 'opencode', 'codex'], expectedFingerprints: { 'claude-code': 'a'.repeat(64), opencode: 'b'.repeat(64), codex: 'c'.repeat(64) }, definition: { transport: 'stdio', command: '🌱'.repeat(2048), args: cliBoundaryArgs, env: cliBoundaryEnvironment } }] },
@@ -238,10 +235,6 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'agentSession:sendByTaskId', case: 'persisted-attachment', args: [task, 'Fixture', [{ id: 'attachment_fixture', filename: 'fixture.txt', size: 4, mime_type: 'text/plain' }]] },
   { operation: 'agentConfig:getProviders', case: 'default-provider', args: [] },
   { operation: 'agentConfig:getProviders', case: 'backend-only', args: [undefined, 'claude-code'] },
-  { operation: 'terminal:create', case: 'owner-default-cwd', args: ['terminal:fixture', 1, 4096] },
-  { operation: 'terminal:kill', case: 'no-expected-pid', args: ['terminal:fixture'] },
-  { operation: 'terminal:getCwd', case: 'no-expected-pid', args: ['terminal:fixture'] },
-  { operation: 'terminal:getBuffer', case: 'default-lines', args: ['terminal:fixture'] },
   { operation: 'db:updateTask', case: 'wide-output-json', args: [task, { output_fields: [{ id: 'output_fixture', name: 'Wide JSON', type: 'json', value: Object.fromEntries(Array.from({ length: 300 }, (_, index) => [`field_${index}`, index])) }] }] },
   { operation: 'db:updateTask', case: 'large-output-json-array', args: [task, { output_fields: [{ id: 'output_fixture', name: 'Array JSON', type: 'json', value: Array.from({ length: 5000 }, (_, index) => index) }] }] },
   { operation: 'db:updateTask', case: 'depth-40-output-json', args: [task, { output_fields: [{ id: 'output_fixture', name: 'Deep JSON', type: 'json', value: deepOutput }] }] },
@@ -297,14 +290,12 @@ export const PRODUCTION_REQUEST_VARIANTS: Variant[] = [
   { operation: 'mobile:revokeSession', case: 'mobile-namespaced-session-id', args: ['mobile.fixture:one'] },
   { operation: 'chat:start', case: 'tool-history', args: [{ messages: [{ role: 'user', content: 'Fixture request' }, { role: 'assistant', content: '', toolCalls: [{ id: 'call_fixture', name: 'fixture_tool', input: { projectId: project } }] }, { role: 'tool', toolCallId: 'call_fixture', name: 'fixture_tool', content: 'Fixture result', isError: false }], maxToolCalls: 32 }] },
   ...PRODUCTION_SETTINGS_KEYS.map(key => ({ operation: 'settings:get', case: `setting-${key}`, args: [key] })),
-  ...PRODUCTION_ENV_KEYS.map(key => ({ operation: 'env:get', case: `marker-${key}`, args: [key] })),
-  { operation: 'settings:get', case: 'project-canvas', args: [`canvas_state:${project}`] },
-  { operation: 'settings:set', case: 'project-canvas-value', args: [`canvas_state:${project}`, JSON.stringify({ nodes: [], viewport: { zoom: 1 } })] }
+  ...PRODUCTION_ENV_KEYS.map(key => ({ operation: 'env:get', case: `marker-${key}`, args: [key] }))
 ]
 export interface ProductionRequestCorpus { version: 1; operations: string[]; requests: Array<{ operation: string; case: string; payload: JsonValue }> }
 export function createProductionRequestCorpus(): ProductionRequestCorpus {
   const operations = Object.keys(PROOF_COMMAND_CODECS).sort(), fixtures = Object.keys(PRODUCTION_REQUEST_ARGUMENTS).sort()
-  if (operations.length !== 245 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
+  if (operations.length !== 239 || JSON.stringify(operations) !== JSON.stringify(fixtures)) throw new Error('Production command corpus must cover the exact finite codec map')
   const inputs = [...Object.entries(PRODUCTION_REQUEST_ARGUMENTS).map(([operation, args]) => ({ operation, args, case: 'baseline' })), ...PRODUCTION_REQUEST_VARIANTS]
   const requests = inputs.map(row => {
     const codec = PROOF_COMMAND_CODECS[row.operation as keyof typeof PROOF_COMMAND_CODECS]

@@ -74,15 +74,13 @@ Neither failure nor disconnect automatically replays an accepted mutation.
 `production_contracts.rs` enumerates the reviewed production commands and
 events independently of diagnostic grants. It validates bounded frames,
 exact operation-specific argument fields, explicit optional-result envelopes,
-image byte envelopes, terminal dimensions/byte limits, settings keys and
-masked metadata. The Node production domain codecs validate complete DTOs and
+image byte envelopes, settings keys and masked metadata. The Node production domain codecs validate complete DTOs and
 actual task/project/agent/session/request ownership again. Unknown operations,
 bootstrap fields, epoch changes, duplicate callback IDs, regressing event
 sequences and unreviewed events fail closed. A domain addition requires updating
 both finite contracts; there is no namespace grant. Native Tauri ingress must
 still authorize the actual main WebView label, origin and frame before invoking
-the private production engine. A terminal's optional expected-PID field is an
-equality guard on its exact owned terminal ID, never native kill authority.
+the private production engine.
 
 External URL and notification callbacks are optional typed host functions;
 declaring them supported without supplying a real function rejects startup.

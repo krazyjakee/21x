@@ -255,13 +255,6 @@ export function initializeTaskDesktopState(): () => void {
       tasks: state.tasks.filter((t) => t.id !== taskId),
       selectedTaskId: state.selectedTaskId === taskId ? null : state.selectedTaskId
     }))
-
-    // Automatically remove from canvas if it was added.
-    // Dynamic import avoids circular dependency and ensures canvas store is only loaded if needed.
-    import('./canvas-store').then(({ useCanvasStore }) => {
-      if (releaseListeners !== release) return
-      useCanvasStore.getState().removePanelsByRefId(taskId)
-    })
   }))
 
   // Listen for tasks:refresh from main process (recurrence scheduler, heartbeat, etc.)

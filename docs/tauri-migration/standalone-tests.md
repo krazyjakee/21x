@@ -13,7 +13,7 @@ connector and production staging when selecting their proofs):
 
 ```sh
 pnpm test:host-neutral:audit
-pnpm test:host-neutral -- --service-proofs --production-proofs --terminal-proofs --run-receipt=/tmp/host-neutral-run.json
+pnpm test:host-neutral -- --service-proofs --production-proofs --owner-proofs --run-receipt=/tmp/host-neutral-run.json
 pnpm test:host-neutral -- --project=renderer
 pnpm test:host-neutral -- --project=mobile
 pnpm test:host-neutral -- --node-tests
@@ -36,15 +36,15 @@ executed when filters are present. A filtered reporter run is a launcher
 control, not a complete-suite run.
 
 Before launching either framework, the runner checks physical canonical Node,
-SQLite and PTY packages and exact versions from `scripts/tauri-runtime.json`.
+SQLite package and exact version from `scripts/tauri-runtime.json`.
 A separate process under that Node actually opens/queries/closes SQLite and
-loads the PTY addon, checks Node ABI 127 and verifies that native files came
+checks Node ABI 127 and verifies that native files came
 from staged resources. Test setup rechecks the owning executable and canonical
 package paths in each project. Inherited Electron/Node injection and resource
 path overrides are removed. There is no implicit preparation, native rebuild
 or root-addon fallback. Root addon inventories/hashes are checked before and
 after the real preflight; an `--ignore-scripts` installation need not contain a
-root PTY binary. Node/package version checks and local hashes are reproducible
+root native binary. Node/package version checks and local hashes are reproducible
 provenance, not upstream release-signature or redistribution acceptance.
 
 `test/electron-transition-tests.json` explicitly reviews each remaining
@@ -104,7 +104,7 @@ master-only. It prepares four source targets with `--ignore-scripts`, explicitly
 stages the standalone resources, runs the main/shared/renderer/mobile and
 foundation subprocess cohorts, and retains framework reports plus run/inventory
 receipts even on failure. A separate Linux job retains the historical Electron
-cohort. Production/terminal wrappers and installed UI/release scenarios are
+cohort. Production/owner wrappers and installed UI/release scenarios are
 explicitly unavailable in this source-only matrix. The existing Verify trigger,
 commands and workflows are unchanged. YAML trigger/matrix and shell syntax
 checks are local preparation; no workflow has been dispatched or hosted pass

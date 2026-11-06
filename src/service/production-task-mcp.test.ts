@@ -11,8 +11,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
 import { startTaskApiServer, closeTaskApiServer, getTaskApiToken } from '../main/task-api-server-core'
 import { buildTaskMcpUrl } from '../main/task-mcp-endpoint'
-import { browserTools } from '../main/mcp-servers/task-management-tools'
 import { listRegisteredTaskArtifacts } from '../main/artifacts'
+const REMOVED_TOOLS = ['browser_navigate', 'browser_snapshot', 'browser_recording_list', 'move_task_panel', 'close_task_panel', 'set_canvas_view']
 
 describe.skipIf(!!process.versions.electron)('actual bundled Node production task stdio', () => {
   let root: string, entry: string
@@ -66,7 +66,7 @@ describe.skipIf(!!process.versions.electron)('actual bundled Node production tas
       const actual = await connect(url)
       const list = await actual.client.listTools()
       expect(list.tools.some(tool => tool.name === 'list_tasks')).toBe(true)
-      expect(list.tools.some(tool => browserTools.some(browser => browser.name === tool.name))).toBe(false)
+      expect(list.tools.some(tool => REMOVED_TOOLS.includes(tool.name))).toBe(false)
       const listed = JSON.stringify(await actual.client.callTool({ name: 'list_tasks', arguments: { project_id: b.id } }))
       expect(listed).toContain('Own stdio task'); expect(listed).not.toContain('Foreign stdio task')
       expect(JSON.stringify(await actual.client.callTool({ name: 'get_task', arguments: { task_id: foreign.id } }))).toContain('not in this project')
@@ -75,7 +75,7 @@ describe.skipIf(!!process.versions.electron)('actual bundled Node production tas
       const artifacts = await listRegisteredTaskArtifacts(db.getWorkspaceDir(mine.id), mine.id)
       expect(artifacts).toHaveLength(1); expect(artifacts[0].taskId).toBe(mine.id)
       expect(await listRegisteredTaskArtifacts(db.getWorkspaceDir(foreign.id), foreign.id)).toEqual([])
-      for (const tool of browserTools) expect((await actual.client.callTool({ name: tool.name, arguments: { task_id: mine.id } })).isError, tool.name).toBe(true)
+      for (const name of REMOVED_TOOLS) expect((await actual.client.callTool({ name, arguments: { task_id: mine.id } })).isError, name).toBe(true)
       // A forged scope and a wrong launch token may establish stdio, but
       // cannot obtain the tool list from the actual signature/token owner.
       for (const invalid of [url.replace(a.id, b.id), url.replace(getTaskApiToken(), 'f'.repeat(64))]) {

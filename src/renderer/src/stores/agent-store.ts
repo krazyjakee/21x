@@ -50,10 +50,9 @@ export interface TaskSession {
 // full snapshot on bind and idempotent `transcript:changed` deltas.
 
 const projections = new Map<string, TranscriptProjection>()
-// Number of mounted transcript views per task. Canvas panels can be kept in the
-// workspace indefinitely, but their full transcript only belongs in renderer
-// memory while at least one view is actually mounted. The durable DB projection
-// is re-hydrated when a view comes back.
+// Number of mounted transcript views per task. A full transcript only belongs
+// in renderer memory while at least one view is actually mounted. The durable
+// DB projection is re-hydrated when a view comes back.
 const projectionBindings = new Map<string, number>()
 const bindingTasks = new Set<string>()
 // Tasks whose projection may be missing rows (a live event was blocked, or a

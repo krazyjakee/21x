@@ -32,7 +32,6 @@ const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => 
 const calls = (operation: string) => invoke.mock.calls.filter(([, args]) => args?.operation === operation)
 let host: ReturnType<typeof import('@/lib/native-desktop-host').createNativeDesktopHost>, release: () => void
 let Workspace: typeof import('./TaskWorkspace').TaskWorkspace
-let Canvas: typeof import('../canvas/TranscriptPanelContent').TranscriptPanelContent
 let agents: typeof import('@/stores/agent-store').useAgentStore
 let tasks: typeof import('@/stores/task-store').useTaskStore
 const legacy = window.electronAPI
@@ -44,7 +43,6 @@ beforeAll(async () => {
   release = (await import('@/lib/desktop-api')).installDesktopHost(host)
   host.setRehydrator(async () => {}); await host.reconnect()
   Workspace = (await import('./TaskWorkspace')).TaskWorkspace
-  Canvas = (await import('../canvas/TranscriptPanelContent')).TranscriptPanelContent
   tasks = (await import('@/stores/task-store')).useTaskStore
   agents = (await import('@/stores/agent-store')).useAgentStore
 })
@@ -702,84 +700,6 @@ it('offers Resume again once a pending start has settled', async () => {
   await waitFor(() => expect(calls('agent:getStartRecoveryState').length).toBeGreaterThan(0))
   await act(async () => {})
   expect(screen.getAllByRole('button', { name: /^(Resume|Resume Session)$/ }).length).toBeGreaterThan(0)
-})
-const renderCanvas = async (task: Task) => {
-  tasks.setState({ tasks: [task], selectedTaskId: null })
-  render(<Canvas taskId="task-1" />)
-  await act(async () => {})
-  finishedSession()
-  await waitFor(() => expect(transcript.restart).toEqual(expect.any(Function)))
-  return transcript.restart!
-}
-const canvasFeedback = async () => {
-  const { onShortcutFeedback } = await import('@/lib/keyboard-shortcuts')
-  const feedback = vi.fn()
-  return { feedback, off: onShortcutFeedback(feedback) }
-}
-it('restarts on the canvas through the native Fresh owner, without Stop or a runtime-field write', async () => {
-  values.set('agent:getStartRecoveryState', null); values.set('agentSession:start', { sessionId: 'fresh-session' })
-  const restart = await renderCanvas(storedTask())
-  act(() => { restart(); restart() })
-  await waitFor(() => expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('fresh-session'))
-  expect(calls('agentSession:start')).toHaveLength(1)
-  expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:stopByTaskId')).toHaveLength(0)
-  expect(calls('db:updateTask')).toHaveLength(0)
-})
-it.each([
-  ['cancelled', 'Send a message'],
-  ['failed', 'Send a message'],
-  ['queued', 'already has a start in progress']
-])('refuses a canvas Restart after a %s start and keeps the transcript', async (state, message) => {
-  const { feedback, off } = await canvasFeedback()
-  values.set('agent:getStartRecoveryState', queueRow(state))
-  const restart = await renderCanvas(storedTask())
-  await act(async () => { restart() })
-  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining(message) })))
-  expect(calls('agentSession:start')).toHaveLength(0); expect(calls('agentSession:stop')).toHaveLength(0)
-  expect(retained()).toBe('Retained transcript')
-  off()
-})
-it('withholds a canvas Restart from a live session and refuses a stale handler before any effect', async () => {
-  const { feedback, off } = await canvasFeedback()
-  values.set('agent:getStartRecoveryState', null)
-  const stale = await renderCanvas(storedTask())
-  finishedSession('live-session')
-  await waitFor(() => expect(transcript.restart).toBeUndefined())
-  await act(async () => { stale() })
-  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('while this session is live') })))
-  expect(calls('agentSession:stop')).toHaveLength(0); expect(calls('agentSession:stopByTaskId')).toHaveLength(0); expect(calls('agentSession:start')).toHaveLength(0)
-  expect(agents.getState().sessions.get('task-1')?.sessionId).toBe('live-session'); expect(retained()).toBe('Retained transcript')
-  off()
-})
-it.each([[completed], [{ role: 'captain' }], [{ role: 'task_group' }]] as Array<[Partial<Task>]>)('withholds a canvas Restart on %j', async extra => {
-  values.set('agent:getStartRecoveryState', null)
-  tasks.setState({ tasks: [storedTask(extra)], selectedTaskId: null })
-  render(<Canvas taskId="task-1" />)
-  await act(async () => {})
-  finishedSession()
-  await act(async () => {})
-  expect(transcript.restart).toBeUndefined(); expect(calls('agentSession:start')).toHaveLength(0)
-})
-it('keeps the canvas transcript of a task completed after render', async () => {
-  const { feedback, off } = await canvasFeedback()
-  values.set('agent:getStartRecoveryState', null)
-  const restart = await renderCanvas(storedTask())
-  values.set('db:getTask', retainedTask(completed))
-  await act(async () => { restart() })
-  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: 'Completed tasks cannot be started.' })))
-  expect(calls('agentSession:start')).toHaveLength(0); expect(retained()).toBe('Retained transcript')
-  off()
-})
-it('reports an unconfirmed canvas Restart once and holds it for review without replay', async () => {
-  const { feedback, off } = await canvasFeedback()
-  values.set('agent:getStartRecoveryState', null); handlers.set('agentSession:start', async () => undefined)
-  const restart = await renderCanvas(storedTask())
-  await act(async () => { restart() })
-  await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('could not be confirmed') })))
-  await act(async () => { restart() })
-  expect(calls('agentSession:start')).toHaveLength(1); expect(feedback).toHaveBeenCalledTimes(1)
-  expect(calls('db:updateTask')).toHaveLength(0)
-  off()
 })
 it('keeps native incompatible-session Fresh UI unavailable', async () => {
   const { IncompatibleSessionDialog } = await import('./IncompatibleSessionDialog')

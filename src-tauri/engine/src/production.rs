@@ -3961,7 +3961,7 @@ mod tests {
                 .capabilities
                 .external_urls = HostCapability::Host;
             *owner.lock().unwrap() = Some(fixture.engine.clone());
-            let event = json!({"kind":"event","protocolVersion":1,"engineEpoch":"transport-fixture","operation":"terminal:data","payload":{"id":"terminal:fixture","data":"retire"},"sequence":1});
+            let event = json!({"kind":"event","protocolVersion":1,"engineEpoch":"transport-fixture","operation":"task:deleted","payload":{"taskId":"task_retire"},"sequence":1});
             let callback = json!({"kind":"request","protocolVersion":1,"engineEpoch":"transport-fixture","requestId":"service:1","operation":"host.shell.openExternal","payload":{"url":"https://example.com/"}});
             let mut bytes = serde_json::to_vec(&event).unwrap();
             bytes.push(b'\n');
@@ -4054,7 +4054,7 @@ mod tests {
     #[test]
     fn production_event_saturation_retains_cursor_and_old_epochs_never_reach_host() {
         let cursor = Mutex::new(0);
-        let frame = json!({"kind":"event","protocolVersion":1,"engineEpoch":"epoch-current", "operation":"terminal:data","payload":{"id":"terminal:fixture","data":"output"},"sequence":1});
+        let frame = json!({"kind":"event","protocolVersion":1,"engineEpoch":"epoch-current", "operation":"task:deleted","payload":{"taskId":"task_output"},"sequence":1});
         let saturated = |_: Value| Err(EngineError::new("BACKPRESSURE"));
         assert_eq!(
             forward_production_event(&frame, "epoch-current", &cursor, &saturated)
@@ -4536,7 +4536,10 @@ mod tests {
         let call_count = calls.clone();
         host.ui_command = Some(Arc::new(move |command, lease, epoch| {
             call_count.fetch_add(1, Ordering::SeqCst);
-            assert_eq!(command, json!({"kind":"close_task_panel","taskId":"task"}));
+            assert_eq!(
+                command,
+                json!({"kind":"open_task","taskId":"task","where":"workspace"})
+            );
             assert_eq!(lease, "lease:1");
             assert_eq!(epoch, "epoch-fixture");
             let entered = entered.lock().unwrap().take().unwrap();
@@ -4547,7 +4550,7 @@ mod tests {
                 Ok(json!({"ok":true,"leaseId":lease}))
             })
         }));
-        let bad = json!({"command":{"kind":"close_task_panel","taskId":"task","window":"main"},"leaseId":"lease:1"});
+        let bad = json!({"command":{"kind":"open_task","taskId":"task","where":"workspace","window":"main"},"leaseId":"lease:1"});
         assert_eq!(
             ui_callback(
                 &host,
@@ -4572,7 +4575,7 @@ mod tests {
                 &HostCapability::Host,
                 "epoch-fixture".into(),
                 "host.ui.command",
-                &json!({"command":{"kind":"close_task_panel","taskId":"task"},"leaseId":"lease:1"}),
+                &json!({"command":{"kind":"open_task","taskId":"task","where":"workspace"},"leaseId":"lease:1"}),
             )
             .await;
             assert_eq!(answer.unwrap(), json!({"ok":true,"leaseId":"lease:1"}));
@@ -4603,7 +4606,7 @@ mod tests {
                 &HostCapability::Host,
                 "epoch-fixture".into(),
                 "host.ui.command",
-                &json!({"command":{"kind":"close_task_panel","taskId":"task"},"leaseId":"lease:1"})
+                &json!({"command":{"kind":"open_task","taskId":"task","where":"workspace"},"leaseId":"lease:1"})
             )
             .await
             .unwrap_err()

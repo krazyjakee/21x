@@ -31,8 +31,8 @@
  * accepted cost. Stdio MCP servers get a scrubbed environment from their agent,
  * a task runner may filter what it passes down, and the shared `opencode serve`
  * is not marked. A cgroup would catch those, but `app-21x-*.scope` also holds
- * whatever a person runs in the integrated terminal, so it cannot tell agent
- * work from a user's `screen -dm`.
+ * whatever else a person starts from the app, so it cannot tell agent work from
+ * a user's `screen -dm`.
  *
  * THE MARKER PROVES WHO STARTED A PROCESS, NOT THAT NOBODY WANTS IT. Anything an
  * agent ran, rooted in a workspace, can be stopped here once it has lost its

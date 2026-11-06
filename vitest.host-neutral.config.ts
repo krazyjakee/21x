@@ -13,8 +13,6 @@ const include = selected.filter(file => !optIn[file] || process.env[optIn[file]]
 const resolveOptions = { alias: [
   { find: /^better-sqlite3$/, replacement: join(resources.sqlite, 'lib/index.js') },
   { find: /^better-sqlite3\//, replacement: resources.sqlite + '/' },
-  { find: /^node-pty$/, replacement: join(resources.pty, 'lib/index.js') },
-  { find: /^node-pty\//, replacement: resources.pty + '/' },
   { find: /^(?:electron(?:$|[-/])|@electron(?:$|[-/]))/, replacement: join(root, 'test/forbid-electron.ts') },
   { find: '@shared', replacement: join(root, 'src/shared') },
   { find: '@', replacement: join(root, 'src/renderer/src') }

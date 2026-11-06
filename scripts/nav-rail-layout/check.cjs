@@ -63,7 +63,7 @@ app.whenReady().then(async () => {
     win.setContentSize(900,600); await pause(100); wc.setZoomFactor(2)
     await js(`document.documentElement.classList.toggle('dark',${theme==='dark'}); document.querySelector('nav button').focus();`)
     await pause(100)
-    for (const name of ['Canvas','Tasks','Skills','Commander','Projects','Settings']) {
+    for (const name of ['Tasks','Skills','Commander','Projects','Settings']) {
       wc.sendInputEvent({type:'keyDown',keyCode:'Tab'}); wc.sendInputEvent({type:'keyUp',keyCode:'Tab'}); await settle(); await pause(60)
       assert.equal(await js('document.activeElement.ariaLabel'),name)
       assert(await js(`(() => {const b=document.activeElement.getBoundingClientRect(), g=document.activeElement.parentElement.getBoundingClientRect();return b.top>=g.top && b.bottom<=g.bottom})()`), 'Tab scrolls the whole focused target into view')

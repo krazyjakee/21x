@@ -42,9 +42,9 @@ function makeDb() {
 
 let sent: Array<{ channel: string; data: unknown }>
 
-/** A window is open, showing `view`, with `panels` on the canvas. */
-function windowShowing(view: string, panels: Array<{ taskId: string | null }> = []): void {
-  setTaskApiUiState({ view, canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels } })
+/** A window is open, showing `view`. */
+function windowShowing(view: string): void {
+  setTaskApiUiState({ view })
 }
 
 beforeEach(() => {
@@ -63,7 +63,7 @@ async function productionWindow() {
   const snapshot = vi.fn(async () => native.state), send = vi.fn(async (_command: unknown, leaseId: string): Promise<NativeUiAcknowledgement> => ({ ok: true, leaseId }))
   const grants = { canAccessProject: () => true, canAccessTask: () => true, canAccessAgent: () => true }
   const ui = new ProductionUiOwner({ database: db, manager, native: { snapshot, send }, assertCurrent: () => {}, beforeState: state => assertUiStateReferences(db,state,grants), beforeCommand: command => assertUiCommandReferences(db,command,grants) })
-  const state: UiStateSnapshot = { view: 'canvas', projectId: project.id, modal: null, selectedTaskId: task.id, selectedTaskTitle: task.title, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [task.id], canvas: { viewport: { x: 0, y: 0, zoom: 1 }, panels: [{ panelId: 'actual_panel', type: 'task', taskId: task.id, title: task.title, x: 0, y: 0, width: 600, height: 400 }] } }
+  const state: UiStateSnapshot = { view: 'tasks', projectId: project.id, modal: null, selectedTaskId: task.id, selectedTaskTitle: task.title, dashboardPreviewTaskId: null, captainOpen: false, settingsTab: null, waitingForYou: false, visibleTaskIds: [task.id] }
   const releases: Array<() => void> = []
   productionCleanups.push(async () => { for (const release of releases) release(); await ui.close(); await manager.stopAllSessions(); const root = dirname(dirname(db.getWorkspaceDir('cleanup'))); db.close(); rmSync(root,{ recursive:true,force:true }) })
   setTaskApiUiOwner(ui); await ui.publish(state,'lease:one',{ beforeEffect: () => {},signal: new AbortController().signal })
@@ -74,12 +74,12 @@ describe('production task API UI ownership', () => {
   it('uses native state and acknowledgement without generic notification or an applied claim', async () => {
     const p = await productionWindow(); windowShowing('dashboard')
     const getter = vi.spyOn(p.db,'getTask')
-    expect(await p.handle('/get_ui_state')).toMatchObject({ available:true,view:'canvas',projectId:p.project.id })
-    expect(await p.handle('/open_task',{ task_id:p.task.id })).toEqual({ success:true,command:'open_task',accepted:true,where:'canvas',task_title:p.task.title })
-    expect(p.send).toHaveBeenCalledWith({ kind:'open_task',taskId:p.task.id,where:'canvas' },'lease:one',expect.any(AbortSignal))
+    expect(await p.handle('/get_ui_state')).toMatchObject({ available:true,view:'tasks',projectId:p.project.id })
+    expect(await p.handle('/open_task',{ task_id:p.task.id })).toEqual({ success:true,command:'open_task',accepted:true,where:'workspace',task_title:p.task.title })
+    expect(p.send).toHaveBeenCalledWith({ kind:'open_task',taskId:p.task.id,where:'workspace' },'lease:one',expect.any(AbortSignal))
     expect(getter).not.toHaveBeenCalled(); expect(sent).toHaveLength(0)
     p.native.state={available:false}; expect(await p.handle('/get_ui_state')).toEqual({available:false})
-    expect(await p.handle('/navigate',{view:'canvas'})).toEqual({error:'No 21x window is open'})
+    expect(await p.handle('/navigate',{view:'tasks'})).toEqual({error:'No 21x window is open'})
     expect(p.send).toHaveBeenCalledTimes(1); expect(sent).toHaveLength(0)
   })
   it('waits ignored native work, redacts failure details and never retries a stale acceptance', async () => {
@@ -92,10 +92,10 @@ describe('production task API UI ownership', () => {
     p.send.mockResolvedValueOnce({ok:false,detail:'private secret/path diagnostics'})
     expect(await p.handle('/navigate',{view:'dashboard'})).toEqual({error:'The window could not accept the command'})
   })
-  it('refuses replacement windows before sending commands derived from the old canvas', async () => {
+  it('refuses replacement windows before sending commands derived from the old screen', async () => {
     const p = await productionWindow()
     p.snapshot.mockResolvedValueOnce({available:true,leaseId:'lease:one'}).mockResolvedValueOnce({available:true,leaseId:'lease:two'})
-    expect(await p.handle('/move_task_panel',{task_id:p.task.id,x:40,y:20})).toEqual({error:'The window changed before the command could be sent'})
+    expect(await p.handle('/open_task',{task_id:p.task.id})).toEqual({error:'The window changed before the command could be sent'})
     expect(p.send).not.toHaveBeenCalled(); expect(sent).toHaveLength(0)
   })
   it('honors out-of-band project scope and rereads signed nonce/task binding after native awaits', async () => {
@@ -105,7 +105,7 @@ describe('production task API UI ownership', () => {
     expect(await p.handle('/get_ui_state',{},scope)).toMatchObject({available:true})
     const sibling=p.db.createTask({title:'Sibling task',project_id:p.project.id})!
     expect(await p.handle('/open_task',{task_id:sibling.id},scope)).toHaveProperty('error'); expect(p.send).not.toHaveBeenCalled()
-    const siblingState={...p.state,selectedTaskId:sibling.id,selectedTaskTitle:sibling.title,visibleTaskIds:[sibling.id],canvas:{...p.state.canvas,panels:[]}}
+    const siblingState={...p.state,selectedTaskId:sibling.id,selectedTaskTitle:sibling.title,visibleTaskIds:[sibling.id]}
     await p.ui.publish(siblingState,'lease:one',{beforeEffect:()=>{},signal:new AbortController().signal})
     expect(await p.handle('/get_ui_state',{},scope)).toEqual({error:'The window state is unavailable'})
     expect(await p.handle('/get_ui_state',{}, {parentTaskId:null,taskId:null,artifactTaskId:p.task.id,projectId:p.project.id})).toEqual({error:'The window state is unavailable'})
@@ -113,9 +113,9 @@ describe('production task API UI ownership', () => {
     await p.ui.publish(p.state,'lease:one',{beforeEffect:()=>{},signal:new AbortController().signal})
     const other=p.db.createProject({name:'Foreign project'})!, foreign=p.db.createTask({title:'Foreign private task',project_id:other.id})!
     expect(await p.handle('/open_task',{task_id:foreign.id,scope:{projectId:other.id}},scope)).toHaveProperty('error'); expect(p.send).not.toHaveBeenCalled()
-    await p.ui.publish({...p.state,projectId:other.id,selectedTaskId:foreign.id,selectedTaskTitle:foreign.title,visibleTaskIds:[foreign.id],canvas:{...p.state.canvas,panels:[]}},'lease:one',{beforeEffect:()=>{},signal:new AbortController().signal})
+    await p.ui.publish({...p.state,projectId:other.id,selectedTaskId:foreign.id,selectedTaskTitle:foreign.title,visibleTaskIds:[foreign.id]},'lease:one',{beforeEffect:()=>{},signal:new AbortController().signal})
     expect(await p.handle('/get_ui_state',{},scope)).toEqual({error:'The window state is unavailable'})
-    expect(await p.handle('/navigate',{view:'canvas'},scope)).toHaveProperty('error')
+    expect(await p.handle('/navigate',{view:'tasks'},scope)).toHaveProperty('error')
     await p.ui.publish(p.state,'lease:one',{beforeEffect:()=>{},signal:new AbortController().signal})
     let resolve!: (value: NativeUiSnapshot)=>void; const held=new Promise<NativeUiSnapshot>(done=>{resolve=done}); p.releases.push(()=>resolve(p.native.state))
     p.snapshot.mockImplementationOnce(()=>held); const pending=p.handle('/navigate',{view:'tasks'},scope)
@@ -128,9 +128,8 @@ describe('no window', () => {
   it('refuses every command rather than reporting a screen nobody saw', async () => {
     setTaskApiUiState(null)
     for (const [route, params] of [
-      ['/navigate', { view: 'canvas' }],
+      ['/navigate', { view: 'tasks' }],
       ['/open_task', { task_id: 't1' }],
-      ['/set_canvas_view', { mode: 'reset' }],
       ['/open_artifact', { task_id: 't1', artifact_id: 'art-1' }],
     ] as Array<[string, Record<string, unknown>]>) {
       const result = (await handle(route, params)) as { error?: string }
@@ -142,9 +141,9 @@ describe('no window', () => {
 
 describe('navigate', () => {
   it('sends the user to a view', async () => {
-    const result = (await handle('/navigate', { view: 'canvas' })) as { success: boolean }
+    const result = (await handle('/navigate', { view: 'tasks' })) as { success: boolean }
     expect(result.success).toBe(true)
-    expect(sent[0]).toEqual({ channel: UI_COMMAND_CHANNEL, data: { kind: 'navigate', view: 'canvas', settingsTab: undefined } })
+    expect(sent[0]).toEqual({ channel: UI_COMMAND_CHANNEL, data: { kind: 'navigate', view: 'tasks', settingsTab: undefined } })
   })
 
   it('carries a settings tab', async () => {
@@ -152,21 +151,16 @@ describe('navigate', () => {
     expect(sent[0].data).toMatchObject({ view: 'settings', settingsTab: 'voice' })
   })
 
-  it('refuses a view that does not exist', async () => {
-    const result = (await handle('/navigate', { view: 'kanban' })) as { error?: string }
-    expect(result.error).toMatch(/view must be one of/)
+  it('refuses a view that does not exist, including the removed canvas', async () => {
+    for (const view of ['kanban', 'canvas']) {
+      const result = (await handle('/navigate', { view })) as { error?: string }
+      expect(result.error, view).toMatch(/view must be one of/)
+    }
     expect(sent).toHaveLength(0)
   })
 })
 
 describe('open_task', () => {
-  it('follows the canvas when the user is on the canvas', async () => {
-    windowShowing('canvas')
-    const result = (await handle('/open_task', { task_id: 't1' })) as { where: string }
-    expect(result.where).toBe('canvas')
-    expect(sent[0].data).toMatchObject({ kind: 'open_task', where: 'canvas' })
-  })
-
   it('opens the dialog when the user is on the dashboard, so they stay there', async () => {
     windowShowing('dashboard')
     const result = (await handle('/open_task', { task_id: 't1' })) as { where: string }
@@ -181,77 +175,28 @@ describe('open_task', () => {
 
   it('obeys an explicit target over the open view', async () => {
     windowShowing('dashboard')
-    const result = (await handle('/open_task', { task_id: 't1', where: 'canvas' })) as { where: string }
-    expect(result.where).toBe('canvas')
+    const result = (await handle('/open_task', { task_id: 't1', where: 'workspace' })) as { where: string }
+    expect(result.where).toBe('workspace')
   })
 
   it('refuses an unknown task and an unknown target', async () => {
     const unknownTask = (await handle('/open_task', { task_id: 'nope' })) as { error?: string }
     expect(unknownTask.error).toMatch(/not found/i)
 
-    const badTarget = (await handle('/open_task', { task_id: 't1', where: 'sidebar' })) as { error?: string }
-    expect(badTarget.error).toMatch(/where must be one of/)
+    for (const where of ['sidebar', 'canvas']) {
+      const badTarget = (await handle('/open_task', { task_id: 't1', where })) as { error?: string }
+      expect(badTarget.error, where).toMatch(/where must be one of/)
+    }
     expect(sent).toHaveLength(0)
   })
 })
 
-describe('move_task_panel', () => {
-  it('moves a panel that is really there', async () => {
-    windowShowing('canvas', [{ taskId: 't1' }])
-    const result = (await handle('/move_task_panel', { task_id: 't1', x: 120, y: -40 })) as { success: boolean }
-    expect(result.success).toBe(true)
-    expect(sent[0].data).toEqual({ kind: 'move_task_panel', taskId: 't1', x: 120, y: -40 })
-  })
-
-  it('refuses when that task has no panel, instead of doing nothing quietly', async () => {
-    windowShowing('canvas', [{ taskId: 'other' }])
-    const result = (await handle('/move_task_panel', { task_id: 't1', x: 0, y: 0 })) as { error?: string }
-    expect(result.error).toMatch(/no panel on the canvas/i)
+describe('removed Canvas routes', () => {
+  it('no longer exist', async () => {
+    for (const route of ['/move_task_panel', '/close_task_panel', '/set_canvas_view']) {
+      expect(await handle(route, { task_id: 't1', x: 0, y: 0, mode: 'reset' }), route).toEqual({ error: 'Unknown route' })
+    }
     expect(sent).toHaveLength(0)
-  })
-
-  it('refuses coordinates that are not numbers', async () => {
-    windowShowing('canvas', [{ taskId: 't1' }])
-    const result = (await handle('/move_task_panel', { task_id: 't1', x: 'left', y: 0 })) as { error?: string }
-    expect(result.error).toMatch(/must be numbers/)
-  })
-})
-
-describe('close_task_panel', () => {
-  it('closes a panel that is there', async () => {
-    windowShowing('canvas', [{ taskId: 't1' }])
-    const result = (await handle('/close_task_panel', { task_id: 't1' })) as { success: boolean }
-    expect(result.success).toBe(true)
-  })
-
-  it('refuses when there is no panel', async () => {
-    const result = (await handle('/close_task_panel', { task_id: 't1' })) as { error?: string }
-    expect(result.error).toMatch(/no panel on the canvas/i)
-  })
-})
-
-describe('set_canvas_view', () => {
-  it('fits every panel', async () => {
-    windowShowing('canvas', [{ taskId: 't1' }])
-    const result = (await handle('/set_canvas_view', { mode: 'fit_all' })) as { success: boolean }
-    expect(result.success).toBe(true)
-  })
-
-  it('refuses to fit an empty canvas', async () => {
-    const result = (await handle('/set_canvas_view', { mode: 'fit_all' })) as { error?: string }
-    expect(result.error).toMatch(/canvas is empty/i)
-  })
-
-  it('keeps zoom inside the range the canvas enforces', async () => {
-    const tooFar = (await handle('/set_canvas_view', { mode: 'zoom', zoom: 12 })) as { error?: string }
-    expect(tooFar.error).toMatch(/between 0.1 and 3/)
-
-    const missing = (await handle('/set_canvas_view', { mode: 'zoom' })) as { error?: string }
-    expect(missing.error).toMatch(/between 0.1 and 3/)
-
-    const fine = (await handle('/set_canvas_view', { mode: 'zoom', zoom: 1.5 })) as { success: boolean }
-    expect(fine.success).toBe(true)
-    expect(sent.at(-1)?.data).toEqual({ kind: 'set_canvas_view', mode: 'zoom', zoom: 1.5 })
   })
 })
 

@@ -67,9 +67,3 @@ export function installDesktopHost(next: DesktopHost): () => void {
   let released = false
   return () => { if (released) return; released = true; if (host === next) host = previous; next.dispose() }
 }
-
-/** Legacy browser access belongs only to the shipping Electron host. */
-export function electronBrowserApi(): Window['electronAPI']['browser'] | undefined {
-  if (host.kind !== 'electron') return undefined
-  return readPath(host.api, 'browser') as Window['electronAPI']['browser'] | undefined
-}

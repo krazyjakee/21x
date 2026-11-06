@@ -54,15 +54,16 @@ describe('task search', () => {
 afterEach(cleanup)
 
 describe('Commander navigation', () => {
-  it('keeps Mod+1–4 on the existing views and puts Commander on Mod+5', () => {
-    expect(NAV_ITEMS.slice(0, 4).map((item) => item.key)).toEqual(['dashboard', 'canvas', 'tasks', 'skills'])
-    expect(navShortcutDigit('commander')).toBe(5)
+  it('keeps Mod+1–3 on the existing views and puts Commander on Mod+4', () => {
+    expect(NAV_ITEMS.slice(0, 3).map((item) => item.key)).toEqual(['dashboard', 'tasks', 'skills'])
+    expect(navShortcutDigit('commander')).toBe(4)
   })
 
   it.each([
     ['1', 'dashboard'],
-    ['4', 'skills'],
-    ['5', 'commander']
+    ['2', 'tasks'],
+    ['3', 'skills'],
+    ['4', 'commander']
   ])('Mod+%s opens %s', (digit, view) => {
     renderHook(() => useGlobalShortcuts(actions, vi.fn()))
     fireEvent.keyDown(window, { key: digit, ctrlKey: true })
@@ -74,7 +75,7 @@ describe('Commander navigation', () => {
     render(<CommandPalette open onOpenChange={onOpenChange} actions={actions} />)
     fireEvent.change(screen.getByPlaceholderText(/run a command/), { target: { value: 'commander' } })
     const entry = screen.getByRole('button', { name: /Go to Commander/ })
-    expect(entry.textContent).toContain(`${modKey}5`)
+    expect(entry.textContent).toContain(`${modKey}4`)
     fireEvent.click(entry)
     expect(useUIStore.getState().sidebarView).toBe('commander')
     expect(onOpenChange).toHaveBeenCalledWith(false)

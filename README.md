@@ -115,7 +115,6 @@ flowchart LR
 - **Git worktree management** — Isolated branches per task
 - **Repository context** — Agents know which repos to work on (GitHub, GitLab & Forgejo)
 - **MCP servers** — Connect Model Context Protocol tools with auto-registration
-- **Browser MCP tools** — Expose console logs and network activity from browser panels to agents
 - **Idle workspace cleanup** — Prunes `node_modules` in workspaces idle for 7+ days to reclaim disk
 - **Local storage** — tasks, transcripts and settings in a local SQLite database
 

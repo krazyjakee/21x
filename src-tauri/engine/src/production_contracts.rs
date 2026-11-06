@@ -237,12 +237,6 @@ pub const COMMANDS: &[&str] = &[
     "secrets:update",
     "secrets:delete",
     "env:get",
-    "terminal:create",
-    "terminal:write",
-    "terminal:resize",
-    "terminal:kill",
-    "terminal:getCwd",
-    "terminal:getBuffer",
     "mcp:getAll",
     "mcp:create",
     "mcp:update",
@@ -308,8 +302,6 @@ pub const EVENTS: &[&str] = &[
     "artifact:updated",
     "commander:event",
     "chat:event",
-    "terminal:data",
-    "terminal:exit",
 ];
 pub(crate) fn object(value: &Value, required: &[&str], optional: &[&str]) -> bool {
     value.as_object().is_some_and(|map| {
@@ -2011,11 +2003,6 @@ fn fields(operation: &str) -> Option<(&'static [&'static str], &'static [&'stati
         "secrets:update" => (&["id", "data"], &[]),
         "secrets:delete" => (&["id"], &[]),
         "env:get" => (&["key"], &[]),
-        "terminal:create" => (&["id", "cols", "rows"], &["cwd"]),
-        "terminal:write" => (&["id", "data"], &[]),
-        "terminal:resize" => (&["id", "cols", "rows"], &[]),
-        "terminal:kill" | "terminal:getCwd" => (&["id"], &["expectedPid"]),
-        "terminal:getBuffer" => (&["id"], &["lines"]),
         _ => return None,
     })
 }
@@ -3621,9 +3608,6 @@ pub fn valid_request(operation: &str, value: &Value) -> bool {
             return false;
         }
     }
-    if operation.starts_with("terminal:") {
-        return terminal_request(operation, value);
-    }
     value
         .as_object()
         .unwrap()
@@ -3879,9 +3863,6 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
                     | "projectResource:reorder"
                     | "commander:setActiveSession"
                     | "secrets:update"
-                    | "terminal:write"
-                    | "terminal:resize"
-                    | "terminal:kill"
             );
     }
     if value["defined"] != true || value.get("value").is_none() {
@@ -4008,24 +3989,6 @@ pub fn valid_result(operation: &str, value: &Value) -> bool {
             .is_some_and(|items| items.len() <= 128 && items.iter().all(secret_metadata)),
         "secrets:create" | "secrets:update" => secret_metadata(result),
         "secrets:delete" => result.is_boolean(),
-        "terminal:create" => {
-            object(result, &["pid"], &[])
-                && integer(&result["pid"])
-                && result["pid"].as_u64().is_some_and(|n| n > 0)
-        }
-        "terminal:getCwd" => {
-            object(result, &["cwd"], &[]) && (result["cwd"].is_null() || text(&result["cwd"], 4096))
-        }
-        "terminal:getBuffer" => {
-            object(result, &["lines"], &[])
-                && result["lines"].as_array().is_some_and(|items| {
-                    items.len() <= 500
-                        && items
-                            .iter()
-                            .all(|line| line.as_str().is_some_and(|s| s.len() <= 512 * 1024))
-                })
-                && serde_json::to_vec(result).is_ok_and(|bytes| bytes.len() <= 512 * 1024)
-        }
         _ => result.is_object() || result.is_null(),
     }
 }
@@ -4188,12 +4151,6 @@ pub fn valid_event(operation: &str, value: &Value) -> bool {
                 && runtime_event(&value["event"], true)
         }
         "commander:event" => commander_event(value),
-        "terminal:data" => {
-            object(value, &["id", "data"], &[])
-                && terminal_id(&value["id"])
-                && value["data"].as_str().is_some_and(|s| s.len() <= 16 * 1024)
-        }
-        "terminal:exit" => object(value, &["id"], &[]) && terminal_id(&value["id"]),
         _ => false,
     }
 }
@@ -4228,10 +4185,6 @@ const SETTINGS: &[&str] = &[
     "sessions.task_managed",
     "sessions.rollover",
     "sessions.rollover_thresholds",
-    "canvas_state",
-    "drawing_state",
-    "canvas_state_migrated_to_projects",
-    "drawing_state_migrated_to_projects",
     "OPENCODE_BINARY_PATH",
     "minimize_to_tray",
     "anthropic_api_key",
@@ -4267,14 +4220,9 @@ const SETTINGS: &[&str] = &[
     "voice_tts_elevenlabs_disclosure",
 ];
 fn setting_key(value: &Value) -> bool {
-    value.as_str().is_some_and(|key| {
-        key.len() <= 256
-            && (SETTINGS.contains(&key)
-                || key
-                    .strip_prefix("canvas_state:")
-                    .or_else(|| key.strip_prefix("drawing_state:"))
-                    .is_some_and(|id_value| id(&Value::String(id_value.to_owned()))))
-    })
+    value
+        .as_str()
+        .is_some_and(|key| key.len() <= 256 && SETTINGS.contains(&key))
 }
 fn credential_setting(key: &str) -> bool {
     matches!(
@@ -4304,38 +4252,6 @@ fn secret_metadata(value: &Value) -> bool {
         && text(&value["env_var_name"], 128)
         && text(&value["created_at"], 128)
         && text(&value["updated_at"], 128)
-}
-fn terminal_id(value: &Value) -> bool {
-    value.as_str().is_some_and(|s| {
-        !s.is_empty()
-            && s.len() <= 256
-            && s.as_bytes()[0].is_ascii_alphanumeric()
-            && s.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-'))
-    })
-}
-fn terminal_request(operation: &str, value: &Value) -> bool {
-    if !terminal_id(&value["id"]) {
-        return false;
-    }
-    match operation {
-        "terminal:create" | "terminal:resize" => {
-            ["cols", "rows"]
-                .iter()
-                .all(|key| value[*key].as_u64().is_some_and(|n| n > 0 && n <= 4096))
-                && value
-                    .get("cwd")
-                    .is_none_or(|cwd| text(cwd, 4096) && cwd != "")
-        }
-        "terminal:write" => value["data"].as_str().is_some_and(|s| s.len() <= 65536),
-        "terminal:kill" | "terminal:getCwd" => value
-            .get("expectedPid")
-            .is_none_or(|pid| integer(pid) && pid.as_u64().is_some_and(|n| n > 0)),
-        "terminal:getBuffer" => value
-            .get("lines")
-            .is_none_or(|lines| lines.as_u64().is_some_and(|n| n > 0 && n <= 500)),
-        _ => false,
-    }
 }
 fn chat_message(value: &Value) -> bool {
     match value["role"].as_str() {
@@ -4789,7 +4705,7 @@ mod tests {
 
     #[test]
     fn mobile_ingress_is_exact_and_public_results_events_never_expose_session_tokens() {
-        assert_eq!(EVENTS.len(), 47);
+        assert_eq!(EVENTS.len(), 45);
         let requests = [
             ("mobile:getInfo", json!({})),
             (
@@ -5682,7 +5598,7 @@ mod tests {
     }
     #[test]
     fn production_names_and_scopes_are_finite() {
-        assert_eq!(COMMANDS.len(), 245);
+        assert_eq!(COMMANDS.len(), 239);
         assert!(valid_request(
             "agent:deletionImpact",
             &json!({"id":"agent_one","alsoRemoving":["agent_two"]})
@@ -5911,28 +5827,7 @@ mod tests {
         ));
     }
     #[test]
-    fn terminal_control_bytes_are_data_and_pid_is_only_an_exact_terminal_receipt_guard() {
-        assert!(valid_request(
-            "terminal:write",
-            &json!({"id":"terminal:fixture","data":"\u{001b}[31m\u{0000}"})
-        ));
-        assert!(valid_request(
-            "terminal:kill",
-            &json!({"id":"terminal:fixture","expectedPid":42})
-        ));
-        assert!(!valid_request("terminal:kill", &json!({"pid":42})));
-        assert!(!valid_request(
-            "terminal:kill",
-            &json!({"id":"terminal:fixture","expectedPid":42,"processName":"sh"})
-        ));
-        assert!(!valid_request(
-            "terminal:create",
-            &json!({"id":"terminal:fixture","cols":0,"rows":24})
-        ));
-        assert!(!valid_event(
-            "terminal:data",
-            &json!({"id":"terminal:fixture","data":"x".repeat(16385)})
-        ));
+    fn chat_events_carry_bounded_image_payloads() {
         assert!(valid_event(
             "chat:event",
             &json!({"turnId":"turn","event":{"type":"done","stopReason":"end_turn","messages":[{"role":"user","content":"image","images":{"version":1,"images":[{"name":"a.png","mimeType":"image/png","encoding":"base64","byteLength":1,"data":"AQ=="}]}}],"usage":{"inputTokens":1,"outputTokens":1}}})

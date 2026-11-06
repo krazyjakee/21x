@@ -9,10 +9,10 @@ import { tmpdir } from 'node:os'
 import { assertHostNeutralRuntime, inspectHostNeutralAbi } from '../scripts/host-neutral-runtime.mjs'
 
 describe('actual additive standalone launcher', () => {
-  it('owns the pinned runtime and loads both staged native addons without changing root addons', async () => {
+  it('owns the pinned runtime and loads the staged native addon without changing root addons', async () => {
     const resources = assertHostNeutralRuntime(process.cwd())
     const require = createRequire(join(process.cwd(), 'package.json'))
-    const rootPackages = ['better-sqlite3', 'node-pty'].map(name => dirname(require.resolve(`${name}/package.json`)))
+    const rootPackages = ['better-sqlite3'].map(name => dirname(require.resolve(`${name}/package.json`)))
     const snapshot = async () => {
       const entries: Array<{ file: string; sha256: string }> = []
       for (const directory of rootPackages) {
@@ -23,11 +23,11 @@ describe('actual additive standalone launcher', () => {
       }
       return entries
     }
-    // --ignore-scripts CI need not have any root PTY binary. Absence is part
+    // --ignore-scripts CI need not have any root native binary. Absence is part
     // of this snapshot too; the runner must neither create nor rebuild one.
     const before = await snapshot(), result = inspectHostNeutralAbi(resources)
     expect(result).toMatchObject({ node: 'v22.23.2', modules: '127', platform: process.platform, arch: process.arch })
-    expect(result.native.length).toBeGreaterThanOrEqual(2)
+    expect(result.native.length).toBeGreaterThanOrEqual(1)
     expect(await snapshot()).toEqual(before)
     for (const { file } of before) expect(result.native).not.toContain(file)
   })

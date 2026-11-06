@@ -5,10 +5,7 @@
  */
 import type { DatabaseManager } from '../database'
 import {
-  UI_CANVAS_MAX_ZOOM,
-  UI_CANVAS_MIN_ZOOM,
   UI_COMMAND_CHANNEL,
-  isUiCanvasViewMode,
   isUiOpenTaskTarget,
   isUiViewName,
   type UiCommand,
@@ -22,37 +19,15 @@ import type { ProductionUiOwner } from '../production-ui-owner'
 import type { TaskMcpScope } from '../mcp-servers/task-management-core'
 import { ServiceProtocolError } from '../../shared/service-protocol'
 
-/** The canvas panels the window last published, or none when it published none. */
-function readCanvasPanels(state: Record<string, unknown>): Array<{ taskId: string | null }> {
-  const canvas = state.canvas as { panels?: Array<{ taskId: string | null }> } | undefined
-  return Array.isArray(canvas?.panels) ? canvas.panels : []
-}
-
 /**
  * Where "open this task" should send the user when the caller did not say.
- * It follows the screen: the canvas stays on the canvas, the dashboard gets
- * the dialog that keeps the user there, anything else the full task view.
+ * It follows the screen: the dashboard gets the dialog that keeps the user
+ * there, anything else the full task view.
  */
-function resolveOpenTaskTarget(state: Record<string, unknown>): 'workspace' | 'canvas' | 'modal' {
+function resolveOpenTaskTarget(state: Record<string, unknown>): 'workspace' | 'modal' {
   const view = typeof state.view === 'string' ? state.view : null
-  if (view === 'canvas') return 'canvas'
   if (view === 'dashboard') return 'modal'
   return 'workspace'
-}
-
-/**
- * Refuses when that task has no panel, so a move cannot silently do nothing.
- *
- * The window publishes only the current project's canvas. A task from another
- * project cannot be checked here: the renderer switches to that project and
- * acts on its canvas, so the command is passed through.
- */
-function requireCanvasPanel(db: DatabaseManager, taskId: string, state: Record<string, unknown>): { error: string } | null {
-  if (readCanvasPanels(state).some((panel) => panel.taskId === taskId)) return null
-  const task = readUiTask(db, taskId)
-  const shownProject = typeof state.projectId === 'string' ? state.projectId : null
-  if (task && shownProject && (task.project_id ?? DEFAULT_PROJECT_ID) !== shownProject) return null
-  return { error: 'That task has no panel on the canvas. Open it there first.' }
 }
 
 /**
@@ -93,8 +68,7 @@ function assertUiApiScope(db: DatabaseManager, scope: TaskMcpScope | undefined, 
   }
   if (state?.available) {
     if (state.projectId !== projectId) throw new ServiceProtocolError('INVALID_REQUEST')
-    const canvas = state.canvas as { panels: Array<{ taskId: string | null }> }
-    const ids = new Set([...(state.visibleTaskIds as string[]), ...canvas.panels.flatMap(panel => panel.taskId ? [panel.taskId] : []), ...[state.selectedTaskId,state.dashboardPreviewTaskId].filter((id): id is string => typeof id === 'string')])
+    const ids = new Set([...(state.visibleTaskIds as string[]), ...[state.selectedTaskId,state.dashboardPreviewTaskId].filter((id): id is string => typeof id === 'string')])
     for (const id of ids) checkTask(id)
   }
   if (command && 'taskId' in command) checkTask(command.taskId)
@@ -111,7 +85,7 @@ function readUiTask(db: DatabaseManager, taskId: string): { id: string; title: s
 }
 
 export async function handleUiRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {
-  if (!['/get_ui_state','/navigate','/open_task','/move_task_panel','/close_task_panel','/set_canvas_view','/open_artifact'].includes(route)) return undefined
+  if (!['/get_ui_state','/navigate','/open_task','/open_artifact'].includes(route)) return undefined
   const owner = taskApiUiOwner
   let state: Record<string, unknown> = uiState
   const beforeEffect = (command?: UiCommand) => { if (owner) { assertTaskApiUiOwner(owner); assertUiApiScope(db, trustedScope, state, command) } }
@@ -126,7 +100,7 @@ export async function handleUiRoute(db: DatabaseManager, route: string, params: 
 
     case '/navigate': {
       if (!isUiViewName(params.view)) {
-        return { error: 'view must be one of dashboard, tasks, canvas, skills, settings' }
+        return { error: 'view must be one of dashboard, tasks, skills, settings' }
       }
       return sendUiCommand({
         kind: 'navigate',
@@ -143,44 +117,11 @@ export async function handleUiRoute(db: DatabaseManager, route: string, params: 
 
       const requested: UiOpenTaskTarget = params.where === undefined ? 'auto' : String(params.where) as UiOpenTaskTarget
       if (!isUiOpenTaskTarget(requested)) {
-        return { error: 'where must be one of auto, workspace, canvas, modal' }
+        return { error: 'where must be one of auto, workspace, modal' }
       }
       const where = requested === 'auto' ? resolveOpenTaskTarget(state) : requested
       const result = await sendUiCommand({ kind: 'open_task', taskId, where }, owner, leaseId, beforeEffect)
       return 'error' in result ? result : { ...result, where, task_title: task.title }
-    }
-
-    case '/move_task_panel': {
-      if (!params.task_id) return { error: 'task_id is required' }
-      const x = Number(params.x)
-      const y = Number(params.y)
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return { error: 'x and y must be numbers' }
-      const taskId = String(params.task_id)
-      if (!readUiTask(db, taskId)) return { error: 'Task not found' }
-      return requireCanvasPanel(db, taskId, state) ?? sendUiCommand({ kind: 'move_task_panel', taskId, x, y }, owner, leaseId, beforeEffect)
-    }
-
-    case '/close_task_panel': {
-      if (!params.task_id) return { error: 'task_id is required' }
-      const taskId = String(params.task_id)
-      return requireCanvasPanel(db, taskId, state) ?? sendUiCommand({ kind: 'close_task_panel', taskId }, owner, leaseId, beforeEffect)
-    }
-
-    case '/set_canvas_view': {
-      if (!isUiCanvasViewMode(params.mode)) {
-        return { error: 'mode must be one of fit_all, reset, zoom' }
-      }
-      let zoom: number | undefined
-      if (params.mode === 'zoom') {
-        zoom = Number(params.zoom)
-        if (!Number.isFinite(zoom) || zoom < UI_CANVAS_MIN_ZOOM || zoom > UI_CANVAS_MAX_ZOOM) {
-          return { error: `zoom must be a number between ${UI_CANVAS_MIN_ZOOM} and ${UI_CANVAS_MAX_ZOOM}` }
-        }
-      }
-      if (params.mode === 'fit_all' && readCanvasPanels(state).length === 0) {
-        return { error: 'The canvas is empty' }
-      }
-      return sendUiCommand({ kind: 'set_canvas_view', mode: params.mode, zoom }, owner, leaseId, beforeEffect)
     }
 
     case '/open_artifact': {

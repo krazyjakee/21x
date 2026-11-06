@@ -74,8 +74,7 @@ const VIEW_ALIASES: Record<string, VoiceViewName> = {
   'task list': 'tasks',
   skill: 'skills',
   skills: 'skills',
-  canvas: 'canvas',
-  board: 'canvas',
+  board: 'dashboard',
   commander: 'commander',
   overview: 'overview',
   projects: 'overview',
@@ -190,11 +189,6 @@ const RULES: Rule[] = [
     build: (_m, t) => propose({ type: 'start_task', taskRef: currentRef() }, t, 'Start this task'),
   },
   {
-    pattern: /^(?:open|show|go to|switch to|navigate to)\s+(?:the\s+)?canvas\s+for\s+(?:this|this task|the current task)$/i,
-    build: (_m, t) =>
-      propose({ type: 'navigate', destination: 'canvas', taskRef: currentRef() }, t, 'Open the canvas for this task'),
-  },
-  {
     pattern: /^(?:open|show|go to|switch to|navigate to|display)\s+(?:the\s+|my\s+)?([a-z ]+?)(?:\s+view|\s+page|\s+tab)?$/i,
     build: (m, t) => {
       const destination = VIEW_ALIASES[m[1].trim().toLowerCase()]
@@ -268,7 +262,7 @@ export function isVoiceIntent(value: unknown): value is VoiceIntent {
     case 'navigate':
       return (
         typeof v.destination === 'string' &&
-        ['tasks', 'skills', 'dashboard', 'canvas', 'commander', 'overview', 'settings'].includes(v.destination) &&
+        ['tasks', 'skills', 'dashboard', 'commander', 'overview', 'settings'].includes(v.destination) &&
         (v.taskRef === undefined || isRef(v.taskRef))
       )
     case 'cancel':

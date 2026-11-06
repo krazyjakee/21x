@@ -3,7 +3,7 @@ import type { ComposerAttachment, SaveImagesHandler } from '@/components/agents/
 import { chatImageApi } from '@/lib/ipc-client'
 
 /**
- * Pasted images on an agent chat (task, canvas transcript, Captain) are
+ * Pasted images on an agent chat (task, Captain) are
  * stored as attachments of the chat's task (#144): main writes the files,
  * appends them to the task and announces the update, and the agent finds them
  * in `<workspace>/attachments` like any attached file.

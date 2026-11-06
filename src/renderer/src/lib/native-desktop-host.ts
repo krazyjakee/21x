@@ -30,7 +30,6 @@ import { PRODUCTION_AGENT_CODECS } from '@shared/production-agent-codecs'
 import { PRODUCTION_AGENT_EVENT_CODECS } from '@shared/production-agent-events'
 import { COMMANDER_COMMAND_CODECS, COMMANDER_EVENT_CODECS } from '@shared/commander-desktop-codecs'
 import { PRODUCTION_SETTINGS_CODECS } from '@shared/production-settings-codecs'
-import { TERMINAL_COMMAND_CODECS, TERMINAL_EVENT_CODECS } from '@shared/terminal-desktop-codecs'
 import { MCP_CODECS } from '@shared/mcp-codecs'
 import { TASK_SOURCE_CODECS } from '@shared/task-source-codecs'
 import { CONNECTOR_CODECS } from '@shared/connector-codecs'
@@ -49,8 +48,8 @@ import { DesktopClient, type DesktopClientState } from './desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, getTauriUiDocument, NativeBootstrapUnavailableError, type TauriDesktopApi } from './tauri-desktop-transport'
 import { DesktopUnavailableError, type DesktopHost } from './desktop-api'
 
-const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...TERMINAL_COMMAND_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_WINDOW_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_ATTACHMENT_PICK_CODECS, ...NATIVE_ATTACHMENT_IMAGE_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...NATIVE_LOGIN_ITEM_CODECS, ...TRAY_PREFERENCE_CODECS, ...VOICE_MANAGEMENT_CODECS, ...VOICE_TURN_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS, ...PROJECT_CONFIGURATION_CODECS }
-const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...TERMINAL_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...VOICE_TURN_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS,
+const commands = { ...DATABASE_COMMAND_CODECS, ...CONFIGURATION_COMMAND_CODECS, ...AGENT_COMMAND_CODECS, ...AGENT_CONFIGURATION_CODECS, ...TASK_LIFECYCLE_CODECS, ...PRODUCTION_AGENT_CODECS, ...COMMANDER_COMMAND_CODECS, ...PRODUCTION_SETTINGS_CODECS, ...MCP_CODECS, ...TASK_SOURCE_CODECS, ...CONNECTOR_CODECS, ...TASK_SOURCE_PLUGIN_CODECS, ...SESSION_CONTEXT_CODECS, ...CLAUDE_PLUGIN_CODECS, ...MOBILE_CODECS, ...AGENT_INSTALLER_CODECS, ...ARTIFACT_CODECS, ...NATIVE_SERVICES_CODECS, ...NATIVE_WINDOW_CODECS, ...NATIVE_CLIPBOARD_CODECS, ...NATIVE_ATTACHMENT_PICK_CODECS, ...NATIVE_ATTACHMENT_IMAGE_CODECS, ...NATIVE_NOTIFICATION_CODECS, ...NATIVE_LOGIN_ITEM_CODECS, ...TRAY_PREFERENCE_CODECS, ...VOICE_MANAGEMENT_CODECS, ...VOICE_TURN_CODECS, ...GIT_PROVIDER_CODECS, ...WORKSPACE_FILE_CODECS, ...TASK_GROUP_CODECS, ...PROJECT_RUNTIME_CODECS, ...HEARTBEAT_CODECS, ...WORKTREE_RUNTIME_CODECS, ...CLI_MCP_CODECS, ...TASK_ATTACHMENT_CODECS, ...UI_DESKTOP_CODECS, ...PROJECT_CONFIGURATION_CODECS }
+const events = { ...DATABASE_EVENT_CODECS, ...CONFIGURATION_EVENT_CODECS, ...AGENT_EVENT_CODECS, ...AGENT_CONFIGURATION_EVENT_CODECS, ...PRODUCTION_AGENT_EVENT_CODECS, ...TASK_LIFECYCLE_EVENT_CODECS, ...COMMANDER_EVENT_CODECS, ...MOBILE_EVENT_CODECS, ...VOICE_MANAGEMENT_EVENT_CODECS, ...VOICE_TURN_EVENT_CODECS, ...HEARTBEAT_EVENT_CODECS, ...WORKTREE_RUNTIME_EVENT_CODECS, ...UI_DESKTOP_EVENT_CODECS, ...AGENT_INSTALLER_EVENT_CODECS,
   ...TASK_FEEDBACK_EVENT_CODECS, ...ARTIFACT_EVENT_CODECS,
   'tasks:refresh': { decodePayload: (value: Parameters<typeof AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh']['decodePayload']>[0]) => AGENT_CONFIGURATION_EVENT_CODECS['tasks:refresh'].decodePayload(value), validatePayload: (value: unknown) => value === undefined } }
 type ApiPath<T> = { [K in keyof T & string]: NonNullable<T[K]> extends (...args: never[]) => unknown ? K : NonNullable<T[K]> extends object ? `${K}.${ApiPath<NonNullable<T[K]>>}` : never }[keyof T & string]
@@ -119,8 +118,6 @@ export const NATIVE_COMMAND_BINDINGS = {
   'commander:cancel': 'commander.cancel', 'commander:undoAction': 'commander.undoAction', 'commander:getActivity': 'commander.getActivity',
   'chat:start': 'chat.start', 'chat:cancel': 'chat.cancel',
   'secrets:getAll': 'secrets.getAll', 'secrets:create': 'secrets.create', 'secrets:update': 'secrets.update', 'secrets:delete': 'secrets.delete', 'env:get': 'env.get',
-  'terminal:create': 'terminal.create', 'terminal:write': 'terminal.write', 'terminal:resize': 'terminal.resize',
-  'terminal:kill': 'terminal.kill', 'terminal:getCwd': 'terminal.getCwd', 'terminal:getBuffer': 'terminal.getBuffer',
   'mcp:getAll': 'mcpServers.getAll', 'mcp:create': 'mcpServers.create', 'mcp:update': 'mcpServers.update', 'mcp:delete': 'mcpServers.delete',
   'mcp:testConnection': 'mcpServers.testConnection', 'mcp:startOAuthFlow': 'mcpServers.startOAuthFlow', 'mcp:getOAuthStatus': 'mcpServers.getOAuthStatus',
   'mcp:revokeOAuthToken': 'mcpServers.revokeOAuthToken', 'mcp:probeForAuth': 'mcpServers.probeForAuth', 'mcp:submitManualClientId': 'mcpServers.submitManualClientId',
@@ -157,13 +154,13 @@ export const NATIVE_EVENT_BINDINGS = {
   'task:created': 'onTaskCreated', 'task:updated': 'onTaskUpdated', 'task:deleted': 'onTaskDeleted', 'project:changed': 'projects.onChanged', 'transcript:changed': 'onTranscriptChanged',
   'skills:changed': 'skills.onChanged', 'agent:status': 'onAgentStatus', 'agent:startQueueChanged': 'onAgentStartQueueChanged',
   'project:statusChanged': 'projects.onStatusChanged', 'concurrency:changed': 'concurrency.onChanged', 'tasks:refresh': 'onTasksRefresh',
-  'commander:event': 'commander.onEvent', 'chat:event': 'chat.onEvent', 'terminal:data': 'terminal.onData', 'terminal:exit': 'terminal.onExit',
+  'commander:event': 'commander.onEvent', 'chat:event': 'chat.onEvent',
   'mobile:pairing-initiated': 'mobile.onPairingInitiated', 'mobile:device-connected': 'mobile.onDeviceConnected',
   'artifact:updated': 'onArtifactUpdated', 'agent:recoveryStateChanged': 'onAgentRecoveryStateChanged'
 } as const satisfies Partial<Record<keyof typeof events, ApiPath<DesktopApi>>>
 const reads = new Set<keyof typeof commands>(['attachments:readImage', 'cliMcp:snapshot', 'heartbeat:getLogs', 'heartbeat:getStatus', 'heartbeat:readFile', 'worktree:changes', 'worktree:files', 'worktree:readFile', 'taskGroups:list', 'taskGroups:get', 'taskGroups:history', 'project:getStatus', 'project:getStatusHistory', 'project:getCaptainMemory', 'project:getAllStatuses', 'projectLimits:getState', 'projectLimits:isAllPaused', 'concurrency:getState', 'github:checkCli', 'github:fetchOrgs', 'github:fetchOrgRepos', 'github:fetchUserRepos', 'github:fetchPullRequestDetails', 'gitlab:checkCli', 'gitlab:fetchOrgs', 'gitlab:fetchOrgRepos', 'gitlab:fetchUserRepos', 'forgejo:checkCli', 'forgejo:fetchOrgs', 'forgejo:fetchOrgRepos', 'forgejo:fetchUserRepos', 'voice:getSnapshot', 'voice:getRuntime', 'voice:tts:getSnapshot', 'db:getTasks', 'db:getTask', 'project:getAll', 'project:get', 'project:getDefault', 'settings:get', 'settings:getAll', 'agent:getAll', 'agent:deletionImpact', 'skills:getAll', 'projectRepo:list', 'projectResource:list', 'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage', 'agentConfig:getProviders', 'agentConfig:listModels', 'db:getSubtasks', 'tasks:getCoordinatorTaskId', 'agent:getStartQueue',
   'agent:getStartRecoveryState', 'agentSession:getRawTranscript', 'agentSession:getDeliveryState', 'captainRuntime:get', 'commander:listSessions',
-  'commander:listMessages', 'commander:getImage', 'commander:getActivity', 'secrets:getAll', 'env:get', 'terminal:getCwd', 'terminal:getBuffer',
+  'commander:listMessages', 'commander:getImage', 'commander:getActivity', 'secrets:getAll', 'env:get',
   'mcp:getAll', 'mcp:getOAuthStatus', 'mcp:probeForAuth', 'taskSource:getAll', 'taskSource:getUsers', 'connectors:bridgePieces', 'connectors:credentialStatus', 'connectors:syncStatus', 'plugin:list', 'plugin:getDocumentation', 'plugin:resolveOptions',
   'sessionContext:getSnapshot', 'claudePlugin:getMarketplaceSources', 'claudePlugin:fetchCatalog', 'claudePlugin:discoverPlugins', 'claudePlugin:getInstalledPlugins', 'claudePlugin:getPluginResources', 'mobile:getPendingPin', 'mobile:getSessions', 'agent-installer:detect', 'artifacts:scan', 'artifacts:read', 'app:getVersion', 'app:getMinimizeToTray', 'app:getNotificationPermission', 'app:getLoginItemSettings', 'shell:readTextFile'])
 
@@ -277,7 +274,7 @@ export function createNativeDesktopHost(native: TauriDesktopApi): NativeDesktopH
   const node = (prefix: string): unknown => {
     if (nodes.has(prefix)) return nodes.get(prefix)
     const value = new Proxy({}, { get(_target, key) {
-      if (typeof key !== 'string' || key === 'then' || key === 'browser') return undefined
+      if (typeof key !== 'string' || key === 'then') return undefined
       const path = prefix ? `${prefix}.${key}` : key
       if ((!prefix && !key.startsWith('on')) || namespaces.has(path)) return node(path)
       if (!nodes.has(path)) nodes.set(path, functionFor(path))

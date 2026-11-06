@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Bot, Check, ChevronDown, ExternalLink, FolderOpen, Layers, Menu, MoreHorizontal, Pencil, Play, RotateCcw, Sparkles, Terminal, Trash2 } from 'lucide-react'
+import { ArrowLeft, Bot, Check, ChevronDown, ExternalLink, FolderOpen, Menu, MoreHorizontal, Pencil, Play, RotateCcw, Sparkles, Terminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { AnthropicLogo, OpenAILogo, OpenCodeLogo, PiLogo } from '@/components/icons/AgentLogos'
 import { TaskPriorityBadge } from './TaskPriorityBadge'
@@ -60,17 +60,10 @@ interface TaskHeaderBarProps {
   onToggleDetails: () => void
   onEdit: () => void
   onSnooze?: () => void
-  onOpenCanvas?: () => void
   onOpenFolder?: () => void
   onOpenFullView?: () => void
   onDelete: () => void
   recoveryState?: string | null
-  /**
-   * Show the live session activity badge (#95). False when the surrounding
-   * chrome already owns it — a canvas task panel puts the same badge in its
-   * own header, and one entity must not be indicated twice.
-   */
-  showActivity?: boolean
 }
 
 export function TaskHeaderBar({
@@ -90,12 +83,10 @@ export function TaskHeaderBar({
   onToggleDetails,
   onEdit,
   onSnooze,
-  onOpenCanvas,
   onOpenFolder,
   onOpenFullView,
   onDelete,
-  recoveryState,
-  showActivity = true
+  recoveryState
 }: TaskHeaderBarProps) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(task.title)
@@ -218,14 +209,12 @@ export function TaskHeaderBar({
       </div>
       {/* Live session activity (#95), beside the durable lifecycle status it
           must never be confused with. One region: one task header animates. */}
-      {showActivity && (
-        <TaskActivityBadge
-          taskId={task.id}
-          title={task.title}
-          region="task-header"
-          className="shrink-0"
-        />
-      )}
+      <TaskActivityBadge
+        taskId={task.id}
+        title={task.title}
+        region="task-header"
+        className="shrink-0"
+      />
       {recoveryState && (
         <span
           data-testid="task-recovery-state"
@@ -336,7 +325,6 @@ export function TaskHeaderBar({
             {[
               { label: 'Edit task', icon: Pencil, action: onEdit },
               { label: 'Snooze', icon: ChevronDown, action: onSnooze },
-              { label: 'Open in canvas', icon: Layers, action: onOpenCanvas },
               { label: 'Open folder', icon: FolderOpen, action: onOpenFolder },
               { label: 'Open full task view', icon: ExternalLink, action: onOpenFullView }
             ].filter((item) => item.action).map((item) => (

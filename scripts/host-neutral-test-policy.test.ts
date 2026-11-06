@@ -70,7 +70,7 @@ describe('reviewed standalone test boundary', () => {
   })
 
   it('clears inherited Electron and Node injection variables without discarding ordinary test configuration', () => {
-    expect(hostNeutralEnvironment({ PATH: '/fixture', HOME: '/synthetic', ELECTRON_RUN_AS_NODE: '1', Node_Options: '--require=foreign', NODE_PATH: '/foreign', TAURI_SQLITE_MODULE: '/foreign', TAURI_NODE_PTY_MODULE: '/foreign', TAURI_PRODUCTION_TASK_MCP_ENTRY: '/foreign', tauri_standalone_service_proofs: '1', TAURI_HOST_NEUTRAL_RUNNER: 'foreign' })).toEqual({ PATH: '/fixture', HOME: '/synthetic' })
+    expect(hostNeutralEnvironment({ PATH: '/fixture', HOME: '/synthetic', ELECTRON_RUN_AS_NODE: '1', Node_Options: '--require=foreign', NODE_PATH: '/foreign', TAURI_SQLITE_MODULE: '/foreign', TAURI_PRODUCTION_TASK_MCP_ENTRY: '/foreign', tauri_standalone_service_proofs: '1', TAURI_HOST_NEUTRAL_RUNNER: 'foreign' })).toEqual({ PATH: '/fixture', HOME: '/synthetic' })
   })
 
   it('keeps all pre-existing public test commands unchanged', () => {

@@ -18,7 +18,7 @@ describe('v37 task group migration', () => {
     rawDb.exec('DROP INDEX idx_tasks_group; ALTER TABLE tasks DROP COLUMN group_id; DROP TABLE task_group_memberships; DROP TABLE task_groups;')
     db.setSetting('__schema_version', '36')
     expect(applySchema(rawDb)).toBe(true)
-    expect(db.getSetting('__schema_version')).toBe('39')
+    expect(db.getSetting('__schema_version')).toBe('40')
     expect(db.getTask(task.id)).toMatchObject({ agent_id: agent.id, session_id: 'retained-native', group_id: null })
     expect(db.getTranscriptParts(task.id)).toEqual(original)
     expect(db.listTaskGroups(task.project_id)).toEqual([])

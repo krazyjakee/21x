@@ -6,6 +6,8 @@ This page describes current work. Earlier batch notes and reports retain their o
 
 ## Latest continuation
 
+2026-11-05 Canvas, the embedded browser and the embedded terminal are removed from both hosts at the user's request, with schema 40 dropping saved layouts. Older entries below that describe them, or dormant Canvas data, are history. See [Canvas, browser and terminal removal](canvas-browser-retirement.md).
+
 2026-11-05 review follow-ups for #237 and #238. Resume is withheld while a start is pending. Native Fresh re-reads the task as well as the queue row before it clears the transcript, and the canvas Restart now follows the same refusals on Tauri, with `src/renderer/src/lib/native-fresh-session.ts` as the shared owner. `agent:recoveryStateChanged` now carries a token as its cause (`provider_failure` when the cause was free text), so provider-failure notices pass both token checks. The journal, the provider and queue records and the transcript keep the original text, and no retry decision reads the notice. None of this has been run; see [renderer recovery](production-renderer-recovery.md) and [profile lock](profile-lock.md).
 
 2026-11-05 shared profiles stay locked or refuse. A Tauri profile that shares an Electron profile's folders now keeps that share when the marker or the Electron database goes, and refuses in plain words when the folder itself has gone, with a Stop using the old folder action for a folder deleted on purpose. See [cross-host profile ownership](profile-lock.md).
@@ -373,7 +375,7 @@ state across PTY callbacks. Production buffer reads select a Unicode-safe recent
 suffix within the existing encoded JSON limit, including long lines. Native PTY
 subscriptions retire only at actual exit, before the core releases ownership.
 Live output, six terminal commands, process identities and shell policy retain
-their existing contracts. See [streaming terminal recovery](terminal-streaming-recovery.md).
+their existing contracts. The terminal has since been removed.
 Installed keyboard/focus and supported-OS production lifecycle acceptance remain
 open; non-Linux production launch still requires #208 containment work. Hosted
 Verify is unavailable while repository Actions is disabled, awaiting user decision.
@@ -725,7 +727,7 @@ retain their tested revision and platform limits.
 
 - Installed artifact policy v3 and the twenty-receipt synthetic-agent diagnostic passed on all four targets, completing [#204](https://github.com/krazyjakee/21x/issues/204). See [artifact provenance](evidence/installed-artifact-v3-four-target-scenarios.json) and [agent provenance](evidence/installed-agent-08d495f-four-target-scenarios.json).
 - [Recurrence](recurrence-owner.md), [scheduled coordination](scheduled-coordination-owner.md), [heartbeat](heartbeat-owner.md), [workspace cleanup](workspace-cleanup-owner.md) and [overdue reminders](overdue-notifier.md) have portable owners and explicit host boundaries. The [four-target scheduler matrix](evidence/schedulers-four-target-scenarios.json) passed 1,436 default standalone cases with zero skips in 92 files per target at `251685c`; it predates terminal and chat ownership.
-- [Terminal ownership](terminal-owner.md) retains native close and cwd work, bounds replay, supports host reattachment and applies trusted IPC checks. The staged native PTY fixture passed on hosted Linux and both Macs at `97c7054`; Windows resize then passed at `e247073` after enabling raw TTY input and resampling when the notification races input; installed behavior and descendant cleanup remain open. The [matrix and failed Windows assertion](evidence/commander-terminal-platform-scenarios.json) retain their exact source and artifact provenance.
+- Terminal ownership (since removed) retained native close and cwd work, bounds replay, supports host reattachment and applies trusted IPC checks. The staged native PTY fixture passed on hosted Linux and both Macs at `97c7054`; Windows resize then passed at `e247073` after enabling raw TTY input and resampling when the notification races input; installed behavior and descendant cleanup remain open. The [matrix and failed Windows assertion](evidence/commander-terminal-platform-scenarios.json) retain their exact source and artifact provenance.
 - [Chat runtime ownership](chat-runtime-owner.md) joins raw providers/tools and iterator cleanup before source teardown. [Commander ownership](commander-owner.md) now also retains accepted turn bookkeeping, title/summary work, Captain delivery and startup issue-write recovery; late writes remain held before source close.
 - [Secret broker ownership](secret-broker-owner.md) now isolates listener generations, coalesces startup, joins native close and rejects final source revival. Shell generation accepts an explicit profile and quotes log paths literally; error logs redact credentials. Production Tauri bootstrap remains open.
 - [MCP probes](mcp-probe-owner.md) now own child close and every HTTP request/body cleanup, bound active operations/output, cancel on shutdown and suppress late tool-list SQLite writes. Real local child/HTTP controls pass; production MCP integration remains open.

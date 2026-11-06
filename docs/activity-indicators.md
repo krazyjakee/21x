@@ -93,7 +93,7 @@ The components live in `src/renderer/src/components/activity/`. The tokens are a
 | `ActivityRing` | 2 px ring around a 24–64 px identity | Thinking only: scale 1→1.03 over 2.4 s | Static ring |
 | `ProgressShimmer` | 2 × 32 px indeterminate line beside "Using [tool]". No `progressbar` role, no value | Clipped sweep every 2.4 s | Static line |
 | `FinishedTick` | 14 px check in the review (pink) or success tone | 150 ms fade-in; the accent settles after 3 s with a 250 ms fade | Static accent, removed after 3 s |
-| `TaskActivityBadge` | One task's badge (canvas headers, board cards, the task header bar) | As `ActivityBadge` | As `ActivityBadge` |
+| `TaskActivityBadge` | One task's badge (board cards, the task header bar) | As `ActivityBadge` | As `ActivityBadge` |
 | `ActivityAnnouncer` | The single polite live region for task/Captain activity | — | — |
 
 Icons: play (running), speech bubble with dots (thinking), wrench (tool), hand (approval), question bubble (question), clock (queued), speaker (speaking), mic (listening), check (finished), alert (failed), minus (idle), slashed circle (unknown, drawn hollow and never animated).
@@ -112,7 +112,7 @@ Dense lists share one region rather than one region per row, so the budget holds
 - every task header bar passes `region="task-header"`;
 - a drag preview renders no badge at all: it mirrors a card that is still mounted.
 
-One entity is never indicated twice in the same chrome. A canvas task panel already carries the task's badge in its own header, so the `TaskWorkspace` it embeds is rendered with `showActivity={false}`; the same workspace opened full-screen or in a dialog shows it.
+One entity is never indicated twice in the same chrome.
 
 ### Quiet states
 
@@ -133,7 +133,6 @@ Compact surfaces call `isQuietActivity(result)` and render nothing for a plain v
 
 | Surface | File | What it shows |
 | --- | --- | --- |
-| Canvas task panel header | `components/canvas/CanvasPanel.tsx` | `TaskActivityBadge` after the title. The panel's own flash/wave no longer fires on the review transition: the header's finished accent is the one completion effect for that panel. The offscreen HUD beacon (a different region) is unchanged. |
 | Status bar | `components/layout/StatusBar.tsx` | Project-scoped counts: running (fresh running/thinking/tool only, including the project's Captain), needs input, queued, failed, unavailable (active claims that expired), ready for review. The Commander's own global state as a static dot. Hosts `ActivityAnnouncer`. The old pulsing "every non-idle session is running" dot is gone. |
 | Nav rail | `components/layout/NavRail.tsx` | Static Commander state glyph on the Commander item. The state is in the item's accessible name and in its tooltip, which now also opens on keyboard focus. |
 | Captain entry | `components/layout/TopBar.tsx` | Static Captain state dot on the Captain button (in its accessible name and tooltip). Includes verified speech. |
@@ -154,7 +153,7 @@ Agent status epoch/sequence/heartbeat/disconnection fields and Commander activit
 
 ## Tests
 
-`pnpm test:activity-input` runs production board, canvas, shell, Captain and
+`pnpm test:activity-input` runs production board, shell, Captain and
 Commander/PiP components in a native window with controlled stamped inputs.
 It checks real elapsed freshness deadlines, hidden/show recovery, epoch and
 queue races, keyboard focus, reduced motion and composited theme contrast.

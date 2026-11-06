@@ -3,7 +3,6 @@ import { useEffect } from 'react'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useAgentStore } from '@/stores/agent-store'
-import { useCanvasStore } from '@/stores/canvas-store'
 import { applyUiCommand, collectUiState } from '@/lib/ui-remote-control'
 
 /** How long the window waits before republishing. */
@@ -60,10 +59,6 @@ export function useUiRemoteControl(): void {
     const offUi = useUIStore.subscribe(publish)
     const offTasks = useTaskStore.subscribe(publish)
     const offAgents = useAgentStore.subscribe(publish)
-    // Panels and viewport only: a panel drag writes `liveDrag` every frame and
-    // must not push the whole screen out with it.
-    const offPanels = useCanvasStore.subscribe((s) => s.panels, publish)
-    const offViewport = useCanvasStore.subscribe((s) => s.viewport, publish)
 
     const offCommand = desktopApi.ui.onCommand?.((command) => {
       applyUiCommand(command)
@@ -79,8 +74,6 @@ export function useUiRemoteControl(): void {
       offUi()
       offTasks()
       offAgents()
-      offPanels()
-      offViewport()
       offCommand?.()
     }
   }, [])

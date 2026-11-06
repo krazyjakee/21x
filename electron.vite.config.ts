@@ -47,7 +47,7 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        external: ['better-sqlite3', 'node-pty'],
+        external: ['better-sqlite3'],
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           // Built from the TypeScript entry, which shares every tool definition

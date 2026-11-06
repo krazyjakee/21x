@@ -22,7 +22,7 @@ const owners: Record<string, string> = {
   plugin: 'src/service/task-source-plugin-backend.ts', claudePlugin: 'src/service/claude-plugin-backend.ts',
   mcp: 'src/service/mcp-backend.ts', sessionContext: 'src/service/session-context-backend.ts',
   heartbeat: 'src/service/heartbeat-backend.ts', worktree: 'src/service/worktree-runtime-backend.ts', workspace: 'src/service/worktree-runtime-backend.ts',
-  terminal: 'src/service/terminal-backend.ts', mobile: 'src/service/mobile-backend.ts',
+  mobile: 'src/service/mobile-backend.ts',
   voice: 'src/service/voice-management-backend.ts', artifacts: 'src/service/artifact-backend.ts',
   cliMcp: 'src/service/cli-mcp-backend.ts', attachments: 'src/service/task-attachment-backend.ts', chatImages: 'src/service/task-attachment-backend.ts',
   ui: 'src/service/ui-state-backend.ts', commander: 'src/service/commander-backend.ts', chat: 'src/service/commander-backend.ts',

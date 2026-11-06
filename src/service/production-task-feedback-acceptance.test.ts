@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 describe('actual production task feedback acceptance', () => {
-  it.skipIf(process.env.TAURI_TERMINAL_PROOFS !== '1' || process.platform !== 'linux')('delivers real scoped owner notices after acknowledged checkpoint/source effects', async () => {
+  it.skipIf(process.env.TAURI_OWNER_PROOFS !== '1' || process.platform !== 'linux')('delivers real scoped owner notices after acknowledged checkpoint/source effects', async () => {
     vi.resetModules()
     const { runProductionTaskFeedbackProof, TASK_FEEDBACK_EVENTS } = await import('../../scripts/production-task-feedback-proof')
     const report = await runProductionTaskFeedbackProof()

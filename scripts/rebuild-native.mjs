@@ -1,5 +1,5 @@
 /**
- * Rebuilds native Node.js addons (better-sqlite3, node-pty) for Electron's
+ * Rebuilds the native Node.js addon (better-sqlite3) for Electron's
  * Node.js runtime.
  *
  * pnpm's hardlink structure prevents electron-builder install-app-deps
@@ -54,19 +54,5 @@ console.log(`Package path: ${sqlitePath}`)
 rebuildForElectron(sqlitePath)
 
 console.log('better-sqlite3 done')
-
-// ── node-pty ────────────────────────────────────────────────────
-try {
-  const ptyPath = dirname(require.resolve('node-pty/package.json'))
-
-  console.log(`\nRebuilding node-pty for Electron ${electronVersion}`)
-  console.log(`Package path: ${ptyPath}`)
-
-  rebuildForElectron(ptyPath)
-
-  console.log('node-pty done')
-} catch (err) {
-  console.warn('node-pty rebuild failed (terminal feature will be unavailable):', err.message)
-}
 
 console.log('\nAll native modules rebuilt')
