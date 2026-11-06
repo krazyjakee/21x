@@ -572,6 +572,7 @@ export class CommanderService {
       const persisted = steps ? steps.get(index + 1) ?? this.persistManagedStep(sessionId, result.turnId, m, index + 1) : this.persistChatMessage(sessionId, m)
       if (persisted) stored.push(persisted)
     }
+    this.moveUndoNotesBehind(stored)
     if (stored.length > 0) this.emit({ type: 'messages_appended', sessionId, turnId: result.turnId, messages: stored })
     this.emitSession(sessionId)
     if (this.active.get(sessionId)?.turnId === result.turnId) this.active.delete(sessionId)
@@ -579,6 +580,28 @@ export class CommanderService {
     this.managedTurnIds.delete(result.turnId)
     this.observationSequence.delete(result.turnId)
     this.emit({ type: 'turn_event', sessionId, turnId: result.turnId, event: { type: 'done', stopReason: result.stopReason } })
+  }
+
+  /**
+   * Undo works as soon as the write commits, and a plain turn stores its tool
+   * results only when it ends. A note written meanwhile would sit before the
+   * action it reversed, and the next turn would read the change as still in place.
+   * The reply is already stored, so a failure here must not cost the user that.
+   */
+  private moveUndoNotesBehind(stored: CommanderMessage[]): void {
+    try {
+      for (const message of stored) {
+        if (message.role !== 'tool' || message.is_error) continue
+        let undoId: unknown
+        try { undoId = (JSON.parse(message.content) as { undoId?: unknown } | null)?.undoId } catch { continue }
+        if (typeof undoId !== 'string') continue
+        const action = this.store.database.prepare('SELECT undone_message_id FROM commander_actions WHERE id = ? AND session_id = ?')
+          .get(undoId, message.session_id) as { undone_message_id: string | null } | undefined
+        if (action?.undone_message_id) this.store.moveMessageToEnd(action.undone_message_id)
+      }
+    } catch (error) {
+      console.error('[Commander] Could not move an Undo note behind its action:', error)
+    }
   }
 
   private persistChatMessage(sessionId: string, message: ChatMessage): CommanderMessage | null {

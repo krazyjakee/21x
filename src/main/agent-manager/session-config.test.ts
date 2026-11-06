@@ -93,7 +93,7 @@ describe('assembleSessionConfig system prompt', () => {
   })
 
   it('still runs a coordinator session on the built-in prompt when the context cannot be built', () => {
-    const broken = { getProject: () => { throw new Error('db closed') } } as unknown as DatabaseManager
+    const broken = { getProject: () => { throw new Error('db closed') }, getSetting: () => null } as unknown as DatabaseManager
     const prompt = configFor('opencode', { ...captain, project_id: 'proj-a' }, AGENT_PROMPT, broken).systemPrompt ?? ''
     expect(prompt.startsWith(builtIn)).toBe(true)
     expect(prompt.endsWith(AGENT_PROMPT)).toBe(true)

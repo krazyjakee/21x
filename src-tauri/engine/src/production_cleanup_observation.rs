@@ -600,7 +600,7 @@ mod linux {
                 }
             };
             for thread in &threads {
-                let thread_path = path.join("task").join(&thread);
+                let thread_path = path.join("task").join(thread);
                 // The leader's /proc/<pid> spelling identifies our pinned FDs.
                 let inspect = if thread == pid {
                     path.clone()

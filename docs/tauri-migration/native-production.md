@@ -74,15 +74,13 @@ Neither failure nor disconnect automatically replays an accepted mutation.
 `production_contracts.rs` enumerates the reviewed production commands and
 events independently of diagnostic grants. It validates bounded frames,
 exact operation-specific argument fields, explicit optional-result envelopes,
-image byte envelopes, terminal dimensions/byte limits, settings keys and
-masked metadata. The Node production domain codecs validate complete DTOs and
+image byte envelopes, settings keys and masked metadata. The Node production domain codecs validate complete DTOs and
 actual task/project/agent/session/request ownership again. Unknown operations,
 bootstrap fields, epoch changes, duplicate callback IDs, regressing event
 sequences and unreviewed events fail closed. A domain addition requires updating
 both finite contracts; there is no namespace grant. Native Tauri ingress must
 still authorize the actual main WebView label, origin and frame before invoking
-the private production engine. A terminal's optional expected-PID field is an
-equality guard on its exact owned terminal ID, never native kill authority.
+the private production engine.
 
 External URL and notification callbacks are optional typed host functions;
 declaring them supported without supplying a real function rejects startup.
@@ -127,7 +125,11 @@ standalone Node dependencies, build `src-tauri/credentials` with `cargo --locked
 and stage the resulting physical credential helper before the production resource
 manifest is generated. A clean clone needs `pnpm install --frozen-lockfile` and
 the pinned Node 22.23.2 plus the platform's native build dependencies; no manual
-helper copy is needed. The staged helper is included in the manifest, and missing
+helper copy is needed. On Debian and Ubuntu those are `libwebkit2gtk-4.1-dev`,
+`build-essential`, `libxdo-dev`, `libssl-dev`, `libayatana-appindicator3-dev`,
+`librsvg2-dev`, `libdbus-1-dev`, `patchelf` and `libfuse2t64`. Without the
+appindicator package everything compiles and bundling then stops with
+`Can't detect any appindicator library`. The staged helper is included in the manifest, and missing
 or linked helpers are rejected. On Linux the host provisions its own delegation
 before any thread starts: it asks the user's systemd manager (`StartTransientUnit` on the
 session bus) to move the process into a transient `twentyonex-<pid>.scope` with

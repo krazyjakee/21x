@@ -118,6 +118,7 @@ async fn retained_action(
     Ok(result)
 }
 struct Reservation(AtomicBool);
+type CloseWatch = tokio::sync::watch::Receiver<Option<Result<(), EngineError>>>;
 struct Inner {
     app: AppHandle,
     work: NativeWorkOwner,
@@ -129,7 +130,7 @@ struct Inner {
     tray: Mutex<Option<tauri::tray::TrayIcon>>,
     #[cfg(target_os = "linux")]
     directory: Mutex<Option<linux::IconDirectory>>,
-    close: Mutex<Option<tokio::sync::watch::Receiver<Option<Result<(), EngineError>>>>>,
+    close: Mutex<Option<CloseWatch>>,
 }
 impl Inner {
     fn current(&self) -> Result<(), EngineError> {
@@ -322,6 +323,8 @@ mod linux {
         held: fs::File,
         inspection: IconInspection,
     }
+    // One per tray, held for its lifetime, so the size is not worth a heap hop.
+    #[allow(clippy::large_enum_variant)]
     enum IconInspection {
         Pending,
         Missing,

@@ -259,9 +259,13 @@ view is part of this window, not an always-on-top OS window. The Commander
 speaks only while this window has focus and its session or the floating call is
 showing; anything else stays in Chat (see `docs/voice-tts.md`).
 
-- **Stage:** an abstract presence tile shows an icon and a state word. The user
-  tile shows an initial, a real input meter while its owned microphone runs,
-  and a crossed-out mic otherwise. Listening requires matching turn ownership
+- **Stage:** an abstract presence tile shows an icon and a state word; the
+  header shows how long the call has been live. The user tile shows an initial,
+  a real input meter while its owned microphone runs, and a crossed-out mic when
+  muted. In push to talk with nothing held it reads Hold Space to talk, because
+  the microphone is closed, not muted. A report that arrives during a call shows
+  a quiet Report from *project* chip in either surface; it never interrupts
+  (#88). Listening requires matching turn ownership
   and a physically running capture; a cached turn ID cannot animate the mic.
   PTT can show Writing your words after capture closes while its recogniser
   delivers the final tail, with the input meter at zero. Before a call, Start talking uses the same
@@ -277,8 +281,12 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
   at most two lines, and Read full captions exposes the complete current text.
   Completed messages remain in Chat. Partials are not live-region announcements.
 - **Toolbar:** mic/mute, the mode/input-device menu, Stop, CC, Chat panel,
-  Voice settings, PiP and a separate red End. Left/Right/Home/End
-  navigate its buttons; Chat/Actions support arrow keys. Stop and Escape
+  Voice settings, PiP and a separate red End. Each toolbar is one Tab stop:
+  Left/Right/Home/End navigate its buttons, and Tab returns to the one last
+  used; if that control disables, as Stop does once pressed, the stop and focus
+  move to the first enabled control. Chat/Actions support arrow keys. An open
+  microphone menu takes Escape first, wherever focus is, so closing it does not
+  stop a reply; focus inside the menu returns to its button. Otherwise Stop and Escape
   interrupt a reply while leaving the call open. End closes media, cancels
   synthesis/the active reply and retains the conversation.
 - **Microphone modes:** open mic preserves the existing default. Its pauses
@@ -290,6 +298,9 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
   final tail arrives, then one complete request is sent. Mode/device changes
   and mute cancel unfinished capture instead of sending it accidentally. The
   input-device selector passes the chosen device to the shared capture owner.
+  Pressing again while the microphone is still opening carries on with that
+  turn. Held Space never scrolls or presses what has focus, even after the
+  recogniser has finished.
 - **Output ring:** the visible speaking tile reads the real shared Web Audio
   analyser directly each frame, without frame-rate store writes. It pauses
   offscreen or in a hidden document and detaches when speech stops or the tile
@@ -307,10 +318,17 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
   attribution shows only a stored voice user's actual heard sentence. Legacy
   records retain their evidence without inventing changes or successful
   execution. Exact reversible actions use direct Undo IPC, with conflict errors
-  shown inline; unsupported operations say Can't be undone here. A fresh
-  validated action has one eight-second toast beside either call surface;
-  destructive changes use the single CallAnnouncer assertive region. Undo notes disable a historical card's
-  Undo after reload. The server owns the exact reversal and idempotency.
+  shown inline; unsupported operations say Can't be undone here. Cards appear
+  as soon as a write returns, not when the reply finishes, so Undo stays
+  reachable while the model is still answering; a note written meanwhile is
+  moved behind the action when the turn is stored, so the next turn reads the
+  change as undone. Calls and results are paired in transcript order because
+  provider call ids can repeat between turns. A fresh validated action has one
+  eight-second toast beside either call surface, naming the target and up to
+  three old → new values so Undo's effect is clear; it sits clear of the floating
+  call and scrolls inside short windows. Destructive changes use the single
+  CallAnnouncer assertive region. Undo notes disable a historical card's Undo
+  after reload. The server owns the exact reversal and idempotency.
 
 - **Floating call:** approximately 280px wide, with Commander identity, state
   icon + word, current captions, Mic, Stop, Expand, CC and End. Drag its grip to
@@ -336,9 +354,18 @@ showing; anything else stays in Chat (see `docs/voice-tts.md`).
   uses fixed ring-opacity steps.
 
 Call shortcuts apply while Commander is open or a call survives elsewhere.
-Mod means Cmd on macOS and Ctrl elsewhere. Dialogs retain their keys. Mic and
-Undo do not intercept text inputs or contenteditable editors; native text Undo
-continues there. Mod+4 and palette navigation remain available.
+Mod means Cmd on macOS and Ctrl elsewhere. Dialogs and IME composition retain
+their keys. No call shortcut intercepts an editor outside the Commander composer,
+so a task field keeps Escape. Inside the composer, Escape, captions, panel, full
+view and End still work; Mic and Undo do not, so native text Undo continues there.
+Mod+D leaves a microphone another surface opened alone. Mod+4 and palette
+navigation remain available.
+
+Microphone mode, input device, captions on/off, caption size and the floating
+corner are remembered between runs in this window's local storage. Device ids
+are opaque handles, never labels or audio. An invalid value falls back to the
+default; a saved device that is unplugged shows as unavailable in the menu with
+a capture error that says to choose another.
 
 | Shortcut | Behavior |
 | --- | --- |
@@ -355,7 +382,27 @@ continues there. Mod+4 and palette navigation remain available.
 The configurable global voice shortcut mutes/unmutes an open mic. In PTT mode
 it starts an utterance on one press and finishes it on the next; held Space
 continues to be the local press/release control. During call setup it waits
-without claiming Captain or opening another capture.
+without claiming Captain or opening another capture. It follows the same
+boundaries as the in-app shortcuts: a pending confirmation, an open dialog or
+focus in another editor makes it wait, though it can still finish a held PTT
+sentence. Focus only counts while this window has it. If another surface owns
+the microphone, the shortcut stays with that surface, as it would with no call.
+
+The design decisions on #82 as shipped. Recommendations were not separately
+approved; this records what the app does.
+
+| ID | Decision | As shipped |
+| --- | --- | --- |
+| D1 | Avatar | Abstract orb, no image |
+| D2 | Default microphone | Open mic; the proposal leaned to push to talk, which is one menu choice away |
+| D3 | Layout | Stage first, Chat in a side panel |
+| D4 | Window | In-app view and floating call; no always-on-top OS window (#93 optional) |
+| D5 | Leaving the view | The call survives in the floating tile |
+| D6 | Global shortcut | Active Commander call, Captain otherwise |
+| D7 | Destructive voice requests | Cards and Undo; no grace delay (#94 optional) |
+| D8 | Undo scope | Exact reversals only; removals and skill promote/move cannot be undone here |
+| D9 | Captions | On by default |
+| D10 | Sessions | Drawer |
 
 The view lives in `components/commander/`; `commander-store.ts` owns durable
 session projections and drafts, `commander-call-store.ts` owns call/microphone
@@ -493,8 +540,9 @@ controls retain their compatibility contract. The wake word stays out of scope.
   deleting chat. It also aborts setup in progress: a late TTS, turn or
   `getUserMedia` completion is cancelled and cannot reclaim the microphone or
   active session. Leaving the view does none of those things. Escape belongs to
-  the call while it is live (the global voice overlay defers); Escape and Stop
-  interrupt the current reply, briefly show "Stopped", and leave the call open.
+  the call while it is live (the global voice overlay defers, except to dismiss
+  its own confirmation); Escape and Stop interrupt the current reply, briefly
+  show "Stopped", and leave the call open. A held Escape is one Stop.
 - **Half-heard words appear once** (#83). While its own conversation turn
   runs, the stage caption strip shows them and the app-level host sets the voice store's
   `captionOwner`.

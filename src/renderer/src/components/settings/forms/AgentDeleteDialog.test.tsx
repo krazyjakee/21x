@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AgentDeleteDialog } from './AgentDeleteDialog'
 import { agentApi } from '@/lib/ipc-client'
 import type { AgentDeletionImpact } from '@shared/agent-deletion'
@@ -16,6 +16,7 @@ const running = { total: 1, items: [{ id: 't1', title: 'Build' }] }
 
 describe('AgentDeleteDialog', () => {
   beforeEach(() => { vi.restoreAllMocks() })
+  afterEach(cleanup)
 
   it('deletes straight away when nothing is touched, saying other agents are safe', async () => {
     vi.spyOn(agentApi, 'deletionImpact').mockResolvedValue(impact())

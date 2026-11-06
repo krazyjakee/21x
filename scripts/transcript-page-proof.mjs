@@ -6,6 +6,10 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { connectDatabaseService } from './database-service-proof.mjs'
 
+// TRANSCRIPT_PAGE_LIMITS in src/shared/transcript-page.ts; this script cannot import TypeScript.
+const PAGE_BYTE_LIMIT = 8 * 1024 * 1024
+const OVERSIZED_FIELD_CHARS = 2 * 1024 * 1024 + 1
+
 export async function runTranscriptPageProof({ serviceEntry, node = process.env.TAURI_NODE_RUNTIME || 'node' }) {
   const entry = await realpath(serviceEntry)
   const resourceRoot = await realpath(dirname(dirname(entry)))
@@ -16,7 +20,7 @@ export async function runTranscriptPageProof({ serviceEntry, node = process.env.
   const validate = (page, request, taskId) => {
     const bytes = Buffer.byteLength(JSON.stringify(page))
     largestPage = Math.max(largestPage, bytes)
-    assert.ok(bytes <= 256 * 1024 && page.version === 1 && page.taskId === taskId && page.mode === request.mode && page.after === request.after)
+    assert.ok(bytes <= PAGE_BYTE_LIMIT && page.version === 1 && page.taskId === taskId && page.mode === request.mode && page.after === request.after)
     assert.ok(page.parts.length <= (request.limit ?? 64))
     if (request.watermark !== undefined) assert.equal(page.watermark, request.watermark)
     let cursor = request.after
@@ -41,7 +45,7 @@ export async function runTranscriptPageProof({ serviceEntry, node = process.env.
       })) })
     }
     // A field larger than a display page survives storage but is not loaded into a page DTO.
-    await client.request('fixture.transcriptUpsert', { taskId, parts: [{ id: 'large', role: 'assistant', content: 'Large stored tool', tool: { name: 'read', output: 'x'.repeat(400_000) } }] })
+    await client.request('fixture.transcriptUpsert', { taskId, parts: [{ id: 'large', role: 'assistant', content: 'Large stored tool', tool: { name: 'read', output: 'x'.repeat(OVERSIZED_FIELD_CHARS) } }] })
     const invalidations = client.events.filter(event => event.operation === 'transcript:changed' && event.payload.reloadRequired)
     assert.ok(invalidations.length >= 21)
     for (const event of invalidations) {
@@ -93,7 +97,7 @@ export async function runTranscriptPageProof({ serviceEntry, node = process.env.
     assert.ok(largestPage > 128 * 1024)
     // The stored tool remains available through the legacy narrow read, proving no preview writeback.
     const large = await client.command('agentSession:getTranscriptSnapshot', { taskId, sinceSeq: 640 })
-    assert.equal(large.find(part => part.partId === 'large').tool.output.length, 400_000)
+    assert.equal(large.find(part => part.partId === 'large').tool.output.length, OVERSIZED_FIELD_CHARS)
     report.phase = 'authority-and-version-denial'
     await assert.rejects(client.command('agentSession:getTranscriptPage', { taskId: 'missing', page: { version: 1, mode: 'snapshot', after: 0 } }), { code: 'INVALID_REQUEST' })
     await assert.rejects(client.command('agentSession:getTranscriptPage', { taskId, page: { version: 2, mode: 'snapshot', after: 0 } }), { code: 'INVALID_ARGUMENTS' })
@@ -103,7 +107,7 @@ export async function runTranscriptPageProof({ serviceEntry, node = process.env.
     await client.request('engine.shutdown', {})
     assert.equal((await client.waitClosed()).code, 0)
     Object.assign(report, { passed: true, phase: 'complete', parts: parts.size, snapshotPages, deltaPages,
-      largestPageBytes: largestPage, pageByteLimit: 256 * 1024, racingUpdatesRecovered: true,
+      largestPageBytes: largestPage, pageByteLimit: PAGE_BYTE_LIMIT, racingUpdatesRecovered: true,
       widePayloadsBounded: true,
       overflowInvalidations: invalidations.length, boundedLiveInvalidationRecovery: true,
       oversizedFieldPreviewOnly: true, missingTaskAndMalformedRequestsDenied: true, acknowledgedServiceExit: true })

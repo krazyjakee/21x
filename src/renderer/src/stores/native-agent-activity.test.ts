@@ -140,13 +140,16 @@ it('disposes the native event lease so a queued callback cannot mutate activity 
 
 const agent = (id = 'agent-1', name = id) => ({ id, name, server_url: 'http://localhost:4096', config: {},
   is_default: true, created_at: '2026-10-17', updated_at: '2026-10-17' })
+const noItems = { total: 0, items: [] }
+const deletionImpact = () => ({ agent_id: 'agent-1', agent_name: 'agent-1', recurring_auto_start: 0, commander_cleared: false, was_default: false, last_agent: false, replacement_default: null,
+  ...Object.fromEntries(['running', 'queued', 'unassigned_tasks', 'recurring_tasks', 'dissolved_groups', 'fallback_agents', 'captain_projects', 'default_projects', 'concurrency_projects'].map(key => [key, noItems])) })
 it.each(['create', 'update', 'delete'] as const)('preserves accepted agent %s across a delayed native list snapshot', async operation => {
   const pending = held<unknown>(), original = agent(), changed = agent('agent-1', 'Renamed'), added = agent('agent-2')
   let current = [original], first = true
   f.handlers.set('agent:getAll', () => { if (first) { first = false; return pending.promise }; return Promise.resolve(current) })
   f.handlers.set('agent:create', async () => { current = [original, added]; return added })
   f.handlers.set('agent:update', async () => { current = [changed]; return changed })
-  f.handlers.set('agent:delete', async () => { current = []; return true })
+  f.handlers.set('agent:delete', async () => { current = []; return deletionImpact() })
   f.useAgentStore.setState({ agents: [original] })
   const recovery = f.rehydrateDesktopAgentState()
   await vi.waitFor(() => expect(f.calls('agent:getAll')).toBe(1))
@@ -190,7 +193,8 @@ it('keeps failed native agent recovery fenced and clears its error only after a 
   f.handlers.set('agent:getAll', async () => [agent()])
   await f.host.rehydrate()
   expect(f.host.hydrationPending).toBe(false)
-  expect(f.useAgentStore.getState()).toMatchObject({ agents: [agent()], error: null, isLoading: false })
+  // Recovery ends by announcing tasks:refresh, which starts one more list read.
+  await vi.waitFor(() => expect(f.useAgentStore.getState()).toMatchObject({ agents: [agent()], error: null, isLoading: false }))
 })
 it('retires pending agent snapshots with the document listener cohort', async () => {
   const pending = held<unknown>(); f.handlers.set('agent:getAll', () => pending.promise)

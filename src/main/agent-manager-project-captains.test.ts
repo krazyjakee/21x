@@ -598,6 +598,18 @@ describe('per-project Captain conversations', () => {
     expect(new DeliveryStore(db).getByKey('held-by-panel')).toMatchObject({ state: 'acknowledged' })
   })
 
+  it('keeps a row an earlier build stopped for review shut, because the backend may have it', async () => {
+    const manager = newManager(new FakeAdapter())
+    const store = new DeliveryStore(db)
+    const { record } = store.enqueue({ idempotencyKey: 'unknown-boundary', kind: 'agent_message', taskId: alphaCaptain, payload: '{}' })
+    store.terminal(record.id, 'failed', 'ECONNRESET; provider recovery requires review before any new delivery.')
+    const before = store.getByKey('unknown-boundary')
+
+    manager.reopenGaveUpDelivery('unknown-boundary')
+
+    expect(store.getByKey('unknown-boundary')).toEqual(before)
+  })
+
   it('reports what became of a message, to the task it belongs to', async () => {
     const manager = newManager(new FakeAdapter())
     const send = vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new Error('backend unavailable'))

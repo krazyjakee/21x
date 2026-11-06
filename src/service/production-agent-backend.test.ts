@@ -162,11 +162,16 @@ describe('production session commands on the actual manager', () => {
 
   it('preserves an unknown transport delivery boundary and never replays the same durable intent', async () => {
     const f = await live()
+    const told = vi.spyOn(manager as unknown as { emitSystemError(...args: string[]): void }, 'emitSystemError')
     adapter.sendPrompt.mockRejectedValueOnce(new Error('ECONNRESET unknown prompt delivery'))
     await expect(call('agentSession:sendByTaskId', [f.task.id, 'Unconfirmed instruction', undefined, 'uncertain-intent'])).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
     await expect(call('agentSession:sendByTaskId', [f.task.id, 'Unconfirmed instruction', undefined, 'uncertain-intent'])).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
     expect(adapter.sendPrompt).toHaveBeenCalledTimes(2)
     expect(adapter.createSession).toHaveBeenCalledOnce()
+    // Handled like a timeout, so the Captain column returns the words instead of
+    // listing a row that no retry can ever clear.
+    expect(db.db.prepare("SELECT state FROM delivery_outbox WHERE task_id = ? AND kind = 'agent_message' AND last_error LIKE '%requires review%'").get(f.task.id)).toEqual({ state: 'timed_out' })
+    expect(told).toHaveBeenCalledWith('', f.task.id, expect.stringMatching(/^delivery-review-/), expect.stringContaining('inspect the conversation before retrying'))
   })
 
   it('uses actual pending native request identity, rejects stale/foreign answers and supports permission and question outcomes', async () => {

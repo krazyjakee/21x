@@ -22,10 +22,12 @@ vi.mock('@/hooks/use-snooze-tick', () => ({
 vi.mock('@/lib/ipc-client', () => ({
   skillApi: { getAll: vi.fn().mockResolvedValue([]), onChanged: vi.fn(() => () => {}) },
   taskApi: {
-    getAll: vi.fn().mockResolvedValue([])
+    getAll: vi.fn().mockResolvedValue([]),
+    getCoordinatorTaskId: vi.fn().mockResolvedValue(null)
   },
   // The command box now offers dictation, so the voice store loads with it.
   voiceApi: {
+    answerNotExpected: vi.fn().mockResolvedValue(undefined),
     getSnapshot: vi.fn().mockResolvedValue({
       enabled: false,
       engine: { state: 'model_missing', message: '' },

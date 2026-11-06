@@ -245,6 +245,8 @@ pub struct ProductionDescriptor {
     pub legacy_profile_root: Option<PathBuf>,
 }
 pub type HostFuture<T> = Pin<Box<dyn Future<Output = Result<T, EngineError>> + Send>>;
+pub type ProductionUiCallback =
+    Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>;
 pub type ProductionEnergyScope = Arc<dyn Fn() -> Result<(), EngineError> + Send + Sync>;
 pub struct ProductionEnergyHost {
     pub invoke: Arc<dyn Fn(bool, ProductionEnergyScope) -> HostFuture<bool> + Send + Sync>,
@@ -312,9 +314,8 @@ pub struct ProductionNativeHost {
     pub notification: Option<ProductionNotificationHost>,
     pub energy: Option<ProductionEnergyHost>,
     pub ui_snapshot: Option<Arc<dyn Fn(String) -> HostFuture<Value> + Send + Sync>>,
-    pub ui_command: Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
-    pub installer_progress:
-        Option<Arc<dyn Fn(Value, String, String) -> HostFuture<Value> + Send + Sync>>,
+    pub ui_command: Option<ProductionUiCallback>,
+    pub installer_progress: Option<ProductionUiCallback>,
 }
 fn energy_host_matches(capability: &HostCapability, host: &ProductionNativeHost) -> bool {
     match capability {
@@ -578,7 +579,7 @@ impl DelegatedCgroup {
     pub fn open(path: &Path) -> Result<Self, EngineError> {
         #[cfg(target_os = "linux")]
         {
-            return linux::open_delegation(path).map(|root| Self { root });
+            linux::open_delegation(path).map(|root| Self { root })
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -1014,7 +1015,7 @@ impl ProductionEngine {
         }
         #[cfg(target_os = "linux")]
         {
-            return Self::launch_linux(launch, host).await;
+            Self::launch_linux(launch, host).await
         }
         #[cfg(windows)]
         {
@@ -2887,7 +2888,7 @@ mod linux {
             let mut ready = [0u8; 1];
             let acknowledged = unsafe { libc::poll(&mut poll, 1, 1000) } > 0
                 && ready_read.read_exact(&mut ready).is_ok()
-                && ready == [b'R']
+                && ready == *b"R"
                 && alive(pid as u32).unwrap_or(false);
             if !acknowledged {
                 drop(parent_write);

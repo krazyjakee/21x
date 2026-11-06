@@ -24,6 +24,8 @@ export interface StreamingToolCall {
   input: Record<string, unknown>
   result?: string
   isError?: boolean
+  /** When the result arrived, for the card shown until the turn is stored. */
+  completedAt?: number
 }
 
 export interface StreamingTurn {
@@ -73,6 +75,17 @@ interface CommanderState {
   send: (text: string, images?: ChatImageInput[]) => Promise<boolean>
   cancel: () => Promise<void>
   handleEvent: (event: CommanderEvent) => void
+}
+
+/**
+ * An executed tool result that main has not stored yet. Plain turns are stored
+ * when they finish, but the write has already happened, so its card and Undo
+ * cannot wait for the rest of the reply.
+ */
+export function liveToolResult(sessionId: string, turnId: string, call: StreamingToolCall, index: number): CommanderMessage {
+  return { id: `live:${turnId}:${index}:${call.id}`, session_id: sessionId, role: 'tool', content: call.result ?? '',
+    is_error: call.isError === true, tool_calls: null, tool_call_id: call.id, tool_name: call.name,
+    project_id: null, correlation_id: null, created_at: call.completedAt ?? Date.now() }
 }
 
 let eventOwner: { active: boolean; subscribers: number; off?: () => void } | undefined
@@ -337,22 +350,25 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
           const current = state.streaming[sessionId]
           const turn: StreamingTurn = current && current.turnId === turnId ? current : { turnId, text: '', toolCalls: [] }
           let next: StreamingTurn = turn
+          let completed: StreamingToolCall | undefined
+          let completedIndex = -1
           if (inner.type === 'text_delta') {
             next = { ...turn, text: turn.text + inner.text }
           } else if (inner.type === 'tool_call_start') {
             next = { ...turn, toolCalls: [...turn.toolCalls, { id: inner.id, name: inner.name, input: inner.input }] }
           } else if (inner.type === 'tool_call_result') {
-            next = {
-              ...turn,
-              toolCalls: turn.toolCalls.map((c) => (c.id === inner.id ? { ...c, result: inner.content, isError: inner.isError } : c))
+            // A repeated provider id belongs to the call still waiting for its result.
+            const waiting = turn.toolCalls.findIndex(call => call.id === inner.id && call.result === undefined)
+            if (waiting >= 0) {
+              const done = { ...turn.toolCalls[waiting], result: inner.content, isError: inner.isError, completedAt: Date.now() }
+              completed = done
+              completedIndex = waiting
+              next = { ...turn, toolCalls: turn.toolCalls.map((c, index) => (index === waiting ? done : c)) }
             }
           }
-          const call = inner.type === 'tool_call_result' ? turn.toolCalls.find(call => call.id === inner.id) : undefined
-          const action = call && inner.type === 'tool_call_result' ? parseCommanderAction(call.name, inner.content, inner.isError) : null
-          const recentAction = action && call && inner.type === 'tool_call_result' ? {
-            call, result: { id: `live:${turnId}:${call.id}`, session_id: sessionId, role: 'tool' as const,
-              content: inner.content, is_error: inner.isError, tool_calls: null, tool_call_id: call.id,
-              tool_name: call.name, project_id: null, correlation_id: null, created_at: Date.now() },
+          const action = completed ? parseCommanderAction(completed.name, completed.result ?? '', completed.isError === true) : null
+          const recentAction = action && completed ? {
+            call: completed, result: liveToolResult(sessionId, turnId, completed, completedIndex),
             requestedBy: [...(state.messages[sessionId] ?? [])].reverse().find(message => message.role === 'user'), observedAt: activityNow()
           } : state.recentAction
           return { streaming: { ...state.streaming, [sessionId]: next }, recentAction }
@@ -363,7 +379,8 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
         const { sessionId, messages } = event
         const state = get()
         const loaded = state.messages[sessionId]
-        const stored = messages.some((m) => m.tool_name !== 'undo_action' && (m.role === 'assistant' || m.role === 'tool'))
+        // An Undo note or context notice lands mid-turn and is not this turn's output.
+        const stored = messages.some((m) => m.tool_name !== 'undo_action' && m.tool_name !== 'context_notice' && (m.role === 'assistant' || m.role === 'tool'))
         set({
           undoneActions: [...new Set([...state.undoneActions, ...messages.filter(message => message.tool_name === 'undo_action' && message.tool_call_id).map(message => message.tool_call_id!)])],
           unseenReports: { ...state.unseenReports, [sessionId]: [...new Set([...(state.unseenReports[sessionId] ?? []), ...messages.filter(message => message.role === 'report').map(message => message.id)])] },

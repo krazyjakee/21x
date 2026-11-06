@@ -6,8 +6,8 @@ import { useCommanderCallUiStore, useCommanderPipVisible, type PipCorner } from 
 import { bindPresenceLevel } from '@/lib/commander-call/presence-level'
 import { commanderCallMedia } from './CommanderCallHost'
 import { useCallPresentation } from './use-call-presentation'
-import { CommanderCaptions, useCommanderCaption } from './CommanderCaptions'
-import { navigateCallToolbar } from './use-call-shortcuts'
+import { CallReportNotice, CommanderCaptions, useCommanderCaption } from './CommanderCaptions'
+import { moveToolbarTabStop, navigateCallToolbar, useToolbarTabStop } from './use-call-shortcuts'
 
 const ICONS = { off: Circle, unavailable: AlertTriangle, ready: Circle, listening: Mic, transcribing: Loader2, thinking: Brain, working: Wrench, speaking: AudioLines, interrupted: Square, error: AlertTriangle } satisfies Record<CallState, typeof Circle>
 
@@ -17,13 +17,15 @@ export function snapPipCorner(x: number, y: number, width: number, height: numbe
 
 export function CommanderPip() {
   const visible = useCommanderPipVisible()
-  const { call, presentation, observation, microphoneOpen: currentMic } = useCallPresentation()
+  const { call, presentation, observation, microphoneOpen: currentMic, pushToTalkReady } = useCallPresentation()
   const caption = useCommanderCaption(presentation)
   const corner = useCommanderCallUiStore(s => s.corner)
   const captions = useCommanderCallUiStore(s => s.captions)
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
   const tile = useRef<HTMLElement>(null)
   const ring = useRef<HTMLDivElement>(null)
+  const toolbar = useRef<HTMLDivElement>(null)
+  useToolbarTabStop(toolbar)
   const drag = useRef<{ pointer: number; dx: number; dy: number } | null>(null)
   const Icon = ICONS[presentation.state]
   const label = presentation.state === 'working' ? 'Working' : presentation.label
@@ -64,8 +66,9 @@ export function CommanderPip() {
     </div>
     <CommanderCaptions caption={caption} compact />
     {presentation.detail && <p className="break-words text-sm">{presentation.detail}</p>}
-    <div className="commander-pip-toolbar" role="toolbar" aria-label="Floating Commander call controls" onKeyDown={navigateCallToolbar}>
-      <Button size="icon" variant={currentMic ? 'default' : 'secondary'} aria-label={call.muted ? 'Unmute microphone' : 'Mute microphone'} aria-pressed={!call.muted} disabled={call.status !== 'live'} onClick={() => void call.toggleMicrophone()}>{currentMic ? <Mic className="size-icon" /> : <MicOff className="size-icon" />}</Button>
+    <CallReportNotice event={presentation.event} />
+    <div ref={toolbar} className="commander-pip-toolbar" role="toolbar" aria-label="Floating Commander call controls" onKeyDown={navigateCallToolbar} onFocus={moveToolbarTabStop}>
+      <Button size="icon" variant={currentMic ? 'default' : 'secondary'} aria-label={call.muted ? 'Unmute microphone' : 'Mute microphone'} aria-pressed={!call.muted} disabled={call.status !== 'live'} onClick={() => void call.toggleMicrophone()}>{currentMic || pushToTalkReady ? <Mic className="size-icon" /> : <MicOff className="size-icon" />}</Button>
       <Button size="icon" variant="secondary" aria-label="Stop the reply" disabled={!presentation.controls.stop} onClick={() => call.interrupt('stop')}><Square className="size-icon" /></Button>
       <Button size="icon" variant="ghost" aria-label="Expand Commander call" data-testid="commander-pip-expand" onClick={() => useCommanderCallUiStore.getState().expand()}><Expand className="size-icon" /></Button>
       <Button size="icon" variant="ghost" aria-label={captions ? 'Hide captions' : 'Show captions'} aria-pressed={captions} onClick={() => useCommanderCallUiStore.getState().toggleCaptions()}><Captions className="size-icon" /></Button>

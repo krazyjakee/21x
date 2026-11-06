@@ -13,6 +13,7 @@ function firstCb<T>(fn: unknown): T | null {
 }
 const transcriptCb = firstCb<(e: TranscriptChangedEvent) => void>(mockElectronAPI.onTranscriptChanged)
 const statusCallback = firstCb<(e: AgentStatusEvent) => void>(mockElectronAPI.onAgentStatus)
+const onRefresh = firstCb<() => void>(mockElectronAPI.onTasksRefresh)!
 
 const getSnapshotMock = mockElectronAPI.agentSession.getTranscriptSnapshot as unknown as Mock
 const getDeltaMock = mockElectronAPI.agentSession.getTranscriptDelta as unknown as Mock
@@ -73,7 +74,6 @@ describe('useAgentStore', () => {
     })
 
     it('follows the one change event, without needing the view to reopen', async () => {
-      const onRefresh = firstCb<() => void>(mockElectronAPI.onTasksRefresh)!
       useAgentStore.setState({ agents: [{ id: 'a1', name: 'Old' } as unknown as Agent] })
       ;(mockElectronAPI.agents.getAll as unknown as Mock).mockResolvedValue([{ id: 'a1', name: 'New' }, { id: 'a2', name: 'Added' }])
       onRefresh()
@@ -81,7 +81,6 @@ describe('useAgentStore', () => {
     })
 
     it('keeps the same list when the event changed nothing, so selectors do not reset', async () => {
-      const onRefresh = firstCb<() => void>(mockElectronAPI.onTasksRefresh)!
       const agents = [{ id: 'a1', name: 'Same' } as unknown as Agent]
       useAgentStore.setState({ agents })
       ;(mockElectronAPI.agents.getAll as unknown as Mock).mockResolvedValue([{ id: 'a1', name: 'Same' }])

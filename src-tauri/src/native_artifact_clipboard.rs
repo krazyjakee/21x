@@ -334,7 +334,7 @@ mod gtk_owner {
             }
             (request.scope)()?; // exact document/lifecycle check immediately before GTK effect
             let target = gtk::ffi::GtkTargetEntry {
-                target: b"text/uri-list\0".as_ptr() as *mut _,
+                target: c"text/uri-list".as_ptr() as *mut _,
                 flags: 0,
                 info: 0,
             };

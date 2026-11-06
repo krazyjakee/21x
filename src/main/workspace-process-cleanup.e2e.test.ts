@@ -15,14 +15,15 @@ import { spawn, type ChildProcess } from 'child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { AGENT_WORK_ENV, AGENT_WORK_MARKER } from '../shared/agent-work-marker'
 import {
-  collectAncestorPids,
   readProcessSnapshot,
   selectLeakedWorkspacePids,
   selectPidsRootedInWorkspaces,
   sweepLeakedWorkspaceProcesses,
   terminateProcessesInWorkspaces,
   canReadProcessCwd,
+  isSessionSubreaper,
   type WorkspaceState
 } from './workspace-process-cleanup'
 
@@ -56,6 +57,7 @@ setInterval(() => {}, 1000)
 `
 
 const spawned: ChildProcess[] = []
+const orphans: number[] = []
 const tempRoots: string[] = []
 
 function alive(pid: number): boolean {
@@ -93,10 +95,10 @@ async function settle(ms = 400): Promise<void> {
  * watcher survives with no parent — the force-quit shape, and a process this
  * test process does NOT own.
  */
-async function startOrphanedWatcher(root: string, script: string, cwd: string): Promise<number> {
+async function startOrphanedWatcher(root: string, script: string, cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const launcherPath = join(root, `launcher-${cwd.length}-${spawned.length}.cjs`)
   writeFileSync(launcherPath, LAUNCHER)
-  const launcher = spawn(process.execPath, [launcherPath, script, cwd], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })
+  const launcher = spawn(process.execPath, [launcherPath, script, cwd], { cwd: root, env, stdio: ['ignore', 'pipe', 'ignore'] })
   spawned.push(launcher)
 
   const watcherPid = await new Promise<number>((resolve, reject) => {
@@ -113,6 +115,7 @@ async function startOrphanedWatcher(root: string, script: string, cwd: string): 
     launcher.on('error', reject)
   })
 
+  orphans.push(watcherPid)
   process.kill(launcher.pid!, 'SIGKILL')
   await settle(1500)
   return watcherPid
@@ -122,6 +125,14 @@ afterEach(() => {
   for (const child of spawned.splice(0)) {
     try {
       if (child.pid) process.kill(child.pid, 'SIGKILL')
+    } catch {
+      // already gone
+    }
+  }
+  // A failed assertion must not leave a real orphan behind.
+  for (const pid of orphans.splice(0)) {
+    try {
+      process.kill(pid, 'SIGKILL')
     } catch {
       // already gone
     }
@@ -187,25 +198,25 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
     // so only a boot sweep can ever collect it.
     const fx = fixture()
     // Force-quit the parent, the way SIGKILL on 20x kills `pnpm` and `turbo`.
-    const watcherPid = await startOrphanedWatcher(fx.root, fx.script, fx.workspaceDir('task_force_quit'))
+    // Started as an agent's shell would be: on Linux the marker is what proves it.
+    const watcherPid = await startOrphanedWatcher(fx.root, fx.script, fx.workspaceDir('task_force_quit'), { ...process.env, ...AGENT_WORK_ENV })
 
     // BEFORE: the watcher is alive and has lost its parent.
     expect(alive(watcherPid), 'the watcher survives its parent').toBe(true)
     const before = await readProcessSnapshot()
     const orphan = before.rows.find((row) => row.pid === watcherPid)
     expect(orphan, 'the watcher is still in the process table').toBeDefined()
-    // Its launcher is dead, so its parent must now be either init or a
-    // subreaper — and a subreaper is by definition one of OUR ancestors. Any
-    // third answer would mean it is still owned by a live process, and the
-    // whole premise of the test would be wrong.
+    // Its launcher is dead, so its parent must now be either init or the
+    // session's subreaper. Any third answer would mean it is still owned by a
+    // live process, and the whole premise of the test would be wrong.
+    const adopter = before.rows.find((row) => row.pid === orphan!.ppid)
     const reparentedToInit = orphan!.ppid === 1
-    const adopters = collectAncestorPids(before.rows, process.pid)
-    expect(reparentedToInit || adopters.has(orphan!.ppid) || orphan!.ppid === process.pid, `unexpected new parent ${orphan!.ppid}`).toBe(true)
+    expect(reparentedToInit || isSessionSubreaper(adopter?.command ?? ''), `unexpected new parent ${orphan!.ppid}: ${adopter?.command}`).toBe(true)
 
-    // macOS and an ordinary Linux session reparent to pid 1, which is the case
-    // the sweep is built for. A Linux host with a subreaper in the session
-    // hands the child to that instead, and it is then caught by the descendant
-    // branch. Both are asserted; which one applies is the host's business.
+    // macOS reparents to pid 1. A systemd desktop session hands the child to
+    // `systemd --user` instead, which is an ancestor of this test and so does
+    // not make the watcher a descendant of it: the sweep has to recognise that
+    // parent and find the marker. Both are asserted; which applies is the host's business.
     console.log(`watcher ${watcherPid} reparented to ppid ${orphan!.ppid}`)
 
     // The boot sweep, as `app.whenReady` runs it.
@@ -217,11 +228,40 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
     // AFTER: selected as an orphan, and gone.
     const leak = swept.find((entry) => entry.pid === watcherPid)
     expect(leak, 'selected by the sweep').toBeDefined()
-    expect(leak!.reason).toContain(reparentedToInit ? 'orphaned (ppid 1)' : 'our descendant')
+    expect(leak!.reason).toContain(`orphaned (ppid ${orphan!.ppid})`)
     await settle()
     expect(alive(watcherPid), 'the watcher is gone after the boot sweep').toBe(false)
     expect((await readProcessSnapshot()).rows.some((row) => row.pid === watcherPid)).toBe(false)
   }, 90000)
+
+  it('leaves an orphan with no proof of 21x alone when the session adopted it, at boot and on an active task', async (context) => {
+    // The same shape as a `code .` or tmux server a person started from a task
+    // workspace: nothing owns it now, and nothing says 21x started it.
+    const fx = fixture()
+    const unmarked = { ...process.env, [AGENT_WORK_MARKER]: undefined }
+    const pid = await startOrphanedWatcher(fx.root, fx.script, fx.workspaceDir('task_user_editor'), unmarked)
+    const { rows } = await readProcessSnapshot()
+    const adopter = rows.find((row) => row.pid === rows.find((candidate) => candidate.pid === pid)?.ppid)
+    // Only this adopter reaches the rule: pid 1 has its own, and any other
+    // subreaper is never swept, so a pass there would prove nothing.
+    if (!adopter || !isSessionSubreaper(adopter.command)) return context.skip()
+
+    // The control: the same sweep does take the marked twin, so this test
+    // cannot pass with the rule switched off or the environment unreadable.
+    const twin = await startOrphanedWatcher(fx.root, fx.script, fx.workspaceDir('task_user_editor'), { ...process.env, ...AGENT_WORK_ENV })
+    const sweep = (status: string) => sweepLeakedWorkspaceProcesses({
+      workspacesRoot: fx.workspaces,
+      workspaceState: () => ({ status, exists: true }),
+      orphansIgnoreTaskState: true
+    })
+    const swept = await sweep('completed')
+    expect(swept.map((leak) => leak.pid)).toContain(twin)
+    expect(swept.map((leak) => leak.pid)).not.toContain(pid)
+    expect((await sweep('agent_working')).map((leak) => leak.pid)).not.toContain(pid)
+    await settle()
+    expect(alive(twin), 'the marked twin must be gone').toBe(false)
+    expect(alive(pid), 'an orphan with no proof must survive').toBe(true)
+  }, 60000)
 
   it('EXIT TEST 2 (again, at the selection) — an identical command line outside the root is never selected', async () => {
     const fx = fixture()
