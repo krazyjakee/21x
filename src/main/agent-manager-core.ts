@@ -5786,9 +5786,13 @@ export class AgentManager extends EventEmitter {
       'irreversible', 'external-side-effect'
     ].includes(label))
     if (excluded) return excluded.replace(/-/g, '_')
-    const unresolved = this.db.getTranscriptParts(task.id).filter((part) => {
+    const parts = this.db.getTranscriptParts(task.id)
+    const lastReply = parts.findLastIndex((part) => part.role === 'user')
+    const unresolved = parts.filter((part, index) => {
       if (part.partType !== 'question' && part.partType !== 'tool') return false
-      const tool = part.tool as { status?: unknown } | undefined
+      const tool = part.tool as { name?: unknown; status?: unknown } | undefined
+      // Nothing closes a Claude Code question part: the reply after it is the answer.
+      if (tool?.name === 'AskUserQuestion' && index < lastReply) return false
       return typeof tool?.status === 'string' && ['running', 'pending', 'waiting'].includes(tool.status.toLowerCase())
     })
     if (unresolved.some((part) => part.partType === 'question' || (part.tool as { name?: unknown })?.name === 'permission')) {

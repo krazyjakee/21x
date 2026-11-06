@@ -143,6 +143,26 @@ describe('active-turn provider recovery', () => {
     expect(h.row().state).toBe('accepted')
   })
 
+  it('treats a Claude Code question as open only until someone replies after it', () => {
+    const h = fixture()
+    const question = { partId: 'tool-q1', role: 'assistant', partType: 'question', tool: { name: 'AskUserQuestion', status: 'pending', questions: [{ question: 'Red or blue?' }] } }
+    const transcript = vi.mocked(h.db.getTranscriptParts)
+    transcript.mockReturnValue([question] as never)
+    expect(h.internal.retryExclusion(h.db.getTask(h.task.id))).toBe('awaiting_approval')
+
+    transcript.mockReturnValue([question, { partId: 'reply-1', role: 'user', partType: 'text' }] as never)
+    expect(h.internal.retryExclusion(h.db.getTask(h.task.id))).toBeNull()
+  })
+
+  it('keeps refusing a retry for a tool that may still be running after a reply', () => {
+    const h = fixture()
+    vi.mocked(h.db.getTranscriptParts).mockReturnValue([
+      { partId: 'tool-1', role: 'assistant', partType: 'tool', tool: { name: 'Bash', status: 'running' } },
+      { partId: 'reply-1', role: 'user', partType: 'text' }
+    ] as never)
+    expect(h.internal.retryExclusion(h.db.getTask(h.task.id))).toBe('unsafe_side_effect_unknown')
+  })
+
   it('handles rejected direct send exactly once through the outbox and never resets its budget', async () => {
     const h = fixture()
     h.adapter.sendPrompt.mockRejectedValueOnce(providerFailureError('serverOverloaded', 'rejected'))
