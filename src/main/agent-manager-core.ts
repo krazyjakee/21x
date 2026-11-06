@@ -6143,6 +6143,8 @@ export class AgentManager extends EventEmitter {
         // Not `failed`: the backend may have it, so it can never be sent again and
         // the words go back to the person, who checks the conversation first.
         this.deliveries.terminal(claimed.id, 'timed_out', `${detail}${DELIVERY_NEEDS_REVIEW}`)
+        this.emitSystemError('', claimed.taskId, `delivery-review-${claimed.id}`,
+          `${detail}. Backend acceptance is unknown; inspect the conversation before retrying.`)
       } else if (claimed.attemptCount >= 5) {
         this.deliveries.terminal(claimed.id, 'failed', detail)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-failed-${claimed.id}`,
